@@ -99,6 +99,7 @@ impl CommsRequestFacts {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CommsRequestReading {
+    pub required_ticks: u32,
     pub remaining_ticks: u32,
     pub last_tick: u64,
 }
@@ -106,6 +107,7 @@ pub struct CommsRequestReading {
 impl CommsRequestReading {
     pub fn start(total_ticks: u32, now: u64) -> Result<Self, &'static str> {
         let state = Self {
+            required_ticks: total_ticks,
             remaining_ticks: total_ticks,
             last_tick: now,
         };
@@ -121,6 +123,7 @@ impl CommsRequestReading {
 
     pub fn validate(&self, total_ticks: u32, now: u64) -> Result<(), &'static str> {
         if total_ticks == 0
+            || self.required_ticks != total_ticks
             || self.remaining_ticks > total_ticks
             || self.last_tick > now
             || self.due_tick().is_none()
@@ -131,6 +134,7 @@ impl CommsRequestReading {
     }
 
     pub fn advance(&mut self, now: u64, eligible_ai: bool) -> Result<bool, &'static str> {
+        self.validate(self.required_ticks, now)?;
         if now < self.last_tick {
             return Err("request reading cannot rewind logical time");
         }
@@ -141,6 +145,7 @@ impl CommsRequestReading {
             self.remaining_ticks
         };
         let next = Self {
+            required_ticks: self.required_ticks,
             remaining_ticks: remaining,
             last_tick: now,
         };
@@ -307,7 +312,8 @@ pub(crate) fn validate_copy(
                 .as_ref()
                 .ok_or("structured radio copy requires local progress")?;
             if message.literal_body
-                || (progress.dismissed && !message.is_read && !message.is_orphaned)
+                || message.is_orphaned
+                || (progress.dismissed && !message.is_read)
             {
                 return Err("request dismissal requires an eligible local inbox copy");
             }

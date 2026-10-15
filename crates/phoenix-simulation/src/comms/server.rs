@@ -219,6 +219,7 @@ impl PendingAiResponseKey {
 /// made against the old one, which is the failure this record's fingerprint
 /// exists to prevent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PendingAiResponse {
     /// The sim tick at or after which the choice is sampled and submitted.
     /// Absolute, computed once at arm time from the authored seconds and the
@@ -230,6 +231,10 @@ pub struct PendingAiResponse {
     /// node no longer fingerprints to this, the wait is cancelled and re-armed
     /// so the choice is resampled from the current options.
     pub response_fingerprint: u64,
+    /// Partial new-request reading shares this one pending response owner.
+    /// Legacy weighted dialogue waits retain exactly their existing due clock.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_reading: Option<phoenix_model::comms_request::CommsRequestReading>,
 }
 
 /// Bevy resource wrapping the server-side comms inbox.
@@ -402,6 +407,8 @@ pub(crate) fn register_comms_consumer(app: &mut App) {
             &[
                 Payload::Hail,
                 Payload::SendCommsText,
+                Payload::SendCommsRequest,
+                Payload::MarkCommsRead,
                 Payload::RespondToMessage,
                 Payload::ClearComms,
                 Payload::ShowOnScreen,
@@ -414,6 +421,7 @@ impl Plugin for CommsWorldPlugin {
     fn build(&self, app: &mut App) {
         register_comms_consumer(app);
         crate::comms::radio::register(app);
+        crate::comms::requests::register(app);
         app.init_resource::<CommsRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<OnScreenMessage>()
@@ -1043,6 +1051,10 @@ pub(crate) fn broadcast_comms_state(
         .filter(|message| message.is_for_ship(ship_uuid.map(|uuid| uuid.0.as_str())))
         .collect();
     for m in messages.iter_mut() {
+        if m.request_progress.is_some() {
+            super::requests::redact_private_progress(m);
+            continue;
+        }
         if let Some(flag) = comms.range_flags.get(&m.sender_uuid).copied() {
             m.sender_in_range = flag;
         } else if comms.range_active {

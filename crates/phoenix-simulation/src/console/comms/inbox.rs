@@ -32,7 +32,7 @@ impl CommsInbox {
     pub fn orphan_sender(&mut self, sender: &str) -> Vec<String> {
         let mut ids = Vec::new();
         for record in &mut self.records {
-            if record.message.sender_uuid == sender {
+            if record.message.sender_uuid == sender && record.message.request_progress.is_none() {
                 ids.push(record.message.id.clone());
                 if !record.message.is_orphaned {
                     record.message.is_orphaned = true;
@@ -64,26 +64,51 @@ impl CommsInbox {
     ///
     /// Returns the number of messages removed.
     pub fn clear(&mut self) -> usize {
-        let before = self.records.len();
-        self.records
-            .retain(|r| !r.message.is_orphaned && !r.message.is_read);
-        let removed = before - self.records.len();
-        if removed > 0 {
-            self.dirty = true;
-        }
-        removed
+        self.clear_matching(|_| true)
     }
 
-    /// Clear only the requesting ship's visible messages. Legacy fleet-wide
-    /// messages retain their existing shared clear semantics.
+    /// Clear only the requesting ship's visible messages. Structured histories
+    /// are dismissed locally and retained for lineage/returns on the SAME copy.
     pub fn clear_for_ship(&mut self, ship: Option<&str>) -> usize {
-        let before = self.records.len();
-        self.records.retain(|r| {
-            !r.message.is_for_ship(ship) || (!r.message.is_orphaned && !r.message.is_read)
+        self.clear_matching(|message| message.is_for_ship(ship))
+    }
+
+    fn clear_matching(&mut self, matches: impl Fn(&CommsMessage) -> bool) -> usize {
+        let mut cleared = 0;
+        self.records.retain_mut(|record| {
+            let message = &mut record.message;
+            if !matches(message) || (!message.is_orphaned && !message.is_read) {
+                return true;
+            }
+            if let Some(progress) = &mut message.request_progress {
+                if !progress.dismissed {
+                    progress.dismissed = true;
+                    cleared += 1;
+                }
+                true
+            } else {
+                cleared += 1;
+                false
+            }
         });
-        let removed = before - self.records.len();
-        self.dirty |= removed > 0;
-        removed
+        self.dirty |= cleared > 0;
+        cleared
+    }
+
+    /// A mutation seam restricted to the actual recipient's structured copy.
+    /// Machinery owners validate the command and event clock before calling it.
+    pub(crate) fn request_copy_mut(&mut self, id: &str, ship: &str) -> Option<&mut CommsMessage> {
+        let record = self.records.iter_mut().find(|record| {
+            record.message.id == id
+                && record
+                    .message
+                    .recipient_ship
+                    .as_ref()
+                    .is_some_and(|recipient| recipient.0 == ship)
+                && record.message.request_progress.is_some()
+        })?;
+        self.dirty = true;
+        Some(&mut record.message)
     }
 
     /// Current inbox as an ordered slice of `CommsMessage` references.

@@ -141,6 +141,8 @@ pub enum FixedStep {
     ApplyAssignedStationRating,
     RetireDialoguesForPendingLayerUnloads,
     HandleHail,
+    HandleCommsRead,
+    TickCommsRequestReading,
     OperateCommsResponseAi,
     HandleRespondToMessage,
     OperateTractorAi,

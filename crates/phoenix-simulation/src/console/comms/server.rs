@@ -130,6 +130,11 @@ pub(crate) fn publish_comms_blackboard(
         if is_local || slot.is_some() {
             if let Some(runtime) = runtime.as_deref() {
                 for message in &mut bb.messages {
+                    // Structured decisions are local; original receipt never
+                    // becomes an oracle of current remote listener viability.
+                    if message.request_progress.is_some() {
+                        continue;
+                    }
                     message.sender_in_range = slot.map_or_else(
                         || {
                             crate::comms::server::current_sender_in_range(
@@ -146,7 +151,8 @@ pub(crate) fn publish_comms_blackboard(
                         },
                     );
                     for response in &mut message.responses {
-                        response.available = message.sender_in_range;
+                        response.available =
+                            message.request_progress.is_some() || message.sender_in_range;
                     }
                 }
                 bb.contacts = runtime.contacts.clone();
@@ -191,6 +197,9 @@ pub(crate) fn publish_comms_blackboard(
                         })
                 })
                 .unwrap_or_default();
+        }
+        for message in &mut bb.messages {
+            crate::comms::requests::redact_private_progress(message);
         }
         bb.host_station = hosts.and_then(|h| h.0.get(&key).cloned());
         boards.0.insert(key.clone(), SystemBlackboard::Comms(bb));
@@ -270,6 +279,17 @@ pub(crate) fn handle_hail(
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct CommsRespondAux<'w, 's> {
     power: Query<'w, 's, &'static mut crate::ship::power::ShipPowerSystem>,
+    request_views: Query<
+        'w,
+        's,
+        (
+            &'static crate::ship_plugin::ShipConfigComponent,
+            &'static crate::server_app::ShipSystemBlackboards,
+            &'static ShipSystemControlSources,
+            Option<&'static crate::ship::compartment_damage::ShipDamage>,
+            Option<&'static crate::comms::radio::RadioProfile>,
+        ),
+    >,
     sessions: Res<'w, crate::lobby::Sessions>,
     outbox: ResMut<'w, crate::server_app::SimOutbox>,
     /// The tick-scoped id mint (issue #907): spawned-entity ids for the shared
@@ -530,6 +550,54 @@ pub(crate) fn handle_respond_to_message(
                 crate::core::messages::ActionFeedbackOutcome::Refused,
             );
         };
+
+        // Generic requests use the same admitted response and inbox owner,
+        // without invoking plot callbacks or another specialist's machinery.
+        if inbox
+            .0
+            .iter()
+            .any(|message| message.id == *message_id && crate::comms::requests::is_request(message))
+        {
+            let applied =
+                if let (Some(uuid), Some(now), Ok((config, boards, sources, damage, radio))) = (
+                    hull.uuid,
+                    aux.script.sim_tick.as_ref().map(|tick| tick.0),
+                    aux.request_views.get(hull.entity),
+                ) {
+                    let power = aux.power.get_mut(hull.entity).ok();
+                    crate::comms::requests::respond(
+                        &mut inbox,
+                        &uuid.0,
+                        message_id,
+                        *response_index,
+                        now,
+                        config,
+                        boards,
+                        sources,
+                        damage,
+                        power.as_deref(),
+                        radio,
+                    )
+                } else {
+                    false
+                };
+            if applied {
+                if let Some(uuid) = hull.uuid {
+                    comms.pending_ai_responses.remove(
+                        &crate::comms::server::PendingAiResponseKey::new(&uuid.0, message_id),
+                    );
+                }
+                comms.needs_broadcast = true;
+                finish_action_feedback(
+                    cmd,
+                    &mut aux.outbox,
+                    crate::core::messages::ActionFeedbackOutcome::Applied,
+                );
+            } else {
+                reject(&mut aux.outbox, cmd, message_id, *response_index);
+            }
+            continue;
+        }
 
         // Look up active dialogue for this message.
         let dialogue = match comms.active_dialogues.get(message_id) {
@@ -936,7 +1004,7 @@ pub(crate) fn handle_clear_comms(
             let dialogue_ids: Vec<_> = inbox
                 .0
                 .iter()
-                .filter(|m| m.is_for_ship(ship))
+                .filter(|m| m.is_for_ship(ship) && m.request_progress.is_none())
                 .map(|m| m.id.clone())
                 .collect();
             for id in &dialogue_ids {
@@ -1001,7 +1069,7 @@ pub(crate) fn handle_show_on_screen(
             _ => None,
         };
         if let Some(message_id) = show_message_id {
-            let outcome = if let (Some(vm), Some(msg)) = (
+            let outcome = if let (Some(vm), Some(mut msg)) = (
                 vm.as_deref_mut(),
                 inbox.0.messages().into_iter().find(|m| {
                     &m.id == message_id && m.is_for_ship(uuid.map(|uuid| uuid.0.as_str()))
@@ -1017,6 +1085,7 @@ pub(crate) fn handle_show_on_screen(
                     on_screen.0 = None;
                     vm.restore_captain_view();
                 } else {
+                    crate::comms::requests::redact_private_progress(&mut msg);
                     on_screen.0 = Some(msg.clone());
                     // Only push the Comms overlay when it is not already the
                     // resolved view. `show_view_mode` now routes through the
@@ -2173,6 +2242,8 @@ pub fn operate_comms_response_ai(
         // real value in production, or `fact(power_rating) > 3` silently
         // never fires.
         Option<&CommsTargetSelector>,
+        Option<&crate::comms::radio::RadioProfile>,
+        Option<&crate::server_app::ShipSystemBlackboards>,
     )>,
 ) {
     // Restore the pre-#1185 locals so the policy body below reads as it did.
@@ -2208,7 +2279,12 @@ pub fn operate_comms_response_ai(
     let mut pending_next: std::collections::BTreeMap<
         crate::comms::server::PendingAiResponseKey,
         crate::comms::server::PendingAiResponse,
-    > = std::collections::BTreeMap::new();
+    > = comms_res
+        .pending_ai_responses
+        .iter()
+        .filter(|(_, record)| record.request_reading.is_some())
+        .map(|(key, record)| (key.clone(), *record))
+        .collect();
     // Whether the frozen fleet is in the world at all this tick. A pass that saw
     // NO hull must not be mistaken for one that cancelled everything — a
     // snapshot restore re-establishes this map a tick before it re-spawns the
@@ -2254,15 +2330,20 @@ pub fn operate_comms_response_ai(
         policy_comp,
         cadence_comp,
         selector_comp,
+        radio,
+        boards,
     ) in fleet
     {
-        // The structural migration retains ordinary plot behavior. The new
-        // request consumer will separately opt non-roster radio actors in.
-        let (Some(slot), Some(operator_uuid)) = (slot, _entity_uuid) else {
+        let Some(operator_uuid) = _entity_uuid else {
             continue;
         };
+        // Existing fleet plots keep their original ordered/RNG sweep. New
+        // non-roster actors participate only through actual configured radio.
+        if slot.is_none() && radio.is_none() {
+            continue;
+        }
         fleet_seen = true;
-        let host = slot.0;
+        let host = slot.map(|slot| slot.0);
         // Read-only for the length of the pass; the one write (`pending_next`
         // replacing the running waits) lands after the loop, so nothing inside it
         // can see a half-updated schedule.
@@ -2319,6 +2400,69 @@ pub fn operate_comms_response_ai(
             if message.selected_response.is_some() {
                 continue;
             }
+            if crate::comms::requests::is_request(&message) {
+                let key =
+                    crate::comms::server::PendingAiResponseKey::new(&operator_uuid.0, &message.id);
+                let (Some(config), Some(boards), Some(radio)) = (_ship_config, boards, radio)
+                else {
+                    continue;
+                };
+                if message
+                    .transmission
+                    .as_ref()
+                    .is_none_or(|wire| wire.received_tick.is_none())
+                    || !crate::comms::requests::permitted(config, boards, &message)
+                    || !sources.0.entries().any(|(id, _)| id == &radio.0.system)
+                    || !crate::ai::host::ai_operates(&sources.0, &radio.0.system)
+                    || policy.is_none()
+                    || !comms_available
+                {
+                    continue;
+                }
+                if !message.is_read {
+                    if !pending_next.contains_key(&key) {
+                        if let Ok(reading) =
+                            phoenix_model::comms_request::CommsRequestReading::start(
+                                radio.0.request_reading_ticks,
+                                tick,
+                            )
+                        {
+                            pending_next.insert(
+                                key,
+                                crate::comms::server::PendingAiResponse {
+                                    due_tick: reading.due_tick().expect("checked reading clock"),
+                                    response_fingerprint: 0,
+                                    request_reading: Some(reading),
+                                },
+                            );
+                        }
+                    }
+                    continue;
+                }
+                pending_next.remove(&key);
+                let facts =
+                    crate::comms::requests::response_facts(&message, comms_available, power_rating);
+                let host_tick = crate::ai::host::HostTick {
+                    system: radio.0.system.clone(),
+                    channel: crate::entities::config::COMMS_RESPOND_CHANNEL,
+                    facts: &facts,
+                    flags: &flag_chain,
+                    state: None,
+                };
+                if let crate::ai::host::HostOutcome::Act(
+                    crate::ai::policy::AiPolicyVerb::RespondToMessage(index),
+                ) = crate::ai::host::decide(&sources.0, policy, &host_tick)
+                {
+                    if *index < 2 {
+                        answers.push((entity, message.id.clone(), *index as usize));
+                    }
+                }
+                continue;
+            }
+            // Non-roster actors do not newly enter legacy plot dialogues.
+            let Some(host) = host else {
+                continue;
+            };
             let Some(dialogue) = comms.active_dialogues.get(&message.id) else {
                 continue;
             };
@@ -2649,6 +2793,7 @@ fn weighted_backfill_choice(
             inputs.tick_hz,
         );
         return WeightedChoiceOutcome::Wait(crate::comms::server::PendingAiResponse {
+            request_reading: None,
             due_tick: inputs.now_tick.saturating_add(delay_ticks),
             response_fingerprint: fingerprint,
         });

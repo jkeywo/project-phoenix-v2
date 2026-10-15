@@ -1686,6 +1686,9 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
             acc = fold_str(acc, &key.message_id);
             acc = fold_u64(acc, record.due_tick);
             acc = fold_u64(acc, record.response_fingerprint);
+            if let Some(reading) = &record.request_reading {
+                acc = fold_serde(fold_str(acc, "request-reading"), reading);
+            }
         }
     } else {
         acc = fold_u64(acc, 0);

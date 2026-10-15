@@ -47,6 +47,13 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
         });
         return report;
     }
+    if let Err(reason) = super::comms_requests::validate(world, snapshot) {
+        report.gaps.push(RestoreGap::ResourceStateInvalid {
+            uuid: "comms".into(),
+            reason,
+        });
+        return report;
+    }
     if let Err((uuid, reason)) = super::personnel::validate_roster(world, snapshot) {
         report
             .gaps

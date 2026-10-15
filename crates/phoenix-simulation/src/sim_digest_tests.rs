@@ -2384,6 +2384,7 @@ fn the_backfill_choice_metadata_and_its_running_wait_move_the_digest() {
         .insert(
             crate::comms::server::PendingAiResponseKey::new("waiting-crew-one", "msg-1"),
             crate::comms::server::PendingAiResponse {
+                request_reading: None,
                 due_tick: 300,
                 response_fingerprint: 0xabcd,
             },

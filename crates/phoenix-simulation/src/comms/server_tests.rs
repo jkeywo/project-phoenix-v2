@@ -1285,6 +1285,7 @@ fn a_weighted_dialogue_and_its_running_wait_survive_a_save() {
     runtime.pending_ai_responses.insert(
         crate::comms::server::PendingAiResponseKey::new("actual-crew", "lift-1"),
         crate::comms::server::PendingAiResponse {
+            request_reading: None,
             due_tick: 421,
             response_fingerprint: crate::comms::ai_choice::response_set_fingerprint(
                 &node.responses,

@@ -319,16 +319,22 @@ fn real_eligible_reading_ticks_pause_and_resume_without_counting_human_or_offlin
     assert_eq!(resumed, before);
     assert!(CommsRequestReading::start(0, 10).is_err());
     assert!(CommsRequestReading::start(30, u64::MAX - 1).is_err());
+    assert!(
+        reading.validate(31, 100).is_err(),
+        "actual authored reading requirement is part of the continuation binding"
+    );
     let before = reading;
     assert!(reading.advance(u64::MAX, false).is_err());
     assert_eq!(reading, before);
     assert!(CommsRequestReading {
+        required_ticks: 30,
         remaining_ticks: 31,
         last_tick: 10
     }
     .validate(30, 10)
     .is_err());
     assert!(CommsRequestReading {
+        required_ticks: 30,
         remaining_ticks: 1,
         last_tick: 11
     }

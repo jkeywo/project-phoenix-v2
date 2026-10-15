@@ -26,18 +26,18 @@ pub(crate) fn install(
 }
 
 #[derive(Clone)]
-struct Endpoint {
-    entity: Entity,
-    uuid: String,
-    name: String,
-    point: Vec3,
-    radio: CommsRadioConfig,
-    listening: f32,
-    fleet: bool,
-    faction: Option<String>,
+pub(crate) struct Endpoint {
+    pub(crate) entity: Entity,
+    pub(crate) uuid: String,
+    pub(crate) name: String,
+    pub(crate) point: Vec3,
+    pub(crate) radio: CommsRadioConfig,
+    pub(crate) listening: f32,
+    pub(crate) fleet: bool,
+    pub(crate) faction: Option<String>,
 }
 
-type Sources<'w, 's> = Query<
+pub(crate) type Sources<'w, 's> = Query<
     'w,
     's,
     (
@@ -99,7 +99,7 @@ fn thread(channel: &str, audience: &CommsAudience, source: &str) -> String {
     }
 }
 
-fn copy_message(
+pub(crate) fn copy_message(
     id: String,
     source: &Endpoint,
     recipient: &str,
@@ -117,7 +117,26 @@ fn copy_message(
         true,
         CommsPriority::Routine,
     );
-    message.literal_body = true;
+    use phoenix_model::comms_request::{CommsRadioContent, CommsRequestProgress};
+    message.literal_body = metadata.content.is_text();
+    if !message.literal_body {
+        message.request_progress = Some(CommsRequestProgress::default());
+        if matches!(metadata.content, CommsRadioContent::Request { .. })
+            && metadata.received_tick.is_some()
+        {
+            message.responses = [
+                phoenix_model::comms_request::REPORT_RESPONSE,
+                phoenix_model::comms_request::DECLINE_RESPONSE,
+            ]
+            .into_iter()
+            .map(|text| crate::core::messages::CommsResponseView {
+                text: text.into(),
+                important: false,
+                available: true,
+            })
+            .collect();
+        }
+    }
     message.is_read = metadata.received_tick.is_none();
     message.recipient_ship = Some(phoenix_model::wire::ShipKey(recipient.into()));
     message.transmission = Some(metadata);
@@ -200,13 +219,28 @@ pub(crate) fn tick_radio(
             continue;
         };
         for command in commands.for_target(source.radio.system.0.as_str()) {
-            let SystemControlPayload::SendCommsText {
-                channel,
-                audience,
-                body,
-            } = &command.payload
-            else {
-                continue;
+            let (channel, audience, body, content) = match &command.payload {
+                SystemControlPayload::SendCommsText {
+                    channel,
+                    audience,
+                    body,
+                } => (
+                    channel,
+                    audience,
+                    body.as_str(),
+                    phoenix_model::comms_request::CommsRadioContent::Text,
+                ),
+                SystemControlPayload::SendCommsRequest {
+                    channel,
+                    audience,
+                    request,
+                } => (
+                    channel,
+                    audience,
+                    phoenix_model::comms_request::REPORT_STATUS_BODY,
+                    phoenix_model::comms_request::CommsRadioContent::Request { request: *request },
+                ),
+                _ => continue,
             };
             let profile = source
                 .radio
@@ -234,7 +268,7 @@ pub(crate) fn tick_radio(
                 && source.listening > 0.0
                 && address_known
                 && audience.is_valid()
-                && phoenix_model::comms_channel::valid_text(body)
+                && (!content.is_text() || phoenix_model::comms_channel::valid_text(body))
                 && power
                     .0
                     .try_work_discrete_count(
@@ -269,7 +303,7 @@ pub(crate) fn tick_radio(
                 audience: audience.clone(),
                 emitted_tick: tick.0,
                 received_tick: None,
-                content: Default::default(),
+                content,
             };
             inbox.0.inject(copy_message(
                 new_id(),
@@ -314,6 +348,22 @@ pub(crate) fn tick_radio(
             runtime.needs_broadcast = true;
         }
     }
+    // Same radio work/frontier, retained canonical inbox and endpoint pass.
+    // Structured outcomes are a sustained service; text above remains one-shot.
+    super::request_returns::settle(
+        &endpoints,
+        &mut sources,
+        &mut inbox,
+        &mut runtime,
+        &paths,
+        tick.0,
+        || {
+            crate::world_id::mint_live_id_with(
+                mint.as_deref(),
+                crate::world_id::IdNamespace::Message,
+            )
+        },
+    );
 }
 
 pub(crate) fn register(app: &mut App) {

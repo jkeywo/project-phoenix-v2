@@ -313,3 +313,6 @@ fn radio_inbox_and_paid_reserves_continue_after_json_and_malformed_copies_do_not
         assert_eq!(crate::sim_digest::world_digest(live.world()), digest);
     }
 }
+
+#[path = "request_tests.rs"]
+mod request_tests;

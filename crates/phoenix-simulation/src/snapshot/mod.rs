@@ -389,3 +389,5 @@ mod weapon_targets;
 
 #[cfg(test)]
 mod blaster_spatial_tests;
+
+mod comms_requests;

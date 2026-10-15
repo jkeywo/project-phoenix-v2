@@ -2290,6 +2290,14 @@ pub enum SystemControlPayload {
         audience: crate::comms_channel::CommsAudience,
         body: String,
     },
+    SendCommsRequest {
+        channel: String,
+        audience: crate::comms_channel::CommsAudience,
+        request: crate::comms_request::GenericCommsRequest,
+    },
+    MarkCommsRead {
+        message_id: String,
+    },
     SelectCommsMessage {
         message_id: String,
     },

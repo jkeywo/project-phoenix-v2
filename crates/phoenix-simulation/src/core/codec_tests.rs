@@ -4617,6 +4617,16 @@ fn comms_control_system_payloads_round_trip() {
         SystemControlPayload::Hail {
             target_uuid: "starbase-1".into(),
         },
+        SystemControlPayload::SendCommsRequest {
+            channel: "public".into(),
+            audience: phoenix_model::comms_channel::CommsAudience::Contact {
+                target_uuid: "other-ship".into(),
+            },
+            request: phoenix_model::comms_request::GenericCommsRequest::ReportStatus,
+        },
+        SystemControlPayload::MarkCommsRead {
+            message_id: "m1".into(),
+        },
         SystemControlPayload::SelectCommsMessage {
             message_id: "m1".into(),
         },

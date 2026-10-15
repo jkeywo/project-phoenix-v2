@@ -1,0 +1,639 @@
+//! Real-host PDC runtime probe. Reuses the production headless BootPlan and
+//! ordinary crew/admission path; no injected observation, projectile or AI state.
+#![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+use bevy::prelude::*;
+use project_phoenix::{
+    console::weapons::{
+        assignments::ShipWeaponTargets, BlasterSystemResource, TacticalRadarSelection,
+        TorpedoSystemResource,
+    },
+    core::messages::{
+        AdmittedCommands, ClientMessage, ServerMessage, StationId, SystemControlPayload as Control,
+        SystemId,
+    },
+    entities::spawner::EntityUuid,
+    headless::{build_headless_app, HeadlessArgs},
+    infrastructure::InfrastructureCondition,
+    lobby::{server::InboundMessage, Sessions},
+    science::{broad::BroadTracks, contact_routing},
+    server_app::{LocalShip, ShipSystemBlackboards, SimOutbox},
+    ship::{compartment_damage::ShipDamage, power::ShipPowerSystem},
+    ship_plugin::{HumanSeekingHosts, ShipConfigComponent, ShipSystemControlSources},
+    sim_digest::world_digest,
+    sim_sets::FixedStep,
+    sim_tick::{sim_tick_period, SimTick},
+    snapshot::{capture, ready_to_restore, restore, PhoenixSnapshot},
+    world::config::WorldConfig,
+};
+use std::collections::{BTreeMap, BTreeSet};
+
+const HULL: &str = "assets/entities/pdc_cruiser.toml";
+const SINGLE: &str = "tests/fixtures/pdc-gameplay-world.toml";
+const SALVO: &str = "tests/fixtures/pdc-salvo-world.toml";
+const BANK: &str = "blaster-side";
+fn id(value: &str) -> SystemId {
+    SystemId(value.into())
+}
+
+/// Read-only observer of the real owner interval. This diagnostic resource is
+/// never consumed by simulation or serialized as gameplay state. Observe before
+/// terminal guided settlement, so an expired/detonated round is not mislabelled
+/// as PDC interception. The ordinary publisher/broadcaster stays untouched.
+#[derive(Resource, Default, Debug)]
+struct Trace {
+    launcher: String,
+    launched: BTreeSet<String>,
+    bolts: BTreeSet<String>,
+    qualified: BTreeSet<String>,
+    interceptions: BTreeSet<String>,
+    hits: BTreeSet<(String, String)>,
+    ai_fire: bool,
+    ai_automatic: bool,
+    automatic_with_ship_primary: bool,
+    paid: BTreeMap<u64, f64>,
+    initial_rounds: i64,
+    initial_energy: f32,
+    before_payload_hp: Option<f64>,
+    payload_damaged_own_hull: bool,
+}
+#[allow(clippy::type_complexity)]
+fn observe_pdc(
+    tick: Res<SimTick>,
+    outbox: Res<SimOutbox>,
+    mut trace: ResMut<Trace>,
+    own: Query<
+        (
+            &EntityUuid,
+            &ShipConfigComponent,
+            &ShipSystemBlackboards,
+            &BroadTracks,
+            &ShipWeaponTargets,
+            &ShipPowerSystem,
+            &AdmittedCommands,
+            &TacticalRadarSelection,
+            &ShipDamage,
+        ),
+        With<LocalShip>,
+    >,
+) {
+    let Ok((uuid, config, boards, tracks, assignments, power, admitted, primary, damage)) =
+        own.single()
+    else {
+        return;
+    };
+    trace.before_payload_hp = Some(damage.structural_totals().0);
+    let owner = id(BANK);
+    let view = config.0.observations_for_system(&owner, &boards.0);
+    for record in boards
+        .0
+        .keys()
+        .filter_map(|key| view.get(key))
+        .filter_map(contact_routing::observations)
+        .flatten()
+    {
+        if record.selectable
+            && !record.predicted
+            && record.classification.as_deref() == Some("missile")
+            && record.elevation.is_some()
+            && record.velocity.is_some()
+        {
+            if let Some(route) = contact_routing::resolve(
+                &config.0,
+                boards,
+                Some(tracks),
+                &owner,
+                &record.contact_id,
+            ) {
+                assert_ne!(
+                    record.contact_id, route,
+                    "paid knowledge stays a public handle"
+                );
+                trace.qualified.insert(route);
+            }
+        }
+    }
+    trace.ai_fire |= admitted
+        .for_target(BANK)
+        .any(|command| matches!(command.payload, Control::ChargeBlasterStart));
+    trace.ai_automatic |= admitted.for_target(BANK).any(|command| {
+        matches!(
+            &command.payload,
+            Control::SetAutomaticWeaponTarget { uuid: Some(_) }
+        )
+    });
+    let automatic_with_ship_primary = primary.0.as_deref() == Some(trace.launcher.as_str())
+        && assignments
+            .0
+             .0
+            .get(&owner)
+            .is_some_and(|row| row.automatic.is_some() && !row.has_explicit_order());
+    trace.automatic_with_ship_primary |= automatic_with_ship_primary;
+    trace.paid.insert(tick.0, power.0.emitted_work(&owner));
+    for (_, message) in outbox.iter() {
+        match message {
+            ServerMessage::TorpedoLaunched { uuid, .. } => {
+                trace.launched.insert(uuid.clone());
+            }
+            ServerMessage::BlasterFired {
+                bank,
+                source_uuid,
+                projectile_id,
+                ..
+            } if bank == "side" && source_uuid == &uuid.0 => {
+                trace.bolts.insert(projectile_id.clone());
+            }
+            ServerMessage::BlasterHit {
+                projectile_id,
+                target_uuid,
+                ..
+            } if trace.bolts.contains(projectile_id) => {
+                trace
+                    .hits
+                    .insert((projectile_id.clone(), target_uuid.clone()));
+            }
+            ServerMessage::TorpedoDestroyed { uuid }
+                if trace.hits.iter().any(|(_, target)| target == uuid) =>
+            {
+                trace.interceptions.insert(uuid.clone());
+            }
+            _ => {}
+        }
+    }
+}
+fn observe_terminal_damage(own: Query<&ShipDamage, With<LocalShip>>, mut trace: ResMut<Trace>) {
+    if let (Ok(damage), Some(before)) = (own.single(), trace.before_payload_hp) {
+        trace.payload_damaged_own_hull |= damage.structural_totals().0 < before;
+    }
+}
+fn steps(app: &mut App, count: usize) {
+    for _ in 0..count {
+        app.update();
+    }
+}
+fn local(app: &mut App) -> Entity {
+    app.world_mut()
+        .query_filtered::<Entity, With<LocalShip>>()
+        .single(app.world())
+        .unwrap()
+}
+fn send(app: &mut App, token: &str, msg: ClientMessage) {
+    app.world_mut().write_message(InboundMessage {
+        token: token.into(),
+        msg,
+    });
+}
+fn claim(app: &mut App, station: &str) {
+    let entity = local(app);
+    let rating = app
+        .world()
+        .get::<ShipConfigComponent>(entity)
+        .unwrap()
+        .0
+        .stations
+        .iter()
+        .find(|row| row.id.0 == station)
+        .unwrap()
+        .ratings
+        .first()
+        .unwrap()
+        .name
+        .clone();
+    for message in [
+        ClientMessage::Identify {
+            token: station.into(),
+            name: station.into(),
+        },
+        ClientMessage::SelectStation {
+            station: station.into(),
+        },
+        ClientMessage::SetReady { ready: true },
+        ClientMessage::SetStationRating {
+            rating_name: rating,
+        },
+    ] {
+        send(app, station, message);
+        steps(app, 4);
+    }
+}
+fn authorised(
+    app: &App,
+    entity: Entity,
+    station: &str,
+    owner: &SystemId,
+    payload: &Control,
+) -> bool {
+    let sessions = app.world().resource::<Sessions>();
+    sessions.0.holder_for_station(&StationId(station.into())) == Some(station)
+        && sessions
+            .0
+            .players()
+            .iter()
+            .any(|player| player.token == station && player.connected && player.ready)
+        && project_phoenix::command_admission::policy::is_command_authorized(
+            station,
+            owner,
+            payload,
+            app.world().get::<ShipSystemControlSources>(entity).unwrap(),
+            sessions,
+            &app.world().get::<ShipConfigComponent>(entity).unwrap().0,
+            app.world().get::<HumanSeekingHosts>(entity),
+        )
+}
+fn control(app: &mut App, station: &str, owner: &str, payload: Control) {
+    let entity = local(app);
+    for _ in 0..120 {
+        if authorised(app, entity, station, &id(owner), &payload) {
+            break;
+        }
+        app.update();
+    }
+    assert!(
+        authorised(app, entity, station, &id(owner), &payload),
+        "normal {station} claim must authorize {owner}"
+    );
+    send(
+        app,
+        station,
+        ClientMessage::ControlSystem {
+            target: id(owner),
+            payload,
+        },
+    );
+    steps(app, 4);
+}
+fn boot(world: &str) -> (App, Entity) {
+    let mut app = build_headless_app(&HeadlessArgs {
+        world_path: world.into(),
+        ship_path: HULL.into(),
+        deterministic: true,
+        seed: Some(156_215),
+        ..Default::default()
+    })
+    .unwrap();
+    let period = sim_tick_period(app.world().resource::<WorldConfig>().global.sim_tick_hz);
+    app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period));
+    app.init_resource::<Trace>().add_systems(
+        FixedUpdate,
+        observe_pdc
+            .after(FixedStep::HandleBlasterHits)
+            .before(FixedStep::TickTorpedoLifecycle),
+    );
+    app.add_systems(
+        FixedUpdate,
+        observe_terminal_damage
+            .after(FixedStep::TickTorpedoLifecycle)
+            .before(FixedStep::HandleCollisions),
+    );
+    app.finish();
+    app.cleanup();
+    steps(&mut app, 10);
+    let own = local(&mut app);
+    // All changes below are the same public commands a joined crew sends.
+    for station in ["helm", "science", "engineering", "tactical", "captain"] {
+        claim(&mut app, station);
+    }
+    control(
+        &mut app,
+        "helm",
+        "helm-thrust",
+        Control::SetThrust { value: 0.0 },
+    );
+    control(
+        &mut app,
+        "helm",
+        "helm-steering",
+        Control::SetSteering { value: 0.0 },
+    );
+    for arc in ["fore", "port", "aft", "starboard"] {
+        control(
+            &mut app,
+            "science",
+            &format!("shield-arc-{arc}"),
+            Control::SetShieldRaised { raised: false },
+        );
+    }
+    for bank in [
+        "phaser-fore",
+        "phaser-aft",
+        "torpedo-tube-fore-port",
+        "torpedo-tube-fore-starboard",
+        "torpedo-tube-aft",
+    ] {
+        control(
+            &mut app,
+            "tactical",
+            bank,
+            Control::SetWeaponTarget { uuid: None },
+        );
+    }
+    // Isolate the real finite PDC reserve debit from refill, using its real
+    // allocation command. No capacity, generation or reserve is increased.
+    control(
+        &mut app,
+        "engineering",
+        "power",
+        Control::SetEnergySystemFlow {
+            system: id(BANK),
+            flow_per_sec: Some(0.0),
+        },
+    );
+    control(
+        &mut app,
+        "captain",
+        "red-alert",
+        Control::SetRedAlert { active: true },
+    );
+    let initial_rounds = rounds(&app, own);
+    let initial_energy = reserve(&app, own);
+    let mut trace = app.world_mut().resource_mut::<Trace>();
+    assert_eq!(initial_rounds, 22, "actual finite trial battery stock");
+    trace.initial_rounds = initial_rounds;
+    trace.initial_energy = initial_energy;
+    trace.paid.clear();
+    assert!(
+        trace.bolts.is_empty(),
+        "bank is still manually held during setup"
+    );
+    (app, own)
+}
+fn ship_contact(app: &App, own: Entity) -> Option<(String, String)> {
+    let config = &app.world().get::<ShipConfigComponent>(own)?.0;
+    let boards = app.world().get::<ShipSystemBlackboards>(own)?;
+    let tracks = app.world().get::<BroadTracks>(own)?;
+    let view = config.observations_for_system(&id("tactical-radar"), &boards.0);
+    boards
+        .0
+        .keys()
+        .filter_map(|key| view.get(key))
+        .filter_map(contact_routing::observations)
+        .flatten()
+        .filter(|row| row.selectable && !row.predicted)
+        .find_map(|row| {
+            (row.identity.as_ref()?.name == "PDC probe launcher").then_some(())?;
+            let route = contact_routing::resolve(
+                config,
+                boards,
+                Some(tracks),
+                &id("tactical-radar"),
+                &row.contact_id,
+            )?;
+            Some((row.contact_id.clone(), route))
+        })
+}
+fn prepare(world: &str) -> (App, Entity, String) {
+    let (mut app, own) = boot(world);
+    for _ in 0..1200 {
+        if ship_contact(&app, own).is_some() {
+            break;
+        }
+        app.update();
+    }
+    let (contact, route) = ship_contact(&app, own).expect("actual paid identified hostile ship");
+    assert_ne!(contact, route);
+    app.world_mut().resource_mut::<Trace>().launcher = route.clone();
+    control(
+        &mut app,
+        "tactical",
+        "tactical-radar",
+        Control::SetTarget { uuid: contact },
+    );
+    send(
+        &mut app,
+        "tactical",
+        ClientMessage::SetStationRating {
+            rating_name: "Simplified".into(),
+        },
+    );
+    steps(&mut app, 8);
+    assert_eq!(
+        app.world()
+            .get::<ShipSystemControlSources>(own)
+            .unwrap()
+            .0
+            .source_for(&id(BANK)),
+        project_phoenix::ship::control_source::ControlSource::Ai
+    );
+    assert!(app
+        .world()
+        .get::<ShipWeaponTargets>(own)
+        .unwrap()
+        .0
+         .0
+        .get(&id(BANK))
+        .is_none_or(|row| !row.has_explicit_order()));
+    (app, own, route)
+}
+fn rounds(app: &App, own: Entity) -> i64 {
+    let stock = &app.world().get::<InfrastructureCondition>(own).unwrap().0;
+    stock.capacity("side-kinetic-rounds").unwrap() + stock.capacity("hold-kinetic-rounds").unwrap()
+}
+fn reserve(app: &App, own: Entity) -> f32 {
+    app.world()
+        .get::<ShipPowerSystem>(own)
+        .unwrap()
+        .0
+        .network()
+        .consumers[&id(BANK)]
+        .energy
+}
+fn flights(app: &mut App) -> BTreeMap<String, [f32; 3]> {
+    app.world_mut()
+        .query::<&TorpedoSystemResource>()
+        .iter(app.world())
+        .flat_map(|provider| {
+            provider
+                .0
+                .in_flight
+                .iter()
+                .map(|round| (round.uuid.clone(), [round.x, round.y, round.z]))
+        })
+        .collect()
+}
+fn launcher_entity(app: &mut App, uuid: &str) -> Entity {
+    app.world_mut()
+        .query::<(Entity, &EntityUuid)>()
+        .iter(app.world())
+        .find(|(_, id)| id.0 == uuid)
+        .map(|(entity, _)| entity)
+        .unwrap()
+}
+fn first_difference(a: &serde_json::Value, b: &serde_json::Value, path: &str) -> Option<String> {
+    match (a, b) {
+        (serde_json::Value::Object(a), serde_json::Value::Object(b)) => {
+            let keys: BTreeSet<_> = a.keys().chain(b.keys()).collect();
+            keys.into_iter().find_map(|key| {
+                first_difference(
+                    a.get(key).unwrap_or(&serde_json::Value::Null),
+                    b.get(key).unwrap_or(&serde_json::Value::Null),
+                    &format!("{path}.{key}"),
+                )
+            })
+        }
+        (serde_json::Value::Array(a), serde_json::Value::Array(b)) if a.len() == b.len() => a
+            .iter()
+            .zip(b)
+            .enumerate()
+            .find_map(|(index, (a, b))| first_difference(a, b, &format!("{path}[{index}]"))),
+        _ => (a != b).then(|| format!("{path}: {a} != {b}")),
+    }
+}
+
+#[test]
+fn ordinary_pdc_intercepts_and_survives_launcher_removal_with_exact_json_continuation() {
+    let (mut live, own, launcher) = prepare(SINGLE);
+    let before_rounds = live.world().resource::<Trace>().initial_rounds;
+    let before_energy = live.world().resource::<Trace>().initial_energy;
+    for _ in 0..2400 {
+        if live.world().resource::<Trace>().automatic_with_ship_primary
+            && !live.world().resource::<Trace>().bolts.is_empty()
+            && !flights(&mut live).is_empty()
+        {
+            break;
+        }
+        live.update();
+    }
+    assert!(live.world().resource::<Trace>().automatic_with_ship_primary,
+        "normal bank AI must actually use a measured missile while retaining the ship primary: {:?}",
+        live.world().resource::<Trace>());
+    let departing = flights(&mut live);
+    assert!(
+        !departing.is_empty(),
+        "ordinary identified foe must launch actual finite ordnance"
+    );
+    let source = launcher_entity(&mut live, &launcher);
+    let before_source_ammo = live
+        .world()
+        .get::<TorpedoSystemResource>(source)
+        .unwrap()
+        .0
+        .rounds_aboard();
+    let source_hold = live
+        .world()
+        .get::<InfrastructureCondition>(source)
+        .unwrap()
+        .0
+        .capacity("hold-ammunition")
+        .unwrap();
+    let emitted_source = live.world().resource::<Trace>().launched.len() as i64;
+    assert_eq!(
+        i64::from(before_source_ammo) + source_hold + emitted_source,
+        6,
+        "actual source magazine/tubes/hold and emitted rounds conserve authored six"
+    );
+    // This is explicitly a removal-owner/hook witness, not GM admission.
+    let _ = project_phoenix::gm_despawn::remove_entity(live.world_mut(), source);
+    live.update();
+    let carried = flights(&mut live);
+    assert!(
+        departing.keys().any(|id| carried.contains_key(id)),
+        "actual flight must outlive launcher"
+    );
+    assert!(
+        emitted_source > 0,
+        "actual source spent finite physical ammunition"
+    );
+    assert!(
+        departing
+            .iter()
+            .any(|(id, point)| carried.get(id).is_some_and(|next| next != point)),
+        "same existing vector must continue moving after removal"
+    );
+    let saved: PhoenixSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
+    let (mut resumed, restored, _) = prepare(SINGLE);
+    assert!(ready_to_restore(resumed.world(), &saved));
+    let applied = restore(resumed.world_mut(), &saved);
+    assert!(applied.is_complete(), "{:?}", applied.gaps);
+    // Trace is intentionally outside gameplay state. Its original launch and
+    // knowledge witnesses stay on the live host; both hosts retain real owners.
+    for step in 0..360 {
+        assert_eq!(
+            world_digest(live.world()),
+            world_digest(resumed.world()),
+            "digest {step}"
+        );
+        let a = serde_json::to_value(capture(live.world())).unwrap();
+        let b = serde_json::to_value(capture(resumed.world())).unwrap();
+        assert_eq!(
+            a,
+            b,
+            "complete continuation {step}: {:?}",
+            first_difference(&a, &b, "snapshot")
+        );
+        live.update();
+        resumed.update();
+    }
+    let trace = live.world().resource::<Trace>();
+    assert!(
+        !trace.interceptions.is_empty(),
+        "actual paid PDC interception required: {trace:?}"
+    );
+    assert!(trace.interceptions.is_subset(&trace.qualified),
+        "every intercepted actor must have a current paid classified/elevated moving handle: {trace:?}");
+    assert!(
+        trace.ai_fire && trace.ai_automatic,
+        "ordinary admitted bank controller must act: {trace:?}"
+    );
+    // This witness is collected before removing the primary ship; losing its
+    // source later must not cancel already-emitted physical ordnance.
+    assert!(
+        trace.automatic_with_ship_primary,
+        "ship primary must not suppress defensive fallback: {trace:?}"
+    );
+    let emitted = trace.bolts.len() as i64;
+    assert!(emitted > 0 && emitted <= before_rounds);
+    assert_eq!(rounds(&live, own), before_rounds - emitted);
+    let energy_paid: f64 = trace.paid.values().sum();
+    assert!(energy_paid > 0.0);
+    assert!(
+        (f64::from(before_energy - reserve(&live, own)) - energy_paid).abs() < 1e-5,
+        "no refill or unpaid shots: actual reserve and work receipts must agree"
+    );
+    assert_eq!(rounds(&live, own), rounds(&resumed, restored));
+    assert_eq!(reserve(&live, own), reserve(&resumed, restored));
+    assert!(
+        flights(&mut live).is_empty(),
+        "intercepted single salvo cannot leave ghost flights"
+    );
+}
+
+#[test]
+fn actual_larger_salvo_exceeds_one_paid_two_barrel_cycle() {
+    let (mut app, own, _) = prepare(SALVO);
+    let before = app.world().resource::<Trace>().initial_rounds;
+    for _ in 0..2400 {
+        if app.world().resource::<Trace>().interceptions.len() >= 1
+            && app.world().resource::<Trace>().launched.len() >= 2
+            && flights(&mut app).is_empty()
+        {
+            break;
+        }
+        app.update();
+    }
+    let trace = app.world().resource::<Trace>();
+    assert!(
+        trace.launched.len() >= 2,
+        "ordinary two-tube launch: {trace:?}"
+    );
+    assert!(
+        !trace.interceptions.is_empty(),
+        "useful actual PDC baseline: {trace:?}"
+    );
+    assert!(
+        trace.interceptions.len() < trace.launched.len(),
+        "larger finite salvo must not be guaranteed defence: {trace:?}"
+    );
+    assert!(trace.ai_fire && trace.automatic_with_ship_primary);
+    assert_eq!(rounds(&app, own), before - trace.bolts.len() as i64);
+    assert!(
+        trace.payload_damaged_own_hull,
+        "saturation must reach actual terminal payload damage, not mere expiry: {trace:?}"
+    );
+    assert!(app
+        .world()
+        .get::<BlasterSystemResource>(own)
+        .unwrap()
+        .0
+        .iter()
+        .any(|bank| bank.config.id == "side" && bank.config.cooldown_secs > 0.0));
+}

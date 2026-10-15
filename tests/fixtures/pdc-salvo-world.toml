@@ -1,0 +1,26 @@
+# Quiet runtime probe, not a mission: no deadlines, waves or script progression.
+# Existing mission content/pacing and the PDC instrument's real sample times are unchanged.
+[global]
+seed = 156215
+[player_spawn]
+position = [0, 0, 0]
+[[entity]]
+template_path = "assets/entities/pdc_cruiser.toml"
+id = "player-ship"
+name = "player-ship"
+spawn_on = "game_start"
+transform = { position = [0, 0, 0] }
+[[entity]]
+template_path = "tests/fixtures/pdc-salvo-launcher.toml"
+id = "pdc-launcher"
+name = "pdc-launcher"
+spawn_on = "game_start"
+transform = { position = [0, 0, -45], rotation = [0, 3.141592653589793, 0] }
+[script]
+setup = """
+on_world_loaded("opposed");
+fn opposed(ctx) {
+    ctx.effects.add_faction_enemy("Harrow", "Alliance");
+    ctx.effects.add_faction_enemy("Alliance", "Harrow");
+}
+"""

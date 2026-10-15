@@ -1,0 +1,5 @@
+# Same finite launcher, releasing the second real tube for saturation.
+includes = ["pdc-launcher.toml"]
+[[weapon]]
+id = "torpedo-tube-fore_starboard"
+targets = false

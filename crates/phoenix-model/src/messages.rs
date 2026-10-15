@@ -32,7 +32,7 @@ use uuid::Uuid;
 /// port service/order projections; earlier clients cannot operate those views.
 /// Revision 14 carries per-bank assignment views, active-beam operation controls
 /// and acquired combat evidence; older clients cannot represent those views.
-pub const PROTOCOL_VERSION: u32 = 16;
+pub const PROTOCOL_VERSION: u32 = 17;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).

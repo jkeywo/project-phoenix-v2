@@ -440,7 +440,8 @@ use super::*;
 /// source-owned issued/heard order knowledge separately from physical flight.
 // 56 adds canonical per-axis Helm intent and dated recipient-scoped radio facts.
 // 57 adds finite officer custody joined to the candidate's actual Repair teams.
-pub const SNAPSHOT_FORMAT: u32 = 57;
+// 58 includes emitter command channels and frozen receiver illumination opt-in.
+pub const SNAPSHOT_FORMAT: u32 = 58;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -540,7 +541,9 @@ pub const SNAPSHOT_FORMAT: u32 = 57;
 /// listening/emission physical work, with original sent/received facts.
 /// "0.29" applies finite co-located officer posting and internal Repair expertise
 /// through the sole existing team/job navigation and work owners.
-pub const SIMULATION_RULES: &str = "0.29";
+/// "0.30" emits independently paid, measured Science assistance to explicitly
+/// opted-in matching guided rounds, retaining their physical target intent.
+pub const SIMULATION_RULES: &str = "0.30";
 
 /// The authored data, computed rather than remembered.
 ///

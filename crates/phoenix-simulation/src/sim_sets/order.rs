@@ -31,6 +31,8 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
         &[
             TickComponentEffects,
             ReadSystemText,
+            OperateIlluminationAi,
+            HandleIlluminationCommands,
             AiTorpedoLoad,
             TickFrequencyHintHighFidelity,
             OperateCaptainAi,
@@ -155,6 +157,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             EmitAttackedOnNewAttacker,
             AiTorpedoAutoFire,
             HandleGuidanceCommands,
+            TickIllumination,
             HandleFireTorpedo,
             RefreshGuidanceKnowledge,
             HandleTorpedoMagazineInterSystem,

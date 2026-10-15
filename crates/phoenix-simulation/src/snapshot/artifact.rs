@@ -559,7 +559,9 @@ pub const SNAPSHOT_FORMAT: u32 = 60;
 /// stages their existing script consequences once at the retained event frontier.
 /// "0.37" lets the ordinary Comms policy answer an actually heard/read typed
 /// status request without consulting unknown reverse-link viability.
-pub const SIMULATION_RULES: &str = "0.37";
+/// "0.38" applies authored nonplayer World headings to the existing physics
+/// owner, matching the retained transform and runtime-spawn convention.
+pub const SIMULATION_RULES: &str = "0.38";
 
 /// The authored data, computed rather than remembered.
 ///

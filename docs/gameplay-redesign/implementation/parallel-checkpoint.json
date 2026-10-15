@@ -60,11 +60,52 @@
     "retry_log": ".phoenix/pdc-producer-helm-retry.log"
   },
   "pending": [
-    "Rebuild and execute seven corrected owner cases from the 343-pass suite",
+    "Execute corrected Comms, Helm radar and activity cases; run authored NPC pose regressions",
     "Real headless-host PDC and joined-crew Helm continuation probes",
     "Full-host illumination and radio journeys",
     "Remaining runtime scope in increments 16 through 24",
     "Browser/native devices, multiplayer peers, performance, balance and human workload acceptance",
     "Required final integrated gates before any push"
-  ]
+  ],
+  "latest_integrated_native": {
+    "source": "8539f5cd plus UI-only be202c0d/182a675c; executable predates later corrections",
+    "command": "cargo test -p phoenix-simulation --lib --no-default-features -- comms:: guided_ guidance_ helm_movement console::helm:: control::tests lateral_owner_tests illumination:: flight_carrier:: pdc:: assignments:: mounts:: personnel ports_equipment ports_server boost dock:: umbilical:: ai_torpedo_auto_fire npc_torpedo_ai power_ai_tests activity_ activities::",
+    "result": "394 passed, 9 failed, 4265 filtered out; 112.04 seconds",
+    "log": ".phoenix/parallel-requests-activities-native.log",
+    "log_sha256": "6234cea4c60c0db2a12b1091d02c389be71c843639e764cf113a21440b8719ed",
+    "new_positive_evidence": [
+      "All seven failures from the previous 343-pass run pass",
+      "All ten Power AI cases pass",
+      "Activity snapshot and malformed-evidence refusal cases pass"
+    ],
+    "failures": {
+      "comms": "One ordinary policy failed to answer a heard/read typed status request; corrected in 057427c5, execution pending",
+      "helm": "Five legacy publication fixtures omitted real paid radar equipment; corrected in f2b3d0da, execution pending",
+      "activities": "Three physical fixtures did not establish the actual Repair visit scope or local stock deficit; corrected in 837c2b82, execution pending"
+    }
+  },
+  "latest_full_host_attempt": {
+    "source": "182a675c; runtime through 8539f5cd",
+    "log": ".phoenix/power-helm-full-host-retry.log",
+    "helm": "Failed finite-reserve assertion before continuation: Minimal allocation ignores manually set fine flows and the reactor capacitor still exports stored energy. Probe now explicitly selects Manual and zeroes the three tested intake flows through admitted commands (8dd26833); retry pending.",
+    "pdc": "Both probes failed because ordinary foe launched no rounds. Real World spawn ignored authored heading, sending foe out of contact range before classification; actual spawn owner corrected in c94de029 without changing test geometry or combat tuning. Retry pending.",
+    "exit": "No full-host continuation exit claimed"
+  },
+  "latest_pure_electronic": {
+    "source": "c94de029",
+    "command": "cargo test -p phoenix-sim-gameplay --lib -- electronic:: regions::interference",
+    "result": "4 passed, 0 failed, 1656 filtered out",
+    "log": ".phoenix/electronics-pure-geometry-tests.log"
+  },
+  "latest_client_bundle": {
+    "command": "node scripts/build-client.mjs",
+    "result": "passed; 19/phoenix-base/4",
+    "log": ".phoenix/current-console-client-build.log"
+  },
+  "latest_design_validation": {
+    "command": "uv run pasm validate",
+    "result": "passed; 1126 entities, 614 informational findings, Status OK",
+    "log": ".phoenix/parallel-requests-activities-pasm.log",
+    "limitation": "Development validation during ongoing lane integration; not the final pinned gate"
+  }
 }

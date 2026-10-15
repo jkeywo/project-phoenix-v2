@@ -95,6 +95,11 @@ For a browser `HostPreloaded` boot, `PendingHostContentFreeze` defers sealing un
 
 The chain is `insert_world_config_resource` → `insert_raw_world_source_resource` → `compile_world_scripts` → `freeze_host_preloaded_content` → `setup_world` → `spawn_world_entities` → `init_world_runtime` → `load_extra_worlds`. Anonymous non-asteroid entries belong to `setup_world` (`crates/phoenix-simulation/src/server_app/world_setup.rs`); named entries and asteroid fields belong to `spawn_world_entities`. Both consult the same composition gate and their App's `ScriptActivationGate` before spawning. Compilation resets that derived resource on every load and publishes a failure before either spawn half runs; another App's compile cannot change it. Anonymous entities mint before named entities. `init_comms_runtime` remains ordered after `init_world_runtime` by the Comms plugin.
 
+Both World spawn paths apply authored rotation and scale through the shared
+`apply_authored_spawn_transform` adapter. An existing `ShipPhysics` owner receives
+the matching `yaw = -rotation[1]`; static equipment gains no movement owner.
+The player and runtime script paths retain their existing heading convention.
+
 `load_extra_worlds` queues supporting layers; their activation runs in the simulation's existing layer applier after the mission starts. GameStart spawning owns the durable roster marker that startup restore waits on. Neither it nor render-only startup belongs to the shared materialization pass. A world-less native lobby runs the pass without materializing content until its selection is loaded.
 
 `tests/native_host_lobby/materialization.rs` compares actual boot/deferred loads through both lifecycle stages, plus the shared registration's membership and subsequent mint sequence. Native ingest, selected hull, tick-zero parking/restoration, prepared commitment and re-Welcome are owned by `src/native_host/world_load.rs`.

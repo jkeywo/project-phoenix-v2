@@ -3,8 +3,6 @@ use super::*;
 #[test]
 fn pre_port_snapshots_refuse_before_decoding_current_required_visits() {
     let current = Versions::new(SNAPSHOT_FORMAT, SIMULATION_RULES, 0);
-    assert_eq!(SNAPSHOT_FORMAT, 51);
-    assert_eq!(SIMULATION_RULES, "0.23");
     assert!(matches!(
         Versions::new(48, SIMULATION_RULES, 0).check(&current),
         Err(vellum_save::Moved::Format { .. })

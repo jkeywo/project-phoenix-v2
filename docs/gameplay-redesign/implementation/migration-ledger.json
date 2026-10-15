@@ -275,7 +275,7 @@
     {
       "id": 17,
       "title": "Electronic operations",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         14,
         15,

@@ -64,7 +64,7 @@ fn fixture_with_faction(faction: Option<&str>) -> (World, Entity, Entity, String
     let target = crate::entities::spawner::spawn_entity(
         &mut world.commands(),
         &target_config,
-        Vec3::new(0.0, 0.0, -100.0),
+        Vec3::new(0.0, 0.0, -20.0),
         "actual-receiver".into(),
         None,
     );
@@ -480,7 +480,7 @@ fn actual_radio_loses_friendly_and_other_faction_links_without_changing_local_em
             world.run_system_once(tick).unwrap();
             assert_eq!(factor(&mut world, Vec3::new(0.0, 0.0, -200.0)), 1.0);
             assert_eq!(
-                factor(&mut world, Vec3::new(0.0, 0.0, -100.0)) < 1.0,
+                factor(&mut world, Vec3::new(0.0, 0.0, -20.0)) < 1.0,
                 enabled
             );
             let send = |world: &mut World| {

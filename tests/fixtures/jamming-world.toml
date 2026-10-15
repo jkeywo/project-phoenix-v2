@@ -14,7 +14,7 @@ template_path = "assets/entities/alliance_cruiser.toml"
 id = "support-target"
 name = "support-target"
 spawn_on = "game_start"
-transform = { position = [0,3,-90] }
+transform = { position = [0,3,-20] }
 # The request names an actually observable unique subject, not a private route.
 [entity.overrides]
 name = "support-target"

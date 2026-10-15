@@ -19,6 +19,26 @@ const TOKEN: &str = "interference-operator";
 fn owner() -> SystemId {
     SystemId(OWNER.into())
 }
+/// Read-only proof of the real Input work interval, before the ordinary
+/// Physics energy tick clears per-interval emission scratch. Never game state.
+#[derive(Resource, Default)]
+struct PaidInputWitness {
+    actor: Option<Entity>,
+    tick: Option<u64>,
+    amount: f32,
+}
+fn observe_paid_input(
+    tick: Res<project_phoenix::sim_tick::SimTick>,
+    ships: Query<(Entity, &ShipPowerSystem), With<LocalShip>>,
+    mut witness: ResMut<PaidInputWitness>,
+) {
+    *witness = PaidInputWitness::default();
+    if let Ok((actor, power)) = ships.single() {
+        witness.actor = Some(actor);
+        witness.tick = Some(tick.0);
+        witness.amount = power.0.emitted_work(&owner());
+    }
+}
 fn boot() -> (App, Entity) {
     let mut app = build_headless_app(&HeadlessArgs {
         world_path: "tests/fixtures/jamming-world.toml".into(),
@@ -28,6 +48,14 @@ fn boot() -> (App, Entity) {
         ..Default::default()
     })
     .unwrap();
+    app.init_resource::<PaidInputWitness>();
+    app.add_systems(
+        FixedUpdate,
+        observe_paid_input
+            .in_set(project_phoenix::sim_sets::SimSet::Input)
+            .after_ignore_deferred(project_phoenix::sim_sets::FixedStep::TickJamming)
+            .before_ignore_deferred(project_phoenix::sim_sets::FixedStep::RefreshJammedCommsRange),
+    );
     let period = sim_tick_period(app.world().resource::<WorldConfig>().global.sim_tick_hz);
     app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period));
     app.finish();
@@ -55,12 +83,15 @@ fn enabled(app: &App, actor: Entity) -> bool {
     )
 }
 fn paid(app: &App, actor: Entity) -> bool {
-    app.world()
-        .get::<ShipPowerSystem>(actor)
-        .unwrap()
-        .0
-        .emitted_work(&owner())
-        > 0.0
+    let witness = app.world().resource::<PaidInputWitness>();
+    witness.actor == Some(actor)
+        && witness.tick.and_then(|tick| tick.checked_add(1))
+            == Some(
+                app.world()
+                    .resource::<project_phoenix::sim_tick::SimTick>()
+                    .0,
+            )
+        && witness.amount > 0.0
 }
 fn own_notice(app: &App, actor: Entity) -> Option<bool> {
     match app
@@ -103,6 +134,7 @@ fn acquisition_diagnostic(app: &App, actor: Entity) -> serde_json::Value {
         "channels": state.0.get(&owner()), "notice": own_notice(app,actor),
         "source": format!("{:?}",sources.source_for(&owner())),
         "policy": format!("{:?}",sources.policy_for(&owner())),
+        "input_paid": world.get_resource::<PaidInputWitness>().map(|witness|(witness.tick,witness.amount)),
         "work": power.emitted_work(&owner()), "last_fraction": power.last_work_fraction(&owner()),
         "reserve": power.network().consumers.get(&owner()).map(|consumer|consumer.energy),
         "radar_work": power.emitted_work(&SystemId("tactical-radar".into())),

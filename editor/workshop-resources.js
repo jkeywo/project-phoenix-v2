@@ -1,4 +1,5 @@
 import { guardManagedStockBounds } from './workshop-stock-bindings.js';
+import { guardProductionReferences } from './workshop-production.js';
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
 import { acceptWorkshopChanges } from './workshop-acceptance.js';
@@ -135,6 +136,10 @@ export function prepareResourceOperation(draft, dependencies, operation) {
   // Pure preparation never lands an invalid draft. The authoritative runtime
   // validation below checks endpoint references, System admission and content.
   parse(after);
+  if (inspection.resolved.value.production) {
+    const candidate = { paths: () => draft.paths(), isBinary: path => draft.isBinary(path), read: path => path === operation.path ? after : draft.read(path) };
+    guardProductionReferences(inspection.resolved.value, inspectResources(candidate, dependencies, operation.path).resolved.value);
+  }
   return { changes: [{ path: operation.path, before, after }] };
 }
 

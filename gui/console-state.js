@@ -2459,6 +2459,13 @@ export function buildLogisticsConsoleState(state, systemIds = []) {
     stores: bb.stores || [], deliveries: bb.deliveries || [], next_delivery: bb.next_delivery || null, refusal: bb.refusal || null };
 }
 
+export function buildProductionConsoleState(state, systemIds = []) {
+  const entry = blackboardOfKind(state, 'Production', systemIds), bb = entry?.data || {};
+  return { system_id: entry?.systemId ?? systemIds[0] ?? null, enabled: !!bb.enabled, selected_recipe: bb.selected_recipe ?? null,
+    production_controllable: systemIds.includes(entry?.systemId) && state.controlSources?.[entry?.systemId] === 'Human',
+    target: bb.target ?? 0, recipes: bb.recipes || [], active: bb.active || null, can_start: !!bb.can_start, blocked: bb.blocked || null };
+}
+
 export function buildSecurityConsoleState(state, systemIds = []) {
   const entry = blackboardOfKind(state, 'Security', systemIds);
   const bb = entry?.data || {};
@@ -2507,6 +2514,7 @@ const FAMILY_BUILDERS = Object.freeze({
   command: Object.freeze({ build: buildCommandConsoleState }),
   tractor: Object.freeze({ build: buildTractorConsoleState, autoField: 'tractor_auto', autoScope: 'first' }),
   logistics: Object.freeze({ build: buildLogisticsConsoleState, autoField: 'logistics_auto', autoScope: 'first' }),
+  production: Object.freeze({ build: buildProductionConsoleState, autoField: 'production_auto', autoScope: 'first' }),
   umbilical: Object.freeze({ build: buildUmbilicalConsoleState, autoField: 'umbilical_auto', autoScope: 'first' }),
   security: Object.freeze({ build: buildSecurityConsoleState, autoField: 'security_auto', autoScope: 'first' }),
 });

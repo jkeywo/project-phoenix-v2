@@ -27,6 +27,18 @@ function mount(markup) {
 }
 const el = (id) => document.getElementById(id);
 
+describe('Engineering production composition', () => {
+  it('passes exact Production ownership to its panel and includes it in the Station AUTO summary', () => {
+    mount('<ph-production-controls id="production-panel"></ph-production-controls><span id="engineering-auto-badge"></span>');
+    const state = { system_ids: ['power-unit', 'repair-unit', 'fabricator'], system_families: { 'power-unit': 'power', 'repair-unit': 'repair', fabricator: 'production' },
+      systems: { 'power-unit': { power_auto: true }, 'repair-unit': { repair_auto: true }, fabricator: { production_auto: false, target: 4 } } };
+    rawCruiserRender(state, document); expect(el('production-panel').state).toMatchObject({ system_id: 'fabricator', target: 4 });
+    expect(el('engineering-auto-badge').hidden).toBe(true);
+    state.systems.fabricator.production_auto = true; rawCruiserRender(state, document);
+    expect(el('engineering-auto-badge').hidden).toBe(false);
+  });
+});
+
 // The cruiser mounts the two Operations panels since #1390 (its Engineering
 // seat owns a `kind = "tractor"` and a `kind = "umbilical"` System), but no
 // Field Repair dispatch panel — this hull authors no

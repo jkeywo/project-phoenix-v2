@@ -66,6 +66,9 @@ function logisticsCommand(type, fields) {
 
 export const ACTION_MAP = Object.freeze({
   logistics_enabled: logisticsCommand('SetLogisticsEnabled', ['enabled']),
+  production_enabled: logisticsCommand('SetProductionEnabled', ['enabled']),
+  production_target: logisticsCommand('SetProductionTarget', ['amount']),
+  production_recipe: logisticsCommand('SelectProductionRecipe', ['recipe', 'target']),
   logistics_target: logisticsCommand('SetStockTarget', ['store', 'amount']),
   logistics_reserve: logisticsCommand('SetStockReserve', ['store', 'amount']),
   logistics_priority: logisticsCommand('SetStockPriority', ['store', 'priority']),

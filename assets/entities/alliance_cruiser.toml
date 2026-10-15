@@ -1909,21 +1909,21 @@ manual_overview = "You keep the ship alive. Allocate reactor power between helm,
 [[station.rating]]
 name = "Std"
 automated_systems = []
-detailed_systems = ["power-reactor","power-battery","repair","tractor","umbilical","weapons-access","logistics"]
+detailed_systems = ["power-reactor", "power-battery", "repair", "tractor", "umbilical", "weapons-access", "logistics", "fabrication"]
 
 [[station.rating]]
 name = "Guided"
-automated_systems = ["logistics"]
+automated_systems = ["logistics", "fabrication"]
 detailed_systems = ["power-reactor","power-battery","tractor","umbilical","weapons-access"]
 
 [[station.rating]]
 name = "Simplified"
-automated_systems = ["repair","logistics"]
+automated_systems = ["repair", "logistics", "fabrication"]
 detailed_systems = ["power-reactor","power-battery","tractor","umbilical","weapons-access"]
 
 [[station.rating]]
 name = "Maintenance"
-automated_systems = ["repair","power-reactor","power-battery","logistics"]
+automated_systems = ["repair", "power-reactor", "power-battery", "logistics", "fabrication"]
 detailed_systems = ["tractor","umbilical","weapons-access"]
 
 
@@ -5401,7 +5401,7 @@ max_penalty = 0.8
 # `tests/smoke/operations-dock-umbilical.spec.js` does.
 [umbilical]
 capacity = "reserve_fuel"
-allowed_resources = ["coolant","structural_parts","machinery_parts"]
+allowed_resources = ["coolant","structural_parts","machinery_parts","alloy"]
 rate = 20.0
 direction = "deliver"
 min_power_level = 2
@@ -5701,6 +5701,10 @@ kind = "Stock"
 [[console.feed]]
 source = "stock/power-reactor"
 kind = "Stock"
+
+[[console.feed]]
+source = "fabrication"
+kind = "Production"
 [[console]]
 id = "comms"
 name = "station.comms.name"
@@ -5926,6 +5930,7 @@ shield-arc-port = "weapons"
 shield-arc-aft = "weapons"
 shield-arc-starboard = "weapons"
 weapons-access = "engineering"
+fabrication = "support"
 # [ai] Increment 10 mechanical access gate; ordinary System authority and AI.
 [[system]]
 id = "weapons-access"
@@ -6174,15 +6179,29 @@ source = "hold-coolant"
 kind = "capacity"
 id = "coolant"
 
+[[logistics.store]]
+id = "hold-alloy"
+resource = "alloy"
+compartment = "support"
+role = "main"
+target = 12
+reserve = 0
+priority = 3
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "alloy"
+
 [[logistics.storage]]
 compartment = "support"
-space = 783
+space = 807
 
 [logistics.storage.unit_space]
 torpedoes = 1
 machinery_parts = 1
 structural_parts = 1
 coolant = 1
+alloy = 1
 
 [[logistics.storage]]
 compartment = "engineering"
@@ -6225,3 +6244,108 @@ id = "hold-coolant"
 amount = 624
 ceiling = 624
 label = "energy.coolant"
+
+# Increment12.3: finite fabrication is optional (initial target zero).
+[[system]]
+id = "fabrication"
+kind = "fabrication"
+console = "engineering"
+power_group = "energy-fabrication"
+
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[system.config.ai]
+root = "production"
+
+[[system.config.ai.tree]]
+id = "production"
+initial = "manufacture"
+
+[[system.config.ai.tree.state]]
+id = "manufacture"
+
+[[system.config.ai.tree.state.task]]
+id = "start-needed"
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "fact"
+name = "enabled"
+
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "start"
+
+[system.config.ai.tree.state.task.action.value]
+source = "fact"
+name = "production_available"
+
+[[infrastructure.capacity]]
+id = "alloy"
+amount = 12
+ceiling = 24
+label = "production.alloy"
+
+[resource_services.alloy]
+kind = "capacity"
+id = "alloy"
+
+[production]
+system = "fabrication"
+initial_recipe = "torpedoes"
+initial_target = 0
+
+[[production.recipe]]
+id = "torpedoes"
+work_secs = 10
+
+[[production.recipe.inputs]]
+store = "hold-machinery-parts"
+amount = 1
+
+[[production.recipe.inputs]]
+store = "hold-alloy"
+amount = 2
+
+[[production.recipe.outputs]]
+store = "hold-ammunition"
+amount = 1

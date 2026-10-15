@@ -215,3 +215,70 @@ fn late_model_children_cannot_override_hidden_actor_with_explicit_visible() {
         Some(&Visibility::Visible)
     );
 }
+
+#[test]
+fn actual_generated_rock_bundle_does_not_bypass_measured_visibility() {
+    let (mut app, _, _) = app();
+    let authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/asteroid_common_1_small.toml",
+    )
+    .unwrap();
+    let rock = crate::asteroids::lifecycle::RockConfig {
+        collider: authored.collider.clone().unwrap(),
+        max_hp: authored.hull.as_ref().unwrap().hull_integrity,
+        tags: authored.tags.clone(),
+        mesh: authored.mesh.clone(),
+        radar_icon: authored.radar_appearance.as_ref().unwrap().icon.clone(),
+        radar_colour: None,
+        radar_size: None,
+    };
+    let actual = Transform::from_xyz(80.0, 3.0, -20.0).with_rotation(Quat::from_rotation_y(0.7));
+    let generated = app
+        .world_mut()
+        .spawn((
+            crate::asteroids::lifecycle::rock_bundle(
+                "private-rock",
+                &rock,
+                actual.translation,
+                actual.rotation,
+                0.0,
+                rock.max_hp,
+            ),
+            Visibility::Visible,
+        ))
+        .id();
+    assert!(app.world().get::<EntityUuid>(generated).is_none());
+    assert_eq!(
+        app.world().get::<AsteroidUuid>(generated).unwrap().0,
+        "private-rock"
+    );
+    app.update();
+    assert_eq!(
+        app.world().get::<Visibility>(generated),
+        Some(&Visibility::Hidden)
+    );
+    assert_eq!(app.world().get::<Transform>(generated), Some(&actual));
+    // Only the separately held observation is drawn, never a UUID/pose copied
+    // from the generated hazard's actual private body.
+    let mut proxies = app.world_mut().query::<(&ContactProxy, &Transform)>();
+    let (proxy, pose) = proxies.single(app.world()).unwrap();
+    assert_eq!(proxy.contact, "observed-alias");
+    assert_eq!(pose.translation, Vec3::new(11.0, 0.0, 22.0));
+    // An explicit authored chart grant is still honoured for this ordinary
+    // generated entity, whose tags live in the accepted world roster.
+    let mut world = crate::lobby::WorldResource::default();
+    world
+        .0
+        .entities
+        .push(crate::core::messages::EntitySnapshot {
+            uuid: "private-rock".into(),
+            tags: vec![crate::console_delivery::CHARTED_TAG.into()],
+            ..Default::default()
+        });
+    app.insert_resource(world);
+    app.update();
+    assert_eq!(
+        app.world().get::<Visibility>(generated),
+        Some(&Visibility::Visible)
+    );
+}

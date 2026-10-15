@@ -3,7 +3,7 @@ use crate::{
     core::messages::GamePhase,
     entities::spawner::{EntityTagsSection, EntityUuid},
     science::broad::SensingControls,
-    server_app::{LocalShip, ShipSystemBlackboards},
+    server_app::{AsteroidUuid, LocalShip, ShipSystemBlackboards},
     ship::{components::ShipConfigComponent, state::ShipViewMode},
     world::config::WorldConfig,
 };
@@ -34,6 +34,7 @@ pub(crate) fn sync_contact_visuals(
     mut commands: Commands,
     phase: Option<Res<State<GamePhase>>>,
     world_config: Option<Res<WorldConfig>>,
+    world_metadata: Option<Res<crate::lobby::WorldResource>>,
     accepted: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     observer: Query<
@@ -47,8 +48,17 @@ pub(crate) fn sync_contact_visuals(
         With<LocalShip>,
     >,
     actors: Query<
-        (Entity, &EntityUuid, Option<&EntityTagsSection>),
-        (Without<LocalShip>, Without<ContactProxy>),
+        (
+            Entity,
+            Option<&EntityUuid>,
+            Option<&AsteroidUuid>,
+            Option<&EntityTagsSection>,
+        ),
+        (
+            Or<(With<EntityUuid>, With<AsteroidUuid>)>,
+            Without<LocalShip>,
+            Without<ContactProxy>,
+        ),
     >,
     parents: Query<&ChildOf>,
     mut visual_visibility: Query<(Entity, &mut Visibility), Without<ContactProxy>>,
@@ -66,17 +76,37 @@ pub(crate) fn sync_contact_visuals(
             .as_ref()
             .is_some_and(|phase| *phase.get() == GamePhase::InProgress);
     let mut hidden_roots = std::collections::HashSet::new();
-    for (entity, source, tags) in &actors {
+    // Generated rocks carry their authored tags in the existing world roster,
+    // rather than EntityTagsSection. Read permission only, never its geometry.
+    let charted_metadata: std::collections::HashSet<_> = world_metadata
+        .as_ref()
+        .into_iter()
+        .flat_map(|world| &world.0.entities)
+        .filter(|row| {
+            row.tags
+                .iter()
+                .any(|tag| tag == crate::console_delivery::CHARTED_TAG)
+        })
+        .map(|row| row.uuid.as_str())
+        .collect();
+    for (entity, source, rock, tags) in &actors {
+        let source = source
+            .map(|source| source.0.as_str())
+            .or_else(|| rock.map(|source| source.0.as_str()))
+            .unwrap_or_default();
         let charted = own.is_some()
-            && tags.is_some_and(|tags| {
-                tags.0
-                    .iter()
-                    .any(|tag| tag.as_str() == crate::console_delivery::CHARTED_TAG)
-            })
+            && tags.map_or_else(
+                || charted_metadata.contains(source),
+                |tags| {
+                    tags.0
+                        .iter()
+                        .any(|tag| tag.as_str() == crate::console_delivery::CHARTED_TAG)
+                },
+            )
             && !super::measured_contacts::concealed(
                 runtime.as_deref(),
                 own.unwrap_or_default(),
-                &source.0,
+                source,
             );
         if active && !charted {
             hidden_roots.insert(entity);

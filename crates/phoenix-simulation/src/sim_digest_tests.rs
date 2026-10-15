@@ -88,9 +88,9 @@ fn optional_namespace_exact_fold_characterization() {
             16847282475859703794,
             2604905312334251123,
             2045009351732382248,
-            7322358685363040768,
-            4609971591295840796,
-            10771667353891034293,
+            14973753830041066014,
+            4071187490566706122,
+            10793943143758498756,
         ]
     );
     assert_eq!(
@@ -107,12 +107,37 @@ fn optional_namespace_exact_fold_characterization() {
             ("tractor", 3412975283742167187),
             ("dock", 196895128352095218),
             ("system-ai-trees", 196895128352095218),
-            ("umbilical", 9470254417540384327),
-            ("resource-stocks", 9470254417540384327),
-            ("asteroid", 808843215005956282),
-            ("collisions", 1181279844596788338),
-            ("security", 12919174898061707866),
-            ("internal-repair", 17219695052010668043),
+            ("umbilical", 9027666793607804605),
+            ("resource-stocks", 9027666793607804605),
+            ("asteroid", 12536570469048620948),
+            ("collisions", 8899963866678085940),
+            ("security", 16191184914516307137),
+            ("internal-repair", 13509907477215362722),
+            ("personnel-custody", 13509907477215362722),
+            ("interior-access", 13509907477215362722),
+            ("logistics", 13509907477215362722),
+            ("production", 13509907477215362722),
+            ("recovery", 13509907477215362722),
+            ("ports", 13509907477215362722),
+            ("fitting", 13509907477215362722),
+            ("equipment-recovery", 13509907477215362722),
+            ("physical-damage", 13509907477215362722),
+            ("disablement-observation", 13509907477215362722),
+            ("spatial-fields", 13509907477215362722),
+            ("recorded-scans", 13509907477215362722),
+            ("passive-samples", 13509907477215362722),
+            ("system-mounts", 13509907477215362722),
+            ("helm-movement-intent", 13509907477215362722),
+            ("transit-drive-orders", 13509907477215362722),
+            ("physical-craft", 13509907477215362722),
+            ("weapon-target-assignments", 13509907477215362722),
+            ("guided-source-order-knowledge", 13509907477215362722),
+            ("ship-illumination-intent", 13509907477215362722),
+            ("ship-jamming-intent", 13509907477215362722),
+            ("ship-signal-protection-intent", 13509907477215362722),
+            ("broad-tracks", 13509907477215362722),
+            ("navigation-sharing", 13509907477215362722),
+            ("navigation-request", 13509907477215362722),
         ]
     );
 }
@@ -1934,11 +1959,10 @@ fn an_armed_gm_skip_moves_the_digest_and_never_collapses_onto_an_armed_fire() {
     );
 }
 
-/// The cooldown stamp folds as present-or-absent and never by value: a restore
-/// reconstructs the mission-clock anchor by `f32` subtraction, so its readings
-/// are not bit-exact across a resume. See `fold_scenario_triggers`.
+/// Cooldown elapsed readings survive restore exactly since the mission-clock
+/// migration. A changed saved reading is therefore a real divergence.
 #[test]
-fn the_cooldown_stamp_folds_as_set_or_unset_but_not_as_a_number() {
+fn the_cooldown_stamp_preserves_exact_restored_reading_and_detects_a_changed_value() {
     let mut world = scenario_world();
     world
         .resource_mut::<WorldContentRuntime>()
@@ -1960,17 +1984,28 @@ fn the_cooldown_stamp_folds_as_set_or_unset_but_not_as_a_number() {
          moves it"
     );
 
+    let exact = world.resource::<WorldContentRuntime>().triggers.capture();
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .triggers
+        .restore(&exact)
+        .unwrap();
+    assert_eq!(
+        stamped,
+        world_digest(&world),
+        "exact saved reading round-trips"
+    );
+
     continuation[0].last_fired_elapsed = Some(5.000_000_5);
     world
         .resource_mut::<WorldContentRuntime>()
         .triggers
         .restore(&continuation)
         .unwrap();
-    assert_eq!(
+    assert_ne!(
         stamped,
         world_digest(&world),
-        "the reading itself is NOT folded: a resumed world's anchor is rebuilt \
-         by subtraction and lands an ULP away, which is not a divergence"
+        "a different canonical cooldown reading changes future eligibility"
     );
 }
 

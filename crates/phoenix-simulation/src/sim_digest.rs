@@ -109,8 +109,8 @@
 //! order (never the raw ordinal — see [`fold_scenario_flags`] for why the
 //! payload cannot round-trip that); every trigger's authored identity (`id` plus
 //! its condition's kind) and latch (`fired`, its `OnAllDestroyed` accumulation,
-//! and whether a `repeat`'s cooldown stamp is set — see
-//! [`fold_scenario_triggers`] for why the stamp's VALUE is not folded) with the
+//! and each `repeat`'s exact saved cooldown reading — see
+//! [`fold_scenario_triggers`] for the process-independent elapsed clock) with the
 //! table's row count and each row's `origin_layer`;
 //! the scripted `PendingCallbacks` queue and the queued `WorldEvent`s, both in
 //! queue order because that order is what fires; the named records — entity

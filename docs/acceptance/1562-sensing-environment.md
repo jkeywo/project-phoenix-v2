@@ -373,3 +373,75 @@ calculation, actual projectile observation and permitted-feed publication tests
 are authored but have not run natively at this checkpoint. Visual Workshop
 enable/disable authoring, broader integrated continuation and increment exit
 acceptance remain pending.
+
+### Integrated reference, enquiry and Navigation checkpoint
+
+At `afe7cbf2`, the targeted no-renderer Gameplay command below passed **31
+cases**, covering conditional approaches, reference correlation, deterministic
+AI reading and forecast/sensing calculations:
+
+```text
+cargo test -p phoenix-sim-gameplay --lib --no-default-features -- science::approaches::tests science::references::tests ai::text_reading::tests science::forecast::tests science::sensing::tests --test-threads=1
+```
+
+Log: `.phoenix/increment14-integrated-reference-approach-gameplay-tests-retry.log`,
+SHA256 `7c73356983848db7ff1099a01389245bf622611dc0f6bfafd14926c79280bf6d`.
+The initial attempt found a missing `reading_ticks` field in a full fixture
+literal; the corrected retry passed. This is not Simulation or whole-host
+continuation evidence.
+
+Navigation sharing and Helm projection authoring are integrated through
+`680c6e57`. The no-renderer Simulation compile check at `8b0da994` passed,
+and eight integrated Navigation/Helm/Sensing client suites passed **502 cases**
+at `680c6e57`. Strict strings passed with **5799 entries**, no errors or warnings.
+These totals overlap earlier client runs and must not be added to them.
+
+```text
+npx vitest run tests/client/navigation-sharing.test.js tests/client/navigation-sharing-projection.test.js tests/client/workshop-sensing-panel.test.js editor/tests/workshop-sensing.test.js tests/client/workshop-helm-projection-panel.test.js editor/tests/workshop-helm-projection.test.js tests/client/console-state.test.js tests/client/ph-helm-radar.test.js
+```
+
+Logs: `.phoenix/increment14-navigation-integrated-check.log`, SHA256
+`7a8777828f0ae883fc8949c8c30e3e2a7bebf71e8e1b1f78b4987ffeee80efae`;
+`.phoenix/increment14-integrated-navigation-helm-client-tests.log`, SHA256
+`ec2931c28a9f19f17a05fe89cbdfd1050be6577b6dfca6c9bdc96550e1bfe250`;
+`.phoenix/increment14-integrated-navigation-helm-strings.log`, SHA256
+`b1adcd74212ea19df84414133cbcc4645a6c6d2784d58699c7ee30c58d8282e6`.
+
+The first combined Simulation batch against `680c6e57` plus the two explicit
+schema/DTO fixture additions **failed: 24 passed, 26 failed**. The passing cases
+include reading, reference preflight, enquiry sampling, observed approaches,
+Navigation sharing and strict shipped-hull AI loading. Failures comprise twenty
+scan fixtures retaining sharing references to removed instruments, four enquiry
+fixtures missing their fitted passive-receiver profile, a Navigation restore
+fixture missing its repair-team owner, and the explicit Live schema ratchet.
+Corrections and affected retries are in progress; the batch is not green.
+Log: `.phoenix/increment14-integrated-enquiry-reference-navigation-owner-tests-retry.log`,
+SHA256 `823ff6b3af2bf83719f994b8fbde60f0fabb88e5b28fce312a0af2ac3772e40d`.
+
+The affected server/schema retry passed **21 cases**, against `680c6e57` plus
+the explicit schema/DTO literal additions, corrected fitted sharing references
+and reviewed exact schema ratchet. The initial batch's other five failures
+remain pending and are not covered by this retry. Cargo reported a filesystem
+hard-link cache warning and copied the files; no code warning was emitted.
+
+```text
+cargo test -p phoenix-simulation --lib --no-default-features -- science::server::tests complete_active_schema_inventory_is_ratcheted_across_all_five_domains --test-threads=1
+```
+
+Log: `.phoenix/increment14-server-schema-fixture-retry.log`, SHA256
+`d7c7868dea9728245a65d076b5c5ca732a23eaa510391854f4a7e713034e82f0`.
+
+Separately, the frozen sharing worktree completed Gameplay **32**, Model Cargo
+**11**, Simulation **36**, Presentation **14**, and the whole-host generated
+asteroid **1** targeted cases at their recorded pins through `6a2a60fe`.
+Its receipt is `.phoenix/worktrees/increment-14-sharing-validation/.phoenix/validation/receipt.json`,
+SHA256 `32e8bafd744a9c4228bcb0f4eaf713bfe61621447bacfdf1e4d53a8315f62d07`.
+Those pins precede the newer integrated reference, enquiry, Helm and Navigation
+changes; they do not prove the combined main result.
+
+The remaining information-access audit covers Helm AI, Navigation anchors and
+traffic, and Dock/Tractor/Transporter public-contact routing. Whole-host
+continuation, affected browser journeys, performance/activity, multiplayer and
+human/native acceptance remain open. Implementation evidence publication for
+increments 9–18 is explicitly authorised; the current published checkpoint is
+[PRD #1562 comment](https://github.com/jkeywo/project-phoenix-v2/issues/1562#issuecomment-6186902157).

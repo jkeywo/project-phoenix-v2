@@ -5758,6 +5758,7 @@ fn midgame_reconnect_resets_blackboard_cache() {
 
     let helm_id = SystemId("helm".into());
     let helm_bb = SystemBlackboard::Helm(HelmBlackboard {
+        approaches: Vec::new(),
         yaw: 1.0,
         forward_speed: 50.0,
         x: 100.0,

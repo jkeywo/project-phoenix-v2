@@ -399,6 +399,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         field: _,
         signal_material: _,
         sensing: _,
+        enquiry_observation: _,
     } = crate::entities::config::EntityConfig::default();
     // These patterns are intentionally separate from the maximal active
     // hull union above. The union proves that shipped combinations map to
@@ -791,6 +792,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         helm_console_schema,
         crate::entities::config::HelmConsoleConfig,
+        projection,
         max_speed,
         max_reverse_speed,
         acceleration,
@@ -1439,7 +1441,9 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     // Repair workflows add sixteen authored Job-context leaves.
     // Resource services add one authored endpoint-kind leaf, recreate-required.
     // Physical damage adds explicit materials/remedies/component/impact/layout
-    // leaves and checked physical System actions; owner output records 972 ship rows.
+    // leaves and checked physical System actions. Sensing, focused enquiry,
+    // explicit radar sharing, Navigation sharing and Helm projection extend
+    // the shipped-hull union to 1011 recreate-required/derived ship rows.
     let mut fingerprint = 0xcbf2_9ce4_8422_2325_u64;
     for row in &inventory {
         let line = format!(
@@ -1458,11 +1462,11 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     println!("reviewed schema counts={counts:?}; fingerprint={fingerprint}");
     assert_eq!(
         counts,
-        [55, 71, 972, 51, 56],
+        [55, 71, 1011, 51, 56],
         "update the reviewed inventory ratchet"
     );
     assert_eq!(
-        fingerprint, 12_420_028_744_364_521_399,
+        fingerprint, 1_058_332_460_400_903_743,
         "update the reviewed inventory fingerprint"
     );
 }

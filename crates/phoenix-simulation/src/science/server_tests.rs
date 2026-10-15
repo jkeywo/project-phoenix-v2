@@ -116,6 +116,11 @@ fn app_with(config: ScanConfig, condition: f32, depot_x: f32) -> (App, Entity) {
     sensing
         .broad
         .retain(|profile| profile.system.0 == "sensor-radar");
+    // This fixture fits just the observing instrument. Sharing declarations
+    // must refer to that same fitted set, as they do in accepted content.
+    sensing
+        .sharing
+        .retain(|profile| profile.system.0 == "sensor-radar");
     sensing.broad[0].sample_interval_secs = 0.1;
     sensing.focused[0].work_secs = 0.1;
     let mut time = Time::<()>::default();

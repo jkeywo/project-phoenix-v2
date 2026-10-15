@@ -1890,6 +1890,7 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
                 .iter()
                 .map(|burst| {
                     (
+                        &burst.launch_uuid,
                         &burst.tube_id,
                         burst.profile,
                         burst.burst_interval_secs,

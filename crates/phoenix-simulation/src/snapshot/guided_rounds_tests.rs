@@ -29,6 +29,7 @@ fn candidate() -> PhoenixSnapshot {
                     ..Default::default()
                 }],
                 bursts: vec![BurstState {
+                    launch_uuid: "first-emitted-round".into(),
                     profile: profile(),
                     burst_interval_secs: 0.3,
                     tube_id: "fore".into(),
@@ -345,6 +346,7 @@ fn saved_burst_ammunition_and_actual_tube_ownership_refuse_before_any_live_write
     for case in 0..3 {
         let mut saved = weapons.clone();
         saved.bursts = vec![BurstState {
+            launch_uuid: "first-emitted-round".into(),
             tube_id: "fore_port".into(),
             pending: 2,
             timer: 0.3,

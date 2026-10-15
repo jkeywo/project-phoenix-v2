@@ -183,6 +183,23 @@ pub struct Torpedo {
 }
 
 impl Torpedo {
+    /// Private physical receiver seam. Caller has proved source ownership,
+    /// dated Console permission, actual paired link and paid source work.
+    /// No independent seeker may use this to acquire another target.
+    pub fn receive_guidance(&mut self, observation: Option<&GuidanceObservation>) -> bool {
+        if self.profile.receiver.is_none()
+            || observation.is_some_and(|reading| {
+                reading.validate(u64::MAX).is_err()
+                    || !matches!(reading.source, GuidanceSource::Console { .. })
+            })
+        {
+            return false;
+        }
+        self.target_uuid = observation.map(|reading| reading.target_uuid.clone());
+        self.last_guidance = observation.cloned();
+        true
+    }
+
     /// Structural/intent acceptance only: the physical producer or link must
     /// validate the original sample and receipt frontier against its actual
     /// logical tick first. A forwarded receipt can postdate its original sample.
@@ -529,6 +546,8 @@ pub struct TorpedoTickResult {
 /// the pure-module `tick` can drive the burst without Bevy.
 #[derive(Clone, Debug, Default)]
 pub struct TubeBurstState {
+    /// Causal first emitted round identity; not another mint or launch cursor.
+    pub launch_uuid: String,
     pub profile: GuidedRoundProfile,
     /// Original emission cadence; current equipment cannot retime this volley.
     pub burst_interval_secs: f32,
@@ -1095,6 +1114,7 @@ impl TorpedoSystem {
         if count_remaining > 0 {
             self.burst_states.retain(|b| b.tube_id != tube_id);
             self.burst_states.push(TubeBurstState {
+                launch_uuid: uuid.clone(),
                 profile,
                 burst_interval_secs: burst_interval,
                 tube_id: tube_id.to_string(),

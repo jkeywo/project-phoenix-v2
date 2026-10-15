@@ -250,3 +250,48 @@ fn older_acknowledgement_cannot_claim_an_order_after_the_latest_issue() {
     assert!(validate(&forged, 130).is_err());
     assert_eq!(state, unchanged);
 }
+
+#[test]
+fn delayed_emission_uses_its_actual_first_id_not_a_later_order_on_the_same_tube() {
+    let mut state = GuidedSourceKnowledge::default();
+    let tube = SystemId("torpedo-tube-fore-port".into());
+    let first = KnownGuidedLaunchCommand {
+        tube: tube.clone(),
+        issued_tick: 100,
+        target: Some("original-public-contact".into()),
+        sampled_tick: Some(99),
+    };
+    assert!(note_launch_command(
+        &mut state,
+        "first-actual-emitted-id".into(),
+        first.clone(),
+        100
+    ));
+    assert!(note_launch_command(
+        &mut state,
+        "later-actual-emitted-id".into(),
+        KnownGuidedLaunchCommand {
+            issued_tick: 120,
+            target: Some("different-public-contact".into()),
+            sampled_tick: Some(119),
+            ..first.clone()
+        },
+        120
+    ));
+    assert!(!note_launch_command(
+        &mut state,
+        "first-actual-emitted-id".into(),
+        first.clone(),
+        120
+    ));
+    let restored: GuidedSourceKnowledge =
+        serde_json::from_slice(&serde_json::to_vec(&state).unwrap()).unwrap();
+    validate(&restored, 120).unwrap();
+    assert_eq!(restored.launch_commands["first-actual-emitted-id"], first);
+    assert_eq!(
+        restored.launch_commands["later-actual-emitted-id"]
+            .target
+            .as_deref(),
+        Some("different-public-contact")
+    );
+}

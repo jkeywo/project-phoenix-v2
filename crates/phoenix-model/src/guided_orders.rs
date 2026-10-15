@@ -36,11 +36,23 @@ pub struct KnownGuidedLaunch {
     pub acknowledged: Option<GuidanceAcknowledgement>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KnownGuidedLaunchCommand {
+    pub tube: SystemId,
+    pub issued_tick: u64,
+    pub target: Option<String>,
+    pub sampled_tick: Option<u64>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GuidedSourceKnowledge {
     /// Only identities this source actually emitted; no all-world roster.
     pub launches: BTreeMap<String, KnownGuidedLaunch>,
+    /// Original accepted launch command, keyed by its first actual emitted ID.
+    /// Kept only while the existing actual tube owns a pending burst.
+    pub launch_commands: BTreeMap<String, KnownGuidedLaunchCommand>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

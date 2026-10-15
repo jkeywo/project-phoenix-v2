@@ -1,7 +1,7 @@
 //! Operations on own sent/acknowledged knowledge. No physical projectile queries.
 use phoenix_model::guided_orders::{
     GuidanceAcknowledgement, GuidedOrderView, GuidedSourceKnowledge, IssuedGuidanceOrder,
-    KnownGuidedLaunch,
+    KnownGuidedLaunch, KnownGuidedLaunchCommand,
 };
 use phoenix_model::identity::SystemId;
 
@@ -23,6 +23,22 @@ fn valid_order(order: &IssuedGuidanceOrder, launched: u64, now: u64) -> bool {
 }
 
 pub fn validate(state: &GuidedSourceKnowledge, now: u64) -> Result<(), String> {
+    for (first_emitted_id, command) in &state.launch_commands {
+        if !identity(first_emitted_id)
+            || !identity(&command.tube.0)
+            || command.issued_tick > now
+            || command
+                .target
+                .as_deref()
+                .is_some_and(|target| !public_contact(target))
+            || command
+                .sampled_tick
+                .is_some_and(|sample| sample > command.issued_tick)
+            || (command.target.is_none() && command.sampled_tick.is_some())
+        {
+            return Err("invalid source-owned burst launch command".into());
+        }
+    }
     for (key, launch) in &state.launches {
         if key != &launch.round_uuid
             || !identity(key)
@@ -174,3 +190,24 @@ pub fn project(
 #[cfg(test)]
 #[path = "guided_orders_tests.rs"]
 mod tests;
+
+/// Tied to the first real emitted ID; a later launch on this tube is distinct.
+pub fn note_launch_command(
+    state: &mut GuidedSourceKnowledge,
+    first_emitted_id: String,
+    command: KnownGuidedLaunchCommand,
+    now: u64,
+) -> bool {
+    if state.launch_commands.contains_key(&first_emitted_id) || command.issued_tick != now {
+        return false;
+    }
+    let mut candidate = GuidedSourceKnowledge::default();
+    candidate
+        .launch_commands
+        .insert(first_emitted_id.clone(), command.clone());
+    if validate(&candidate, now).is_err() {
+        return false;
+    }
+    state.launch_commands.insert(first_emitted_id, command);
+    true
+}

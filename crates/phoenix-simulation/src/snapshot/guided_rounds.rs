@@ -49,9 +49,12 @@ pub(super) fn validate_weapon_state(stored: &WeaponState) -> Result<(), String> 
         }
     }
     let mut tubes = BTreeSet::new();
+    let mut launches = BTreeSet::new();
     for burst in &stored.bursts {
         burst.profile.validate()?;
-        if !identity(&burst.tube_id)
+        if !identity(&burst.launch_uuid)
+            || !launches.insert(&burst.launch_uuid)
+            || !identity(&burst.tube_id)
             || !tubes.insert(&burst.tube_id)
             || burst.pending == 0
             || !burst.burst_interval_secs.is_finite()

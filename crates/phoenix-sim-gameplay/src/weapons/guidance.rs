@@ -69,8 +69,26 @@ pub fn receiver_accepts(
     tick: u64,
     fixed_secs: f64,
 ) -> bool {
+    link_reaches(
+        profile,
+        receiver_position,
+        transmitter_position,
+        transmission,
+    ) && observation.validate(tick).is_ok()
+        && fixed_secs.is_finite()
+        && fixed_secs > 0.0
+        && tick.saturating_sub(observation.sampled_tick) as f64 * fixed_secs
+            <= f64::from(profile.maximum_sample_age_secs)
+}
+
+/// Physical equipment link only; a stop/acknowledgement carries no target sample.
+pub fn link_reaches(
+    profile: &GuidanceReceiverProfile,
+    receiver_position: [f32; 3],
+    transmitter_position: [f32; 3],
+    transmission: f32,
+) -> bool {
     if profile.validate().is_err()
-        || observation.validate(tick).is_err()
         || !receiver_position
             .iter()
             .chain(transmitter_position.iter())
@@ -78,15 +96,12 @@ pub fn receiver_accepts(
         || !transmission.is_finite()
         || transmission < profile.minimum_transmission
         || transmission > 1.0
-        || !fixed_secs.is_finite()
-        || fixed_secs <= 0.0
     {
         return false;
     }
     let delta = glam::DVec3::from_array(receiver_position.map(f64::from))
         - glam::DVec3::from_array(transmitter_position.map(f64::from));
-    let age = tick.saturating_sub(observation.sampled_tick) as f64 * fixed_secs;
-    delta.length() <= f64::from(profile.range) && age <= f64::from(profile.maximum_sample_age_secs)
+    delta.length() <= f64::from(profile.range)
 }
 
 #[cfg(test)]

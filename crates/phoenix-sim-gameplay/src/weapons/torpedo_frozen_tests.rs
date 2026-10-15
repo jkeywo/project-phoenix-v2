@@ -332,3 +332,74 @@ fn actual_receiver_retains_an_original_sample_with_later_forwarded_receipts() {
     system.in_flight[0].tick(0.1, None);
     assert_eq!(system.in_flight[0].last_guidance.as_ref(), Some(&received));
 }
+
+#[test]
+fn delayed_burst_retains_the_first_actual_emitted_identity_after_round_retargeting() {
+    let mut system = loaded(3);
+    assert_eq!(system.burst_states[0].launch_uuid, "first");
+    system.in_flight[0].target_uuid = Some("different-intent".into());
+    let result =
+        system.advance_with_work(0.2, &HashMap::new(), &mut |_| 1.0, &mut || "later".into());
+    assert_eq!(result.burst_launched.len(), 1);
+    assert_eq!(system.burst_states[0].launch_uuid, "first");
+    assert_eq!(
+        system
+            .in_flight
+            .iter()
+            .find(|round| round.uuid == "later")
+            .unwrap()
+            .target_uuid
+            .as_deref(),
+        Some("target")
+    );
+}
+
+#[test]
+fn received_retarget_and_stop_change_only_existing_guidance_intent() {
+    let mut system = loaded(1);
+    let round = &mut system.in_flight[0];
+    let mut reading = GuidanceObservation {
+        target_uuid: "new-intent".into(),
+        position: [5.0, 3.0, -30.0],
+        sampled_tick: 17,
+        source: GuidanceSource::Console {
+            ship_uuid: "launcher".into(),
+            console: phoenix_model::identity::ConsoleId("tactical".into()),
+            system: phoenix_model::identity::SystemId("torpedo-tube-fore-port".into()),
+            samples: Vec::new(),
+            observation: Some(phoenix_model::observation::ObservationMetadata {
+                observed_tick: Some(17),
+                received_tick: Some(18),
+                ..Default::default()
+            }),
+        },
+    };
+    reading.validate(20).unwrap();
+    let unfitted = round.clone();
+    assert!(!round.receive_guidance(Some(&reading)));
+    assert!(!round.receive_guidance(None));
+    assert_eq!(*round, unfitted);
+    round.profile.receiver = Some(phoenix_model::guided_guidance::GuidanceReceiverProfile {
+        range: 100.0,
+        minimum_transmission: 0.1,
+        maximum_sample_age_secs: 2.0,
+    });
+    let before = round.clone();
+    assert!(round.receive_guidance(Some(&reading)));
+    assert_eq!(round.target_uuid.as_deref(), Some("new-intent"));
+    assert_eq!(round.last_guidance.as_ref(), Some(&reading));
+    assert!(round.receive_guidance(None));
+    let mut expected = before.clone();
+    expected.target_uuid = None;
+    expected.last_guidance = None;
+    assert_eq!(
+        *round, expected,
+        "stop preserves identity, physical pose, endurance, HP and payload"
+    );
+    reading.source = GuidanceSource::Seeker;
+    assert!(
+        !round.receive_guidance(Some(&reading)),
+        "a seeker cannot retarget itself through the remote seam"
+    );
+    assert_eq!(*round, expected);
+}

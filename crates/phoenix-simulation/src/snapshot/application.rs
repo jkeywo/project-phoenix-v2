@@ -2242,6 +2242,7 @@ pub(super) fn apply_torpedo_inventory(
         .bursts
         .iter()
         .map(|b| TubeBurstState {
+            launch_uuid: b.launch_uuid.clone(),
             profile: b.profile,
             burst_interval_secs: b.burst_interval_secs,
             tube_id: b.tube_id.clone(),

@@ -803,6 +803,7 @@ pub(super) fn weapon_state(
                 s.burst_states
                     .iter()
                     .map(|b| BurstState {
+                        launch_uuid: b.launch_uuid.clone(),
                         profile: b.profile,
                         burst_interval_secs: b.burst_interval_secs,
                         tube_id: b.tube_id.clone(),

@@ -916,6 +916,7 @@ pub struct TorpedoInFlight {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BurstState {
+    pub launch_uuid: String,
     pub profile: phoenix_model::guided_round::GuidedRoundProfile,
     pub burst_interval_secs: f32,
     pub tube_id: String,

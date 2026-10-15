@@ -89,6 +89,14 @@ fn pending_work_at(slot: bool) -> (World, Entity, PhoenixSnapshot) {
     runtime.mission_clock = Some(crate::world::server::MissionClock::new(
         std::time::Duration::ZERO,
     ));
+    // Candidate validation resolves definitions from accepted World source,
+    // not mutable runtime copies. This fixture authors the same declarations.
+    world
+        .resource_mut::<crate::world::config::WorldConfig>()
+        .situation_definitions = vec![definition.clone()];
+    world
+        .resource_mut::<crate::world::config::WorldConfig>()
+        .situations = vec![config.clone()];
     runtime.situation_definitions = vec![definition];
     runtime.situation_configs = vec![config];
     world.insert_resource(runtime);
@@ -382,6 +390,8 @@ fn unresolved_declared_conditional_actor_does_not_owe_tomorrows_instance() {
     runtime.mission_clock = Some(crate::world::server::MissionClock::new(
         std::time::Duration::ZERO,
     ));
+    base.situation_definitions = vec![definition.clone()];
+    base.situations = vec![request.clone()];
     runtime.situation_definitions = vec![definition];
     runtime.situation_configs = vec![request];
     world.insert_resource(base);

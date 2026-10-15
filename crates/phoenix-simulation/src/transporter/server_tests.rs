@@ -93,7 +93,7 @@ fn measured_rescue_picture(world: &mut World, operator: Entity) -> String {
     )
     .unwrap();
     let profiles = BroadProfile::from_config(&authored).unwrap().unwrap();
-    let owner = crate::ship::system_registry::sensor_radar_system_id();
+    let owner = crate::ship::system_registry::tactical_radar_system_id();
     let profile = &profiles.0[&owner].profile;
     let mut state = BroadTrackState::new(profile);
     state
@@ -106,7 +106,7 @@ fn measured_rescue_picture(world: &mut World, operator: Entity) -> String {
                 source: "uuid-lighter".into(),
                 selectable: true,
                 observation: None,
-                position: [100.0, 0.0],
+                position: [20.0, 0.0],
                 support: 1.0,
                 identity: None,
                 classification: None,
@@ -122,7 +122,7 @@ fn measured_rescue_picture(world: &mut World, operator: Entity) -> String {
         .unwrap_or_default();
     boards.0.insert(
         owner.clone(),
-        SystemBlackboard::SensorRadar(crate::core::messages::SensorRadarBlackboard {
+        SystemBlackboard::TacticalRadar(crate::core::messages::TacticalRadarBlackboard {
             tracks: Some(public),
             ..Default::default()
         }),
@@ -140,6 +140,7 @@ fn measured_rescue_picture(world: &mut World, operator: Entity) -> String {
 #[test]
 fn measured_selection_resolves_alias_refuses_guessed_uuid_and_keeps_stop_after_evidence_loss() {
     let (mut world, operator, contact) = rescue_world(3);
+    world.get_mut::<Transform>(contact).unwrap().translation = Vec3::new(20.0, 0.0, 0.0);
     let alias = measured_rescue_picture(&mut world, operator);
     world
         .entity_mut(operator)
@@ -229,9 +230,9 @@ fn measured_rescue_ai_uses_recorded_request_handle_not_world_name_to_uuid() {
         admitted_payloads(&mut world, operator).is_empty(),
         "mission lookup is not observation"
     );
-    let owner = crate::ship::system_registry::sensor_radar_system_id();
+    let owner = crate::ship::system_registry::tactical_radar_system_id();
     let mut boards = world.get_mut::<ShipSystemBlackboards>(operator).unwrap();
-    let Some(SystemBlackboard::SensorRadar(board)) = boards.0.get_mut(&owner) else {
+    let Some(SystemBlackboard::TacticalRadar(board)) = boards.0.get_mut(&owner) else {
         panic!()
     };
     board.tracks.as_mut().unwrap()[0].identity =

@@ -177,10 +177,10 @@ fn two_explicit_instances_do_not_cross_credit_same_job_numbers_or_replay_effects
     assert_eq!(ready.len(), 1);
     assert_eq!(ready[0].instance, "repair-one");
     instances
-        .finish_activation(&ready[0], ScenarioCallResult::Applied, &definitions)
+        .finish_activation(&ready[0], ScenarioCallResult::Applied, 5, &definitions)
         .unwrap();
     assert!(instances
-        .finish_activation(&ready[0], ScenarioCallResult::Applied, &definitions)
+        .finish_activation(&ready[0], ScenarioCallResult::Applied, 5, &definitions)
         .is_err());
     assert!(
         instances.ready(&definitions).is_empty(),
@@ -220,7 +220,7 @@ fn two_explicit_instances_do_not_cross_credit_same_job_numbers_or_replay_effects
     assert_eq!(ready.len(), 2);
     for activation in ready {
         instances
-            .finish_activation(&activation, ScenarioCallResult::Applied, &definitions)
+            .finish_activation(&activation, ScenarioCallResult::Applied, 8, &definitions)
             .unwrap();
     }
     instances.validate(&definitions, 8).unwrap();
@@ -258,7 +258,7 @@ fn return_cannot_satisfy_receive_and_refused_script_activation_is_not_reentered(
     instances.acknowledge(&fact, 5).unwrap();
     let activation = instances.ready(&definitions).remove(0);
     instances
-        .finish_activation(&activation, ScenarioCallResult::Refused, &definitions)
+        .finish_activation(&activation, ScenarioCallResult::Refused, 5, &definitions)
         .unwrap();
     assert!(instances.ready(&definitions).is_empty());
     let resumed: SituationInstances =
@@ -381,4 +381,98 @@ fn accepted_world_source_can_reuse_a_definition_but_rejects_overlapping_or_inval
         *request = phoenix_model::messages::RepairTarget::External;
     }
     assert!(crate::world::config::parse_world(&toml::to_string(&source).unwrap()).is_err());
+}
+
+#[test]
+fn actual_callback_receipt_has_its_own_clock_and_refusal_never_grants_permission() {
+    let condition = SituationCondition::ScenarioApplied {
+        state: "state-0".into(),
+    };
+    let (mut instances, mut definitions) = prepare();
+    definitions[0] = definition(
+        "restore",
+        vec![SituationCondition::Achieved, condition.clone()],
+    );
+    let fact = achieved(&instances);
+    instances.acknowledge(&fact, 5).unwrap();
+    let ready = instances.ready(&definitions).remove(0);
+    assert_eq!(
+        condition.satisfied_tick(&instances.instances["repair-one"]),
+        None
+    );
+    let before = instances.clone();
+    assert!(instances
+        .finish_activation(&ready, ScenarioCallResult::Applied, 4, &definitions)
+        .is_err());
+    assert_eq!(
+        instances, before,
+        "backdated application does not mutate the frontier"
+    );
+    let mut refused = instances.clone();
+    refused
+        .finish_activation(&ready, ScenarioCallResult::Refused, 7, &definitions)
+        .unwrap();
+    assert_eq!(
+        condition.satisfied_tick(&refused.instances["repair-one"]),
+        None
+    );
+    refused.validate(&definitions, 7).unwrap();
+    instances
+        .finish_activation(&ready, ScenarioCallResult::Applied, 9, &definitions)
+        .unwrap();
+    assert_eq!(
+        condition.satisfied_tick(&instances.instances["repair-one"]),
+        Some(9)
+    );
+    let next = instances.ready(&definitions).remove(0);
+    let before = instances.clone();
+    assert!(instances
+        .finish_activation(&next, ScenarioCallResult::Applied, 8, &definitions)
+        .is_err());
+    assert_eq!(instances, before);
+    instances
+        .finish_activation(&next, ScenarioCallResult::Applied, 10, &definitions)
+        .unwrap();
+    let decoded: SituationInstances =
+        serde_json::from_slice(&serde_json::to_vec(&instances).unwrap()).unwrap();
+    for tick in 10..370 {
+        decoded.validate(&definitions, tick).unwrap();
+    }
+    for variant in 0..5 {
+        let mut forged = decoded.clone();
+        let row = forged.instances.get_mut("repair-one").unwrap();
+        match variant {
+            0 => {
+                row.activation_ticks.remove("state-0");
+            }
+            1 => {
+                row.activation_ticks.insert("extra".into(), 9);
+            }
+            2 => {
+                row.activation_ticks.insert("state-0".into(), 4);
+            }
+            3 => {
+                row.activation_ticks.insert("state-1".into(), 8);
+            }
+            _ => {
+                row.activation_ticks.insert("state-1".into(), 11);
+            }
+        }
+        assert!(
+            forged.validate(&definitions, 10).is_err(),
+            "forged application variant {variant}"
+        );
+    }
+    let mut invalid = definitions[0].clone();
+    invalid.state[0].when = condition;
+    assert!(
+        invalid.validate().is_err(),
+        "a callback cannot grant itself permission"
+    );
+    let mut invalid = definitions[0].clone();
+    invalid.state[0].call = None;
+    assert!(
+        invalid.validate().is_err(),
+        "permission references an explicit authored callback"
+    );
 }

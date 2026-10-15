@@ -198,6 +198,11 @@ pub(super) fn instances(mut acc: u64, values: &SituationInstances) -> u64 {
                 },
             );
         }
+        acc = fold_u64(acc, value.activation_ticks.len() as u64);
+        for (state, tick) in &value.activation_ticks {
+            acc = fold_str(acc, state);
+            acc = fold_u64(acc, *tick);
+        }
     }
     acc
 }

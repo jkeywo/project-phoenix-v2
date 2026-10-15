@@ -379,3 +379,107 @@ fn original_capability_explanations_are_bounded_and_survive_choice_json() {
     assert!(compiled.derive(&forged).is_err());
     assert!(compiled.derive(&decoded).is_ok());
 }
+
+#[test]
+fn dependency_waits_for_actual_authored_callback_not_just_preceding_fact() {
+    let mut source = library(true);
+    source.definitions[0].state[0].call = Some(ScenarioCall {
+        script: "assets/worlds/permission.toml#script.setup".into(),
+        function: "grant".into(),
+    });
+    for task in &mut source.tasks {
+        if let Task::Compound { methods, .. } = task {
+            for method in methods {
+                method.edges[0].when = SituationCondition::ScenarioApplied {
+                    state: "done".into(),
+                };
+            }
+        }
+    }
+    let compiled = compile(source.clone());
+    let selected = compiled.choose("actual-crew", 10, |_| Ok(())).unwrap();
+    let definitions = selected
+        .graph
+        .definitions
+        .values()
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut choice = selected.choice;
+    let mut instances = SituationInstances::default();
+    compiled
+        .release(&mut choice, &mut instances, "actual-crew", 11)
+        .unwrap();
+    instances
+        .accept_repair(
+            "actual-crew",
+            &SystemId("repair".into()),
+            1,
+            &RepairTarget::Work(room()),
+            JobId(1),
+            12,
+        )
+        .unwrap();
+    let fact = instances
+        .fact(
+            &ActivityJob {
+                actor: "actual-crew".into(),
+                owner: SystemId("repair".into()),
+                job: JobId(1),
+            },
+            14,
+            ActivityOutcome::RepairAchieved {
+                stage: 0,
+                target: room(),
+                remedy: "structure".into(),
+                result: RepairAchievement::Structure { restored_hp: 1.0 },
+            },
+        )
+        .unwrap();
+    instances.acknowledge(&fact, 14).unwrap();
+    assert!(
+        compiled
+            .release(&mut choice, &mut instances, "actual-crew", 15)
+            .unwrap()
+            .is_empty(),
+        "achieved work is not an applied Scenario callback"
+    );
+    let activation = instances.ready(&definitions).remove(0);
+    let mut refused = instances.clone();
+    refused
+        .finish_activation(&activation, ScenarioCallResult::Refused, 18, &definitions)
+        .unwrap();
+    let mut refused_choice = choice.clone();
+    assert!(compiled
+        .release(&mut refused_choice, &mut refused, "actual-crew", 19)
+        .unwrap()
+        .is_empty());
+    instances
+        .finish_activation(&activation, ScenarioCallResult::Applied, 20, &definitions)
+        .unwrap();
+    assert_eq!(
+        compiled
+            .release(&mut choice, &mut instances, "actual-crew", 21)
+            .unwrap(),
+        vec!["htn/maintenance/root/supply"]
+    );
+    let decoded: PlanChoice =
+        serde_json::from_slice(&serde_json::to_vec(&choice).unwrap()).unwrap();
+    for now in 21..381 {
+        compiled
+            .validate_history(&decoded, &instances, now)
+            .unwrap();
+    }
+    let mut forged = decoded.clone();
+    forged.released.insert("root/supply".into(), 19);
+    assert!(
+        compiled.validate_history(&forged, &instances, 21).is_err(),
+        "a release cannot predate its actual permission"
+    );
+    source.definitions[0].state[0].call = None;
+    assert!(
+        compile(source)
+            .choose("actual-crew", 10, |_| Ok(()))
+            .is_err(),
+        "dependency must name an explicit callback"
+    );
+}

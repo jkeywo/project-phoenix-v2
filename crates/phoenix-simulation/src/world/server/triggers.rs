@@ -701,6 +701,7 @@ pub(crate) fn tick_trigger_pipeline(
                     .finish_activation(
                         &activation,
                         phoenix_sim_world::world::activities::ScenarioCallResult::Applied,
+                        now_tick,
                         &runtime.situation_definitions,
                     )
                     .expect("ready closed Scenario transition");
@@ -766,7 +767,7 @@ pub(crate) fn tick_trigger_pipeline(
                             Ok(effects) => effects,
                             Err(error) => {
                                 bevy::log::warn!(instance=%activation.instance,%error,"Scenario call refused; buffered effects discarded");
-                                runtime.situations.finish_activation(activation, phoenix_sim_world::world::activities::ScenarioCallResult::Refused, &runtime.situation_definitions).expect("ready Scenario refusal");
+                                runtime.situations.finish_activation(activation, phoenix_sim_world::world::activities::ScenarioCallResult::Refused, now_tick, &runtime.situation_definitions).expect("ready Scenario refusal");
                                 None
                             }
                         }
@@ -818,7 +819,7 @@ pub(crate) fn tick_trigger_pipeline(
                         );
                         if completed {
                             if let Some(activation) = &activation {
-                                runtime.situations.finish_activation(activation, phoenix_sim_world::world::activities::ScenarioCallResult::Applied, &runtime.situation_definitions).expect("applied Scenario activation");
+                                runtime.situations.finish_activation(activation, phoenix_sim_world::world::activities::ScenarioCallResult::Applied, now_tick, &runtime.situation_definitions).expect("applied Scenario activation");
                             }
                         }
                     }
@@ -830,6 +831,7 @@ pub(crate) fn tick_trigger_pipeline(
                     .finish_activation(
                         activation,
                         phoenix_sim_world::world::activities::ScenarioCallResult::Refused,
+                        now_tick,
                         &runtime.situation_definitions,
                     )
                     .expect("ready Scenario missing-runtime refusal");

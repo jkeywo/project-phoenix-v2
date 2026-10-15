@@ -119,3 +119,14 @@ requests, accepted scopes and receipt evidence before writes. The imported
 communication-maintenance domain and existing Workshop source/activity editors
 use these same closed operators and read/reported/declined conditions. Actual
 whole-host, peer and human workload acceptance remains separate from source tests.
+
+
+Scenario activation results retain their actual script-effect application clocks
+on the same SituationInstance. The bounded result and tick maps have identical
+state keys. A `scenario_applied` dependency names an explicit callback and waits
+for its actual Applied result; a report receipt or refused callback cannot satisfy
+it. Scenario-local references point only to an earlier callback in the acyclic
+chain. Preflight checks causal, nonfuture and nondecreasing clocks; inspection
+shows the application clock separately from the underlying physical/radio fact.
+This records a historical authored consequence and does not create another
+permission inventory or prove arbitrary past script effects from current state.

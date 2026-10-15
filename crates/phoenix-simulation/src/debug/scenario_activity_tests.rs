@@ -48,6 +48,7 @@ fn author_inspection_preserves_exact_job_and_pending_vs_acknowledged_frontiers()
             settled: None,
             state: Some("received".into()),
             activations: Default::default(),
+            activation_ticks: Default::default(),
         },
     );
     runtime
@@ -71,6 +72,7 @@ fn author_inspection_preserves_exact_job_and_pending_vs_acknowledged_frontiers()
     state
         .activations
         .insert("received".into(), ScenarioCallResult::Refused);
+    state.activation_ticks.insert("received".into(), 15);
     state.state = None;
     runtime.pending_world_events.clear();
     let projected = collect_scenario_state(&runtime, &ObjectiveManager::default());

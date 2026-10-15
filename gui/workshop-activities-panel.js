@@ -20,13 +20,14 @@ export function mountWorkshopActivities({root,provider,runtime,draft:getDraft,bu
     const row={fieldset,name,states:[]};definitionRows.push(row);
     fieldset.append(label(name,'definition'),states);
     function addState(value={id:'',when:{kind:'accepted'}}) {
-      const box=el('fieldset'),name=input('state-'+serial++,value.id),when=select('condition-'+serial++,['accepted','achieved','settled','received','returned','communication_read','communication_reported','communication_declined'].map(key=>[key,t('workshop.activities.condition.'+key)]),value.when.kind);
+      const box=el('fieldset'),name=input('state-'+serial++,value.id),when=select('condition-'+serial++,['accepted','achieved','settled','received','returned','communication_read','communication_reported','communication_declined','scenario_applied'].map(key=>[key,t('workshop.activities.condition.'+key)]),value.when.kind);
       const outcome=select('outcome-'+serial++,['completed','cancelled','failed'].map(key=>[key,t('workshop.activities.outcome.'+key)]),value.when.outcome);
+      const previous=input('application-state-'+serial++,value.when.state || '');
       const script=input('script-'+serial++,value.call?.script || ''),fn=input('function-'+serial++,value.call?.function || '');
-      const state={box,name,when,outcome,script,fn};row.states.push(state);
-      box.append(label(name,'state'),label(when,'condition'),label(outcome,'outcome'),label(script,'script'),label(fn,'function'),
+      const state={box,name,when,outcome,previous,script,fn};row.states.push(state);
+      box.append(label(name,'state'),label(when,'condition'),label(outcome,'outcome'),label(previous,'application_state'),label(script,'script'),label(fn,'function'),
         button(null,'remove',()=>{row.states.splice(row.states.indexOf(state),1);box.remove();}));
-      const refresh=()=>{outcome.hidden=when.value!=='settled';};when.addEventListener('change',refresh);refresh();states.append(box);controls();
+      const refresh=()=>{outcome.hidden=when.value!=='settled';previous.hidden=when.value!=='scenario_applied';};when.addEventListener('change',refresh);refresh();states.append(box);controls();
     }
     const seen=new Set();let cursor=value.initial;
     while(cursor!=null&&!seen.has(cursor)){const state=value.state.find(row=>row.id===cursor);if(!state)break;seen.add(cursor);addState(state);cursor=state.next;}
@@ -89,7 +90,7 @@ export function mountWorkshopActivities({root,provider,runtime,draft:getDraft,bu
     const current=()=>!disposed&&token===generation&&getDraft()===draft&&world.value===path;
     void runWorkshopMutation({setBusy,current,start:controls,invoke:()=>{
       const values=definitionRows.map(row=>({id:row.name.value,initial:row.states[0]?.name.value || '',state:row.states.map((state,index)=>({id:state.name.value,
-        when:{kind:state.when.value,...(state.when.value==='settled'?{outcome:state.outcome.value}:{})},
+        when:{kind:state.when.value,...(state.when.value==='settled'?{outcome:state.outcome.value}:state.when.value==='scenario_applied'?{state:state.previous.value}:{})},
         ...(state.script.value||state.fn.value?{call:{script:state.script.value,function:state.fn.value}}:{}),
         ...(index+1<row.states.length?{next:row.states[index+1].name.value}:{})}))}));
       return applyActivities({draft,provider,runtime,dependencies,path,definitions:values,situations:instanceRows.map(row=>({id:row.name.value,definition:row.definition.value,request:row.read()})),current});},

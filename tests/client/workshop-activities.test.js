@@ -111,3 +111,22 @@ describe('communication activity authoring',()=>{
     draft.undo();expect(draft.toFiles()).toEqual(before);draft.redo();expect(parse(draft.read(path)).situation[0].request).toEqual(rows[0].request);
   });
 });
+
+
+describe('actual Scenario application dependency authoring',()=>{
+  it('preserves a prior explicit callback reference through accepted source and refuses impossible history',async()=>{
+    const draft=documentFor(source()),dependencies=deps(),inspection=inspectActivities(draft,dependencies,path);
+    const definitions=defs();definitions[0].state[1].when={kind:'scenario_applied',state:'useful'};
+    validateActivities(definitions,situations(),inspection.actors);
+    for(const edit of [row=>row.state[1].when.state='missing',row=>row.state[1].when.state='settled',row=>delete row.state[0].call,row=>row.state[1].when.outcome='completed']){
+      const invalid=structuredClone(definitions);edit(invalid[0]);expect(()=>validateActivities(invalid,situations(),inspection.actors)).toThrow();
+    }
+    await applyActivities({draft,dependencies,runtime:{validate:async()=>({accepted:true})},path,definitions,situations:situations()});
+    expect(parse(new WorkshopDocument(draft.archive()).read(path)).situation_definition).toEqual(definitions);
+    draft.undo();expect(parse(draft.read(path)).situation_definition).toEqual(defs());draft.redo();
+    document.body.innerHTML='<main></main>';
+    const panel=mountWorkshopActivities({root:document.querySelector('main'),runtime:{dependencies:async()=>dependencies,validate:async()=>({accepted:true})},draft:()=>draft,busy:()=>false,setBusy:()=>{}});await settle();
+    expect(panel.node.querySelector('input[id*="application-state-"]:not([hidden])').value).toBe('useful');
+    panel.node.querySelector('#workshop-activities-save').click();await settle();expect(parse(draft.read(path)).situation_definition).toEqual(definitions);panel.dispose();
+  });
+});

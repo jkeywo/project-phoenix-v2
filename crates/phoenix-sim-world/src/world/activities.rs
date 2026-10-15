@@ -242,10 +242,11 @@ impl ActivityRequest {
     }
 }
 
-/// Scenario conditions consume only this instance's acknowledged historical facts.
+/// Conditions consume only this instance's acknowledged facts and actual Scenario applications.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SituationCondition {
+    ScenarioApplied { state: String },
     CommunicationRead {},
     CommunicationReported {},
     CommunicationDeclined {},
@@ -260,6 +261,7 @@ impl SituationCondition {
     /// HTN release. No live condition, job slot or stock polling is involved.
     pub fn satisfied_tick(&self, instance: &SituationInstance) -> Option<u64> {
         match self {
+            Self::ScenarioApplied { state } => (instance.activations.get(state) == Some(&ScenarioCallResult::Applied)).then(|| instance.activation_ticks.get(state).copied()).flatten(),
             Self::CommunicationRead {} => instance.achieved.as_ref().filter(|fact| matches!(fact.outcome, ActivityOutcome::CommunicationRead { .. })).map(|fact| fact.tick),
             Self::CommunicationReported {} => instance.settled.as_ref().filter(|fact| matches!(&fact.outcome, ActivityOutcome::CommunicationReturned { outcome, .. } if outcome.facts.report.is_some())).map(|fact| fact.tick),
             Self::CommunicationDeclined {} => instance.settled.as_ref().filter(|fact| matches!(&fact.outcome, ActivityOutcome::CommunicationReturned { outcome, .. } if outcome.facts.decision.as_ref().is_some_and(|decision| decision.choice == phoenix_model::comms_request::CommsRequestDecision::Decline))).map(|fact| fact.tick),
@@ -325,6 +327,24 @@ impl SituationDefinition {
         let mut visited = BTreeSet::new();
         let mut cursor = Some(&self.initial);
         while let Some(id) = cursor {
+            let current = self
+                .state
+                .iter()
+                .find(|row| &row.id == id)
+                .expect("known state");
+            if let SituationCondition::ScenarioApplied { state } = &current.when {
+                if !visited.contains(state)
+                    || !self
+                        .state
+                        .iter()
+                        .any(|row| &row.id == state && row.call.is_some())
+                {
+                    return Err(
+                        "Scenario application condition requires an earlier authored callback"
+                            .into(),
+                    );
+                }
+            }
             if !visited.insert(id) {
                 return Err("cyclic first Scenario lifecycle".into());
             }
@@ -367,6 +387,8 @@ pub struct SituationInstance {
     pub state: Option<String>,
     /// Each state is activated once through the existing script-effect boundary.
     pub activations: BTreeMap<String, ScenarioCallResult>,
+    /// Actual effect-boundary clocks, keyed exactly like the retained results.
+    pub activation_ticks: BTreeMap<String, u64>,
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -415,6 +437,7 @@ impl SituationInstances {
                 settled: None,
                 state: Some(definition.initial.clone()),
                 activations: BTreeMap::new(),
+                activation_ticks: BTreeMap::new(),
             },
         );
         Ok(())
@@ -594,6 +617,7 @@ impl SituationInstances {
         &mut self,
         activation: &ScenarioActivation,
         result: ScenarioCallResult,
+        tick: u64,
         definitions: &[SituationDefinition],
     ) -> Result<(), String> {
         if !self.ready(definitions).contains(activation) {
@@ -611,7 +635,22 @@ impl SituationInstances {
             .iter()
             .find(|row| row.id == activation.state)
             .expect("ready state");
+        if tick < instance.armed_tick
+            || state
+                .when
+                .satisfied_tick(instance)
+                .is_none_or(|evidence| evidence > tick)
+            || instance
+                .activation_ticks
+                .values()
+                .any(|previous| *previous > tick)
+        {
+            return Err(
+                "Scenario application predates its evidence or previous application".into(),
+            );
+        }
         instance.activations.insert(state.id.clone(), result);
+        instance.activation_ticks.insert(state.id.clone(), tick);
         instance.state = if result == ScenarioCallResult::Applied {
             state.next.clone()
         } else {
@@ -706,8 +745,16 @@ impl SituationInstances {
             }
             // Reconstruct only legal progression from consumed facts and the
             // persisted per-state call result; never inspect current machinery.
+            if instance
+                .activations
+                .keys()
+                .ne(instance.activation_ticks.keys())
+            {
+                return Err("Scenario result/application clock keys differ".into());
+            }
             let mut expected = Some(definition.initial.clone());
             let mut seen = BTreeSet::new();
+            let mut previous_tick = instance.armed_tick;
             while let Some(current) = expected.clone() {
                 let Some(result) = instance.activations.get(&current) else {
                     break;
@@ -721,6 +768,18 @@ impl SituationInstances {
                 let mut projection = instance.clone();
                 projection.state = Some(current.clone());
                 projection.activations.remove(&current);
+                projection.activation_ticks.remove(&current);
+                let application_tick = instance.activation_ticks[&current];
+                if application_tick < previous_tick
+                    || application_tick > now
+                    || state
+                        .when
+                        .satisfied_tick(&projection)
+                        .is_none_or(|evidence| evidence > application_tick)
+                {
+                    return Err("Scenario application clock lacks its causal evidence".into());
+                }
+                previous_tick = application_tick;
                 let check = Self {
                     instances: BTreeMap::from([(id.clone(), projection)]),
                 };

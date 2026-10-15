@@ -213,3 +213,57 @@ fn shared_budget_postpones_ready_scenario_without_marking_it_applied_or_refused(
     app.update();
     assert_eq!(value(&app, "credited"), 1);
 }
+
+#[test]
+fn authored_permission_uses_actual_effect_boundary_and_refused_effects_cannot_grant_it() {
+    for (function, applied) in [("useful", true), ("refuse", false)] {
+        let mut app = prepared(function);
+        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+        let definition = &mut runtime.situation_definitions[0];
+        definition.state[0].next = Some("permission".into());
+        definition.state.push(SituationState {
+            id: "permission".into(),
+            when: SituationCondition::ScenarioApplied {
+                state: "received".into(),
+            },
+            call: Some(ScenarioCall {
+                script: definition.state[0].call.as_ref().unwrap().script.clone(),
+                function: "settled".into(),
+            }),
+            next: None,
+        });
+        drop(runtime);
+        receive(&mut app, 3, false);
+        app.insert_resource(crate::sim_tick::SimTick(8));
+        app.update();
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        let instance = &runtime.situations.instances["supply"];
+        assert_eq!(instance.settled.as_ref().unwrap().tick, 3);
+        assert_eq!(instance.activation_ticks["received"], 8);
+        assert_eq!(
+            instance.activations["received"],
+            if applied {
+                ScenarioCallResult::Applied
+            } else {
+                ScenarioCallResult::Refused
+            }
+        );
+        assert_eq!(
+            instance.activation_ticks.get("permission").copied(),
+            applied.then_some(8)
+        );
+        assert_eq!(runtime.flags.counter("settled"), i64::from(applied));
+        runtime
+            .situations
+            .validate(&runtime.situation_definitions, 8)
+            .unwrap();
+        let before = runtime.situations.clone();
+        for _ in 0..3 {
+            app.update();
+        }
+        assert_eq!(
+            app.world().resource::<WorldContentRuntime>().situations,
+            before
+        );
+    }
+}

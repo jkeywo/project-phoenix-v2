@@ -6271,3 +6271,6 @@ workshop.security.remove,Local Security authoring and optional reference,[Remove
 workshop.security.add_action,Local Security authoring and optional reference,[Add local action],,,
 workshop.security.save,Local Security authoring and optional reference,[Save Security profile],,,
 workshop.security.refused,Local Security authoring and optional reference,[Security edit refused: {reason}],,,
+
+workshop.activities.condition.scenario_applied,Scenario callback dependency,[Callback applied],,,
+workshop.activities.application_state,Scenario callback dependency,[Earlier callback state],,,

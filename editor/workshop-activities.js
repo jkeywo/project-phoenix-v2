@@ -75,8 +75,9 @@ export function validateActivities(definitions,situations,actors) {
     const seen=new Set();let cursor=def.initial;
     while(cursor!=null) {
       const state=def.state.find(row=>row.id===cursor);
-      if(!state || seen.has(cursor) || !closed(state,['id','when','call','next']) || !closed(state.when,['kind','outcome'])
-        || !['accepted','achieved','settled','received','returned','communication_read','communication_reported','communication_declined'].includes(state.when.kind)
+      if(!state || seen.has(cursor) || !closed(state,['id','when','call','next']) || !closed(state.when,['kind','outcome','state'])
+        || !['accepted','achieved','settled','received','returned','communication_read','communication_reported','communication_declined','scenario_applied'].includes(state.when.kind)
+        || (state.when.kind==='scenario_applied' ? !seen.has(state.when.state) || !def.state.some(row=>row.id===state.when.state && row.call) : Object.hasOwn(state.when,'state'))
         || (state.when.kind==='settled' ? !['completed','cancelled','failed'].includes(state.when.outcome) : Object.hasOwn(state.when,'outcome'))
         || (state.call!=null && (!closed(state.call,['script','function']) || !id(state.call.script) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(state.call.function)))) throw Error('Use an acyclic exact evidence condition and a named Scenario function.');
       seen.add(cursor);cursor=state.next;

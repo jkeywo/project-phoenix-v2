@@ -104,6 +104,7 @@ fn root_actor(arguments: &BTreeMap<String, Value>) -> Result<&str, String> {
 }
 fn compatible(condition: &SituationCondition, request: &ActivityRequest) -> bool {
     match condition {
+        SituationCondition::ScenarioApplied { .. } => true,
         SituationCondition::CommunicationRead {}
         | SituationCondition::CommunicationReported {}
         | SituationCondition::CommunicationDeclined {} => {
@@ -399,6 +400,9 @@ impl CompiledPlanning {
                 || !graph.leaves.contains_key(&edge.to)
                 || graph.dependencies[..index].contains(edge)
                 || !compatible(&edge.when, &graph.leaves[&edge.from].request)
+                || matches!(&edge.when, SituationCondition::ScenarioApplied { state }
+                    if !graph.definitions[&graph.leaves[&edge.from].definition].state.iter()
+                        .any(|row| &row.id == state && row.call.is_some()))
             {
                 return Err("invalid HTN primitive dependency reference/outcome".into());
             }

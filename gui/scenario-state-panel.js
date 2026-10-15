@@ -358,7 +358,7 @@ export function buildScenarioStatePanel(payload, opts = {}) {
           {tick:fact.tick, kind:fact.outcome?.kind})));
       }
       for (const [stateId, result] of Object.entries(state.activations || {})) {
-        row.appendChild(el(doc, 'div', 'ss-situation-activation', `${stateId}: ${result}`));
+        row.appendChild(el(doc, 'div', 'ss-situation-activation', `${stateId}: ${result}${state.activation_ticks?.[stateId] == null ? '' : ' @ ' + state.activation_ticks[stateId]}`));
       }
       sec.appendChild(row);
     }

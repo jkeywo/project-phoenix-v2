@@ -354,3 +354,15 @@ Root owns Cargo, compatibility versions and integration evidence. Normal joined
 Human/AI care, fresh 360-step hosted continuation, physical browser/native and
 workload acceptance remain pending. Injury propagation, away work, real craft
 custody and capture remain open; this source checkpoint does not close increment20.
+
+
+The separate actual-host Medical proof is authored and independently source
+reviewed: `tests/medical_gameplay_continuation.rs` covers normal joined Human
+admission, an incompatible-team refusal, physical arrival/funded work, one actual
+medication consumption, seven malformed no-write candidates, fresh complete JSON
+360 and ordinary AFK/Backfill/Human continuation. A second case starts no Human
+care command and requires ordinary Repair AI to select and complete the setup
+patient. Exact LocalShip UUID matching governs private inspection/forgeries.
+The finite roster guard includes a forged terminal extra-team no-write regression
+before accepted-home indexing. Native execution remains solely the integrator's;
+authored assertions and source review are not passing gameplay evidence.

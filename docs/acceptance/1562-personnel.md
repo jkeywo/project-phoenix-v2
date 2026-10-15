@@ -91,3 +91,13 @@ port tests are authored; Cargo remains exclusively the integrator's. Joined-host
 Human/ordinary AI, fresh JSON 360, browser/native and workload checks remain
 pending. No external custody, casualty propagation, capture or full increment20
 acceptance is claimed.
+
+
+The separate `medical_gameplay_continuation` source proof now has two reviewed
+actual-host cases: ordinary joined Human care with seven whole-candidate no-write
+forgeries, real paid work/one medication, fresh JSON 360 and AFK/AI/Human handoff;
+and ordinary Backfill selecting and completing the setup patient without a Human
+care command. Private inspection and forgeries select the actual LocalShip UUID.
+An early exact finite-team-count guard also rejects a forged terminal extra team
+before its home lookup. Independent source review passes; these native assertions
+remain unexecuted in the worker and require root integration evidence.

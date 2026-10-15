@@ -1,0 +1,11 @@
+# Quiet actual-host proof of finite local treatment and the ordinary Cruiser.
+[global]
+seed = 156221
+[player_spawn]
+position = [0,0,0]
+[[entity]]
+template_path = "assets/entities/medical_cruiser.toml"
+id = "medical-reference"
+name = "medical-reference"
+spawn_on = "game_start"
+transform = {position = [0,0,0]}

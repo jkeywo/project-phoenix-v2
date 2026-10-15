@@ -100,3 +100,101 @@ integration and continuation. Apply targeted tests during development and the
 existing integration gates at the programme boundary. Report measured duration and
 workload evidence separately from provisional tuning. Completing the planner does
 not waive the original planetary, catalogue, Workshop or manual acceptance gates.
+
+
+## First 24A consumer: finite maintenance opportunities
+
+Adopted 15 October 2026 under the parallel-work contract. The actual Cruiser
+already has a finite `hold-structural-parts` to `repair-structural` delivery route;
+its structural remedy consumes one `structural_parts` through the existing service
+binding and restores up to ten HP. First search discovers useful structural Repair,
+or Delivery followed by that Repair, from real positive compartment damage, local
+shortage and a funded compatible main store. This is an initial real operator
+composition, not the required later captured-vessel return/evacuation exit.
+
+Search declarations identify existing imported primitive tasks and the supported
+closed Repair/Delivery precondition and outcome families. Keep their exact typed
+actor/System/team/target/store/commodity/quantity bindings and immutable recipe
+validation. The source may restrict eligible compartments, goals and budgets; it
+cannot invent new physical effects. Useful structural improvement differs from
+full restoration. Search estimates a supported outcome; only actual committed
+owner facts can establish it later.
+
+Project current finite Damage, Stock/claims/incoming/held capacity, ResourceServices,
+Repair/Logistics jobs and access routes through existing owners. Existing automatic
+replenishment, an unbound Repair assignment or an incoming batch already serving
+the need makes the proposed extra work ineligible. Include ordinary reserve floors,
+receiving room and actual route/equipment capability. Known discovery evidence must
+come from the issuing ship's permitted current maintenance reports/tools; no private
+foreign observation becomes crew information through an offer. Successful ordinary
+automation can leave no candidate, without spawning replacement chores.
+
+Use deterministic sorted bindings, at most eight search steps, 256 expansions and
+16 candidates. Canonical visited states reject cycles and duplicate resulting
+bindings. Scratch hypothetical stock transfers and expected repair results never
+call physical commit, reserve real goods, mint a JobId or alter canonical Damage.
+Retain bounded discovery inputs, original tick, source/operator bindings, expansion
+order/result and refusal explanations needed to derive accepted history. Exhaustion
+produces no offer while existing execution continues.
+
+### Same-HTN optional execution join
+
+Keep the primary PlanChoice unchanged. A bounded optional record in the same World
+owner refers to frozen source operators and has a closed source-derived execution
+identity with a monotonic ordinal. Scope every leaf, definition, Scenario callback
+and publication from that identity; arbitrary caller prefixes are unsupported.
+Reuse the existing typed primitive expander, Decomposition release/history/request
+logic, SituationInstances and ordinary physical/Comms consumers. Static authored
+root argument equality remains strict. A discovered graph is derived from its
+retained source/bindings, not a pretend authored file or a separately implemented
+physical executor.
+
+The first admission is deliberately conservative: the primary and earlier optional
+work must have released all their nodes, reached actual terminal physical settlement
+and completed required Scenario callbacks. An unreleased/refused future node does
+not count as finished. Optional failure/abandonment needs an explicit retained
+cause and closed future-node decision; it neither teleports returning teams nor
+undoes paid work. This is not concurrent 24B admission or workload-reactive 24C pacing.
+
+Allow a later activity to reuse a historical team/target/route only when its arming
+tick is strictly later than the earlier actual terminal settlement/home/release
+frontier. RepairAchieved alone cannot free a returning team. Apply the same causal
+rule at arming and full historical pairwise validation. Retain the original scoped
+JobId/radio origin, evidence and Scenario results permanently within this bounded
+run; old facts cannot bind or satisfy the new instance. The global 32-situation
+limit still applies. At most eight optional records are retained; capacity exhaustion
+refuses new work rather than silently evicting committed history.
+
+### Normal offered communication and atomic acceptance
+
+At most one outstanding offer per actor/source enters the normal existing Comms
+conversation path. Its original immutable proposal identity travels with the open,
+active dialogue and response callback. A stale response cannot accept a replacement
+offer. Offer entry is distinct from an admitted response, acceptance and execution;
+no trigger/timer may masquerade as a response on that bound conversation.
+
+An admitted normal Human/ordinary Comms response requests acceptance or refusal of
+that exact record. Immediately before admission, revalidate current own permitted
+evidence, physical needs, jobs, routes, finite stocks and capacity. Stage the existing
+Promise ledger record, optional choice and Situation release as one World commit.
+A failed child release cannot leave a newly recorded promise. Duplicate, stale or
+withdrawn offers refuse explicitly. A changed need can withdraw an unaccepted offer;
+accepted source/choice/deadline/history is never replaced by a new search result.
+Only ordinary admitted System owners execute any released instructions.
+
+Snapshots/digests retain proposal/decision/child history on that same World owner.
+Preflight frozen source and exact typed bindings, actor provenance, promise open
+interval, execution namespaces, complete callback/evidence clocks, global history
+capacity and settlement-before-repeat before writes. Do not rerun today's usefulness
+test against an accepted historical child. Reject orphan leaves and erased or
+rebound decisions. Privileged Workshop/Scenario inspection explains discovery,
+rejection, offer, acceptance and actual jobs separately; ordinary Comms exposes
+only the offered information. Extend existing accepted-source/history/Preview/Test.
+
+Prove a genuinely funded Delivery→Repair chain, direct Repair alternative, incoming
+or already-owned work exclusion, stale/duplicate/currently-unfunded acceptance,
+refusal without commitment, interrupted physical work and at least 360 complete
+fresh-JSON updates across discovery/offer/acceptance/physical checkpoints. Measure
+search cost separately from human workload. Full 23, captured-vessel search, concurrent
+admission/pacing, planetary scope, catalogue coverage and human 2/4/6/8 acceptance
+remain open until their actual consumers and evidence land.

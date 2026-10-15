@@ -352,6 +352,13 @@ fn ordinary_protection_and_independent_jammer_restore_exactly_then_human_priorit
         same(&live, &resumed, step);
         live.update();
         resumed.update();
+        assert_paid(&mut live);
+        assert_paid(&mut resumed);
+        assert!(
+            live.world().resource::<PaidWitness>().suppression > 0.0,
+            "reference protection must remain genuinely funded throughout continuation"
+        );
+        assert!(resumed.world().resource::<PaidWitness>().suppression > 0.0);
         continued_paid |= paid(&live) && live.world().resource::<PaidWitness>().suppression > 0.0;
     }
     same(&live, &resumed, 360);

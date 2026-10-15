@@ -1138,7 +1138,9 @@ max_flow_per_sec = 1
 default_flow_per_sec = 1
 max_cooling_per_sec = 1
 default_cooling_per_sec = 0.2
-priority = 30
+# This optional defensive fit reserves its declared finite intake before the
+# lower-priority support loads; reactor capacity and all costs stay unchanged.
+priority = 4
 restore_delay_secs = 0.5
 
 [interior]

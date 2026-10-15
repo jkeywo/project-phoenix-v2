@@ -1,0 +1,38 @@
+{
+  "status": "partial",
+  "increment": 15,
+  "date": "2026-10-15",
+  "source_revision": "d1750c12",
+  "tested_rust_revision": "d1750c12",
+  "command": "cargo test -p phoenix-simulation --lib --no-default-features -- flight_carrier:: pdc:: assignments:: mounts:: guided_ blaster_spatial actual_damage_systems_expose_rng seeker actual_in_flight_ordnance",
+  "environment": {
+    "CARGO_TARGET_DIR": "C:/Coding/project-phoenix-v2/target",
+    "cargo_coordination": "One sequential integrator Cargo stream; byte-preserving Simulation lib timestamp refresh on source-tree switch."
+  },
+  "result": {
+    "passed": 51,
+    "failed": 0,
+    "ignored": 0,
+    "filtered_out": 4540
+  },
+  "log": {
+    "name": "increment15-spatial-guidance-native-retry2.log",
+    "sha256": "14b0fb783f3bfeabc579788359aef410b834dd751b6b3cf08c9eb6d93cb6338e"
+  },
+  "other_evidence": {
+    "model_guidance_tests": 4,
+    "gameplay_guidance_geometry_tests": 9,
+    "client_measured_elevation_tests": 68,
+    "wiki_source_references": 63,
+    "wiki_index_links": 71,
+    "combined_pasm": "validate/scan/traceability exit 0 before later 22A contract; separate 22A receipt recorded by contract author"
+  },
+  "pending": [
+    "Receiver-backed retarget/cancel and independent Science illumination",
+    "Full-host paid PDC acquisition, delegation, salvo and launcher-loss continuation demonstration",
+    "Additional physical payload and approach-advice consumers where not yet implemented",
+    "Final integrated gates and shipped-content/baseline comparisons",
+    "Browser/native device, performance/balance and human workload acceptance"
+  ],
+  "limitations": "Initial integration checkpoint only. Earlier failed batches remain recorded. No full increment exit, push or human acceptance claimed."
+}

@@ -340,3 +340,54 @@ effect, resource and clock candidates refuse without live writes. Shipped conten
 physical browser/native/Workshop journeys, performance/electronic-combat comparisons
 and 2/4/6/8-human workload remain separate verified acceptance. Source preparation
 or initial implementation cannot close 17, 19 decoys or earlier outstanding exits.
+
+## Adopted next consumer: a physical ship's misleading transponder
+
+[ai] The next S019 consumer changes evidence about an already detected actual
+ship. A distinct composed `IdentityEmitter` System has one retained generic
+enabled channel, a real PowerInput, actual Operation/compartment placement and
+a finite authored false callsign plus optional declared faction identity. The
+equipment profile is data; humans and its sole reusable per-System state tree
+operate the same admitted enabled control. There is no prose parser, arbitrary
+Workshop program or second controller. Workshop edits and previews the actual
+profile, ordinary Console details show own intent/operability, and delegation
+uses the same actual source boundary.
+
+The emitter pays continuous work at the existing actual equipment boundary.
+Only a current full work grant permits this first binary identity claim;
+partial, missing, Offline, destroyed or disabled equipment makes no false claim.
+Its derived current-tick claim is cleared on restore and recomputed without
+bootstrap credit. Stable actual System order chooses the first active fitted
+claim if several compatible emitters exist; there is no random identity flicker
+or hidden observer selection. The reference tuning remains provisional.
+
+The existing Broad physical acquisition producer substitutes the emitted
+callsign/faction only in its ordinary identity measurement after actual
+geometry/path/range coverage succeeds. Position, elevation, velocity evidence,
+classification, assessment, uncertainty, actual source association and ordinary
+identity maturity remain unchanged. The actual EntityName, FactionComponent,
+collider, material truth, real jobs and physical targeting remain unchanged.
+Source UUIDs remain private routing keys; no fake actor UUID, truth-versus-spoof
+flag or privileged route comparison is published or consumed by AI. A target
+still resolves to the same body through its earned observer-local alias and
+measured ray. This consumer creates no phantom contact or unselectable decoy;
+physical decoy craft remain increment 19 and apparent empty-space bodies need
+their own ordinary aim/acquisition contract before implementation.
+
+False identity carries no dossier references copied from the real ship. Existing
+explicitly supplied observer reports retain their current priority and provenance.
+Independent focused scans and genuinely received Comms may supply contradictory
+evidence through their normal equipment/knowledge rules; they do not gain a
+new universal spoof-detection bit. Held history, other Console observations and
+manual attachments are not erased or rewritten when the emitter starts/stops.
+Later ordinary Broad measurements may update its current identity under the
+existing refresh rules. No automatic faction relationship, permission, ownership
+or remote command changes follow from an identity claim.
+
+Canonical enabled intent is captured/digested at its ordinary owner and validated
+against accepted equipment before restore writes; current emissions are derived.
+Evidence must include paid/unfunded/partial-work boundaries, actual human and
+ordinary AI operation, observer isolation, no fake identity/reference leak,
+physical aim unchanged, contradictory retained evidence, Workshop composition
+and a fresh JSON full-host 360-step continuation with malformed no-write cases.
+No runtime or completion evidence is claimed by this contract.

@@ -445,3 +445,44 @@ continuation, affected browser journeys, performance/activity, multiplayer and
 human/native acceptance remain open. Implementation evidence publication for
 increments 9–18 is explicitly authorised; the current published checkpoint is
 [PRD #1562 comment](https://github.com/jkeywo/project-phoenix-v2/issues/1562#issuecomment-6186902157).
+
+### Reviewed contact boundaries and unified native handoff
+
+`2189e205` closes machinery ingress/egress through permitted public handles;
+`0b77fc20` builds fitted Helm AI inputs from measured findings; `b5d9710e`
+does the same for Navigation and retains successful own traffic requests per
+public contact. Independent source reviews passed after correcting duplicate
+observations, concealment, legacy egress, simultaneous traffic requests and
+historical scans incorrectly refreshing live personnel counts. The latter
+counts are withheld until a supported personnel observation exists; own active
+transport/progress remains operational state. Transporter has no current phone
+widget and gains no invented UI acceptance claim.
+
+The no-renderer compile check after the machinery/Helm integration passed.
+Four measured-Helm Gameplay cases then passed, including observed velocity,
+unknown foreign reach/arcs and ordinary own weapon arc assistance:
+
+```text
+cargo test -p phoenix-sim-gameplay --lib --no-default-features -- measured_tests --test-threads=1
+```
+
+Log: `.phoenix/increment14-helm-measured-gameplay-tests.log`, SHA256
+`c88268547cb2ccd5e68df8b066f120f9158bd38125124c037bf789091870c215`.
+Three targeted Model enquiry cases also passed at `9193b6ec`; log
+`.phoenix/increment14-typed-enquiry-model-tests.log`, SHA256
+`b9318f8a1f73c37095fe821f487f677651d3f8783ecd107344c55d0cce3df6ad`.
+
+Actual Dock/Tractor `@core` Chromium phone journeys passed **2 cases in 6.4s**
+on the isolated machinery source and rebuilt pure-JS client; their reviewed
+source is integrated as `f394aafc`. They exercise actual widgets, keyboard
+release and correlated action-map envelopes with opaque contacts; they do not
+establish Rust/WASM acquisition or admission behavior.
+
+Unified native validation now runs in
+`.phoenix/worktrees/increment-14-native-validation`, initially pinned to
+`b5d9710e`. Its first compilation found three Navigation test-harness errors
+before executing tests. The reviewed fixture corrections are main `75ccfb94`
+(donor `4f0b2fe4`); the same affected batch is retrying. Whole-host enquiries,
+Navigation continuation and the combined playable exit remain pending. Root
+continues increment 15 source in isolated worktrees; its contract `ee3bd7b0`
+and in-progress implementation are not completion evidence.

@@ -2,14 +2,15 @@
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 use bevy::prelude::*;
 use project_phoenix::{
-    core::messages::{ClientMessage, SystemControlPayload, SystemId},
+    core::messages::{ClientMessage, StationId, SystemControlPayload, SystemId},
     entities::spawner::EntityUuid,
     headless::{build_headless_app, HeadlessArgs},
     infrastructure::InfrastructureCondition,
-    lobby::server::InboundMessage,
+    lobby::{server::InboundMessage, Sessions},
     resources::recovery_server::{RecoverableSource, ShipRecovery},
     server_app::LocalShip,
     ship::power::ShipPowerSystem,
+    ship_plugin::{HumanSeekingHosts, ShipConfigComponent, ShipSystemControlSources},
     sim_digest::world_digest,
     sim_tick::{sim_tick_period, SimTick},
     snapshot::{capture, ready_to_restore, restore, PhoenixSnapshot},
@@ -91,6 +92,9 @@ fn commands(target: &str) -> Vec<ClientMessage> {
         ClientMessage::SelectStation {
             station: "engineering".into(),
         },
+        // A mid-mission claim is pending until the ordinary Ready message;
+        // selecting a seat alone intentionally leaves Backfill in control.
+        ClientMessage::SetReady { ready: true },
         ClientMessage::ControlSystem {
             target: SystemId("logistics".into()),
             payload: SystemControlPayload::SetStockTarget {
@@ -102,6 +106,7 @@ fn commands(target: &str) -> Vec<ClientMessage> {
         ClientMessage::SelectStation {
             station: "science".into(),
         },
+        ClientMessage::SetReady { ready: true },
         ClientMessage::ControlSystem {
             target: SystemId("sensors".into()),
             payload: SystemControlPayload::SetScienceTarget {
@@ -109,6 +114,53 @@ fn commands(target: &str) -> Vec<ClientMessage> {
             },
         },
     ]
+}
+/// Read the actual joined Session and resolved machinery authority before
+/// sending an input. This does not install crew or alter controller state.
+fn assert_operator(app: &mut App, token: &str, msg: &ClientMessage) {
+    let ClientMessage::ControlSystem { target, payload } = msg else {
+        return;
+    };
+    let ship = local(app);
+    let sessions = app.world().resource::<Sessions>();
+    let player = sessions
+        .0
+        .players()
+        .iter()
+        .find(|p| p.token == token)
+        .expect("Identify must register the actual input sender");
+    assert!(
+        player.connected && player.ready,
+        "{token} must complete the mid-mission Ready handoff"
+    );
+    let expected_station = StationId(
+        match target.0.as_str() {
+            "logistics" => "engineering",
+            "sensors" => "science",
+            other => panic!("unexpected journey target {other}"),
+        }
+        .into(),
+    );
+    assert_eq!(player.station.as_ref(), Some(&expected_station));
+    assert_eq!(
+        sessions.0.holder_for_station(&expected_station),
+        Some(token)
+    );
+    let sources = app.world().get::<ShipSystemControlSources>(ship).unwrap();
+    assert!(sources.0.policy_for(target).accept_human_input);
+    assert!(!sources.0.policy_for(target).operate_ai);
+    assert!(
+        project_phoenix::command_admission::policy::is_command_authorized(
+            token,
+            target,
+            payload,
+            sources,
+            sessions,
+            &app.world().get::<ShipConfigComponent>(ship).unwrap().0,
+            app.world().get::<HumanSeekingHosts>(ship),
+        ),
+        "the actual System → Console → host Station must authorise this sender"
+    );
 }
 fn started() -> (App, Entity) {
     let mut app = unstarted("assets/worlds/probe_recovery.toml");
@@ -120,6 +172,7 @@ fn started() -> (App, Entity) {
     let entity = local(&mut app);
     let (_, target) = source(&mut app);
     for msg in commands(&target) {
+        assert_operator(&mut app, "recovery-operator", &msg);
         send(&mut app, "recovery-operator", msg);
         for _ in 0..4 {
             app.update();
@@ -294,11 +347,12 @@ fn actual_recovery_competes_for_one_finite_source_on_both_local_ship_peers() {
     }
     let targets = hosts.each_mut().map(|app| source(app).1);
     assert_eq!(targets[0], targets[1]);
+    let journey_len = commands(&targets[0]).len();
     let mut journeys = [
         commands(&targets[0]).into_iter(),
         commands(&targets[1]).into_iter(),
     ];
-    for _ in 0..6 {
+    for _ in 0..journey_len {
         for index in 0..2 {
             let mut msg = journeys[index].next().unwrap();
             let token = format!("recovery-operator-{index}");
@@ -309,6 +363,7 @@ fn actual_recovery_competes_for_one_finite_source_on_both_local_ship_peers() {
             {
                 *identify_token = token.clone();
             }
+            assert_operator(&mut hosts[index], &token, &msg);
             send(&mut hosts[index], &token, msg);
         }
         for _ in 0..6 {

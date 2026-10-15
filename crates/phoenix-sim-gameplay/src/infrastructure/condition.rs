@@ -674,10 +674,21 @@ impl InfrastructureState {
         recipe: &phoenix_model::damage::RemedyConfig,
         services: &std::collections::BTreeMap<String, crate::resources::service::ResourceEndpoint>,
     ) -> Result<Vec<FlagChange>, String> {
+        self.requirement_parts(action, claim, &recipe.requirements, services)
+    }
+
+    /// Same atomic requirement transaction for actual treatment medication.
+    pub fn requirement_parts(
+        &mut self,
+        action: crate::jobs::repair::RepairStockAction,
+        claim: &str,
+        requirements: &[phoenix_model::damage::PartRequirement],
+        services: &std::collections::BTreeMap<String, crate::resources::service::ResourceEndpoint>,
+    ) -> Result<Vec<FlagChange>, String> {
         use crate::jobs::repair::RepairStockAction;
         use crate::resources::service::{resolve_endpoint, ResourceEndpoint, ResourceLink};
         let mut stocks: Vec<_> = self.capacities.iter().map(|c| c.stock.clone()).collect();
-        for (index, part) in recipe.requirements.iter().enumerate() {
+        for (index, part) in requirements.iter().enumerate() {
             let endpoint = resolve_endpoint(
                 &part.resource,
                 services,

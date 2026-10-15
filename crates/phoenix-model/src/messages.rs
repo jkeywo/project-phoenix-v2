@@ -2443,6 +2443,11 @@ pub enum SystemControlPayload {
         officer: String,
         team_idx: Option<u32>,
     },
+    /// Actual local care by one existing finite compatible team.
+    TreatDutyOfficer {
+        officer: String,
+        team_idx: u32,
+    },
     /// Prioritise ONE named system in whichever repair team's sweep already
     /// covers it (issue #1015) — the repair console's damaged-systems list taps.
     ///

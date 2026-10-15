@@ -8,7 +8,22 @@ fn validate_row(
     tick: u64,
 ) -> Result<(), String> {
     match (profile, row.personnel.as_ref()) {
-        (None, None) => Ok(()),
+        (None, None)
+            if !row
+                .repair
+                .as_ref()
+                .and_then(|repair| repair.jobs.as_ref())
+                .is_some_and(|jobs| {
+                    jobs.teams.iter().flatten().any(|job| {
+                        matches!(
+                            job.activity,
+                            crate::jobs::repair::RepairActivity::Treatment { .. }
+                        )
+                    })
+                }) =>
+        {
+            Ok(())
+        }
         (Some(profile), Some(state)) => {
             let jobs = row
                 .repair
@@ -27,7 +42,7 @@ pub(super) fn validate_roster(
 ) -> Result<(), (String, String)> {
     for row in &snapshot.entities {
         let live = world
-            .try_query_filtered::<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>()
+            .try_query_filtered::<(Entity, &EntityUuid), bevy::ecs::query::Allow<bevy::ecs::entity_disabling::Disabled>>()
             .and_then(|mut query| {
                 query
                     .iter(world)

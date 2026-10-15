@@ -6,11 +6,18 @@ use std::collections::BTreeSet;
 #[serde(rename_all = "snake_case")]
 pub enum DutyCompetency {
     MechanicalRepair,
+    MedicalCare,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersonnelConfig {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::guided_guidance::deserialize_optional_profile"
+    )]
+    pub care: Option<CareConfig>,
     #[serde(default, rename = "repair_team")]
     pub repair_teams: Vec<DutyTeamConfig>,
     #[serde(default, rename = "officer")]
@@ -30,12 +37,60 @@ pub struct DutyTeamConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DutyOfficerConfig {
+    #[serde(default)]
+    pub initial_condition: PersonnelCondition,
     pub id: String,
     pub label: String,
     pub home_compartment: String,
     pub competencies: Vec<DutyCompetency>,
     /// Applies only to actual compatible internal physical remedy progress.
     pub repair_work_multiplier: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersonnelCondition {
+    #[default]
+    Fit,
+    Minor,
+    Severe,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CareConfig {
+    pub system: crate::identity::SystemId,
+    pub minor_work_secs: f32,
+    pub severe_work_secs: f32,
+    #[serde(rename = "requirement")]
+    pub requirements: Vec<crate::damage::PartRequirement>,
+}
+impl CareConfig {
+    pub fn work_secs(&self, condition: PersonnelCondition) -> Option<f32> {
+        match condition {
+            PersonnelCondition::Fit => None,
+            PersonnelCondition::Minor => Some(self.minor_work_secs),
+            PersonnelCondition::Severe => Some(self.severe_work_secs),
+        }
+    }
+    pub fn validate(&self) -> Result<(), String> {
+        let mut resources = BTreeSet::new();
+        if self.system.0.trim().is_empty()
+            || ![self.minor_work_secs, self.severe_work_secs]
+                .iter()
+                .all(|value| value.is_finite() && *value > 0.0)
+            || self.requirements.is_empty()
+            || self.requirements.iter().any(|part| {
+                part.resource.trim().is_empty()
+                    || part.service.trim().is_empty()
+                    || part.amount <= 0
+                    || !resources.insert(&part.resource)
+            })
+        {
+            return Err("care requires actual equipment, positive finite work and unique finite medication requirements".into());
+        }
+        Ok(())
+    }
 }
 
 fn valid_id(id: &str) -> bool {
@@ -49,6 +104,9 @@ fn valid_competencies(values: &[DutyCompetency]) -> bool {
 }
 impl PersonnelConfig {
     pub fn validate(&self) -> Result<(), String> {
+        if let Some(care) = &self.care {
+            care.validate()?;
+        }
         let mut ids = BTreeSet::new();
         let mut slots = BTreeSet::new();
         for team in &self.repair_teams {
@@ -98,6 +156,8 @@ pub enum OfficerLocation {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DutyOfficerState {
+    /// Required continuation field; older state needs its original game version.
+    pub condition: PersonnelCondition,
     pub location: OfficerLocation,
     pub changed_tick: u64,
 }
@@ -122,7 +182,20 @@ pub struct DutyTeamView {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct OfficerTreatmentView {
+    pub team_idx: u32,
+    pub phase: crate::job::JobPhase,
+    pub progress: u16,
+    pub waiting_medication: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DutyOfficerView {
+    pub condition: PersonnelCondition,
+    pub treatment_teams: Vec<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub treatment: Option<OfficerTreatmentView>,
     pub id: String,
     pub label: String,
     pub competencies: Vec<DutyCompetency>,

@@ -656,3 +656,124 @@ fn two_actual_visitors_settle_in_public_id_order_without_charging_rejected_work(
     };
     assert_eq!(run(false), run(true));
 }
+
+#[test]
+fn actual_medical_reference_replenishes_its_managed_hold_from_finite_paid_port_stock() {
+    let hull = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/medical_cruiser.toml",
+    )
+    .unwrap();
+    let (mut app, visitor, old_provider) =
+        rig_with(PortServicePolicy::FreeAlliedReplenishment, |content| {
+            *content = hull.clone()
+        });
+    let machinery = crate::entities::spawner::spawn_entity(
+        &mut app.world_mut().commands(),
+        &hull,
+        Vec3::ZERO,
+        "medical-machinery".into(),
+        None,
+    );
+    app.world_mut().flush();
+    let damage = app
+        .world_mut()
+        .entity_mut(machinery)
+        .take::<ShipDamage>()
+        .unwrap();
+    let repair = app
+        .world_mut()
+        .entity_mut(machinery)
+        .take::<crate::console::repair::server::ShipRepairTeams>()
+        .unwrap();
+    let services = app
+        .world_mut()
+        .entity_mut(machinery)
+        .take::<ResourceServices>()
+        .unwrap();
+    app.world_mut()
+        .entity_mut(visitor)
+        .insert((damage, repair, services));
+    assert!(app.world_mut().despawn(machinery));
+    let port = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/medical_service_port.toml",
+    )
+    .unwrap();
+    assert!(app.world_mut().despawn(old_provider));
+    let provider = crate::entities::spawner::spawn_entity(
+        &mut app.world_mut().commands(),
+        &port,
+        Vec3::ZERO,
+        PROVIDER.into(),
+        None,
+    );
+    app.world_mut().flush();
+    app.world_mut()
+        .get_mut::<crate::ship_plugin::ShipSystemControlSources>(provider)
+        .unwrap()
+        .0
+        .set(id("dock"), ControlSource::Ai);
+    app.update();
+    let profile = app
+        .world()
+        .get::<CompiledPortService>(provider)
+        .unwrap()
+        .0
+        .clone();
+    let visit = app
+        .world()
+        .get::<PortProviderState>(provider)
+        .unwrap()
+        .0
+        .visitors[VISITOR]
+        .visit;
+    let offer = profile
+        .offers
+        .iter()
+        .find(|offer| offer.resource == "medical_supplies")
+        .unwrap();
+    let destination =
+        actual_store(app.world(), visitor, "hold-medication", &offer.resource).unwrap();
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_secs_f32(1.0));
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+    app.world_mut()
+        .get_mut::<TransferUmbilical>(visitor)
+        .unwrap()
+        .running = true;
+    let request = PortTransfer {
+        operator: VISITOR.into(),
+        provider: PROVIDER.into(),
+        visit,
+        offer: offer.id.clone(),
+        destination,
+        store: Some("hold-medication".into()),
+        lots: 1,
+        tick: app.world().resource::<crate::sim_tick::SimTick>().0,
+        ordered: false,
+        inbound: false,
+        maintain_goal: false,
+    };
+    let before = [
+        quantity(&app, visitor, "hold-medication"),
+        quantity(&app, provider, "medical-supplies"),
+    ];
+    let before_power = [
+        energy(&app, visitor, "umbilical"),
+        energy(&app, provider, "dock"),
+    ];
+    assert_eq!(
+        crate::resources::ports_equipment::settle(app.world_mut(), &request),
+        Ok(1)
+    );
+    assert_eq!(quantity(&app, visitor, "hold-medication"), before[0] + 1);
+    assert_eq!(quantity(&app, provider, "medical-supplies"), before[1] - 1);
+    assert!(energy(&app, visitor, "umbilical") < before_power[0]);
+    assert!(energy(&app, provider, "dock") < before_power[1]);
+    let actual = actual_state(&app, visitor, provider);
+    assert_eq!(
+        crate::resources::ports_equipment::settle(app.world_mut(), &request),
+        Ok(0)
+    );
+    assert_eq!(actual_state(&app, visitor, provider), actual);
+}

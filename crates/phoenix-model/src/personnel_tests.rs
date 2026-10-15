@@ -2,6 +2,7 @@ use super::*;
 
 fn profile() -> PersonnelConfig {
     PersonnelConfig {
+        care: None,
         repair_teams: vec![DutyTeamConfig {
             id: "repair-alpha".into(),
             label: "Alpha".into(),
@@ -9,6 +10,7 @@ fn profile() -> PersonnelConfig {
             competencies: vec![DutyCompetency::MechanicalRepair],
         }],
         officers: vec![DutyOfficerConfig {
+            initial_condition: PersonnelCondition::Fit,
             id: "chief".into(),
             label: "Chief".into(),
             home_compartment: "engineering".into(),
@@ -51,6 +53,7 @@ fn authored_roster_is_closed_and_cannot_duplicate_a_finite_team_or_officer() {
 #[test]
 fn custody_has_one_closed_physical_location_and_no_independent_movement() {
     let state = DutyOfficerState {
+        condition: PersonnelCondition::Fit,
         location: OfficerLocation::WithRepairTeam { team_idx: 1 },
         changed_tick: 12,
     };
@@ -65,4 +68,32 @@ fn custody_has_one_closed_physical_location_and_no_independent_movement() {
         r#"{"kind":"with_repair_team","team_idx":0,"compartment":"bridge"}"#
     )
     .is_err());
+}
+
+#[test]
+fn care_is_closed_and_old_conditionless_continuation_is_explicitly_refused() {
+    assert!(serde_json::from_value::<DutyOfficerState>(serde_json::json!({"location":{"kind":"at_compartment","compartment":"engineering"},"changed_tick":0})).is_err());
+    let mut config = profile();
+    config.care = Some(CareConfig {
+        system: crate::identity::SystemId("repair".into()),
+        minor_work_secs: 3.0,
+        severe_work_secs: 6.0,
+        requirements: vec![crate::damage::PartRequirement {
+            resource: "medication".into(),
+            service: "medication".into(),
+            amount: 1,
+        }],
+    });
+    config.validate().unwrap();
+    let mut value = serde_json::to_value(&config).unwrap();
+    value["care"]["minor_work_secs"] = 0.into();
+    assert!(serde_json::from_value::<PersonnelConfig>(value.clone())
+        .unwrap()
+        .validate()
+        .is_err());
+    value["care"] = false.into();
+    assert!(serde_json::from_value::<PersonnelConfig>(value)
+        .unwrap()
+        .care
+        .is_none());
 }

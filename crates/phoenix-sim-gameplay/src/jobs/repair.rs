@@ -17,6 +17,9 @@ mod external_physical;
 pub use external_physical::ExternalPhysicalRepairWork;
 #[path = "repair_refit.rs"]
 mod refit;
+#[path = "repair_treatment.rs"]
+mod treatment;
+pub use treatment::TreatmentWork;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum RepairActivity {
@@ -26,6 +29,11 @@ pub enum RepairActivity {
     },
     External {
         target: String,
+    },
+    Treatment {
+        phase: TeamSlot,
+        cancelled: bool,
+        work: TreatmentWork,
     },
     /// Physical fitting commitment; machinery stages belong to the fitting owner.
     Refit {
@@ -121,7 +129,10 @@ impl RepairTeams {
             .iter()
             .map(|job| match job {
                 Some(Job {
-                    activity: RepairActivity::Internal { phase, .. } | RepairActivity::Refit { phase, .. },
+                    activity:
+                        RepairActivity::Internal { phase, .. }
+                        | RepairActivity::Refit { phase, .. }
+                        | RepairActivity::Treatment { phase, .. },
                     outcome: None,
                     ..
                 }) => phase.clone(),
@@ -212,6 +223,7 @@ impl RepairTeams {
     }
     pub fn restore_state(&mut self, state: &RepairJobState) -> Result<(), String> {
         self.validate_refit_work(state)?;
+        self.validate_treatment_shape(state)?;
         self.validate_physical_work(state)?;
         self.validate_external_physical_shape(state)?;
         match (&self.layout, &state.navigation) {
@@ -296,7 +308,9 @@ impl RepairTeams {
                         external += 1;
                     }
                 }
-                RepairActivity::Internal { phase, .. } | RepairActivity::Refit { phase, .. } => {
+                RepairActivity::Internal { phase, .. }
+                | RepairActivity::Refit { phase, .. }
+                | RepairActivity::Treatment { phase, .. } => {
                     if let Some(layout) = &self.layout {
                         let known = |id: &SystemId| layout.compartment_for_system(id).is_some();
                         let valid = match phase {
@@ -400,7 +414,11 @@ impl RepairTeams {
         self.phases()
             .free_team_indices(abroad)
             .into_iter()
-            .filter(|team| self.external_team() != Some(*team) && !self.is_refit_team(*team))
+            .filter(|team| {
+                self.external_team() != Some(*team)
+                    && !self.is_refit_team(*team)
+                    && !self.is_treatment_team(*team)
+            })
             .collect()
     }
     pub fn free_team_indices_reserving(&self, abroad: Option<usize>, reserved: u8) -> Vec<usize> {
@@ -410,6 +428,7 @@ impl RepairTeams {
     }
     pub fn is_committed_to_operation(&self, team: usize, abroad: Option<usize>) -> bool {
         self.is_refit_team(team)
+            || self.is_treatment_team(team)
             || self.external_team() == Some(team)
             || self.phases().is_committed_to_operation(team, abroad)
     }
@@ -417,6 +436,7 @@ impl RepairTeams {
         if team >= self.state.teams.len()
             || self.external_team() == Some(team)
             || self.is_refit_team(team)
+            || self.is_treatment_team(team)
             || self.refit_claims_system(&target)
         {
             return;
@@ -468,6 +488,9 @@ impl RepairTeams {
         self.commit_phases(&phases);
     }
     pub fn recall(&mut self, team: usize) -> bool {
+        if self.is_treatment_team(team) {
+            return self.return_treatment(team);
+        }
         if self.is_refit_team(team) {
             return self.return_refit(team, true);
         }
@@ -508,7 +531,7 @@ impl RepairTeams {
         changed
     }
     pub fn set_priority(&mut self, team: usize, priority: u8) -> bool {
-        if self.is_refit_team(team) {
+        if self.is_refit_team(team) || self.is_treatment_team(team) {
             return false;
         }
         let mut p = self.phases();
@@ -531,7 +554,7 @@ impl RepairTeams {
         let mut p = self.phases();
         let result = p
             .prioritise_system(target, hull, config)
-            .filter(|team| !self.is_refit_team(*team));
+            .filter(|team| !self.is_refit_team(*team) && !self.is_treatment_team(*team));
         self.commit_phases(&p);
         result
     }
@@ -574,7 +597,7 @@ impl RepairTeams {
             .collect();
         let mut phases = self.phases();
         let skipped: BTreeSet<_> = (0..self.state.teams.len())
-            .filter(|team| self.is_refit_team(*team))
+            .filter(|team| self.is_refit_team(*team) || self.is_treatment_team(*team))
             .collect();
         if let (Some(layout), Some(navigation)) = (&self.layout, &mut self.state.navigation) {
             super::repair_navigation::prepare(
@@ -719,7 +742,7 @@ impl RepairTeams {
                         (JobPhase::External, None, Some(target.clone()))
                     }
                     RepairActivity::Internal { phase, .. }
-                    | RepairActivity::Refit { phase, .. } => match phase {
+                    | RepairActivity::Refit { phase, .. } | RepairActivity::Treatment { phase, .. } => match phase {
                         TeamSlot::Travelling { system_id, .. } => {
                             (JobPhase::Travelling, system_id.clone(), None)
                         }
@@ -757,7 +780,9 @@ impl RepairTeams {
                                 .get(&job.id.0)
                                 .and_then(|work| work.target.clone())
                         }),
-                    work_progress: self
+                    work_progress: if let RepairActivity::Treatment {work,..}=&job.activity {
+                        Some(((work.progress/work.work_secs).clamp(0.0,1.0)*1000.0) as u16)
+                    } else { self
                         .state
                         .physical_work
                         .get(&job.id.0)
@@ -782,8 +807,8 @@ impl RepairTeams {
                                         ((work.progress / secs).clamp(0.0, 1.0) * 1000.0) as u16
                                     })
                                 })
-                        }),
-                    waiting_parts: self
+                        }) },
+                    waiting_parts: matches!(&job.activity,RepairActivity::Treatment {work,..} if work.waiting_medication) || self
                         .state
                         .physical_work
                         .get(&job.id.0)
@@ -801,11 +826,14 @@ impl RepairTeams {
 fn facts(activity: &RepairActivity) -> BTreeMap<String, bool> {
     let internal = matches!(
         activity,
-        RepairActivity::Internal { .. } | RepairActivity::Refit { .. }
+        RepairActivity::Internal { .. }
+            | RepairActivity::Refit { .. }
+            | RepairActivity::Treatment { .. }
     );
     let (travelling, repairing, returning, target) = match activity {
-        RepairActivity::Internal { phase, .. } | RepairActivity::Refit { phase, .. } => match phase
-        {
+        RepairActivity::Internal { phase, .. }
+        | RepairActivity::Refit { phase, .. }
+        | RepairActivity::Treatment { phase, .. } => match phase {
             TeamSlot::Travelling { system_id, .. } => (true, false, false, system_id.is_some()),
             TeamSlot::Repairing { system_id, .. } => (false, true, false, system_id.is_some()),
             TeamSlot::Returning { system_id, .. } => (false, false, true, system_id.is_some()),
@@ -834,6 +862,18 @@ fn channels() -> BTreeMap<String, bool> {
 }
 fn evaluate(program: &Program, job: &mut Job<RepairActivity>) -> bool {
     if job.workflow_error {
+        // Successful care already changed the actual patient. Return cleanup
+        // cannot cancel that outcome or strand the still-committed team.
+        if matches!(
+            &job.activity,
+            RepairActivity::Treatment {
+                phase: TeamSlot::Returning { .. },
+                ..
+            }
+        ) {
+            job.paused = false;
+            return true;
+        }
         let returning = if let RepairActivity::Internal {
             phase:
                 TeamSlot::Returning {
@@ -874,6 +914,10 @@ fn evaluate(program: &Program, job: &mut Job<RepairActivity>) -> bool {
         | RepairActivity::Refit {
             phase: TeamSlot::Travelling { .. },
             ..
+        }
+        | RepairActivity::Treatment {
+            phase: TeamSlot::Travelling { .. },
+            ..
         } => "advance_travel",
         RepairActivity::Internal {
             phase: TeamSlot::Repairing { .. },
@@ -882,12 +926,20 @@ fn evaluate(program: &Program, job: &mut Job<RepairActivity>) -> bool {
         | RepairActivity::Refit {
             phase: TeamSlot::Repairing { .. },
             ..
+        }
+        | RepairActivity::Treatment {
+            phase: TeamSlot::Repairing { .. },
+            ..
         } => "apply_repair",
         RepairActivity::Internal {
             phase: TeamSlot::Returning { .. },
             ..
         }
         | RepairActivity::Refit {
+            phase: TeamSlot::Returning { .. },
+            ..
+        }
+        | RepairActivity::Treatment {
             phase: TeamSlot::Returning { .. },
             ..
         } => "advance_return",

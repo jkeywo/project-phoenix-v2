@@ -136,3 +136,111 @@ fn forged_custody_refuses_before_any_global_or_entity_write() {
 
 #[path = "planning_snapshot_tests.rs"]
 mod planning;
+
+#[test]
+fn actual_medical_candidate_rejects_forged_site_terms_condition_and_exclusive_team_before_writes() {
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/medical_cruiser.toml",
+    )
+    .unwrap();
+    let mut world = World::new();
+    world.register_component::<EntitySystemHull>();
+    world.register_component::<EntityShipArcHull>();
+    world.register_component::<crate::console::repair::server::RepairRequestQueue>();
+    world.register_component::<crate::ship_plugin::RepairHumanAlerted>();
+    world.register_component::<crate::ai::server::ObjectiveCursors>();
+    world.register_component::<crate::console::weapons::blaster::BlasterSystemResource>();
+    world.insert_resource(SimTick(20));
+    world.insert_resource(Time::<Fixed>::default());
+    let entity = crate::entities::spawner::spawn_entity(
+        &mut world.commands(),
+        &config,
+        Vec3::ZERO,
+        "medical-ship".into(),
+        None,
+    );
+    world.flush();
+    let profile = world.get::<CompiledPersonnel>(entity).unwrap().clone();
+    let personnel = world.get::<PersonnelState>(entity).unwrap().clone();
+    world
+        .get_mut::<crate::console::repair::server::ShipRepairTeams>(entity)
+        .unwrap()
+        .0
+        .claim_treatment(&profile, &personnel, "repair-chief", 1)
+        .unwrap();
+    let saved: PhoenixSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&capture(&world)).unwrap()).unwrap();
+    validate_roster(&world, &saved).unwrap();
+    let before = capture(&world);
+    let digest = crate::sim_digest::world_digest(&world);
+    for mode in 0..8 {
+        let mut candidate = saved.clone();
+        candidate.tick += 10;
+        let row = candidate
+            .entities
+            .iter_mut()
+            .find(|row| row.uuid == "medical-ship")
+            .unwrap();
+        match mode {
+            0 => {
+                row.personnel
+                    .as_mut()
+                    .unwrap()
+                    .officers
+                    .get_mut("repair-chief")
+                    .unwrap()
+                    .condition = phoenix_model::personnel::PersonnelCondition::Fit
+            }
+            1 => {
+                row.personnel
+                    .as_mut()
+                    .unwrap()
+                    .officers
+                    .get_mut("repair-chief")
+                    .unwrap()
+                    .location = phoenix_model::personnel::OfficerLocation::AtCompartment {
+                    compartment: "bridge".into(),
+                }
+            }
+            2 => row.personnel = None,
+            _ => {
+                let jobs = row.repair.as_mut().unwrap().jobs.as_mut().unwrap();
+                if mode == 7 {
+                    let mut duplicate = jobs.teams[1].clone().unwrap();
+                    duplicate.id.0 += 1;
+                    jobs.next_id = duplicate.id.0 + 1;
+                    jobs.teams[0] = Some(duplicate);
+                } else {
+                    let crate::jobs::repair::RepairActivity::Treatment { phase, work, .. } =
+                        &mut jobs.teams[1].as_mut().unwrap().activity
+                    else {
+                        panic!()
+                    };
+                    match mode {
+                        3 => work.work_secs = 0.001,
+                        4 => work.patient = "imaginary".into(),
+                        5 => work.progress = 1.0,
+                        _ => {
+                            *phase = crate::core::messages::TeamSlot::Repairing {
+                                system_id: Some(crate::ship::system_registry::repair_system_id()),
+                                display_name: None,
+                                priority: None,
+                                priority_system_id: None,
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let report = restore(&mut world, &candidate);
+        assert!(
+            !report.is_complete(),
+            "forgery {mode} must fail: {report:?}"
+        );
+        assert_eq!(capture(&world), before);
+        assert_eq!(crate::sim_digest::world_digest(&world), digest);
+    }
+    let report = restore(&mut world, &saved);
+    assert!(report.is_complete(), "{report:?}");
+    assert_eq!(capture(&world), before);
+}

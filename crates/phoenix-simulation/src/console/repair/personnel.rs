@@ -11,21 +11,26 @@ pub(crate) fn register(app: &mut App) {
     use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
     app.declare_state::<CompiledPersonnel>(StateClass::Derived, "accepted-personnel-roster")
         .declare_state::<PersonnelState>(StateClass::Folded, "officer-physical-custody");
-    app.register_admitted_consumer(
-        ConsumerMatcher::kind_payload(
-            crate::ship::system_registry::REPAIR_KIND,
-            SystemControlPayloadDiscriminants::SetDutyOfficerPosting,
-        )
-        .with_feedback(
-            crate::command_admission::FeedbackAddress::DeclaredKindOnly,
-            &[SystemControlPayloadDiscriminants::SetDutyOfficerPosting],
-        ),
-    );
+    for payload in [
+        SystemControlPayloadDiscriminants::SetDutyOfficerPosting,
+        SystemControlPayloadDiscriminants::TreatDutyOfficer,
+    ] {
+        app.register_admitted_consumer(
+            ConsumerMatcher::kind_payload(crate::ship::system_registry::REPAIR_KIND, payload)
+                .with_feedback(
+                    crate::command_admission::FeedbackAddress::DeclaredKindOnly,
+                    &[payload],
+                ),
+        );
+    }
     app.add_systems(
         FixedUpdate,
         apply
             .in_set(crate::sim_sets::SimSet::Physics)
-            .in_set(crate::sim_sets::FixedStep::HandleDutyOfficerPosting),
+            .in_set(crate::sim_sets::FixedStep::HandleDutyOfficerPosting)
+            .after(super::server::operate_repair_ai)
+            .after(super::dispatch::handle_set_repair_target_priority)
+            .before(super::server::tick_repair_teams),
     );
 }
 
@@ -40,7 +45,7 @@ pub(crate) fn apply(
             &AdmittedCommands,
             &ShipConfigComponent,
             &ShipSystemControlSources,
-            Option<&super::server::ShipRepairTeams>,
+            Option<&mut super::server::ShipRepairTeams>,
             Option<&CompiledPersonnel>,
             Option<&mut PersonnelState>,
         ),
@@ -50,13 +55,15 @@ pub(crate) fn apply(
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
 ) {
-    for (admitted, config, sources, teams, profile, mut personnel) in &mut ships {
+    for (admitted, config, sources, mut teams, profile, mut personnel) in &mut ships {
         for command in &admitted.0 {
-            let SystemControlPayload::SetDutyOfficerPosting { officer, team_idx } =
-                &command.payload
-            else {
+            if !matches!(
+                &command.payload,
+                SystemControlPayload::SetDutyOfficerPosting { .. }
+                    | SystemControlPayload::TreatDutyOfficer { .. }
+            ) {
                 continue;
-            };
+            }
             if config
                 .0
                 .system(&command.target)
@@ -65,7 +72,7 @@ pub(crate) fn apply(
                 continue;
             }
             let result = (|| {
-                let teams = teams.ok_or("missing actual Repair teams")?;
+                let teams = teams.as_deref_mut().ok_or("missing actual Repair teams")?;
                 if &command.target != teams.0.owner()
                     || !sources.0.entries().any(|(id, _)| id == &command.target)
                     || sources.0.is_offline(&command.target)
@@ -82,16 +89,29 @@ pub(crate) fn apply(
                 let tick = tick
                     .as_deref()
                     .ok_or("missing actual logical posting clock")?;
-                state
-                    .post(
-                        profile,
-                        teams.0.job_state(),
-                        layout,
-                        officer,
-                        *team_idx,
-                        tick.0,
-                    )
-                    .map_err(|_| "posting is not physically available")
+                match &command.payload {
+                    SystemControlPayload::SetDutyOfficerPosting { officer, team_idx } => state
+                        .post(
+                            profile,
+                            teams.0.job_state(),
+                            layout,
+                            officer,
+                            *team_idx,
+                            tick.0,
+                        )
+                        .map_err(|_| "posting is not physically available"),
+                    SystemControlPayload::TreatDutyOfficer { officer, team_idx } => {
+                        state
+                            .validate(profile, teams.0.job_state(), tick.0)
+                            .map_err(|_| "invalid actual personnel state")?;
+                        teams
+                            .0
+                            .claim_treatment(profile, state, officer, *team_idx as usize)
+                            .map(|_| ())
+                            .ok_or("treatment is not physically available")
+                    }
+                    _ => unreachable!(),
+                }
             })();
             crate::command_admission::finish_action_feedback(
                 command,

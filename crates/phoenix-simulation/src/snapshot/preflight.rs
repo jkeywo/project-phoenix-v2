@@ -973,7 +973,8 @@ pub(super) fn validate_cross_entity_repairs(
                     .filter(|work| &work.target_uuid == target && roster.contains(target))
                     .and_then(|work| work.target.clone())
                     .map(|work| (target.clone(), work)),
-                crate::jobs::repair::RepairActivity::Refit { .. } => None,
+                crate::jobs::repair::RepairActivity::Refit { .. }
+                | crate::jobs::repair::RepairActivity::Treatment { .. } => None,
             };
             if let Some(key) = work {
                 if claimed.insert(key, (row.uuid.clone(), job.id.0)).is_some() {

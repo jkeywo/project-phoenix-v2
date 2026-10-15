@@ -2609,8 +2609,16 @@ fn fold_internal_repair_namespace(world: &World, acc: u64) -> u64 {
                 }
             }
             for job in state.teams.iter_mut().flatten() {
+                if let crate::jobs::repair::RepairActivity::Treatment { work, .. } =
+                    &mut job.activity
+                {
+                    work.progress = f32::from_bits(canon_f32(work.progress));
+                    work.work_secs = f32::from_bits(canon_f32(work.work_secs));
+                }
                 if let crate::jobs::repair::RepairActivity::Internal { phase, .. }
-                | crate::jobs::repair::RepairActivity::Refit { phase, .. } = &mut job.activity
+                | crate::jobs::repair::RepairActivity::Refit { phase, .. }
+                | crate::jobs::repair::RepairActivity::Treatment { phase, .. } =
+                    &mut job.activity
                 {
                     match phase {
                         crate::core::messages::TeamSlot::Travelling { elapsed, .. } => {

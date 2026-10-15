@@ -10,6 +10,8 @@ export function mountWorkshopPersonnel({ root, provider, runtime, draft: getDraf
   const input = (id, value, type = 'text') => { const node = el('input', id); node.type = type; node.value = value; if (type === 'number') node.step = 'any'; return node; };
   const button = (id, key, action) => { const node = el('button', id, key); node.type = 'button'; node.addEventListener('click', action); return node; };
   const node = el('section', 'panel'), template = el('select', 'template'), materialise = input('materialise', '', 'checkbox');
+  const careEnabled = input('care-enabled', '', 'checkbox'), careSystem = input('care-system', 'repair'), minorSecs = input('care-minor', 6, 'number'), severeSecs = input('care-severe', 12, 'number');
+  const requirements = el('div', 'requirements'); let requirementRows = [];
   const teams = el('div', 'teams'), officers = el('div', 'officers'), status = el('p', 'status'); status.setAttribute('role', 'status');
   let dependencies = null, inspection = null, loading = false, disposed = false, generation = 0, observed = null, observedDraft = null, serial = 0, teamRows = [], officerRows = [];
   function addRow(kind, value) {
@@ -22,8 +24,16 @@ export function mountWorkshopPersonnel({ root, provider, runtime, draft: getDraf
       if (field === 'repair_work_multiplier') control.min = '1';
       row.fields[field] = control; section.append(label(control, field));
     }
-    section.append(el('p', null, 'competency'), button(null, 'remove', () => { rows.splice(rows.indexOf(row), 1); section.remove(); }));
+    row.competencies = {};
+    for (const competency of ['mechanical_repair','medical_care']) { const choice = input(kind + '-' + competency + '-' + index, '', 'checkbox'); choice.checked = (value.competencies || ['mechanical_repair']).includes(competency); row.competencies[competency] = choice; section.append(label(choice, competency)); }
+    if (kind === 'officer') { const condition = el('select', 'officer-condition-' + index); for (const value of ['fit','minor','severe']) { const option = el('option', null, 'condition_' + value); option.value = value; condition.append(option); } condition.value = value.initial_condition || 'fit'; row.condition = condition; section.append(label(condition, 'initial_condition')); }
+    section.append(button(null, 'remove', () => { rows.splice(rows.indexOf(row), 1); section.remove(); }));
     (kind === 'team' ? teams : officers).append(section); controls();
+  }
+  function addRequirement(value = {}) {
+    const section = el('fieldset'), row = { section, fields: {} }; requirementRows.push(row);
+    for (const field of ['resource','service','amount']) { const control = input('care-' + field + '-' + serial++, value[field] ?? (field === 'amount' ? 1 : ''), field === 'amount' ? 'number' : 'text'); if (field === 'amount') { control.min = '1'; control.step = '1'; } row.fields[field] = control; section.append(label(control, 'care_' + field)); }
+    section.append(button(null, 'remove', () => { requirementRows.splice(requirementRows.indexOf(row), 1); section.remove(); })); requirements.append(section); controls();
   }
   function controls() { for (const control of node.querySelectorAll('input,select,button')) control.disabled = disposed || loading || busy() || !inspection; }
   function inspect(force = false) {
@@ -35,7 +45,9 @@ export function mountWorkshopPersonnel({ root, provider, runtime, draft: getDraf
     const key = JSON.stringify([draft.sourceRevision, selected, dependencies]); if (!force && observedDraft === draft && observed === key) { controls(); return; }
     try {
       inspection = inspectPersonnel(draft, dependencies, selected); observed = key; observedDraft = draft; materialise.checked = false;
-      teams.replaceChildren(); officers.replaceChildren(); teamRows = []; officerRows = [];
+      teams.replaceChildren(); officers.replaceChildren(); teamRows = []; officerRows = []; requirements.replaceChildren(); requirementRows = [];
+      const care = inspection.personnel.care; careEnabled.checked = !!care; careSystem.value = care?.system || 'repair'; minorSecs.value = care?.minor_work_secs ?? 6; severeSecs.value = care?.severe_work_secs ?? 12;
+      for (const value of care?.requirement || []) addRequirement(value);
       for (const value of inspection.personnel.repair_team || []) addRow('team', value);
       for (const value of inspection.personnel.officer || []) addRow('officer', value);
       status.textContent = '';
@@ -49,12 +61,18 @@ export function mountWorkshopPersonnel({ root, provider, runtime, draft: getDraf
     catch (error) { if (!disposed) status.textContent = t('workshop.personnel.refused', { reason: error.message }); }
     finally { if (!disposed && token === generation) { loading = false; inspect(true); } }
   }
-  function values(rows) { return rows.map(row => ({ ...Object.fromEntries(Object.entries(row.fields).map(([key, control]) => [key, control.type === 'number' ? control.valueAsNumber : control.value])), competencies: ['mechanical_repair'] })); }
+  function values(rows) { return rows.map(row => ({ ...Object.fromEntries(Object.entries(row.fields).map(([key, control]) => [key, control.type === 'number' ? control.valueAsNumber : control.value])), competencies: Object.entries(row.competencies).filter(([,control]) => control.checked).map(([key]) => key), ...(row.condition && row.condition.value !== 'fit' ? { initial_condition: row.condition.value } : {}) })); }
   const save = button('save', 'save', () => {
     if (!inspection || busy()) return;
-    const token = ++generation, operation = { path: template.value, materialise: materialise.checked, value: { repair_team: values(teamRows), officer: values(officerRows) } };
-    void runWorkshopMutation({ setBusy, current: () => !disposed && token === generation, start: controls,
-      invoke: () => applyPersonnelOperation({ draft: getDraft(), provider, runtime, dependencies, operation, current: () => !disposed && token === generation }),
+    const captured = getDraft(), selectedPath = template.value, token = ++generation;
+    const current = () => !disposed && token === generation && captured === getDraft() && template.value === selectedPath;
+    const value = { repair_team: values(teamRows), officer: values(officerRows) };
+    if (careEnabled.checked) value.care = { system: careSystem.value, minor_work_secs: minorSecs.valueAsNumber, severe_work_secs: severeSecs.valueAsNumber,
+      requirement: requirementRows.map(row => Object.fromEntries(Object.entries(row.fields).map(([key,control]) => [key, control.type === 'number' ? control.valueAsNumber : control.value]))) };
+    else if (inspection.personnel.care !== undefined) value.care = false;
+    const operation = { path: selectedPath, materialise: materialise.checked, value };
+    void runWorkshopMutation({ setBusy, current, start: controls,
+      invoke: () => applyPersonnelOperation({ draft: captured, provider, runtime, dependencies, operation, current }),
       success: () => { changed(operation.path); inspect(true); status.textContent = t('workshop.changed'); },
       error: error => { status.textContent = t('workshop.personnel.refused', { reason: error.report?.findings?.[0]?.message || error.message }); }, release: controls });
   });
@@ -62,7 +80,7 @@ export function mountWorkshopPersonnel({ root, provider, runtime, draft: getDraf
   const fly = button('test', null, () => { if (!busy() && inspection) test(template.value); }); fly.textContent = t('workshop.entity.test');
   node.append(el('h3', null, 'title'), el('p', null, 'hint'), label(template, 'template'), label(materialise, 'materialise'), teams,
     button('add-team', 'add_team', () => addRow('team', { id: '', label: '', team_idx: 0 })), officers,
-    button('add-officer', 'add_officer', () => addRow('officer', { id: '', label: '', home_compartment: '', repair_work_multiplier: 1 })), save, show, fly, status);
-  template.addEventListener('change', () => inspect(true)); if (attach) root.append(node); controls(); void load();
+    button('add-officer', 'add_officer', () => addRow('officer', { id: '', label: '', home_compartment: '', repair_work_multiplier: 1 })), label(careEnabled, 'care_enabled'), label(careSystem, 'care_system'), label(minorSecs, 'care_minor'), label(severeSecs, 'care_severe'), requirements, button('add-requirement', 'add_requirement', () => addRequirement()), save, show, fly, status);
+  template.addEventListener('change', () => { generation++; inspect(true); }); if (attach) root.append(node); controls(); void load();
   return { node, refresh({ hidden = false } = {}) { node.hidden = hidden; if (!hidden) { void load(); inspect(); } }, dispose() { disposed = true; generation++; node.remove(); } };
 }

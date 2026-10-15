@@ -48,6 +48,7 @@ impl RepairTeams {
     ) -> Option<JobId> {
         if request == 0
             || self.refit_job(request).is_some()
+            || self.treatment_claims_system(&target)
             || self
                 .layout
                 .as_ref()?

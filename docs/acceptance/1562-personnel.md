@@ -74,3 +74,20 @@ pending**. The full-host tracer includes actual joined controls, seven malformed
 no-write candidates, blocked and working fresh-JSON 360-step comparisons, paid
 Security work and ordinary AFK Backfill/Human return. No physical browser/native,
 multiplayer, full station workload or increment20 exit is claimed.
+
+
+## Local treatment source checkpoint (15 October 2026)
+
+The optional medical Cruiser/port add actual local care on the existing finite
+Repair TeamJobs and PersonnelState roster. Named patient condition/custody remains
+single-owned; care uses real routes, finite medication and paid equipment, then
+returns the same team. Reference starting injury is authored setup. Root must move
+the existing HandleDutyOfficerPosting step after HandleSetRepairTargetPriority and
+before TickRepairTeams and advance supported continuation/control compatibility.
+Six client files pass 631 tests (5.10s), Workshop build/layers/strings pass, and
+independent core source review passes with that schedule dependency. New owner,
+adapter, whole-candidate no-write, failing-return workflow and finite medication
+port tests are authored; Cargo remains exclusively the integrator's. Joined-host
+Human/ordinary AI, fresh JSON 360, browser/native and workload checks remain
+pending. No external custody, casualty propagation, capture or full increment20
+acceptance is claimed.

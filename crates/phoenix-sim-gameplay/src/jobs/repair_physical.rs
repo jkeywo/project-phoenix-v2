@@ -70,7 +70,7 @@ impl RepairTeams {
         target: Option<RepairWorkTarget>,
         label: String,
     ) -> Option<phoenix_model::job::JobId> {
-        if self.external_team() == Some(team) || self.is_refit_team(team) || self.refit_claims_system(&system)
+        if self.external_team() == Some(team) || (self.is_refit_team(team) || self.is_treatment_team(team)) || self.refit_claims_system(&system)
             || target.as_ref().is_some_and(|target| matches!(target, RepairWorkTarget::Component { system, .. } if self.refit_claims_system(system))) {
             return None;
         }
@@ -304,7 +304,10 @@ impl RepairTeams {
         let mut physical_slots = phases.slots().to_vec();
         for (index, (slot, team)) in physical_slots.iter_mut().zip(navigation).enumerate() {
             if self.state.jobs.teams[index].as_ref().is_some_and(|job| {
-                matches!(job.activity, RepairActivity::Refit { .. }) && job.outcome.is_none()
+                matches!(
+                    job.activity,
+                    RepairActivity::Refit { .. } | RepairActivity::Treatment { .. }
+                ) && job.outcome.is_none()
             }) {
                 continue;
             }

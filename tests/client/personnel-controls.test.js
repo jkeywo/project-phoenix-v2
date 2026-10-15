@@ -1,10 +1,10 @@
 /** @vitest-environment jsdom */
 import { afterEach, expect, it, vi } from 'vitest';
-import { personnelPayload, personnelPosting } from '../../gui/personnel.js';
+import { personnelPayload, personnelPosting, personnelTreatment } from '../../gui/personnel.js';
 import { buildRepairConsoleState } from '../../gui/console-state.js';
 import { renderPersonnelControls } from '../../gui/components/personnel-controls.js';
 import { createEngineeringActionRegistry } from '../../gui/stations/engineering-actions.js';
-import { PERSONNEL_POST_ACTION_ID } from '../../gui/stations/personnel-actions.js';
+import { PERSONNEL_POST_ACTION_ID, PERSONNEL_TREAT_ACTION_ID } from '../../gui/stations/personnel-actions.js';
 import { dispatchConsoleAction } from '../../gui/action-map.js';
 import { ActionFeedbackLifecycle } from '../../gui/action-feedback.js';
 import '../../gui/components/ph-repair-teams.js';
@@ -86,4 +86,28 @@ it('mounts the same optional officer controls inside the actual existing Repair 
   expect(widget.shadowRoot.querySelector('#personnel-controls select')).not.toBeNull();
   widget.state = { teams: [], jobs: [], reports: [] };
   expect(widget.shadowRoot.querySelector('#personnel-controls').hidden).toBe(true);
+});
+
+it('offers care only for an actual injured patient and eligible finite team through ordinary correlated authority', () => {
+  const raw = roster(); raw.officers[0].condition = 'minor'; raw.officers[0].available_teams = []; raw.officers[0].treatment_teams = [1];
+  raw.teams[1].competencies.push('medical_care');
+  const view = personnelPayload(raw, 'actual-repair', true);
+  const detail = { officer: 'chief', team_idx: 1, changed_tick: 7, control_system_id: 'actual-repair' };
+  expect(personnelTreatment(view, detail)).toEqual({ officer: 'chief', team_idx: 1 });
+  for (const bad of [{ ...detail, team_idx: 0 }, { ...detail, changed_tick: 6 }, { ...detail, control_system_id: 'other' }]) expect(personnelTreatment(view,bad)).toBeNull();
+  expect(personnelTreatment({ ...view, controllable: false }, detail)).toBeNull();
+  const repair = { system_id: 'actual-repair', repair_auto: false, personnel_controllable: true, personnel: view };
+  const state = { system_ids: ['actual-repair'], system_families: { 'actual-repair': 'repair' }, systems: { 'actual-repair': repair } };
+  const send = vi.fn(), registry = createEngineeringActionRegistry({ getState: () => state, sendAction: send,
+    actionFeedback: new ActionFeedbackLifecycle({ correlation: () => 'treatment-1' }) });
+  registry.activate(PERSONNEL_TREAT_ACTION_ID, { context: 'engineering', detail });
+  const wire = vi.fn(); for (const [action, fields] of send.mock.calls) dispatchConsoleAction({ action, ...fields }, wire, vi.fn());
+  expect(wire.mock.calls[0]).toEqual(['ControlSystemCorrelated', { correlation: 'treatment-1', target: 'actual-repair', payload: {type:'TreatDutyOfficer', data:{officer:'chief',team_idx:1}} }]);
+  const container = document.createElement('section'); document.body.append(container); const owner = {sendAction:vi.fn()};
+  renderPersonnelControls(container, {personnel:view}, owner);
+  const picks = container.querySelectorAll('select'); expect(picks[0].disabled).toBe(true); picks[1].value='1'; picks[1].dispatchEvent(new Event('change'));
+  const button = [...container.querySelectorAll('button')].at(-1); button.click();
+  expect(owner.sendAction).toHaveBeenCalledWith('treat_duty_officer', expect.objectContaining({officer:'chief',team_idx:1}));
+  button.dispatchEvent(new Event('pointerdown'));
+  renderPersonnelControls(container,{personnel:{...view,system_id:'new-repair'}},owner);button.click();expect(owner.sendAction).toHaveBeenCalledTimes(1);
 });

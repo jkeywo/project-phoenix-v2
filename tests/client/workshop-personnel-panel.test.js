@@ -98,3 +98,26 @@ it('replaces same-revision pack controls before saving its different roster', as
   expect(panel.node.querySelector('input[id*="officer-id"]').value).toBe('other');
   control('save').click(); await settle(); expect(parse(draft.read(path)).personnel).toEqual(replacement); panel.dispose();
 });
+
+it('validates the real optional Medical hull, finite medication source and structured care history', async () => {
+  const base_files = {};
+  const visit = directory => { for (const row of fs.readdirSync(directory,{withFileTypes:true})) { const full=pathModule.join(directory,row.name); if(row.isDirectory()) visit(full); else if(row.name.endsWith('.toml')) base_files[full.replaceAll('\\','/')]=fs.readFileSync(full,'utf8'); } }; visit('assets/entities');
+  const draft=documentFor('includes=["medical_cruiser.toml"]\n'); const deps={base_files,packs:[]};
+  const resolved=inspectPersonnel(draft,deps,path).resolved.value;
+  expect(()=>validatePersonnel(resolved.personnel,resolved)).not.toThrow();
+  expect(resolved.personnel.officer[0].initial_condition).toBe('minor');
+  expect(resolved.personnel.care.requirement[0].resource).toBe('medical_supplies');
+  for (const change of [e=>e.personnel.care.minor_work_secs=Infinity,e=>e.personnel.care.requirement[0].amount=999,e=>e.personnel.repair_team[1].competencies=['mechanical_repair'],e=>delete e.resource_services.medical_supplies,e=>e.logistics.store=e.logistics.store.filter(store=>store.id!=='local-medication')]) {
+    const bad=structuredClone(resolved);change(bad);expect(()=>validatePersonnel(bad.personnel,bad)).toThrow();
+  }
+  document.body.innerHTML='<main></main>';let busy=false;
+  const runtime={dependencies:async()=>deps,validate:vi.fn(async()=>({accepted:true}))};
+  const panel=mountWorkshopPersonnel({root:document.querySelector('main'),runtime,draft:()=>draft,busy:()=>busy,setBusy:value=>{busy=value;}});await settle();
+  expect(control('care-enabled').checked).toBe(true); control('materialise').checked=true;
+  control('care-minor').value='8';control('save').click();await settle();
+  expect(inspectPersonnel(draft,deps,path).personnel.care.minor_work_secs).toBe(8);
+  expect(inspectPersonnel(draft,deps,path).personnel.repair_team[1].competencies).toContain('medical_care');
+  draft.undo();panel.refresh();expect(control('care-minor').value).toBe('6');
+  control('materialise').checked=true;control('care-enabled').checked=false;control('save').click();await settle();
+  expect(inspectPersonnel(draft,deps,path).personnel.care).toBe(false);panel.dispose();
+});

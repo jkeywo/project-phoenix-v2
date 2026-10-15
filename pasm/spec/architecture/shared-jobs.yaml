@@ -8,6 +8,7 @@ entities:
       rationale:
         - "[ai] Repair is the first real consumer. The same closed state-tree compiler/evaluator/editor supports Job facts and final effect channels; once-per-step stage execution preserves existing travel, repair, sweep and return boundaries. There is no additional AI controller or child-job hierarchy."
         - "[ai] Snapshot 41/rules 0.13 carry canonical jobs once. Restore validates crew identity and private continuation before writing existing rows; digest folds canonical assignments and timers, not derived slots. Permitted work lists expose issued assignments/outcomes without hidden diagnosis or command authority."
+        - "[ai] Optional local Treatment is a typed activity in the same Repair TeamJobs, with one actual route/team commitment and PersonnelState patient condition/custody. It joins paid equipment, finite existing capacity requirements and ordinary admitted Human/Repair AI controls. Active care and refit exclude the same machinery; completed care survives return-workflow cleanup without cancelling its patient outcome. This local source is not external personnel or full20 acceptance."
         - "[ai] Coordination's physical onsite projection precedes external job maintenance in Modifiers; the gated external effect follows maintenance and still precedes infrastructure condition processing. Explicit ordering covers the shared team owner's new mutable access without growing schedule debt."
     architecture:
       kind: subsystem
@@ -16,6 +17,6 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [crates/phoenix-model/src/job.rs, crates/phoenix-sim-gameplay/src/jobs/mod.rs, crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/jobs/repair_workflow.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/sim_digest.rs, gui/job-work-list.js, gui/workshop-state-trees.js, editor/workshop-state-trees.js]
+      paths: [crates/phoenix-model/src/job.rs, crates/phoenix-sim-gameplay/src/jobs/mod.rs, crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/jobs/repair_treatment.rs, crates/phoenix-sim-gameplay/src/personnel.rs, crates/phoenix-sim-gameplay/src/jobs/repair_workflow.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/sim_digest.rs, gui/job-work-list.js, gui/workshop-state-trees.js, editor/workshop-state-trees.js]
       symbols: [TeamJobs, RepairTeams, validate_runtime, renderJobWorkList]
-      tests: [crates/phoenix-sim-gameplay/src/jobs/repair_tests.rs, crates/phoenix-simulation/src/snapshot_tests.rs, crates/phoenix-simulation/src/console/repair/external_server_tests.rs, tests/client/job-work-list.test.js, editor/tests/workshop-job-workflow.test.js]
+      tests: [crates/phoenix-sim-gameplay/src/jobs/repair_treatment_tests.rs, crates/phoenix-simulation/src/console/repair/treatment_tests.rs, crates/phoenix-sim-gameplay/src/jobs/repair_tests.rs, crates/phoenix-simulation/src/snapshot_tests.rs, crates/phoenix-simulation/src/console/repair/external_server_tests.rs, tests/client/job-work-list.test.js, editor/tests/workshop-job-workflow.test.js]

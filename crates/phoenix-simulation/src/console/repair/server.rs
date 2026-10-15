@@ -403,7 +403,9 @@ pub fn tick_repair_teams(
                 Option<&ShipSystemControlSources>,
                 (
                     Option<&phoenix_sim_gameplay::personnel::CompiledPersonnel>,
-                    Option<&phoenix_sim_gameplay::personnel::PersonnelState>,
+                    Option<&mut phoenix_sim_gameplay::personnel::PersonnelState>,
+                    Option<&crate::resources::fitting_server::CompiledShipFitting>,
+                    Option<&crate::resources::fitting_server::ShipFitting>,
                 ),
             ),
             With<crate::server_app::Ship>,
@@ -475,7 +477,7 @@ pub fn tick_repair_teams(
         mut inventory,
         services,
         tool_controls,
-        (personnel_profile, personnel_state),
+        (personnel_profile, mut personnel_state, care_fitting_profile, care_fitting),
     ) in ship_q.iter_mut()
     {
         // Crew wrecks remain for identity and cinematic spectating. A queued
@@ -511,8 +513,76 @@ pub fn tick_repair_teams(
                 .collect();
             let before: f64 = damage.state.compartments.values().map(|room| room.hp).sum();
             let mut changes = Vec::new();
+            if let (Some(profile), Some(state), Some(tick)) = (
+                personnel_profile,
+                personnel_state.as_deref_mut(),
+                tick.as_ref(),
+            ) {
+                teams.0.tick_treatments(
+                    profile,
+                    state,
+                    tick.0,
+                    dt,
+                    &blocked,
+                    |commit, claim, requirements| {
+                        use crate::jobs::repair::RepairStockAction;
+                        let (Some(inventory), Some(services)) =
+                            (inventory.as_deref_mut(), services)
+                        else {
+                            return false;
+                        };
+                        let mut candidate = inventory.0.clone();
+                        if candidate
+                            .requirement_parts(
+                                RepairStockAction::Reserve,
+                                claim,
+                                requirements,
+                                &services.0,
+                            )
+                            .is_err()
+                        {
+                            return false;
+                        }
+                        if !commit {
+                            return true;
+                        }
+                        let Ok(flags) = candidate.requirement_parts(
+                            RepairStockAction::Consume,
+                            claim,
+                            requirements,
+                            &services.0,
+                        ) else {
+                            return false;
+                        };
+                        inventory.0 = candidate;
+                        changes.extend(flags);
+                        true
+                    },
+                    |owner, work_dt| {
+                        let factor = tool_factors.get(owner).copied().unwrap_or(0.0);
+                        if factor <= 0.0
+                            || care_fitting_profile.zip(care_fitting).is_some_and(
+                                |(profile, state)| {
+                                    crate::resources::fitting_server::unavailable(
+                                        profile, state, owner,
+                                    )
+                                },
+                            )
+                            || tool_controls.is_some_and(|controls| controls.0.is_offline(owner))
+                        {
+                            return 0.0;
+                        }
+                        power.as_deref_mut().map_or(0.0, |power| {
+                            power
+                                .0
+                                .work_continuous(owner, work_dt, 1.0)
+                                .map_or(0.0, |grant| grant.fraction * factor)
+                        })
+                    },
+                );
+            }
             let expertise = personnel_profile
-                .zip(personnel_state)
+                .zip(personnel_state.as_deref())
                 .map(|(profile, state)| state.repair_work_multipliers(profile, teams.0.job_state()))
                 .unwrap_or_default();
             let committed = teams.0.tick_physical_with_expertise(
@@ -1556,6 +1626,52 @@ pub fn operate_repair_ai(
                 }
             }
         }
+        // Optional local care uses the same permitted roster and ordinary
+        // Repair controller. Outstanding damage keeps its existing priority.
+        if let (Some(teams), Some(queue), Some(config), Some(boards)) =
+            (teams_comp, repair_queue_comp, config_comp, boards)
+        {
+            if queue.is_empty() {
+                let permitted = config
+                    .0
+                    .observations_for_system(&repair_system_id(), &boards.0);
+                if let Some(crate::core::messages::SystemBlackboard::Repair(board)) =
+                    permitted.get(&repair_system_id())
+                {
+                    if let Some(personnel) = &board.personnel {
+                        let mut free = teams.0.free_team_indices(None);
+                        let mut dispatched = false;
+                        for officer in &personnel.officers {
+                            if let Some(team) = officer
+                                .treatment_teams
+                                .iter()
+                                .copied()
+                                .find(|team| free.contains(&(*team as usize)))
+                            {
+                                if emit_ai_command(
+                                    entity_uuid,
+                                    repair_system_id(),
+                                    crate::core::messages::SystemControlPayload::TreatDutyOfficer {
+                                        officer: officer.id.clone(),
+                                        team_idx: team,
+                                    },
+                                    sources,
+                                    &sessions,
+                                    Some(config),
+                                    &mut admitted,
+                                ) {
+                                    free.retain(|slot| *slot != team as usize);
+                                    dispatched = true;
+                                }
+                            }
+                        }
+                        if dispatched {
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
         // Fitting is another request handled by Repair's sole ordinary
         // controller. Outstanding damage reports take priority. A permitted
         // fitting request grants no control over its target machinery.
@@ -1942,3 +2058,7 @@ mod physical_tests;
 #[cfg(test)]
 #[path = "activity_tests.rs"]
 mod activity_tests;
+
+#[cfg(test)]
+#[path = "treatment_tests.rs"]
+mod treatment_tests;

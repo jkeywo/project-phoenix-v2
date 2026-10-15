@@ -1,0 +1,67 @@
+# Optional finite replenishment for the actual local care reference.
+includes = [ "station_axiom.toml" ]
+name = "entity.medical_service_port.name"
+
+[port_service]
+system = "dock"
+policy = "free_allied_replenishment"
+eligible_factions = [ "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa" ]
+
+[[port_service.offer]]
+id = "coolant"
+resource = "coolant"
+unit_amount = 1
+quota = 1000
+cost = []
+
+[[port_service.offer]]
+id = "machinery-parts"
+resource = "machinery_parts"
+unit_amount = 1
+quota = 200
+cost = []
+
+[[port_service.offer]]
+id = "structural-parts"
+resource = "structural_parts"
+unit_amount = 1
+quota = 100
+cost = []
+
+[[port_service.offer]]
+id = "alloy"
+resource = "alloy"
+unit_amount = 1
+quota = 24
+cost = []
+
+[[port_service.offer]]
+id = "reserve-fuel"
+resource = "reserve_fuel"
+unit_amount = 1
+quota = 10000
+cost = []
+
+[[port_service.offer]]
+id = "torpedoes"
+resource = "torpedoes"
+unit_amount = 1
+quota = 100
+cost = []
+
+[[port_service.offer]]
+id = "medical-supplies"
+resource = "medical_supplies"
+quota = 20
+unit_amount = 1
+cost = []
+
+[[infrastructure.capacity]]
+id = "medical-supplies"
+amount = 100
+ceiling = 100
+label = "personnel.medication"
+
+[resource_services.medical_supplies]
+kind = "capacity"
+id = "medical-supplies"

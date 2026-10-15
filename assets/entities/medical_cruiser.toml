@@ -1,0 +1,395 @@
+# Optional local care reference. Initial injury and work tuning are authored setup.
+# The same real finite Repair team walks from Bridge to Engineering, consumes
+# actual medication, treats the officer at home, then physically returns.
+includes = [ "alliance_cruiser.toml" ]
+name = "entity.medical_cruiser.name"
+
+[interior]
+team_homes = [ "engineering", "bridge" ]
+
+[[interior.deck]]
+id = "upper"
+label = "interior.deck.upper.label"
+damage_weight = 1
+
+[[interior.deck]]
+id = "lower"
+label = "interior.deck.lower.label"
+damage_weight = 1
+
+[[interior.compartment]]
+id = "bridge"
+deck = "upper"
+label = "interior.room.bridge.label"
+x = -10
+z = -20
+width = 20
+depth = 15
+material = "bulkhead"
+max_hp = 110.625
+recovery_fraction = 0.2
+structural_remedy = "structural"
+
+[[interior.compartment]]
+id = "support"
+deck = "upper"
+label = "interior.room.support.label"
+x = -10
+z = -5
+width = 20
+depth = 15
+material = "bulkhead"
+max_hp = 110.625
+recovery_fraction = 0.2
+structural_remedy = "structural"
+
+[[interior.compartment]]
+id = "engineering"
+deck = "lower"
+label = "interior.room.engineering.label"
+x = -10
+z = -10
+width = 20
+depth = 20
+material = "armour"
+max_hp = 147.5
+recovery_fraction = 0.2
+structural_remedy = "structural"
+
+[[interior.compartment]]
+id = "weapons"
+deck = "lower"
+label = "interior.room.weapons.label"
+x = -20
+z = 10
+width = 40
+depth = 15
+material = "armour"
+max_hp = 221.25
+recovery_fraction = 0.2
+structural_remedy = "structural"
+
+[[interior.connection]]
+id = "bridge-support"
+from = "bridge"
+to = "support"
+travel_secs = 2.5
+
+[[interior.connection]]
+id = "deck-stair"
+from = "support"
+to = "engineering"
+travel_secs = 2.5
+
+[[interior.connection]]
+id = "engineering-weapons"
+from = "engineering"
+to = "weapons"
+travel_secs = 2.5
+boundary = "weapons-access"
+
+[interior.placements]
+logistics = "engineering"
+dock = "support"
+captain = "bridge"
+command = "bridge"
+red-alert = "bridge"
+helm-thrust = "engineering"
+helm-steering = "engineering"
+helm-joystick = "engineering"
+helm-engine-port = "engineering"
+helm-engine-starboard = "engineering"
+helm-radar = "bridge"
+tactical-radar = "bridge"
+phaser-control = "bridge"
+helm-impulse = "engineering"
+helm-boost = "engineering"
+helm-lateral-thrust = "engineering"
+phaser-fore = "weapons"
+phaser-aft = "weapons"
+torpedo-magazine = "weapons"
+torpedo-tube-fore-port = "weapons"
+torpedo-tube-fore-starboard = "weapons"
+torpedo-tube-aft = "weapons"
+sensors = "bridge"
+sensor-radar = "bridge"
+passive-receiver = "bridge"
+shields-system = "weapons"
+navigation = "bridge"
+power-reactor = "engineering"
+power-battery = "engineering"
+repair = "engineering"
+tractor = "support"
+umbilical = "support"
+comms = "bridge"
+viewscreen = "bridge"
+security = "support"
+shield-arc-fore = "weapons"
+shield-arc-port = "weapons"
+shield-arc-aft = "weapons"
+shield-arc-starboard = "weapons"
+weapons-access = "engineering"
+fabrication = "support"
+resource-recovery = "support"
+
+[[logistics.store]]
+id = "hold-ammunition"
+resource = "torpedoes"
+compartment = "support"
+role = "main"
+target = 4
+reserve = 0
+priority = 2
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "hold-ammunition"
+
+[[logistics.store]]
+id = "magazine"
+resource = "torpedoes"
+compartment = "weapons"
+role = "local"
+target = 6
+reserve = 0
+priority = 2
+system = "torpedo-magazine"
+source = "hold-ammunition"
+
+[logistics.store.endpoint]
+kind = "torpedo_magazine"
+
+[[logistics.store]]
+id = "hold-machinery-parts"
+resource = "machinery_parts"
+compartment = "support"
+role = "main"
+target = 102
+reserve = 20
+priority = 1
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "hold-machinery-parts"
+
+[[logistics.store]]
+id = "repair-machinery"
+resource = "machinery_parts"
+compartment = "engineering"
+role = "local"
+target = 12
+reserve = 0
+priority = 1
+system = "repair"
+source = "hold-machinery-parts"
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "machinery_parts"
+
+[[logistics.store]]
+id = "hold-structural-parts"
+resource = "structural_parts"
+compartment = "support"
+role = "main"
+target = 51
+reserve = 8
+priority = 1
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "hold-structural-parts"
+
+[[logistics.store]]
+id = "repair-structural"
+resource = "structural_parts"
+compartment = "engineering"
+role = "local"
+target = 8
+reserve = 0
+priority = 1
+system = "repair"
+source = "hold-structural-parts"
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "structural_parts"
+
+[[logistics.store]]
+id = "hold-coolant"
+resource = "coolant"
+compartment = "support"
+role = "main"
+target = 624
+reserve = 0
+priority = 0
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "hold-coolant"
+
+[[logistics.store]]
+id = "coolant-reservoir"
+resource = "coolant"
+compartment = "engineering"
+role = "local"
+target = 156
+reserve = 0
+priority = 0
+system = "power-reactor"
+source = "hold-coolant"
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "coolant"
+
+[[logistics.store]]
+id = "hold-alloy"
+resource = "alloy"
+compartment = "support"
+role = "main"
+target = 12
+reserve = 0
+priority = 3
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "alloy"
+
+[[logistics.store]]
+id = "hold-ore"
+resource = "ore"
+role = "main"
+compartment = "support"
+target = 0
+reserve = 0
+priority = 4
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "ore"
+
+[[logistics.store]]
+id = "hold-scrap"
+resource = "scrap"
+role = "main"
+compartment = "support"
+target = 0
+reserve = 0
+priority = 4
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "scrap"
+
+[[logistics.store]]
+id = "local-medication"
+resource = "medical_supplies"
+role = "local"
+compartment = "engineering"
+system = "repair"
+target = 8
+reserve = 0
+priority = 5
+source = "hold-medication"
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "medical-supplies"
+
+[[logistics.store]]
+id = "hold-medication"
+resource = "medical_supplies"
+role = "main"
+compartment = "support"
+target = 20
+reserve = 0
+priority = 5
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "hold-medication"
+
+[[logistics.storage]]
+compartment = "support"
+space = 875
+
+[logistics.storage.unit_space]
+torpedoes = 1
+machinery_parts = 1
+structural_parts = 1
+coolant = 1
+alloy = 1
+ore = 1
+scrap = 1
+medical_supplies = 1
+
+[[logistics.storage]]
+compartment = "engineering"
+space = 184
+
+[logistics.storage.unit_space]
+machinery_parts = 1
+structural_parts = 1
+coolant = 1
+medical_supplies = 1
+
+[[logistics.storage]]
+compartment = "weapons"
+space = 6
+
+[logistics.storage.unit_space]
+torpedoes = 1
+
+[[logistics.handling]]
+system = "logistics"
+max_active = 2
+max_batch = 100
+units_per_sec = 50
+reorder_fraction = 0.5
+
+[[personnel.repair_team]]
+id = "repair-alpha"
+label = "personnel.team.alpha"
+team_idx = 0
+competencies = [ "mechanical_repair" ]
+
+[[personnel.repair_team]]
+id = "repair-beta"
+label = "personnel.team.beta"
+team_idx = 1
+competencies = [ "mechanical_repair", "medical_care" ]
+
+[[personnel.officer]]
+id = "repair-chief"
+label = "personnel.officer.repair_chief"
+home_compartment = "engineering"
+competencies = [ "mechanical_repair" ]
+repair_work_multiplier = 1.25
+initial_condition = "minor"
+
+[personnel.care]
+system = "repair"
+minor_work_secs = 6
+severe_work_secs = 12
+
+[[personnel.care.requirement]]
+resource = "medical_supplies"
+service = "medical_supplies"
+amount = 1
+
+[[infrastructure.capacity]]
+id = "medical-supplies"
+amount = 2
+ceiling = 8
+label = "personnel.medication"
+
+[[infrastructure.capacity]]
+id = "hold-medication"
+amount = 0
+ceiling = 20
+label = "personnel.medication"
+
+[resource_services.medical_supplies]
+kind = "capacity"
+id = "medical-supplies"

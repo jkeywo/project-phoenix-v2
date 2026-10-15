@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Component, Clone, Debug)]
 pub struct CompiledPersonnel {
+    pub care_compartment: Option<String>,
     pub config: PersonnelConfig,
     team_homes: Vec<String>,
 }
@@ -43,7 +44,27 @@ impl CompiledPersonnel {
                 );
             }
         }
+        let care_compartment = config
+            .care
+            .as_ref()
+            .map(|care| {
+                interior
+                    .placements
+                    .get(&care.system)
+                    .cloned()
+                    .ok_or("care equipment needs an actual compartment")
+            })
+            .transpose()?;
+        if care_compartment.is_some()
+            && !config
+                .repair_teams
+                .iter()
+                .any(|team| team.competencies.contains(&DutyCompetency::MedicalCare))
+        {
+            return Err("care requires an actual finite team with MedicalCare competency".into());
+        }
         Ok(Self {
+            care_compartment,
             config: config.clone(),
             team_homes: interior.team_homes.clone(),
         })
@@ -79,15 +100,63 @@ pub fn compile_entity(
     {
         return Err("personnel requires the installed canonical Repair owner and actual physical remedy definition".into());
     }
+    if let Some(care) = &config.care {
+        if care.system != owner
+            || ship.system(&care.system).is_none()
+            || !entity.energy.as_ref().is_some_and(|energy| {
+                energy.consumers.iter().any(|consumer| {
+                    consumer.system == care.system && consumer.continuous_cost_per_sec > 0.0
+                })
+            })
+        {
+            return Err(
+                "care needs installed service machinery and actual positive paid work".into(),
+            );
+        }
+        for part in &care.requirements {
+            let endpoint = crate::resources::service::resolve_endpoint(
+                &part.resource,
+                &entity.resource_services,
+                &crate::resources::service::ResourceLink {
+                    service: Some(part.service.clone()),
+                    provider: None,
+                },
+            )?;
+            let crate::resources::service::ResourceEndpoint::Capacity { id } = endpoint else {
+                return Err("care medication needs a real finite capacity stock".into());
+            };
+            if !entity.logistics.as_ref().is_some_and(|logistics| {
+                logistics.stores.iter().any(|store| {
+                    store.resource == part.resource
+                        && store.endpoint
+                            == (crate::resources::service::ResourceEndpoint::Capacity {
+                                id: id.clone(),
+                            })
+                        && store.role == phoenix_model::logistics::StoreRole::Local
+                        && store.system.as_ref() == Some(&care.system)
+                        && store.source.is_some()
+                })
+            }) {
+                return Err("care medication requires a managed local stock and actual replenishment source".into());
+            }
+            if !entity.infrastructure.as_ref().is_some_and(|stock| {
+                stock.capacities.iter().any(|capacity| {
+                    capacity.id == id && capacity.ceiling.unwrap_or(capacity.amount) >= part.amount
+                })
+            }) {
+                return Err(
+                    "care medication service lacks a sufficient actual stock capacity".into(),
+                );
+            }
+        }
+    }
     CompiledPersonnel::compile(config, interior, repair.repair_team_count as usize).map(Some)
 }
 
 fn compatible(team: &DutyTeamConfig, officer: &DutyOfficerConfig) -> bool {
     team.competencies
-        .contains(&DutyCompetency::MechanicalRepair)
-        && officer
-            .competencies
-            .contains(&DutyCompetency::MechanicalRepair)
+        .iter()
+        .any(|competency| officer.competencies.contains(competency))
 }
 
 #[derive(Component, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -122,6 +191,7 @@ impl PersonnelState {
                     (
                         officer.id.clone(),
                         DutyOfficerState {
+                            condition: officer.initial_condition,
                             location: OfficerLocation::AtCompartment {
                                 compartment: officer.home_compartment.clone(),
                             },
@@ -189,6 +259,7 @@ impl PersonnelState {
                 _ => return Err("unposted officer is outside its supported home custody".into()),
             }
         }
+        self.validate_treatment(profile, jobs)?;
         Ok(())
     }
 
@@ -214,6 +285,12 @@ impl PersonnelState {
             .officers
             .get(officer_id)
             .ok_or("officer has no physical custody")?;
+        if destination.is_some() && officer.condition != PersonnelCondition::Fit {
+            return Err("unfit officers cannot be newly posted".into());
+        }
+        if jobs.teams.iter().flatten().any(|job|job.outcome.is_none() && matches!(&job.activity, RepairActivity::Treatment { work, .. } if work.patient == officer_id)) {
+            return Err("officer is committed to actual treatment".into());
+        }
         let current = match &officer.location {
             OfficerLocation::AtCompartment { .. } => None,
             OfficerLocation::WithRepairTeam { team_idx } => Some(*team_idx),
@@ -258,10 +335,142 @@ impl PersonnelState {
         self.officers.insert(
             officer_id.into(),
             DutyOfficerState {
+                condition: officer.condition,
                 location,
                 changed_tick: tick,
             },
         );
+        Ok(())
+    }
+
+    /// Candidate destinations derive only from actual finite free team slots and
+    /// the patient's one physical location, not a second medical availability pool.
+    pub fn treatment_teams(
+        &self,
+        profile: &CompiledPersonnel,
+        jobs: &RepairJobState,
+        patient: &str,
+    ) -> Vec<u32> {
+        let Some(state) = self.officers.get(patient) else {
+            return Vec::new();
+        };
+        let Some(room) = profile.care_compartment.as_ref() else {
+            return Vec::new();
+        };
+        if profile.config.care.as_ref().is_some_and(|care|jobs.teams.iter().flatten().any(|job|job.outcome.is_none() && matches!(&job.activity,RepairActivity::Refit {target,..} if target==&care.system))) {return Vec::new();}
+        if state.condition==PersonnelCondition::Fit || !matches!(&state.location,OfficerLocation::AtCompartment {compartment} if compartment==room)
+            || jobs.teams.iter().flatten().any(|job|job.outcome.is_none() && matches!(&job.activity,RepairActivity::Treatment {work,..} if work.patient==patient)) {return Vec::new();}
+        profile.config.repair_teams.iter().filter_map(|team| {
+            let index=team.team_idx as usize;
+            (team.competencies.contains(&DutyCompetency::MedicalCare) && jobs.teams.get(index).is_some_and(|entry|entry.as_ref().is_none_or(|job|job.outcome.is_some()))
+                && jobs.navigation.as_ref().and_then(|rows|rows.get(index)).is_some_and(|cursor|matches!(&cursor.location,TeamLocation::Compartment {compartment} if profile.team_homes.get(index)==Some(compartment))))
+                .then_some(team.team_idx)
+        }).collect()
+    }
+    fn validate_treatment(
+        &self,
+        profile: &CompiledPersonnel,
+        jobs: &RepairJobState,
+    ) -> Result<(), String> {
+        let mut patients = BTreeSet::new();
+        for (index, entry) in jobs.teams.iter().enumerate() {
+            let Some(job) = entry else {
+                continue;
+            };
+            let RepairActivity::Treatment {
+                phase,
+                cancelled,
+                work,
+            } = &job.activity
+            else {
+                continue;
+            };
+            let care = profile
+                .config
+                .care
+                .as_ref()
+                .ok_or("treatment has no accepted care profile")?;
+            let room = profile
+                .care_compartment
+                .as_ref()
+                .ok_or("care has no actual service compartment")?;
+            let patient = self
+                .officers
+                .get(&work.patient)
+                .ok_or("unknown actual treatment patient")?;
+            let cursor = jobs
+                .navigation
+                .as_ref()
+                .and_then(|rows| rows.get(index))
+                .ok_or("missing actual treatment team cursor")?;
+            let duration = care
+                .work_secs(work.condition)
+                .ok_or("treatment cannot claim a fit condition")?;
+            if !profile.config.repair_teams.iter().any(|team| {
+                team.team_idx as usize == index
+                    && team.competencies.contains(&DutyCompetency::MedicalCare)
+            }) || work.work_secs != duration
+                || !work.progress.is_finite()
+                || !(0.0..=duration).contains(&work.progress)
+                || (work.progress > 0.0 && !work.medication_used)
+                || (work.completed
+                    && (work.progress != duration || !work.medication_used || *cancelled))
+                || (!work.completed && work.progress >= duration)
+                || (job.outcome.is_none() && !patients.insert(&work.patient))
+            {
+                return Err(
+                    "treatment does not match actual patient, team, site or accepted work terms"
+                        .into(),
+                );
+            }
+            // Retained terminal history describes past work; a future assignment
+            // may change patient condition/custody, so live joins stop at release.
+            if job.outcome.is_some() {
+                continue;
+            }
+            if !matches!(&patient.location,OfficerLocation::AtCompartment {compartment} if compartment==room)
+            {
+                return Err("active treatment patient left its actual service compartment".into());
+            }
+            if patient.condition
+                != if work.completed {
+                    PersonnelCondition::Fit
+                } else {
+                    work.condition
+                }
+            {
+                return Err("treatment disagrees with the single actual patient condition".into());
+            }
+            if !matches!(phase,phoenix_model::messages::TeamSlot::Returning {..}) && jobs.teams.iter().flatten().any(|other|other.outcome.is_none() && matches!(&other.activity,RepairActivity::Refit {target,..} if target==&care.system)) {
+                return Err("active treatment cannot also refit its actual service machinery".into());
+            }
+            match phase {
+                phoenix_model::messages::TeamSlot::Travelling {
+                    system_id: Some(system),
+                    elapsed,
+                    ..
+                } if system == &care.system
+                    && *elapsed == 0.0
+                    && work.progress == 0.0
+                    && !work.medication_used
+                    && !*cancelled => {}
+                phoenix_model::messages::TeamSlot::Repairing {
+                    system_id: Some(system),
+                    ..
+                } if system == &care.system
+                    && !*cancelled
+                    && !work.completed
+                    && matches!(&cursor.location,TeamLocation::Compartment {compartment} if compartment==room) =>
+                    {}
+                phoenix_model::messages::TeamSlot::Returning {
+                    remaining,
+                    system_id: None,
+                    queued_system_id: None,
+                    ..
+                } if *remaining == 0.0 && (*cancelled || work.completed) => {}
+                _ => return Err("treatment work phase is not at the accepted actual site".into()),
+            }
+        }
         Ok(())
     }
 
@@ -280,6 +489,13 @@ impl PersonnelState {
             else {
                 continue;
             };
+            if self.officers[&definition.id].condition != PersonnelCondition::Fit
+                || !definition
+                    .competencies
+                    .contains(&DutyCompetency::MechanicalRepair)
+            {
+                continue;
+            }
             let index = *team_idx as usize;
             let on_site = jobs
                 .teams
@@ -303,11 +519,13 @@ impl PersonnelState {
                     .and_then(|rows| rows.get(index))
                     .is_some_and(|team| matches!(team.location, TeamLocation::Compartment { .. }));
             if on_site
-                && profile
-                    .config
-                    .repair_teams
-                    .iter()
-                    .any(|team| team.team_idx == *team_idx && compatible(team, definition))
+                && profile.config.repair_teams.iter().any(|team| {
+                    team.team_idx == *team_idx
+                        && team
+                            .competencies
+                            .contains(&DutyCompetency::MechanicalRepair)
+                        && compatible(team, definition)
+                })
             {
                 if let Some(multiplier) = result.get_mut(index) {
                     *multiplier = definition.repair_work_multiplier;
@@ -380,6 +598,33 @@ impl PersonnelState {
                                 .post(profile, jobs, interior, &definition.id, None, tick)
                                 .is_ok();
                     Some(DutyOfficerView {
+                        condition: officer.condition,
+                        treatment_teams: self.treatment_teams(profile, jobs, &definition.id),
+                        treatment: jobs.teams.iter().enumerate().find_map(|(index, entry)| {
+                            let job = entry.as_ref().filter(|job| job.outcome.is_none())?;
+                            let RepairActivity::Treatment { work, phase, .. } = &job.activity
+                            else {
+                                return None;
+                            };
+                            if work.patient != definition.id {
+                                return None;
+                            }
+                            Some(OfficerTreatmentView {
+                                team_idx: index as u32,
+                                phase: match phase {
+                                    phoenix_model::messages::TeamSlot::Travelling { .. } => {
+                                        phoenix_model::job::JobPhase::Travelling
+                                    }
+                                    phoenix_model::messages::TeamSlot::Repairing { .. } => {
+                                        phoenix_model::job::JobPhase::Working
+                                    }
+                                    _ => phoenix_model::job::JobPhase::Returning,
+                                },
+                                progress: ((work.progress / work.work_secs).clamp(0.0, 1.0)
+                                    * 1000.0) as u16,
+                                waiting_medication: work.waiting_medication,
+                            })
+                        }),
                         id: definition.id.clone(),
                         label: definition.label.clone(),
                         competencies: definition.competencies.clone(),

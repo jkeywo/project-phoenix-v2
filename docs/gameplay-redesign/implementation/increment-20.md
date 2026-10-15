@@ -303,3 +303,54 @@ Human/AI controls. Knowledge stays on the existing Repair Console. Explicit
 human-seeking plot surgery remains an authored exception. Physical injury inputs,
 remote casualties and carried-craft custody remain later joins; this local slice
 cannot close increment20 or claim those capabilities.
+
+
+### Local treatment source checkpoint
+
+The optional `medical_cruiser.toml` binds MedicalCare to existing Repair team 1,
+starting at Bridge, and an authored minor injury to the existing named officer at
+Engineering. The patient stays at that actual home; accepted canonical Repair
+machinery supplies care in the same compartment. The finite team walks the real
+route, consumes one actual medical-supplies unit only when funded work begins,
+changes the one PersonnelState condition to fit on completion and returns before
+release. Minor/severe work times (6/12 seconds) and initial stocks are provisional
+reference authoring, without a general injury or balance claim.
+
+Treatment is a typed activity in the existing Repair TeamJobs. It excludes
+repair/refit/external use of the same team and duplicate patient claims. Actual
+service refits also exclude active care; existing fitting unavailability pauses
+paid work. A later workflow failure during return preserves an already completed
+patient outcome and still allows physical return. Required condition state,
+accepted work terms, route/site, competency, actual patient and existing job joins
+are validated before restore writes; no old conditionless continuation adapter
+is introduced.
+
+The reference has actual managed main/local medication stores, source goals and
+capacity space. `medical_service_port.toml` offers replenishment from finite
+stock through the existing paid Dock/umbilical/PortService path. Care consumes the
+same capacity owner using the existing atomic requirement transaction, without
+creating a medication inventory or persisted reservation frontier beside it.
+
+The existing admitted Personnel applier handles posting and TreatDutyOfficer.
+Its integration dependency is explicit: root must move the existing
+HandleDutyOfficerPosting fixed step after HandleSetRepairTargetPriority and before
+TickRepairTeams. Ordinary Repair AI reads only the permitted own Personnel view,
+selects eligible patients when its damage queue is empty and emits that same
+control. The applier then precedes funded work, so valid idle postings affect
+that tick's work. If a same-tick ordinary dispatch already commits a team, a later
+new posting/treatment is refused rather than moving an officer to an away team.
+There is no duplicate applier, controller or central step.
+
+The existing Personnel widget adds eligible care controls and actual team/phase,
+progress and medication-waiting readouts. Workshop edits supported competencies,
+initial conditions, service/work terms and finite medication requirements through
+accepted history and Preview/Test, including explicit inherited `care = false`.
+Worker validation: six selected client files pass 631 tests (5.10s); Workshop build,
+layers and strict String Table checks pass. Independent core source review passes
+conditional on the stated root schedule join. Model/Gameplay owner tests, actual
+adapter, eight malformed whole-candidate cases, supported failing-return-tree and
+finite paid-port replenishment tests are authored but unrun in this worker.
+Root owns Cargo, compatibility versions and integration evidence. Normal joined
+Human/AI care, fresh 360-step hosted continuation, physical browser/native and
+workload acceptance remain pending. Injury propagation, away work, real craft
+custody and capture remain open; this source checkpoint does not close increment20.

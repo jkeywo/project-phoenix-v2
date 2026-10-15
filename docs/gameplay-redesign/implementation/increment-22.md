@@ -408,3 +408,13 @@ unchanged. Whole-snapshot rollback validates its own candidate World rather than
 requiring equality with today's accepted jobs. An explicit candidate spawn
 origin must resolve exactly and retain the accepted base/slot equipment recipe;
 a failed replacement cannot borrow bootstrap capability.
+
+
+The same PlanChoice retains the original ordered immutable-capability method
+refusal explanations, bounded by the existing 256-node search budget and the
+existing 512-character diagnostic limit per reason. This is accepted choice
+metadata, never a current damage/stock/resource claim. Full-candidate preflight
+reconstructs deterministic selection against the accepted complete base/slot
+recipe and checks both the chosen identities and original explanations. Privileged
+Scenario inspection derives the graph and shows original choice/release/evidence
+separately; it cannot choose a replacement or grant gameplay feeds.

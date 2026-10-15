@@ -26,8 +26,13 @@ fn instrument_profile() -> SensingConfig {
 fn actual_broad_and_focused_instruments_use_distinct_owned_physical_reserves() {
     let config =
         crate::test_fixtures::load_entity_config("assets/entities/alliance_cruiser.toml").unwrap();
-    validate_sensing(&instrument_profile(), &config).unwrap();
-    for mode in 0..5 {
+    let mut profile = instrument_profile();
+    profile.passive = config
+        .sensing
+        .as_ref()
+        .and_then(|profile| profile.passive.clone());
+    validate_sensing(&profile, &config).unwrap();
+    for mode in 0..6 {
         let mut bad = config.clone();
         match mode {
             0 => {
@@ -62,7 +67,7 @@ fn actual_broad_and_focused_instruments_use_distinct_owned_physical_reserves() {
                     .unwrap()
                     .console = None
             }
-            _ => bad
+            4 => bad
                 .ship_config
                 .as_mut()
                 .unwrap()
@@ -74,11 +79,9 @@ fn actual_broad_and_focused_instruments_use_distinct_owned_physical_reserves() {
                 .retain(|component| {
                     component.binding != phoenix_model::damage::DamageBinding::Operation
                 }),
+            _ => bad.sensors_console = None,
         }
-        assert!(
-            validate_sensing(&instrument_profile(), &bad).is_err(),
-            "mode {mode}"
-        );
+        assert!(validate_sensing(&profile, &bad).is_err(), "mode {mode}");
     }
 }
 #[test]
@@ -176,39 +179,28 @@ fn passive_receiver_needs_own_hardware_and_closed_program_without_target_truth()
     let mut entity =
         crate::test_fixtures::load_entity_config("assets/entities/alliance_cruiser.toml").unwrap();
     let id = crate::core::messages::SystemId("passive-receiver".into());
-    let mut receiver = entity
-        .ship_config
-        .as_ref()
-        .unwrap()
-        .system(&crate::core::messages::SystemId("sensors".into()))
-        .unwrap()
-        .clone();
-    receiver.id = id.clone();
-    receiver.kind = PASSIVE_RECEIVER_KIND.into();
-    // Serialise through TOML so optional state-tree fields keep their native shape.
-    let tree = toml::to_string(&crate::science::sensing_ai::initial_tree()).unwrap();
-    receiver.config = Some(toml::Value::Table(toml::map::Map::from_iter([(
-        "ai".into(),
-        toml::from_str(&tree).unwrap(),
-    )])));
-    entity.ship_config.as_mut().unwrap().systems.push(receiver);
-    let mut consumer = entity
-        .energy
-        .as_ref()
-        .unwrap()
-        .consumers
-        .iter()
-        .find(|consumer| consumer.system.0 == "sensors")
-        .unwrap()
-        .clone();
-    consumer.system = id.clone();
-    entity.energy.as_mut().unwrap().consumers.push(consumer);
-    entity
-        .interior
-        .as_mut()
-        .unwrap()
-        .placements
-        .insert(id.clone(), "bridge".into());
+    assert_eq!(
+        entity
+            .ship_config
+            .as_ref()
+            .unwrap()
+            .systems
+            .iter()
+            .filter(|system| system.id == id)
+            .count(),
+        1
+    );
+    assert_eq!(
+        entity
+            .energy
+            .as_ref()
+            .unwrap()
+            .consumers
+            .iter()
+            .filter(|consumer| consumer.system == id)
+            .count(),
+        1
+    );
     let profile = SensingConfig {
         focused: None,
         broad: None,

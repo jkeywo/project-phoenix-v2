@@ -58,4 +58,14 @@ describe('accepted-source independent sensing instruments', () => {
       expect(result.sensing.focused.work_secs).toBe(2); expect(result.sensing.broad.system).not.toBe(id);
     }
   });
+  it('migrates every remaining fitted broad radar explicitly while preserving actual hull reach', () => {
+    for (const [hull, range] of [['alliance_battleship', 300], ['alliance_courier', 250], ['alliance_destroyer', 250]]) {
+      const result = resolveTemplate(`assets/entities/${hull}.toml`, { read: file => fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null }, parse).resolved.value;
+      validateSensing(result.sensing, result); expect(result.sensing.broad.system).toBe('sensor-radar');
+      expect(result.sensing.broad.assessment_secs).toBeGreaterThan(result.sensing.broad.identity_secs);
+      expect(result.sensors_console.long_range_radar.range).toBe(range);
+      const invalid = structuredClone(result); delete invalid.sensors_console;
+      expect(() => validateSensing(result.sensing, invalid)).toThrow(/radar coverage/);
+    }
+  });
 });

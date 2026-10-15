@@ -1,4 +1,4 @@
-includes = ["fragments/energy/alliance_courier.toml","fragments/damage/common.toml"]
+includes = ["fragments/energy/alliance_courier.toml","fragments/damage/common.toml","fragments/sensing/standard_broad.toml"]
 
 # Alliance Courier — a compact two-player hull.
 #

@@ -13,6 +13,9 @@ pub fn mount(config: &SensorMountConfig) -> crate::weapons::mount::MountConfig {
 /// No state, resource quantities or observer truth is copied into this profile.
 pub fn validate_sensing(profile: &SensingConfig, entity: &EntityConfig) -> Result<(), String> {
     profile.validate()?;
+    if profile.broad.is_some() && entity.sensors_console.is_none() {
+        return Err("broad sensing requires its actual SensorsConsole radar coverage".into());
+    }
     let ship = entity
         .ship_config
         .as_ref()

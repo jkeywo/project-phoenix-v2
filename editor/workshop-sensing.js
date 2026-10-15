@@ -20,6 +20,7 @@ export function inspectSensing(draft, dependencies, path) {
   return { ...inspection, sensing: structuredClone(inspection.resolved.value.sensing || null), systems: authoredAndGeneratedSystems(inspection.resolved.value) };
 }
 export function validateSensing(profile, value) {
+  if (profile?.broad && !value.sensors_console) throw new Error('Broad sensing requires actual SensorsConsole radar coverage.');
   if (!closed(profile, Object.keys(sensingRoles)) || !Object.keys(sensingRoles).some(role => profile[role])) throw new Error('Sensing requires at least one closed instrument profile.');
   const systems = authoredAndGeneratedSystems(value), seen = new Set();
   for (const [role, spec] of Object.entries(sensingRoles)) {

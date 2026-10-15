@@ -9819,6 +9819,7 @@ fn set_torpedoes_in_flight(app: &mut App, n: usize) {
             .in_flight
             .push(crate::weapons::torpedo::Torpedo {
                 previous_position: None,
+                collision_interval_secs: None,
                 last_guidance: None,
                 profile,
                 durability_remaining: profile.durability,

@@ -13,6 +13,8 @@ pub mod blaster;
 mod round_work;
 pub mod flight_carrier;
 pub(crate) mod pdc;
+pub(crate) mod guided_advance;
+pub(crate) use guided_advance::advance_torpedo_flights;
 pub mod server;
 pub mod shared;
 pub mod strike;

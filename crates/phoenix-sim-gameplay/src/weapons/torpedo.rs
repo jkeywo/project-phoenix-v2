@@ -147,6 +147,8 @@ pub struct Torpedo {
     /// collision owner clears it after relative CCD; saves/folds keep current
     /// canonical pose rather than a competing flight/history copy.
     pub previous_position: Option<[f32; 3]>,
+    /// Actual live travel duration paired with this unsaved collision segment.
+    pub collision_interval_secs: Option<f32>,
     /// One actual held measurement, retaining its original sample and source.
     pub last_guidance: Option<GuidanceObservation>,
     pub profile: GuidedRoundProfile,
@@ -208,8 +210,14 @@ impl Torpedo {
             .as_ref()
             .filter(|held| self.target_uuid.as_deref() == Some(held.target_uuid.as_str()))
             .map(|held| held.position);
-        if dt.is_finite() && dt > 0.0 {
+        let dt = if dt.is_finite() && dt > 0.0 && self.lifespan_remaining.is_finite() {
+            dt.min(self.lifespan_remaining.max(0.0))
+        } else {
+            0.0
+        };
+        if dt > 0.0 {
             self.previous_position = Some([self.x, self.y, self.z]);
+            self.collision_interval_secs = Some(dt);
         }
         if self.target_uuid.is_some() {
             if let Some([tx, ty, tz]) = target_pos {
@@ -1062,6 +1070,7 @@ impl TorpedoSystem {
         self.tubes[idx].pattern_step = step0;
         self.in_flight.push(Torpedo {
             previous_position: None,
+            collision_interval_secs: None,
             last_guidance: None,
             profile,
             durability_remaining: profile.durability,
@@ -1117,6 +1126,20 @@ impl TorpedoSystem {
     /// Work funding affects preparation and launch only. A waiting burst keeps
     /// its rounds and target; launched torpedoes continue real-time flight.
     pub fn tick_with_work(
+        &mut self,
+        dt: f32,
+        guidance: &std::collections::HashMap<String, GuidanceObservation>,
+        work: &mut impl FnMut(TorpedoWork<'_>) -> f32,
+        next_uuid: &mut impl FnMut() -> String,
+    ) -> TorpedoTickResult {
+        let mut result = self.advance_with_work(dt, guidance, work, next_uuid);
+        result.expired = self.settle_expired();
+        result
+    }
+
+    /// Physics advancement leaves final clipped intervals available to Damage.
+    /// The normal standalone wrapper settles expiry immediately afterwards.
+    pub fn advance_with_work(
         &mut self,
         dt: f32,
         guidance: &std::collections::HashMap<String, GuidanceObservation>,
@@ -1264,6 +1287,7 @@ impl TorpedoSystem {
                 pattern_updates.push((burst.tube_id.clone(), barrel, step));
                 burst_torpedoes.push(Torpedo {
                     previous_position: None,
+                    collision_interval_secs: None,
                     last_guidance: None,
                     profile: burst.profile,
                     durability_remaining: burst.profile.durability,
@@ -1315,12 +1339,21 @@ impl TorpedoSystem {
             // The map is keyed by actual round, never by a world target. Each
             // entry is a permitted measurement from a finite producer.
             t.tick(dt, guidance.get(&t.uuid));
-            if t.is_expired() {
-                result.expired.push(t.uuid.clone());
-            }
         }
-        self.in_flight.retain(|t| !t.is_expired());
         result
+    }
+
+    /// Called after physical PDC and endpoint impacts. Expired survivors cannot
+    /// be saved or advanced into a later interval.
+    pub fn settle_expired(&mut self) -> Vec<String> {
+        let expired = self
+            .in_flight
+            .iter()
+            .filter(|round| round.is_expired())
+            .map(|round| round.uuid.clone())
+            .collect();
+        self.in_flight.retain(|round| !round.is_expired());
+        expired
     }
 
     /// Close the actual collision interval after ordinary Damage. No payload,
@@ -1328,6 +1361,7 @@ impl TorpedoSystem {
     pub fn finish_collision_interval(&mut self) {
         for round in &mut self.in_flight {
             round.previous_position = None;
+            round.collision_interval_secs = None;
         }
     }
 
@@ -1342,9 +1376,22 @@ impl TorpedoSystem {
             return Ok(None);
         };
         let round = &self.in_flight[index];
-        round
-            .profile
-            .validate_active(round.lifespan_remaining, round.durability_remaining)?;
+        round.profile.validate()?;
+        let final_live_interval = round.lifespan_remaining == 0.0
+            && round.previous_position.is_some()
+            && round
+                .collision_interval_secs
+                .is_some_and(|seconds| seconds.is_finite() && seconds > 0.0);
+        if !final_live_interval {
+            round
+                .profile
+                .validate_active(round.lifespan_remaining, round.durability_remaining)?;
+        } else if !round.durability_remaining.is_finite()
+            || round.durability_remaining <= 0.0
+            || round.durability_remaining > round.profile.durability
+        {
+            return Err("intercepted final interval has invalid remaining durability".into());
+        }
         let remaining = (round.durability_remaining - damage).max(0.0);
         if remaining == 0.0 {
             self.in_flight.remove(index);

@@ -666,6 +666,7 @@ fn find_detonation_hits_handles_multiple_torpedoes_independently() {
     // matching rather than tube load state.
     sys.in_flight.push(Torpedo {
         previous_position: None,
+        collision_interval_secs: None,
         last_guidance: None,
         profile: sys.config.round_profile(Default::default()),
         durability_remaining: sys.config.durability,

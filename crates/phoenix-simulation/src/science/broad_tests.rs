@@ -86,6 +86,7 @@ fn actual_in_flight_ordnance_is_measured_without_guidance_or_launcher_intelligen
         .in_flight
         .push(crate::weapons::torpedo::Torpedo {
             previous_position: None,
+            collision_interval_secs: None,
             last_guidance: None,
             profile: crate::weapons::torpedo::TorpedoConfig {
                 lifespan: 100.0,

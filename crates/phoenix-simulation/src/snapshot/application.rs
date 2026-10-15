@@ -2025,6 +2025,7 @@ pub(super) fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponStat
             .iter()
             .map(|t| Torpedo {
                 previous_position: None,
+                collision_interval_secs: None,
                 last_guidance: t.last_guidance.clone(),
                 profile: t.profile,
                 durability_remaining: t.durability_remaining,

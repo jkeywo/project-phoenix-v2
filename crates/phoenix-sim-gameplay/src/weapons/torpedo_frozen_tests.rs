@@ -189,6 +189,7 @@ fn actual_guided_motion_exposes_one_relative_collision_interval_without_saved_sh
     system.finish_collision_interval();
     let mut expected = current;
     expected.previous_position = None;
+    expected.collision_interval_secs = None;
     assert_eq!(system.in_flight[0], expected);
     system.tick_with_work(
         0.1,
@@ -202,4 +203,85 @@ fn actual_guided_motion_exposes_one_relative_collision_interval_without_saved_sh
     );
     system.finish_collision_interval();
     assert_eq!(system.in_flight[0].previous_position, None);
+}
+
+#[test]
+fn final_clipped_guided_interval_is_interceptable_before_terminal_payload_settlement() {
+    let mut system = loaded(1);
+    system.in_flight[0].lifespan_remaining = 0.125;
+    let result = system.advance_with_work(
+        0.5,
+        &HashMap::new(),
+        &mut |_| panic!("already emitted round needs no machinery work"),
+        &mut || unreachable!(),
+    );
+    assert!(
+        result.expired.is_empty(),
+        "Physics cannot settle terminal work before PDC"
+    );
+    let round = &system.in_flight[0];
+    assert_eq!(round.lifespan_remaining, 0.0);
+    assert_eq!(
+        round.z, -1.0,
+        "8 units/sec for only the last 0.125 live seconds"
+    );
+    assert_eq!(round.collision_interval_secs, Some(0.125));
+    assert_eq!(system.apply_interception("first", 6.0).unwrap(), Some(0.0));
+    assert!(system
+        .find_detonation_hits(&[("target".into(), 0.0, 0.0, -1.0, 1.0)])
+        .is_empty());
+    assert!(
+        system.settle_expired().is_empty(),
+        "interception removes the actual payload once"
+    );
+}
+
+#[test]
+fn surviving_expiry_settles_once_after_only_its_actual_live_travel() {
+    let mut system = loaded(1);
+    system.in_flight[0].lifespan_remaining = 0.125;
+    system.advance_with_work(
+        1.0,
+        &HashMap::new(),
+        &mut |_| unreachable!(),
+        &mut || unreachable!(),
+    );
+    assert_eq!(system.in_flight[0].z, -1.0);
+    assert_eq!(system.in_flight[0].collision_interval_secs, Some(0.125));
+    system.in_flight[0].tick(0.0, None);
+    assert_eq!(system.in_flight[0].collision_interval_secs, Some(0.125));
+    system.finish_collision_interval();
+    assert_eq!(system.in_flight[0].collision_interval_secs, None);
+    assert_eq!(system.settle_expired(), ["first"]);
+    assert!(system.settle_expired().is_empty());
+    assert!(system.handle_collision_full("first").is_none());
+}
+
+#[test]
+fn accepted_point_cannot_be_replaced_by_another_intent_older_sample_or_unfitted_receiver() {
+    let mut system = loaded(1);
+    let original = GuidanceObservation {
+        target_uuid: "target".into(),
+        position: [4.0, 2.0, -20.0],
+        sampled_tick: 42,
+        source: GuidanceSource::Seeker,
+    };
+    assert!(system.in_flight[0].accept_guidance(&original));
+    for case in 0..3 {
+        let mut bad = original.clone();
+        match case {
+            0 => bad.target_uuid = "different-intent".into(),
+            1 => bad.sampled_tick = 41,
+            2 => {
+                bad.source = GuidanceSource::Console {
+                    ship_uuid: "source".into(),
+                    console: phoenix_model::identity::ConsoleId("science".into()),
+                    system: phoenix_model::identity::SystemId("illumination".into()),
+                }
+            }
+            _ => unreachable!(),
+        }
+        assert!(!system.in_flight[0].accept_guidance(&bad));
+        assert_eq!(system.in_flight[0].last_guidance.as_ref(), Some(&original));
+    }
 }

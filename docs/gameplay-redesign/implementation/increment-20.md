@@ -470,3 +470,14 @@ physical collect/handoff/return, interruption, origin/craft loss, finite capacit
 malformed no-write and fresh 360-step complete capture/digest evidence are required.
 Root owns compatibility versions and full gates. This bounded consumer does not
 close increments19/20.
+
+First-loop knowledge is deliberately local. Exact officer condition/location and
+escort controls are published only for actual local compartments/teams/escorts,
+or a pod physically stored on the origin carrier through its explicit permitted
+Bay feed. Deployed, foreign-carried and remotely Lost officers produce identical
+live controls and ordinary AI inputs. Existing actual departure Job history may
+remain as earned history; it cannot be refreshed into privileged current remote
+condition or loss. Bay manifests/counts derive only for locally stored craft.
+Assert paired hidden-state variants produce identical permitted projections.
+Later dated Comms telemetry can extend this view through its real delivery owner;
+global physical custody alone is never a knowledge grant.

@@ -1,9 +1,5 @@
-// Science scan readout and control (issue #1032).
-//
-// Sits under <ph-operation-panel> on the captain console: operations are what
-// the crew are doing to the world, a scan is what they are finding out about
-// it. One ship holds one reading, so this is a header, a short list of rows and
-// a button — not a log.
+// Timed focused enquiry and bounded historical findings. Science, Sensors and
+// Captain surfaces use this same owner-scoped control and historical picker.
 //
 // NOTHING HERE KNOWS WHAT A STRUCTURE IS. Every row is a `(label, value)` pair
 // the server derived from the subject's own condition track (or, for mass —
@@ -29,10 +25,10 @@
 // loaded, so the constructor's template t() calls never see an empty table.
 // No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
-import { t } from '../strings.js';
-import { observationDetails } from '../observation-details.js';
+import { t, wireText } from '../strings.js';
+import { observationDetails, observationRows } from '../observation-details.js';
 import { PhElement, phDefine } from './ph-element.js';
-import { SENSORS_SCAN_ACTION_ID } from '../stations/sensors-actions.js';
+import { SENSORS_SCAN_ACTION_ID, SENSORS_CANCEL_SCAN_ACTION_ID } from '../stations/sensors-actions.js';
 
 /**
  * Whole-percent condition, rendered at the precision the answering band bought.
@@ -113,8 +109,13 @@ export class PhScanReadout extends PhElement {
              padding: 0.35rem; margin-top: 0.25rem; background: transparent; color: var(--ink);
              border: 1px solid var(--line-soft); border-radius: 2px; cursor: pointer; min-height: var(--control-hit-min); }
     button:disabled { color: var(--ink-dim); cursor: default; }
+    label { display:block; font-size:var(--text-xs); }
+    select { display:block; width:100%; max-width:100%; min-height:44px; font:inherit; color:var(--ink); background:var(--surface-void); }
   </style>
   <div class="heading" id="heading"></div>
+  <label id="history-label" for="history"><span id="history-text"></span><select id="history"></select></label>
+  <div id="progress" role="status"></div>
+  <button id="cancel" type="button" hidden></button>
   <div id="body"></div>
   <div class="reason" id="reason" hidden></div>
   <button id="action" type="button" hidden></button>
@@ -123,6 +124,14 @@ export class PhScanReadout extends PhElement {
 
   onTemplate() {
     this.$('heading').textContent = t('component.scan.heading');
+    this.$('history-text').textContent = t('component.scan.history');
+    this.$('cancel').textContent = t('component.scan.cancel');
+    this.$('history').addEventListener('change', () => this.render(this.state));
+    this.$('history').addEventListener('keydown', event => event.stopPropagation());
+    this.$('cancel').addEventListener('click', () => {
+      const scan = this.state?.scan;
+      if (scan?.controllable && scan.system_id && scan.focused) window.activateSemanticAction?.(SENSORS_CANCEL_SCAN_ACTION_ID, { source: 'control', detail: { system_id: scan.system_id } });
+    });
     this.$('action').addEventListener('click', () => this.#onAction());
   }
 
@@ -134,8 +143,8 @@ export class PhScanReadout extends PhElement {
   get action() {
     const scan = (this.state && this.state.scan) || {};
     const uuid = (this.state && this.state.target_uuid) || null;
-    if (!scan.capable || !uuid) return null;
-    return { action: 'scan_target', uuid };
+    if (!scan.capable || !scan.controllable || !scan.system_id || !uuid) return null;
+    return { action: 'scan_target', uuid, control_system_id: scan.system_id };
   }
 
   #onAction() {
@@ -144,13 +153,25 @@ export class PhScanReadout extends PhElement {
     if (!action || typeof activate !== 'function') return;
     activate(SENSORS_SCAN_ACTION_ID, {
       source: 'control',
-      detail: { uuid: action.uuid },
+      detail: { uuid: action.uuid, system_id: action.control_system_id },
     });
   }
 
   render(state) {
     const scan = (state && state.scan) || {};
-    const reading = scan.reading || null;
+    const picker = this.$('history'), key = reading => JSON.stringify([reading.subject_uuid, reading.taken_at_tick, reading.band]);
+    const history = new Map((scan.history || []).map(reading => [key(reading), reading]));
+    const choices = new Map([['latest', t('component.scan.latest')], ...[...history].map(([id, reading]) => [id,
+      t('component.scan.history-entry', { name: reading.subject_name ? wireText(reading.subject_name) : reading.subject_uuid, tick: reading.taken_at_tick })])]);
+    const selected = picker.value;
+    for (const option of [...picker.options]) if (!choices.has(option.value)) option.remove();
+    for (const [id, text] of choices) { let option = [...picker.options].find(option => option.value === id); if (!option) { option = this.ownerDocument.createElement('option'); option.value = id; picker.append(option); } option.textContent = text; }
+    picker.value = choices.has(selected) ? selected : 'latest'; this.$('history-label').hidden = !history.size;
+    const reading = history.get(picker.value) || scan.reading || null;
+    const focused = scan.focused;
+    this.$('progress').textContent = focused ? t('component.scan.progress', { progress: Math.round(Math.max(0, Math.min(1000, Number(focused.progress) || 0)) / 10) })
+      + (focused.waiting ? ' · ' + t(['unpowered', 'source_unavailable'].includes(focused.waiting) ? 'component.scan.waiting.' + focused.waiting : focused.waiting) : '') : '';
+    this.$('cancel').hidden = !focused || !scan.controllable; this.$('cancel').disabled = !scan.system_id;
     const body = this.shadowRoot.getElementById('body');
     const oldDetails = body.querySelector('.observation-details');
     const detailsOpen = oldDetails?.open && oldDetails.dataset.subject === reading?.subject_uuid;
@@ -160,13 +181,19 @@ export class PhScanReadout extends PhElement {
     // A hull whose sensor suite cannot take a reading says so, rather than
     // showing an empty box the crew have to interpret.
     if (!scan.capable) {
+      body.dataset.capable = 'false';
       body.innerHTML = `<div class="empty">${t('component.scan.none')}</div>`;
       reasonEl.hidden = true;
       button.hidden = true;
       return;
     }
 
-    if (!reading) {
+    const readingKey = JSON.stringify(reading), sameReading = this._readingKey === readingKey && body.dataset.capable === 'true';
+    this._readingKey = readingKey; body.dataset.capable = 'true';
+    if (sameReading) {
+      const rows = observationRows(reading?.observation, scan.observation_tick, Number.isFinite(reading?.condition_fraction) ? { condition_fraction: 'component.scan.condition' } : {});
+      for (const [key, , value] of rows) { const row = body.querySelector(`[data-observation="${key}"]`); if (row) row.textContent = value; }
+    } else if (!reading) {
       body.innerHTML = `<div class="empty">${t('component.scan.idle')}</div>`;
     } else {
       body.textContent = '';
@@ -174,7 +201,7 @@ export class PhScanReadout extends PhElement {
       subject.className = 'subject';
       subject.innerHTML = '<span class="name"></span><span class="band"></span>';
       subject.firstChild.textContent = reading.subject_name
-        ? t(reading.subject_name)
+        ? wireText(reading.subject_name)
         : (reading.subject_uuid || '');
       subject.lastChild.textContent = reading.band_label
         ? t(reading.band_label)
@@ -263,7 +290,7 @@ export class PhScanReadout extends PhElement {
     if (scan.refusal) reasonEl.textContent = t(scan.refusal);
 
     const action = this.action;
-    button.hidden = false;
+    button.hidden = !scan.controllable;
     button.disabled = !action;
     button.textContent = t('component.scan.take');
   }

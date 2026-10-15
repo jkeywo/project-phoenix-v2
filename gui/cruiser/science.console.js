@@ -7,6 +7,7 @@ import { makeScienceRender } from '../stations/science-console.js';
 
 export const renderStation = makeScienceRender({
   ids: {
+    scanReadout: 'scan-readout', passiveReadout: 'passive-readout',
     sensorRadar: 'sensor-radar',
     sensorPanel: 'sensor-panel',
     shieldPanel: 'shield-panel',

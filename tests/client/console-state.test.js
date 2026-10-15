@@ -2210,12 +2210,12 @@ describe('buildSensorsConsoleState', () => {
     const s = buildSensorsConsoleState({
       blackboards: { scan: { capable: true, reading, refusal: null } },
     });
-    expect(s.scan).toEqual({ observation_tick: null, capable: true, reading, refusal: null });
+    expect(s.scan).toEqual({ system_id: null, controllable: false, history: [], focused: null, observation_tick: null, capable: true, reading, refusal: null });
   });
 
   it('reports a hull with no scan channel as having no survey suite', () => {
     expect(buildSensorsConsoleState(EMPTY).scan)
-      .toEqual({ observation_tick: null, capable: false, reading: null, refusal: null });
+      .toEqual({ system_id: null, controllable: false, history: [], focused: null, observation_tick: null, capable: false, reading: null, refusal: null });
   });
 
   it('carries a scan refusal through as its string id', () => {

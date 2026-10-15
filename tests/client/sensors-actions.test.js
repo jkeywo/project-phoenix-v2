@@ -15,6 +15,8 @@ import {
   SENSORS_SCAN_ACTION,
   SENSORS_CANCEL_IMPULSE_ACTION_ID,
   SENSORS_SCAN_ACTION_ID,
+  SENSORS_CANCEL_SCAN_ACTION_ID,
+  SENSORS_PASSIVE_ACTION_ID,
   SENSORS_TARGET_ACTION_ID,
   SENSORS_VIEWSCREEN_ACTION_ID,
   createSensorScienceActionRegistry,
@@ -61,6 +63,8 @@ describe('Sensors and Science semantic definitions', () => {
     expect(SENSOR_SCIENCE_ACTIONS.map((entry) => entry.id)).toEqual([
       SENSORS_TARGET_ACTION_ID,
       SENSORS_SCAN_ACTION_ID,
+      SENSORS_CANCEL_SCAN_ACTION_ID,
+      SENSORS_PASSIVE_ACTION_ID,
       SENSORS_VIEWSCREEN_ACTION_ID,
       SENSORS_CANCEL_IMPULSE_ACTION_ID,
       SCIENCE_SHIELD_FOCUS_ACTION_ID,
@@ -77,7 +81,7 @@ describe('Sensors and Science semantic definitions', () => {
     expect(SENSOR_SCIENCE_ACTIONS[0].contexts).toEqual([
       'sensors', 'science', 'captain', 'tactical',
     ]);
-    expect(SENSOR_SCIENCE_ACTIONS[1].contexts).toEqual(['captain']);
+    expect(SENSOR_SCIENCE_ACTIONS[1].contexts).toEqual(['captain', 'science', 'sensors']);
   });
 
   it('registers conflict-free beside Captain and remains in the private play catalogue', () => {
@@ -190,7 +194,7 @@ describe('Sensors authority-preserving adapters', () => {
   it('scans only the authoritative current target when the suite reports capable', () => {
     const sendAction = vi.fn();
     let sensors = {
-      blips: [{ uuid: 'selected' }], target_uuid: 'selected', scan: { capable: true },
+      blips: [{ uuid: 'selected' }], target_uuid: 'selected', scan: { capable: true, controllable: true, system_id: 'focus-array' },
     };
     const registry = sensorRegistry({
       getState: () => keyedState({ sensors }),
@@ -211,17 +215,17 @@ describe('Sensors authority-preserving adapters', () => {
     expect(sendAction).toHaveBeenCalledTimes(1);
   });
 
-  it('still sends an available scan while Sensors is AI-held so admission owns Refused', () => {
+  it('withholds controls when the actual focused owner is delegated', () => {
     const sendAction = vi.fn();
     const registry = sensorRegistry({
       getState: () => ({
-        target_uuid: 'selected', scan: { capable: true }, sensors_auto: true,
+        target_uuid: 'selected', scan: { capable: true, controllable: false, system_id: 'focus-array' }, sensors_auto: true,
       }),
       sendAction,
     });
     expect(activate(registry, SENSORS_SCAN_ACTION_ID, 'captain'))
-      .toMatchObject({ handled: true });
-    expect(sendAction).toHaveBeenCalledOnce();
+      .toMatchObject({ handled: false });
+    expect(sendAction).not.toHaveBeenCalled();
   });
 
   it('shows only the Sensors projection on the viewscreen', () => {

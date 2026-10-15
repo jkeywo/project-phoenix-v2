@@ -5682,3 +5682,27 @@ workshop.fields.sensor-opaque,Workshop spatial fields,Opaque to sensors,Für Sen
 workshop.fields.comms-opaque,Workshop spatial fields,Opaque to Comms,Für Funk undurchlässig,Opaque to Comms,machine
 workshop.fields.apply,Workshop spatial fields,Apply environment,Umgebung übernehmen,Apply environment,machine
 workshop.fields.refused,Workshop spatial fields,Environment refused: {reason},Umgebung abgelehnt: {reason},Environment refused: {reason},machine
+component.scan.history,Sensing control and historical evidence,Historical finding,Historischer Befund,Historical finding,machine
+component.scan.latest,Sensing control and historical evidence,Latest result,Neuestes Ergebnis,Latest result,machine
+component.scan.history-entry,Sensing control and historical evidence,{name} · tick {tick},{name} · Tick {tick},{name} · tick {tick},machine
+component.scan.progress,Sensing control and historical evidence,Focused enquiry {progress}%,Fokusuntersuchung {progress}%,Focused enquiry {progress}%,machine
+component.scan.cancel,Sensing control and historical evidence,Cancel focused enquiry,Fokusuntersuchung abbrechen,Cancel focused enquiry,machine
+component.scan.waiting.unpowered,Sensing control and historical evidence,Waiting for funded work,Warten auf finanzierte Arbeit,Waiting for funded work,machine
+component.scan.waiting.source_unavailable,Sensing control and historical evidence,Source unavailable,Quelle nicht verfuegbar,Source unavailable,machine
+passive.title,Sensing control and historical evidence,Passive bearings,Passive Peilungen,Passive bearings,machine
+passive.enable,Sensing control and historical evidence,Enable receiver,Empfaenger aktivieren,Enable receiver,machine
+passive.disable,Sensing control and historical evidence,Disable receiver,Empfaenger deaktivieren,Disable receiver,machine
+passive.enabled,Sensing control and historical evidence,Receiver enabled,Empfaenger aktiviert,Receiver enabled,machine
+passive.disabled,Sensing control and historical evidence,Receiver disabled,Empfaenger deaktiviert,Receiver disabled,machine
+passive.unavailable,Sensing control and historical evidence,Unable to operate,Betrieb nicht moeglich,Unable to operate,machine
+passive.sample,Sensing control and historical evidence,{bearing}° ±{error}° · {signature} · strength {strength} · age {age},{bearing}° ±{error}° · {signature} · Staerke {strength} · Alter {age},{bearing}° ±{error}° · {signature} · strength {strength} · age {age},machine
+passive.signature.unclassified,Sensing control and historical evidence,Unclassified signal,Unklassifiziertes Signal,Unclassified signal,machine
+passive.signature.reactor,Sensing control and historical evidence,Reactor emission,Reaktoremission,Reactor emission,machine
+passive.signature.propulsion,Sensing control and historical evidence,Propulsion emission,Antriebsemission,Propulsion emission,machine
+passive.signature.weapon,Sensing control and historical evidence,Weapon emission,Waffenemission,Weapon emission,machine
+passive.signature.active_scan,Sensing control and historical evidence,Active scan emission,Aktive Scanemission,Active scan emission,machine
+passive.signature.comms,Sensing control and historical evidence,Comms emission,Funkemission,Comms emission,machine
+semantic_action.sensors.cancel_scan.label,Sensing control and historical evidence,Cancel focused enquiry,Fokusuntersuchung abbrechen,Cancel focused enquiry,machine
+semantic_action.sensors.cancel_scan.accessibility,Sensing control and historical evidence,Cancel this instrument’s focused enquiry,Fokusuntersuchung dieses Instruments abbrechen,Cancel this instrument’s focused enquiry,machine
+semantic_action.sensors.passive_enabled.label,Sensing control and historical evidence,Set passive receiver enabled,Passiven Empfaenger aktivieren,Set passive receiver enabled,machine
+semantic_action.sensors.passive_enabled.accessibility,Sensing control and historical evidence,Enable or disable the selected passive receiver,Ausgewaehlten passiven Empfaenger aktivieren oder deaktivieren,Enable or disable the selected passive receiver,machine

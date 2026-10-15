@@ -15,6 +15,8 @@ import { createSemanticActionRegistry } from '../semantic-action-registry.js';
 
 export const SENSORS_TARGET_ACTION_ID = 'sensors.target-selection';
 export const SENSORS_SCAN_ACTION_ID = 'sensors.scan';
+export const SENSORS_CANCEL_SCAN_ACTION_ID = 'sensors.cancel-scan';
+export const SENSORS_PASSIVE_ACTION_ID = 'sensors.passive-enabled';
 export const SENSORS_VIEWSCREEN_ACTION_ID = 'sensors.viewscreen';
 export const SENSORS_CANCEL_IMPULSE_ACTION_ID = 'sensors.cancel-impulse';
 export const SCIENCE_SHIELD_FOCUS_ACTION_ID = 'science.shield-focus';
@@ -43,17 +45,19 @@ export const SENSORS_TARGET_ACTION = action(
   'face-left',
 );
 
-// The only shipped scan control is on the destroyer Captain surface. The
-// action remains a Sensors identity because it commands the Sensors suite.
 export const SENSORS_SCAN_ACTION = action(
   SENSORS_SCAN_ACTION_ID,
-  Object.freeze(['captain']),
+  Object.freeze(['captain', 'science', 'sensors']),
   'sensors.scan',
   'KeyN',
   'button',
   'face-top',
   { shiftKey: true },
 );
+export const SENSORS_CANCEL_SCAN_ACTION = defineStationAction({ id: SENSORS_CANCEL_SCAN_ACTION_ID,
+  contexts: ['captain', 'science', 'sensors'], labelKey: 'sensors.cancel_scan', bindings: [null, null] });
+export const SENSORS_PASSIVE_ACTION = defineStationAction({ id: SENSORS_PASSIVE_ACTION_ID,
+  contexts: ['captain', 'science', 'sensors'], labelKey: 'sensors.passive_enabled', bindings: [null, null] });
 
 export const SENSORS_VIEWSCREEN_ACTION = action(
   SENSORS_VIEWSCREEN_ACTION_ID,
@@ -97,6 +101,8 @@ export const SCIENCE_SHIELD_RECOVERY_ACTION = defineStationAction({
 export const SENSOR_SCIENCE_ACTIONS = Object.freeze([
   SENSORS_TARGET_ACTION,
   SENSORS_SCAN_ACTION,
+  SENSORS_CANCEL_SCAN_ACTION,
+  SENSORS_PASSIVE_ACTION,
   SENSORS_VIEWSCREEN_ACTION,
   SENSORS_CANCEL_IMPULSE_ACTION,
   SCIENCE_SHIELD_FOCUS_ACTION,
@@ -178,9 +184,19 @@ export function registerSensorScienceActions(registry, options = {}) {
     const view = sensorsActionView(getState());
     const uuid = view && typeof view.target_uuid === 'string' ? view.target_uuid : '';
     const requested = detail && detail.uuid;
-    if (!view || !view.scan || !view.scan.capable || !uuid
-        || (requested != null && requested !== uuid)) return false;
-    return send(actionId, correlation, inputMs, 'scan_target', { uuid });
+    if (!view || !view.scan?.capable || !view.scan.controllable || !view.scan.system_id || !uuid
+        || (requested != null && requested !== uuid) || (detail?.system_id && detail.system_id !== view.scan.system_id)) return false;
+    return send(actionId, correlation, inputMs, 'scan_target', { uuid, control_system_id: view.scan.system_id });
+  });
+  registry.register(SENSORS_CANCEL_SCAN_ACTION, ({ actionId, correlation, inputMs, detail } = {}) => {
+    const scan = sensorsActionView(getState())?.scan;
+    if (!scan?.controllable || !scan.system_id || !scan.focused || (detail?.system_id && detail.system_id !== scan.system_id)) return false;
+    return send(actionId, correlation, inputMs, 'cancel_focused_scan', { control_system_id: scan.system_id });
+  });
+  registry.register(SENSORS_PASSIVE_ACTION, ({ actionId, correlation, inputMs, detail } = {}) => {
+    const row = sensorsActionView(getState())?.passive?.find(row => row.system_id === detail?.system_id);
+    if (!row?.controllable || typeof detail?.enabled !== 'boolean') return false;
+    return send(actionId, correlation, inputMs, 'set_passive_enabled', { control_system_id: row.system_id, enabled: detail.enabled });
   });
 
   registry.register(SENSORS_VIEWSCREEN_ACTION, ({ actionId, correlation, inputMs } = {}) => {

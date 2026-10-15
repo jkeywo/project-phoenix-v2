@@ -53,6 +53,9 @@ export function makeScienceRender(variant) {
     if (ids.sensorRadar) { const el = doc.getElementById(ids.sensorRadar); if (el) el.state = sensors; }
     if (ids.sensorPanel) { const el = doc.getElementById(ids.sensorPanel); if (el) el.state = sensors; }
 
+    if (ids.scanReadout) { const el = doc.getElementById(ids.scanReadout); if (el) el.state = { scan: sensors.scan || {}, target_uuid: sensors.target_uuid || null }; }
+    if (ids.passiveReadout) { const el = doc.getElementById(ids.passiveReadout); if (el) el.state = { passive: sensors.passive || [] }; }
+
     // ── Shields ──────────────────────────────────────────────────────────
     if (ids.shieldPanel) { const el = doc.getElementById(ids.shieldPanel); if (el) el.state = shields; }
     if (ids.shieldFacings) {

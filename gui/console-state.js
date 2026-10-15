@@ -1937,13 +1937,17 @@ export function buildShieldsConsoleState(state, systemIds = []) {
  * `capable`, so the console never has to guess.
  * @param {{ blackboards }} state
  */
-function scanPayload(state) {
+function scanPayload(state, systemIds = []) {
   const entry = blackboardOfKind(state, 'Scan');
   const bb = entry?.data || {};
   return {
+    system_id: bb.owner ?? null,
+    controllable: typeof bb.owner === 'string' && systemIds.includes(bb.owner) && state.controlSources?.[bb.owner] === 'Human',
     observation_tick: observationTickFor(state, entry?.systemId),
     capable: bb.capable ?? false,
     reading: bb.reading ?? null,
+    history: Array.isArray(bb.history) ? bb.history : [],
+    focused: bb.focused ?? null,
     refusal: bb.refusal ?? null,
   };
 }
@@ -2143,7 +2147,10 @@ export function buildSensorsConsoleState(state, systemIds = []) {
     target_projection:  targetProjection,
     // The last scan reading (issue #1032) — a blackboard of its own, so it is
     // read from its own channel key rather than off the sensors one.
-    scan:               (() => { const scan = scanPayload(state); return scan.reading && (overrides[scan.reading.subject_uuid] === 'conceal' || Object.hasOwn(reports, scan.reading.subject_uuid)) ? { ...scan, reading: null } : scan; })(),
+    scan:               (() => { const scan = scanPayload(state, systemIds); return scan.reading && (overrides[scan.reading.subject_uuid] === 'conceal' || Object.hasOwn(reports, scan.reading.subject_uuid)) ? { ...scan, reading: null } : scan; })(),
+    passive: blackboardsOfKind(state, 'Passive', systemIds).map(entry => ({ ...entry.data,
+      system_id: entry.systemId, controllable: systemIds.includes(entry.systemId) && state.controlSources?.[entry.systemId] === 'Human',
+      observation_tick: observationTickFor(state, entry.systemId) })),
     own_hull: aggregateStationHull('sensors', state.consoleHull, state.stationSystems),
     sensors_auto: systemIds.length > 0
       ? systemIds.every(id => state.controlSources?.[id] === 'Ai')

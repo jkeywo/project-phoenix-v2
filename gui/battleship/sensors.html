@@ -62,7 +62,7 @@
           <!-- hide-shield-rows: this console's Target Analysis panel above
                already shows target shields (renderShieldFacings()) and
                Shield Freq — without this the shared panel duplicated both. -->
-          <ph-sensor-panel id="sensor-panel" hide-shield-rows></ph-sensor-panel>
+          <ph-sensor-panel id="sensor-panel" hide-shield-rows></ph-sensor-panel><ph-scan-readout id="scan-readout"></ph-scan-readout><ph-passive-readout id="passive-readout"></ph-passive-readout>
         </div>
       </div>
     </div>
@@ -70,6 +70,8 @@
   <script type="module">
     import '../components/ph-sensor-radar.js';
     import '../components/ph-sensor-panel.js';
+    import '../components/ph-scan-readout.js';
+    import '../components/ph-passive-readout.js';
     import { initConsole } from '../console-core.js';
     import { SENSORS_CANCEL_IMPULSE_ACTION_ID } from '../stations/sensors-actions.js';
     // The render lives in gui/battleship/sensors.console.js (issue #1235):

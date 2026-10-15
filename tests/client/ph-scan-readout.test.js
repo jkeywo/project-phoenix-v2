@@ -40,7 +40,7 @@ const COARSE = {
 
 function panelState(overrides = {}) {
   return {
-    scan: { capable: true, reading: DETAILED, refusal: null },
+    scan: { capable: true, controllable: true, system_id: 'focus-array', reading: DETAILED, refusal: null },
     target_uuid: '00000000-0000-8000-8000-000000000042',
     ...overrides,
   };
@@ -83,7 +83,7 @@ describe('PhScanReadout', () => {
 
   it('renders a fitted suite that has read nothing yet, with a live button', () => {
     const el = setup();
-    el.state = panelState({ scan: { capable: true, reading: null, refusal: null } });
+    el.state = panelState({ scan: { capable: true, controllable: true, system_id: 'focus-array', reading: null, refusal: null } });
     expect(el.shadowRoot.querySelector('.empty').textContent)
       .toBe(t('component.scan.idle'));
     expect(button(el).hidden).toBe(false);
@@ -121,7 +121,7 @@ describe('PhScanReadout', () => {
     const el = setup();
     el.state = panelState({
       scan: {
-        capable: true,
+        capable: true, controllable: true, system_id: 'focus-array',
         reading: {
           ...DETAILED,
           flags: [['world.invented.pylon_intact.label', true]],
@@ -142,7 +142,7 @@ describe('PhScanReadout', () => {
   // stops claiming to count what it did not resolve.
   it('states the tolerance of a coarse reading and drops the rows it did not resolve', () => {
     const el = setup();
-    el.state = panelState({ scan: { capable: true, reading: COARSE, refusal: null } });
+    el.state = panelState({ scan: { capable: true, controllable: true, system_id: 'focus-array', reading: COARSE, refusal: null } });
     const condition = rows(el)[0];
     expect(condition[1]).toBe('25%±13%');
     expect(rows(el)).toHaveLength(3, 'condition, mass and the flag; no capacity row');
@@ -153,7 +153,7 @@ describe('PhScanReadout', () => {
   // rounding and no tolerance beside it.
   it('reports mass unrounded and without a tolerance even at a coarse band', () => {
     const el = setup();
-    el.state = panelState({ scan: { capable: true, reading: COARSE, refusal: null } });
+    el.state = panelState({ scan: { capable: true, controllable: true, system_id: 'focus-array', reading: COARSE, refusal: null } });
     const mass = rows(el)[1];
     expect(mass).toEqual([t('component.scan.mass'), '250000']);
   });
@@ -161,7 +161,7 @@ describe('PhScanReadout', () => {
   it('shows the refusal reason and no stale reading', () => {
     const el = setup();
     el.state = panelState({
-      scan: { capable: true, reading: null, refusal: 'scan.refusal.out_of_range' },
+      scan: { capable: true, controllable: true, system_id: 'focus-array', reading: null, refusal: 'scan.refusal.out_of_range' },
     });
     const reason = el.shadowRoot.getElementById('reason');
     expect(reason.hidden).toBe(false);
@@ -176,7 +176,7 @@ describe('PhScanReadout', () => {
     button(el).click();
     expect(window.activateSemanticAction).toHaveBeenCalledWith('sensors.scan', {
       source: 'control',
-      detail: { uuid: '00000000-0000-8000-8000-000000000042' },
+      detail: { uuid: '00000000-0000-8000-8000-000000000042', system_id: 'focus-array' },
     });
   });
 
@@ -264,7 +264,7 @@ describe('PhScanReadout hazard projection', () => {
   it('names what is under a confirmed rock, how near it gets and when', () => {
     const el = setup();
     el.state = panelState({
-      scan: { capable: true, reading: CONFIRMED_ROCK, refusal: null },
+      scan: { capable: true, controllable: true, system_id: 'focus-array', reading: CONFIRMED_ROCK, refusal: null },
     });
     const shown = rows(el);
     expect(shown).toContainEqual([
@@ -280,7 +280,7 @@ describe('PhScanReadout hazard projection', () => {
     // learned something, and a blank panel would leave them where they started.
     const el = setup();
     el.state = panelState({
-      scan: { capable: true, reading: HARMLESS_ROCK, refusal: null },
+      scan: { capable: true, controllable: true, system_id: 'focus-array', reading: HARMLESS_ROCK, refusal: null },
     });
     const shown = rows(el);
     expect(shown).toContainEqual([
@@ -297,7 +297,7 @@ describe('PhScanReadout hazard projection', () => {
   it('says what the suite calls a mass that size, beside the number', () => {
     const el = setup();
     el.state = panelState({
-      scan: { capable: true, reading: CONFIRMED_ROCK, refusal: null },
+      scan: { capable: true, controllable: true, system_id: 'focus-array', reading: CONFIRMED_ROCK, refusal: null },
     });
     expect(rows(el)).toContainEqual([
       t('component.scan.mass'),

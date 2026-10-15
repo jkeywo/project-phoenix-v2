@@ -416,12 +416,26 @@ export const ACTION_MAP = Object.freeze({
    * and the server never has to guess which contact was selected when.
    */
   scan_target: (a, send) => {
-    if (!a.uuid) return;
+    if (!a.uuid || !a.control_system_id) return;
     const correlated = typeof a.correlation === 'string' && a.correlation;
     send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
       ...(correlated ? { correlation: a.correlation } : {}),
-      target: 'sensors',
+      target: a.control_system_id,
       payload: { type: 'ScanTarget', data: { uuid: a.uuid } },
+    });
+  },
+  cancel_focused_scan: (a, send) => {
+    if (!a.control_system_id) return;
+    send(a.correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(a.correlation ? { correlation: a.correlation } : {}), target: a.control_system_id,
+      payload: { type: 'CancelFocusedScan' },
+    });
+  },
+  set_passive_enabled: (a, send) => {
+    if (!a.control_system_id || typeof a.enabled !== 'boolean') return;
+    send(a.correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(a.correlation ? { correlation: a.correlation } : {}), target: a.control_system_id,
+      payload: { type: 'SetPassiveEnabled', data: { enabled: a.enabled } },
     });
   },
 

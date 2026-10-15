@@ -42,7 +42,7 @@
        exactly as tall as what they hold, and a stack too tall for the rail
        overflows the rail's own `overflow-y: auto` above rather than being
        crushed to nothing. */
-    ph-sensor-panel, ph-shield-panel, ph-shield-facings { flex-shrink: 0; }
+    ph-sensor-panel, ph-scan-readout, ph-passive-readout, ph-shield-panel, ph-shield-facings { flex-shrink: 0; }
     /* Compact threat-bearing readout (issue #926) — the standing fact the
        battleship's dedicated Shields console shows, condensed to one line
        and set beside the ring it describes. Hidden when Sensors holds no
@@ -77,7 +77,7 @@
             <span class="spacer"></span>
             <span class="auto-badge" id="science-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
           </div>
-          <ph-sensor-panel id="sensor-panel"></ph-sensor-panel>
+          <ph-sensor-panel id="sensor-panel"></ph-sensor-panel><ph-scan-readout id="scan-readout"></ph-scan-readout><ph-passive-readout id="passive-readout"></ph-passive-readout>
         </div>
         <div class="radar-col scope-cell">
           <ph-sensor-radar id="sensor-radar"></ph-sensor-radar>
@@ -93,6 +93,8 @@
   <script type="module">
     import '../components/ph-sensor-radar.js';
     import '../components/ph-sensor-panel.js';
+    import '../components/ph-scan-readout.js';
+    import '../components/ph-passive-readout.js';
     import '../components/ph-shield-panel.js';
     import '../components/ph-shield-facings.js';
     import { initConsole } from '../console-core.js';

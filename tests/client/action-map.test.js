@@ -10,6 +10,7 @@ describe('ACTION_MAP', () => {
 
   it('contains exactly the supported action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
+      'cancel_focused_scan',
       'cancel_impulse',
       'charge_blaster_cancel',
       'charge_blaster_start',
@@ -55,6 +56,7 @@ describe('ACTION_MAP', () => {
       'set_navigation_chart',
       'set_navigation_waypoint',
       'set_objective_priority',
+      'set_passive_enabled',
       'set_phaser_frequency',
       'set_phaser_mode',
       'set_power',
@@ -81,7 +83,27 @@ describe('ACTION_MAP', () => {
       'toggle_boost',
       'undock',
       'unload_tube',
-    ]);
+      'fitting_cancel',
+      'fitting_dispatch',
+      'fitting_recover',
+      'fitting_recover_cancel',
+      'fitting_request',
+      'logistics_dispatch',
+      'logistics_enabled',
+      'logistics_priority',
+      'logistics_reserve',
+      'logistics_return',
+      'logistics_target',
+      'port_maintenance',
+      'port_start',
+      'port_stop',
+      'port_store',
+      'production_enabled',
+      'production_recipe',
+      'production_target',
+      'recovery_enabled',
+      'recovery_selection',
+    ].sort());
   });
 });
 
@@ -1334,11 +1356,11 @@ describe('scan_target', () => {
     // station-tenure admission the science target selection already does.
     const send = mkSend();
     ACTION_MAP.scan_target({
-      action: 'scan_target', uuid: 'depot-1', correlation: 'scan-1',
+      action: 'scan_target', control_system_id: 'focus-array', uuid: 'depot-1', correlation: 'scan-1',
     }, send);
     expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
       correlation: 'scan-1',
-      target: 'sensors',
+      target: 'focus-array',
       payload: { type: 'ScanTarget', data: { uuid: 'depot-1' } },
     });
   });
@@ -1351,9 +1373,9 @@ describe('scan_target', () => {
 
   it('retains the legacy uncorrelated transport for non-semantic callers', () => {
     const send = mkSend();
-    ACTION_MAP.scan_target({ action: 'scan_target', uuid: 'depot-1' }, send);
+    ACTION_MAP.scan_target({ action: 'scan_target', control_system_id: 'focus-array', uuid: 'depot-1' }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
-      target: 'sensors',
+      target: 'focus-array',
       payload: { type: 'ScanTarget', data: { uuid: 'depot-1' } },
     });
   });

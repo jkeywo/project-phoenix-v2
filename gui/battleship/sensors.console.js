@@ -9,6 +9,7 @@ import { makeSensorsRender } from '../stations/sensors-console.js';
 
 export const renderStation = makeSensorsRender({
   ids: {
+    scanReadout: 'scan-readout', passiveReadout: 'passive-readout',
     radar: 'sensor-radar',
     sensorPanel: 'sensor-panel',
     scanRange: 'scan-range-val',

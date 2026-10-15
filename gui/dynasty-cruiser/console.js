@@ -82,6 +82,7 @@ export const renderGunnery = makeTacticalRender({
 export const renderSensors = makeScienceRender({
   ids: {
     sensorRadar: 'sensor-radar', sensorPanel: 'sensor-panel',
+    scanReadout: 'scan-readout', passiveReadout: 'passive-readout',
     footer: 'sensor-target', autoBadge: 'auto-badge',
   },
 });

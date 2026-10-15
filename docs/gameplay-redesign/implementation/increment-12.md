@@ -218,6 +218,32 @@ Do not treat allied faction as unlimited spending permission, visitor control of
 port machinery or foreign-stock omniscience. Provider capability/stocks, access,
 dock duration and physical transfer time remain real constraints.
 
+The selected provider table is `[port_service]`, with an explicit policy,
+eligible faction UUIDs and `[[port_service.offer]]` rows. Quota counters count
+whole **lots** per offer, visitor and physical docking visit. `unit_amount` and
+each `[[port_service.offer.cost]]` amount are actual resource units per lot.
+An empty eligible-faction list denies all visitors. Free-allied offers carry no
+costs. Maintained free demand is `floor(deficit / unit_amount)`, respecting
+incoming/held quantities and never overshooting approved targets. An explicitly
+started editable manual order may exceed its current target when actual space,
+finite supply and visit quota permit it.
+
+Use the existing Umbilical System for `SetPortMaintenance`, `StartPortOrder`,
+`StopPortOrder` and an optional typed `SetTransferStore` binding. No store binding
+retains its normal named-service endpoint; an explicit binding addresses a real
+compatible main store, without changing resource identity or local service links.
+`StartPortOrder` binds the provider UUID and current visit and is a human/explicit
+trusted-mission action at admission, rather than a client-supplied authority flag
+or advisory token test. Delegation can execute a prior approved order, but cannot
+create purchase authority. The current controller's decision still governs work.
+
+One atomic settlement validates all independent pre-existing source quantities,
+protected floors, shared receiving space and cost legs before changing any stock
+or quota. Incoming goods cannot finance the same exchange. The provider's actual
+delivered-lot counter changes with stock commit, so concurrent requests cannot
+overspend a visit quota before feedback is processed. A receipt reports actual
+settlement; undocking releases unperformed work while retaining completed goods.
+
 Keep the six-seat Cruiser as reference. Inventory and main-store policy live on
 Engineering's existing Console, data-driven like other role assignments. Detailed
 Engineering exposes main-store targets, reserve floors and resupply priorities;

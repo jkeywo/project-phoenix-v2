@@ -1,0 +1,29 @@
+# Real foreign planned request and actual receiver. Nothing injects a packet,
+# decoder frontier, key, read/response fact or paid work.
+[global]
+seed=15621667
+[player_spawn]
+position=[0,0,0]
+[[entity]]
+template_path="assets/entities/capture_cruiser.toml"
+id="monitor"
+name="monitor"
+spawn_on="game_start"
+transform={position=[0,0,0]}
+[[entity]]
+template_path="assets/entities/alliance_cruiser.toml"
+id="emitter"
+name="emitter"
+spawn_on="game_start"
+transform={position=[80,0,0]}
+[[entity]]
+template_path="tests/fixtures/capture-reporter.toml"
+id="status-reporter"
+name="status-reporter"
+spawn_on="game_start"
+transform={position=[160,0,0]}
+[planning]
+id="protected-status"
+task="capture::send-status"
+arguments={actor={kind="actor",value="emitter"}}
+import=[{path="tests/fixtures/capture-domain.toml",as="capture",names=["send-status"]}]

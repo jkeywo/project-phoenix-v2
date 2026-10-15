@@ -1,0 +1,4 @@
+includes=["../../assets/entities/alliance_cruiser.toml"]
+[comms]
+hailable=true
+display_name="Status reporter"

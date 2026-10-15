@@ -268,3 +268,101 @@ fn active_flag_reports_actual_burn_separately_from_post_cycle_rest() {
             .firing
     );
 }
+
+#[test]
+fn actual_core_fine_and_reconnect_target_filters_use_only_held_classification() {
+    use phoenix_model::tags::EntityTag;
+    let (mut world, entity, _) = fixture();
+    let owner = SystemId("phaser-fore".into());
+    world
+        .get_mut::<crate::weapons::mounts::ShipMounts>(entity)
+        .unwrap()
+        .0
+        .get_mut(&owner)
+        .unwrap()
+        .offset_deg = 90.0;
+    assert!(published(&mut world, entity).1.fire_ready);
+    // Unknown held classification cannot satisfy an explicit tag, regardless
+    // of the real actor's private definition/position elsewhere in the scene.
+    world
+        .get_mut::<PhaserCombatConfigResource>(entity)
+        .unwrap()
+        .0
+        .banks
+        .iter_mut()
+        .find(|bank| bank.id == "fore")
+        .unwrap()
+        .targets = Some(vec![EntityTag::Missile]);
+    for classification in [None, Some("ship"), Some("missile")] {
+        let mut boards = world.get_mut::<ShipSystemBlackboards>(entity).unwrap();
+        let SystemBlackboard::TacticalRadar(board) = boards
+            .0
+            .get_mut(&SystemId("tactical-radar".into()))
+            .unwrap()
+        else {
+            unreachable!();
+        };
+        board.tracks.as_mut().unwrap()[0].classification = classification.map(str::to_owned);
+        drop(boards);
+        let (core, fine, reconnect) = published(&mut world, entity);
+        let bank = core.banks.iter().find(|bank| bank.id == "fore").unwrap();
+        assert_eq!(fine.fire_ready, classification == Some("missile"));
+        assert_eq!(bank.fire_ready, fine.fire_ready);
+        assert_eq!(
+            bank.readiness,
+            reconnect
+                .banks
+                .iter()
+                .find(|bank| bank.id == "fore")
+                .unwrap()
+                .readiness
+        );
+    }
+    world
+        .get_mut::<PhaserCombatConfigResource>(entity)
+        .unwrap()
+        .0
+        .banks
+        .iter_mut()
+        .find(|bank| bank.id == "fore")
+        .unwrap()
+        .targets = Some(vec![]);
+    assert!(
+        !published(&mut world, entity).1.fire_ready,
+        "empty explicit policy holds even on a measured missile"
+    );
+}
+#[test]
+fn omitted_policy_does_not_turn_a_nonordinary_route_into_ready_geometry() {
+    let (mut world, entity, _) = fixture();
+    let owner = SystemId("phaser-fore".into());
+    world
+        .get_mut::<crate::weapons::mounts::ShipMounts>(entity)
+        .unwrap()
+        .0
+        .get_mut(&owner)
+        .unwrap()
+        .offset_deg = 90.0;
+    assert!(published(&mut world, entity).1.fire_ready);
+    let physical = world
+        .query::<(Entity, &crate::entities::spawner::EntityUuid)>()
+        .iter(&world)
+        .find_map(|(entity, id)| (id.0 == "private-target").then_some(entity))
+        .unwrap();
+    world
+        .entity_mut(physical)
+        .remove::<crate::entities::spawner::EntityUuid>();
+    let (core, fine, reconnect) = published(&mut world, entity);
+    assert!(!fine.fire_ready);
+    let bank = core.banks.iter().find(|bank| bank.id == "fore").unwrap();
+    assert_eq!(bank.readiness.target_range, None);
+    assert_eq!(
+        bank.readiness,
+        reconnect
+            .banks
+            .iter()
+            .find(|bank| bank.id == "fore")
+            .unwrap()
+            .readiness
+    );
+}

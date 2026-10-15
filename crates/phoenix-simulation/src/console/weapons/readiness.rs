@@ -18,6 +18,63 @@ impl Context<'_> {
     pub fn measured(&self) -> bool {
         crate::science::contact_routing::measured_machinery(self.tracks, self.controls)
     }
+    /// A configured tag policy is evidence, never scene classification. The
+    /// ordinary-domain predicate only checks the already-routed actuator ID.
+    fn allowed(
+        &self,
+        owner: &SystemId,
+        filter: Option<&[phoenix_model::tags::EntityTag]>,
+        ordinary: &impl Fn(&str) -> bool,
+    ) -> bool {
+        let Some(config) = self.config else {
+            return !self.measured()
+                && filter.is_none()
+                && viewscreen_combat_lock(self.boards).is_some_and(|route| ordinary(&route));
+        };
+        let Some(contact) = super::super::assignments::effective_weapon_contact(
+            &config.0,
+            owner,
+            self.boards,
+            self.tracks,
+            self.controls,
+            self.targets,
+        ) else {
+            return false;
+        };
+        let Some(route) = crate::science::contact_routing::resolve_machinery(
+            Some(&config.0),
+            Some(self.boards),
+            self.tracks,
+            self.controls,
+            owner,
+            &contact,
+        ) else {
+            return false;
+        };
+        let view = config.0.observations_for_system(owner, &self.boards.0);
+        let mut classifications = self
+            .boards
+            .0
+            .keys()
+            .filter_map(|key| view.get(key))
+            .filter_map(crate::science::contact_routing::observations)
+            .flatten()
+            .filter(|record| record.contact_id == contact && record.selectable && !record.predicted)
+            .filter_map(|record| record.classification.as_deref());
+        let tags: Vec<_> = if !self.measured() {
+            Vec::new()
+        } else {
+            match classifications.next() {
+                Some(first) if classifications.all(|other| other == first) => {
+                    phoenix_model::tags::EntityTag::from_str(first)
+                        .into_iter()
+                        .collect()
+                }
+                _ => Vec::new(),
+            }
+        };
+        phoenix_sim_gameplay::weapons::operation::target_allowed(filter, &tags, ordinary(&route))
+    }
     pub fn geometry(
         &self,
         owner: &SystemId,
@@ -95,6 +152,7 @@ impl Context<'_> {
         tubes: &mut [TorpedoTubeState],
         bolts: &mut [BlasterBankState],
         legacy: impl Fn(&str) -> Option<[f32; 2]>,
+        ordinary: impl Fn(&str) -> bool,
     ) {
         let online = |owner: &SystemId| sources.is_none_or(|sources| !sources.0.is_offline(owner));
         for bank in banks {
@@ -118,7 +176,14 @@ impl Context<'_> {
                     },
                 },
             );
-            let geometry = self.geometry(&owner, &mount, physics, &legacy);
+            let geometry = self
+                .allowed(
+                    &owner,
+                    configured.and_then(|bank| bank.targets.as_deref()),
+                    &ordinary,
+                )
+                .then(|| self.geometry(&owner, &mount, physics, &legacy))
+                .flatten();
             bank.fire_ready = geometry.is_some_and(|geometry| geometry.in_arc && geometry.in_range);
             bank.readiness =
                 WeaponReadiness::evaluate(online(&owner), bank.on_cooldown, false, false, geometry);
@@ -131,16 +196,21 @@ impl Context<'_> {
             let Some(config) = system.0.tube(&tube.id) else {
                 continue;
             };
-            let geometry = self.geometry(
-                &owner,
-                &crate::weapons::mount::MountConfig {
-                    facing_deg: config.facing_deg,
-                    fire_arc_deg: config.fire_arc_deg,
-                    range: system.0.config.speed * system.0.config.lifespan,
-                },
-                physics,
-                &legacy,
-            );
+            let geometry = self
+                .allowed(&owner, config.targets.as_deref(), &ordinary)
+                .then(|| {
+                    self.geometry(
+                        &owner,
+                        &crate::weapons::mount::MountConfig {
+                            facing_deg: config.facing_deg,
+                            fire_arc_deg: config.fire_arc_deg,
+                            range: system.0.config.speed * system.0.config.lifespan,
+                        },
+                        physics,
+                        &legacy,
+                    )
+                })
+                .flatten();
             let loading = tube.loaded_count == 0 && tube.state == "loading";
             tube.readiness = WeaponReadiness::evaluate(
                 online(&owner),
@@ -159,7 +229,10 @@ impl Context<'_> {
             else {
                 continue;
             };
-            let geometry = self.geometry(&owner, &bank.config.mount(), physics, &legacy);
+            let geometry = self
+                .allowed(&owner, bank.config.targets.as_deref(), &ordinary)
+                .then(|| self.geometry(&owner, &bank.config.mount(), physics, &legacy))
+                .flatten();
             bolt.fire_ready = bank.is_fire_ready()
                 && geometry.is_some_and(|geometry| geometry.in_arc && geometry.in_range);
             bolt.readiness = WeaponReadiness::evaluate(

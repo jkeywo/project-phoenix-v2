@@ -597,6 +597,10 @@ impl WeaponsProjectionInputs<'_, '_> {
                             })
                         })
                 },
+                |route| {
+                    self.entities.iter().any(|(id, _)| id.0 == route)
+                        || self.asteroids.iter().any(|(id, _)| id.0 == route)
+                },
             );
         }
         LastWeaponsUpdate {
@@ -1206,6 +1210,10 @@ pub(crate) fn publish_weapons_core_blackboard(
             &mut tubes,
             &mut blasters,
             |route| live_entity_xz(route, &asteroid_q, &entity_q).map(|(x, z)| [x, z]),
+            |route| {
+                entity_q.iter().any(|(id, _)| id.0 == route)
+                    || asteroid_q.iter().any(|(id, _)| id.0 == route)
+            },
         );
         phaser_arcs.retain_mut(|arc| {
             crate::ship::system_registry::phaser_bank_system_id(&arc.id)
@@ -1659,6 +1667,10 @@ pub(crate) fn publish_phaser_bank_blackboards(
             &mut [],
             &mut [],
             |route| live_entity_xz(route, &asteroid_q, &entity_q).map(|(x, z)| [x, z]),
+            |route| {
+                entity_q.iter().any(|(id, _)| id.0 == route)
+                    || asteroid_q.iter().any(|(id, _)| id.0 == route)
+            },
         );
         for bank_state in &banks {
             let Some(bank_sysid) =

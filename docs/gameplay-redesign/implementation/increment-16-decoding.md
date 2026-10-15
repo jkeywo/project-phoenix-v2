@@ -120,7 +120,9 @@ retained history, private recipient deduplication or a prior paid media carrier.
 Focused JavaScript: 17 tests across three files passed (latest 4.17s); strict strings
 6,307 with zero errors/warnings; Workshop bundle and layer import checks passed.
 Rust leaves are formatted. Pure Model/Gameplay source review passed under the
-explicit immutable accepted-key boundary; actual runtime review/execution and
+explicit immutable accepted-key boundary. Independent actual capture/decoder/AI
+leaf and radio-hook source review passed after correcting the actual work API
+Result and the owning System's implicit own-publication test; native execution and
 integrated continuation remain pending. The Rust owner tests use real spawned
 radios and reserves for paid foreign capture, no addressed inbox/early body,
 paid decode, impossible protection and never-captured archive refusal. Their

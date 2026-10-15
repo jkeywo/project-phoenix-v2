@@ -196,7 +196,22 @@ mod tests {
                 &[],
                 true
             ),
-            None
+            Some(2),
+            "a System retains its own Console publication independently of cross-System feeds"
+        );
+        boards.0.remove(&owner);
+        assert_eq!(
+            decision(
+                &config,
+                &boards,
+                &sources,
+                &radio,
+                Some(&policy.0),
+                &[],
+                true
+            ),
+            None,
+            "an actually absent own publication cannot be replaced by private captured state"
         );
     }
 }

@@ -206,7 +206,7 @@ pub(crate) fn settle(
                     )
                 })
                 .clamp(0.0, 1.0);
-            if let Some(grant) = power.0.work_continuous(&receiver.radio.system, dt, 1.0) {
+            if let Ok(grant) = power.0.work_continuous(&receiver.radio.system, dt, 1.0) {
                 runtime.needs_broadcast |= captured.0.advance(
                     now,
                     grant.fraction * operation,

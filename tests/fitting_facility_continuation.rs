@@ -137,11 +137,19 @@ fn parts(app: &App, entity: Entity) -> i64 {
         .level
 }
 fn identities(app: &mut App) -> BTreeSet<String> {
-    app.world_mut()
+    let items: Vec<_> = app
+        .world_mut()
         .query::<&ShipFitting>()
         .iter(app.world())
         .flat_map(|state| state.equipment.assemblies.keys().cloned())
-        .collect()
+        .collect();
+    let unique: BTreeSet<_> = items.iter().cloned().collect();
+    assert_eq!(
+        items.len(),
+        unique.len(),
+        "each physical assembly has exactly one owner"
+    );
+    unique
 }
 fn assert_same(live: &App, resumed: &App, step: usize) {
     assert_eq!(

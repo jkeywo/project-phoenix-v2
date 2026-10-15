@@ -4,6 +4,7 @@ pub mod decision_trace;
 pub mod faction;
 pub mod host;
 pub mod lod;
+pub(crate) mod lod_clock;
 pub mod patrol_cursor;
 pub mod policy;
 pub mod selector;

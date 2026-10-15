@@ -985,6 +985,8 @@ const LOD_DWELL_SECS: f64 = 2.0;
 /// same bubble.
 fn lod_ai_ships(
     time: Res<Time>,
+    sim_tick: Option<Res<crate::sim_tick::SimTick>>,
+    fixed: Option<Res<Time<Fixed>>>,
     puppets: Option<Res<crate::gm::operations::puppet::StationPuppets>>,
     fleet: Query<
         (&Transform, Option<&LodBubble>),
@@ -1004,7 +1006,11 @@ fn lod_ai_ships(
     >,
     mut commands: Commands,
 ) {
-    let now_secs = time.elapsed_secs() as f64;
+    let now_secs = crate::ai::lod_clock::sample(
+        sim_tick.as_ref().map(|tick| tick.0),
+        fixed.as_ref().map(|time| time.timestep().as_secs_f64()),
+        f64::from(time.elapsed_secs()),
+    );
 
     // Anchors: every ship in the frozen fleet, identically on every peer.
     // `(x, z, radius)`.

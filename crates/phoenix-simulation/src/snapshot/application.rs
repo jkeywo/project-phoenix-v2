@@ -1219,6 +1219,13 @@ pub(super) fn apply_entity_state_with(
     restored_alert_tick: bevy::ecs::change_detection::Tick,
 ) {
     super::fitting::apply(world, entity, row);
+    let lod_transition = row
+        .ai_fidelity
+        .as_ref()
+        .and_then(|state| state.last_transition_age_secs)
+        .map(|age| {
+            crate::ai::lod_clock::restore_timestamp(world, tick, age, f64::from(restored_at))
+        });
     let mut entity_mut = world.entity_mut(entity);
     if let Some(saved) = &row.equipment_recovery {
         entity_mut.insert(saved.clone());
@@ -1271,7 +1278,7 @@ pub(super) fn apply_entity_state_with(
     // land; a Low capture restored onto High must remove them before any
     // high-fidelity system can observe the stale bootstrap marker.
     if let Some(ai_fidelity) = &row.ai_fidelity {
-        apply_ai_fidelity(&mut entity_mut, ai_fidelity, f64::from(restored_at));
+        apply_ai_fidelity(&mut entity_mut, ai_fidelity, lod_transition);
     }
     if let Some(mut sources) = entity_mut.get_mut::<crate::ship_plugin::ShipSystemControlSources>()
     {
@@ -1769,7 +1776,7 @@ pub(super) fn apply_frequency_hint(
 pub(super) fn apply_ai_fidelity(
     entity: &mut EntityWorldMut<'_>,
     stored: &AiFidelityState,
-    restored_at: f64,
+    transition_timestamp: Option<f64>,
 ) {
     use crate::ai::server::{
         ai_high_fidelity_components, AiHighFidelityComponents, LodTransitionTimer,
@@ -1786,9 +1793,8 @@ pub(super) fn apply_ai_fidelity(
         entity.remove::<AiHighFidelityComponents>();
     }
 
-    match stored.last_transition_age_secs {
-        Some(age) => {
-            let last_state_change_secs = restored_at - age;
+    match transition_timestamp {
+        Some(last_state_change_secs) => {
             if let Some(mut timer) = entity.get_mut::<LodTransitionTimer>() {
                 timer.last_state_change_secs = last_state_change_secs;
             } else {

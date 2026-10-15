@@ -1387,7 +1387,9 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                         .and_then(|state| state.0.clone()),
                     ai_fidelity: context
                         .ai_fidelity
-                        .then(|| capture_ai_fidelity(entity, f64::from(context.captured_at)))
+                        .then(|| {
+                            capture_ai_fidelity(entity, crate::ai::lod_clock::from_world(world))
+                        })
                         .flatten(),
                     control: capture_controls(entity),
                     drive: context.drives.then(|| capture_drives(entity)).flatten(),

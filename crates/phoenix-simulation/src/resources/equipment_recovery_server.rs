@@ -659,7 +659,7 @@ pub fn validate_state(
 pub fn project(world: &World, actor: Entity) -> Option<EquipmentRecoveryView> {
     let owner = world.get::<ShipEquipmentRecovery>(actor)?;
     let profile = &world.get::<CompiledShipFitting>(actor)?.0;
-    let selected = owner.job.as_ref().map(|job| option(&job.activity));
+    let selected = owner.job.as_ref().map(|job| option(world, &job.activity));
     let mut options = Vec::new();
     if !active(owner) {
         for uuid in known(world, actor, None) {
@@ -692,9 +692,9 @@ pub fn project(world: &World, actor: Entity) -> Option<EquipmentRecoveryView> {
                         waiting: String::new(),
                     };
                     match prepare(world, actor, &work, JobId(owner.next_id), false) {
-                        Ok(_) => options.push(option(&work)),
+                        Ok(_) => options.push(option(world, &work)),
                         Err(reason) if reason == "major_equipment_requires_facility" => {
-                            let mut unavailable = option(&work);
+                            let mut unavailable = option(world, &work);
                             unavailable.blocked_reason = Some(reason);
                             options.push(unavailable);
                         }
@@ -736,9 +736,12 @@ pub fn project(world: &World, actor: Entity) -> Option<EquipmentRecoveryView> {
     })
 }
 
-fn option(work: &EquipmentRecoveryWork) -> EquipmentRecoveryOption {
+fn option(world: &World, work: &EquipmentRecoveryWork) -> EquipmentRecoveryOption {
     EquipmentRecoveryOption {
         target_uuid: work.target_uuid.clone(),
+        target_name: find(world, &work.target_uuid)
+            .and_then(|source| world.get::<crate::entities::spawner::EntityName>(source))
+            .map_or_else(|| work.target_uuid.clone(), |name| name.0.clone()),
         slot: work.source_slot.clone(),
         equipment: work.definition.clone(),
         destination_locker: work.destination_locker.clone(),

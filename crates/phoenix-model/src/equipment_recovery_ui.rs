@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EquipmentRecoveryOption {
     pub target_uuid: String,
+    pub target_name: String,
     pub slot: String,
     pub equipment: String,
     pub destination_locker: String,

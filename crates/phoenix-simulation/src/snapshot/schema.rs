@@ -895,6 +895,7 @@ pub struct TubeState {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TorpedoInFlight {
+    pub last_guidance: Option<phoenix_model::guided_guidance::GuidanceObservation>,
     pub profile: phoenix_model::guided_round::GuidedRoundProfile,
     pub durability_remaining: f32,
     #[serde(default)]

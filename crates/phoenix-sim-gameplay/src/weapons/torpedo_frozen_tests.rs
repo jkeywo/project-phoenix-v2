@@ -4,6 +4,11 @@ use std::collections::HashMap;
 fn loaded(count: u32) -> TorpedoSystem {
     let config = TorpedoConfig {
         count: 6,
+        seeker: Some(phoenix_model::guided_guidance::SeekerProfile {
+            range: 2000.0,
+            fire_arc_deg: 360.0,
+            minimum_transmission: 0.01,
+        }),
         speed: 8.0,
         turn_rate: 0.4,
         lifespan: 90.0,
@@ -57,7 +62,20 @@ fn committed_burst_keeps_flight_payload_and_cadence_without_inheriting_paid_boos
     system.config.durability = 60.0;
     system.config.burst_interval_secs = 9.0;
     system.tubes[0].impact.penetration = 100.0;
-    let targets = HashMap::from([("target".into(), (100.0, 30.0, -50.0))]);
+    let targets = ["first", "burst-1", "burst-2"]
+        .into_iter()
+        .map(|id| {
+            (
+                id.into(),
+                GuidanceObservation {
+                    target_uuid: "target".into(),
+                    position: [100.0, 30.0, -50.0],
+                    sampled_tick: 0,
+                    source: GuidanceSource::Seeker,
+                },
+            )
+        })
+        .collect::<HashMap<_, _>>();
     let mut next = 0;
     let mut uuid = || {
         next += 1;
@@ -144,7 +162,15 @@ fn actual_guided_motion_exposes_one_relative_collision_interval_without_saved_sh
         system.in_flight[0].y,
         system.in_flight[0].z,
     ];
-    let targets = HashMap::from([("target".into(), (10.0, 6.0, -20.0))]);
+    let targets = HashMap::from([(
+        "first".into(),
+        GuidanceObservation {
+            target_uuid: "target".into(),
+            position: [10.0, 6.0, -20.0],
+            sampled_tick: 0,
+            source: GuidanceSource::Seeker,
+        },
+    )]);
     system.tick_with_work(
         0.2,
         &targets,

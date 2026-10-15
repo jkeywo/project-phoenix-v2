@@ -50,6 +50,11 @@ fn launched() -> TorpedoSystemResource {
 fn launched_id(id: &str) -> TorpedoSystemResource {
     let mut owner = TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig {
         load_time: 0.1,
+        seeker: Some(phoenix_model::guided_guidance::SeekerProfile {
+            range: 2000.0,
+            fire_arc_deg: 360.0,
+            minimum_transmission: 0.01,
+        }),
         ..Default::default()
     }));
     let tube = owner.0.tubes[0].id.clone();
@@ -187,7 +192,15 @@ fn carrier_json_restore_discards_bootstrap_flights_and_continues_same_vector_exa
     );
     let left = carriers(original.world_mut())[0];
     let right = carriers(resumed.world_mut())[0];
-    let targets = HashMap::from([("target".into(), (10.0, 8.0, -30.0))]);
+    let targets = HashMap::from([(
+        "physical-round".into(),
+        phoenix_model::guided_guidance::GuidanceObservation {
+            target_uuid: "target".into(),
+            position: [10.0, 8.0, -30.0],
+            sampled_tick: 42,
+            source: phoenix_model::guided_guidance::GuidanceSource::Seeker,
+        },
+    )]);
     for step in 0..360 {
         assert_eq!(
             crate::snapshot::capture(original.world()),

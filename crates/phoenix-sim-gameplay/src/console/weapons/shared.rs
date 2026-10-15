@@ -235,10 +235,10 @@ impl BeamContext {
 /// in the same tick. It carries no state across frames.
 #[derive(Resource, Default)]
 pub struct TorpedoTargetSnapshot {
-    /// UUID → (x, y, z) positions for torpedo guidance, from live ECS
-    /// transforms with a `WorldResource` snapshot fallback. Y threaded for
-    /// full-3D torpedo homing (issue #768); `0.0` for Planar entities.
-    pub target_positions: std::collections::HashMap<String, (f32, f32, f32)>,
+    /// Actual round UUID -> finite instrument observation for that round.
+    /// Physical collision positions never provide an unlimited steering feed.
+    pub guidance:
+        std::collections::HashMap<String, phoenix_model::guided_guidance::GuidanceObservation>,
     /// Proximity detonation target list (uuid, x, y, z, radius). Virtual
     /// entities (asteroid-field anchors, region trigger volumes) are
     /// excluded. Y threaded for 3D collision (issue #768).
@@ -249,7 +249,7 @@ impl TorpedoTargetSnapshot {
     /// Empty the per-tick target collections. The builder calls this at
     /// the start of every frame before repopulating.
     pub fn clear(&mut self) {
-        self.target_positions.clear();
+        self.guidance.clear();
         self.targets.clear();
     }
 }

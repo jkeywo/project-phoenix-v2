@@ -18,6 +18,7 @@ fn candidate() -> PhoenixSnapshot {
             uuid: "launcher-removed".into(),
             weapons: Some(WeaponState {
                 torpedoes_in_flight: vec![TorpedoInFlight {
+                    last_guidance: None,
                     profile: profile(),
                     durability_remaining: 4.0,
                     uuid: "actual-round".into(),
@@ -143,6 +144,11 @@ fn actual_weapon_capture_application_and_full_flight_digest_continue_ordered_com
     }
     let config = TorpedoConfig {
         count: 6,
+        seeker: Some(phoenix_model::guided_guidance::SeekerProfile {
+            range: 2000.0,
+            fire_arc_deg: 360.0,
+            minimum_transmission: 0.01,
+        }),
         lifespan: 90.0,
         speed: 8.0,
         durability: 6.0,
@@ -256,8 +262,27 @@ fn actual_weapon_capture_application_and_full_flight_digest_continue_ordered_com
         .0
         .validate_magazine()
         .unwrap();
-    let positions = HashMap::from([("target".into(), (50.0, 30.0, -100.0))]);
     for step in 0..360 {
+        let positions = live
+            .get::<TorpedoSystemResource>(source)
+            .unwrap()
+            .0
+            .in_flight
+            .iter()
+            .filter_map(|round| {
+                phoenix_sim_gameplay::weapons::guidance::seeker_observation(
+                    round.profile.seeker.as_ref()?,
+                    [round.x, round.y, round.z],
+                    round.heading,
+                    round.pitch,
+                    "target",
+                    [50.0, 30.0, -100.0],
+                    1.0,
+                    0,
+                )
+                .map(|observation| (round.uuid.clone(), observation))
+            })
+            .collect::<HashMap<_, _>>();
         assert_eq!(
             state(&live, source),
             state(&resumed, receiver),
@@ -362,5 +387,61 @@ fn saved_burst_ammunition_and_actual_tube_ownership_refuse_before_any_live_write
         assert_eq!(world.resource::<crate::sim_tick::SimTick>().0, 42);
         assert_eq!(serde_json::to_value(capture(&world)).unwrap(), before);
         assert_eq!(crate::sim_digest::world_digest(&world), before_digest);
+    }
+}
+
+#[test]
+fn held_guidance_requires_original_time_matching_intent_and_frozen_equipment() {
+    let mut valid = candidate();
+    let round = &mut valid.entities[0]
+        .weapons
+        .as_mut()
+        .unwrap()
+        .torpedoes_in_flight[0];
+    round.profile.seeker = Some(phoenix_model::guided_guidance::SeekerProfile {
+        range: 40.0,
+        fire_arc_deg: 90.0,
+        minimum_transmission: 0.2,
+    });
+    round.last_guidance = Some(phoenix_model::guided_guidance::GuidanceObservation {
+        target_uuid: "last-target-removed".into(),
+        position: [4.0, 2.0, -20.0],
+        sampled_tick: 17,
+        source: phoenix_model::guided_guidance::GuidanceSource::Seeker,
+    });
+    validate_roster(&valid).unwrap();
+    let restored: PhoenixSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&valid).unwrap()).unwrap();
+    assert_eq!(
+        restored, valid,
+        "missing target/source never renews original sample"
+    );
+    let world = World::new();
+    let before = capture(&world);
+    for case in 0..5 {
+        let mut bad = valid.clone();
+        let round = &mut bad.entities[0]
+            .weapons
+            .as_mut()
+            .unwrap()
+            .torpedoes_in_flight[0];
+        match case {
+            0 => round.last_guidance.as_mut().unwrap().sampled_tick = 1000,
+            1 => round.last_guidance.as_mut().unwrap().target_uuid = "different-intent".into(),
+            2 => round.profile.seeker = None,
+            3 => round.last_guidance.as_mut().unwrap().position[0] = f32::NAN,
+            4 => {
+                round.last_guidance.as_mut().unwrap().source =
+                    phoenix_model::guided_guidance::GuidanceSource::Console {
+                        ship_uuid: "source".into(),
+                        console: crate::core::messages::ConsoleId("science".into()),
+                        system: crate::core::messages::SystemId("illumination".into()),
+                    }
+            }
+            _ => unreachable!(),
+        }
+        let mut world = World::new();
+        assert!(!restore(&mut world, &bad).is_complete(), "case{case}");
+        assert_eq!(capture(&world), before, "case{case} wrote rejected state");
     }
 }

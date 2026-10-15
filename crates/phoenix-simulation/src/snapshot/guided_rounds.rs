@@ -11,6 +11,23 @@ pub(super) fn validate_weapon_state(stored: &WeaponState) -> Result<(), String> 
         round
             .profile
             .validate_active(round.lifespan_remaining, round.durability_remaining)?;
+        if let Some(observation) = &round.last_guidance {
+            observation.validate(u64::MAX)?;
+            if round.target_uuid.as_deref() != Some(observation.target_uuid.as_str())
+                || match observation.source {
+                    phoenix_model::guided_guidance::GuidanceSource::Seeker => {
+                        round.profile.seeker.is_none()
+                    }
+                    phoenix_model::guided_guidance::GuidanceSource::Console { .. } => {
+                        round.profile.receiver.is_none()
+                    }
+                }
+            {
+                return Err(
+                    "guidance observation has no matching supported round intent/equipment".into(),
+                );
+            }
+        }
         if !identity(&round.uuid)
             || !identity(&round.tube_id)
             || round
@@ -82,6 +99,13 @@ pub(super) fn validate_roster(snapshot: &PhoenixSnapshot) -> Result<(), (String,
             continue;
         };
         validate_weapon_state(weapons).map_err(|reason| (row.uuid.clone(), reason))?;
+        for round in &weapons.torpedoes_in_flight {
+            if let Some(observation) = &round.last_guidance {
+                observation
+                    .validate(snapshot.tick)
+                    .map_err(|reason| (row.uuid.clone(), reason))?;
+            }
+        }
         for id in weapons
             .torpedoes_in_flight
             .iter()

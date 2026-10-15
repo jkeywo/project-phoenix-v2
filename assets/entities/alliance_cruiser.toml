@@ -644,6 +644,9 @@ damage_type = "laser"
 penetration = 20
 
 [torpedoes]
+# Frozen finite guidance equipment; physical collision does not grant tracking.
+seeker = { range = 300.0, fire_arc_deg = 180.0, minimum_transmission = 0.1 }
+receiver = { range = 300.0, minimum_transmission = 0.1, maximum_sample_age_secs = 2.0 }
 # Initial stock is split with the real hold; capacity still includes tube occupancy.
 count = 6
 initial_count = 2

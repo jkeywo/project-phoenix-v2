@@ -1865,6 +1865,7 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
                 .map(|round| {
                     (
                         &round.uuid,
+                        &round.last_guidance,
                         round.profile,
                         round.durability_remaining,
                         [round.x, round.y, round.z],

@@ -70,3 +70,7 @@ pub(crate) fn finish_action_feedback(
         },
     );
 }
+
+#[cfg(test)]
+#[path = "seeker_tests.rs"]
+mod seeker_tests;

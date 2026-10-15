@@ -611,6 +611,8 @@ shield_pierce = 0.15
 damage_type = "physical"
 penetration = 25
 [torpedoes]
+# Frozen finite guidance equipment; physical collision does not grant tracking.
+seeker = { range = 200.0, fire_arc_deg = 180.0, minimum_transmission = 0.1 }
 count = 12
 damage_hull = 30
 damage_shields = 0

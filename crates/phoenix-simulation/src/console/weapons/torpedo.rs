@@ -923,13 +923,20 @@ pub fn handle_torpedo_magazine_inter_system(
 }
 
 /// Phase 1 of the torpedo tick (issue #724): build the one-tick
-/// [`TorpedoTargetSnapshot`] — target positions (live ECS with a
-/// `WorldResource` fallback) and the proximity detonation target list —
+/// [`TorpedoTargetSnapshot`] contains finite per-round seeker observations
+/// separately from the physical proximity detonation target list,
 /// which `tick_torpedo_lifecycle` reads later in the same tick.
 pub(crate) fn build_torpedo_target_snapshot(
     world: Res<WorldResource>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    entity_q: Query<
+        (
+            &crate::entities::spawner::EntityUuid,
+            &Transform,
+            Option<&ShipPhysics>,
+        ),
+        Without<AsteroidUuid>,
+    >,
     // Virtual entities (asteroid-field anchors, region trigger volumes) are
     // organisational/effect-only. They carry an `EntityUuid` and a non-zero
     // `radius` in the world snapshot (from `outer_radius` or region shape),
@@ -946,6 +953,11 @@ pub(crate) fn build_torpedo_target_snapshot(
         )>,
     >,
     mut snapshot: ResMut<TorpedoTargetSnapshot>,
+    owners: Query<&TorpedoSystemResource>,
+    fallback: Option<Res<TorpedoSystemResource>>,
+    paths: crate::regions::signal_path::RegionSignalQuery,
+    tick: Option<Res<crate::sim_tick::SimTick>>,
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
 ) {
     snapshot.clear();
 
@@ -969,30 +981,81 @@ pub(crate) fn build_torpedo_target_snapshot(
         .map(|e| e.uuid.as_str())
         .collect();
 
-    // Build target positions from *live* ECS transforms, falling back to the
-    // (stale) WorldResource snapshot for entities not currently in the ECS.
-    let target_positions: std::collections::HashMap<String, (f32, f32, f32)> = {
-        let mut map: std::collections::HashMap<String, (f32, f32, f32)> =
-            std::collections::HashMap::new();
-        for (u, t) in asteroid_q.iter() {
-            map.insert(
-                u.0.clone(),
-                (t.translation.x, t.translation.y, t.translation.z),
-            );
+    // The physical seeker samples live actors only. A cached WorldResource
+    // row can remain useful for physical coarse collision, never for refreshing
+    // a round's retained knowledge after the actual subject has disappeared.
+    let live_positions: std::collections::HashMap<_, _> = asteroid_q
+        .iter()
+        .map(|(id, transform)| (id.0.clone(), transform.translation))
+        .chain(
+            entity_q
+                .iter()
+                .filter(|(id, _, _)| !virtual_uuids.contains(id.0.as_str()))
+                .map(|(id, transform, physics)| {
+                    (
+                        id.0.clone(),
+                        physics.map_or(transform.translation, |pose| {
+                            Vec3::new(pose.x, pose.y, pose.z)
+                        }),
+                    )
+                }),
+        )
+        .collect();
+    let mut guidance = std::collections::HashMap::new();
+    if let Some(tick) = tick {
+        let mut sample_owner = |owner: &TorpedoSystemResource| {
+            for round in &owner.0.in_flight {
+                let (Some(profile), Some(target)) = (&round.profile.seeker, &round.target_uuid)
+                else {
+                    continue;
+                };
+                if runtime.as_ref().is_some_and(|runtime| {
+                    std::iter::once(round.uuid.as_str())
+                        .chain(round.source_uuid.as_deref())
+                        .any(|observer| {
+                            crate::gm::operations::contact::mode(
+                                &runtime.contact_overrides,
+                                observer,
+                                target,
+                            ) == crate::gm::operations::contact::ContactMode::Conceal
+                        })
+                }) {
+                    continue;
+                }
+                let Some(position) = live_positions.get(target) else {
+                    continue;
+                };
+                let origin = Vec3::new(round.x, round.y, round.z);
+                let transmission = paths.transmission(
+                    origin,
+                    *position,
+                    crate::regions::signal_path::SignalClass::Sensors,
+                );
+                if let Some(observation) =
+                    phoenix_sim_gameplay::weapons::guidance::seeker_observation(
+                        profile,
+                        origin.to_array(),
+                        round.heading,
+                        round.pitch,
+                        target,
+                        position.to_array(),
+                        transmission,
+                        tick.0,
+                    )
+                {
+                    guidance.insert(round.uuid.clone(), observation);
+                }
+            }
+        };
+        for owner in &owners {
+            sample_owner(owner);
         }
-        for (u, t) in entity_q.iter() {
-            map.insert(
-                u.0.clone(),
-                (t.translation.x, t.translation.y, t.translation.z),
-            );
+        if owners.is_empty() {
+            if let Some(owner) = fallback.as_deref() {
+                sample_owner(owner);
+            }
         }
-        // Fill remaining entries from WorldResource snapshot for completeness.
-        for e in world.0.entities.iter() {
-            map.entry(e.uuid.clone())
-                .or_insert_with(|| (e.x(), e.y(), e.z()));
-        }
-        map
-    };
+    }
 
     // Radius by UUID, indexed once up front. This used to be a
     // `world.0.entities.iter().find(|e| e.uuid == ...)` inside each of the two
@@ -1029,7 +1092,7 @@ pub(crate) fn build_torpedo_target_snapshot(
                 (t.translation.x, t.translation.y, t.translation.z, radius),
             );
         }
-        for (u, t) in entity_q.iter() {
+        for (u, t, _) in entity_q.iter() {
             if virtual_uuids.contains(u.0.as_str()) || virtual_snapshot_uuids.contains(u.0.as_str())
             {
                 continue;
@@ -1064,7 +1127,7 @@ pub(crate) fn build_torpedo_target_snapshot(
         out
     };
 
-    snapshot.target_positions = target_positions;
+    snapshot.guidance = guidance;
     snapshot.targets = targets;
 }
 
@@ -1175,7 +1238,7 @@ pub(crate) fn tick_torpedo_lifecycle(
     let log = &ambient.log;
     let dt = time.delta_secs();
     let mut weapons_target_opt = weapons_target_q.single_mut().ok();
-    let target_positions = &snapshot.target_positions;
+    let guidance = &snapshot.guidance;
     let targets = &snapshot.targets;
 
     // ── Phase 1: tick every ship's TorpedoSystem + collect detonation events ──
@@ -1236,7 +1299,7 @@ pub(crate) fn tick_torpedo_lifecycle(
         };
         let result = torpedo_sys.0.tick_with_work(
             dt,
-            target_positions,
+            guidance,
             &mut |work| {
                 use crate::weapons::torpedo::TorpedoWork;
                 let Some(power) = power.as_deref_mut() else {
@@ -1341,15 +1404,14 @@ pub(crate) fn tick_torpedo_lifecycle(
     // Resource-only fallback: tests that only insert the global
     // `TorpedoSystemResource` and no Ship entity still work.
     if !any_ship_component && ships.is_empty() {
-        let result =
-            torpedo_sys_res
-                .0
-                .tick_with_work(dt, target_positions, &mut |_| 0.0, &mut || {
-                    crate::world_id::mint_live_id_with(
-                        id_mint,
-                        crate::world_id::IdNamespace::Projectile,
-                    )
-                });
+        let result = torpedo_sys_res
+            .0
+            .tick_with_work(dt, guidance, &mut |_| 0.0, &mut || {
+                crate::world_id::mint_live_id_with(
+                    id_mint,
+                    crate::world_id::IdNamespace::Projectile,
+                )
+            });
         for expired_uuid in result.expired {
             outbox.push_reliable((
                 Target::All,

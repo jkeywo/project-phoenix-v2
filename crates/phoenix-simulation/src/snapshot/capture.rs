@@ -782,6 +782,7 @@ pub(super) fn weapon_state(
                 s.in_flight
                     .iter()
                     .map(|t| TorpedoInFlight {
+                        last_guidance: t.last_guidance.clone(),
                         profile: t.profile,
                         durability_remaining: t.durability_remaining,
                         strike_damage_bonus: t.strike_damage_bonus,

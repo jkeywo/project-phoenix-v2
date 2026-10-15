@@ -16,6 +16,7 @@
 use crate::resources::{reserve_requirements, ResourceRequirement, Stock};
 use crate::simmath;
 use crate::weapons::pattern::BarrelPattern;
+use phoenix_model::guided_guidance::{GuidanceObservation, GuidanceSource};
 pub use phoenix_model::guided_round::GuidedRoundProfile;
 use std::f32::consts::PI;
 
@@ -146,6 +147,8 @@ pub struct Torpedo {
     /// collision owner clears it after relative CCD; saves/folds keep current
     /// canonical pose rather than a competing flight/history copy.
     pub previous_position: Option<[f32; 3]>,
+    /// One actual held measurement, retaining its original sample and source.
+    pub last_guidance: Option<GuidanceObservation>,
     pub profile: GuidedRoundProfile,
     pub durability_remaining: f32,
     pub strike_damage_bonus: f32,
@@ -178,12 +181,38 @@ pub struct Torpedo {
 }
 
 impl Torpedo {
-    pub fn tick(&mut self, dt: f32, target_pos: Option<(f32, f32, f32)>) {
+    pub fn accept_guidance(&mut self, observation: &GuidanceObservation) -> bool {
+        if self.target_uuid.as_deref() != Some(observation.target_uuid.as_str())
+            || observation.validate(observation.sampled_tick).is_err()
+            || self
+                .last_guidance
+                .as_ref()
+                .is_some_and(|held| held.sampled_tick > observation.sampled_tick)
+            || match observation.source {
+                GuidanceSource::Seeker => self.profile.seeker.is_none(),
+                GuidanceSource::Console { .. } => self.profile.receiver.is_none(),
+            }
+        {
+            return false;
+        }
+        self.last_guidance = Some(observation.clone());
+        true
+    }
+
+    pub fn tick(&mut self, dt: f32, observation: Option<&GuidanceObservation>) {
+        if let Some(observation) = observation {
+            self.accept_guidance(observation);
+        }
+        let target_pos = self
+            .last_guidance
+            .as_ref()
+            .filter(|held| self.target_uuid.as_deref() == Some(held.target_uuid.as_str()))
+            .map(|held| held.position);
         if dt.is_finite() && dt > 0.0 {
             self.previous_position = Some([self.x, self.y, self.z]);
         }
         if self.target_uuid.is_some() {
-            if let Some((tx, ty, tz)) = target_pos {
+            if let Some([tx, ty, tz]) = target_pos {
                 let dx = tx - self.x;
                 let dz = tz - self.z;
                 let desired = simmath::atan2(dx, -dz);
@@ -1033,6 +1062,7 @@ impl TorpedoSystem {
         self.tubes[idx].pattern_step = step0;
         self.in_flight.push(Torpedo {
             previous_position: None,
+            last_guidance: None,
             profile,
             durability_remaining: profile.durability,
             strike_damage_bonus: 0.0,
@@ -1078,10 +1108,10 @@ impl TorpedoSystem {
     pub fn tick(
         &mut self,
         dt: f32,
-        target_positions: &std::collections::HashMap<String, (f32, f32, f32)>,
+        guidance: &std::collections::HashMap<String, GuidanceObservation>,
         next_uuid: &mut impl FnMut() -> String,
     ) -> TorpedoTickResult {
-        self.tick_with_work(dt, target_positions, &mut |_| 1.0, next_uuid)
+        self.tick_with_work(dt, guidance, &mut |_| 1.0, next_uuid)
     }
 
     /// Work funding affects preparation and launch only. A waiting burst keeps
@@ -1089,7 +1119,7 @@ impl TorpedoSystem {
     pub fn tick_with_work(
         &mut self,
         dt: f32,
-        target_positions: &std::collections::HashMap<String, (f32, f32, f32)>,
+        guidance: &std::collections::HashMap<String, GuidanceObservation>,
         work: &mut impl FnMut(TorpedoWork<'_>) -> f32,
         next_uuid: &mut impl FnMut() -> String,
     ) -> TorpedoTickResult {
@@ -1234,6 +1264,7 @@ impl TorpedoSystem {
                 pattern_updates.push((burst.tube_id.clone(), barrel, step));
                 burst_torpedoes.push(Torpedo {
                     previous_position: None,
+                    last_guidance: None,
                     profile: burst.profile,
                     durability_remaining: burst.profile.durability,
                     strike_damage_bonus: 0.0,
@@ -1281,12 +1312,9 @@ impl TorpedoSystem {
 
         // ── In-flight torpedo movement ────────────────────────────────────
         for t in &mut self.in_flight {
-            let pos = t
-                .target_uuid
-                .as_ref()
-                .and_then(|id| target_positions.get(id))
-                .copied();
-            t.tick(dt, pos);
+            // The map is keyed by actual round, never by a world target. Each
+            // entry is a permitted measurement from a finite producer.
+            t.tick(dt, guidance.get(&t.uuid));
             if t.is_expired() {
                 result.expired.push(t.uuid.clone());
             }

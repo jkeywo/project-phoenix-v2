@@ -268,6 +268,8 @@ fn actual_powered_allied_facility_refits_reactor_and_continues_paid_work() {
     let checkpoint: PhoenixSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
     let mut resumed = build(false);
+    claim(&mut resumed, "engineering");
+    claim(&mut resumed, "helm");
     let restored = restore(resumed.world_mut(), &checkpoint);
     assert!(restored.is_complete(), "{:?}", restored.gaps);
     let mut done = 0;
@@ -402,6 +404,9 @@ fn intact_recovery_preserves_actual_condition_then_vacant_repair_fetches_and_ins
     let recovery_checkpoint: PhoenixSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
     let mut recovery_resumed = build(true);
+    for station in ["engineering", "science", "tactical"] {
+        claim(&mut recovery_resumed, station);
+    }
     let report = restore(recovery_resumed.world_mut(), &recovery_checkpoint);
     assert!(report.is_complete(), "{:?}", report.gaps);
     for step in 0..1800 {
@@ -462,6 +467,11 @@ fn intact_recovery_preserves_actual_condition_then_vacant_repair_fetches_and_ins
         serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
     let initial_parts = parts(&live, entity);
     let mut resumed = build(true);
+    for station in ["engineering", "science", "tactical"] {
+        claim(&mut resumed, station);
+    }
+    send(&mut resumed, "engineering", ClientMessage::ReleaseStation);
+    steps(&mut resumed, 4);
     let restored = restore(resumed.world_mut(), &checkpoint);
     assert!(restored.is_complete(), "{:?}", restored.gaps);
     let mut done = 0;

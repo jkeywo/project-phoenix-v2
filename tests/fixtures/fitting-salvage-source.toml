@@ -235,3 +235,13 @@ weapons-access = "engineering"
 fabrication = "engineering"
 resource-recovery = "engineering"
 # [ai] Increment 10 mechanical access gate; ordinary System authority and AI.
+
+# Local stock owners follow their authored System placements.
+[logistics.handling]]
+system = "logistics"
+max_active = 2
+max_batch = 100
+units_per_sec = 50
+reorder_fraction = 0.5
+
+# Increment 12.2: finite hold/local splits preserve each hull's original totals.

@@ -14,6 +14,9 @@ use crate::resources::recovery::*;
 use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
 use phoenix_model::recovery_ui::*;
 
+#[path = "recovery_contacts.rs"]
+mod contacts;
+
 #[derive(Component, Clone, Debug)]
 pub struct CompiledShipRecovery(pub RecoveryToolConfig);
 #[derive(Component, Clone, Debug)]
@@ -183,11 +186,18 @@ fn operate_ai(
         };
         let equipment_active =
             equipment.is_some_and(crate::resources::equipment_recovery_server::active);
+        let ongoing = board.enabled
+            && board.resource.is_some()
+            && board.destination_store.is_some()
+            && !matches!(
+                board.blocked.as_deref(),
+                Some("recovery.blocked.goal_met" | "recovery.blocked.no_target")
+            );
         let facts = BTreeMap::from([
             ("enabled".into(), board.enabled),
             (
                 "recovery_available".into(),
-                board.next_recovery.is_some() || equipment_active,
+                board.next_recovery.is_some() || equipment_active || ongoing,
             ),
         ]);
         let channels = BTreeMap::from([("recover".into(), false)]);
@@ -222,14 +232,21 @@ fn operate_ai(
             .as_ref()
             .filter(|_| result.intents.get("recover") == Some(&true));
         if let Some(choice) = choice {
-            for payload in [
-                Control::SetRecoverySelection {
+            let mut payloads = Vec::new();
+            if board.target_uuid.as_ref() != Some(&choice.target_uuid)
+                || board.resource.as_ref() != Some(&choice.resource)
+                || board.destination_store.as_ref() != Some(&choice.destination_store)
+            {
+                payloads.push(Control::SetRecoverySelection {
                     target_uuid: Some(choice.target_uuid.clone()),
                     resource: Some(choice.resource.clone()),
                     destination_store: Some(choice.destination_store.clone()),
-                },
-                Control::SetRecoveryEnabled { enabled: true },
-            ] {
+                });
+            }
+            if !board.enabled {
+                payloads.push(Control::SetRecoveryEnabled { enabled: true });
+            }
+            for payload in payloads {
                 crate::command_admission::ai_emit::emit_ai_command(
                     uuid,
                     state.0.owner.clone(),
@@ -240,7 +257,7 @@ fn operate_ai(
                     &mut admitted,
                 );
             }
-        } else if state.0.enabled {
+        } else if state.0.enabled && (!ongoing || result.intents.get("recover") != Some(&true)) {
             crate::command_admission::ai_emit::emit_ai_command(
                 uuid,
                 state.0.owner.clone(),
@@ -324,13 +341,30 @@ fn sources(query: &SourceQuery) -> BTreeMap<String, SourceView> {
 fn candidate(
     profile: &RecoveryToolConfig,
     source: &SourceView,
-    id: &str,
+    contact: &contacts::Contact,
     position: Vec3,
-) -> RecoveryCandidate {
-    RecoveryCandidate {
-        uuid: id.into(),
-        name: source.name.clone(),
-        distance: position.distance(source.position),
+) -> Option<RecoveryCandidate> {
+    let distance = contact.position.map_or_else(
+        || position.distance(source.position),
+        |measured| {
+            ((f64::from(position.x) - f64::from(measured[0]))
+                .hypot(f64::from(position.z) - f64::from(measured[1]))) as f32
+        },
+    );
+    if !distance.is_finite() || distance > profile.range {
+        return None;
+    }
+    Some(RecoveryCandidate {
+        uuid: contact.handle.clone(),
+        name: if contact.position.is_some() {
+            contact
+                .name
+                .clone()
+                .unwrap_or_else(|| "console.common.unknown".into())
+        } else {
+            source.name.clone()
+        },
+        distance,
         resources: source
             .config
             .resources
@@ -338,7 +372,7 @@ fn candidate(
             .filter(|resource| profile.resources.contains(resource))
             .cloned()
             .collect(),
-    }
+    })
 }
 
 fn selection_limit(
@@ -396,6 +430,7 @@ pub(crate) fn tick(
     source_query: SourceQuery,
     mut transfers: ResMut<EffectQueue<crate::resources::server::ResourceTransfer>>,
     mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     mut ships: Query<(
         &EntityUuid,
         &Transform,
@@ -414,6 +449,8 @@ pub(crate) fn tick(
         (
             Option<&mut crate::ship::power::ShipPowerSystem>,
             Option<&crate::resources::equipment_recovery_server::ShipEquipmentRecovery>,
+            Option<&crate::science::broad::BroadTracks>,
+            Option<&crate::science::broad::SensingControls>,
         ),
     )>,
 ) {
@@ -436,17 +473,21 @@ pub(crate) fn tick(
             boards,
             admitted,
             damage,
-            (mut power, equipment),
+            (mut power, equipment, tracks, sensing),
         )) = ships.iter_mut().find(|(uuid, ..)| uuid.0 == id)
         else {
             continue;
         };
-        let known = known_contacts(
+        let picture = contacts::Picture::capture(
             &config.0,
             &profile.0.system,
             &boards.0,
-            owner.0.target.as_deref(),
+            tracks,
+            sensing,
+            &id,
+            runtime.as_deref(),
         );
+        let known = picture.known_for_work(owner.0.target.as_deref());
         let destinations = local_destinations(&profile.0, &config.0, logistics, layout, &boards.0);
         let mut next = owner.0.clone();
         let system = next.owner.clone();
@@ -461,32 +502,44 @@ pub(crate) fn tick(
                     resource,
                     destination_store,
                 } => {
+                    let actual_target = target_uuid
+                        .as_deref()
+                        .and_then(|handle| picture.resolve(handle))
+                        .filter(|contact| {
+                            sources
+                                .get(&contact.source)
+                                .and_then(|source| {
+                                    candidate(&profile.0, source, contact, position.translation)
+                                })
+                                .is_some()
+                        })
+                        .map(|contact| contact.source.as_str());
                     let mut selected = next.clone();
                     selected
                         .select(
                             &profile.0,
-                            target_uuid.as_deref(),
+                            actual_target,
                             resource.as_deref(),
                             destination_store.as_deref(),
                         )
                         .and_then(|()| {
                             if target_uuid.is_none()
-                                || (target_uuid.as_ref() != Some(&id)
-                                    && known.contains(target_uuid.as_ref().unwrap())
+                                || (actual_target
+                                    .is_some_and(|target| target != id && known.contains(target))
                                     && destinations.iter().any(|store| {
                                         Some(&store.id) == destination_store.as_ref()
                                             && Some(&store.resource) == resource.as_ref()
                                     })
-                                    && sources.get(target_uuid.as_ref().unwrap()).is_some_and(
-                                        |source| {
+                                    && actual_target
+                                        .and_then(|target| sources.get(target))
+                                        .is_some_and(|source| {
                                             position.translation.distance(source.position)
                                                 <= profile.0.range
                                                 && source
                                                     .config
                                                     .resources
                                                     .contains_key(resource.as_ref().unwrap())
-                                        },
-                                    ))
+                                        }))
                             {
                                 next = selected;
                                 Ok(())
@@ -637,6 +690,7 @@ fn settle(
 #[allow(clippy::type_complexity)]
 fn publish(
     source_query: SourceQuery,
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     mut ships: Query<(
         &EntityUuid,
         &Transform,
@@ -646,27 +700,33 @@ fn publish(
         &crate::ship::access::InteriorLayout,
         &ShipConfigComponent,
         &mut crate::server_app::ShipSystemBlackboards,
+        Option<&crate::science::broad::BroadTracks>,
+        Option<&crate::science::broad::SensingControls>,
     )>,
 ) {
     let sources = sources(&source_query);
-    for (uuid, position, profile, state, logistics, layout, config, mut boards) in &mut ships {
-        let known = known_contacts(
+    for (uuid, position, profile, state, logistics, layout, config, mut boards, tracks, sensing) in
+        &mut ships
+    {
+        let picture = contacts::Picture::capture(
             &config.0,
             &profile.0.system,
             &boards.0,
-            state.0.target.as_deref(),
+            tracks,
+            sensing,
+            &uuid.0,
+            runtime.as_deref(),
         );
+        let known = picture.known_for_work(state.0.target.as_deref());
         let destinations = local_destinations(&profile.0, &config.0, logistics, layout, &boards.0);
-        let candidates: Vec<_> = known
-            .iter()
-            .filter(|id| **id != uuid.0)
-            .filter_map(|id| {
+        let candidates: Vec<_> = picture
+            .contacts
+            .values()
+            .filter(|contact| contact.source != uuid.0)
+            .filter_map(|contact| {
                 sources
-                    .get(id)
-                    .filter(|source| {
-                        position.translation.distance(source.position) <= profile.0.range
-                    })
-                    .map(|source| candidate(&profile.0, source, id, position.translation))
+                    .get(&contact.source)
+                    .and_then(|source| candidate(&profile.0, source, contact, position.translation))
             })
             .filter(|candidate| !candidate.resources.is_empty())
             .collect();
@@ -680,10 +740,11 @@ fn publish(
                         return None;
                     }
                     let mut selected = state.0.clone();
+                    let actual = &picture.resolve(&candidate.uuid)?.source;
                     selected
                         .select(
                             &profile.0,
-                            Some(&candidate.uuid),
+                            Some(actual),
                             Some(&store.resource),
                             Some(&store.id),
                         )
@@ -705,9 +766,30 @@ fn publish(
                 })
             })
             .collect::<Vec<_>>();
+        let public_target = state
+            .0
+            .target
+            .as_deref()
+            .and_then(|source| picture.handle_for_source(source));
+        if state.0.enabled
+            && public_target.is_none()
+            && selection_limit(
+                &state.0,
+                &profile.0,
+                position.translation,
+                &known,
+                &sources,
+                &destinations,
+            )
+            .is_ok()
+        {
+            // Loss of the radar handle does not withdraw previously admitted
+            // physical work. Its own progress remains readable and cancellable.
+            choices.clear();
+        }
         choices.sort_by_key(|choice| {
             (
-                Some(&choice.target_uuid) != state.0.target.as_ref()
+                Some(&choice.target_uuid) != public_target.as_ref()
                     || Some(&choice.resource) != state.0.resource.as_ref()
                     || Some(&choice.destination_store) != state.0.destination_store.as_ref(),
                 destinations
@@ -736,7 +818,7 @@ fn publish(
             state.0.owner.clone(),
             SystemBlackboard::Recovery(RecoveryBlackboard {
                 enabled: state.0.enabled,
-                target_uuid: state.0.target.clone(),
+                target_uuid: public_target,
                 resource: state.0.resource.clone(),
                 destination_store: state.0.destination_store.clone(),
                 fraction: state.0.fraction,

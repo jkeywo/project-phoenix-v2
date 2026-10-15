@@ -97,6 +97,48 @@ fn rig_with(
             )),
         ))
         .id();
+    let broad = crate::science::broad::BroadProfile::from_config(&content)
+        .unwrap()
+        .unwrap();
+    let mut tracks = crate::science::broad::BroadTracks::new(&broad);
+    let radar = id("sensor-radar");
+    // This reduced owner fixture supplies one real paid instrument sample; it
+    // does not run the complete Science/Power publisher graph.
+    let paid = app
+        .world_mut()
+        .get_mut::<crate::ship::power::ShipPowerSystem>(ship)
+        .unwrap()
+        .0
+        .work_continuous(&radar, 0.5, 1.0)
+        .unwrap()
+        .fraction;
+    assert!(paid > 0.0);
+    let instrument = &broad.0[&radar].profile;
+    let state = tracks.0.get_mut(&radar).unwrap();
+    state
+        .advance(
+            instrument,
+            0,
+            0.5,
+            paid,
+            &[crate::science::broad::BroadMeasurement {
+                source: "finite-source".into(),
+                selectable: true,
+                position: [6.0, 0.0],
+                support: 1.0,
+                identity: None,
+                classification: None,
+                assessment: None,
+            }],
+        )
+        .unwrap();
+    let public = state.projection(instrument, 0, 0.5).unwrap();
+    let selected = public[0].contact_id.clone();
+    app.world_mut().entity_mut(ship).insert((
+        broad,
+        tracks,
+        crate::science::broad::SensingControls(content.sensing.as_ref().unwrap().control.clone()),
+    ));
     app.world_mut()
         .get_mut::<crate::server_app::ShipSystemBlackboards>(ship)
         .unwrap()
@@ -104,7 +146,8 @@ fn rig_with(
         .insert(
             id("sensor-radar"),
             SystemBlackboard::SensorRadar(crate::core::messages::SensorRadarBlackboard {
-                selected_target: Some("finite-source".into()),
+                selected_target: Some(selected),
+                tracks: Some(public),
                 ..Default::default()
             }),
         );
@@ -132,12 +175,24 @@ fn energy(app: &App, entity: Entity) -> f32 {
         .energy
 }
 fn start(app: &mut App) {
+    let target = app
+        .world_mut()
+        .query::<&crate::server_app::ShipSystemBlackboards>()
+        .iter(app.world())
+        .find_map(|boards| match boards.0.get(&id("resource-recovery")) {
+            Some(SystemBlackboard::Recovery(board)) => board
+                .candidates
+                .first()
+                .map(|candidate| candidate.uuid.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| "unobserved-source".into());
     send(
         app,
         "engineer",
         "resource-recovery",
         Control::SetRecoverySelection {
-            target_uuid: Some("finite-source".into()),
+            target_uuid: Some(target),
             resource: Some("scrap".into()),
             destination_store: Some("hold-scrap".into()),
         },
@@ -168,6 +223,188 @@ fn assert_settled(app: &App, ship: Entity) {
         .resource::<EffectQueue<crate::resources::server::ResourceTransferReceipt>>()
         .0
         .is_empty());
+}
+
+fn reading(app: &App, ship: Entity) -> RecoveryBlackboard {
+    let boards = &app
+        .world()
+        .get::<crate::server_app::ShipSystemBlackboards>(ship)
+        .unwrap()
+        .0;
+    let SystemBlackboard::Recovery(board) = &boards[&id("resource-recovery")] else {
+        panic!("Recovery publication")
+    };
+    board.clone()
+}
+
+#[test]
+fn measured_recovery_candidates_never_reveal_the_source_identity_or_live_position() {
+    let (mut app, ship, source) = rig(ControlSource::Human, 12, 3);
+    let initial = reading(&app, ship);
+    assert_eq!(initial.candidates.len(), 1);
+    assert_ne!(initial.candidates[0].uuid, "finite-source");
+    assert_eq!(initial.candidates[0].name, "console.common.unknown");
+    let measured = {
+        let boards = &app
+            .world()
+            .get::<crate::server_app::ShipSystemBlackboards>(ship)
+            .unwrap()
+            .0;
+        let SystemBlackboard::SensorRadar(board) = &boards[&id("sensor-radar")] else {
+            unreachable!()
+        };
+        board.tracks.as_ref().unwrap()[0].position
+    };
+    assert_eq!(
+        initial.candidates[0].distance,
+        f64::from(measured[0]).hypot(f64::from(measured[1])) as f32
+    );
+    app.world_mut().entity_mut(source).insert((
+        EntityName("SECRET LIVE IDENTITY".into()),
+        Transform::from_xyz(700.0, 900.0, 400.0),
+    ));
+    app.update();
+    let changed = reading(&app, ship);
+    assert_eq!(
+        changed.candidates, initial.candidates,
+        "held public measurement does not follow unobserved motion/name"
+    );
+    assert!(
+        changed.next_recovery.is_none(),
+        "physical executor still refuses work outside its real range"
+    );
+    let wire = serde_json::to_string(&changed).unwrap();
+    for secret in [
+        "finite-source",
+        "SECRET LIVE IDENTITY",
+        "700.0",
+        "900.0",
+        "400.0",
+    ] {
+        assert!(!wire.contains(secret), "{secret} escaped: {wire}");
+    }
+}
+
+#[test]
+fn new_recovery_selection_requires_the_same_tools_current_permitted_handle() {
+    let (mut app, ship, source) = rig(ControlSource::Human, 12, 3);
+    let handle = reading(&app, ship).candidates[0].uuid.clone();
+    let before = energy(&app, ship);
+    send(
+        &mut app,
+        "engineer",
+        "resource-recovery",
+        Control::SetRecoverySelection {
+            target_uuid: Some("finite-source".into()),
+            resource: Some("scrap".into()),
+            destination_store: Some("hold-scrap".into()),
+        },
+    );
+    app.update();
+    assert!(app
+        .world()
+        .get::<ShipRecovery>(ship)
+        .unwrap()
+        .0
+        .target
+        .is_none());
+    assert_eq!(energy(&app, ship), before);
+    assert_eq!((stock(&app, ship), stock(&app, source)), (0, 12));
+    let observer = app.world().get::<EntityUuid>(ship).unwrap().0.clone();
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .contact_overrides
+        .entry(observer.clone())
+        .or_default()
+        .insert(
+            "finite-source".into(),
+            crate::gm::operations::contact::ContactMode::Conceal,
+        );
+    send(
+        &mut app,
+        "engineer",
+        "resource-recovery",
+        Control::SetRecoverySelection {
+            target_uuid: Some(handle.clone()),
+            resource: Some("scrap".into()),
+            destination_store: Some("hold-scrap".into()),
+        },
+    );
+    app.update();
+    assert!(app
+        .world()
+        .get::<ShipRecovery>(ship)
+        .unwrap()
+        .0
+        .target
+        .is_none());
+    assert!(reading(&app, ship).candidates.is_empty());
+    assert_eq!(energy(&app, ship), before);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .contact_overrides
+        .remove(&observer);
+    send(
+        &mut app,
+        "engineer",
+        "resource-recovery",
+        Control::SetRecoverySelection {
+            target_uuid: Some(handle),
+            resource: Some("scrap".into()),
+            destination_store: Some("hold-scrap".into()),
+        },
+    );
+    send(
+        &mut app,
+        "engineer",
+        "resource-recovery",
+        Control::SetRecoveryEnabled { enabled: true },
+    );
+    app.update();
+    let state = &app.world().get::<ShipRecovery>(ship).unwrap().0;
+    assert_eq!(
+        state.target.as_deref(),
+        Some("finite-source"),
+        "only internal machinery keeps the actual endpoint route"
+    );
+    assert!(state.fraction > 0.0);
+    assert!(energy(&app, ship) < before);
+}
+
+#[test]
+fn human_and_ordinary_ai_keep_admitted_paid_work_after_the_public_handle_fades() {
+    for controller in [ControlSource::Human, ControlSource::Ai] {
+        let (mut app, ship, source) = rig(controller, 12, 3);
+        if controller == ControlSource::Human {
+            start(&mut app);
+        }
+        for _ in 0..8 {
+            app.update();
+            if app.world().get::<ShipRecovery>(ship).unwrap().0.fraction > 0.0 {
+                break;
+            }
+        }
+        assert!(app.world().get::<ShipRecovery>(ship).unwrap().0.fraction > 0.0);
+        let before = energy(&app, ship);
+        app.world_mut()
+            .get_mut::<crate::server_app::ShipSystemBlackboards>(ship)
+            .unwrap()
+            .0
+            .insert(
+                id("sensor-radar"),
+                SystemBlackboard::SensorRadar(Default::default()),
+            );
+        app.update();
+        let board = reading(&app, ship);
+        assert!(board.enabled && board.target_uuid.is_none() && board.candidates.is_empty());
+        for _ in 0..40 {
+            app.update();
+            assert_settled(&app, ship);
+        }
+        assert_eq!((stock(&app, ship), stock(&app, source)), (3, 9));
+        assert!(energy(&app, ship) < before);
+        assert!(reading(&app, ship).target_uuid.is_none());
+    }
 }
 
 #[test]

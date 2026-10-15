@@ -554,6 +554,21 @@ fn actual_physical_removal_fails_bound_job_once_without_refunding_work() {
 #[test]
 fn canonical_capture_keeps_stored_identity_reserves_and_whole_custody_graph() {
     let (mut app, parent, child) = fixture(true);
+    // This owner rig installs craft, not the complete host plugin graph.
+    // Canonical capture deliberately keeps its established registration gate;
+    // register its optional schema without attaching legacy percentage hulls
+    // or manufacturing another active body for the stored actual actor.
+    app.world_mut()
+        .register_component::<crate::ship::state::ShipPhysics>();
+    app.world_mut()
+        .register_component::<crate::entities::spawner::EntitySystemHull>();
+    app.world_mut()
+        .register_component::<crate::ship::state::ShipRedAlert>();
+    app.world_mut()
+        .register_component::<crate::console::command::server::ShipStationStances>();
+    app.world_mut()
+        .register_component::<crate::ship_plugin::ShipSystemControlSources>();
+    assert!(app.world().entity(child).contains::<Disabled>());
     app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 10;
     let snapshot = crate::snapshot::capture(app.world());
     let row = snapshot

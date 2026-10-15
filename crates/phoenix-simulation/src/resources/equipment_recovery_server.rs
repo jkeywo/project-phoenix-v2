@@ -636,12 +636,19 @@ pub fn validate_state(
             || work.waiting.len() > 128
             || work.waiting.chars().any(char::is_control)
             || (job.outcome == Some(JobOutcome::Completed) && work.progress != work.work_secs)
+            || (job.outcome.is_none()
+                && (work.progress >= work.work_secs || job.paused != !work.waiting.is_empty()))
+            || (job.outcome.is_some() && (job.paused || !work.waiting.is_empty()))
+            || job.outcome == Some(JobOutcome::Failed)
+            || (work.progress > 0.0 && state.last_tick.is_none())
         {
             return Err("invalid equipment recovery job".into());
         }
         let profile = profile.ok_or("equipment recovery has no actual receiving profile")?;
         let definition = profile.equipment(&work.definition)?;
-        if definition.work.work_secs != work.work_secs {
+        if definition.work.work_secs != work.work_secs
+            || definition.work.class != crate::resources::fitting::RefitClass::Field
+        {
             return Err("equipment recovery work recipe changed".into());
         }
         profile.locker(&work.destination_locker)?;

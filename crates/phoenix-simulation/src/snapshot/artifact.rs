@@ -454,7 +454,8 @@ use super::*;
 /// `68` retains actual planned radio emission/receipt bindings and local Security
 /// team routes rather than reconstructing work from a scenario instruction.
 /// `69` retains original applied Scenario callback ticks for causal dependencies.
-pub const SNAPSHOT_FORMAT: u32 = 69;
+/// `70` retains actual personnel conditions and typed Treatment work.
+pub const SNAPSHOT_FORMAT: u32 = 70;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -593,7 +594,8 @@ pub const SNAPSHOT_FORMAT: u32 = 69;
 /// local Security work through the installed compartment graph.
 /// "0.49" requires successful original Scenario application receipts before
 /// releasing dependent work and validates frozen Transit equipment/cost terms.
-pub const SIMULATION_RULES: &str = "0.49";
+/// "0.50" executes finite Treatment through the existing exclusive Repair jobs.
+pub const SIMULATION_RULES: &str = "0.50";
 
 /// The authored data, computed rather than remembered.
 ///

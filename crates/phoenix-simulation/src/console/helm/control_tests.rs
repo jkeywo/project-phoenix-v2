@@ -253,7 +253,10 @@ fn match_requires_exact_current_permitted_dated_velocity_and_loss_keeps_the_samp
     let instrument = SystemId("helm-radar".into());
     let profile = &profiles.0[&instrument].profile;
     let mut history = BroadTrackState::new(profile);
-    for (tick, x) in [(0, 20.0), (30, 25.0)] {
+    // Work/cadence accrues once per actual logical step; jumping the supplied
+    // tick alone must not fabricate a second paid sample or velocity.
+    for tick in 0..=30 {
+        let x = 20.0 + tick as f32 / 6.0;
         history
             .advance(
                 profile,
@@ -274,6 +277,7 @@ fn match_requires_exact_current_permitted_dated_velocity_and_loss_keeps_the_samp
             )
             .unwrap();
     }
+    history.validate(profile, 30, 1.0 / 60.0).unwrap();
     let records = history.projection(profile, 30, 1.0 / 60.0).unwrap();
     let record = records.iter().find(|record| !record.predicted).unwrap();
     let velocity = record.velocity.unwrap();
@@ -399,16 +403,21 @@ fn renamed_actual_owner_runs_the_existing_compiled_ai_and_normal_admission() {
         AiPolicyTickClock, FineSystemAiPolicies, HelmAiShipFrame, HelmAiSurfacesFrame,
         HelmEnginesAiPolicyState, HelmSteeringAiPolicyState,
     };
-    let authored = crate::entities::include_resolve::load_entity_config(
+    // Re-parse accepted authored source, not the runtime DTO: generated shield
+    // equipment and other compile-only fields intentionally skip serialization.
+    let source = crate::entities::include_resolve::resolve_from_disk(
         "assets/entities/alliance_cruiser.toml",
     )
-    .unwrap();
-    let source = toml::to_string(&authored)
-        .unwrap()
-        .replace("helm-thrust", "actual-drive")
-        .replace("helm-steering", "actual-rudder")
-        .replace("helm-lateral-thrust", "actual-lateral");
+    .unwrap()
+    .toml
+    .replace("helm-thrust", "actual-drive")
+    .replace("helm-steering", "actual-rudder")
+    .replace("helm-lateral-thrust", "actual-lateral");
     let authored = crate::entities::config::EntityConfig::from_toml(&source).unwrap();
+    assert!(
+        !authored.shield_arcs.is_empty(),
+        "keep the real resolved hull equipment"
+    );
     let profile = authored.helm_control.clone().unwrap();
     let mut app = App::new();
     crate::ai::host::register_ai_host_env(&mut app);

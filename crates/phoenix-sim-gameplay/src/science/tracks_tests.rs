@@ -1,6 +1,36 @@
 use super::*;
 
 #[test]
+fn distant_elevation_rounding_stays_inside_the_published_error() {
+    let mut p = profile();
+    p.position_error = 0.8;
+    let mut state = BroadTrackState::new(&p);
+    let mut value = sample("actor", 20.0);
+    let actual_height = 10_000_005.0_f32;
+    assert_eq!(
+        measured_position([actual_height, 0.0], p.position_error)[0],
+        10_000_006.0
+    );
+    value.elevation = Some(ObservedElevation {
+        height: actual_height,
+        error: p.position_error,
+        velocity: None,
+    });
+    state.advance(&p, 0, 0.5, 1.0, &[value]).unwrap();
+    let observed = state.projection(&p, 0, 0.5).unwrap()[0].elevation.unwrap();
+    assert_eq!(observed.height, actual_height);
+    assert_eq!(observed.error, p.position_error);
+    assert!(
+        (f64::from(observed.height) - f64::from(actual_height)).abs() <= f64::from(observed.error)
+    );
+    assert_eq!(observed.velocity, None);
+    let restored: BroadTrackState =
+        serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+    assert_eq!(restored, state);
+    restored.validate(&p, 0, 0.5).unwrap();
+}
+
+#[test]
 fn elevation_is_one_dated_paid_measurement_with_sample_derived_vertical_motion() {
     let p = profile();
     let mut state = BroadTrackState::new(&p);

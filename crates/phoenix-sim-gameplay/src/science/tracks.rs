@@ -571,7 +571,16 @@ impl BroadTrackState {
             }
             let position = measured_position(sample.position, profile.position_error);
             let elevation = sample.elevation.map(|sample| {
-                let height = measured_position([sample.height, 0.0], sample.error)[0];
+                let rounded = measured_position([sample.height, 0.0], sample.error)[0];
+                // Casting a distant grid centre to f32 can move it beyond the
+                // promised error. The representable input remains a valid centre.
+                let height = if (f64::from(rounded) - f64::from(sample.height)).abs()
+                    <= f64::from(sample.error)
+                {
+                    rounded
+                } else {
+                    sample.height
+                };
                 let velocity =
                     track
                         .elevation

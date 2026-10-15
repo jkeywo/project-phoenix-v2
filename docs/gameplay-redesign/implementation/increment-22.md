@@ -374,14 +374,14 @@ changes only in this opt-in policy; combat effectiveness remains independent.
 
 At original choice, Simulation projects only the bound actor's actual System
 control entries, ordinary authority host and replicated Station Rating. A Human
-operator additionally requires that exact Station in the existing frozen fleet
-crew picture and a current non-Backfill rating. A vacant/default-Human seat is not
+operator additionally requires that exact Station in the actual replicated
+participation set below and a current non-Backfill rating. A vacant/default-Human seat is not
 capacity; cohosted Consoles share their one Station operator budget. AI-operated
 owners have no invented human attention demand. Missing/Offline controls or a
 Human source without supported occupied provenance withhold the new schedule.
-Initially vacant seats joined later need a canonical participation-provenance
-extension before this first consumer can count them; local Sessions are never a
-cross-peer fallback. No participant token or new crew owner is introduced.
+Initially vacant seats joined later enter that set only through the same admitted
+crew transition below; local Sessions are never a cross-peer World fallback.
+No participant token or new physical crew owner is introduced.
 
 World computes a deterministic bounded schedule in dependency/topological and
 stable node-id order. It uses conservative maximum duration plus recovery,
@@ -428,6 +428,42 @@ The later communication primitive requires an explicit adopted join to actual
 ReportStatus read and returned lineage before any authored Scenario permission
 effect may follow. A status report is not permission. Do not create hypothetical
 permission/hazard facts or an invented communication JobId to complete this exit.
+
+#### Accepted refusal and actual participation prerequisite
+
+The same choice's closed temporal decision distinguishes `Committed` from
+`Refused`. Both retain their complete original bounded input; a refusal retains
+its deterministic bounded explanation instead of releasing any leaf. The
+immutable method choice still exists, so a legitimate infeasible mission capture
+does not require weakening missing-history validation. Full-candidate validation
+recomputes that result from original inputs/source. Missing/Offline/unoccupied
+owners are explicit input alternatives, not missing keys or invented humans.
+22D must add explicit cause-based reconsideration while preserving announced
+commitments and earned history; no silent method retry is introduced here.
+
+Actual participation extends the existing admitted crew transition. One
+`ShipCrewPresence` Station set records supported occupied seats, alongside existing
+ratings/sources; it is not a Session/player/token copy. Bootstrap seeds it only
+from actual connected non-AFK/non-spectator launch participation, or the identical
+frozen crew picture on every fleet peer, excluding Backfill defaults. Normal
+claim/reconnect/ready/rating/AFK/release/disconnect handling projects that exact
+post-handler holder availability at the existing local Session adapter. The same
+`AssignStationRating` envelope carries optional `occupied`; its existing admitted
+applier commits presence and rating together on all peers. A rating-only legacy,
+GM or NPC command omits the field and cannot create participation. Voluntary
+Backfill can retain actual presence, but contributes no Human budget until actual
+source/rating supports Human operation. No new network message or admission route
+is added. Solo uses the same accepted local result boundary, without a fake fleet.
+
+`MeshCrewState` captures/restores the bounded sorted Station set with existing
+ratings/sources. Validate actual authored Station membership, uniqueness and
+required owner presence before candidate application; fold it once with crew
+authority and declare the component at the normal state census. Standalone resume
+keeps its existing policy of adopting newly connected local crew; mesh continuation
+restores exact replicated authority. Historical plan inputs remain unchanged by
+either policy. Plan choice runs only after this normal bootstrap/admitted crew
+projection is installed, so transient default-Human components do not permanently
+refuse an ordinary launch. A missing bootstrap owner waits before choosing.
 
 ## 22D — Monitoring, repair and authoring
 

@@ -87,8 +87,8 @@ initial = "maintain"
 [[system.config.ai.tree.state]]
 id = "maintain"
 [[system.config.ai.tree.state.task]]
-id = "retain-intent"
-action = {kind="write",channel="enabled",value={source="fact",name="enabled"}}
+id = "operate-declared-priorities"
+action = {kind="write",channel="enabled",value={source="fact",name="has_priorities"}}
 
 [[station]]
 id = "science"

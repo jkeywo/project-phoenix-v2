@@ -6884,3 +6884,23 @@ fn independently_owned_jammer_controls_use_the_same_typed_and_correlated_codec()
         });
     }
 }
+
+#[test]
+fn exact_owned_protection_controls_keep_correlated_codec() {
+    for payload in [
+        SystemControlPayload::SetSignalProtectionEnabled { enabled: true },
+        SystemControlPayload::SetSignalProtectionPriorities {
+            systems: vec![SystemId("comms".into()), SystemId("sensors".into())],
+        },
+    ] {
+        assert_client_roundtrip(ClientMessage::ControlSystem {
+            target: SystemId("signal-protection".into()),
+            payload: payload.clone(),
+        });
+        assert_client_roundtrip(ClientMessage::ControlSystemCorrelated {
+            target: SystemId("signal-protection".into()),
+            payload,
+            correlation: ActionCorrelationId::new("protection-change").unwrap(),
+        });
+    }
+}

@@ -220,13 +220,49 @@ pub(crate) fn register(app: &mut App) {
     use crate::sim_sets::{FixedStep, SimSet};
     app.declare_state::<ShipSignalProtection>(StateClass::Folded, "ship-signal-protection-intent")
         .declare_state::<ProtectionGrants>(StateClass::Derived, "signal-protection-paid-grants");
+    use crate::command_admission::{ConsumerMatcher, FeedbackAddress, RegisterAdmittedConsumer};
+    use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
+    crate::ai::cadence::register_ai_cadence(app);
+    for (payload, feedback) in [
+        (
+            Payload::SetSignalProtectionEnabled,
+            &[Payload::SetSignalProtectionEnabled] as &'static [_],
+        ),
+        (
+            Payload::SetSignalProtectionPriorities,
+            &[Payload::SetSignalProtectionPriorities] as &'static [_],
+        ),
+    ] {
+        app.register_admitted_consumer(
+            ConsumerMatcher::kind_payload(
+                crate::ship::system_registry::SIGNAL_PROTECTION_KIND,
+                payload,
+            )
+            .with_feedback(FeedbackAddress::DeclaredKindOnly, feedback),
+        );
+    }
     app.add_systems(
         FixedUpdate,
-        tick.in_set(SimSet::Input)
-            .in_set(FixedStep::TickSignalProtection)
-            .before(FixedStep::TickJamming),
+        (
+            control::operate_ai
+                .in_set(SimSet::Input)
+                .in_set(FixedStep::OperateSignalProtectionAi)
+                .before(control::handle_commands)
+                .run_if(crate::ai::cadence::ai_tick_ready),
+            control::handle_commands
+                .in_set(SimSet::Input)
+                .in_set(FixedStep::HandleSignalProtectionCommands)
+                .before(tick),
+            tick.in_set(SimSet::Input)
+                .in_set(FixedStep::TickSignalProtection)
+                .before(FixedStep::TickJamming),
+        ),
     );
 }
 #[cfg(test)]
 #[path = "protection_tests.rs"]
 pub(crate) mod tests;
+
+#[path = "protection_control.rs"]
+mod control;
+pub(crate) use control::project;

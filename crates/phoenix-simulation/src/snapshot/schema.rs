@@ -484,6 +484,11 @@ pub struct EntityState {
 /// still stored as `Some(default)` and clears bootstrap state on restore.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct NavigationWaypointState {
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub accepted_requests: std::collections::BTreeMap<
+        String,
+        crate::console::navigation::server::AcceptedTrafficRequest,
+    >,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f32; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

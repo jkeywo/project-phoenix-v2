@@ -1255,6 +1255,7 @@ pub(super) fn capture_navigation_continuation(
     let waypoint = waypoint.map(|waypoint| {
         let snapshot = waypoint.snapshot();
         NavigationWaypointState {
+            accepted_requests: waypoint.accepted_requests.clone(),
             position: snapshot.as_ref().map(|point| [point.x, point.z]),
             source_uuid: snapshot.and_then(|point| point.source_uuid),
             generation: waypoint.generation(),

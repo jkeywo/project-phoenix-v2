@@ -1641,9 +1641,11 @@ pub(super) fn apply_navigation_waypoint(
     });
     if let Some(mut waypoint) = entity.get_mut::<crate::console::navigation::NavigationWaypoint>() {
         waypoint.replace_continuation(mode, stored.generation);
+        waypoint.accepted_requests = stored.accepted_requests.clone();
     } else {
         let mut waypoint = crate::console::navigation::NavigationWaypoint::default();
         waypoint.replace_continuation(mode, stored.generation);
+        waypoint.accepted_requests = stored.accepted_requests.clone();
         entity.insert(waypoint);
     }
 }

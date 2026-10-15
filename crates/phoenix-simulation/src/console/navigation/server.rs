@@ -79,6 +79,7 @@ impl Plugin for NavigationPlugin {
             ),
         );
         sharing::register(app);
+        super::knowledge::register(app);
         // The admitted-waypoint applier moves Input→Physics (issue #830):
         // `operate_navigation_ai` emits its `SetNavigationWaypoint` into
         // `AdmittedCommands` in Physics, and admission clears `AdmittedCommands`
@@ -103,10 +104,8 @@ impl Plugin for NavigationPlugin {
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(operate_navigation_ai),
         )
-        // Refresh anchored waypoints from the parent entity's live
-        // Transform every tick, before the broadcaster reads the
-        // waypoint into the SimSnapshot. Auto-clear when the parent
-        // entity is no longer present.
+        // Refresh fitted anchors from held permitted measurements; legacy
+        // unconfigured consumers retain the prior live-transform path.
         .add_systems(
             FixedUpdate,
             refresh_anchored_waypoint
@@ -152,32 +151,37 @@ impl Plugin for NavigationPlugin {
 /// host in `SimSet::Input`, consumes it through the same path as a human console
 /// press; nothing downstream can tell which actor supplied it.
 ///
-/// Observing `CivilianState::order()` makes emission idempotent. Once one craft
+/// Latest successful own requests per public contact make measured operation idempotent. Once one craft
 /// has received its order the next AI cadence chooses the next objective, so a
 /// scenario can publish one payload-bearing objective per endangered craft
 /// without resetting a civilian's acknowledgement clock every tick.
 #[allow(clippy::type_complexity)]
 pub fn operate_civilian_order_ai(
     sessions: Res<crate::lobby::Sessions>,
+    knowledge: super::knowledge::Environment,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     civilians: Query<(
         &crate::entities::spawner::EntityUuid,
         &crate::civilian::CivilianTraffic,
+        Option<&crate::civilian::CivilianSection>,
     )>,
     mut ships: Query<
         (
+            Entity,
             Option<&crate::entities::spawner::EntityUuid>,
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::server_app::ShipSystemBlackboards,
             Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&sharing::NavigationSharingProfile>,
+            Option<&NavigationWaypoint>,
             &mut crate::core::messages::AdmittedCommands,
         ),
         With<crate::server_app::LocalShip>,
     >,
 ) {
-    for (entity_uuid, sources, blackboards, ship_config, profile, mut admitted) in ships.iter_mut()
+    for (entity, entity_uuid, sources, blackboards, ship_config, profile, waypoint, mut admitted) in
+        ships.iter_mut()
     {
         let Some(owner) = navigation_owner(ship_config, profile) else {
             continue;
@@ -196,7 +200,11 @@ pub fn operate_civilian_order_ai(
             continue;
         };
 
-        let next = view.scored_objectives.iter().find_map(|objective| {
+        let picture = knowledge.picture(entity, ship_config, &owner, Some(blackboards), profile);
+        let mut considered_contacts = std::collections::BTreeSet::new();
+        let mut objectives: Vec<_> = view.scored_objectives.iter().collect();
+        objectives.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.id.cmp(&b.id)));
+        let next = objectives.into_iter().find_map(|objective| {
             if objective.score <= 0.0
                 || !objective
                     .relevance
@@ -213,6 +221,39 @@ pub fn operate_civilian_order_ai(
             {
                 return None;
             }
+            let order = crate::civilian::CivilianOrder::divert_to_route(route);
+            if picture.configured {
+                let contact = picture.request(target)?;
+                if contact.charted || contact.name.is_none() {
+                    return None;
+                }
+                // Only fixed supported interaction choices or an explicit typed
+                // received claim authorize a request; no foreign order lookup.
+                let manifest = civilians.iter().any(|(uuid, _, section)| {
+                    uuid.0 == contact.route
+                        && section.is_some_and(|section| {
+                            section
+                                .0
+                                .order_options
+                                .iter()
+                                .any(|option| option.order == order)
+                        })
+                });
+                if !manifest || !considered_contacts.insert(contact.key.clone()) {
+                    return None;
+                }
+                if waypoint
+                    .and_then(|waypoint| waypoint.accepted_requests.get(&contact.key))
+                    .is_some_and(|receipt| {
+                        receipt.owner == owner
+                            && receipt.contact == contact.key
+                            && receipt.order == order
+                    })
+                {
+                    return None;
+                }
+                return Some((contact.key.clone(), order));
+            }
             let resolved = runtime
                 .as_deref()
                 .and_then(|world| world.name_to_uuid.get(target))
@@ -220,8 +261,8 @@ pub fn operate_civilian_order_ai(
                 .unwrap_or(target);
             let traffic = civilians
                 .iter()
-                .find(|(uuid, _)| uuid.0 == resolved)
-                .map(|(_, traffic)| traffic)?;
+                .find(|(uuid, ..)| uuid.0 == resolved)
+                .map(|(_, traffic, _)| traffic)?;
             let order = crate::civilian::CivilianOrder::divert_to_route(route);
             (traffic.0.order() != Some(&order)).then(|| (target.to_string(), order))
         });
@@ -260,6 +301,17 @@ pub fn operate_civilian_order_ai(
 pub struct NavigationWaypoint {
     mode: Option<WaypointMode>,
     generation: u64,
+    /// Latest own standing request per public contact, never foreign compliance.
+    /// Replace on acceptance; retain on information loss; reset with the mission owner.
+    pub(crate) accepted_requests: std::collections::BTreeMap<String, AcceptedTrafficRequest>,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct AcceptedTrafficRequest {
+    pub owner: crate::core::messages::SystemId,
+    pub contact: String,
+    pub order: crate::civilian::CivilianOrder,
+    pub tick: u64,
 }
 
 /// Bookkeeping for [`issue_navigate_to_clearance`], the single origin-agnostic
@@ -460,19 +512,24 @@ use crate::command_admission::finish_action_feedback as finish_waypoint_action_f
 pub(super) fn handle_navigation_waypoint(
     mut ship_query: Query<
         (
+            Entity,
             &AdmittedCommands,
             &mut NavigationWaypoint,
             Option<&mut crate::ship::power::ShipPowerSystem>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&sharing::NavigationSharingProfile>,
+            Option<&crate::server_app::ShipSystemBlackboards>,
         ),
         With<crate::server_app::Ship>,
     >,
     mut outbound: Option<
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
+    knowledge: super::knowledge::Environment,
 ) {
-    for (admitted, mut waypoint, mut power, config, profile) in ship_query.iter_mut() {
+    for (entity, admitted, mut waypoint, mut power, config, profile, boards) in
+        ship_query.iter_mut()
+    {
         let owner = navigation_owner(config, profile);
         for cmd in admitted
             .0
@@ -494,6 +551,30 @@ pub(super) fn handle_navigation_waypoint(
                 SystemControlPayload::SetNavigationWaypoint { x, z, source_uuid }
                     if x.is_finite() && z.is_finite() =>
                 {
+                    let picture = knowledge.picture(entity, config, &cmd.target, boards, profile);
+                    let mode = if picture.configured {
+                        if let Some(requested) =
+                            source_uuid.as_deref().filter(|value| !value.is_empty())
+                        {
+                            let Some(contact) = picture.contacts.get(requested) else {
+                                finish_waypoint_action_feedback(
+                                    cmd,
+                                    &mut outbound,
+                                    ActionFeedbackOutcome::Refused,
+                                );
+                                continue;
+                            };
+                            WaypointMode::Anchored {
+                                source_uuid: contact.route.clone(),
+                                last_x: contact.position[0],
+                                last_z: contact.position[2],
+                            }
+                        } else {
+                            WaypointMode::Free { x: *x, z: *z }
+                        }
+                    } else {
+                        make_waypoint_mode(*x, *z, source_uuid.as_deref())
+                    };
                     if !power.as_deref_mut().is_some_and(|power| {
                         power.0.try_work_discrete(&cmd.target).unwrap_or(false)
                     }) {
@@ -508,7 +589,7 @@ pub(super) fn handle_navigation_waypoint(
                     // clearance for it is issued by the shared, origin-agnostic
                     // `issue_navigate_to_clearance` — the same issuer the AI
                     // write path relies on (AGENTS.md rule 6).
-                    waypoint.set(make_waypoint_mode(*x, *z, source_uuid.as_deref()));
+                    waypoint.set(mode);
                     finish_waypoint_action_feedback(
                         cmd,
                         &mut outbound,
@@ -664,22 +745,29 @@ fn make_waypoint_mode(x: f32, z: f32, source_uuid: Option<&str>) -> WaypointMode
     }
 }
 
-/// Each tick, if any ship's navigation waypoint is anchored to an entity,
-/// look up the entity's current `Transform` by `EntityUuid` and refresh
-/// the waypoint's stored coordinates. If no entity carries the anchored
-/// UUID, auto-clear the waypoint (per the despawn policy). Iterates every
-/// ship so both player and NPC waypoints track their anchors.
+/// Refresh the existing course from Navigation's permitted measured picture.
+/// Information loss retains its last legitimate point. Only unconfigured legacy
+/// consumers follow live Transform and clear on despawn.
 fn refresh_anchored_waypoint(
     mut waypoint_q: Query<
         (
+            Entity,
             &mut NavigationWaypoint,
             Option<&crate::ship::power::ShipPowerSystem>,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+            Option<&crate::server_app::ShipSystemBlackboards>,
+            Option<&sharing::NavigationSharingProfile>,
         ),
         With<crate::server_app::Ship>,
     >,
     entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform)>,
+    knowledge: super::knowledge::Environment,
 ) {
-    for (mut waypoint, power) in waypoint_q.iter_mut() {
+    for (entity, mut waypoint, power, config, boards, profile) in waypoint_q.iter_mut() {
+        let Some(owner) = navigation_owner(config, profile) else {
+            continue;
+        };
+        let picture = knowledge.picture(entity, config, &owner, boards, profile);
         let fraction = phoenix_sim_gameplay::ship::energy_work::fraction_for_kind(
             power.map(|power| &power.0),
             crate::ship::system_registry::NAVIGATION_KIND,
@@ -695,6 +783,16 @@ fn refresh_anchored_waypoint(
         else {
             continue;
         };
+
+        if picture.configured {
+            if let Some(contact) = picture.routed(source_uuid) {
+                *last_x += (contact.position[0] - *last_x) * fraction;
+                *last_z += (contact.position[2] - *last_z) * fraction;
+            }
+            // Losing a measurement does not reveal whether its actor moved or
+            // despawned, and is not an order to discard the legitimate goal.
+            continue;
+        }
 
         let mut found = false;
         for (uuid, transform) in entity_q.iter() {
@@ -730,6 +828,7 @@ fn refresh_anchored_waypoint(
 /// asks NPC ships to carry navigation blackboards, so this publishes for every
 /// AI-bearing ship (those carrying `ShipSystemBlackboards`).
 pub(crate) fn publish_navigation_blackboard(
+    knowledge: super::knowledge::Environment,
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     // The civilian traffic picture (issue #1028). Read-only, so this system
@@ -743,6 +842,7 @@ pub(crate) fn publish_navigation_blackboard(
     )>,
     mut ship_q: Query<
         (
+            Entity,
             &NavigationWaypoint,
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
             &mut crate::server_app::ShipSystemBlackboards,
@@ -764,19 +864,33 @@ pub(crate) fn publish_navigation_blackboard(
     // world picture for everyone, and UUID-sorted so archetype order never
     // reaches the wire.
     let civilians = civilian_traffic_rows(&civilians_q, world_config.as_deref());
-    for (waypoint, is_local, mut bbs, hosts, sharing, sources, config, profile) in ship_q.iter_mut()
+    for (entity, waypoint, is_local, mut bbs, hosts, sharing, sources, config, profile) in
+        ship_q.iter_mut()
     {
         let Some(nav_id) = navigation_owner(config, profile) else {
             continue;
         };
         let navigation_waypoint = waypoint.snapshot();
+        let picture = knowledge.picture(entity, config, &nav_id, Some(&bbs), profile);
+        let visible_civilians = if picture.configured {
+            let received = config.map(|config| {
+                let view = config.0.observations_for_system(&nav_id, &bbs.0);
+                bbs.0
+                    .keys()
+                    .filter_map(|key| view.get(key).map(|value| (key.clone(), value.clone())))
+                    .collect()
+            });
+            super::knowledge::civilian_rows(&picture, &civilians_q, received.as_ref(), &nav_id)
+        } else {
+            civilians.clone()
+        };
         let mut bb = if is_local {
             NavigationBlackboard {
                 nav_chart_range: cfg.nav_chart_range,
                 nav_chart_shows: cfg.nav_chart_shows.clone(),
                 nav_chart_selects: cfg.nav_chart_selects.clone(),
                 navigation_waypoint,
-                civilians: civilians.clone(),
+                civilians: visible_civilians,
                 host_station: hosts.and_then(|h| h.0.get(&nav_id).cloned()),
                 sharing: None,
                 received_chart: Vec::new(),
@@ -941,22 +1055,8 @@ pub fn operate_navigation_ai(
     // schedule build, so a bare `App` cannot silently diverge from production.
     ai_env: crate::ai::host::AiHostEnv,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
+    knowledge: super::knowledge::Environment,
 ) {
-    let all_entities: Vec<(String, Option<String>, [f32; 3])> = entities
-        .iter()
-        .map(|(uuid, transform, name)| {
-            (
-                uuid.0.clone(),
-                name.map(|n| n.0.clone()),
-                [
-                    transform.translation.x,
-                    transform.translation.y,
-                    transform.translation.z,
-                ],
-            )
-        })
-        .collect();
-
     for (
         ship_entity,
         sources,
@@ -987,6 +1087,29 @@ pub fn operate_navigation_ai(
         // stand-in.
         let Some(selector_comp) = target_selector else {
             continue;
+        };
+        let picture = knowledge.picture(
+            ship_entity,
+            ship_config,
+            &navigation_owner,
+            Some(blackboards),
+            sharing_profile,
+        );
+        // Unconfigured old fixtures retain their original source. Fitted
+        // consumers never construct a raw foreign actor candidate list.
+        let all_entities: Vec<(String, Option<String>, [f32; 3])> = if picture.configured {
+            Vec::new()
+        } else {
+            entities
+                .iter()
+                .map(|(uuid, transform, name)| {
+                    (
+                        uuid.0.clone(),
+                        name.map(|name| name.0.clone()),
+                        transform.translation.to_array(),
+                    )
+                })
+                .collect()
         };
 
         let scored: Vec<crate::core::messages::ScoredObjective> =
@@ -1047,15 +1170,23 @@ pub fn operate_navigation_ai(
                 | crate::core::messages::AiDirective::Dock { target }
                     if !target.is_empty() =>
                 {
-                    if let Some((uuid, pos)) = resolve_destroy_target(
-                        &all_entities,
-                        Some(ai_env.content_runtime()),
-                        target,
-                    ) {
+                    let target = if picture.configured {
+                        picture.request(target).map(|contact| {
+                            (contact.key.clone(), contact.route.clone(), contact.position)
+                        })
+                    } else {
+                        resolve_destroy_target(
+                            &all_entities,
+                            Some(ai_env.content_runtime()),
+                            target,
+                        )
+                        .map(|(uuid, position)| (uuid.clone(), uuid, position))
+                    };
+                    if let Some((uuid, route, pos)) = target {
                         modes.insert(
                             uuid.clone(),
                             WaypointMode::Anchored {
-                                source_uuid: uuid.clone(),
+                                source_uuid: route,
                                 last_x: pos[0],
                                 last_z: pos[2],
                             },
@@ -1126,6 +1257,18 @@ pub fn operate_navigation_ai(
         // `source_chart_contact` marker into a coincident objective destination
         // (the selector dedups by UUID, folding facts) and stand ready for an
         // author to weight into eligible destinations.
+        if picture.configured {
+            for contact in picture.contacts.values() {
+                modes
+                    .entry(contact.key.clone())
+                    .or_insert(WaypointMode::Anchored {
+                        source_uuid: contact.route.clone(),
+                        last_x: contact.position[0],
+                        last_z: contact.position[2],
+                    });
+                candidates.push(chart_contact_candidate(&contact.key, contact.position));
+            }
+        }
         for (uuid, _name, pos) in &all_entities {
             modes.entry(uuid.clone()).or_insert(WaypointMode::Anchored {
                 source_uuid: uuid.clone(),
@@ -1151,7 +1294,15 @@ pub fn operate_navigation_ai(
         // on its entity UUID, a `Free` waypoint on its position-derived synthetic
         // UUID — the same keys the candidates above use.
         let current_key = match waypoint.mode() {
-            Some(WaypointMode::Anchored { source_uuid, .. }) => Some(source_uuid.clone()),
+            Some(WaypointMode::Anchored { source_uuid, .. }) => {
+                if picture.configured {
+                    picture
+                        .routed(source_uuid)
+                        .map(|contact| contact.key.clone())
+                } else {
+                    Some(source_uuid.clone())
+                }
+            }
             Some(WaypointMode::Free { x, z }) => Some(free_candidate_key(*x, *z)),
             None => None,
         };
@@ -1161,10 +1312,16 @@ pub fn operate_navigation_ai(
         // The scenario flag chain is anchored at the layer that spawned this
         // ship (issue #891 stage 2).
         let flag_chain = ai_env.flag_chain(ship_entity);
-        let desired: Option<WaypointMode> = selector_comp
+        let mut desired: Option<WaypointMode> = selector_comp
             .selector
             .select(&self_ctx, &candidates, current_key.as_deref(), &flag_chain)
             .and_then(|uuid| modes.get(&uuid).cloned());
+        if desired.is_none()
+            && picture.configured
+            && matches!(waypoint.mode(), Some(WaypointMode::Anchored {source_uuid,..}) if picture.routed(source_uuid).is_none())
+        {
+            desired = waypoint.mode().cloned();
+        }
 
         // ── Emit on change only (issue #828 shape) ───────────────────────────
         // Compare against the current waypoint by identity (`same_waypoint`):
@@ -1193,7 +1350,13 @@ pub fn operate_navigation_ai(
             }) => SystemControlPayload::SetNavigationWaypoint {
                 x: *last_x,
                 z: *last_z,
-                source_uuid: Some(source_uuid.clone()),
+                source_uuid: if picture.configured {
+                    picture
+                        .routed(source_uuid)
+                        .map(|contact| contact.key.clone())
+                } else {
+                    Some(source_uuid.clone())
+                },
             },
             None => SystemControlPayload::ClearNavigationWaypoint,
         };
@@ -1334,3 +1497,7 @@ mod ownership_tests;
 #[allow(clippy::disallowed_methods)]
 #[path = "server_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "knowledge_tests.rs"]
+mod knowledge_tests;

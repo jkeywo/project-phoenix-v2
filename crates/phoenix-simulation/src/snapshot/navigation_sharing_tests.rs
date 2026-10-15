@@ -14,14 +14,29 @@ fn fixture() -> (World, Entity, PhoenixSnapshot) {
     // The production snapshot plugin registers the legacy optional row type;
     // this renderer-free World otherwise has only the fitted physical owner.
     world.register_component::<EntitySystemHull>();
+    world.register_component::<EntityShipArcHull>();
+    world.register_component::<crate::console::repair::server::RepairRequestQueue>();
+    world.register_component::<crate::ship_plugin::RepairHumanAlerted>();
+    world.register_component::<crate::ai::server::ObjectiveCursors>();
     world.insert_resource(SimTick(20));
     world.insert_resource(Time::<Fixed>::default());
-    let entity = crate::entities::spawner::spawn_entity(
+    let ship = config.ship_config.as_ref().unwrap().clone();
+    let (resolver, ratings) = crate::ship::rating::seed_boot_ratings(&ship, |_| {
+        crate::ship::rating::BACKFILL_RATING.to_string()
+    });
+    let seed = crate::entities::ship_spawn::ShipSpawnSeed {
+        ship_config: crate::ship_plugin::ShipConfigComponent(ship),
+        control_sources: crate::ship_plugin::ShipSystemControlSources(resolver),
+        active_ratings: crate::ship_plugin::ActiveStationRatings(ratings),
+        initial_yaw: 0.0,
+    };
+    let entity = crate::entities::spawner::spawn_entity_with_ship_seed(
         &mut world.commands(),
         &config,
         Vec3::ZERO,
         "navigation-source".into(),
         None,
+        Some(seed),
     );
     world.flush();
     let mut owner = world.get_mut::<NavigationSharing>(entity).unwrap();
@@ -60,6 +75,22 @@ fn fixture() -> (World, Entity, PhoenixSnapshot) {
         .accept("navigation-source", 20, &sender.exports())
         .unwrap();
     drop(owner);
+    assert!(world
+        .get::<crate::console::repair::server::ShipRepairTeams>(entity)
+        .is_some());
+    world
+        .get_mut::<crate::console::navigation::NavigationWaypoint>(entity)
+        .unwrap()
+        .accepted_requests
+        .insert(
+            "observed-public-contact".into(),
+            crate::console::navigation::server::AcceptedTrafficRequest {
+                owner: crate::ship::system_registry::navigation_system_id(),
+                contact: "observed-public-contact".into(),
+                order: crate::civilian::CivilianOrder::Hold,
+                tick: 19,
+            },
+        );
     let snapshot = capture(&world);
     assert_eq!(snapshot.entities.len(), 1);
     assert_eq!(
@@ -97,6 +128,17 @@ fn actual_spawn_capture_and_json_application_preserve_the_navigation_frontier() 
     super::application::apply_entity_state(&mut world, entity, &decoded.entities[0], decoded.tick);
     assert_eq!(world.get::<NavigationSharing>(entity).unwrap().0, expected);
     assert_eq!(
+        world
+            .get::<crate::console::navigation::NavigationWaypoint>(entity)
+            .unwrap()
+            .accepted_requests,
+        decoded.entities[0]
+            .navigation_waypoint
+            .as_ref()
+            .unwrap()
+            .accepted_requests
+    );
+    assert_eq!(
         capture(&world).entities[0].navigation_sharing,
         Some(expected)
     );
@@ -104,7 +146,7 @@ fn actual_spawn_capture_and_json_application_preserve_the_navigation_frontier() 
 
 #[test]
 fn missing_wrong_or_future_navigation_state_refuses_before_any_live_write() {
-    for mutation in 0..5 {
+    for mutation in 0..8 {
         let (mut world, entity, mut snapshot) = fixture();
         match mutation {
             0 => snapshot.entities[0].navigation_sharing = None,
@@ -135,6 +177,40 @@ fn missing_wrong_or_future_navigation_state_refuses_before_any_live_write() {
                     .provenance
                     .origin
                     .source = "radar-origin-0000000000000001".into()
+            }
+            5 => {
+                snapshot.entities[0]
+                    .navigation_waypoint
+                    .as_mut()
+                    .unwrap()
+                    .accepted_requests
+                    .values_mut()
+                    .next()
+                    .unwrap()
+                    .tick = 21
+            }
+            6 => {
+                snapshot.entities[0]
+                    .navigation_waypoint
+                    .as_mut()
+                    .unwrap()
+                    .accepted_requests
+                    .values_mut()
+                    .next()
+                    .unwrap()
+                    .owner
+                    .0 = "wrong-owner".into()
+            }
+            7 => {
+                snapshot.entities[0]
+                    .navigation_waypoint
+                    .as_mut()
+                    .unwrap()
+                    .accepted_requests
+                    .values_mut()
+                    .next()
+                    .unwrap()
+                    .contact = "wrong-key".into()
             }
             _ => {
                 world

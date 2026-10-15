@@ -177,5 +177,14 @@ preserving captured hail intent and avoiding synthetic boundary events. Field an
 recorded-observation continuations participate in the existing snapshot/digest;
 the snapshot artifact and shared protocol constants declare the compatibility boundary.
 
+Configured Navigation builds its candidates and moving-anchor refresh from its
+own permitted measured picture and explicit filtered chart. Lost observations
+hold the last legitimate waypoint; foreign Transform and current itinerary are
+not alternate knowledge sources. Identified civilian contacts expose fixed
+authored interaction choices. Live route/compliance requires an explicit received
+Navigation claim. Its existing waypoint owner retains the latest successful own
+request per public contact to avoid repeated AI payment, without treating that
+receipt as foreign compliance. These receipts save and digest with that owner.
+
 The broader redesign contract and incomplete work belong in PASM and the
 implementation/acceptance records, rather than this current-owner index.

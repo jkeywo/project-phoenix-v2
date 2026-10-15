@@ -62,7 +62,11 @@ pub(super) fn validate_roster(
             || row.navigation_sharing.is_some()
             || row.broad.is_some()
             || row.scan.is_some()
-            || row.passive.is_some())
+            || row.passive.is_some()
+            || row
+                .navigation_waypoint
+                .as_ref()
+                .is_some_and(|waypoint| !waypoint.accepted_requests.is_empty()))
             && (!world.contains_resource::<crate::sim_tick::SimTick>()
                 || !world.contains_resource::<Time<bevy::time::Fixed>>())
         {
@@ -107,6 +111,61 @@ pub(super) fn validate_roster(
                     .iter(world)
                     .find_map(|(entity, uuid)| (uuid.0 == row.uuid).then_some(entity))
             });
+        for (contact, receipt) in row
+            .navigation_waypoint
+            .iter()
+            .flat_map(|waypoint| &waypoint.accepted_requests)
+        {
+            let accepted_owner = if let Some(entity) = live {
+                crate::console::navigation::server::navigation_owner(
+                    world.get::<crate::ship_plugin::ShipConfigComponent>(entity),
+                    world.get::<crate::console::navigation::sharing::NavigationSharingProfile>(
+                        entity,
+                    ),
+                )
+            } else if let Some(origin) = &row.spawn {
+                let config = origin
+                    .resolve(
+                        &crate::entities::loader::WasmTemplateLoader,
+                        &mut Vec::new(),
+                    )
+                    .ok_or_else(|| {
+                        (
+                            row.uuid.clone(),
+                            "cannot resolve own Navigation request capability".into(),
+                        )
+                    })?;
+                let profile = config.navigation_console.as_ref().and_then(|nav| {
+                    nav.sharing.as_ref().map(|sharing| {
+                        crate::console::navigation::sharing::NavigationSharingProfile {
+                            owner: sharing.system.clone(),
+                            radar: nav.system_chart.clone(),
+                        }
+                    })
+                });
+                let ship = config
+                    .ship_config
+                    .map(crate::ship_plugin::ShipConfigComponent);
+                crate::console::navigation::server::navigation_owner(
+                    ship.as_ref(),
+                    profile.as_ref(),
+                )
+            } else {
+                Some(crate::ship::system_registry::navigation_system_id())
+            };
+            let valid_owner = accepted_owner.as_ref() == Some(&receipt.owner);
+            if !valid_owner
+                || contact != &receipt.contact
+                || receipt.contact.trim().is_empty()
+                || receipt.order.validate().is_err()
+                || receipt.tick > snapshot.tick
+            {
+                return Err((
+                    row.uuid.clone(),
+                    "invalid own Navigation request receipt".into(),
+                ));
+            }
+        }
         let navigation_owner = if let Some(entity) = live {
             world
                 .get::<crate::console::navigation::sharing::NavigationSharingProfile>(entity)

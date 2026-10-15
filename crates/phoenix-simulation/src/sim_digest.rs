@@ -472,6 +472,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("passive-samples", fold_passive_samples_namespace),
     ("broad-tracks", fold_broad_tracks_namespace),
     ("navigation-sharing", fold_navigation_sharing_namespace),
+    ("navigation-request", fold_navigation_request_namespace),
 ];
 
 /// The running accumulator after each named stage of the fold.
@@ -2814,5 +2815,17 @@ fn fold_resource_stocks_namespace(world: &World, acc: u64) -> u64 {
             }
             acc
         },
+    )
+}
+
+fn fold_navigation_request_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "navigation-request",
+        |owner: &crate::console::navigation::NavigationWaypoint| {
+            Some(owner.accepted_requests.clone())
+        },
+        |acc, receipt| fold_serde(acc, &receipt),
     )
 }

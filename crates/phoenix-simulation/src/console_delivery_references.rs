@@ -349,4 +349,61 @@ impl ReferenceProjection {
             _ => {}
         }
     }
+
+    /// Navigation can retain an explicitly charted public landmark, but a
+    /// private moving anchor must use this publisher's own measured handle.
+    pub fn navigation(
+        &self,
+        source: &SystemId,
+        board: &mut SystemBlackboard,
+        charted: impl Fn(&str) -> bool,
+    ) {
+        if !self.measured {
+            return;
+        }
+        let SystemBlackboard::Navigation(board) = board else {
+            return;
+        };
+        let reference = |id: &str| {
+            self.resolve(source, Some(id), None)
+                .or_else(|| {
+                    let console = self.publishers.get(source)?;
+                    let mut known = self
+                        .contexts
+                        .get(console)?
+                        .iter()
+                        .filter(|contact| contact.name.as_deref() == Some(id));
+                    let first = known.next()?;
+                    known.next().is_none().then(|| first.clone())
+                })
+                .map(|contact| contact.id)
+                .or_else(|| charted(id).then(|| id.to_owned()))
+        };
+        if let Some(waypoint) = &mut board.navigation_waypoint {
+            waypoint.source_uuid = waypoint.source_uuid.as_deref().and_then(reference);
+        }
+        board.civilians.retain_mut(|row| {
+            let Some(contact) = self.resolve(source, Some(&row.uuid), None) else {
+                return false;
+            };
+            let Some(name) = contact.name else {
+                return false;
+            };
+            row.uuid = contact.id;
+            row.name = name;
+            if row.order == "dock" {
+                row.order_destination = reference(&row.order_destination).unwrap_or_default();
+            }
+            row.order_options.retain_mut(|option| {
+                if let crate::civilian::CivilianOrder::Dock { structure } = &mut option.order {
+                    let Some(id) = reference(structure) else {
+                        return false;
+                    };
+                    *structure = id;
+                }
+                true
+            });
+            true
+        });
+    }
 }

@@ -163,7 +163,7 @@ impl Plugin for CivilianPlugin {
 /// [`crate::sim_digest`] applies to its own walks.
 #[allow(clippy::too_many_arguments)]
 pub fn tick_civilian_traffic(
-    runtime: Option<ResMut<WorldContentRuntime>>,
+    runtime: Option<Res<WorldContentRuntime>>,
     // The scripted civilian-order queue, extracted off `WorldContentRuntime`
     // (issue #1223). This is its owning drain; console orders still arrive on the
     // `order_sources` query below.
@@ -172,11 +172,15 @@ pub fn tick_civilian_traffic(
     factions: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     sim_tick: Option<Res<crate::sim_tick::SimTick>>,
     mut outbox: Option<ResMut<crate::server_app::SimOutbox>>,
+    knowledge: crate::console::navigation::knowledge::Environment,
     mut order_sources: Query<(
+        Entity,
         &AdmittedCommands,
         Option<&mut crate::ship::power::ShipPowerSystem>,
         Option<&crate::ship_plugin::ShipConfigComponent>,
         Option<&crate::console::navigation::sharing::NavigationSharingProfile>,
+        Option<&crate::server_app::ShipSystemBlackboards>,
+        Option<&mut crate::console::navigation::NavigationWaypoint>,
     )>,
     mut civilians: Query<(
         Entity,
@@ -215,7 +219,8 @@ pub fn tick_civilian_traffic(
     let mut queued: Vec<PendingCivilianOrder> = std::mem::take(&mut civilian_orders_queue.0);
     let mut rejections: Vec<(String, String, String, Option<ActionCorrelationId>)> = Vec::new();
     let mut accepted_feedback: Vec<(String, String, ActionCorrelationId)> = Vec::new();
-    for (admitted, mut power, config, profile) in order_sources.iter_mut() {
+    let mut receipts = Vec::new();
+    for (entity, admitted, mut power, config, profile, boards, _) in order_sources.iter_mut() {
         let owner = crate::console::navigation::server::navigation_owner(config, profile);
         for cmd in admitted.0.iter().filter(|command| {
             crate::console::navigation::server::navigation_target(config, &command.target)
@@ -244,8 +249,25 @@ pub fn tick_civilian_traffic(
                 ));
                 continue;
             }
-            match resolve_civilian(&runtime, target).filter(|uuid| addressable.contains(uuid)) {
-                Some(uuid) => {
+            let picture = knowledge.picture(entity, config, &cmd.target, boards, profile);
+            let resolved = if picture.configured {
+                picture
+                    .contacts
+                    .get(target)
+                    .filter(|contact| !contact.charted && contact.name.is_some())
+                    .and_then(|contact| {
+                        civilians.iter().find_map(|(_, uuid, _, section, ..)| {
+                            (uuid.0 == contact.route)
+                                .then(|| picture.canonical_order(order, &section.0.order_options))
+                                .flatten()
+                                .map(|order| (contact.route.clone(), order))
+                        })
+                    })
+            } else {
+                resolve_civilian(&runtime, target).map(|uuid| (uuid, order.clone()))
+            };
+            match resolved.filter(|(uuid, _)| addressable.contains(uuid)) {
+                Some((uuid, order)) => {
                     if !power.as_deref_mut().is_some_and(|power| {
                         power.0.try_work_discrete(&cmd.target).unwrap_or(false)
                     }) {
@@ -257,6 +279,16 @@ pub fn tick_civilian_traffic(
                         ));
                         continue;
                     }
+                    receipts.push((
+                        uuid.clone(),
+                        entity,
+                        crate::console::navigation::server::AcceptedTrafficRequest {
+                            owner: cmd.target.clone(),
+                            contact: target.clone(),
+                            order: order.clone(),
+                            tick: now,
+                        },
+                    ));
                     queued.push(PendingCivilianOrder {
                         uuid: uuid.clone(),
                         order: order.clone(),
@@ -343,6 +375,13 @@ pub fn tick_civilian_traffic(
                     t.from.as_str(),
                     t.to.as_str()
                 );
+            }
+        }
+        for (_, source, receipt) in receipts.iter().filter(|(target, ..)| target == &uuid) {
+            if let Ok((_, _, _, _, _, _, Some(mut waypoint))) = order_sources.get_mut(*source) {
+                waypoint
+                    .accepted_requests
+                    .insert(receipt.contact.clone(), receipt.clone());
             }
         }
         // A console order is Applied when this owning consumer has delivered

@@ -50,8 +50,27 @@ fn reserve(world: &World, entity: Entity) -> f32 {
 
 #[test]
 fn custom_navigation_controls_pay_the_fitted_owner_and_reject_an_absent_canonical_alias() {
-    let config = custom_config();
+    let mut config = custom_config();
+    let ship_config = config.ship_config.as_mut().unwrap();
+    let console = ship_config
+        .system(&SystemId("custom-navigation".into()))
+        .unwrap()
+        .console
+        .clone()
+        .unwrap();
+    ship_config
+        .consoles
+        .iter_mut()
+        .find(|row| row.id == console)
+        .unwrap()
+        .feeds
+        .push(phoenix_model::console::ConsoleFeed {
+            source: SystemId("sensor-radar".into()),
+            kind: phoenix_model::console::ConsoleObservationKind::SensorRadar,
+        });
     let mut app = App::new();
+    app.insert_resource(Time::<Fixed>::from_seconds(0.5));
+    app.insert_resource(crate::sim_tick::SimTick(0));
     app.init_resource::<crate::world::server::WorldContentRuntime>();
     app.init_resource::<crate::effect_queue::EffectQueue<crate::civilian::server::PendingCivilianOrder>>();
     let ship = crate::entities::spawner::spawn_entity(
@@ -62,12 +81,31 @@ fn custom_navigation_controls_pay_the_fitted_owner_and_reject_an_absent_canonica
         None,
     );
     app.world_mut().flush();
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(NavigationWaypoint::default());
     let traffic_uuid = uuid::Uuid::from_u128(0xc14).to_string();
+    let mut civilian_config = crate::civilian::CivilianConfig::default();
+    civilian_config
+        .order_options
+        .push(crate::civilian::traffic::CivilianOrderOption {
+            id: "hold".into(),
+            label: "public.hold".into(),
+            order: crate::civilian::CivilianOrder::Hold,
+        });
     let civilian = app
         .world_mut()
         .spawn((
             crate::entities::spawner::EntityUuid(traffic_uuid.clone()),
-            crate::civilian::CivilianSection(crate::civilian::CivilianConfig::default()),
+            Transform::from_xyz(10.0, 0.0, 0.0),
+            crate::entities::spawner::EntityName("public-traffic".into()),
+            crate::entities::spawner::EntityTagsSection(vec!["ship".into()]),
+            crate::entities::spawner::EntityTarget(crate::entities::target::TargetSection {
+                tags: vec!["ship".into()],
+                threat_level: Default::default(),
+                description: None,
+            }),
+            crate::civilian::CivilianSection(civilian_config),
             crate::civilian::CivilianTraffic(crate::civilian::CivilianState::from_config(
                 &crate::civilian::CivilianConfig::default(),
             )),
@@ -77,8 +115,9 @@ fn custom_navigation_controls_pay_the_fitted_owner_and_reject_an_absent_canonica
         ))
         .id();
     let before = reserve(app.world(), ship);
+    let contact = super::knowledge_tests::observe(&mut app, ship, true);
     let order = || SystemControlPayload::OrderCivilian {
-        target: traffic_uuid.clone(),
+        target: contact.clone(),
         order: crate::civilian::CivilianOrder::Hold,
     };
     app.world_mut().get_mut::<AdmittedCommands>(ship).unwrap().0 =

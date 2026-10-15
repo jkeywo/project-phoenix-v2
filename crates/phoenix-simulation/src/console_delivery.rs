@@ -316,6 +316,8 @@ impl CapturedConsoleDelivery {
                 });
                 for (source, board) in updates.iter_mut() {
                     self.references.board(source, board);
+                    self.references
+                        .navigation(source, board, |id| self.charted(id));
                 }
                 if let Some(scope) = console_scope {
                     scope.retain(|source| self.references.permits(token, source));

@@ -382,6 +382,7 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
 /// its teams simply falling back to the pre-sweep "fix one system, walk home"
 /// behaviour — see `RepairTeams::tick`.
 pub fn tick_repair_teams(
+    mut roster: Option<ResMut<phoenix_sim_gameplay::personnel::PersonnelRoster>>,
     time: Res<Time>,
     tick: Option<Res<crate::sim_tick::SimTick>>,
     mut inputs: ParamSet<(
@@ -403,7 +404,6 @@ pub fn tick_repair_teams(
                 Option<&ShipSystemControlSources>,
                 (
                     Option<&phoenix_sim_gameplay::personnel::CompiledPersonnel>,
-                    Option<&mut phoenix_sim_gameplay::personnel::PersonnelState>,
                     Option<&crate::resources::fitting_server::CompiledShipFitting>,
                     Option<&crate::resources::fitting_server::ShipFitting>,
                 ),
@@ -477,9 +477,12 @@ pub fn tick_repair_teams(
         mut inventory,
         services,
         tool_controls,
-        (personnel_profile, mut personnel_state, care_fitting_profile, care_fitting),
+        (personnel_profile, care_fitting_profile, care_fitting),
     ) in ship_q.iter_mut()
     {
+        let mut personnel_state = roster
+            .as_deref_mut()
+            .and_then(|roster| ship_uuid.and_then(|actor| roster.state_mut(&actor.0)));
         // Crew wrecks remain for identity and cinematic spectating. A queued
         // repair must not revive them on the next tick and reopen admission.
         // NPC repair/recovery, including authored derelicts, keeps its policy.
@@ -784,6 +787,7 @@ pub fn tick_repair_teams(
 /// `ShipSystemBlackboards`, so the query naturally scopes to AI-bearing ships;
 /// the wire broadcaster stays `LocalShip`-filtered.
 pub(crate) fn publish_repair_blackboard(
+    roster: Option<Res<phoenix_sim_gameplay::personnel::PersonnelRoster>>,
     tick: Option<Res<crate::sim_tick::SimTick>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     base_world: Option<Res<crate::world::config::WorldConfig>>,
@@ -805,7 +809,6 @@ pub(crate) fn publish_repair_blackboard(
         Option<&crate::ship::compartment_damage::ShipDamage>,
         (
             Option<&phoenix_sim_gameplay::personnel::CompiledPersonnel>,
-            Option<&phoenix_sim_gameplay::personnel::PersonnelState>,
             Option<&crate::entities::spawner::EntityUuid>,
         ),
     )>,
@@ -839,9 +842,12 @@ pub(crate) fn publish_repair_blackboard(
         access,
         layout,
         physical,
-        (personnel_profile, personnel_state, actor),
+        (personnel_profile, actor),
     ) in ship_q.iter_mut()
     {
+        let personnel_state = roster
+            .as_deref()
+            .and_then(|roster| actor.and_then(|actor| roster.state(&actor.0)));
         let default_teams;
         let teams: &ShipRepairTeams = match teams_opt {
             Some(t) => t,

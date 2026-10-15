@@ -54,7 +54,7 @@ pub(super) fn install(
         insert_power_state(config, &groups, cmds);
         insert_target_selectors(config, cmds);
         insert_ai_policies(config, cmds);
-        insert_power_multipliers_and_modifiers(config, build_power_multipliers(config), cmds);
+        insert_power_multipliers_and_modifiers(config, uuid, build_power_multipliers(config), cmds);
         insert_ship_markers_and_trackers(cmds);
     } else if config.energy.is_some()
         || config.ship_config.as_ref().is_some_and(|ship| {
@@ -564,6 +564,7 @@ fn insert_shield_tuning(config: &EntityConfig, cmds: &mut EntityCommands) {
 /// declares repair TEAMS — the [`ShipRepairTeams`].
 fn insert_power_multipliers_and_modifiers(
     config: &EntityConfig,
+    uuid: &str,
     multipliers: std::collections::HashMap<crate::core::messages::PowerGroupId, [f32; 4]>,
     cmds: &mut EntityCommands,
 ) {
@@ -616,9 +617,17 @@ fn insert_power_multipliers_and_modifiers(
                     }
                     match phoenix_sim_gameplay::personnel::compile_entity(config) {
                         Ok(Some(profile)) => {
-                            let state =
-                                phoenix_sim_gameplay::personnel::PersonnelState::new(&profile);
-                            cmds.insert((profile, state));
+                            let actor = uuid.to_owned();
+                            let entity = cmds.id();
+                            cmds.insert(profile.clone());
+                            cmds.commands().queue(move |world:&mut World| {
+                                let source=world.get::<super::spawner::EntitySpawnOrigin>(entity).and_then(|origin|crate::console::repair::personnel::source(&origin.0,&actor).ok());
+                                let tick=source.as_ref().map_or(0,|source|source.birth_tick);
+                                world.init_resource::<phoenix_sim_gameplay::personnel::PersonnelRoster>();
+                                if let Err(reason)=world.resource_mut::<phoenix_sim_gameplay::personnel::PersonnelRoster>().accept(&actor,profile,source,tick) {
+                                    error!("refusing duplicate personnel origin: {reason}");
+                                }
+                            });
                         }
                         Ok(None) => {}
                         Err(error) => {

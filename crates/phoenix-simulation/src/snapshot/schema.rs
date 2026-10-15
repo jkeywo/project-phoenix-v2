@@ -202,8 +202,6 @@ pub struct EntityState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repair: Option<RepairState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub personnel: Option<phoenix_sim_gameplay::personnel::PersonnelState>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub access: Option<Vec<phoenix_model::interior::BoundaryStatus>>,
     /// The Weapons→Helm arc-bearing seam — see [`ArcRequestState`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1848,6 +1846,8 @@ pub struct BootIdentity {
 /// divergence is defined over, at one tick.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PhoenixSnapshot {
+    /// Required single global owner, including retained terminal identities.
+    pub personnel: phoenix_sim_gameplay::personnel::PersonnelRoster,
     /// The logical tick the capture was taken between. Mirrors
     /// `vellum_save::Snapshot::tick`, which is the envelope's copy; this is the
     /// resource's own value, and [`restore`] writes it back.

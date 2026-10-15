@@ -1,12 +1,13 @@
 //! Exclusive officer custody references the existing Repair team's physical cursor.
 use crate::jobs::repair::{RepairActivity, RepairJobState};
 use crate::ship::interior::{InteriorConfig, TeamLocation};
-use bevy::prelude::Component;
+use bevy::prelude::{Component, Resource};
 pub use phoenix_model::personnel::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Component, Clone, Debug)]
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CompiledPersonnel {
     pub care_compartment: Option<String>,
     pub config: PersonnelConfig,
@@ -159,10 +160,89 @@ fn compatible(team: &DutyTeamConfig, officer: &DutyOfficerConfig) -> bool {
         .any(|competency| officer.competencies.contains(competency))
 }
 
-#[derive(Component, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersonnelState {
     pub officers: BTreeMap<String, DutyOfficerState>,
+}
+
+/// The sole canonical personnel owner. Origin identity survives actual actor
+/// removal; individual Console publication must still select its permitted row.
+#[derive(Resource, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PersonnelRoster {
+    pub origins: BTreeMap<String, PersonnelOrigin>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PersonnelOrigin {
+    pub definition: CompiledPersonnel,
+    pub source: Option<PersonnelSource>,
+    pub accepted_tick: u64,
+    pub removed_tick: Option<u64>,
+    pub state: PersonnelState,
+}
+
+impl PersonnelRoster {
+    pub fn accept(
+        &mut self,
+        actor: &str,
+        profile: CompiledPersonnel,
+        source: Option<PersonnelSource>,
+        tick: u64,
+    ) -> Result<(), String> {
+        if actor.trim().is_empty() {
+            return Err("personnel origin requires a stable actor identity".into());
+        }
+        if let Some(existing) = self.origins.get(actor) {
+            return if existing.definition == profile && existing.removed_tick.is_none() {
+                Ok(())
+            } else {
+                Err("personnel identity cannot be replaced or rerolled".into())
+            };
+        }
+        self.origins.insert(
+            actor.into(),
+            PersonnelOrigin {
+                state: PersonnelState::new(&profile),
+                definition: profile,
+                source,
+                accepted_tick: tick,
+                removed_tick: None,
+            },
+        );
+        Ok(())
+    }
+    pub fn state(&self, actor: &str) -> Option<&PersonnelState> {
+        self.origins
+            .get(actor)
+            .filter(|origin| origin.removed_tick.is_none())
+            .map(|origin| &origin.state)
+    }
+    pub fn state_mut(&mut self, actor: &str) -> Option<&mut PersonnelState> {
+        self.origins
+            .get_mut(actor)
+            .filter(|origin| origin.removed_tick.is_none())
+            .map(|origin| &mut origin.state)
+    }
+    pub fn remove_actor(&mut self, actor: &str, tick: u64) {
+        let Some(origin) = self.origins.get_mut(actor) else {
+            return;
+        };
+        if origin.removed_tick.is_some() {
+            return;
+        }
+        origin.removed_tick = Some(tick);
+        for state in origin.state.officers.values_mut() {
+            // All currently supported custody is physically aboard its origin.
+            // Future off-ship variants must retain their actual location here.
+            state.location = OfficerLocation::Lost {
+                actor: actor.into(),
+            };
+            state.changed_tick = tick;
+        }
+    }
 }
 
 fn at_idle_home<'a>(
@@ -292,6 +372,7 @@ impl PersonnelState {
             return Err("officer is committed to actual treatment".into());
         }
         let current = match &officer.location {
+            OfficerLocation::Lost { .. } => return Err("lost officer cannot be posted".into()),
             OfficerLocation::AtCompartment { .. } => None,
             OfficerLocation::WithRepairTeam { team_idx } => Some(*team_idx),
         };
@@ -299,6 +380,9 @@ impl PersonnelState {
             return Ok(());
         }
         let compartment = match &officer.location {
+            OfficerLocation::Lost { .. } => {
+                return Err("lost officer has no operational location".into());
+            }
             OfficerLocation::AtCompartment { compartment } => compartment.as_str(),
             OfficerLocation::WithRepairTeam { team_idx } => {
                 at_idle_home(jobs, interior, *team_idx as usize)

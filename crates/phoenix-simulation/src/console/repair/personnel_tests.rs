@@ -1,4 +1,15 @@
 use super::*;
+fn state(world: &World, actor: Entity) -> &phoenix_sim_gameplay::personnel::PersonnelState {
+    world
+        .resource::<PersonnelRoster>()
+        .state(
+            &world
+                .get::<crate::entities::spawner::EntityUuid>(actor)
+                .unwrap()
+                .0,
+        )
+        .unwrap()
+}
 use crate::core::messages::{AdmittedCommand, SystemId};
 use crate::ship::control_source::ControlSource;
 use bevy::ecs::system::RunSystemOnce;
@@ -59,7 +70,7 @@ fn actual_admitted_human_and_ai_posting_share_one_custody_without_payment_or_mov
             .unwrap()
             .clone();
         issue(&mut world, ship, "repair", Some(0));
-        let posted = world.get::<PersonnelState>(ship).unwrap().clone();
+        let posted = state(&world, ship).clone();
         assert_eq!(
             posted.officers["repair-chief"].location,
             phoenix_model::personnel::OfficerLocation::WithRepairTeam { team_idx: 0 }
@@ -67,7 +78,7 @@ fn actual_admitted_human_and_ai_posting_share_one_custody_without_payment_or_mov
         assert_eq!(posted.officers["repair-chief"].changed_tick, 12);
         world.resource_mut::<crate::sim_tick::SimTick>().0 = 13;
         issue(&mut world, ship, "repair", Some(0));
-        assert_eq!(world.get::<PersonnelState>(ship).unwrap(), &posted);
+        assert_eq!(state(&world, ship), &posted);
         assert_eq!(
             world
                 .get::<super::super::server::ShipRepairTeams>(ship)
@@ -92,7 +103,7 @@ fn actual_admitted_human_and_ai_posting_share_one_custody_without_payment_or_mov
         );
         issue(&mut world, ship, "repair", None);
         assert_eq!(
-            world.get::<PersonnelState>(ship).unwrap().officers["repair-chief"].location,
+            state(&world, ship).officers["repair-chief"].location,
             phoenix_model::personnel::OfficerLocation::AtCompartment {
                 compartment: "engineering".into()
             }
@@ -123,14 +134,14 @@ fn unavailable_or_away_actual_team_cannot_teleport_custody() {
                 .0
                 .dispatch(0, SystemId("helm-engine-port".into()), "Port engine".into());
         }
-        let before = world.get::<PersonnelState>(ship).unwrap().clone();
+        let before = state(&world, ship).clone();
         let jobs = world
             .get::<super::super::server::ShipRepairTeams>(ship)
             .unwrap()
             .0
             .save_state();
         issue(&mut world, ship, "repair", Some(0));
-        assert_eq!(world.get::<PersonnelState>(ship).unwrap(), &before);
+        assert_eq!(state(&world, ship), &before);
         assert_eq!(
             world
                 .get::<super::super::server::ShipRepairTeams>(ship)

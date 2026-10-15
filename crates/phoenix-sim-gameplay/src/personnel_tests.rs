@@ -152,3 +152,34 @@ fn posted_continuation_cannot_cross_between_distinct_actual_team_homes() {
         "restore must retain the same home-only physical handoff rule as admission"
     );
 }
+
+#[test]
+fn retained_roster_keeps_origin_identity_and_never_recreates_lost_officers() {
+    let (profile, _, _, _) = fixture();
+    let mut roster = PersonnelRoster::default();
+    roster.accept("first", profile.clone(), None, 0).unwrap();
+    roster.accept("second", profile.clone(), None, 0).unwrap();
+    assert_eq!(roster.origins.len(), 2);
+    assert_eq!(roster.state("first").unwrap().officers.len(), 2);
+    roster.remove_actor("first", 7);
+    assert!(roster.state("first").is_none());
+    assert!(roster.state_mut("first").is_none());
+    assert!(roster.state("second").is_some());
+    for state in roster.origins["first"].state.officers.values() {
+        assert_eq!(
+            state.location,
+            OfficerLocation::Lost {
+                actor: "first".into()
+            }
+        );
+        assert_eq!(state.changed_tick, 7);
+    }
+    let saved = roster.clone();
+    roster.remove_actor("first", 8);
+    assert_eq!(roster, saved);
+    assert!(roster.accept("first", profile, None, 8).is_err());
+    assert_eq!(roster, saved);
+    let decoded: PersonnelRoster =
+        serde_json::from_str(&serde_json::to_string(&roster).unwrap()).unwrap();
+    assert_eq!(decoded, roster);
+}

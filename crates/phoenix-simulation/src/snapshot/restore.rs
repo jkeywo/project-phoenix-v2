@@ -267,6 +267,7 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
     }) {
         return report;
     }
+    super::personnel::apply(world, snapshot);
     restore_npc_frequency_matches(world, snapshot, &mut report);
     restore_coordination_staging(world, snapshot, &mut report);
     restore_asteroids(world, snapshot, &mut report);

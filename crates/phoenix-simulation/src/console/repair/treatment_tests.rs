@@ -2,7 +2,7 @@
 use super::*;
 use crate::{infrastructure::InfrastructureCondition, ship::power::ShipPowerSystem};
 use bevy::ecs::system::RunSystemOnce;
-use phoenix_sim_gameplay::personnel::{CompiledPersonnel, PersonnelCondition, PersonnelState};
+use phoenix_sim_gameplay::personnel::{CompiledPersonnel, PersonnelCondition, PersonnelRoster};
 #[test]
 fn actual_human_and_ai_care_share_finite_team_paid_equipment_medication_and_return() {
     for source in [
@@ -116,7 +116,11 @@ fn actual_human_and_ai_care_share_finite_team_paid_equipment_medication_and_retu
             }
         }
         let teams = &app.world().get::<ShipRepairTeams>(entity).unwrap().0;
-        let state = app.world().get::<PersonnelState>(entity).unwrap();
+        let state = app
+            .world()
+            .resource::<PersonnelRoster>()
+            .state("medical-actor")
+            .unwrap();
         assert!(was_working && was_returning);
         assert_eq!(
             state.officers["repair-chief"].condition,

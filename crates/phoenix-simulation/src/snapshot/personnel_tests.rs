@@ -1,4 +1,5 @@
 use super::*;
+use phoenix_sim_gameplay::personnel::PersonnelState;
 
 #[path = "activity_snapshot_tests.rs"]
 mod activities;
@@ -9,6 +10,7 @@ fn fixture() -> (World, Entity, PhoenixSnapshot) {
     )
     .unwrap();
     let mut world = World::new();
+    crate::console::repair::personnel::register_hooks(&mut world);
     world.register_component::<EntitySystemHull>();
     world.register_component::<EntityShipArcHull>();
     world.register_component::<crate::console::repair::server::RepairRequestQueue>();
@@ -32,7 +34,8 @@ fn fixture() -> (World, Entity, PhoenixSnapshot) {
         .0
         .save_state();
     world
-        .get_mut::<PersonnelState>(entity)
+        .resource_mut::<PersonnelRoster>()
+        .state_mut("personnel-ship")
         .unwrap()
         .post(
             &profile,
@@ -44,7 +47,7 @@ fn fixture() -> (World, Entity, PhoenixSnapshot) {
         )
         .unwrap();
     let saved = capture(&world);
-    assert!(saved.entities[0].personnel.is_some());
+    assert_eq!(saved.personnel.origins.len(), 1);
     assert!(saved.entities[0].repair.as_ref().unwrap().jobs.is_some());
     (world, entity, saved)
 }
@@ -60,20 +63,25 @@ fn actual_spawn_and_json_application_preserve_one_custody_owner_and_team_frontie
         .unwrap()
         .0
         .save_state();
-    let profile = world.get::<CompiledPersonnel>(entity).unwrap().clone();
+    // A single machinery row cannot rewind global custody; the full candidate
+    // owns that transaction and preserves the same actual job frontier.
     world
-        .entity_mut(entity)
-        .insert(PersonnelState::new(&profile));
+        .resource_mut::<PersonnelRoster>()
+        .origins
+        .get_mut("personnel-ship")
+        .unwrap()
+        .state = PersonnelState::new(&world.get::<CompiledPersonnel>(entity).unwrap().clone());
+    let current = world.resource::<PersonnelRoster>().clone();
     super::super::application::apply_entity_state(
         &mut world,
         entity,
         &decoded.entities[0],
         decoded.tick,
     );
-    assert_eq!(
-        world.get::<PersonnelState>(entity),
-        decoded.entities[0].personnel.as_ref()
-    );
+    assert_eq!(world.resource::<PersonnelRoster>(), &current);
+    let report = restore(&mut world, &decoded);
+    assert!(report.is_complete(), "{report:?}");
+    assert_eq!(world.resource::<PersonnelRoster>(), &decoded.personnel);
     assert_eq!(
         world
             .get::<crate::console::repair::server::ShipRepairTeams>(entity)
@@ -82,10 +90,7 @@ fn actual_spawn_and_json_application_preserve_one_custody_owner_and_team_frontie
             .save_state(),
         jobs
     );
-    assert_eq!(
-        capture(&world).entities[0].personnel,
-        decoded.entities[0].personnel
-    );
+    assert_eq!(capture(&world).personnel, decoded.personnel);
 }
 
 #[test]
@@ -98,20 +103,28 @@ fn forged_custody_refuses_before_any_global_or_entity_write() {
         candidate.tick += 10;
         let row = &mut candidate.entities[0];
         match fault {
-            0 => row.personnel = None,
+            0 => {
+                candidate.personnel.origins.remove("personnel-ship");
+            }
             1 => {
-                row.personnel
-                    .as_mut()
+                candidate
+                    .personnel
+                    .origins
+                    .get_mut("personnel-ship")
                     .unwrap()
+                    .state
                     .officers
                     .get_mut("repair-chief")
                     .unwrap()
                     .changed_tick = candidate.tick + 1
             }
             2 => {
-                row.personnel
-                    .as_mut()
+                candidate
+                    .personnel
+                    .origins
+                    .get_mut("personnel-ship")
                     .unwrap()
+                    .state
                     .officers
                     .get_mut("repair-chief")
                     .unwrap()
@@ -120,7 +133,14 @@ fn forged_custody_refuses_before_any_global_or_entity_write() {
             }
             3 => row.repair.as_mut().unwrap().jobs = None,
             _ => {
-                row.personnel.as_mut().unwrap().officers.clear();
+                candidate
+                    .personnel
+                    .origins
+                    .get_mut("personnel-ship")
+                    .unwrap()
+                    .state
+                    .officers
+                    .clear();
             }
         }
         let report = restore(&mut world, &candidate);
@@ -161,7 +181,11 @@ fn actual_medical_candidate_rejects_forged_site_terms_condition_and_exclusive_te
     );
     world.flush();
     let profile = world.get::<CompiledPersonnel>(entity).unwrap().clone();
-    let personnel = world.get::<PersonnelState>(entity).unwrap().clone();
+    let personnel = world
+        .resource::<PersonnelRoster>()
+        .state("medical-ship")
+        .unwrap()
+        .clone();
     world
         .get_mut::<crate::console::repair::server::ShipRepairTeams>(entity)
         .unwrap()
@@ -183,18 +207,24 @@ fn actual_medical_candidate_rejects_forged_site_terms_condition_and_exclusive_te
             .unwrap();
         match mode {
             0 => {
-                row.personnel
-                    .as_mut()
+                candidate
+                    .personnel
+                    .origins
+                    .get_mut("medical-ship")
                     .unwrap()
+                    .state
                     .officers
                     .get_mut("repair-chief")
                     .unwrap()
                     .condition = phoenix_model::personnel::PersonnelCondition::Fit
             }
             1 => {
-                row.personnel
-                    .as_mut()
+                candidate
+                    .personnel
+                    .origins
+                    .get_mut("medical-ship")
                     .unwrap()
+                    .state
                     .officers
                     .get_mut("repair-chief")
                     .unwrap()
@@ -202,7 +232,9 @@ fn actual_medical_candidate_rejects_forged_site_terms_condition_and_exclusive_te
                     compartment: "bridge".into(),
                 }
             }
-            2 => row.personnel = None,
+            2 => {
+                candidate.personnel.origins.remove("medical-ship");
+            }
             _ => {
                 let jobs = row.repair.as_mut().unwrap().jobs.as_mut().unwrap();
                 if mode == 7 {
@@ -243,4 +275,242 @@ fn actual_medical_candidate_rejects_forged_site_terms_condition_and_exclusive_te
     let report = restore(&mut world, &saved);
     assert!(report.is_complete(), "{report:?}");
     assert_eq!(capture(&world), before);
+}
+
+#[test]
+fn ordinary_removal_retains_terminal_identity_and_full_restore_does_not_reroll_it() {
+    let (mut world, entity, _) = fixture();
+    world.resource_mut::<SimTick>().0 = 25;
+    world.despawn(entity);
+    world.flush();
+    assert!(world.get_entity(entity).is_err());
+    let saved = capture(&world);
+    assert!(saved
+        .entities
+        .iter()
+        .all(|row| row.uuid != "personnel-ship"));
+    let origin = &saved.personnel.origins["personnel-ship"];
+    assert_eq!(origin.removed_tick, Some(25));
+    assert_eq!(origin.state.officers.len(), 1);
+    assert_eq!(
+        origin.state.officers["repair-chief"].location,
+        OfficerLocation::Lost {
+            actor: "personnel-ship".into()
+        }
+    );
+    let (mut fresh, original, _) = fixture();
+    let decoded: PhoenixSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    let report = restore(&mut fresh, &decoded);
+    assert!(report.is_complete(), "{report:?}");
+    assert!(fresh.get_entity(original).is_err());
+    assert_eq!(capture(&fresh), decoded);
+    assert_eq!(
+        crate::sim_digest::world_digest(&fresh),
+        crate::sim_digest::world_digest(&world)
+    );
+    assert!(fresh
+        .resource::<PersonnelRoster>()
+        .state("personnel-ship")
+        .is_none());
+}
+
+#[test]
+fn removed_origin_population_provenance_and_terminal_closure_are_preflighted() {
+    let (mut world, entity, _) = fixture();
+    world.resource_mut::<SimTick>().0 = 25;
+    world.despawn(entity);
+    world.flush();
+    let saved = capture(&world);
+    let (mut fresh, _, _) = fixture();
+    let before = capture(&fresh);
+    let digest = crate::sim_digest::world_digest(&fresh);
+    for fault in 0..8 {
+        let mut bad = saved.clone();
+        match fault {
+            0 => {
+                bad.personnel.origins.clear();
+            }
+            1 => {
+                bad.personnel
+                    .origins
+                    .get_mut("personnel-ship")
+                    .unwrap()
+                    .removed_tick = None;
+            }
+            2 => {
+                bad.personnel
+                    .origins
+                    .get_mut("personnel-ship")
+                    .unwrap()
+                    .removed_tick = Some(26);
+            }
+            3 => {
+                bad.personnel
+                    .origins
+                    .get_mut("personnel-ship")
+                    .unwrap()
+                    .state
+                    .officers
+                    .clear();
+            }
+            4 => {
+                bad.personnel
+                    .origins
+                    .get_mut("personnel-ship")
+                    .unwrap()
+                    .definition
+                    .config
+                    .officers[0]
+                    .repair_work_multiplier = 99.0;
+            }
+            5 => {
+                bad.personnel
+                    .origins
+                    .get_mut("personnel-ship")
+                    .unwrap()
+                    .state
+                    .officers
+                    .get_mut("repair-chief")
+                    .unwrap()
+                    .location = OfficerLocation::AtCompartment {
+                    compartment: "engineering".into(),
+                };
+            }
+            6 => {
+                bad.personnel
+                    .origins
+                    .get_mut("personnel-ship")
+                    .unwrap()
+                    .state
+                    .officers
+                    .get_mut("repair-chief")
+                    .unwrap()
+                    .changed_tick = 24;
+            }
+            _ => {
+                let origin = bad.personnel.origins["personnel-ship"].clone();
+                bad.personnel
+                    .origins
+                    .insert("invented-origin".into(), origin);
+            }
+        }
+        let report = restore(&mut fresh, &bad);
+        assert!(!report.is_complete(), "forgery {fault}: {report:?}");
+        assert_eq!(capture(&fresh), before);
+        assert_eq!(crate::sim_digest::world_digest(&fresh), digest);
+    }
+    let mut old = serde_json::to_value(&saved).unwrap();
+    old.as_object_mut().unwrap().remove("personnel");
+    assert!(
+        serde_json::from_value::<PhoenixSnapshot>(old).is_err(),
+        "required global owner must not silently default"
+    );
+}
+
+#[test]
+fn runtime_origin_recipe_is_retained_after_body_loss_and_validated_on_fresh_restore() {
+    use crate::world_id::{IdNamespace, WorldId, WorldIdMint, WorldIdMintState};
+    let (mut world, entity, _) = fixture();
+    let actor = WorldId::new(IdNamespace::Entity, 20, 0).render();
+    world.get_mut::<EntityUuid>(entity).unwrap().0 = actor.clone();
+    let record = world
+        .resource_mut::<PersonnelRoster>()
+        .origins
+        .remove("personnel-ship")
+        .unwrap();
+    world
+        .resource_mut::<PersonnelRoster>()
+        .origins
+        .insert(actor.clone(), record);
+    world.insert_resource(WorldIdMint::from_state(WorldIdMintState {
+        tick: 20,
+        next_seq: [1, 0, 0, 0],
+    }));
+    world
+        .entity_mut(entity)
+        .insert(crate::entities::spawner::EntitySpawnOrigin(
+            crate::world::spawn_origin::SpawnOrigin {
+                template_path: "assets/entities/personnel_cruiser.toml".into(),
+                ..Default::default()
+            },
+        ));
+    assert_eq!(
+        world.resource::<PersonnelRoster>().origins[&actor].accepted_tick,
+        20
+    );
+    assert!(world.resource::<PersonnelRoster>().origins[&actor]
+        .source
+        .is_some());
+    world.resource_mut::<SimTick>().0 = 25;
+    world.despawn(entity);
+    let saved = capture(&world);
+    let mut fresh = World::new();
+    fresh.insert_resource(SimTick(0));
+    validate_roster(&fresh, &saved).unwrap();
+    let before = capture(&fresh);
+    let digest = crate::sim_digest::world_digest(&fresh);
+    for fault in 0..7 {
+        let mut wrong = saved.clone();
+        match fault {
+            0 => {
+                wrong
+                    .personnel
+                    .origins
+                    .get_mut(&actor)
+                    .unwrap()
+                    .source
+                    .as_mut()
+                    .unwrap()
+                    .template_path = "assets/entities/physical_probe.toml".into()
+            }
+            1 => {
+                wrong
+                    .personnel
+                    .origins
+                    .get_mut(&actor)
+                    .unwrap()
+                    .definition
+                    .config
+                    .officers[0]
+                    .repair_work_multiplier = 99.0
+            }
+            2 | 3 => {
+                let other = WorldId::new(IdNamespace::Entity, 20, 1).render();
+                let mut duplicate = wrong.personnel.origins[&actor].clone();
+                duplicate
+                    .state
+                    .officers
+                    .get_mut("repair-chief")
+                    .unwrap()
+                    .location = OfficerLocation::Lost {
+                    actor: other.clone(),
+                };
+                if fault == 3 {
+                    wrong.personnel.origins.remove(&actor);
+                }
+                wrong.personnel.origins.insert(other, duplicate);
+            }
+            4 => {
+                wrong
+                    .personnel
+                    .origins
+                    .get_mut(&actor)
+                    .unwrap()
+                    .source
+                    .as_mut()
+                    .unwrap()
+                    .birth_tick = 19
+            }
+            5 => wrong.mint.as_mut().unwrap().next_seq[0] = 0,
+            _ => wrong.mint = None,
+        }
+        let report = restore(&mut fresh, &wrong);
+        assert!(
+            !report.is_complete(),
+            "runtime receipt forgery {fault}: {report:?}"
+        );
+        assert_eq!(capture(&fresh), before);
+        assert_eq!(crate::sim_digest::world_digest(&fresh), digest);
+    }
 }

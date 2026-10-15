@@ -144,6 +144,10 @@ impl PersonnelConfig {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OfficerLocation {
+    /// Terminal physical loss; retaining identity never keeps its ship alive.
+    Lost {
+        actor: String,
+    },
     AtCompartment {
         compartment: String,
     },
@@ -151,6 +155,18 @@ pub enum OfficerLocation {
     WithRepairTeam {
         team_idx: u32,
     },
+}
+
+/// The personnel-relevant accepted recipe of a runtime origin. World placement
+/// and display names do not alter its finite roster or interior bindings.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PersonnelSource {
+    /// Actual Entity WorldId receipt, never an independently minted identity.
+    pub birth_tick: u64,
+    pub birth_sequence: u64,
+    pub template_path: String,
+    pub overrides: Option<toml::Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

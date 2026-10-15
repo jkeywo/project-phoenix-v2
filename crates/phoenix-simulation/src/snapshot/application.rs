@@ -1311,7 +1311,6 @@ pub(super) fn apply_entity_state_with(
         crate::console::weapons::flight_carrier::seed_banks(world, entity, &row.carrier_bolt_banks);
     }
     super::fitting::apply(world, entity, row);
-    super::personnel::apply(world, entity, row);
     let emp_clock = crate::ship::emp::clock(world, tick).ok();
     let mut entity_mut = world.entity_mut(entity);
     if let Some(saved) = &row.equipment_recovery {

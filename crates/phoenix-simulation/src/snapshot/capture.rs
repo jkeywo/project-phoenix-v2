@@ -55,6 +55,10 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
         .cloned()
         .unwrap_or_default();
     PhoenixSnapshot {
+        personnel: world
+            .get_resource::<phoenix_sim_gameplay::personnel::PersonnelRoster>()
+            .cloned()
+            .unwrap_or_default(),
         tick: world.get_resource::<SimTick>().map_or(0, |t| t.0),
         // The ROSTER is the identity: it is replicated and every peer agrees on
         // it, while `SelectedShipResource` is this peer's own local choice and
@@ -1422,7 +1426,6 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                     helm_waypoint_clearance: navigation.helm_clearance,
                     weapons,
                     repair,
-                    personnel: entity.get::<phoenix_sim_gameplay::personnel::PersonnelState>().cloned(),
                     blackboards,
                     patrol_cursors,
                     shield_ai: context

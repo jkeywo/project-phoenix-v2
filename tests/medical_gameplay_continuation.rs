@@ -140,15 +140,7 @@ fn condition(app: &App, actor: Entity) -> PersonnelCondition {
         .get::<project_phoenix::entities::spawner::EntityUuid>(actor)
         .unwrap()
         .0;
-    capture(app.world())
-        .entities
-        .into_iter()
-        .find(|row| &row.uuid == uuid)
-        .unwrap()
-        .personnel
-        .unwrap()
-        .officers["repair-chief"]
-        .condition
+    capture(app.world()).personnel.origins[uuid].state.officers["repair-chief"].condition
 }
 fn medication(app: &App, actor: Entity) -> i64 {
     app.world()
@@ -356,15 +348,17 @@ fn joined_treatment_spends_once_and_json360_preserves_job_patient_and_ordinary_b
             .find(|row| row.uuid == actor_uuid)
             .unwrap();
         if fault == 0 {
-            row.personnel
-                .as_mut()
+            bad.personnel
+                .origins
+                .get_mut(&actor_uuid)
                 .unwrap()
+                .state
                 .officers
                 .get_mut("repair-chief")
                 .unwrap()
                 .condition = PersonnelCondition::Fit;
         } else if fault == 1 {
-            row.personnel = None;
+            bad.personnel.origins.remove(&actor_uuid);
         } else {
             let jobs = row.repair.as_mut().unwrap().jobs.as_mut().unwrap();
             if fault == 6 {

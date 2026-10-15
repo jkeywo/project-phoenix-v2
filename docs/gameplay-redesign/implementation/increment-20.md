@@ -397,3 +397,24 @@ explicit permitted local subset; the roster resource confers no knowledge access
 Structural owner, loss, malformed no-write and fresh hosted continuation evidence
 are required before the owned-carrier passenger loop starts. Root owns compatibility
 versions and native integration. This prerequisite does not close increment20.
+
+The structural source checkpoint removes canonical PersonnelState components.
+The one required global snapshot field captures immutable accepted definitions,
+per-officer custody/condition, origin lifecycle and source provenance. Existing
+posting, bonus, local treatment and permitted publication consume the same roster.
+Actual profile despawn records terminal Lost custody and leaves ordinary entity
+removal/events untouched. Whole-restore suppression prevents false bootstrap loss;
+single-row machinery application cannot rewind personnel.
+
+Runtime provenance includes the actual Entity WorldId birth tuple, derived from
+the accepted actor identity rather than process insertion time. Preflight checks
+canonical UUID rendering, exact receipt/key and birth-clock joins, the saved mint
+frontier, accepted source definition and finite population closure. Authored
+origins bind their fresh accepted UUID/definition. This validates consistency of
+claimed supported history, matching ordinary snapshot semantics; it does not add
+cryptographic historical authentication or a second population ledger.
+
+Worker client regression evidence: three existing Personnel/Repair/Workshop client
+files pass 72 tests (4.90s). Owner, actual adapter, source-receipt/terminal no-write
+and joined Human/Backfill 360-step Medical continuation assertions are migrated
+or authored for the single owner, but native execution remains with root.

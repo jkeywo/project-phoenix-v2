@@ -67,6 +67,23 @@ explicit inherited roster materialisation, and existing Preview/Test. Snapshot
 before writes and the digest folds custody once. This local Repair consumer
 does not establish external personnel acceptance.
 
+`PersonnelRoster` is the single retained Gameplay resource, keyed by origin actor
+UUID and local officer ID. `PersonnelState` is a row value, never an entity
+component. `CompiledPersonnel` remains the accepted derived live actor binding.
+Repair command, work and publication adapters join that actor's row only; a
+global resource grants no additional Console or individual AI knowledge.
+The snapshot's required global `personnel` field captures the roster once, and
+single-row machinery restore validates against current custody without rewinding
+it. Whole restore checks actual Repair jobs, finite definitions, retained source
+receipts and terminal closure before replacing the resource.
+
+Actual removal records `Lost` custody without retaining a ship or intercepting its
+ordinary destruction events. The derived profile's despawn hook respects existing
+whole-restore suppression. Runtime origins retain template/override provenance
+and their actual canonical Entity WorldId birth receipt; authored origins bind the
+fresh accepted roster. These are continuation consistency checks, without a new
+historical birth ledger. No passenger or transfer consumer is inferred.
+
 Optional `personnel.care` adds local treatment using the same finite Repair team
 slots and navigation. `jobs/repair_treatment.rs` owns typed work, consumed-medication
 frontier and physical return. PersonnelState owns the patient's sole coarse

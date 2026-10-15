@@ -2535,13 +2535,14 @@ mod tests;
 /// Repair commitments, requests and notification latches use independent sorted
 /// entity walks. Empty components contribute nothing; map insertion order is not state.
 fn fold_personnel_namespace(world: &World, acc: u64) -> u64 {
-    fold_optional_namespace(
-        world,
-        acc,
-        "personnel-custody",
-        |owner: &phoenix_sim_gameplay::personnel::PersonnelState| Some(owner.clone()),
-        |acc, state| fold_serde(acc, &state),
-    )
+    let Some(roster) = world.get_resource::<phoenix_sim_gameplay::personnel::PersonnelRoster>()
+    else {
+        return acc;
+    };
+    if roster.origins.is_empty() {
+        return acc;
+    }
+    fold_serde(fold_str(acc, "personnel-custody"), roster)
 }
 fn fold_internal_repair_namespace(world: &World, acc: u64) -> u64 {
     use crate::console::repair::server::{RepairRequestQueue, ShipRepairTeams};

@@ -795,7 +795,7 @@ fn main() {
                 if explicit_owner {
                     match native_host::relay_socket::WsRelaySocket::connect(base, origin) {
                         Ok(socket) => {
-                            app.insert_resource(native_host::host_lobby::fleet::NativeFleetWire(
+                            app.insert_resource(native_host::host_lobby::fleet::NativeFleetWire::new(
                                 Box::new(socket),
                             ));
                             eprintln!(

@@ -10,6 +10,8 @@ import { HOST_ROLE_GM, HOST_ROLE_SHIP, HOST_ROLE_SHIP_GM } from './host-mesh.js'
  */
 export function createNativeFleetPeer({
   send, log = console.log, createOwner = createFleetOwner, createMember = createFleetMember,
+  sendSnapshot = () => false,
+  nowMs = () => performance.now(),
   onRoster = () => {}, onDiag = () => {}, onHealth = () => {},
 } = {}) {
   let handle = null;
@@ -35,6 +37,7 @@ export function createNativeFleetPeer({
       : url === socketUrl(config.base, '/v1/join') ? 'join' : null;
     if (generation > 0 && !role) throw new Error('native fleet socket endpoint');
     let messageHandler = null, opened = false;
+    let snapshotReady = false, outstanding = null, snapshotDeadline = 0, nextSnapshot = 1;
     const queued = generation === 0 ? pendingWire.splice(0) : [];
     const drainWire = () => {
       if (!opened || typeof messageHandler !== 'function') return;
@@ -42,7 +45,41 @@ export function createNativeFleetPeer({
     };
     const value = {
       readyState: wireFailed ? 3 : generation === 0 ? 1 : 0,
-      bufferedAmount: 0,
+      // Enqueuing a lobby record does not measure the native socket backlog.
+      bufferedAmount: Infinity,
+      trySendSnapshot(frame, bounds = {}) {
+        const now = nowMs();
+        if (!Number.isFinite(now) || now < 0) return false;
+        // A downstream best-effort queue can drop an admitted record. Expiry
+        // frees local admission for a NEW packet; the expired packet is never retried.
+        if (outstanding !== null && now >= snapshotDeadline) outstanding = null;
+        if (!snapshotReady || outstanding || value.readyState !== 1 || !opened
+            || typeof frame !== 'string' || frame.length > 32768
+            || !Number.isSafeInteger(bounds.maxBytes) || bounds.maxBytes <= 0
+            || !Number.isSafeInteger(bounds.maxBufferedBytes) || bounds.maxBufferedBytes <= 0
+            || !Number.isSafeInteger(nextSnapshot)) return false;
+        const bytes = new TextEncoder().encode(frame).byteLength;
+        if (bytes > 32768 || bytes > bounds.maxBytes || bytes > bounds.maxBufferedBytes) return false;
+        const sequence = nextSnapshot++;
+        const record = {kind:'fleet_wire_snapshot', generation, sequence, frame,
+          max_buffered_bytes:Math.min(bounds.maxBufferedBytes, 65536)};
+        // Admission is bounded local staging, never a delivery acknowledgement.
+        try { if (sendSnapshot(record) !== true) return false; } catch { return false; }
+        outstanding = sequence;
+        snapshotDeadline = now + 250;
+        return true;
+      },
+      snapshotReceipt(event) {
+        const ready = event.supported === true && Number.isSafeInteger(event.next_sequence) && event.next_sequence > 0;
+        if (event.event === 'snapshot-ready') {
+          snapshotReady = ready;
+          if (ready) nextSnapshot = Math.max(nextSnapshot,event.next_sequence);
+        } else if (outstanding !== null && outstanding === event.sequence) {
+          outstanding = null;
+          snapshotReady = ready;
+          if (ready) nextSnapshot = Math.max(nextSnapshot,event.next_sequence);
+        }
+      },
       send(frame) {
         if (value.readyState !== 1) throw new Error('native fleet socket is not open');
         send({ kind: 'fleet_wire_send', generation, frame });
@@ -53,6 +90,8 @@ export function createNativeFleetPeer({
         value.ended();
       },
       ended() {
+        snapshotReady = false;
+        outstanding = null;
         value.readyState = 3;
         queued.length = 0;
         sockets.delete(generation);
@@ -111,6 +150,12 @@ export function createNativeFleetPeer({
     return credential;
   };
   const emit = (record) => send(record);
+  const mediaFrame = (frame, authenticated_slot) => {
+    if (typeof frame !== 'string' || frame.length > 20480
+        || new TextEncoder().encode(frame).byteLength > 20480
+        || !Number.isSafeInteger(authenticated_slot) || authenticated_slot <= 0) return false;
+    return sendSnapshot({kind:'fleet_media_frame', frame, authenticated_slot}) === true;
+  };
   // These callbacks also travel with a member if it becomes the owner.
   // Acceptance here only queues the request; Rust owns pause/restore/commit.
   const beginGmJoin = request => {
@@ -204,6 +249,7 @@ export function createNativeFleetPeer({
         onSimulationFrame: (frame, authenticated_slot) => emit({
           kind: 'fleet_frame', frame, authenticated_slot,
         }),
+        onMediaFrame: mediaFrame,
         onStartGrant: (grant) => emit({ kind: 'fleet_start_grant', grant }),
         onHostLost: (slot) => emit({ kind: 'fleet_host_lost', slot }),
         onSlotClaimed: (slot) => emit({ kind: 'fleet_slot_claimed', slot }),
@@ -223,6 +269,7 @@ export function createNativeFleetPeer({
         stamp: config.stamp,
         iceServers: [],
         transports: ['ws-relay'],
+        onMediaFrame: mediaFrame,
         // Member joiners select transport through levers, including when a
         // browser owner also advertises WebRTC that native cannot provide.
         levers: transportLeversFromLocation('?transport=ws-relay'),
@@ -328,6 +375,12 @@ export function createNativeFleetPeer({
       return true;
     },
 
+    sendMedia(frame) {
+      if (typeof frame !== 'string' || frame.length > 20480
+          || new TextEncoder().encode(frame).byteLength > 20480) return false;
+      return handle?.sendMedia?.(frame) === true;
+    },
+
     close() {
       if (handle) handle.close();
       handle = null;
@@ -358,6 +411,7 @@ export function createNativeFleetPeer({
         }
         if (event.event === 'open') socket.opened();
         else if (event.event === 'close') socket.ended();
+        else if (event.event === 'snapshot-ready' || event.event === 'snapshot-receipt') socket.snapshotReceipt(event);
         else if (event.event === 'frame') socket.receive(event.frame);
         return;
       }

@@ -3,6 +3,36 @@ use crate::native_host::panes::RecordingSurface;
 
 const LOBBY: &str = r#"{"phase":"Lobby","crew_count":0}"#;
 
+#[test]
+fn ephemeral_records_never_evict_ordinary_and_drop_without_retry() {
+    let bridge = HostLobbyBridge::new();
+    let record = serde_json::json!({"kind":"fleet_wire_snapshot","generation":0,
+        "sequence":1,"frame":"media","max_buffered_bytes":65536})
+    .to_string();
+    for _ in 0..5 {
+        bridge.record(&record);
+    }
+    bridge.record(r#"{"kind":"fleet_wire_send","generation":0,"frame":"command"}"#);
+    let records = bridge.take_records();
+    assert_eq!(records.len(), 5);
+    assert!(records[0].contains("command"));
+    assert!(records[1..].iter().all(|row| row == &record));
+    assert!(!bridge.fleet_faulted());
+    let oversized = serde_json::json!({"kind":"fleet_media_frame","frame":"x".repeat(65536),"authenticated_slot":2}).to_string();
+    bridge.record(&oversized);
+    assert!(bridge.take_records().is_empty());
+    bridge.push_fleet_wire("ordinary");
+    for _ in 0..4 {
+        assert!(bridge.push_fleet_ephemeral("ephemeral".into()));
+    }
+    assert!(!bridge.push_fleet_ephemeral("would evict".into()));
+    let mut surface = RecordingSurface::ready();
+    pump_host_lobby(&bridge, &mut surface);
+    assert!(surface.pushed[0].contains("ordinary"));
+    assert_eq!(&surface.pushed[1..], &["ephemeral"; 4]);
+    assert!(!bridge.has_pending());
+}
+
 fn publish_lane(bridge: &HostLobbyBridge, lane: usize, newer: bool) -> String {
     let json = if newer {
         r#"{"value":2}"#

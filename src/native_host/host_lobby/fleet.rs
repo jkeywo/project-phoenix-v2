@@ -5,6 +5,8 @@ use bevy::prelude::*;
 use serde::Serialize;
 
 use super::{HostLobbyBridgeResource, HostLobbyRecord};
+#[path = "fleet_media.rs"]
+mod media;
 
 #[derive(Resource, Clone, Debug, Serialize)]
 pub struct NativeFleetConfig {
@@ -40,6 +42,13 @@ pub struct NativeFleetEvents(Vec<NativeFleetEvent>);
 
 #[derive(Resource)]
 pub struct NativeFleetWire(pub Box<dyn RelaySocket>);
+impl NativeFleetWire {
+    /// Install before the page can register/join and make this socket routable.
+    pub fn new(mut socket: Box<dyn RelaySocket>) -> Self {
+        socket.set_ingress_classifier(media::classify);
+        Self(socket)
+    }
+}
 
 /// Generation zero adopts the boot socket. At most two live role sockets may
 /// overlap while a member binds its delegated successor host connection.
@@ -51,6 +60,7 @@ struct NativeFleetRoleWires {
     primary_closed: bool,
     adopted: bool,
     terminal: bool,
+    snapshot_sequence: std::collections::BTreeMap<u64, u64>,
 }
 
 struct NativeFleetDial {
@@ -130,6 +140,16 @@ pub enum NativeFleetEvent {
         generation: u64,
         frame: String,
     },
+    WireSnapshot {
+        generation: u64,
+        sequence: u64,
+        frame: String,
+        max_buffered_bytes: usize,
+    },
+    MediaFrame {
+        frame: String,
+        authenticated_slot: u32,
+    },
     WireAdopt,
     WireOpen {
         generation: u64,
@@ -202,6 +222,24 @@ impl NativeFleetEvents {
                 })
             }
             HostLobbyRecord::FleetWireAdopt => Some(NativeFleetEvent::WireAdopt),
+            HostLobbyRecord::FleetWireSnapshot {
+                generation,
+                sequence,
+                frame,
+                max_buffered_bytes,
+            } => Some(NativeFleetEvent::WireSnapshot {
+                generation: *generation,
+                sequence: *sequence,
+                frame: frame.clone(),
+                max_buffered_bytes: *max_buffered_bytes,
+            }),
+            HostLobbyRecord::FleetMediaFrame {
+                frame,
+                authenticated_slot,
+            } => Some(NativeFleetEvent::MediaFrame {
+                frame: frame.clone(),
+                authenticated_slot: *authenticated_slot,
+            }),
             HostLobbyRecord::FleetWireOpen { generation, role } => {
                 Some(NativeFleetEvent::WireOpen {
                     generation: *generation,
@@ -338,7 +376,14 @@ fn prepare_managed_lobby(world: &mut World) {
 }
 
 fn apply_events(world: &mut World) {
-    let events = std::mem::take(&mut world.resource_mut::<NativeFleetEvents>().0);
+    let mut events = std::mem::take(&mut world.resource_mut::<NativeFleetEvents>().0);
+    // Preserve ordinary ordering, including commands and gameplay snapshots.
+    events.sort_by_key(|event| {
+        matches!(
+            event,
+            NativeFleetEvent::WireSnapshot { .. } | NativeFleetEvent::MediaFrame { .. }
+        )
+    });
     for event in events {
         match event {
             NativeFleetEvent::Join { code } => {
@@ -380,7 +425,7 @@ fn apply_events(world: &mut World) {
                 }
                 match connect_join_wire(&config.base, &config.origin) {
                     Ok(wire) => {
-                        world.insert_resource(NativeFleetWire(wire));
+                        world.insert_resource(NativeFleetWire::new(wire));
                     }
                     Err(error) => {
                         world
@@ -596,6 +641,7 @@ fn apply_events(world: &mut World) {
                     );
                 } else {
                     world.resource_mut::<NativeFleetRoleWires>().adopted = true;
+                    media::ready(world, 0);
                 }
             }
             NativeFleetEvent::WireOpen { generation, role } => {
@@ -616,6 +662,24 @@ fn apply_events(world: &mut World) {
                     .get_mut(&generation)
                 {
                     wire.send(frame);
+                }
+            }
+            NativeFleetEvent::WireSnapshot {
+                generation,
+                sequence,
+                frame,
+                max_buffered_bytes,
+            } => {
+                media::send(world, generation, sequence, frame, max_buffered_bytes);
+            }
+            NativeFleetEvent::MediaFrame {
+                frame,
+                authenticated_slot,
+            } => {
+                if let Some(mut mesh) =
+                    world.get_resource_mut::<crate::comms::media_mesh::MediaMesh>()
+                {
+                    mesh.offer(authenticated_slot, &frame);
                 }
             }
             NativeFleetEvent::Continuation {
@@ -676,6 +740,7 @@ fn apply_events(world: &mut World) {
             }
         }
     }
+    media::support(world);
 }
 
 // Only the private retained surface can emit this record. Its member adapter
@@ -712,7 +777,10 @@ fn admitted_gm_operator(
 #[cfg(feature = "host")]
 fn connect_join_wire(base: &str, origin: &str) -> Result<Box<dyn RelaySocket>, String> {
     crate::native_host::relay_socket::WsRelaySocket::connect_join(base, origin)
-        .map(|socket| Box::new(socket) as Box<dyn RelaySocket>)
+        .map(|mut socket| {
+            socket.set_ingress_classifier(media::classify);
+            Box::new(socket) as Box<dyn RelaySocket>
+        })
         .map_err(|error| error.to_string())
 }
 
@@ -809,6 +877,10 @@ fn wire_event(world: &World, generation: u64, event: &str, frame: Option<String>
 }
 
 fn close_role_wire(world: &mut World, generation: u64) {
+    world
+        .resource_mut::<NativeFleetRoleWires>()
+        .snapshot_sequence
+        .remove(&generation);
     if generation == 0 {
         world.resource_mut::<NativeFleetRoleWires>().primary_closed = true;
         if let Some(mut wire) = world.get_resource_mut::<NativeFleetWire>() {
@@ -893,7 +965,10 @@ fn connect_role_wire(base: &str, origin: &str, role: &str) -> Result<Box<dyn Rel
         crate::native_host::relay_socket::WsRelaySocket::connect_join(base, origin)
     };
     result
-        .map(|wire| Box::new(wire) as Box<dyn RelaySocket>)
+        .map(|mut wire| {
+            wire.set_ingress_classifier(media::classify);
+            Box::new(wire) as Box<dyn RelaySocket>
+        })
         .map_err(|error| error.to_string())
 }
 #[cfg(not(feature = "host"))]
@@ -943,6 +1018,7 @@ fn poll_role_dials(world: &mut World) {
                     .sockets
                     .insert(generation, socket);
                 wire_event(world, generation, "open", None);
+                media::ready(world, generation);
             }
             Err(_) if !cancelled => wire_event(world, generation, "close", None),
             Err(_) => {}
@@ -980,7 +1056,22 @@ fn poll_wire(world: &mut World) {
         }
     }
     for (generation, event, frame) in events {
-        wire_event(world, generation, event, frame);
+        let class = frame.as_deref().map(media::classify);
+        if event == "frame" && class == Some(phoenix_transport::socket::IngressClass::Refuse) {
+            continue;
+        }
+        if event == "frame" && class == Some(phoenix_transport::socket::IngressClass::Scoped) {
+            if let Some(bridge) = world.get_resource::<HostLobbyBridgeResource>() {
+                if frame.as_ref().is_some_and(|raw| raw.len() <= 32768) {
+                    let raw = serde_json::json!({"native_wire":{"generation":generation,"event":event,"frame":frame}}).to_string();
+                    bridge
+                        .0
+                        .push_fleet_ephemeral(super::document::host_lobby_fleet_wire_script(&raw));
+                }
+            }
+        } else {
+            wire_event(world, generation, event, frame);
+        }
         if event == "close" {
             close_role_wire(world, generation);
         }
@@ -991,6 +1082,7 @@ fn poll_wire(world: &mut World) {
     {
         close_all_role_wires(world);
     }
+    media::support(world);
 }
 
 fn continuation_result(world: &World) -> Option<NativeContinuationResult> {
@@ -1014,6 +1106,7 @@ fn continuation_result(world: &World) -> Option<NativeContinuationResult> {
 }
 
 fn publish_state(world: &mut World) {
+    media::publish(world);
     let Some(bridge) = world.get_resource::<HostLobbyBridgeResource>().cloned() else {
         return;
     };

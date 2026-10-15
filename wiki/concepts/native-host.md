@@ -3,7 +3,7 @@ title: Native Host
 type: concept
 tags: [native, viewscreen, lobby, scenario-selection, boot-profile, wgpu, winit, transport, delivery, ultralight, panes, displays, monitors, bridge-profile, saved-layouts, media-devices, camera, microphone, saves]
 sources: [src/delivery/args.rs, src/delivery/args_tests.rs, tests/native_cli_smoke.rs, crates/phoenix-delivery/src/http.rs, src/native_host/console_assignment_tests.rs, src/native_host/fleet_identity.rs, crates/phoenix-delivery/src/stamp.rs, gui/native-fleet-peer.js, src/native_host/host_lobby/fleet.rs, scripts/fleet-native-matrix.mjs, scripts/fleet-native-probe.mjs, scripts/fleet-native-workload.mjs, assets/audio/reduced-range.toml, src/native_host/audio/range.rs, gui/audio-range.js, tests/smoke/audio-range.spec.js, assets/audio/room-ducking.toml, src/native_host/audio/ducking.rs, src/native_host/audio/engine.rs, src/native_host/audio/private.rs, src/native_host/audio/private_tests.rs, src/native_host/panes/operator_storage.js, tests/smoke/native-private-audio.spec.js, src/native_host/audio/spatial.rs, src/native_host/audio/hrtf.rs, src/native_host/audio/visual.rs, src/native_host/audio/combat_tests.rs, crates/phoenix-presentation/src/server/audio.rs, tests/smoke/native-combat-audio.spec.js, src/native_host/audio/mod.rs, src/native_host/audio/player.rs, src/native_host/audio/decoder.rs, src/native_host/audio/device.rs, src/native_host/audio/store.rs, gui/native-audio.js, tests/client/native-audio.test.js, pasm/spec/architecture/presentation-loading.yaml, src/native_host/media_camera.rs, src/native_host/media_microphone.rs, src/native_host/media_output.rs, src/native_host/native_gm/mod.rs, src/native_host/native_gm/bridge.rs, src/native_host/console_assignment.rs, src/native_host/panes/operator.rs, src/native_host/panes/gamepad_discovery.rs, pasm/spec/design/native-bridge-operation.yaml, crates/phoenix-simulation/src/world/materialization.rs, tests/native_host_lobby/materialization.rs, src/delivery/payload.rs, tests/native_host_catalogue.rs, tests/client/scenario-catalogue-wire.test.js, src/native_host/mod.rs, src/native_host/direct_join.rs, src/native_host/join_codes.rs, src/native_host/app.rs, src/native_host/world_load.rs, crates/phoenix-sim-session/src/lobby/scenario_arbiter.rs, crates/phoenix-simulation/src/lobby/handler.rs, crates/phoenix-simulation/src/content_ledger.rs, tests/fixtures/scenario-arbiter-parity.json, src/native_host/transport.rs, src/native_host/bridge_profile.rs, src/native_host/bridge_layout.rs, src/native_host/bridge_display.rs, src/native_host/bridge_display_roster_tests.rs, tests/native_host_lobby/display_roster.rs, src/native_host/layout_store.rs, src/native_host/layout_store_systems.rs, src/native_host/viewscreen_presentation.rs, src/native_host/viewscreen_locale.rs, gui/locale-preference.js, src/native_host/host_lobby/host_lobby_link.js, pasm/spec/architecture/client-shell.yaml, src/native_host/bridge_media.rs, src/native_host/input_routing.rs, src/native_host/panes/keyboard.rs, gui/focus-trap.js, tests/client/focus-trap.test.js, tests/client/native-settings.test.js, tests/fixtures/native-escape-keydown.json, src/native_host/panes/mod.rs, src/native_host/panes/identity.rs, crates/phoenix-sim-session/src/session_connections.rs, src/native_host/connections.rs, src/native_host/panes/document.rs, src/native_host/panes/surface.rs, src/native_host/panes/ultralight.rs, src/native_host/panes/frame_stats.rs, src/native_host/panes/hud.rs, gui/viewscreen-hud.html, tests/client/viewscreen-hud.test.js, src/native_host/panes/surface_stats.rs, src/native_host/panes/pane_thread.rs, src/native_host/panes/mirror.rs, src/native_host/panes/upload.rs, src/native_host/panes/recovery.rs, src/native_host/panes/pending_views.rs, src/native_host/host_lobby/mod.rs, src/native_host/host_lobby/document.rs, src/native_host/host_lobby/bridge.rs, src/native_host/host_lobby/reveal.rs, src/native_host/host_lobby/join.rs, gui/host-qr.js, gui/join-url.js, src/delivery/serve.rs, src/boot/mod.rs, src/bin/phoenix_host.rs, crates/phoenix-simulation/src/entities/template_preload.rs, crates/phoenix-simulation/src/save_slots_store.rs, src/native_host/audio/private_audition.rs, crates/phoenix-simulation/src/sound_cues.rs, gui/sound-audition-panel.js, crates/phoenix-simulation/src/gm/operations/presentation/sound.rs, src/native_host/audio/authored_tests.rs, tests/smoke/live-authored-audio.spec.js, tests/native_host_lobby/preparation.rs, crates/phoenix-simulation/src/gm/continuity/solo.rs]
-updated: 2026-10-04
+updated: 2026-10-15
 ---
 
 # Native Host
@@ -24,6 +24,19 @@ The upgrade handoff carries prefetched bytes to
 for the 101 response and preserves the first game frame.
 The [native probe](../../scripts/fleet-native-probe.mjs) stages a dereferenced
 copy of the served bundle.
+
+Fleet media forwarding uses the existing retained lobby surface and relay
+socket. [fleet_media.rs](../../src/native_host/host_lobby/fleet_media.rs) exposes
+actual socket support, a sequence floor and one-attempt receipts by socket generation. The page
+reports unknown network backlog and admits at most one bounded outstanding
+packet per generation. A 250 ms local expiry releases lost admission for future
+packets without retrying the old packet. The actual typed media envelope is
+classified before socket and bridge staging, independently of caller flags.
+Separate non-evicting bridge tails carry media after
+ordinary records and projections; failed pushes and sends are dropped. A local
+staging receipt does not promise network delivery. Raw media bypasses the
+lockstep inbox and continuation history; the receiving MediaMesh validates its
+authenticated host slot.
 
 
 Native operator-profile storage resets Live layouts older than version 19 and

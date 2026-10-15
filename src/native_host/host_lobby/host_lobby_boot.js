@@ -33,6 +33,25 @@
 //     every repaint is driven synchronously from a host push, inside the
 //     host's own evaluate_script. There is nothing to starve.
 (function () {
+  // Same bridge drain, with a small non-evicting best-effort tail. These bytes
+  // never enter the ordinary queue_shim backlog or displace an operator record.
+  var snapshots = [], snapshotBytes = 0;
+  var ordinaryDrain = window.__phoenixHostLobbyOutDrain;
+  window.__phoenixHostFleetSnapshotSend = function (record) {
+    if (!record || !['fleet_wire_snapshot','fleet_media_frame'].includes(record.kind)) return false;
+    var json = JSON.stringify(record);
+    if (json.length > 65536) return false;
+    var bytes = new TextEncoder().encode(json).byteLength;
+    if (bytes > 65536 || snapshots.length >= 4 || snapshotBytes + bytes > 131072) return false;
+    snapshots.push(json); snapshotBytes += bytes;
+    return true;
+  };
+  window.__phoenixHostLobbyOutDrain = function () {
+    var ordinary = ordinaryDrain();
+    var tail = snapshots.join('\n');
+    snapshots.length = 0; snapshotBytes = 0;
+    return ordinary && tail ? ordinary + '\n' + tail : ordinary || tail;
+  };
   // This document is the control surface for the authoritative native
   // simulation process. Any host-mesh bootstrap running on this surface must
   // advertise the process's ship and local-GM capabilities on the same peer.

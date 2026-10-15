@@ -186,6 +186,16 @@ pub enum HostLobbyRecord {
         generation: u64,
         frame: String,
     },
+    FleetWireSnapshot {
+        generation: u64,
+        sequence: u64,
+        frame: String,
+        max_buffered_bytes: usize,
+    },
+    FleetMediaFrame {
+        frame: String,
+        authenticated_slot: u32,
+    },
     FleetWireAdopt,
     FleetWireOpen {
         generation: u64,

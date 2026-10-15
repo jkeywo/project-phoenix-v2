@@ -220,7 +220,9 @@ function send(record) {
 
 const nativeFleetHealth = createFleetHealth({ doc: document,
   root: () => document.body, t });
-const nativeFleetPeer = createNativeFleetPeer({ send, log: msg => console.log(msg),
+const nativeFleetPeer = createNativeFleetPeer({ send,
+  sendSnapshot: record => window.__phoenixHostFleetSnapshotSend?.(record) === true,
+  log: msg => console.log(msg),
   onRoster: nativeFleetHealth.roster, onDiag: nativeFleetHealth.diagnostic,
   onHealth: nativeFleetHealth.health });
 let pendingNativeFleetJoin = null;
@@ -243,6 +245,7 @@ window.__phoenixHostFleetUpdate = json => {
   return nativeFleetPeer.update(state);
 };
 window.__phoenixHostFleetWire = frame => nativeFleetPeer.receive(frame);
+window.__phoenixHostFleetMedia = frame => nativeFleetPeer.sendMedia(frame);
 
 // What the host last told us is locked. Read by `shipStillNeeded` below, and by
 // the auto-resolve latch beside it — both of which need the AUTHORITATIVE

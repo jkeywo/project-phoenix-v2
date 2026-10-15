@@ -168,6 +168,9 @@ struct Inner {
     fleet_config: Option<String>,
     fleet_updates: VecDeque<String>,
     fleet_wire: VecDeque<String>,
+    /// Bounded drop-only scripts, delivered after all ordinary bridge work.
+    fleet_ephemeral: VecDeque<String>,
+    fleet_snapshot_records: VecDeque<String>,
     hud_os_defaults: crate::native_host::panes::os_prefs::OsAccessibilityPrefs,
 }
 
@@ -352,6 +355,7 @@ impl HostLobbyBridge {
         inner.fleet_config.is_some()
             || !inner.fleet_updates.is_empty()
             || !inner.fleet_wire.is_empty()
+            || !inner.fleet_ephemeral.is_empty()
             || inner.projections.has_pending()
             || inner.qr_toggles > 0
     }
@@ -376,7 +380,10 @@ impl HostLobbyBridge {
     /// empty queue forever. That is the whole reason the picks and the monitor
     /// row share an enum instead of having one each.
     pub fn take_records(&self) -> Vec<String> {
-        self.lock().records.drain(..).collect()
+        let mut inner = self.lock();
+        let mut records: Vec<_> = inner.records.drain(..).collect();
+        records.extend(inner.fleet_snapshot_records.drain(..));
+        records
     }
 
     /// Host-local recovery uses the same typed layout record and one reader as
@@ -393,6 +400,23 @@ impl HostLobbyBridge {
 
     fn record(&self, json: &str) {
         let mut inner = self.lock();
+        // Media never shares the ordinary queue's eviction/fault policy.
+        if is_snapshot_record(json) {
+            if json.len() <= 65536
+                && !inner.fleet_faulted
+                && inner.fleet_snapshot_records.len() < 4
+                && inner
+                    .fleet_snapshot_records
+                    .iter()
+                    .map(String::len)
+                    .sum::<usize>()
+                    + json.len()
+                    <= 131072
+            {
+                inner.fleet_snapshot_records.push_back(json.to_owned());
+            }
+            return;
+        }
         let incoming_fleet = is_fleet_record(json);
         if incoming_fleet && inner.fleet_faulted {
             return;
@@ -431,6 +455,7 @@ impl HostLobbyBridge {
             fleet_config: inner.fleet_config.take(),
             fleet_updates: std::mem::take(&mut inner.fleet_updates),
             fleet_wire: std::mem::take(&mut inner.fleet_wire),
+            fleet_ephemeral: std::mem::take(&mut inner.fleet_ephemeral),
             projections: inner.projections.take(),
             qr_toggles: std::mem::take(&mut inner.qr_toggles),
         }
@@ -493,6 +518,19 @@ impl HostLobbyBridge {
         }
         inner.fleet_wire.push_back(frame.into());
     }
+    /// Best effort, bounded before staging; no retry and no ordinary record eviction.
+    pub(crate) fn push_fleet_ephemeral(&self, script: String) -> bool {
+        let mut inner = self.lock();
+        if inner.fleet_faulted
+            || script.len() > 65536
+            || inner.fleet_ephemeral.len() >= 4
+            || inner.fleet_ephemeral.iter().map(String::len).sum::<usize>() + script.len() > 131072
+        {
+            return false;
+        }
+        inner.fleet_ephemeral.push_back(script);
+        true
+    }
     pub fn fleet_faulted(&self) -> bool {
         self.lock().fleet_faulted
     }
@@ -507,6 +545,19 @@ impl HostLobbyBridge {
     fn restore_qr_toggles(&self, count: usize) {
         self.lock().qr_toggles += count;
     }
+}
+
+fn is_snapshot_record(json: &str) -> bool {
+    #[derive(serde::Deserialize)]
+    struct Kind {
+        kind: String,
+    }
+    crate::core::codec::from_json::<Kind>(json).is_ok_and(|row| {
+        matches!(
+            row.kind.as_str(),
+            "fleet_wire_snapshot" | "fleet_media_frame"
+        )
+    })
 }
 
 fn is_fleet_record(json: &str) -> bool {
@@ -542,6 +593,7 @@ struct Pending {
     fleet_config: Option<String>,
     fleet_updates: VecDeque<String>,
     fleet_wire: VecDeque<String>,
+    fleet_ephemeral: VecDeque<String>,
     projections: [Option<Projection>; 8],
     qr_toggles: usize,
 }
@@ -719,6 +771,14 @@ pub fn pump_host_lobby(
         }
     }
 
+    // No ephemeral work is retried ahead of commands or gameplay snapshots.
+    if !failed {
+        for script in pending.fleet_ephemeral {
+            if surface.push(&script).is_ok() {
+                report.pushed += 1;
+            }
+        }
+    }
     for record in surface.drain() {
         bridge.record(&record);
         report.records.push(record);

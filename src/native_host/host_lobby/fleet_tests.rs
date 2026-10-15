@@ -17,6 +17,164 @@ impl RelaySocket for TestWire {
         self.0.lock().unwrap().1 = true;
     }
 }
+
+#[derive(Clone, Default)]
+struct SnapshotWire {
+    sent: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    refuse: bool,
+    classifier:
+        std::sync::Arc<std::sync::Mutex<Option<phoenix_transport::socket::IngressClassifier>>>,
+}
+impl RelaySocket for SnapshotWire {
+    fn poll(&mut self) -> Vec<String> {
+        Vec::new()
+    }
+    fn send(&mut self, text: String) {
+        self.sent.lock().unwrap().push(text);
+    }
+    fn is_open(&self) -> bool {
+        true
+    }
+    fn close(&mut self) {}
+    fn set_ingress_classifier(&mut self, classifier: phoenix_transport::socket::IngressClassifier) {
+        *self.classifier.lock().unwrap() = Some(classifier);
+    }
+    fn snapshot_only_supported(&self) -> bool {
+        true
+    }
+    fn try_send_snapshot(&mut self, text: String, max: usize) -> bool {
+        if self.refuse || text.len() > max {
+            return false;
+        }
+        self.sent.lock().unwrap().push(text);
+        true
+    }
+}
+fn media_wire_frame() -> String {
+    let payload =
+        crate::comms::media_mesh::MediaHostFrame::encode(crate::comms::media_mesh::MediaHostBody {
+            from: 1,
+            to: 2,
+            call_origin_id: "call".into(),
+            generation: None,
+            packet: None,
+        })
+        .unwrap();
+    serde_json::json!({"type":"relay","class":"snapshot","drop_only":true,"payload":payload})
+        .to_string()
+}
+#[test]
+fn optional_native_send_is_generation_scoped_bounded_and_after_ordinary() {
+    let mut world = wire_world();
+    let wire = SnapshotWire::default();
+    world.insert_resource(NativeFleetWire::new(Box::new(wire.clone())));
+    world.resource_mut::<NativeFleetRoleWires>().adopted = true;
+    let frame = media_wire_frame();
+    world.resource_mut::<NativeFleetEvents>().0 = vec![
+        NativeFleetEvent::WireSnapshot {
+            generation: 0,
+            sequence: 1,
+            frame: frame.clone(),
+            max_buffered_bytes: 65536,
+        },
+        NativeFleetEvent::WireSend {
+            generation: 0,
+            frame: "command".into(),
+        },
+        NativeFleetEvent::WireSend {
+            generation: 0,
+            frame: "gameplay snapshot".into(),
+        },
+    ];
+    apply_events(&mut world);
+    assert_eq!(
+        *wire.sent.lock().unwrap(),
+        vec![
+            "command".to_owned(),
+            "gameplay snapshot".to_owned(),
+            frame.clone()
+        ]
+    );
+    media::send(&mut world, 0, 1, frame.clone(), 65536); // replay cannot retry an attempt
+    media::send(&mut world, 1, 2, frame.clone(), 65536); // no actual role socket
+    media::send(&mut world, 0, 2, frame.clone(), 1); // actual queue refuses
+    media::send(&mut world, 0, 3, "x".repeat(32769), 65536);
+    media::send(
+        &mut world,
+        0,
+        4,
+        r#"{"type":"relay","class":"reliable","payload":"wrong"}"#.into(),
+        65536,
+    );
+    assert_eq!(wire.sent.lock().unwrap().len(), 3);
+    world.resource_mut::<NativeFleetRoleWires>().primary_closed = true;
+    media::send(&mut world, 0, 5, frame, 65536);
+    assert_eq!(wire.sent.lock().unwrap().len(), 3);
+    // Older socket implementations never advertise this optional capability.
+    world.insert_resource(NativeFleetWire(Box::new(TestWire::default())));
+    world.resource_mut::<NativeFleetRoleWires>().primary_closed = false;
+    assert!(!world
+        .resource::<NativeFleetWire>()
+        .0
+        .snapshot_only_supported());
+}
+#[test]
+fn actual_host_media_is_scoped_before_native_reader_and_bridge_without_caller_flag() {
+    use phoenix_transport::socket::IngressClass;
+    let wire = SnapshotWire::default();
+    let _native = NativeFleetWire::new(Box::new(wire.clone()));
+    let classify = wire
+        .classifier
+        .lock()
+        .unwrap()
+        .expect("install before native registration");
+    let mut frame: serde_json::Value = crate::core::codec::from_json(&media_wire_frame()).unwrap();
+    frame.as_object_mut().unwrap().remove("drop_only");
+    assert_eq!(classify(&frame.to_string()), IngressClass::Scoped);
+    frame["class"] = serde_json::json!("reliable");
+    assert_eq!(classify(&frame.to_string()), IngressClass::Refuse);
+    frame["class"] = serde_json::json!("snapshot");
+    frame["payload"] = serde_json::json!(r#"{"t":"media","m":0}"#);
+    assert_eq!(classify(&frame.to_string()), IngressClass::Refuse);
+    frame["payload"] = serde_json::json!(format!(
+        r#"{{"t":"media","extra":"{}"}}"#,
+        "x".repeat(32768)
+    ));
+    assert_eq!(classify(&frame.to_string()), IngressClass::Refuse);
+    frame["payload"] = serde_json::json!(r#"{"t":"command-batch"}"#);
+    assert_eq!(classify(&frame.to_string()), IngressClass::Ordinary);
+}
+#[test]
+fn native_sequence_floor_is_retained_and_exhaustion_cannot_restart_it() {
+    let mut world = wire_world();
+    let wire = SnapshotWire::default();
+    world.insert_resource(NativeFleetWire::new(Box::new(wire.clone())));
+    world.resource_mut::<NativeFleetRoleWires>().adopted = true;
+    world
+        .resource_mut::<NativeFleetRoleWires>()
+        .snapshot_sequence
+        .insert(0, 40);
+    media::send(&mut world, 0, 1, media_wire_frame(), 65536);
+    assert!(wire.sent.lock().unwrap().is_empty());
+    media::send(&mut world, 0, 41, media_wire_frame(), 65536);
+    assert_eq!(wire.sent.lock().unwrap().len(), 1);
+    assert_eq!(
+        world.resource::<NativeFleetRoleWires>().snapshot_sequence[&0],
+        41
+    );
+    world
+        .resource_mut::<NativeFleetRoleWires>()
+        .snapshot_sequence
+        .insert(0, 9_007_199_254_740_991);
+    media::send(
+        &mut world,
+        0,
+        9_007_199_254_740_992,
+        media_wire_frame(),
+        65536,
+    );
+    assert_eq!(wire.sent.lock().unwrap().len(), 1);
+}
 #[test]
 fn native_gm_reconnect_record_enters_the_authoritative_pause_transaction() {
     use crate::command_admission::HostSlot;

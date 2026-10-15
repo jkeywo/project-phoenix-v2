@@ -370,7 +370,7 @@ pub fn is_atomic_energy_profile(path: &str) -> bool {
 pub fn is_atomic_logistics_profile(path: &str) -> bool {
     matches!(
         path,
-        "logistics" | "production" | "recovery" | "recoverable" | "port_service" | "fitting"
+        "logistics" | "production" | "recovery" | "recoverable" | "port_service" | "fitting" | "field" | "signal_material"
     )
 }
 

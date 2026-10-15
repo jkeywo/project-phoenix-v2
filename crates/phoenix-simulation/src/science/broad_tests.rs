@@ -1,5 +1,101 @@
 use super::*;
 #[test]
+fn streamed_rock_actor_uses_authored_tags_paid_observation_and_normal_contact_alias() {
+    let (mut app, observer, target, profile) = rig();
+    app.world_mut().despawn(target);
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/asteroid_common_1_small.toml",
+    )
+    .unwrap();
+    let mut rock =
+        crate::asteroids::lifecycle::rock_config("assets/entities/asteroid_common_1_small.toml");
+    rock.tags = config.tags.clone();
+    let target_tags = config.target.unwrap().tags;
+    rock.collider = config.collider.unwrap();
+    let private_id = "streamed-rock-private-route";
+    let actor = app
+        .world_mut()
+        .spawn(crate::asteroids::lifecycle::rock_bundle(
+            private_id,
+            &rock,
+            Vec3::new(10.0, 0.0, 0.0),
+            Quat::IDENTITY,
+            0.0,
+            rock.max_hp,
+        ))
+        .id();
+    assert!(app.world().get::<EntityUuid>(actor).is_none());
+    let mut world = crate::lobby::server::WorldResource::default();
+    world
+        .0
+        .entities
+        .push(crate::core::messages::EntitySnapshot {
+            uuid: private_id.into(),
+            tags: rock.tags.clone(),
+            target_tags,
+            // Deliberately contradictory: measurement location comes from the actor.
+            position: Some([90000.0, 0.0, 90000.0]),
+            ..Default::default()
+        });
+    app.insert_resource(world);
+    fund(&mut app, observer, &profile, 1.0);
+    app.update();
+    let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
+    let alias = state.contact_for_source(private_id).unwrap().to_owned();
+    assert_ne!(alias, private_id);
+    let measured = state.projection(&profile, 0, 0.5).unwrap();
+    assert_eq!(measured.len(), 1);
+    assert!(measured[0].selectable);
+    assert!((measured[0].position[0] - 10.0).abs() <= profile.position_error);
+    assert!(!serde_json::to_string(&measured)
+        .unwrap()
+        .contains(private_id));
+    // Display tags cannot grant targetability. Distinct authored targeting
+    // tags govern selection even when the object still displays as a rock.
+    app.world_mut()
+        .get_mut::<BroadProfile>(observer)
+        .unwrap()
+        .0
+        .get_mut(&profile.system)
+        .unwrap()
+        .radar
+        .selects = crate::entities::tags::parse_tags(&["cargo".into()]);
+    app.world_mut()
+        .resource_mut::<crate::lobby::server::WorldResource>()
+        .0
+        .entities[0]
+        .target_tags = vec!["cargo".into()];
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 1;
+    fund(&mut app, observer, &profile, 1.0);
+    app.update();
+    let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
+    assert!(state.projection(&profile, 1, 0.5).unwrap()[0].selectable);
+    app.world_mut()
+        .resource_mut::<crate::lobby::server::WorldResource>()
+        .0
+        .entities[0]
+        .target_tags
+        .clear();
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 2;
+    fund(&mut app, observer, &profile, 1.0);
+    app.update();
+    let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
+    assert!(!state.projection(&profile, 2, 0.5).unwrap()[0].selectable);
+    app.world_mut()
+        .get_mut::<Transform>(actor)
+        .unwrap()
+        .translation
+        .x = 1_000_000.0;
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 3;
+    fund(&mut app, observer, &profile, 1.0);
+    app.update();
+    let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
+    assert!(state.resolve_current(&alias).is_none());
+    let held = state.projection(&profile, 3, 0.5).unwrap();
+    assert!(held[0].predicted && held[0].position[0] < 100.0);
+}
+
+#[test]
 fn paid_sensor_tracks_include_ghosts_without_any_scene_entity_and_keep_unchanged_sample_time() {
     let (mut app, observer, _, profile) = rig();
     let observer_id = app.world().get::<EntityUuid>(observer).unwrap().0.clone();

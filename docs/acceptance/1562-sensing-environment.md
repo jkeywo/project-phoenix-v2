@@ -252,3 +252,26 @@ SHA256 `26a127d52bc380c0dc2f2fb74658f93f8f69202cd4efa577ff981a72fa655283`.
 It checks original samples/horizon/range, exact-owner actions, delegation and
 removal of another instrument's forecast when switching. These results do not
 establish full WASM-host, native monitor, multiplayer or increment exit acceptance.
+
+The integrated forecast/Broad/continuation/outgoing batch then passed **31 cases**
+(5m56s build, 0.22s execution):
+
+```text
+cargo test -p phoenix-simulation --lib --no-default-features -- science::server::tests::forecasts_use science::broad::tests science::focused::tests console_delivery::tests
+```
+
+The log is `.phoenix/increment14-forecast-rock-integrated-tests.log`, SHA256
+`7ff783f69b7545bc6d3c0a2be6e1d723a3ce1ac6eda0fe7f0661ba3dd11749ad`.
+The tested source is `0a63c743` plus the retained pre-target-metadata Broad patch
+under `.phoenix/increment14-forecast-rock-proof/`, including matching library
+dependency records. This proves issued forecasts remain unchanged after live
+condition changes, projection loss and earlier-sample pruning; invalid forecast
+intervals refuse validation.
+
+Independent review subsequently found generated rocks were using general display
+tags for target selection. `e68ab8a8` now preserves actual template `target.tags`
+through streaming and the existing whole-roster restore path. The Broad producer
+uses those separate tags, with a source-reviewed regression for differing display
+and target tags and absent-target denial. That correction and its real streaming
+restore regression await the next integrated native batch; the earlier 31 cases
+must not be read as post-correction execution evidence.

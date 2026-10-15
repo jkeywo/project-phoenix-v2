@@ -61,6 +61,10 @@ paid grant and physical measurements, retains acquired findings with their sampl
 ticks and predicts lost positions using observed motion. Public contact IDs include
 their instrument owner; current actuator routing stays private and expires with
 measured support. Co-hosting instruments does not merge their knowledge.
+Generated gameplay rocks participate using their existing `AsteroidUuid`, actual
+physical pose and authored roster tags. Visibility follows the scanner's `shows`
+filter; selection separately follows the rock template's `target.tags` and the
+scanner's `selects`. Their measured returns use the same paid range/path rules.
 
 An observer's substituted Sensors reports enter that same instrument-owned track
 lifecycle. They retain the reported position, permitted label and original sample

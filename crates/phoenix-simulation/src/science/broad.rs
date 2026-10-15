@@ -117,8 +117,10 @@ pub(crate) fn tick(
     paths: crate::regions::signal_path::RegionSignalQuery,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
+    world: Option<Res<crate::lobby::server::WorldResource>>,
     scene: Query<(
-        &EntityUuid,
+        Option<&EntityUuid>,
+        Option<&crate::server_app::AsteroidUuid>,
         &Transform,
         Option<&ShipPhysics>,
         Option<&EntityName>,
@@ -148,6 +150,14 @@ pub(crate) fn tick(
     if !dt.is_finite() || dt <= 0.0 {
         return;
     }
+    // Streamed rocks retain their existing actor identity and authored tags in
+    // WorldResource. Positions still come from the actual physical actor.
+    let snapshots: BTreeMap<_, _> = world
+        .as_ref()
+        .into_iter()
+        .flat_map(|world| &world.0.entities)
+        .map(|row| (row.uuid.as_str(), row))
+        .collect();
     let mut observers: Vec<_> = observers.iter_mut().collect();
     observers.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
     for (
@@ -209,6 +219,7 @@ pub(crate) fn tick(
                 if range.is_finite() && range > 0.0 {
                     for (
                         id,
+                        rock,
                         transform,
                         physics,
                         name,
@@ -221,7 +232,16 @@ pub(crate) fn tick(
                         target,
                     ) in &scene
                     {
-                        if id.0 == observer.0 {
+                        let Some(id) = id
+                            .map(|id| id.0.as_str())
+                            .or_else(|| rock.map(|id| id.0.as_str()))
+                        else {
+                            continue;
+                        };
+                        let tags = tags.map(|tags| tags.0.as_slice()).or_else(|| {
+                            rock.and_then(|_| snapshots.get(id).map(|row| row.tags.as_slice()))
+                        });
+                        if id == observer.0 {
                             continue;
                         }
                         let report = runtime.as_ref().and_then(|runtime| {
@@ -229,13 +249,13 @@ pub(crate) fn tick(
                                 .contact_information
                                 .reports
                                 .get(&observer.0)?
-                                .get(&id.0)
+                                .get(id)
                         });
                         let mode = runtime.as_ref().map_or(Default::default(), |runtime| {
                             crate::gm::operations::contact::mode(
                                 &runtime.contact_overrides,
                                 &observer.0,
-                                &id.0,
+                                id,
                             )
                         });
                         if mode == crate::gm::operations::contact::ContactMode::Conceal {
@@ -247,20 +267,16 @@ pub(crate) fn tick(
                             system.kind == crate::ship::system_registry::SENSOR_RADAR_KIND
                         }) {
                             if let Some(report) = report {
-                                if let Some(measurement) = reported_measurement(
-                                    system,
-                                    &id.0,
-                                    report,
-                                    target,
-                                    &radar.selects,
-                                ) {
+                                if let Some(measurement) =
+                                    reported_measurement(system, id, report, target, &radar.selects)
+                                {
                                     measurements.push(measurement);
                                 }
                                 continue;
                             }
                         }
                         if !tags.is_some_and(|tags| {
-                            tags.0.iter().any(|tag| {
+                            tags.iter().any(|tag| {
                                 radar
                                     .shows
                                     .iter()
@@ -290,28 +306,34 @@ pub(crate) fn tick(
                                     "region",
                                 ]
                                 .into_iter()
-                                .find(|known| tags.0.iter().any(|tag| tag.as_str() == *known))
+                                .find(|known| tags.iter().any(|tag| tag.as_str() == *known))
                             })
                             .unwrap_or("contact")
                         };
                         // Classification changes interpretation of an already
                         // detected return; it never supplies detection itself.
                         let supplied_identity = runtime.as_ref().and_then(|runtime| {
-                            runtime.contact_classifications.get(&observer.0)?.get(&id.0)
+                            runtime.contact_classifications.get(&observer.0)?.get(id)
                         });
                         let identity_name = supplied_identity
                             .map(|identity| identity.label.as_str())
                             .or_else(|| name.map(|name| name.0.as_str()))
                             .filter(|name| !name.is_empty());
                         measurements.push(BroadMeasurement {
-                            source: id.0.clone(),
+                            source: id.to_owned(),
                             observation: None,
                             selectable: target.is_some_and(|target| {
                                 crate::entities::tags::matches_any(
                                     &crate::entities::tags::parse_tags(&target.0.tags),
                                     &radar.selects,
                                 )
-                            }),
+                            }) || rock.is_some()
+                                && snapshots.get(id).is_some_and(|snapshot| {
+                                    crate::entities::tags::matches_any(
+                                        &crate::entities::tags::parse_tags(&snapshot.target_tags),
+                                        &radar.selects,
+                                    )
+                                }),
                             position: [position.x, position.z],
                             support,
                             identity: identity_name.map(|name| TrackIdentity {

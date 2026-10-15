@@ -6650,3 +6650,9 @@ step = 0.01
 [target]
 tags = ["ship"]
 threat_level = "none"
+
+# Equivalent assisted default; direct controls retain these actual independent owners.
+[helm_control]
+thrust = "helm-thrust"
+steering = "helm-steering"
+lateral = "helm-lateral-thrust"

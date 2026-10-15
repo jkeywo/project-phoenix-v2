@@ -9,6 +9,7 @@ pub mod damage;
 pub mod eligibility;
 pub mod energy_work;
 pub mod helm;
+pub mod helm_control;
 pub mod helm_ai;
 pub mod impulse;
 pub mod lateral_thrust;

@@ -72,6 +72,8 @@ pub struct EntityConfig {
     pub collider: Option<ColliderConfig>,
     pub appearance: Option<AppearanceConfig>,
     pub helm_console: Option<HelmConsoleConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub helm_control: Option<phoenix_model::helm_control::HelmControlConfig>,
     /// Optional helm capability declaration (`[helm_capability]`).
     /// Describes vertical movement mode and impulse steering policy.
     #[serde(default)]
@@ -973,6 +975,10 @@ impl EntityConfig {
                 crate::weapons::assignments::validate_groups(&weapons.groups, ship)
                     .map_err(SerdeError::custom)?;
             }
+        }
+        if let Some(controls) = &config.helm_control {
+            crate::ship::helm_control::validate_profile(controls, &config)
+                .map_err(SerdeError::custom)?;
         }
         if let Some(sensing) = &config.sensing {
             crate::science::sensing::validate_sensing(sensing, &config)

@@ -53,4 +53,12 @@ fn force_speed_and_heading_requests_are_closed_and_preserve_their_units() {
         serde_json::from_str::<SpeedDemand>(r#"{"kind":"live_target","uuid":"private"}"#).is_err()
     );
     assert!(serde_json::from_str::<HelmControlMode>(r#""autopilot""#).is_err());
+    assert!(LateralIntent::Direct { force: -0.5 }.is_valid());
+    assert!(!LateralIntent::Assisted {
+        value: f32::INFINITY
+    }
+    .is_valid());
+    let legacy: HelmControlConfig =
+        serde_json::from_str(r#"{"thrust":"drive","steering":"rudder"}"#).unwrap();
+    assert!(legacy.lateral.is_none());
 }

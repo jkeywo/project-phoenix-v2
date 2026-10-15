@@ -149,6 +149,43 @@ pub fn compute_physics(
     dt: f32,
     config: &ShipPhysicsConfig,
 ) -> ShipPhysicsResult {
+    compute_physics_with_drive(
+        state,
+        input,
+        dt,
+        config,
+        LongitudinalDriveMode::VelocityFraction,
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LongitudinalDriveMode {
+    /// Existing normalized desired-speed behavior, including authored drag.
+    VelocityFraction,
+    /// Paid signed acceleration. Neutral preserves longitudinal momentum.
+    Force,
+}
+
+/// The same physical integrator with an explicit interpretation of thrust.
+/// Force changes no resource owner and never overwrites an existing over-cap speed.
+pub fn compute_physics_with_drive(
+    state: ShipPhysicsState,
+    input: ShipPhysicsInput,
+    dt: f32,
+    config: &ShipPhysicsConfig,
+    drive: LongitudinalDriveMode,
+) -> ShipPhysicsResult {
+    compute_physics_with_controls(state, input, dt, config, drive, false)
+}
+
+pub fn compute_physics_with_controls(
+    state: ShipPhysicsState,
+    input: ShipPhysicsInput,
+    dt: f32,
+    config: &ShipPhysicsConfig,
+    drive: LongitudinalDriveMode,
+    lateral_direct: bool,
+) -> ShipPhysicsResult {
     // Clamp inputs
     let thrust = input.thrust.clamp(-1.0, 1.0);
     let steering = input.steering.clamp(-1.0, 1.0);
@@ -158,7 +195,16 @@ pub fn compute_physics(
     // Compute new forward speed (signed: positive = forward, negative = reverse).
     // - Non-zero thrust: drive speed toward (thrust * max_speed forward or max_reverse_speed reverse)
     // - Zero thrust: decelerate toward 0 from whichever side.
-    let new_speed = if thrust.abs() > f32::EPSILON {
+    let mut new_speed = if drive == LongitudinalDriveMode::Force {
+        apply_force(
+            state.forward_speed,
+            thrust,
+            config.acceleration,
+            config.max_speed,
+            config.max_reverse_speed,
+            dt,
+        )
+    } else if thrust.abs() > f32::EPSILON {
         let max_fwd = config.max_speed;
         let max_rev = config.max_reverse_speed;
         let target = if thrust > 0.0 {
@@ -247,15 +293,38 @@ pub fn compute_physics(
     let new_yaw = state.yaw + yaw_change;
 
     // Compute lateral speed
-    let new_lateral_speed = crate::ship::lateral_thrust::compute_lateral_speed(
-        state.lateral_speed,
-        lateral_input,
-        dt,
-        &crate::ship::lateral_thrust::LateralThrustConfig {
-            max_lateral_speed: config.max_lateral_speed,
-            lateral_acceleration: config.lateral_acceleration,
-        },
-    );
+    let mut new_lateral_speed = if lateral_direct {
+        apply_force(
+            state.lateral_speed,
+            lateral_input,
+            config.lateral_acceleration,
+            config.max_lateral_speed,
+            config.max_lateral_speed,
+            dt,
+        )
+    } else {
+        crate::ship::lateral_thrust::compute_lateral_speed(
+            state.lateral_speed,
+            lateral_input,
+            dt,
+            &crate::ship::lateral_thrust::LateralThrustConfig {
+                max_lateral_speed: config.max_lateral_speed,
+                lateral_acceleration: config.lateral_acceleration,
+            },
+        )
+    };
+
+    if drive == LongitudinalDriveMode::Force || lateral_direct {
+        // The existing velocity owner stores body-frame components. Turning the
+        // body must change that basis, not rotate inertial world momentum for
+        // free. Forces above were applied along the original physical axes.
+        let turn = new_yaw - state.yaw;
+        let (sin, cos) = (simmath::sin(turn), simmath::cos(turn));
+        let forward = new_speed * cos + new_lateral_speed * sin;
+        let lateral = new_lateral_speed * cos - new_speed * sin;
+        new_speed = forward;
+        new_lateral_speed = lateral;
+    }
 
     // Compute displacement based on new yaw, signed speed, and lateral speed
     let fwd_x = simmath::sin(new_yaw);
@@ -289,6 +358,27 @@ pub fn compute_physics(
         forward_speed: new_speed,
         lateral_speed: new_lateral_speed,
         vertical_speed: new_vertical_speed,
+    }
+}
+
+fn apply_force(
+    speed: f32,
+    input: f32,
+    acceleration: f32,
+    forward_cap: f32,
+    reverse_cap: f32,
+    dt: f32,
+) -> f32 {
+    // Finite authored f32 inputs can have products and cap differences larger
+    // than f32. Keep that intermediate range until the bounded final speed.
+    let speed = speed as f64;
+    let delta = input as f64 * acceleration as f64 * dt as f64;
+    if delta > 0.0 {
+        (speed + delta.min((forward_cap as f64 - speed).max(0.0))) as f32
+    } else if delta < 0.0 {
+        (speed + delta.max((-(reverse_cap as f64) - speed).min(0.0))) as f32
+    } else {
+        speed as f32
     }
 }
 

@@ -17,6 +17,8 @@ pub enum HelmControlMode {
 pub struct HelmControlConfig {
     pub thrust: SystemId,
     pub steering: SystemId,
+    #[serde(default)]
+    pub lateral: Option<SystemId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -55,6 +57,28 @@ pub enum SteeringDemand {
 pub enum SteeringIntent {
     Assisted { demand: SteeringDemand },
     Direct { rate: f32 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub enum LateralIntent {
+    Assisted { value: f32 },
+    Direct { force: f32 },
+}
+
+impl LateralIntent {
+    pub fn mode(&self) -> HelmControlMode {
+        match self {
+            Self::Assisted { .. } => HelmControlMode::Assisted,
+            Self::Direct { .. } => HelmControlMode::Direct,
+        }
+    }
+    pub fn is_valid(&self) -> bool {
+        match self {
+            Self::Assisted { value } => axis(*value),
+            Self::Direct { force } => axis(*force),
+        }
+    }
 }
 
 fn axis(value: f32) -> bool {

@@ -1,0 +1,4 @@
+# Explicit ordinary public contact for real radio/mission continuation probes.
+includes = ["../../assets/entities/alliance_cruiser.toml"]
+[comms]
+hailable = true

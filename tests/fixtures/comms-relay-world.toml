@@ -16,7 +16,7 @@ name = "signal-relay"
 spawn_on = "game_start"
 transform = { position = [175, 0, 0] }
 [[entity]]
-template_path = "assets/entities/alliance_cruiser.toml"
+template_path = "tests/fixtures/hailable-cruiser.toml"
 id = "status-reporter"
 name = "status-reporter"
 spawn_on = "game_start"

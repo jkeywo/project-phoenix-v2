@@ -1714,7 +1714,7 @@ pub(super) fn apply_addressed_action(
         ),
         With<BehaviourSection>,
     >,
-    entities: Query<(Entity, &EntityUuid)>,
+    entities: Query<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>,
     mut layers: Option<ResMut<WorldLayerMap>>,
     mut balance: Option<ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>>,
     mut queues: EffectQueues,

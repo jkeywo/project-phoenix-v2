@@ -303,7 +303,7 @@ pub(crate) fn tick_trigger_pipeline(
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<crate::server_app::GameOverReason>>,
     mut world_layers: WorldLayerParams,
-    entity_uuid_query: Query<(Entity, &EntityUuid)>,
+    entity_uuid_query: Query<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>,
     mut faction_dispatch: FactionDispatchParams,
     time: Option<Res<bevy::time::Time>>,
     id_mint: crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Entity as usize }>,
@@ -830,7 +830,7 @@ pub(crate) fn tick_delayed_actions(
     mut pending_layers: Option<ResMut<PendingWorldLayerChanges>>,
     mut layer_map: Option<ResMut<WorldLayerMap>>,
     base_world_config: Option<Res<crate::world::config::WorldConfig>>,
-    entity_uuid_query: Query<(Entity, &EntityUuid)>,
+    entity_uuid_query: Query<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>,
     mut faction_dispatch: FactionDispatchParams,
     // Issue #710: `RemoveFactionEnemy` re-validates AI targets after a
     // successful removal. The immediate path always did; the delayed path did
@@ -988,7 +988,7 @@ pub(crate) fn tick_script_callbacks(
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<crate::server_app::GameOverReason>>,
     mut world_layers: WorldLayerParams,
-    entity_uuid_query: Query<(Entity, &EntityUuid)>,
+    entity_uuid_query: Query<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>,
     mut faction_dispatch: FactionDispatchParams,
     time: Option<Res<bevy::time::Time>>,
     mut ai_query: Query<

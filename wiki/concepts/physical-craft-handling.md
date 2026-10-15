@@ -43,7 +43,9 @@ details. Delegated summaries retain observations without granting control.
 
 Carried probes keep their actual Collider and rigid-body definitions, with backend
 handles removed and derived Disabled membership. Operational queries omit them;
-canonical snapshot and digest queries include them. The existing Power owner
+canonical snapshot, digest and authored World action target maps include them.
+World destruction/group edges still require explicit destruction events; storage
+does not fabricate death. An authored removal can address the actual stored actor. The existing Power owner
 ages reserves and thermal state without generation or active sensing work. EMP
 expiry keeps the ordinary absolute logical clock. Acquired history remains dated;
 current physical sensor associations are withdrawn when the body is stored.

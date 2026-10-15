@@ -138,10 +138,27 @@ fn assert_capture_is_alive(payload: &PhoenixSnapshot) {
             .is_some_and(|p| p[4] != 0.0 || p[6] != 0.0 || p[7] != 0.0)
     });
     assert!(moving, "no captured ship has any velocity");
-    let damaged = payload.entities.iter().any(|e| {
-        e.hull
+    let damaged = payload.entities.iter().any(|row| {
+        let Some(damage) = &row.physical_damage else {
+            return false;
+        };
+        let config = row
+            .spawn
             .as_ref()
-            .is_some_and(|rows| rows.iter().any(|(_, current, max)| current < max))
+            .and_then(|origin| {
+                origin.resolve(
+                    &project_phoenix::entities::loader::WasmTemplateLoader,
+                    &mut Vec::new(),
+                )
+            })
+            .expect("captured physical damage has its accepted authored hull");
+        config
+            .interior
+            .as_ref()
+            .expect("physical damage has its authored compartment maxima")
+            .compartments
+            .iter()
+            .any(|room| damage.compartments[&room.id].hp < f64::from(room.max_hp))
     });
     assert!(
         damaged,
@@ -1839,7 +1856,10 @@ fn the_transfer_carries_every_persisted_dimension() {
         "Comms state crosses the transfer exactly as captured"
     );
     assert!(
-        reassembled.entities.iter().any(|e| e.hull.is_some()),
+        reassembled
+            .entities
+            .iter()
+            .any(|e| e.physical_damage.is_some()),
         "every ship's authoritative state rides the transfer"
     );
 }

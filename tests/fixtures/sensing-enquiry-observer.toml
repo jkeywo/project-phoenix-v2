@@ -3,6 +3,11 @@
 # an intrusive request is not universally detectable by every subject.
 includes = ["../../assets/entities/alliance_cruiser.toml"]
 
+# This scenario explicitly exposes the subject as a selectable ship contact.
+[target]
+tags = ["ship"]
+threat_level = "none"
+
 [infrastructure]
 publish = false
 

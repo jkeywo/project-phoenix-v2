@@ -18,3 +18,6 @@ pub(crate) mod reports;
 pub(crate) mod personnel;
 
 pub(crate) mod personnel_transfer;
+/// Ephemeral current-custody input to the public Repair tick. The owning
+/// admitted handler rebuilds its private contents from actual equipment.
+pub use personnel_transfer::PersonnelTransferContext;

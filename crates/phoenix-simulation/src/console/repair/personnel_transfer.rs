@@ -26,12 +26,12 @@ pub(crate) struct StoredPod {
     pub name: Option<String>,
 }
 #[derive(Resource, Default)]
-pub(crate) struct PersonnelTransferContext {
-    pub tick: Option<u64>,
-    pub carried: BTreeMap<(String, String), StoredPod>,
+pub struct PersonnelTransferContext {
+    pub(crate) tick: Option<u64>,
+    pub(crate) carried: BTreeMap<(String, String), StoredPod>,
 }
 impl PersonnelTransferContext {
-    pub fn pod(&self, actor: &str, craft: &str, tick: u64) -> Option<&StoredPod> {
+    pub(crate) fn pod(&self, actor: &str, craft: &str, tick: u64) -> Option<&StoredPod> {
         (self.tick == Some(tick))
             .then(|| self.carried.get(&(actor.into(), craft.into())))
             .flatten()

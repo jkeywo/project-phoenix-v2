@@ -1,74 +1,15 @@
 use super::*;
 use crate::core::messages::SystemId;
-use phoenix_model::console::{ConsoleFeed, ConsoleObservationKind};
+use phoenix_model::console::ConsoleObservationKind;
 
 fn fixture() -> EntityConfig {
     let mut entity =
         crate::test_fixtures::load_entity_config("assets/entities/alliance_cruiser.toml").unwrap();
-    let ship = entity.ship_config.as_mut().unwrap();
-    let existing = ship
-        .systems
-        .iter()
-        .find(|s| s.kind == RECOVERY_KIND)
-        .cloned();
-    let mut system = existing.clone().unwrap_or_else(|| {
-        ship.systems
-            .iter()
-            .find(|s| s.kind == crate::resources::production::FABRICATION_KIND)
-            .unwrap()
-            .clone()
-    });
-    let original = system.id.clone();
-    if existing.is_none() {
-        system.id = SystemId("resource-recovery".into());
-    }
-    system.kind = RECOVERY_KIND.into();
-    system.config = Some(
-        toml::Value::try_from(
-            serde_json::json!({"ai": crate::resources::recovery_ai::initial_tree()}),
-        )
-        .unwrap(),
-    );
-    let console = ship
-        .consoles
-        .iter_mut()
-        .find(|c| Some(&c.id) == system.console.as_ref())
-        .unwrap();
-    let radar_feed = ConsoleFeed {
-        source: SystemId("sensor-radar".into()),
-        kind: ConsoleObservationKind::SensorRadar,
-    };
-    if !console.feeds.contains(&radar_feed) {
-        console.feeds.push(radar_feed);
-    }
-    if let Some(row) = ship.systems.iter_mut().find(|s| s.id == system.id) {
-        *row = system.clone();
-    } else {
-        ship.systems.push(system.clone());
-    }
-    entity
-        .interior
-        .as_mut()
-        .unwrap()
-        .placements
-        .insert(system.id.clone(), "support".into());
-    let energy = entity.energy.as_mut().unwrap();
-    let mut consumer = energy
-        .consumers
-        .iter()
-        .find(|c| c.system == original)
-        .unwrap()
-        .clone();
-    consumer.system = system.id.clone();
-    if !energy.consumers.iter().any(|c| c.system == system.id) {
-        energy.consumers.push(consumer);
-    }
-    entity.recovery = Some(RecoveryToolConfig {
-        system: system.id,
-        range: 20.0,
-        units_per_sec: 2.0,
-        resources: vec!["alloy".into()],
-    });
+    // Use the actual fitted tool, ownership, tree, energy and room. These
+    // profile tests vary only the acquisition range and supported material.
+    let recovery = entity.recovery.as_mut().expect("shipped recovery profile");
+    recovery.range = 20.0;
+    recovery.resources = vec!["alloy".into()];
     entity
 }
 

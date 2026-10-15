@@ -2269,6 +2269,7 @@ pub(super) fn apply_repair(entity: &mut EntityWorldMut<'_>, stored: &RepairState
     }
     if let Some(mut queue) = entity.get_mut::<RepairRequestQueue>() {
         queue.recoveries = stored.recoveries.clone();
+        queue.personnel_destinations = stored.personnel_destinations.clone();
         queue.entries = stored
             .queue
             .iter()

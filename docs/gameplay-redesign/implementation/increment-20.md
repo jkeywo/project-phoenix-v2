@@ -481,3 +481,46 @@ condition or loss. Bay manifests/counts derive only for locally stored craft.
 Assert paired hidden-state variants produce identical permitted projections.
 Later dated Comms telemetry can extend this view through its real delivery owner;
 global physical custody alone is never a knowledge grant.
+
+
+## Owned carrier source slice — awaiting native integration evidence
+
+The first implementation uses `PersonnelTransfer` on the existing Repair
+TeamJobs owner. `SetDutyOfficerDestination` persists a closed request on
+RepairRequestQueue; `DispatchOfficerTransfer` borrows a compatible actual finite
+team. The same ordinary Repair AI responds to explicit intent through these
+admitted commands. A request grants neither custody nor a berth reservation.
+Actual collection, escort, handoff and team return share one JobId and physical
+cursor. Retarget/recall after collection escorts the officer home before releasing
+the team. Completed handoffs remain completed during return cleanup.
+
+The optional `personnel_carrier.toml` inherits the existing six-seat probe carrier,
+adds finite Transport competency and two named officers, and explicitly grants
+Engineering a Bay observation feed. Tactical retains Bay authority.
+`personnel_pod.toml` inherits ordinary fixed battery-backed sensor equipment with
+one accepted berth; it creates no personnel population, pilot or new controller.
+Existing probes keep empty berth lists.
+
+The first consumer serializes one active crew handoff per Bay. It excludes actual
+Bay handling, refit and physical equipment stripping, while ordinary component
+repair can coexist and actual availability can pause handoff. Canonical occupants
+and current jobs determine free berths for every command and physical handoff.
+The existing fixed-step owner remains a singleton: its exclusive wrapper rebuilds
+an explicitly Derived tick-stamped context using the existing actual Bay readiness
+function, then executes the ordinary admitted consumer. Restore clears this context;
+it has no snapshot or digest payload. Missing/stale context refuses new work.
+
+Global custody alone is never telemetry. Publication hides deployed,
+foreign-carried and remotely Lost officers identically; only current owned stored
+pods with an explicit Bay feed expose their local occupants and finite capacity.
+Actual departure work remains factual Job history. Whole-candidate preflight
+joins accepted craft/berths, unique occupants, exclusive Bay jobs, exact team/cursor
+and retained origin receipts before writes; single-row rewinds refuse this graph.
+
+Source review is independent of native acceptance. Targeted JavaScript checks
+cover correlated destination/escort commands, stale held controls, delegation,
+finite berth authoring, explicit feeds and unchanged seats/probes. Gameplay owner,
+Simulation adapter and hidden-state tests are authored but unrun by this worker;
+root owns compilation, schema/version joins and all native checks. The full-host
+Human/ordinary AI, malformed no-write, loss and fresh JSON360 tracer follows in a
+separate donor. This source slice is not an increment19/20 playable exit.

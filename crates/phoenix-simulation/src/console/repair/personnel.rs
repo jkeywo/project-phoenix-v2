@@ -11,12 +11,21 @@ pub(crate) fn register(app: &mut App) {
     use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
     app.declare_state::<CompiledPersonnel>(StateClass::Derived, "accepted-personnel-roster")
         .declare_state::<PersonnelRoster>(StateClass::Folded, "retained-officer-roster")
-        .init_resource::<PersonnelRoster>();
+        .init_resource::<PersonnelRoster>()
+        .declare_state::<super::personnel_transfer::PersonnelTransferContext>(
+            StateClass::Derived,
+            "actual-personnel-transfer-context",
+        )
+        .init_resource::<super::personnel_transfer::PersonnelTransferContext>();
     register_hooks(app.world_mut());
     for payloads in [
         &[SystemControlPayloadDiscriminants::SetDutyOfficerPosting]
             as &'static [SystemControlPayloadDiscriminants],
         &[SystemControlPayloadDiscriminants::TreatDutyOfficer]
+            as &'static [SystemControlPayloadDiscriminants],
+        &[SystemControlPayloadDiscriminants::SetDutyOfficerDestination]
+            as &'static [SystemControlPayloadDiscriminants],
+        &[SystemControlPayloadDiscriminants::DispatchOfficerTransfer]
             as &'static [SystemControlPayloadDiscriminants],
     ] {
         let payload = payloads[0];
@@ -30,7 +39,7 @@ pub(crate) fn register(app: &mut App) {
     }
     app.add_systems(
         FixedUpdate,
-        apply
+        handle
             .in_set(crate::sim_sets::SimSet::Physics)
             .in_set(crate::sim_sets::FixedStep::HandleDutyOfficerPosting)
             .after(super::server::operate_repair_ai)
@@ -39,9 +48,21 @@ pub(crate) fn register(app: &mut App) {
     );
 }
 
+/// One existing fixed-step owner. Refresh derived readiness before the same
+/// admitted command consumer; neither operation is scheduled a second time.
+fn handle(world: &mut World) {
+    super::personnel_transfer::prepare(world);
+    world
+        .run_system_cached(apply)
+        .expect("accepted personnel consumer must have its registered world inputs");
+}
+
 pub(crate) fn register_hooks(world: &mut World) {
     world
         .register_component_hooks::<CompiledPersonnel>()
+        .on_despawn(origin_removed);
+    world
+        .register_component_hooks::<crate::entities::craft::ProbeCustody>()
         .on_despawn(origin_removed);
     world
         .register_component_hooks::<crate::entities::spawner::EntitySpawnOrigin>()
@@ -55,6 +76,7 @@ mod tests;
 pub(crate) fn apply(
     tick: Option<Res<crate::sim_tick::SimTick>>,
     mut roster: Option<ResMut<PersonnelRoster>>,
+    context: Option<Res<super::personnel_transfer::PersonnelTransferContext>>,
     mut ships: Query<
         (
             &AdmittedCommands,
@@ -63,6 +85,8 @@ pub(crate) fn apply(
             Option<&mut super::server::ShipRepairTeams>,
             Option<&CompiledPersonnel>,
             &crate::entities::spawner::EntityUuid,
+            Option<&mut super::server::RepairRequestQueue>,
+            Option<&crate::server_app::ShipSystemBlackboards>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -70,12 +94,14 @@ pub(crate) fn apply(
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
 ) {
-    for (admitted, config, sources, mut teams, profile, actor) in &mut ships {
+    for (admitted, config, sources, mut teams, profile, actor, mut queue, boards) in &mut ships {
         for command in &admitted.0 {
             if !matches!(
                 &command.payload,
                 SystemControlPayload::SetDutyOfficerPosting { .. }
                     | SystemControlPayload::TreatDutyOfficer { .. }
+                    | SystemControlPayload::SetDutyOfficerDestination { .. }
+                    | SystemControlPayload::DispatchOfficerTransfer { .. }
             ) {
                 continue;
             }
@@ -87,6 +113,9 @@ pub(crate) fn apply(
                 continue;
             }
             let result = (|| {
+                use phoenix_model::personnel::{
+                    OfficerLocation, PersonnelDestination, PersonnelDestinationRequest,
+                };
                 let teams = teams.as_deref_mut().ok_or("missing actual Repair teams")?;
                 if &command.target != teams.0.owner()
                     || !sources.0.entries().any(|(id, _)| id == &command.target)
@@ -94,40 +123,152 @@ pub(crate) fn apply(
                     || sources.0.source_for(&command.target)
                         == crate::ship::control_source::ControlSource::Offline
                 {
-                    return Err("actual Repair posting owner is unavailable");
+                    return Err("actual Repair owner is unavailable");
                 }
                 let profile = profile.ok_or("no accepted officer roster")?;
-                let state = roster
+                let roster = roster
                     .as_deref_mut()
-                    .and_then(|roster| roster.state_mut(&actor.0))
+                    .ok_or("missing actual officer roster")?;
+                let mut state = roster
+                    .state(&actor.0)
+                    .cloned()
                     .ok_or("missing actual officer custody")?;
                 let layout = teams.0.layout().ok_or("missing actual team navigation")?;
                 let tick = tick
                     .as_deref()
-                    .ok_or("missing actual logical posting clock")?;
+                    .ok_or("missing actual logical posting clock")?
+                    .0;
                 match &command.payload {
-                    SystemControlPayload::SetDutyOfficerPosting { officer, team_idx } => state
-                        .post(
-                            profile,
-                            teams.0.job_state(),
-                            layout,
-                            officer,
-                            *team_idx,
-                            tick.0,
-                        )
-                        .map_err(|_| "posting is not physically available"),
+                    SystemControlPayload::SetDutyOfficerPosting { officer, team_idx } => {
+                        state
+                            .post(
+                                profile,
+                                teams.0.job_state(),
+                                layout,
+                                officer,
+                                *team_idx,
+                                tick,
+                            )
+                            .map_err(|_| "posting is not physically available")?;
+                        *roster
+                            .state_mut(&actor.0)
+                            .ok_or("missing actual officer custody")? = state;
+                    }
                     SystemControlPayload::TreatDutyOfficer { officer, team_idx } => {
                         state
-                            .validate(profile, teams.0.job_state(), tick.0)
+                            .validate(profile, teams.0.job_state(), tick)
                             .map_err(|_| "invalid actual personnel state")?;
                         teams
                             .0
-                            .claim_treatment(profile, state, officer, *team_idx as usize)
-                            .map(|_| ())
-                            .ok_or("treatment is not physically available")
+                            .claim_treatment(profile, &state, officer, *team_idx as usize)
+                            .ok_or("treatment is not physically available")?;
+                    }
+                    SystemControlPayload::SetDutyOfficerDestination {
+                        officer,
+                        destination,
+                    } => {
+                        let person = state
+                            .officers
+                            .get(officer)
+                            .ok_or("unknown actual officer")?;
+                        let queue = queue
+                            .as_deref_mut()
+                            .ok_or("missing actual Repair request owner")?;
+                        if let Some(destination) = destination {
+                            let context = context
+                                .as_deref()
+                                .filter(|context| context.tick == Some(tick))
+                                .ok_or("missing current actual carried-craft context")?;
+                            if matches!(person.location, OfficerLocation::Lost { .. }) {
+                                return Err("officer is already committed or unavailable");
+                            }
+                            let permitted = boards
+                                .map(|boards| {
+                                    super::personnel_transfer::permitted_carried(&config.0, boards)
+                                })
+                                .unwrap_or_default();
+                            let craft = match destination {
+                                PersonnelDestination::Craft { craft } => Some(craft),
+                                PersonnelDestination::Home => match &person.location {
+                                    OfficerLocation::AboardCraft { craft, .. } => Some(craft),
+                                    _ => None,
+                                },
+                            };
+                            if let Some(craft) = craft {
+                                if !permitted.contains(craft)
+                                    || context.pod(&actor.0, craft, tick).is_none()
+                                {
+                                    return Err(
+                                        "destination has no permitted actual carried craft",
+                                    );
+                                }
+                            }
+                            if matches!(destination, PersonnelDestination::Home)
+                                && matches!(&person.location, OfficerLocation::AtCompartment { .. })
+                            {
+                                queue.personnel_destinations.remove(officer);
+                            } else if queue
+                                .personnel_destinations
+                                .get(officer)
+                                .is_none_or(|request| request.destination != *destination)
+                            {
+                                queue.personnel_destinations.insert(
+                                    officer.clone(),
+                                    PersonnelDestinationRequest {
+                                        destination: destination.clone(),
+                                        requested_tick: tick,
+                                    },
+                                );
+                            }
+                        } else {
+                            queue.personnel_destinations.remove(officer);
+                        }
+                        let recall:Vec<_>=teams.0.job_state().teams.iter().enumerate().filter_map(|(team,entry)| {
+                            let job=entry.as_ref().filter(|job|job.outcome.is_none())?;
+                            let phoenix_sim_gameplay::jobs::repair::RepairActivity::PersonnelTransfer {work,..}=&job.activity else{return None;};
+                            (work.officer==*officer && !work.completed && queue.personnel_destinations.get(officer)!=Some(&work.request)).then_some(team)
+                        }).collect();
+                        for team in recall {
+                            teams.0.recall(team);
+                        }
+                    }
+                    SystemControlPayload::DispatchOfficerTransfer { officer, team_idx } => {
+                        state
+                            .validate(profile, teams.0.job_state(), tick)
+                            .map_err(|_| "invalid actual officer custody")?;
+                        let request = queue
+                            .as_deref()
+                            .and_then(|queue| queue.personnel_destinations.get(officer))
+                            .cloned()
+                            .ok_or("no actual destination request")?;
+                        let context = context
+                            .as_deref()
+                            .ok_or("missing actual carried-craft context")?;
+                        let permitted = boards
+                            .map(|boards| {
+                                super::personnel_transfer::permitted_carried(&config.0, boards)
+                            })
+                            .unwrap_or_default();
+                        let plan = super::personnel_transfer::plan(
+                            context, &actor.0, profile, roster, teams, officer, &request, tick,
+                            &permitted,
+                        )
+                        .ok_or("physical transfer is not currently available")?;
+                        teams
+                            .0
+                            .claim_personnel_transfer(
+                                profile,
+                                &state,
+                                officer,
+                                *team_idx as usize,
+                                request,
+                                plan,
+                            )
+                            .ok_or("actual escort team is not available")?;
                     }
                     _ => unreachable!(),
                 }
+                Ok(())
             })();
             crate::command_admission::finish_action_feedback(
                 command,

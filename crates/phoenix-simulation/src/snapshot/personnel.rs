@@ -40,7 +40,45 @@ fn validate_active(
         .as_ref()
         .and_then(|repair| repair.jobs.as_ref())
         .ok_or("personnel requires its actual candidate Repair owner")?;
-    origin.state.validate(profile, jobs, tick)
+    origin.state.validate(profile, jobs, tick)?;
+    for (officer, request) in &row
+        .repair
+        .as_ref()
+        .expect("validated Repair owner")
+        .personnel_destinations
+    {
+        if !origin.state.officers.contains_key(officer)
+            || request.requested_tick > tick
+            || matches!(&request.destination,phoenix_model::personnel::PersonnelDestination::Craft {craft} if craft.trim().is_empty())
+        {
+            return Err("invalid actual officer destination request".into());
+        }
+    }
+    for job in jobs.teams.iter().flatten() {
+        let crate::jobs::repair::RepairActivity::PersonnelTransfer {
+            cancelled, work, ..
+        } = &job.activity
+        else {
+            continue;
+        };
+        if work.request.requested_tick > tick {
+            return Err("personnel transfer request is from a future tick".into());
+        }
+        if job.outcome.is_none()
+            && !*cancelled
+            && !work.completed
+            && row
+                .repair
+                .as_ref()
+                .unwrap()
+                .personnel_destinations
+                .get(&work.officer)
+                != Some(&work.request)
+        {
+            return Err("active escort has no matching admitted destination intent".into());
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn validate_roster(
@@ -109,15 +147,20 @@ pub(super) fn validate_roster(
         } else if row
             .repair
             .as_ref()
-            .and_then(|repair| repair.jobs.as_ref())
-            .is_some_and(|jobs| {
-                jobs.teams.iter().flatten().any(|job| {
-                    matches!(
-                        job.activity,
-                        crate::jobs::repair::RepairActivity::Treatment { .. }
-                    )
+            .is_some_and(|repair| !repair.personnel_destinations.is_empty())
+            || row
+                .repair
+                .as_ref()
+                .and_then(|repair| repair.jobs.as_ref())
+                .is_some_and(|jobs| {
+                    jobs.teams.iter().flatten().any(|job| {
+                        matches!(
+                            job.activity,
+                            crate::jobs::repair::RepairActivity::Treatment { .. }
+                                | crate::jobs::repair::RepairActivity::PersonnelTransfer { .. }
+                        )
+                    })
                 })
-            })
         {
             return Err(fail(
                 &row.uuid,
@@ -232,11 +275,11 @@ pub(super) fn validate_roster(
             .collect::<std::collections::BTreeSet<_>>()
             != expected
             || origin.state.officers.values().any(|state| {
-                state.location
-                    != (OfficerLocation::Lost {
-                        actor: actor.clone(),
-                    })
-                    || state.changed_tick != removed
+                state.changed_tick > snapshot.tick
+                    || !matches!(
+                        state.location,
+                        OfficerLocation::Lost { .. } | OfficerLocation::AboardCraft { .. }
+                    )
             })
         {
             return Err(fail(
@@ -245,8 +288,11 @@ pub(super) fn validate_roster(
             ));
         }
     }
-    Ok(())
+    graph::validate(world, snapshot, &profiles)
 }
+
+#[path = "personnel_graph.rs"]
+mod graph;
 
 /// A machinery row has no personnel payload. It may only be applied when its
 /// candidate jobs remain consistent with the current, unreplayed global custody.
@@ -256,6 +302,19 @@ pub(super) fn validate_live(
     row: &EntityState,
     tick: u64,
 ) -> Result<(), String> {
+    if row.repair.as_ref().is_some_and(|repair| {
+        !repair.personnel_destinations.is_empty()
+            || repair.jobs.as_ref().is_some_and(|jobs| {
+                jobs.teams.iter().flatten().any(|job| {
+                    matches!(
+                        job.activity,
+                        crate::jobs::repair::RepairActivity::PersonnelTransfer { .. }
+                    )
+                })
+            })
+    }) {
+        return Err("cross-entity personnel work requires a whole-roster restore".into());
+    }
     match (
         world.get::<CompiledPersonnel>(entity),
         world
@@ -269,6 +328,9 @@ pub(super) fn validate_live(
 }
 pub(super) fn apply(world: &mut World, snapshot: &PhoenixSnapshot) {
     world.insert_resource(snapshot.personnel.clone());
+    world.insert_resource(
+        crate::console::repair::personnel_transfer::PersonnelTransferContext::default(),
+    );
 }
 
 #[cfg(test)]

@@ -66,7 +66,7 @@ pub fn validate_entity(config: &EntityConfig) -> Result<(), String> {
                 )
             })
         {
-            return Err("first probe must be battery-only engineless childless fixed physical sensor equipment with ordinary damage; moving, mesh-child, weapon, passenger, fitting, bay and other actuator profiles are not supported yet".into());
+            return Err("fixed probe/pod must be battery-only engineless childless fixed physical sensor equipment with ordinary damage; moving, mesh-child, weapon, own-crew, fitting, bay and other actuator profiles are not supported yet".into());
         }
     }
     let Some(ship) = &config.ship_config else {

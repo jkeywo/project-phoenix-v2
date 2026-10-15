@@ -9,7 +9,7 @@ use bevy::ecs::entity_disabling::Disabled;
 use phoenix_sim_gameplay::ship::{composition::craft_bay_composition, craft::BayOperation};
 
 #[derive(Clone)]
-pub(super) struct BayContext {
+pub(crate) struct BayContext {
     pub uuid: String,
     pub config: phoenix_model::craft::BayConfig,
     pub cost: f32,
@@ -19,7 +19,7 @@ pub(super) struct BayContext {
     pub pose: Option<([f32; 3], Quat)>,
 }
 
-pub(super) fn context(world: &World, parent: Entity, owner: &SystemId) -> Option<BayContext> {
+pub(crate) fn context(world: &World, parent: Entity, owner: &SystemId) -> Option<BayContext> {
     let ship = &world.get::<ShipConfigComponent>(parent)?.0;
     let system = ship.system(owner)?;
     if system.kind != crate::ship::system_registry::CRAFT_BAY_KIND {
@@ -46,6 +46,22 @@ pub(super) fn context(world: &World, parent: Entity, owner: &SystemId) -> Option
         (None, None) => true,
         _ => false,
     };
+    // Existing physical stripping claims make the same Bay unavailable to
+    // handling and crew handoff; no independent readiness owner is introduced.
+    let recovery_ok = !world
+        .try_query_filtered::<&crate::resources::equipment_recovery_server::ShipEquipmentRecovery, Allow<Disabled>>()
+        .is_some_and(|mut query| {
+            query.iter(world).any(|owner_state| {
+                owner_state.job.as_ref().is_some_and(|job| {
+                    job.outcome.is_none()
+                        && job.activity.target_uuid
+                            == world
+                                .get::<EntityUuid>(parent)
+                                .map_or("", |id| id.0.as_str())
+                        && &job.activity.source_system == owner
+                })
+            })
+        });
     let consumer = world.get::<ShipPowerSystem>(parent).and_then(|power| {
         power
             .0
@@ -78,6 +94,7 @@ pub(super) fn context(world: &World, parent: Entity, owner: &SystemId) -> Option
         available: !world.entity(parent).contains::<Disabled>()
             && source_ok
             && fitting_ok
+            && recovery_ok
             && access_ok
             && pose.is_some()
             && operation > 0.0
@@ -246,7 +263,12 @@ fn eligible(
     let Some(probe) = world.get::<PhysicalProbe>(target) else {
         return false;
     };
-    if !context.available || claimed_elsewhere(world, parent, owner, &uuid.0) {
+    if !context.available
+        || claimed_elsewhere(world, parent, owner, &uuid.0)
+        || world
+            .get::<crate::console::repair::server::ShipRepairTeams>(parent)
+            .is_some_and(|teams| teams.0.claims_personnel_bay(owner))
+    {
         return false;
     }
     match operation {

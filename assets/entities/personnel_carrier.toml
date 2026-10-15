@@ -1,0 +1,115 @@
+# Optional first owned-carrier Personnel consumer. Existing six seats, Bay,
+# physical teams, power, damage and ordinary AI are inherited unchanged.
+includes = ["probe_carrier.toml"]
+name = "entity.personnel_carrier.name"
+
+[[personnel.repair_team]]
+id = "repair-alpha"
+label = "personnel.team.alpha"
+team_idx = 0
+competencies = ["mechanical_repair", "personnel_transport"]
+
+[[personnel.repair_team]]
+id = "repair-beta"
+label = "personnel.team.beta"
+team_idx = 1
+competencies = ["mechanical_repair", "personnel_transport"]
+
+[[personnel.officer]]
+id = "repair-chief"
+label = "personnel.officer.repair_chief"
+home_compartment = "engineering"
+competencies = ["mechanical_repair"]
+repair_work_multiplier = 1.25
+
+[[personnel.officer]]
+id = "technician"
+label = "personnel.officer.technician"
+home_compartment = "engineering"
+competencies = ["mechanical_repair"]
+repair_work_multiplier = 1.1
+
+# Explicit information-only Bay feed. The Engineering Console does not gain
+# Bay command ownership; Tactical still operates the actual Bay.
+[[console]]
+id = "engineering"
+name = "Engineering"
+screen = "gui/cruiser/engineering.html"
+home_station = "engineering"
+
+[[console.feed]]
+source = "command"
+kind = "Command"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "power"
+kind = "Power"
+
+[[console.feed]]
+source = "power-battery"
+kind = "PowerBattery"
+
+[[console.feed]]
+source = "power-reactor"
+kind = "PowerReactor"
+
+[[console.feed]]
+source = "phaser-fore"
+kind = "PhaserBank"
+
+[[console.feed]]
+source = "repair"
+kind = "Repair"
+
+[[console.feed]]
+source = "tractor"
+kind = "Tractor"
+
+[[console.feed]]
+source = "umbilical"
+kind = "Umbilical"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console.feed]]
+source = "logistics"
+kind = "Logistics"
+
+[[console.feed]]
+source = "torpedo-magazine"
+kind = "TorpedoMagazine"
+
+
+[[console.feed]]
+source = "stock/torpedo-magazine"
+kind = "Stock"
+
+[[console.feed]]
+source = "stock/repair"
+kind = "Stock"
+
+[[console.feed]]
+source = "stock/power-reactor"
+kind = "Stock"
+
+[[console.feed]]
+source = "fabrication"
+kind = "Production"
+
+[[console.feed]]
+source = "resource-recovery"
+kind = "Recovery"
+
+[[console.feed]]
+source = "sensor-radar"
+kind = "SensorRadar"
+
+[[console.feed]]
+source = "probe-bay"
+kind = "Bay"

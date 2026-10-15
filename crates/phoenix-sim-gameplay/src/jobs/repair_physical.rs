@@ -70,7 +70,7 @@ impl RepairTeams {
         target: Option<RepairWorkTarget>,
         label: String,
     ) -> Option<phoenix_model::job::JobId> {
-        if self.external_team() == Some(team) || (self.is_refit_team(team) || self.is_treatment_team(team)) || self.refit_claims_system(&system)
+        if self.external_team() == Some(team) || (self.is_refit_team(team) || self.is_treatment_team(team) || self.is_personnel_transfer_team(team)) || self.refit_claims_system(&system)
             || target.as_ref().is_some_and(|target| matches!(target, RepairWorkTarget::Component { system, .. } if self.refit_claims_system(system))) {
             return None;
         }
@@ -306,7 +306,9 @@ impl RepairTeams {
             if self.state.jobs.teams[index].as_ref().is_some_and(|job| {
                 matches!(
                     job.activity,
-                    RepairActivity::Refit { .. } | RepairActivity::Treatment { .. }
+                    RepairActivity::Refit { .. }
+                        | RepairActivity::Treatment { .. }
+                        | RepairActivity::PersonnelTransfer { .. }
                 ) && job.outcome.is_none()
             }) {
                 continue;

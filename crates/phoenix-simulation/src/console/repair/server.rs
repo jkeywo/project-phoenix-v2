@@ -33,6 +33,8 @@ pub struct ShipRepairTeams(pub RepairTeams);
 /// the worst tier and largest deficit.
 #[derive(Component, Clone, Debug, Default)]
 pub struct RepairRequestQueue {
+    pub personnel_destinations:
+        std::collections::BTreeMap<String, phoenix_model::personnel::PersonnelDestinationRequest>,
     pub entries: Vec<RepairQueueEntry>,
     pub recoveries: Vec<(RepairGroup, phoenix_model::observation::ObservationMetadata)>,
 }
@@ -382,6 +384,7 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
 /// its teams simply falling back to the pre-sweep "fix one system, walk home"
 /// behaviour — see `RepairTeams::tick`.
 pub fn tick_repair_teams(
+    transfer_context: Option<Res<super::personnel_transfer::PersonnelTransferContext>>,
     mut roster: Option<ResMut<phoenix_sim_gameplay::personnel::PersonnelRoster>>,
     time: Res<Time>,
     tick: Option<Res<crate::sim_tick::SimTick>>,
@@ -480,9 +483,6 @@ pub fn tick_repair_teams(
         (personnel_profile, care_fitting_profile, care_fitting),
     ) in ship_q.iter_mut()
     {
-        let mut personnel_state = roster
-            .as_deref_mut()
-            .and_then(|roster| ship_uuid.and_then(|actor| roster.state_mut(&actor.0)));
         // Crew wrecks remain for identity and cinematic spectating. A queued
         // repair must not revive them on the next tick and reopen admission.
         // NPC repair/recovery, including authored derelicts, keeps its policy.
@@ -497,6 +497,57 @@ pub fn tick_repair_teams(
         let Some(mut teams) = teams_comp else {
             continue;
         };
+        if let (Some(profile), Some(actor), Some(roster), Some(tick), Some(context)) = (
+            personnel_profile,
+            ship_uuid,
+            roster.as_deref_mut(),
+            tick.as_deref(),
+            transfer_context.as_deref(),
+        ) {
+            let blocked = access
+                .zip(teams.0.layout())
+                .map(|(access, layout)| access.blocked_connections(layout))
+                .unwrap_or_default();
+            teams.0.tick_personnel_transfers(&actor.0,profile,roster,tick.0,dt,&blocked,|work,roster| {
+                let ready=super::personnel_transfer::readiness(context,&actor.0,work,tick.0);
+                if ready!=phoenix_sim_gameplay::jobs::repair::TransferAvailability::Ready {return ready;}
+                if matches!(work.request.destination,phoenix_model::personnel::PersonnelDestination::Craft {..}) && roster.origins.values().flat_map(|origin|origin.state.officers.values()).any(|person|matches!(&person.location,phoenix_model::personnel::OfficerLocation::AboardCraft {craft,berth} if craft==&work.plan.craft && berth==&work.plan.berth)) {
+                    return phoenix_sim_gameplay::jobs::repair::TransferAvailability::Paused;
+                }
+                ready
+            });
+            if let Some(queue) = queue.as_deref_mut() {
+                queue.personnel_destinations.retain(|officer, request| {
+                    let Some(person) = roster
+                        .state(&actor.0)
+                        .and_then(|state| state.officers.get(officer))
+                    else {
+                        return true;
+                    };
+                    !match (&request.destination, &person.location) {
+                        (
+                            phoenix_model::personnel::PersonnelDestination::Home,
+                            phoenix_model::personnel::OfficerLocation::AtCompartment {
+                                compartment,
+                            },
+                        ) => profile.config.officers.iter().any(|definition| {
+                            definition.id == *officer && definition.home_compartment == *compartment
+                        }),
+                        (
+                            phoenix_model::personnel::PersonnelDestination::Craft { craft },
+                            phoenix_model::personnel::OfficerLocation::AboardCraft {
+                                craft: host,
+                                ..
+                            },
+                        ) => craft == host,
+                        _ => false,
+                    }
+                });
+            }
+        }
+        let mut personnel_state = roster
+            .as_deref_mut()
+            .and_then(|roster| ship_uuid.and_then(|actor| roster.state_mut(&actor.0)));
         if let Some(damage) = physical.as_deref_mut() {
             let blocked = access
                 .zip(teams.0.layout())
@@ -787,6 +838,7 @@ pub fn tick_repair_teams(
 /// `ShipSystemBlackboards`, so the query naturally scopes to AI-bearing ships;
 /// the wire broadcaster stays `LocalShip`-filtered.
 pub(crate) fn publish_repair_blackboard(
+    transfer_context: Option<Res<super::personnel_transfer::PersonnelTransferContext>>,
     roster: Option<Res<phoenix_sim_gameplay::personnel::PersonnelRoster>>,
     tick: Option<Res<crate::sim_tick::SimTick>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
@@ -999,7 +1051,7 @@ pub(crate) fn publish_repair_blackboard(
         let repair_groups = config_opt
             .map(|config| repair_group_definitions(&config.0, &damageable_systems))
             .unwrap_or_default();
-        let bb = RepairBlackboard {
+        let mut bb = RepairBlackboard {
             planned_requests: actor
                 .map(|actor| {
                     crate::world::planning::repair_requests(
@@ -1050,6 +1102,26 @@ pub(crate) fn publish_repair_blackboard(
             external_dispatch_target_condition,
         };
 
+        if let (Some(view), Some(profile), Some(roster), Some(actor), Some(config)) = (
+            bb.personnel.as_mut(),
+            personnel_profile,
+            roster.as_deref(),
+            actor,
+            config_opt,
+        ) {
+            let permitted = super::personnel_transfer::permitted_carried(&config.0, &blackboards);
+            super::personnel_transfer::decorate_view(
+                view,
+                transfer_context.as_deref(),
+                &actor.0,
+                profile,
+                roster,
+                teams,
+                repair_queue_ref,
+                tick.as_ref().map_or(0, |tick| tick.0),
+                &permitted,
+            );
+        }
         blackboards.0.insert(
             SystemId(REPAIR_SYSTEM_ID.to_string()),
             SystemBlackboard::Repair(bb),
@@ -1629,6 +1701,57 @@ pub fn operate_repair_ai(
                 }
                 if dispatched {
                     continue;
+                }
+            }
+        }
+        // Explicit personnel orders share the existing request owner. Ordinary
+        // Backfill reads only its permitted local officer/berth view, then emits
+        // the same posting or finite-team dispatch admitted for a Human.
+        if let (Some(teams), Some(queue), Some(config), Some(boards)) =
+            (teams_comp, repair_queue_comp, config_comp, boards)
+        {
+            if queue.is_empty() && !queue.personnel_destinations.is_empty() {
+                let permitted = config
+                    .0
+                    .observations_for_system(&repair_system_id(), &boards.0);
+                if let Some(crate::core::messages::SystemBlackboard::Repair(board)) =
+                    permitted.get(&repair_system_id())
+                {
+                    if let Some(personnel) = &board.personnel {
+                        let mut dispatched = false;
+                        let mut free = teams.0.free_team_indices(None);
+                        for officer in &personnel.officers {
+                            if officer.destination_request.is_none() {
+                                continue;
+                            }
+                            let payload = if matches!(
+                                officer.location,
+                                phoenix_model::personnel::OfficerLocation::WithRepairTeam { .. }
+                            ) && officer.can_release
+                            {
+                                Some(crate::core::messages::SystemControlPayload::SetDutyOfficerPosting {officer:officer.id.clone(),team_idx:None})
+                            } else {
+                                officer.transfer_teams.iter().copied().find(|team|free.contains(&(*team as usize))).map(|team| {
+                                    free.retain(|free|*free!=team as usize);
+                                    crate::core::messages::SystemControlPayload::DispatchOfficerTransfer {officer:officer.id.clone(),team_idx:team}
+                                })
+                            };
+                            if let Some(payload) = payload {
+                                dispatched |= emit_ai_command(
+                                    entity_uuid,
+                                    repair_system_id(),
+                                    payload,
+                                    sources,
+                                    &sessions,
+                                    Some(config),
+                                    &mut admitted,
+                                );
+                            }
+                        }
+                        if dispatched {
+                            continue;
+                        }
+                    }
                 }
             }
         }

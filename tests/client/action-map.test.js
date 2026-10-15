@@ -123,6 +123,8 @@ describe('ACTION_MAP', () => {
       'send_comms_request',
       'send_comms_text',
       'set_duty_officer_posting',
+      'set_duty_officer_destination',
+      'dispatch_officer_transfer',
       'set_helm_desired_heading',
       'set_helm_desired_speed',
       'set_helm_match_speed',

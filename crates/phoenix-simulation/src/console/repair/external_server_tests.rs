@@ -220,6 +220,7 @@ fn critical_local_repairs_reserves_one_team_each_and_damaged_reserves_none() {
     assert_eq!(critical_local_repairs(None), 0);
     assert_eq!(
         critical_local_repairs(Some(&RepairRequestQueue {
+            personnel_destinations: Default::default(),
             recoveries: vec![],
             entries: vec![]
         })),
@@ -232,6 +233,7 @@ fn critical_local_repairs_reserves_one_team_each_and_damaged_reserves_none() {
     };
     assert_eq!(
         critical_local_repairs(Some(&RepairRequestQueue {
+            personnel_destinations: Default::default(),
             recoveries: vec![],
             entries: vec![damaged],
         })),
@@ -240,6 +242,7 @@ fn critical_local_repairs_reserves_one_team_each_and_damaged_reserves_none() {
     // Two Disabled requests reserve two teams.
     assert_eq!(
         critical_local_repairs(Some(&RepairRequestQueue {
+            personnel_destinations: Default::default(),
             recoveries: vec![],
             entries: vec![critical_entry(), critical_entry()],
         })),

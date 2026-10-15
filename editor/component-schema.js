@@ -54,7 +54,7 @@ const TORPEDO_TUBE_ENTRY_FIELDS = [
 ];
 
 export const COMPONENT_SCHEMA = {
-  probe: {section:'probe',label:'Physical probe',fields:[{key:'space',type:'number',default:1}]},
+  probe: {section:'probe',label:'Physical probe',fields:[{key:'space',type:'number',default:1},{key:'passenger_berths',type:'array',items:'string',default:[],optional:true}]},
   tags: {
     section: 'tags',
     label: 'Tags',

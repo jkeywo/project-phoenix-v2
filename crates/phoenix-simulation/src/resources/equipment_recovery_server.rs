@@ -168,6 +168,9 @@ fn locally_claimed(world: &World, source: Entity, system: &SystemId, component: 
     let Some(teams) = world.get::<crate::console::repair::server::ShipRepairTeams>(source) else {
         return false;
     };
+    if teams.0.claims_personnel_bay(system) {
+        return true;
+    }
     let state = teams.0.save_state();
     let active = |id| {
         state

@@ -1,5 +1,5 @@
 import {plannedRepairDispatch} from '../planned-requests.js';
-import { PERSONNEL_ACTION, registerPersonnelActions } from './personnel-actions.js';
+import { PERSONNEL_ACTIONS, registerPersonnelActions } from './personnel-actions.js';
 import { PORT_ACTIONS, registerPortActions } from './port-actions.js';
 import { RECOVERY_ACTIONS, registerRecoveryActions } from './recovery-actions.js';
 import { PRODUCTION_ACTIONS, registerProductionActions } from './production-actions.js';
@@ -146,7 +146,7 @@ export const ENGINEERING_ACTIONS = Object.freeze([
   ...ENERGY_ACTIONS,
   ...LOGISTICS_ACTIONS,
   ...PRODUCTION_ACTIONS,
-  ...RECOVERY_ACTIONS, ...PORT_ACTIONS, PERSONNEL_ACTION,
+  ...RECOVERY_ACTIONS, ...PORT_ACTIONS, ...PERSONNEL_ACTIONS,
   defineStationAction({ id: UMBILICAL_DIRECTION_ACTION_ID, contexts: ENGINEERING_CONTEXTS,
     labelKey: 'engineering.transfer_direction', bindings: [null, null] }),
   defineStationAction({ id: UMBILICAL_RESOURCE_ACTION_ID, contexts: ENGINEERING_CONTEXTS,

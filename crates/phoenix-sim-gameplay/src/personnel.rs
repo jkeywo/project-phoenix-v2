@@ -227,20 +227,25 @@ impl PersonnelRoster {
             .map(|origin| &mut origin.state)
     }
     pub fn remove_actor(&mut self, actor: &str, tick: u64) {
-        let Some(origin) = self.origins.get_mut(actor) else {
-            return;
-        };
-        if origin.removed_tick.is_some() {
-            return;
-        }
-        origin.removed_tick = Some(tick);
-        for state in origin.state.officers.values_mut() {
-            // All currently supported custody is physically aboard its origin.
-            // Future off-ship variants must retain their actual location here.
-            state.location = OfficerLocation::Lost {
-                actor: actor.into(),
-            };
-            state.changed_tick = tick;
+        for (origin_actor, origin) in &mut self.origins {
+            if origin_actor == actor && origin.removed_tick.is_none() {
+                origin.removed_tick = Some(tick);
+            }
+            for state in origin.state.officers.values_mut() {
+                let aboard = match &state.location {
+                    OfficerLocation::AtCompartment { .. }
+                    | OfficerLocation::WithRepairTeam { .. } => origin_actor == actor,
+                    OfficerLocation::WithTransfer { actor: carrier, .. } => carrier == actor,
+                    OfficerLocation::AboardCraft { craft, .. } => craft == actor,
+                    OfficerLocation::Lost { .. } => false,
+                };
+                if aboard {
+                    state.location = OfficerLocation::Lost {
+                        actor: actor.into(),
+                    };
+                    state.changed_tick = tick;
+                }
+            }
         }
     }
 }
@@ -336,10 +341,14 @@ impl PersonnelState {
                         );
                     }
                 }
-                _ => return Err("unposted officer is outside its supported home custody".into()),
+                OfficerLocation::AboardCraft {craft,berth} if !craft.is_empty() && !berth.is_empty()=>{},
+                OfficerLocation::Lost {actor} if !actor.is_empty()=>{},
+                OfficerLocation::WithTransfer {actor,team_idx,job} if !actor.is_empty() && jobs.teams.get(*team_idx as usize).and_then(Option::as_ref).is_some_and(|active|active.id==*job && active.outcome.is_none() && matches!(&active.activity,RepairActivity::PersonnelTransfer {work,..} if work.officer==definition.id && !work.completed && work.stage!=PersonnelTransferStage::Collecting))=>{},
+                _ => return Err("unposted officer is outside its supported actual custody".into()),
             }
         }
         self.validate_treatment(profile, jobs)?;
+        self.validate_personnel_transfers(profile, jobs)?;
         Ok(())
     }
 
@@ -371,8 +380,13 @@ impl PersonnelState {
         if jobs.teams.iter().flatten().any(|job|job.outcome.is_none() && matches!(&job.activity, RepairActivity::Treatment { work, .. } if work.patient == officer_id)) {
             return Err("officer is committed to actual treatment".into());
         }
+        if jobs.teams.iter().flatten().any(|job|job.outcome.is_none() && matches!(&job.activity,RepairActivity::PersonnelTransfer {work,..} if work.officer==officer_id && !work.completed)) {return Err("officer is committed to actual escort work".into());}
         let current = match &officer.location {
-            OfficerLocation::Lost { .. } => return Err("lost officer cannot be posted".into()),
+            OfficerLocation::Lost { .. }
+            | OfficerLocation::AboardCraft { .. }
+            | OfficerLocation::WithTransfer { .. } => {
+                return Err("officer is not available at its actual local posting site".into())
+            }
             OfficerLocation::AtCompartment { .. } => None,
             OfficerLocation::WithRepairTeam { team_idx } => Some(*team_idx),
         };
@@ -380,7 +394,9 @@ impl PersonnelState {
             return Ok(());
         }
         let compartment = match &officer.location {
-            OfficerLocation::Lost { .. } => {
+            OfficerLocation::Lost { .. }
+            | OfficerLocation::AboardCraft { .. }
+            | OfficerLocation::WithTransfer { .. } => {
                 return Err("lost officer has no operational location".into());
             }
             OfficerLocation::AtCompartment { compartment } => compartment.as_str(),
@@ -438,6 +454,7 @@ impl PersonnelState {
         let Some(state) = self.officers.get(patient) else {
             return Vec::new();
         };
+        if jobs.teams.iter().flatten().any(|job|job.outcome.is_none() && matches!(&job.activity,RepairActivity::PersonnelTransfer {work,..} if work.officer==patient && !work.completed)) {return Vec::new();}
         let Some(room) = profile.care_compartment.as_ref() else {
             return Vec::new();
         };
@@ -558,6 +575,78 @@ impl PersonnelState {
         Ok(())
     }
 
+    fn validate_personnel_transfers(
+        &self,
+        profile: &CompiledPersonnel,
+        jobs: &RepairJobState,
+    ) -> Result<(), String> {
+        for (index, entry) in jobs.teams.iter().enumerate() {
+            let Some(job) = entry else {
+                continue;
+            };
+            let RepairActivity::PersonnelTransfer {
+                cancelled, work, ..
+            } = &job.activity
+            else {
+                continue;
+            };
+            let definition = profile
+                .config
+                .officers
+                .iter()
+                .find(|officer| officer.id == work.officer)
+                .ok_or("transfer names an unknown accepted officer")?;
+            let person = self
+                .officers
+                .get(&work.officer)
+                .ok_or("transfer has no actual person")?;
+            let team = profile
+                .config
+                .repair_teams
+                .iter()
+                .find(|team| team.team_idx as usize == index)
+                .ok_or("transfer has no accepted finite team")?;
+            if !team
+                .competencies
+                .contains(&DutyCompetency::PersonnelTransport)
+                || (job.outcome.is_none()
+                    && !work.completed
+                    && person.condition == PersonnelCondition::Severe
+                    && !team.competencies.contains(&DutyCompetency::MedicalCare))
+            {
+                return Err("transfer team lacks actual competency".into());
+            }
+            match &work.request.destination {
+                PersonnelDestination::Craft { .. }
+                    if work.plan.pickup_compartment == definition.home_compartment => {}
+                PersonnelDestination::Home
+                    if work.plan.delivery_compartment == definition.home_compartment => {}
+                _ => return Err("transfer must join the officer's actual authored home".into()),
+            }
+            if job.outcome.is_some() || work.completed {
+                continue;
+            }
+            let carrying = matches!(&person.location,OfficerLocation::WithTransfer {team_idx,job:owner,..} if *team_idx as usize==index && *owner==job.id);
+            let valid = match work.stage {
+                PersonnelTransferStage::Collecting => {
+                    person.location == work.plan.pickup && !*cancelled
+                }
+                PersonnelTransferStage::Escorting => carrying && !*cancelled,
+                PersonnelTransferStage::Returning => {
+                    *cancelled
+                        && (carrying
+                            || person.location == work.plan.pickup
+                            || matches!(&person.location,OfficerLocation::AtCompartment {compartment} if compartment==&definition.home_compartment)
+                            || matches!(person.location, OfficerLocation::Lost { .. }))
+                }
+            };
+            if !valid {
+                return Err("transfer disagrees with its single actual person custody".into());
+            }
+        }
+        Ok(())
+    }
+
     /// Read-only derived work input, not a second bonus or movement owner.
     pub fn repair_work_multipliers(
         &self,
@@ -628,6 +717,7 @@ impl PersonnelState {
     ) -> PersonnelView {
         let multipliers = self.repair_work_multipliers(profile, jobs);
         PersonnelView {
+            carried_destinations: Vec::new(),
             teams: profile
                 .config
                 .repair_teams
@@ -682,6 +772,9 @@ impl PersonnelState {
                                 .post(profile, jobs, interior, &definition.id, None, tick)
                                 .is_ok();
                     Some(DutyOfficerView {
+                        destination_request: None,
+                        transfer_teams: Vec::new(),
+                        transfer: None,
                         condition: officer.condition,
                         treatment_teams: self.treatment_teams(profile, jobs, &definition.id),
                         treatment: jobs.teams.iter().enumerate().find_map(|(index, entry)| {

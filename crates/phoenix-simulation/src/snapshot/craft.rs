@@ -43,6 +43,20 @@ fn shape(
     ))
 }
 
+pub(super) fn personnel_shape(
+    world: &World,
+    row: &EntityState,
+) -> Result<
+    (
+        Option<ProbeProfile>,
+        Option<crate::ship::config::ShipConfig>,
+    ),
+    String,
+> {
+    let (probe, ship, _) = shape(world, row)?;
+    Ok((probe, ship))
+}
+
 pub(super) fn validate_roster(
     world: &World,
     snapshot: &PhoenixSnapshot,

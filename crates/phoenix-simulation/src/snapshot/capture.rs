@@ -922,6 +922,9 @@ pub(super) fn repair_state(
         .unwrap_or_default();
     alerted_rows.sort_by(|a, b| a.0.cmp(&b.0));
     RepairState {
+        personnel_destinations: queue
+            .map(|queue| queue.personnel_destinations.clone())
+            .unwrap_or_default(),
         jobs: teams.map(|t| t.0.save_state()),
         readings: queue
             .map(|q| {

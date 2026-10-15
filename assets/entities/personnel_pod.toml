@@ -1,0 +1,7 @@
+# Ordinary fixed battery sensor craft, one finite accepted berth, no new crew
+# population/pilot/controller. Passengers remain in the one global roster.
+includes = ["physical_probe.toml"]
+name = "entity.personnel_pod.name"
+[probe]
+space = 1
+passenger_berths = ["passenger"]

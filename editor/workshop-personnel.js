@@ -7,7 +7,7 @@ const object = value => value && typeof value === 'object' && !Array.isArray(val
 const closed = (value, keys) => object(value) && Object.keys(value).every(key => keys.includes(key));
 const id = value => typeof value === 'string' && /^[a-z0-9-]+$/.test(value);
 const label = value => typeof value === 'string' && value.trim();
-const competencies = value => Array.isArray(value) && value.length > 0 && value.every(item => ['mechanical_repair','medical_care'].includes(item)) && new Set(value).size === value.length;
+const competencies = value => Array.isArray(value) && value.length > 0 && value.every(item => ['mechanical_repair','medical_care','personnel_transport'].includes(item)) && new Set(value).size === value.length;
 export function validatePersonnel(profile, entity) {
   if (!closed(profile, ['repair_team', 'officer', 'care']) || !Array.isArray(profile.repair_team) || !Array.isArray(profile.officer)) throw new Error('Personnel requires closed team and officer lists.');
   const count = entity.repair?.repair_team_count, homes = entity.interior?.team_homes;
@@ -16,7 +16,7 @@ export function validatePersonnel(profile, entity) {
   const rooms = new Set((entity.interior?.compartment || []).map(room => room.id)), ids = new Set(), slots = new Set();
   for (const team of profile.repair_team) {
     if (!closed(team, ['id', 'label', 'team_idx', 'competencies']) || !id(team.id) || !label(team.label) || ids.has(team.id)
-      || !Number.isInteger(team.team_idx) || team.team_idx < 0 || team.team_idx >= count || slots.has(team.team_idx) || !competencies(team.competencies)) throw new Error('Bind each named team to a distinct actual Repair team with mechanical repair competency.');
+      || !Number.isInteger(team.team_idx) || team.team_idx < 0 || team.team_idx >= count || slots.has(team.team_idx) || !competencies(team.competencies)) throw new Error('Bind each named team to a distinct actual Repair team with accepted competencies.');
     ids.add(team.id); slots.add(team.team_idx);
   }
   ids.clear();

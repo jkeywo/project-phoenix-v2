@@ -72,7 +72,10 @@ fn templates() -> MemoryTemplateLoader {
     let mut probe = loader
         .load_template("assets/entities/battery_probe.toml")
         .unwrap();
-    probe.probe = Some(phoenix_model::craft::ProbeProfile { space: 1 });
+    probe.probe = Some(phoenix_model::craft::ProbeProfile {
+        space: 1,
+        passenger_berths: Vec::new(),
+    });
     MemoryTemplateLoader::new([("parent.toml", parent), ("probe.toml", probe)])
 }
 #[test]

@@ -18,7 +18,7 @@ energy, physical damage and observation history.
 
 `ProbeCustody(CraftLocation)` is the one location owner: Deployed, or Carried by
 an actual parent UUID and Bay System. `PhysicalProbe` holds accepted immutable
-space requirements. The probe retains its entity identity, equipment and reserves.
+space requirements and optional accepted berth names. The probe retains its entity identity, equipment and reserves.
 It is not represented by a second inventory item or emitted-ordnance carrier.
 
 `ShipBayJobs` holds one existing shared Job per actual Bay. Gameplay's `BayState`
@@ -70,3 +70,16 @@ accepted transaction/history boundary. Entity fields expose probe occupied space
 World rows bind initial `carried_by` to an explicit existing parent and Bay.
 Initial carried GameStart rows follow explicit unconditional crew slots, preserving
 ordinary ship classification and avoiding extra claimable seats.
+
+
+## Finite passenger reference
+
+`personnel_pod.toml` inherits the fixed ordinary sensor craft with one berth and
+no own personnel definition. Occupants exist only in PersonnelRoster. Repair's
+actual finite escort Job handles local pickup/handoff/return; Bay launch and
+recovery keep their original lifecycle and physical entity identity. An active
+crew handoff prevents concurrent Bay handling, refit and stripping. Current owned
+stored pod facts require an explicit permitted Bay feed; deployment withdraws
+live personnel telemetry. The optional six-seat Personnel Carrier grants that
+feed to Engineering while Tactical retains Bay control. Broader craft and
+rescue/capture acceptance remain separate consumers.

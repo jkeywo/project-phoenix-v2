@@ -1,6 +1,6 @@
 import { t } from '../strings.js';
 import { activateEngineeringAction } from '../stations/engineering-action-control.js';
-import { PERSONNEL_POST_ACTION_ID, PERSONNEL_TREAT_ACTION_ID } from '../stations/personnel-actions.js';
+import { PERSONNEL_POST_ACTION_ID, PERSONNEL_TREAT_ACTION_ID, PERSONNEL_DESTINATION_ACTION_ID, PERSONNEL_TRANSFER_ACTION_ID } from '../stations/personnel-actions.js';
 const mounts = new WeakMap();
 /** Stable native pickers within the existing Repair surface. */
 export function renderPersonnelControls(container, state, owner) {
@@ -22,8 +22,11 @@ export function renderPersonnelControls(container, state, owner) {
       const name = document.createElement('strong'), status = document.createElement('span');
       const select = document.createElement('select'), post = document.createElement('button'), release = document.createElement('button');
       const careSelect = document.createElement('select'), treat = document.createElement('button');
-      root.append(name, status, select, post, release, careSelect, treat); mount.list.append(root);
-      row = { root, name, status, select, post, release, careSelect, treat }; mount.rows.set(officer.id, row);
+      const destination = document.createElement('select'), request = document.createElement('button'), cancel = document.createElement('button');
+      const escort = document.createElement('select'), transfer = document.createElement('button');
+      destination.dataset.personnelDestination = ''; escort.dataset.personnelEscort = ''; careSelect.dataset.personnelCare = '';
+      root.append(name, status, select, post, release, destination, request, cancel, escort, transfer, careSelect, treat); mount.list.append(root);
+      row = { root, name, status, select, post, release, careSelect, treat, destination, request, cancel, escort, transfer }; mount.rows.set(officer.id, row);
       const activate = team_idx => {
         const current = mount.view.officers.find(item => item.id === officer.id);
         if (!current || !mount.view.controllable) return;
@@ -43,8 +46,18 @@ export function renderPersonnelControls(container, state, owner) {
         activateEngineeringAction(mount.owner, PERSONNEL_TREAT_ACTION_ID,
           { officer: current.id, team_idx: Number(careSelect.value), changed_tick: current.changed_tick, control_system_id: mount.view.system_id }, 'treat_duty_officer');
       });
-      for (const button of [post, release, treat]) button.addEventListener('pointerdown', arm);
-      for (const input of [select, post, release, careSelect, treat]) input.addEventListener('keydown', event => {
+      const sendTransfer = (action, wire, detail) => {
+        const current = mount.view.officers.find(item => item.id === officer.id);
+        if (!current || !mount.view.controllable) return;
+        if (row.armed && (row.armed.owner !== mount.view.system_id || row.armed.tick !== current.changed_tick)) { row.armed = null; return; }
+        row.armed = null;
+        activateEngineeringAction(mount.owner, action, {officer:current.id,changed_tick:current.changed_tick,control_system_id:mount.view.system_id,...detail},wire);
+      };
+      request.addEventListener('click', () => { if (destination.value) sendTransfer(PERSONNEL_DESTINATION_ACTION_ID,'set_duty_officer_destination',{destination:destination.value === 'home' ? {kind:'home'} : {kind:'craft',craft:destination.value}}); });
+      cancel.addEventListener('click', () => sendTransfer(PERSONNEL_DESTINATION_ACTION_ID,'set_duty_officer_destination',{destination:null}));
+      transfer.addEventListener('click', () => { if (escort.value !== '') sendTransfer(PERSONNEL_TRANSFER_ACTION_ID,'dispatch_officer_transfer',{team_idx:Number(escort.value)}); });
+      for (const button of [post, release, treat, request, cancel, transfer]) button.addEventListener('pointerdown', arm);
+      for (const input of [select, post, release, careSelect, treat, destination, request, cancel, escort, transfer]) input.addEventListener('keydown', event => {
         if (event.key === ' ' || event.key === 'Enter') arm();
         event.stopPropagation();
       });
@@ -53,9 +66,11 @@ export function renderPersonnelControls(container, state, owner) {
     const current = officer.location.kind === 'with_repair_team' ? officer.location.team_idx : null;
     const team = view.teams.find(item => item.team_idx === current);
     const room = state.interior?.compartment?.find(room => room.id === officer.location.compartment);
-    row.status.textContent = t('personnel.condition.' + (officer.condition || 'fit')) + ' · ' + t(current === null ? 'personnel.at_home' : 'personnel.with_team',
-      { location: current === null ? t(room?.label || officer.location.compartment) : t(team?.label || ''),
-        multiplier: team?.active_work_multiplier ?? 1 });
+    const locationKey = officer.location.kind === 'aboard_craft' ? 'personnel.aboard_craft' : officer.location.kind === 'with_transfer' ? 'personnel.with_escort' : current === null ? 'personnel.at_home' : 'personnel.with_team';
+    const pod = view.carried_destinations?.find(row => row.craft === officer.location.craft);
+    row.status.textContent = t('personnel.condition.' + (officer.condition || 'fit')) + ' \u00b7 ' + t(locationKey,
+      { location: officer.location.kind === 'aboard_craft' ? t(pod?.name || 'personnel.pod') : officer.location.kind === 'with_transfer' ? t(view.teams.find(row=>row.team_idx===officer.location.team_idx)?.label || '') : current === null ? t(room?.label || officer.location.compartment) : t(team?.label || ''), multiplier: team?.active_work_multiplier ?? 1 });
+    if (officer.transfer) row.status.textContent += ' \u00b7 ' + t('personnel.transfer.' + officer.transfer.stage) + (officer.transfer.blocked ? ' \u00b7 ' + t('personnel.transfer.blocked') : '');
     if (officer.treatment) {
       const care = officer.treatment, team = view.teams.find(item => item.team_idx === care.team_idx);
       row.status.textContent += ' · ' + t('personnel.treatment_status', {team:t(team?.label || ''),phase:t('job.phase.' + care.phase),progress:Math.round(care.progress / 10)});
@@ -76,6 +91,23 @@ export function renderPersonnelControls(container, state, owner) {
     row.post.textContent = t('personnel.action.post'); row.post.disabled = row.select.disabled || row.select.value === '';
     row.select.onchange = () => { row.post.disabled = row.select.disabled || row.select.value === ''; };
     row.release.textContent = t('personnel.action.release'); row.release.disabled = !view.controllable || !officer.can_release;
+    const destinations = [{value:'home',label:t('personnel.destination.home')}, ...(view.carried_destinations || []).map(craft => ({value:craft.craft,label:t('personnel.destination.craft',{name:t(craft.name || 'personnel.pod'),free:craft.free_berths})}))];
+    const destinationSignature = JSON.stringify(destinations);
+    if (row.destination.dataset.choices !== destinationSignature) {
+      const held = row.destination.value; row.destination.replaceChildren();
+      for (const choice of destinations) { const option=document.createElement('option');option.value=choice.value;option.textContent=choice.label;row.destination.append(option); }
+      row.destination.value = destinations.some(choice=>choice.value===held) ? held : 'home'; row.destination.dataset.choices=destinationSignature;
+    }
+    row.destination.setAttribute('aria-label',t('personnel.choose_destination',{officer:t(officer.label)}));
+    row.destination.disabled = !view.controllable;
+    row.request.textContent=t('personnel.action.destination');row.request.disabled=!view.controllable;
+    row.cancel.textContent=t('personnel.action.cancel_destination');row.cancel.disabled=!view.controllable||!officer.destination_request;
+    const escortChoices=(officer.transfer_teams||[]).map(index=>view.teams.find(team=>team.team_idx===index)).filter(Boolean);
+    const escortSignature=JSON.stringify(escortChoices.map(team=>[team.team_idx,team.label]));
+    if(row.escort.dataset.choices!==escortSignature){const held=row.escort.value;row.escort.replaceChildren();const empty=document.createElement('option');empty.value='';empty.textContent=t('personnel.choose_team');row.escort.append(empty);for(const team of escortChoices){const option=document.createElement('option');option.value=String(team.team_idx);option.textContent=t(team.label);row.escort.append(option);}row.escort.value=escortChoices.some(team=>String(team.team_idx)===held)?held:'';row.escort.dataset.choices=escortSignature;}
+    row.escort.setAttribute('aria-label',t('personnel.choose_escort',{officer:t(officer.label)}));row.escort.disabled=!view.controllable||!escortChoices.length;
+    row.transfer.textContent=t('personnel.action.transfer');row.transfer.disabled=row.escort.disabled||row.escort.value==='';
+    row.escort.onchange=()=>{row.transfer.disabled=row.escort.disabled||row.escort.value==='';};
     const careChoices = (officer.treatment_teams || []).map(index => view.teams.find(team => team.team_idx === index)).filter(Boolean);
     const careSignature = JSON.stringify(careChoices.map(team => [team.team_idx, team.label]));
     if (row.careSelect.dataset.choices !== careSignature) {

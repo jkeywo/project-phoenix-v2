@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import {expect,it} from 'vitest';
 import {parse} from 'smol-toml';
+import {COMPONENT_SCHEMA} from '../component-schema.js';
+import {validatePersonnel} from '../workshop-personnel.js';
 import {resolveTemplate} from '../entity-includes.js';
 import {initialBay,validateBayComposition,writeSystemComposition} from '../workshop-system-composition.js';
 const read=path=>fs.existsSync(path)?fs.readFileSync(path,'utf8'):null;
@@ -31,4 +33,16 @@ it('writes only the selected actual System composition and retains exact accepte
  const components=structuredClone(bay.component);components[1].config.launch_work_secs=4;
  const after=writeSystemComposition(source,bay.id,{components,channels:[],materialise:true},bay),parsed=parse(after);
  expect(parsed.includes).toEqual(parse(source).includes);expect(parsed.system[0].component[1].config.launch_work_secs).toBe(4);expect(parsed.energy).toEqual(parse(source).energy);expect(parsed.interior).toEqual(parse(source).interior);expect(parsed.system[0].config.ai).toEqual(parse(source).system[0].config.ai);
+});
+
+it('authors optional finite passenger berths and explicit information-only Bay feed without changing probes or seats',()=>{
+ const base=resolve('assets/entities/probe_carrier.toml'),carrier=resolve('assets/entities/personnel_carrier.toml');
+ const pod=resolve('assets/entities/personnel_pod.toml'),probe=resolve('assets/entities/physical_probe.toml');
+ expect(probe.probe.passenger_berths).toBeUndefined();expect(pod.probe).toEqual({space:1,passenger_berths:['passenger']});
+ expect(pod.system).toEqual(probe.system);expect(pod.personnel).toBeUndefined();expect(carrier.system).toEqual(base.system);expect(carrier.station).toEqual(base.station);
+ expect(carrier.console.find(row=>row.id==='engineering').feed).toContainEqual({source:'probe-bay',kind:'Bay'});
+ expect(carrier.system.find(row=>row.id==='probe-bay').console).toBe('tactical');
+ expect(COMPONENT_SCHEMA.probe.fields.find(row=>row.key==='passenger_berths')).toMatchObject({type:'array',items:'string'});
+ expect(()=>validatePersonnel(carrier.personnel,carrier)).not.toThrow();
+ const bad=structuredClone(carrier.personnel);bad.repair_team[0].competencies.push('invented-pilot');expect(()=>validatePersonnel(bad,carrier)).toThrow();
 });

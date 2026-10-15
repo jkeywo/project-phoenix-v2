@@ -18,8 +18,18 @@ fn closed_probe_and_finite_stopped_parent_bay_roundtrip_without_equipment_copies
     let decoded: BayConfig =
         serde_json::from_str(&serde_json::to_string(&policy).unwrap()).unwrap();
     assert_eq!(decoded, policy);
-    ProbeProfile { space: 1 }.validate().unwrap();
-    assert!(ProbeProfile { space: 0 }.validate().is_err());
+    ProbeProfile {
+        space: 1,
+        passenger_berths: Vec::new(),
+    }
+    .validate()
+    .unwrap();
+    assert!(ProbeProfile {
+        space: 0,
+        passenger_berths: Vec::new()
+    }
+    .validate()
+    .is_err());
     for fault in 0..7 {
         let mut invalid = policy.clone();
         match fault {
@@ -72,4 +82,31 @@ fn one_location_keeps_custody_distinct_from_job_progress_and_refuses_self_parent
         serde_json::from_str::<CraftLocation>(r#"{"kind":"deployed","parent_uuid":"hidden"}"#)
             .is_err()
     );
+}
+
+#[test]
+fn berths_are_finite_accepted_names_not_another_personnel_population() {
+    let profile = ProbeProfile {
+        space: 1,
+        passenger_berths: vec!["one".into(), "two".into()],
+    };
+    profile.validate().unwrap();
+    assert_eq!(
+        serde_json::from_str::<ProbeProfile>(&serde_json::to_string(&profile).unwrap()).unwrap(),
+        profile
+    );
+    for invalid in [
+        vec!["".into()],
+        vec!["one".into(), "one".into()],
+        vec!["bad\nberth".into()],
+    ] {
+        assert!(ProbeProfile {
+            space: 1,
+            passenger_berths: invalid
+        }
+        .validate()
+        .is_err());
+    }
+    let legacy: ProbeProfile = serde_json::from_str(r#"{"space":1}"#).unwrap();
+    assert!(legacy.passenger_berths.is_empty());
 }

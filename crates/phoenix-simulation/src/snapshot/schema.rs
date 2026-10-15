@@ -1019,6 +1019,9 @@ pub struct BlasterBolt {
 /// crew being told twice.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct RepairState {
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub personnel_destinations:
+        std::collections::BTreeMap<String, phoenix_model::personnel::PersonnelDestinationRequest>,
     pub readings: Vec<(
         crate::core::messages::RepairGroup,
         Vec<crate::console::repair::server::RepairSourceReading>,

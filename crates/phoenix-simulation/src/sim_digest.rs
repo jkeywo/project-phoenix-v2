@@ -2565,16 +2565,19 @@ fn fold_internal_repair_namespace(world: &World, acc: u64) -> u64 {
         acc,
         "repair-queue",
         |queue: &RepairRequestQueue| {
-            if queue.entries.is_empty() && queue.recoveries.is_empty() {
+            if queue.entries.is_empty()
+                && queue.recoveries.is_empty()
+                && queue.personnel_destinations.is_empty()
+            {
                 return None;
             }
             let mut entries = queue.entries.clone();
             entries.sort_by(|a, b| a.group.cmp(&b.group));
             let mut recoveries = queue.recoveries.clone();
             recoveries.sort_by(|a, b| a.0.cmp(&b.0));
-            Some((entries, recoveries))
+            Some((entries, recoveries, queue.personnel_destinations.clone()))
         },
-        |mut acc, (entries, recoveries)| {
+        |mut acc, (entries, recoveries, orders)| {
             acc = fold_u64(acc, entries.len() as u64);
             for entry in entries {
                 acc = fold_serde(acc, &entry.group);
@@ -2586,7 +2589,12 @@ fn fold_internal_repair_namespace(world: &World, acc: u64) -> u64 {
                 crate::console::repair::reports::sort_observations(&mut observations);
                 acc = fold_serde(acc, &observations);
             }
-            fold_serde(acc, &recoveries)
+            let acc = fold_serde(acc, &recoveries);
+            if orders.is_empty() {
+                acc
+            } else {
+                fold_serde(fold_str(acc, "personnel-destinations"), &orders)
+            }
         },
     );
     let acc = fold_optional_namespace(
@@ -2632,7 +2640,8 @@ fn fold_internal_repair_namespace(world: &World, acc: u64) -> u64 {
                 }
                 if let crate::jobs::repair::RepairActivity::Internal { phase, .. }
                 | crate::jobs::repair::RepairActivity::Refit { phase, .. }
-                | crate::jobs::repair::RepairActivity::Treatment { phase, .. } =
+                | crate::jobs::repair::RepairActivity::Treatment { phase, .. }
+                | crate::jobs::repair::RepairActivity::PersonnelTransfer { phase, .. } =
                     &mut job.activity
                 {
                     match phase {

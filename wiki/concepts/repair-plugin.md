@@ -2,7 +2,7 @@
 title: Repair Runtime
 type: concept
 tags: [repair, damage, teams, blackboard, ai, external-repair, semantic-actions, feedback]
-sources: [crates/phoenix-sim-gameplay/src/jobs/repair_treatment.rs, crates/phoenix-simulation/src/resources/ports_equipment.rs, crates/phoenix-sim-gameplay/src/security/local.rs, editor/workshop-security.js, gui/workshop-security-panel.js, crates/phoenix-sim-gameplay/src/jobs/security.rs, crates/phoenix-simulation/src/security/server.rs, crates/phoenix-simulation/src/snapshot/security.rs, gui/job-work-list.js, crates/phoenix-model/src/personnel.rs, crates/phoenix-sim-gameplay/src/personnel.rs, crates/phoenix-simulation/src/console/repair/personnel.rs, crates/phoenix-simulation/src/snapshot/personnel.rs, editor/workshop-personnel.js, gui/workshop-personnel-panel.js, crates/phoenix-sim-gameplay/src/jobs/repair_external_physical.rs, crates/phoenix-sim-gameplay/src/jobs/repair_physical.rs, crates/phoenix-model/src/job.rs, crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/jobs/repair_workflow.rs, gui/job-work-list.js, crates/phoenix-simulation/src/console/repair/reports.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/command_admission/mod.rs, gui/components/ph-repair-teams.js, gui/stations/engineering-actions.js, gui/action-map.js]
+sources: [crates/phoenix-sim-gameplay/src/jobs/repair_personnel_transfer.rs, crates/phoenix-simulation/src/console/repair/personnel_transfer.rs, crates/phoenix-simulation/src/snapshot/personnel_graph.rs, crates/phoenix-sim-gameplay/src/jobs/repair_treatment.rs, crates/phoenix-simulation/src/resources/ports_equipment.rs, crates/phoenix-sim-gameplay/src/security/local.rs, editor/workshop-security.js, gui/workshop-security-panel.js, crates/phoenix-sim-gameplay/src/jobs/security.rs, crates/phoenix-simulation/src/security/server.rs, crates/phoenix-simulation/src/snapshot/security.rs, gui/job-work-list.js, crates/phoenix-model/src/personnel.rs, crates/phoenix-sim-gameplay/src/personnel.rs, crates/phoenix-simulation/src/console/repair/personnel.rs, crates/phoenix-simulation/src/snapshot/personnel.rs, editor/workshop-personnel.js, gui/workshop-personnel-panel.js, crates/phoenix-sim-gameplay/src/jobs/repair_external_physical.rs, crates/phoenix-sim-gameplay/src/jobs/repair_physical.rs, crates/phoenix-model/src/job.rs, crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/jobs/repair_workflow.rs, gui/job-work-list.js, crates/phoenix-simulation/src/console/repair/reports.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/command_admission/mod.rs, gui/components/ph-repair-teams.js, gui/stations/engineering-actions.js, gui/action-map.js]
 updated: 2026-10-15
 ---
 
@@ -82,7 +82,27 @@ ordinary destruction events. The derived profile's despawn hook respects existin
 whole-restore suppression. Runtime origins retain template/override provenance
 and their actual canonical Entity WorldId birth receipt; authored origins bind the
 fresh accepted roster. These are continuation consistency checks, without a new
-historical birth ledger. No passenger or transfer consumer is inferred.
+historical birth ledger.
+
+The optional owned-carrier consumer uses `PersonnelTransfer` on the same exclusive
+finite TeamJobs slot and cursor. Destination intent stays on RepairRequestQueue;
+Human dispatch and ordinary Repair AI use the same admitted Repair owner. Actual
+collection installs WithTransfer custody referencing that Job; only arrival at
+the real carried pod's Bay compartment installs AboardCraft/berth custody. Physical
+return releases the team. Refitting, treatment and ordinary repair cannot borrow
+that escort team. The first consumer serializes handoff per Bay and excludes
+concurrent Bay handling/refit/stripping; ordinary component repair may coexist.
+
+The single existing Personnel fixed-step owner prepares a current tick-stamped
+Derived Bay context and runs the ordinary admitted consumer synchronously.
+Readiness reuses the actual Bay owner; capacities derive from global occupants
+and current actual jobs. Restore clears the derived context. Console publication
+filters remote aboard/foreign-carried/Lost variants identically. Exact local pod
+facts require a permitted Bay feed; global roster storage grants no remote AI
+knowledge. `personnel_carrier.toml` and `personnel_pod.toml` are optional reference
+profiles. Snapshot `personnel_graph.rs` joins whole craft/berth/team/job/custody
+closure before writes. Source implementation does not establish full personnel
+or carried-craft gameplay acceptance.
 
 Optional `personnel.care` adds local treatment using the same finite Repair team
 slots and navigation. `jobs/repair_treatment.rs` owns typed work, consumed-medication
@@ -95,8 +115,8 @@ The player widget shows actual team/work/supply state. The Medical reference's
 managed capacity stocks replenish through existing Logistics and the finite paid
 port consumer; no separate medical stock or people pool exists. Root schedule
 integration places the Personnel applier after ordinary Repair dispatch and before
-TickRepairTeams. Initial injury is authored setup; injury propagation, carried-craft
-custody and full personnel acceptance remain separate.
+TickRepairTeams. Initial injury is authored setup; injury propagation and full personnel acceptance
+remain separate from the bounded local treatment and owned carrier consumers.
 
 `TeamJobs<RepairActivity>` is the single per-ship owner of assignments and team
 commitments. Each row retains a ship-scoped JobId, issuing System, activity,

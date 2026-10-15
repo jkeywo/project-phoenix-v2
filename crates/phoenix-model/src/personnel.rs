@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 pub enum DutyCompetency {
     MechanicalRepair,
     MedicalCare,
+    PersonnelTransport,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -144,6 +145,16 @@ impl PersonnelConfig {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OfficerLocation {
+    /// The one real escort team cursor, not a second passenger position.
+    WithTransfer {
+        actor: String,
+        team_idx: u32,
+        job: crate::job::JobId,
+    },
+    AboardCraft {
+        craft: String,
+        berth: String,
+    },
     /// Terminal physical loss; retaining identity never keeps its ship alive.
     Lost {
         actor: String,
@@ -155,6 +166,21 @@ pub enum OfficerLocation {
     WithRepairTeam {
         team_idx: u32,
     },
+}
+
+/// Destination intent is not physical custody or a capacity reservation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PersonnelDestination {
+    Home,
+    Craft { craft: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PersonnelDestinationRequest {
+    pub destination: PersonnelDestination,
+    pub requested_tick: u64,
 }
 
 /// The personnel-relevant accepted recipe of a runtime origin. World placement
@@ -183,6 +209,33 @@ pub struct DutyOfficerState {
 pub struct PersonnelView {
     pub teams: Vec<DutyTeamView>,
     pub officers: Vec<DutyOfficerView>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub carried_destinations: Vec<PersonnelCraftChoice>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PersonnelCraftChoice {
+    pub craft: String,
+    pub name: Option<String>,
+    pub free_berths: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersonnelTransferStage {
+    Collecting,
+    Escorting,
+    Returning,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OfficerTransferView {
+    pub team_idx: u32,
+    pub stage: PersonnelTransferStage,
+    pub completed: bool,
+    pub blocked: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -208,6 +261,12 @@ pub struct OfficerTreatmentView {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DutyOfficerView {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destination_request: Option<PersonnelDestinationRequest>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transfer_teams: Vec<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transfer: Option<OfficerTransferView>,
     pub condition: PersonnelCondition,
     pub treatment_teams: Vec<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

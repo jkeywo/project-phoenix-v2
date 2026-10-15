@@ -1316,6 +1316,7 @@ fn queue_entry_retained_when_all_systems_destroyed() {
     let mut hull = SystemHull::from_config(&[(system_id.clone(), 25.0_f32)]);
 
     let mut rq = RepairRequestQueue {
+        personnel_destinations: Default::default(),
         recoveries: vec![],
         entries: vec![],
     };

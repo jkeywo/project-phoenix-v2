@@ -16,3 +16,5 @@ pub use server::*;
 pub(crate) mod reports;
 
 pub(crate) mod personnel;
+
+pub(crate) mod personnel_transfer;

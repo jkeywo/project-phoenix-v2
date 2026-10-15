@@ -181,7 +181,8 @@ fn validate_shared_claims(
                         .get(&job.id.0)
                         .and_then(|work| work.target.as_ref())
                         .map(|work| (target.as_str(), work)),
-                    crate::jobs::repair::RepairActivity::Treatment { .. } => None,
+                    crate::jobs::repair::RepairActivity::Treatment { .. }
+                    | crate::jobs::repair::RepairActivity::PersonnelTransfer { .. } => None,
                     crate::jobs::repair::RepairActivity::Refit { target, phase, .. } => {
                         if !matches!(phase, crate::core::messages::TeamSlot::Returning { .. }) {
                             add(&row.uuid, target, "*", &row.uuid, &job.owner, job.id.0)?;

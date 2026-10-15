@@ -1,0 +1,27 @@
+# Quiet actual custody witness; no objectives, timers or injected operation.
+[global]
+seed=191919
+[player_spawn]
+position=[0,0,0]
+[[ship_slot]]
+id="crew"
+label="Crew"
+default_ship="assets/entities/personnel_carrier.toml"
+[[ship_slot.ships]]
+template_path="assets/entities/personnel_carrier.toml"
+[[entity]]
+template_path="assets/entities/personnel_carrier.toml"
+id="player-ship"
+name="player-ship"
+spawn_on="game_start"
+[[entity]]
+template_path="assets/entities/personnel_pod.toml"
+id="personnel-pod"
+name="personnel-pod"
+spawn_on="game_start"
+carried_by={parent="player-ship",bay="probe-bay"}
+[[entity]]
+template_path="assets/entities/depot_transfer.toml"
+id="subject"
+name="subject"
+transform={position=[10,0,-35]}

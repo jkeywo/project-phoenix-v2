@@ -2846,6 +2846,7 @@ fn internal_repair_digest_distinguishes_namespaces_and_ignores_insertion_order()
         world.spawn((
             EntityUuid("repair-ship".into()),
             RepairRequestQueue {
+                personnel_destinations: Default::default(),
                 recoveries: vec![],
                 entries: groups
                     .iter()

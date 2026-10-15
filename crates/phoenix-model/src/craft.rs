@@ -15,6 +15,8 @@ pub enum BayOperation {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BayView {
+    #[serde(default)]
+    pub crew_transfer_in_progress: bool,
     pub can_launch: bool,
     pub can_recover: bool,
     pub capacity_space: u64,
@@ -55,11 +57,22 @@ pub struct BayJobView {
 #[serde(deny_unknown_fields)]
 pub struct ProbeProfile {
     pub space: u64,
+    /// Empty for ordinary probes. Occupants live solely in PersonnelRoster.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub passenger_berths: Vec<String>,
 }
 impl ProbeProfile {
     pub fn validate(&self) -> Result<(), String> {
         if self.space == 0 {
             return Err("physical probe requires positive occupied bay space".into());
+        }
+        let mut ids = std::collections::BTreeSet::new();
+        if self
+            .passenger_berths
+            .iter()
+            .any(|id| !identity(id, 128) || !ids.insert(id))
+        {
+            return Err("passenger berths require unique accepted identities".into());
         }
         Ok(())
     }
@@ -154,6 +167,7 @@ mod tests;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BayControlsView {
+    pub crew_transfer_in_progress: bool,
     pub controllable: bool,
     pub can_launch: bool,
     pub can_recover: bool,

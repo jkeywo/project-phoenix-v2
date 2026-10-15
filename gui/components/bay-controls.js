@@ -29,6 +29,7 @@ export function mountBayControls(doc) {
   owner=system;view=next;node.hidden=!next;if(!next)return;
   readonly=delegated||!next.controllable;
   status.textContent=t('craft.bay.capacity',{used:next.occupied_space,total:next.capacity_space})
+   +(next.crew_transfer_in_progress?' \u00b7 '+t('craft.bay.personnel_transfer'):'')
    +(next.progress==null?'':' · '+Math.round(next.progress/10)+'%')
    +(next.outcome?' · '+t('craft.bay.outcome.'+next.outcome):next.paused?' · '+t('craft.bay.paused'):next.ready?' · '+t('craft.bay.ready'):'');
   for(const kind of ['launch','recover']) {

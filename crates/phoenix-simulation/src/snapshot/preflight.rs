@@ -976,7 +976,8 @@ pub(super) fn validate_cross_entity_repairs(
                     .and_then(|work| work.target.clone())
                     .map(|work| (target.clone(), work)),
                 crate::jobs::repair::RepairActivity::Refit { .. }
-                | crate::jobs::repair::RepairActivity::Treatment { .. } => None,
+                | crate::jobs::repair::RepairActivity::Treatment { .. }
+                | crate::jobs::repair::RepairActivity::PersonnelTransfer { .. } => None,
             };
             if let Some(key) = work {
                 if claimed.insert(key, (row.uuid.clone(), job.id.0)).is_some() {

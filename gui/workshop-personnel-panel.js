@@ -25,7 +25,7 @@ export function mountWorkshopPersonnel({ root, provider, runtime, draft: getDraf
       row.fields[field] = control; section.append(label(control, field));
     }
     row.competencies = {};
-    for (const competency of ['mechanical_repair','medical_care']) { const choice = input(kind + '-' + competency + '-' + index, '', 'checkbox'); choice.checked = (value.competencies || ['mechanical_repair']).includes(competency); row.competencies[competency] = choice; section.append(label(choice, competency)); }
+    for (const competency of ['mechanical_repair','medical_care','personnel_transport']) { const choice = input(kind + '-' + competency + '-' + index, '', 'checkbox'); choice.checked = (value.competencies || ['mechanical_repair']).includes(competency); row.competencies[competency] = choice; section.append(label(choice, competency)); }
     if (kind === 'officer') { const condition = el('select', 'officer-condition-' + index); for (const value of ['fit','minor','severe']) { const option = el('option', null, 'condition_' + value); option.value = value; condition.append(option); } condition.value = value.initial_condition || 'fit'; row.condition = condition; section.append(label(condition, 'initial_condition')); }
     section.append(button(null, 'remove', () => { rows.splice(rows.indexOf(row), 1); section.remove(); }));
     (kind === 'team' ? teams : officers).append(section); controls();

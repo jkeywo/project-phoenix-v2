@@ -82,8 +82,15 @@ pub(crate) fn publish(world: &mut World) {
         }
         let state = &world.get::<ShipBayJobs>(parent).unwrap().0[&owner];
         let active = state.job.as_ref().is_some_and(|job| job.outcome.is_none());
-        view.can_launch = context.available && !active && !view.stored.is_empty();
+        view.crew_transfer_in_progress = world
+            .get::<crate::console::repair::server::ShipRepairTeams>(parent)
+            .is_some_and(|teams| teams.0.claims_personnel_bay(&owner));
+        view.can_launch = context.available
+            && !active
+            && !view.crew_transfer_in_progress
+            && !view.stored.is_empty();
         view.can_recover = context.available
+            && !view.crew_transfer_in_progress
             && !active
             && view.occupied_space < view.capacity_space
             && !view.contacts.is_empty();
@@ -130,6 +137,7 @@ pub(crate) fn project(world: &World, entity: Entity, owner: &SystemId) -> Option
         sources.0.policy_for(owner).accept_human_input && !sources.0.is_offline(owner);
     let active = board.job.as_ref().is_some_and(|job| job.outcome.is_none());
     Some(BayControlsView {
+        crew_transfer_in_progress: board.crew_transfer_in_progress,
         controllable,
         can_launch: controllable && board.can_launch,
         can_recover: controllable && board.can_recover,

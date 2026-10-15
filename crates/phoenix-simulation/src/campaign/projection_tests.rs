@@ -307,7 +307,14 @@ fn transient_combat_state_cannot_reach_the_facts() {
             ..crate::snapshot::ControlState::default()
         });
         entity.weapons = Some(crate::snapshot::WeaponState {
-            beams: vec![("fore".to_string(), "x".to_string(), 1.5, 0.25, 6.0)],
+            beams: vec![(
+                "fore".to_string(),
+                "x".to_string(),
+                1.5,
+                0.25,
+                6.0,
+                phoenix_model::weapon_operation::BeamOperation::Fixed,
+            )],
             ..crate::snapshot::WeaponState::default()
         });
     }

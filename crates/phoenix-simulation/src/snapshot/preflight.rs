@@ -695,6 +695,23 @@ pub(super) fn validate_physical_attacks(world: &World, row: &EntityState) -> Res
     {
         return Err("invalid launched torpedo damage modifier".into());
     }
+    let mut beam_banks = std::collections::BTreeSet::new();
+    for (bank, target, remaining, accumulator, cooldown, operation) in &stored.beams {
+        if bank.is_empty()
+            || target.is_empty()
+            || !beam_banks.insert(bank)
+            || !remaining.is_finite()
+            || *remaining < 0.0
+            || (*operation == phoenix_model::weapon_operation::BeamOperation::Fixed
+                && *remaining == 0.0)
+            || !accumulator.is_finite()
+            || !(0.0..1.0).contains(accumulator)
+            || !cooldown.is_finite()
+            || *cooldown < 0.0
+        {
+            return Err("invalid active beam operation/duration/accumulator frontier".into());
+        }
+    }
     for (bank, (target, sample)) in &stored.beam_impact_samples {
         if !stored.beams.iter().any(|(id, ..)| id == bank)
             || target.is_empty()

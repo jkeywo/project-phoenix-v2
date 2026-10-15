@@ -376,3 +376,6 @@ mod navigation_sharing_tests;
 mod shield_enquiry;
 mod sensing_publications;
 mod spatial_fields;
+
+#[cfg(test)]
+mod sustained_beam_tests;

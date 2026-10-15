@@ -17674,3 +17674,6 @@ mod equipment_presence_tests;
 
 #[path = "disablement_tests.rs"]
 mod disablement_tests;
+
+#[path = "sustained_tests.rs"]
+mod sustained_tests;

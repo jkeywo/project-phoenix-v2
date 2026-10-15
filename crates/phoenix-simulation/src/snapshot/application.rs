@@ -1946,10 +1946,11 @@ pub(super) fn apply_coordination_queue(
 pub(super) fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponState) {
     if let Some(mut beam) = entity.get_mut::<ActiveBeam>() {
         beam.restore_live_banks(stored.beams.iter().map(
-            |(bank, target, remaining, accumulator, pending_cooldown)| {
+            |(bank, target, remaining, accumulator, pending_cooldown, operation)| {
                 (
                     bank.clone(),
                     ActiveBeamSlot {
+                        operation: *operation,
                         impact_sample_target: stored
                             .beam_impact_samples
                             .get(bank)

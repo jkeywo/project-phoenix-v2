@@ -703,6 +703,8 @@ pub(crate) fn handle_fire_phaser(
                 .as_deref_mut()
                 .map_or(1.0, |p| p.0.fire_strike_weapon(&cmd.target.0));
             if let Some(slot) = beam.bank_slot_mut(&bank_id) {
+                // Freeze the selected equipment operation at actual light time.
+                slot.operation = bank_cfg.map_or(Default::default(), |bank| bank.operation);
                 slot.strike_damage_bonus = multiplier - 1.0;
             }
             super::finish_action_feedback(cmd, &mut outbound, WeaponActionResult::Applied);
@@ -1162,6 +1164,11 @@ pub(crate) fn tick_beams_prepare(
     los: LineOfSightInputs,
     mut beam_context: ResMut<BeamContext>,
     physical: Query<&crate::ship::compartment_damage::ShipDamage>,
+    availability: Query<(
+        &ShipSystemControlSources,
+        Option<&crate::resources::fitting_server::CompiledShipFitting>,
+        Option<&crate::resources::fitting_server::ShipFitting>,
+    )>,
 ) {
     use crate::entities::config::PhaserCombatConfig;
 
@@ -1239,6 +1246,25 @@ pub(crate) fn tick_beams_prepare(
 
         // An injected/restored beam cannot grant an unequipped ship a weapon.
         let Some(combat_config) = combat_config_opt else {
+            let sustained: Vec<_> = beam
+                .live_banks()
+                .filter(|(_, slot)| {
+                    slot.operation == phoenix_model::weapon_operation::BeamOperation::Sustained
+                })
+                .map(|(bank, slot)| (bank.clone(), slot.target_uuid.clone()))
+                .collect();
+            for (bank, target_uuid) in sustained {
+                beam.complete_bank(
+                    &bank,
+                    &mut cooldown,
+                    PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS,
+                );
+                commands.trigger(BeamEndedEvent {
+                    bank,
+                    target_uuid,
+                    source_entity: shooter_entity,
+                });
+            }
             continue;
         };
 
@@ -1337,25 +1363,73 @@ pub(crate) fn tick_beams_prepare(
             else {
                 continue;
             };
+            let (operation, remaining) = beam
+                .live_banks()
+                .find(|(bank, _)| **bank == active_bank)
+                .map(|(_, slot)| (slot.operation, slot.remaining_secs))
+                .expect("iterated live beam");
+            let sustained = operation == phoenix_model::weapon_operation::BeamOperation::Sustained;
+            let available =
+                availability
+                    .get(shooter_entity)
+                    .is_ok_and(|(sources, profile, state)| {
+                        system_is_registered(sources, &system)
+                            && sources.0.source_for(&system)
+                                != crate::ship::control_source::ControlSource::Offline
+                            && !profile.zip(state).is_some_and(|(profile, state)| {
+                                crate::resources::fitting_server::unavailable(
+                                    profile, state, &system,
+                                )
+                            })
+                    });
             let operation_factor = physical.get(shooter_entity).ok().map_or(1.0, |damage| {
                 damage.factor(&system, phoenix_model::damage::DamageBinding::Operation)
             });
-            if operation_factor <= 0.0 {
+            if operation_factor <= 0.0 || (sustained && !available) {
+                if sustained {
+                    beam.complete_bank(&active_bank, &mut cooldown, cooldown_secs);
+                    commands.trigger(BeamEndedEvent {
+                        bank: active_bank.clone(),
+                        target_uuid,
+                        source_entity: shooter_entity,
+                    });
+                }
                 continue;
             }
             let Some(power) = power
                 .as_deref_mut()
                 .filter(|power| !power.0.weapons_restrained())
             else {
+                if sustained {
+                    beam.complete_bank(&active_bank, &mut cooldown, cooldown_secs);
+                    commands.trigger(BeamEndedEvent {
+                        bank: active_bank.clone(),
+                        target_uuid,
+                        source_entity: shooter_entity,
+                    });
+                }
                 continue;
             };
-            // Preserve the existing fixed-tick burn cadence when fully funded.
-            let work_dt = dt;
+            let work_dt = phoenix_sim_gameplay::weapons::operation::beam_work_seconds(
+                operation, remaining, dt,
+            )
+            .unwrap_or(0.0);
+            if work_dt <= 0.0 {
+                continue;
+            }
             let fraction = power
                 .0
                 .work_continuous(&system, work_dt, 1.0)
                 .map_or(0.0, |grant| grant.fraction);
             if fraction <= 0.0 {
+                if sustained {
+                    beam.complete_bank(&active_bank, &mut cooldown, cooldown_secs);
+                    commands.trigger(BeamEndedEvent {
+                        bank: active_bank.clone(),
+                        target_uuid,
+                        source_entity: shooter_entity,
+                    });
+                }
                 continue;
             }
             let funded_dt = work_dt * fraction;
@@ -1381,7 +1455,9 @@ pub(crate) fn tick_beams_prepare(
                         * modifiers.get(&ModifierSlot::PhaserDamage)
                         * (1.0 + slot.strike_damage_bonus)
                         * funded_dt;
-                    slot.remaining_secs -= funded_dt;
+                    if slot.operation == phoenix_model::weapon_operation::BeamOperation::Fixed {
+                        slot.remaining_secs = (slot.remaining_secs - funded_dt).max(0.0);
+                    }
                     let whole = slot.damage_accumulator.floor() as i32;
                     // Deduct the integer part now; the snapshot below drives damage
                     // application in phase 2.
@@ -2203,7 +2279,9 @@ pub(crate) fn tick_beams_tick_lifetimes(
         let Some(slot) = beam.bank_slot_mut(&state.active_bank) else {
             continue;
         };
-        if slot.remaining_secs <= 0.0 {
+        if slot.operation == phoenix_model::weapon_operation::BeamOperation::Fixed
+            && slot.remaining_secs <= 0.0
+        {
             // The ORDINARY end of a cycle, and the one the jitter is for: the
             // burn ran its drawn length and the rest it paired with follows it
             // (issue #929).

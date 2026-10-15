@@ -134,3 +134,5 @@ compares the complete projection.
 - [Radar Projection](./radar-projection.md)
 - [Broadcaster Seam](./broadcaster-seam.md)
 - [Information-Parity Audit](./information-parity-audit.md)
+
+Sustained beam operation is frozen on the existing active bank slot at launch. Its finite duration value stays unchanged while ordinary paid work continues; unavailable control/equipment, shutdown or failed funding ends it through the same cooldown and BeamEnded lifecycle as an explicit Stop. Snapshots require the live slot's operation and preserve fractional damage and its bought cooldown; presentation continues to render the restored live bank directly.

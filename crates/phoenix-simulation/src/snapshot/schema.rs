@@ -777,7 +777,7 @@ pub struct WeaponState {
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub beam_strike_bonuses: std::collections::BTreeMap<String, f32>,
     /// Every live phaser beam as `(bank, target uuid, remaining_secs,
-    /// damage_accumulator, pending_cooldown_secs)`, in the bank order
+    /// damage_accumulator, pending_cooldown_secs, operation)`, in the bank order
     /// `ActiveBeam` already keeps.
     ///
     /// `damage_accumulator` is in the tuple deliberately. It is the fractional
@@ -797,8 +797,17 @@ pub struct WeaponState {
     /// restored mid-burn continues the cycle it was in rather than redrawing,
     /// and it is why this mechanism did not need a new snapshot seam at all: the
     /// state rides on a component the payload already captured.
+    /// `operation` is frozen at light time. It is required for each active slot
+    /// so a resumed sustained burn cannot silently become a timed fixed cycle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub beams: Vec<(String, String, f32, f32, f32)>,
+    pub beams: Vec<(
+        String,
+        String,
+        f32,
+        f32,
+        f32,
+        phoenix_model::weapon_operation::BeamOperation,
+    )>,
     /// `(bank, remaining_secs)` for every bank still cooling, in bank order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub phaser_cooldowns: Vec<(String, f32)>,

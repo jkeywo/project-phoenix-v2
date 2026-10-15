@@ -739,6 +739,7 @@ pub(super) fn weapon_state(
                             slot.remaining_secs,
                             slot.damage_accumulator,
                             slot.pending_cooldown_secs,
+                            slot.operation,
                         )
                     })
                     .collect()

@@ -1844,6 +1844,14 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
             acc = fold_serde(acc, &attacks);
         }
         if let Some(beam) = world.get::<crate::console::weapons::beam::ActiveBeam>(entity) {
+            let operations: Vec<_> = beam
+                .live_banks()
+                .map(|(id, slot)| (id, slot.operation))
+                .collect();
+            if !operations.is_empty() {
+                acc = fold_str(acc, "beam-frozen-operation");
+                acc = fold_serde(acc, &operations);
+            }
             let samples: Vec<_> = beam
                 .live_banks()
                 .map(|(id, slot)| (id, &slot.impact_sample_target, &slot.impact_sample))

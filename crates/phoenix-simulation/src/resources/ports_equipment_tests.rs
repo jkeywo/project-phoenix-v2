@@ -6,6 +6,42 @@ use bevy::ecs::system::RunSystemOnce;
 
 fn equipped(policy: PortServicePolicy) -> (App, Entity, Entity) {
     let (mut app, visitor, old_provider) = rig(policy);
+    // The adjacent Logistics/port rig deliberately constructs only its stock,
+    // controls and power owners. Equipment-bound service also requires the
+    // actual physical condition and Repair owners. Build those through the
+    // normal accepted hull spawner, retaining the rig's existing finite stock,
+    // energy, local authority and completed parts-use frontier unchanged.
+    let hull = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    let machinery = crate::entities::spawner::spawn_entity(
+        &mut app.world_mut().commands(),
+        &hull,
+        Vec3::ZERO,
+        "facility-fixture-machinery".into(),
+        None,
+    );
+    app.world_mut().flush();
+    let damage = app
+        .world_mut()
+        .entity_mut(machinery)
+        .take::<ShipDamage>()
+        .unwrap();
+    let repair = app
+        .world_mut()
+        .entity_mut(machinery)
+        .take::<crate::console::repair::server::ShipRepairTeams>()
+        .unwrap();
+    app.world_mut().entity_mut(visitor).insert((damage, repair));
+    assert!(app.world_mut().despawn(machinery));
+    assert_eq!(
+        app.world().get::<ShipDamage>(visitor).unwrap().factor(
+            &id("umbilical"),
+            phoenix_model::damage::DamageBinding::Operation
+        ),
+        1.0
+    );
     let mut config = crate::entities::include_resolve::load_entity_config(
         if policy == PortServicePolicy::ManualOffer {
             "assets/entities/manual_trade_port.toml"

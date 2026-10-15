@@ -59,4 +59,5 @@ pub mod activity;
 pub mod illumination_ui;
 pub mod jamming_ui;
 pub mod weapon_targets_view;
+pub mod craft;
 pub mod transit;

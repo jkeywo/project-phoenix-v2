@@ -635,7 +635,10 @@ pub(crate) fn project(
     }
     let controllable = world
         .get::<ShipSystemControlSources>(entity)
-        .is_some_and(|sources| sources.0.policy_for(owner).accept_human_input);
+        .is_some_and(|sources| {
+            sources.0.entries().any(|(actual, _)| actual == owner)
+                && sources.0.policy_for(owner).accept_human_input
+        });
     let mut view = phoenix_model::jamming_ui::JammingControlsView {
         enabled: state.enabled(&config.0, owner),
         target: state.target(&config.0, owner).map(str::to_owned),

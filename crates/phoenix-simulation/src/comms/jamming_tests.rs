@@ -916,3 +916,25 @@ fn actual_focused_fidelity_uses_the_same_receiver_factor_once_and_paid_protectio
     }
     assert_eq!(bands,vec!["coarse","detailed"],"equipment loss applies once on existing fidelity ladder; funded exact protection restores precision");
 }
+
+#[test]
+fn missing_actual_source_withholds_jammer_controls_and_refuses_retained_intent_changes() {
+    let (mut world, source, _, contact) = fixture();
+    prepare(&mut world, source, &contact);
+    world.entity_mut(source).insert(ShipSystemControlSources(
+        crate::ship::control_source::ControlSourceResolver::new(),
+    ));
+    let before = world.get::<ShipJamming>(source).unwrap().clone();
+    assert!(!project(&world, source, &id(OWNER)).unwrap().controllable);
+    command(
+        &mut world,
+        source,
+        Control::SetJammingEnabled { enabled: false },
+    );
+    command(
+        &mut world,
+        source,
+        Control::SetJammingTarget { target_uuid: None },
+    );
+    assert_eq!(world.get::<ShipJamming>(source).unwrap(), &before);
+}

@@ -574,6 +574,16 @@ fn two_drive_fixture() -> (App, Entity, SystemId) {
         }
     }
     ship.systems.push(system);
+    for console in ship
+        .consoles
+        .iter_mut()
+        .filter(|console| console.id.0 == "helm" || console.id.0 == "engineering")
+    {
+        console.feeds.push(phoenix_model::console::ConsoleFeed {
+            source: SystemId("stock/alternate-jump".into()),
+            kind: phoenix_model::console::ConsoleObservationKind::Stock,
+        });
+    }
     let energy = config.energy.as_mut().unwrap();
     let mut consumer = energy
         .consumers

@@ -236,11 +236,11 @@ fabrication = "engineering"
 resource-recovery = "engineering"
 # [ai] Increment 10 mechanical access gate; ordinary System authority and AI.
 
-# Local stock owners follow their Systems; move two magazine storage spaces, preserving total storage.
+# All finite stocks and original total storage follow the relocated machinery, including Fabrication.
 [[logistics.store]]
 id = "hold-ammunition"
 resource = "torpedoes"
-compartment = "support"
+compartment = "engineering"
 role = "main"
 target = 4
 reserve = 0
@@ -267,7 +267,7 @@ kind = "torpedo_magazine"
 [[logistics.store]]
 id = "hold-machinery-parts"
 resource = "machinery_parts"
-compartment = "support"
+compartment = "engineering"
 role = "main"
 target = 102
 reserve = 20
@@ -295,7 +295,7 @@ id = "machinery_parts"
 [[logistics.store]]
 id = "hold-structural-parts"
 resource = "structural_parts"
-compartment = "support"
+compartment = "engineering"
 role = "main"
 target = 51
 reserve = 8
@@ -323,7 +323,7 @@ id = "structural_parts"
 [[logistics.store]]
 id = "hold-coolant"
 resource = "coolant"
-compartment = "support"
+compartment = "engineering"
 role = "main"
 target = 624
 reserve = 0
@@ -351,7 +351,7 @@ id = "coolant"
 [[logistics.store]]
 id = "hold-alloy"
 resource = "alloy"
-compartment = "support"
+compartment = "engineering"
 role = "main"
 target = 12
 reserve = 0
@@ -365,7 +365,7 @@ id = "alloy"
 id = "hold-ore"
 resource = "ore"
 role = "main"
-compartment = "support"
+compartment = "engineering"
 target = 0
 reserve = 0
 priority = 4
@@ -378,7 +378,7 @@ id = "ore"
 id = "hold-scrap"
 resource = "scrap"
 role = "main"
-compartment = "support"
+compartment = "engineering"
 target = 0
 reserve = 0
 priority = 4
@@ -388,8 +388,8 @@ kind = "capacity"
 id = "scrap"
 
 [[logistics.storage]]
-compartment = "support"
-space = 855
+compartment = "engineering"
+space = 1037
 
 [logistics.storage.unit_space]
 torpedoes = 1
@@ -399,22 +399,6 @@ coolant = 1
 alloy = 1
 ore = 1
 scrap = 1
-
-[[logistics.storage]]
-compartment = "engineering"
-space = 178
-
-[logistics.storage.unit_space]
-machinery_parts = 1
-structural_parts = 1
-coolant = 1
-
-[[logistics.storage]]
-compartment = "weapons"
-space = 4
-
-[logistics.storage.unit_space]
-torpedoes = 1
 
 [[logistics.handling]]
 system = "logistics"

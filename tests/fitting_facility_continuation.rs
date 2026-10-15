@@ -128,13 +128,16 @@ fn fit(app: &App, entity: Entity) -> &ShipFitting {
     app.world().get::<ShipFitting>(entity).unwrap()
 }
 fn parts(app: &App, entity: Entity) -> i64 {
-    app.world()
+    let inventory = &app
+        .world()
         .get::<InfrastructureCondition>(entity)
         .unwrap()
-        .0
-        .capacity_stock("machinery_parts")
-        .unwrap()
-        .level
+        .0;
+    ["machinery_parts", "hold-machinery-parts"]
+        .iter()
+        .filter_map(|stock| inventory.capacity_stock(stock))
+        .map(|stock| stock.level)
+        .sum()
 }
 fn identities(app: &mut App) -> BTreeSet<String> {
     let items: Vec<_> = app
@@ -248,13 +251,14 @@ fn actual_powered_allied_facility_refits_reactor_and_continues_paid_work() {
     let initial_parts = parts(&live, entity) + parts(&live, facility);
     let mut paid = false;
     for _ in 0..2400 {
-        paid |= live
-            .world()
-            .get::<ShipPowerSystem>(facility)
-            .unwrap()
-            .0
-            .last_work_fraction(&sid("dock"))
-            .is_some_and(|fraction| fraction > 0.0);
+        paid |= fit(&live, entity).work["reactor"].progress > 0.0
+            && live
+                .world()
+                .get::<ShipPowerSystem>(facility)
+                .unwrap()
+                .0
+                .last_work_fraction(&sid("dock"))
+                .is_some_and(|fraction| fraction > 0.0);
         if fit(&live, entity).work["reactor"].progress > 0.0 {
             break;
         }

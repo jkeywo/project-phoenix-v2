@@ -1,0 +1,74 @@
+entities:
+  - decision: sensing-independent-broad-focused-and-passive-equipment
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Independent Scanners Perform Routine Assessment and Supported Enquiries
+      summary: "G016–20/S056–60 select automatic broad assessment with no ordinary contact-count update budget, an independently powered focused System with one active enquiry, and independently fitted passive receivers operating concurrently. General assessment is the simple default; optional supported aims guide deeper work. Intrusion uses the same focused slot only on capable equipment, with exposure and contextual consequences rather than guaranteed protected answers."
+      rationale:
+        - "Relevant operational radars receive permitted basic returns, not complete identity/capability/intent dossiers or a Captain map. Actual coverage, geometry, equipment, paid local work, condition, concealment and interference still constrain each finding. Player complexity changes delegation and controls, never instrument physics or knowledge."
+        - "S098 reuses existing weapon mount/arc/traversal mechanics for fixed or steerable sensing. Preserve one ordinary knowledge-limited System AI; migrate changed controllers to the existing closed tree engine and retire their superseded controller, without a scanner-capacity pool or shadow planner."
+
+  - decision: sensing-findings-history-and-uncertain-tracks
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Confidence Belongs to Findings and Prediction Uses Observed Motion
+      summary: "G018–19/G106 and S097/S099 retain source/time/confidence per finding, last actual observations and automatically predicted tracks with growing positional uncertainty. Passive evidence may be bearing/signature only. Confidence areas and a few consequential alternatives help investigation; ambiguous Viewscreen wireframes do not reveal true unknown hull geometry. Estimation is integrated into relevant sensing, not another fitted computer or manual plotting task."
+      rationale:
+        - "Known identity does not confirm current position or condition. No secret update from actual velocity, unseen manoeuvres or hidden orders may refresh a lost track. Reacquisition requires supported association; receipt/copying cannot renew sample time or count as another observation."
+        - "[ai] Extend/migrate existing scan, dossier and held report owners into real finding/history/track consumers. Keep one authoritative lifecycle for each finding and explicit Console read bindings; no world-global dossier, co-host knowledge pool or parallel mutable truth store. Stable origin/sample identity and bounded deterministic retention are continuation state."
+        - "[ai] A latent source UUID used for physical routing is not evidence of identity or report association. Unknown contacts require observer-limited presentation and fusion justified by delivered measurements, rather than a hidden ground-truth join. Sampling randomness is stable and seeded, never rerolled by presentation, locale or repeated selection."
+
+  - decision: sensing-deliberate-feeds-and-compatible-observation-fusion
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Shared Radar Findings Preserve Audience, History and Independent Provenance
+      summary: "G022/S061/S063 select explicit Navigation/Sensors/Tactical faction feeds and compatible actually received ship/probe observations contributing to triangulation. Source, original sample time, age, useful geometry and uncertainty constrain fusion. Shared history becomes available normally after a link gap; no separate catch-up System or manual resend ritual."
+      rationale:
+        - "Recipients retain target/order authority and their own permitted knowledge. Omitted/revoked feeds do not deliver new information; retained delivered findings stay honestly historical under supported retention. Old reports cannot overwrite newer samples or become live tracks. Copies circulating through allies remain one observation."
+        - "[ai] Increment 14 proves this with real ships/existing sources and actual gameplay links. New probe launch/recovery/mobile-survey lifecycles remain increment 19; the common observation contract supports them without importing another deployment/relay controller here. Existing technical transport remains unchanged."
+
+  - decision: sensing-responsive-reference-correlation-and-reading
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Correlate Held Records Responsively and Preserve Deliberate Interpretation
+      summary: "G023/S062 select automatic routine known-reference attachment, with deliberate finding/flagging for unusual records. Retrieval/correlation of held information has no additional processing timer or capacity pool. Ordinary AI simulates reading relevant text before using it, using only permitted evidence; acquisition, observation, decryption and communication retain their separate constraints."
+      rationale:
+        - "References and received claims retain attribution/age and do not verify present vessel state, intentions or mission truth. Surface contradictions and meaningful alternatives rather than select hidden truth."
+        - "[ai] Reading is deterministic controller behaviour on supported semantic work/cadence, not locale-dependent display length, wall-clock speed or an analysis-computer resource. Optional enquiry priorities do not require human administration of routine contacts."
+
+  - decision: sensing-shared-regions-and-effect-specific-signal-paths
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Upgrade Regions for Actual Local Exposure and Path Attenuation
+      summary: "G029–30/AD69–70 select shared supported geometry, source transforms and falloff/sampling for natural fields and suitable equipment emissions, with separate effect processors. Analytic evolution and bounded causal parameter changes extend Regions in place. Applicable fields attenuate sensing or in-world Comms along the actual path even when neither endpoint is exposed."
+      rationale:
+        - "Not every emission spawns a Region, not every effect uses one scalar or stacking rule, and path crossing is not automatically a binary block. Local radiation and receiver interference retain appropriate rules; avoid counting the same exposure twice. Real enabled/paid/condition-limited machinery constrains equipment sources."
+        - "[ai] Preserve old binary effects as explicit step profiles before intentional tuning, keeping current units/signs and damage ownership. Define deterministic overlap, grazing, endpoint/path combination and finite sampling costs through actual sensor/Comms consumers; no second field simulation or authoritative sampled grid."
+        - "AD74 rejects message-capacity accounting. Physical signal effects do not disconnect players or change peer transport, command admission, reliable delivery classes or all internal communication indiscriminately. Later Comms/relay/electronic capabilities reuse this physical query rather than create another signal architecture."
+
+  - decision: sensing-static-terrain-occlusion-and-evidence-based-forecasts
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Static Terrain Shapes Signals and Forecasts Stay Within Evidence
+      summary: "G028/G031/AD71 allow authored substantial planets, moons and suitable large asteroids to obstruct/attenuate applicable sensor and in-world Comms paths using physical bounds and signal properties. Celestial bodies do not orbit. S064 forecasts derive from observed trends or known published models, with explicit assumptions, horizon and uncertainty; changed causes can make a forecast wrong."
+      rationale:
+        - "Use shared path geometry with signal-specific responses, not rendered meshes or automatic opacity for every ship/decorative fragment. Supported actual terrain clearing changes obstruction. History behind cover remains evidence, not a live view through terrain. Human and AI sensing obey the same physical rules."
+        - "[ai] Physical/authoring samplers may evaluate analytic field parameters at future ticks; crew forecasts cannot read undiscovered parameters, pending scripts or future actor choices. Moving equipment and bounded field evolution remain allowed without restoring orbital motion or changing ordinary planar capital-ship controls."
+
+  - decision: sensing-increment-14-consumers-and-exit
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Sensing Migrates Through Real Scan, Radar, History and Path Consumers
+      summary: "Increment 14 first migrates current scan/radar findings, then independent Cruiser broad/focused sensing, passive/history/correlation/forecast work, deliberate multi-source sharing, and Regions/terrain signal paths. Each slice includes human operation, ordinary AI, actual resources/conditions, permitted projections, Workshop and deterministic continuation. Preparation does not start runtime or establish a playable exit."
+      rationale:
+        - "[ai] docs/gameplay-redesign/implementation/increment-14.md maps complete selections and later dependencies. Helm observed-ordnance predictions belong to the evidence projections; new offensive doctrine, illumination, shield probing and guidance land at 15, expanded Comms/traffic/decryption/electronic operation at 16–17, new probe lifecycles at 19. No deferred requirement is silently excluded."
+        - "[ai] Preserve current withheld/publication boundaries, adequate-observation scenario events and shipped journeys. Any temporary ScanTarget translation has a named removal point before closure and no competing instant reveal. Scenario changes use design digest/writeback. Full candidate preflight validates records, instruments, queues, sources, feeds and field state before writes."
+        - "[ai] Verify no hidden-state/LocalShip/controller differences, independent broad work, duplicate-proof fusion, actual outside-to-outside attenuation, terrain cover, exact save/multiplayer and invalid no-write cases. Compare Cruiser combat/non-combat activity, station workload and bounded performance without weakening balance thresholds; human browser/native acceptance remains separate."

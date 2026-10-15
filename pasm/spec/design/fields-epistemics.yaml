@@ -1,3 +1,8 @@
+# Increment 14 reconciliation: sensing-and-environment.yaml adopts the selected
+# G016-23/G028-31/G106/S054-64/S097-99 and AD69-71 scope. Broad/focused are
+# independent Systems, passive receivers are independent, and confidence is by
+# finding. Historical band boundaries are not additional runtime requirements;
+# pure future field evaluation is not privileged crew forecasting access.
 entities:
   - decision: fields-are-regions-upgraded
     core:
@@ -51,9 +56,10 @@ entities:
       status: accepted
       confidence: confirmed
       title: Discrete Observation Confidence Tiers
-      summary: "Confidence is a small ordered set of named tiers — detected, rough, fair, precise — advanced by accumulated scan effort per subject. A tier maps to a displayed range width, with a seeded-deterministic offset so the midpoint is not always the truth. Interference caps the reachable tier or slows progression."
+      summary: "Use readable confidence classes per finding, rather than one contact-wide rating. Detected, rough, fair and precise are the earlier label vocabulary, not mandatory universal progression. Position may have a supported uncertainty radius while identity or condition has different confidence. Interference and actual observation conditions constrain refinement; measurement presentation is not always truth-centred."
       rationale:
         - "A tier is readable on a phone summary, author-tunable per field kind, trivially deterministic, and carries in provenance as a word rather than a variance."
+        - "Increment 14 adopts G018 confidence by finding and G019/G106 observed-versus-predicted tracks. Repeated display or forwarded copies do not reroll error, advance confidence or refresh the original sample time."
     game_design:
       must_not_be: [continuous statistics surfaced to players, truth-centred at every tier]
 
@@ -65,6 +71,7 @@ entities:
       summary: "Scan modes extend the existing science/scan.rs machinery with a single focus axis: wide (current behaviour, everything in range accumulates slowly) versus focused (one named subject accumulates fast, the rest pause). Fields become a new ScanSubject kind, which is how field analysis lands with no parallel scanner. The mode toggle lives on the sensors summary surface; the detail screen holds observation history, tier progress, and focus queueing."
       rationale:
         - "2026-10-13: superseded as future design by redesign-independent-broad-focused-sensors, implemented at redesign increment 14. This historical single-axis proposal does not describe the selected redesign; current code is unchanged by the baseline increment."
+        - "Increment 14's sensing-and-environment slice also rejects a shared broad/focused assessment pool and ordinary contact-count budget. Two fitted Systems reuse shared observation machinery; the historical prohibition on a second scanner is not a ban on the selected independent equipment."
         - "No active/passive emissions axis in band B: signature play belongs to band E's signature management, and pre-building its hooks would front-load an unproven system."
     game_design:
       must_not_be: [a second scanner beside science/scan.rs, toggled only from the detail screen]

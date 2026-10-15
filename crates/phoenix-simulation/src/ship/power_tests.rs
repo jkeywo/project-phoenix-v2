@@ -64,6 +64,9 @@ fn app_with(config: EntityConfig) -> (App, Entity) {
     )
     .add_systems(PostUpdate, collect)
     .insert_sim_rng(SimRng::new(408, SeedSource::World));
+    // The complete hull includes spatial observations; restore needs the
+    // ordinary logical clock even when this fixture exercises only power.
+    crate::sim_tick::register_sim_tick(&mut app);
     crate::ship::test_support::drive_one_fixed_step_per_update(
         &mut app,
         std::time::Duration::from_millis(200),

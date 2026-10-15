@@ -26,11 +26,6 @@ pub use personnel_transfer::{PersonnelTransferPlan, PersonnelTransferWork, Trans
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum RepairActivity {
-    PersonnelTransfer {
-        phase: TeamSlot,
-        cancelled: bool,
-        work: PersonnelTransferWork,
-    },
     Internal {
         phase: TeamSlot,
         cancelled: bool,
@@ -51,6 +46,12 @@ pub enum RepairActivity {
         destination_compartment: Option<String>,
         phase: TeamSlot,
         cancelled: bool,
+    },
+    // Append new activities to retain the existing Postcard digest ordinals.
+    PersonnelTransfer {
+        phase: TeamSlot,
+        cancelled: bool,
+        work: PersonnelTransferWork,
     },
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

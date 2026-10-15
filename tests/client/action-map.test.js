@@ -41,6 +41,7 @@ describe('ACTION_MAP', () => {
       'return_to_lobby',
       'scan_target',
       'select_player_ship',
+      'select_formation_course',
       'select_scenario',
       'select_ship_slot',
       'set_access_seal',

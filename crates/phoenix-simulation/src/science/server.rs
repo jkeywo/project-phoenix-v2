@@ -202,6 +202,8 @@ impl Plugin for SciencePlugin {
         super::passive::register(app);
         super::broad::register(app);
         super::sharing::register(app);
+        super::references::register(app);
+        super::reading::register(app);
         app.add_systems(
             FixedUpdate,
             (

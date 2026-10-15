@@ -1977,6 +1977,10 @@ pub enum RepairTarget {
 )]
 #[serde(tag = "type", content = "data")]
 pub enum SystemControlPayload {
+    AttachSensorReference {
+        contact: String,
+        reference: String,
+    },
     SetRadarSharing {
         share_own_faction: bool,
         receive: bool,
@@ -5253,6 +5257,8 @@ pub enum DossierValue {
 /// surface and the provenance vocabulary.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct DossierEvidenceSnapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<crate::sensing_references::KnownReferenceMetadata>,
     /// Shared metadata derived from this existing recorded observation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observation: Option<crate::observation::ObservationMetadata>,

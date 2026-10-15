@@ -30,6 +30,8 @@ pub struct TrackAssessment {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SensorTrackSnapshot {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub references: Vec<crate::sensing_references::AttachedSensorReference>,
     /// Original independent samples supporting this projection. Fusion is a
     /// derived view and does not create another sample identity.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

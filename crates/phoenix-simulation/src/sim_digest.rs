@@ -1460,6 +1460,7 @@ fn fold_scenario_records(world: &World, mut acc: u64) -> u64 {
         acc = fold_str(acc, &entry.text);
         acc = fold_str(acc, entry.provenance.as_str());
         acc = fold_u64(acc, entry.gathered_at_tick);
+        acc = fold_serde(acc, &entry.reference);
     }
 
     // The labour dispute, in authored order.

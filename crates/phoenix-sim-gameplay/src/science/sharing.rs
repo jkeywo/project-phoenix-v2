@@ -257,6 +257,11 @@ pub fn receive_samples(
         next.tracks.insert(
             id.clone(),
             BroadTrack {
+                attached_references: next
+                    .tracks
+                    .get(&id)
+                    .map(|held| held.attached_references.clone())
+                    .unwrap_or_default(),
                 contact_id: id,
                 observation,
                 received: Some(ReceivedRadarSample {

@@ -9,11 +9,25 @@ use bevy::prelude::*;
 pub use phoenix_sim_gameplay::science::references::{held_references, project};
 
 pub(crate) fn register(app: &mut App) {
+    use crate::command_admission::{ConsumerMatcher, FeedbackAddress, RegisterAdmittedConsumer};
+    use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
+    for kind in [
+        crate::ship::system_registry::SENSOR_RADAR_KIND,
+        crate::ship::system_registry::TACTICAL_RADAR_KIND,
+        crate::ship::system_registry::HELM_RADAR_KIND,
+    ] {
+        app.register_admitted_consumer(
+            ConsumerMatcher::kind_payload(kind, Payload::AttachSensorReference).with_feedback(
+                FeedbackAddress::DeclaredKindOnly,
+                &[Payload::AttachSensorReference],
+            ),
+        );
+    }
     app.add_systems(
         FixedUpdate,
         apply
             .in_set(crate::sim_sets::SimSet::Modifiers)
-            .after(super::broad::tick),
+            .after(super::sharing::deliver),
     );
     app.add_systems(
         FixedUpdate,

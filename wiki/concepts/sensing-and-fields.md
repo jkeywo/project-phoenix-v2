@@ -97,6 +97,14 @@ Additional focused controllers skip the designated Science owner. Routine refere
 matching withholds ambiguous display labels, and selecting an anonymous return
 does not supply a name from the machinery's live entity lookup.
 
+Marked held findings remain in World's existing `EvidenceLog`. Gameplay
+`science/references` derives routine or deliberately attached views; Simulation
+`science/references` admits attachment through the radar owner's permitted typed
+feeds. `science/reading` advances private semantic-text progress inside the
+existing System tree runtime. This work has its own logical-tick cadence and
+does not install another controller. Snapshot `spatial_fields` validates the
+candidate's evidence and reading clocks before restore writes any state.
+
 The existing browser and native outbound sinks use `ConsoleDeliveryProjection`
 to preserve own-ship data and explicitly charted landmarks while withholding
 foreign live snapshots and unseen lifecycle events. Typed target references are

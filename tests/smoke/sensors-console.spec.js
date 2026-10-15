@@ -199,3 +199,33 @@ test('sensors console: independent focused instruments retain their owner and wo
   await expect(readout.locator('#progress')).toContainText('25%');
   await expect(readout.locator('#cancel')).toBeVisible();
 });
+
+test('sensors console: held unusual reference is an explicit measured-contact hypothesis', { tag: '@core' }, async ({ page }) => {
+  await page.goto(CONSOLE_URL);
+  const record = { reference: { id: 'unusual-record', unusual: true, reading_ticks: 2 },
+    text: 'sensing.reference.unusual', provenance: 'records', gathered_at_tick: 3, source_name: 'Registry' };
+  const state = { ...NOMINAL_STATE, target_uuid: 'opaque-contact', reference_controls: [{
+    system_id: 'actual-broad', controllable: true, contacts: ['opaque-contact'], records: [record],
+  }] };
+  await page.evaluate(payload => {
+    window.__sent = [];
+    window.__sendAction = json => window.__sent.push(JSON.parse(json));
+    window.__updateConsole('sensors', JSON.stringify(payload));
+  }, state);
+  const panel = page.locator('ph-sensor-references');
+  await expect(panel.locator('select')).toHaveValue('unusual-record');
+  const search = panel.locator('input');
+  await search.fill('unusual');
+  await panel.locator('button').click();
+  expect(await page.evaluate(() => window.__sent)).toEqual([
+    expect.objectContaining({ action: 'attach_sensor_reference', control_system_id: 'actual-broad',
+      contact: 'opaque-contact', reference: 'unusual-record', correlation: expect.any(String) }),
+  ]);
+  await page.evaluate(payload => window.__updateConsole('sensors', JSON.stringify(payload)), {
+    ...state, target_references: [{ ...record, attached_at_tick: 10 }],
+    reference_controls: state.reference_controls.map(row => ({ ...row, controllable: false })),
+  });
+  await expect(search).toHaveValue('unusual');
+  await expect(panel.locator('#attached')).toContainText('Registry');
+  await expect(panel.locator('button')).toBeDisabled();
+});

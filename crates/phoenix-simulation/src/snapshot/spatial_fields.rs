@@ -5,8 +5,49 @@ pub(super) fn validate_roster(
     world: &World,
     snapshot: &PhoenixSnapshot,
 ) -> Result<(), (String, String)> {
+    let evidence = snapshot
+        .scenario
+        .as_ref()
+        .map(|scenario| &scenario.evidence);
+    if let Some(evidence) = evidence {
+        evidence
+            .validate_references(snapshot.tick)
+            .map_err(|reason| ("scenario/evidence".into(), reason))?;
+    }
+    // Resolve against the candidate's findings, never a convenient live log
+    // that restore is about to replace. Original acquisition time bounds each
+    // deliberate hypothesis as well as its identity.
+    let references = evidence
+        .into_iter()
+        .flat_map(|evidence| &evidence.entries)
+        .filter_map(|entry| {
+            entry
+                .reference
+                .as_ref()
+                .map(|reference| (reference.id.clone(), entry.gathered_at_tick))
+        })
+        .collect();
     for row in &snapshot.entities {
+        if let Some(trees) = &row.ai_trees {
+            for runtime in trees.0.values() {
+                if let Some(reading) = &runtime.reading {
+                    // Reading advances independently of the tree's evaluation
+                    // cadence; its clock is bounded by the captured tick.
+                    reading
+                        .validate(snapshot.tick)
+                        .map_err(|reason| (row.uuid.clone(), reason))?;
+                }
+            }
+        }
         if let Some(saved) = &row.broad {
+            for state in saved.values() {
+                phoenix_sim_gameplay::science::references::validate_attachments(
+                    state,
+                    &references,
+                    snapshot.tick,
+                )
+                .map_err(|reason| (row.uuid.clone(), reason))?;
+            }
             if saved
                 .values()
                 .any(|state| state.last_tick.is_some_and(|tick| tick > snapshot.tick))
@@ -141,3 +182,7 @@ pub(super) fn validate_roster(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "spatial_fields_tests.rs"]
+mod tests;

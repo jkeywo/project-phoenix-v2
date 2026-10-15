@@ -1,4 +1,5 @@
 import { scanPublicationOwner } from './scan-source.js';
+import { buildReferenceControls } from './sensor-references.js';
 import { observationTickFor } from './observation-details.js';
 import { consoleReadState } from './console-topology.js';
 import { projectSensorTracks } from './sensor-tracks.js';
@@ -2008,6 +2009,10 @@ export function buildSensorsConsoleState(state, systemIds = []) {
       regions: [], observation_tick: observationTickFor(state, trackEntry.systemId),
       scans: scansPayload(state, systemIds),
       radar_sharing: radarSharingPayload(state, systemIds, 'SensorRadar'),
+      reference_controls: buildReferenceControls({ radars: [
+        ...blackboardsOfKind(state, 'SensorRadar', systemIds), ...blackboardsOfKind(state, 'TacticalRadar', systemIds),
+        ...blackboardsOfKind(state, 'Helm', systemIds)], dossiers: blackboardsOfKind(state, 'Dossiers', systemIds),
+        systemIds, controlSources: state.controlSources }),
       passive: blackboardsOfKind(state, 'Passive', systemIds).map(entry => ({ ...entry.data,
         system_id: entry.systemId, controllable: systemIds.includes(entry.systemId) && state.controlSources?.[entry.systemId] === 'Human',
         observation_tick: observationTickFor(state, entry.systemId) })),

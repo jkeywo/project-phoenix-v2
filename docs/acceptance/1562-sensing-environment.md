@@ -309,3 +309,35 @@ focused/forecast controls. Log: `.phoenix/increment14-sharing-browser-smoke.log`
 SHA256 `ded9f08c6f1a6d40b43d73e723e92e733e8c5e04d59d23ed41dc297e03587198`.
 Native sharing, whole-host continuation, multiplayer and human acceptance remain
 separate outstanding evidence, alongside the remaining selected increment scope.
+
+### Reference and reading integration checkpoint
+
+The reference source checkpoint `5175d434` is connected to Model command/DTO
+contracts, exact-kind admission, the existing Science schedule and actual
+permitted Console projection. Shared-contact refresh preserves deliberate
+attachments. Candidate restore preflight checks marked evidence identity and
+original acquisition time before accepting attachments, and validates private
+AI reading against the captured logical tick independently of tree cadence.
+Evidence reference metadata is included in the deterministic digest.
+
+The integrated Console/reference client command below passed **419 cases** on
+2026-10-15; an initial sandbox run failed before test execution because temporary
+file renames were denied. The unrestricted targeted retry passed.
+
+```text
+npx vitest run tests/client/console-state.test.js tests/client/sensor-references.test.js
+```
+
+After rebuilding the pure-JS client, the actual Sensors reference `@core`
+journey passed **1 case in 5.8s**, including explicit opaque-contact attachment,
+correlated exact-owner command, preserved search and disabled controls after
+delegation. The sandbox browser attempt was interrupted when its server could
+not become usable; the unrestricted run on a fresh port passed.
+
+```text
+PHOENIX_SMOKE_PORT=3098 npx --no-install playwright test sensors-console.spec.js --project chromium --grep 'held unusual reference'
+```
+
+This is client acceptance evidence. The new snapshot and reading joins still
+need native execution and whole-host continuation; this checkpoint does not
+close increment 14.

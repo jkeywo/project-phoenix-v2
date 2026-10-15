@@ -3538,6 +3538,7 @@ fn system_blackboard_dossiers_round_trips_and_carries_no_field_for_a_secret() {
                 summary: String::new(),
                 facts: Vec::new(),
                 evidence: vec![DossierEvidenceSnapshot {
+                    reference: None,
                     observation: None,
                     text: "world.x.evidence".into(),
                     provenance: "scan".into(),
@@ -3563,6 +3564,7 @@ fn system_blackboard_dossiers_round_trips_and_carries_no_field_for_a_secret() {
     // they were not shown.
     let entry: serde_json::Value = serde_json::from_str(
         &serde_json::to_string(&DossierEvidenceSnapshot {
+            reference: None,
             observation: None,
             text: "world.x.evidence".into(),
             provenance: "dialogue".into(),

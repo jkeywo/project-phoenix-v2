@@ -33,8 +33,9 @@ pub mod recovery;
 pub mod recovery_ui;
 pub mod sensing;
 pub mod sensing_forecast;
-pub mod sensing_tracks;
+pub mod sensing_references;
 pub mod sensing_sharing;
+pub mod sensing_tracks;
 
 pub mod logistics_ui;
 pub mod umbilical;

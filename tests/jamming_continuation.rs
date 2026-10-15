@@ -74,6 +74,45 @@ fn own_notice(app: &App, actor: Entity) -> Option<bool> {
         _ => None,
     }
 }
+fn acquisition_diagnostic(app: &App, actor: Entity) -> serde_json::Value {
+    let world = app.world();
+    let config = &world.get::<ShipConfigComponent>(actor).unwrap().0;
+    let boards = &world.get::<ShipSystemBlackboards>(actor).unwrap().0;
+    let view = config.observations_for_system(&owner(), boards);
+    let permitted = boards
+        .keys()
+        .filter_map(|key| {
+            let board = view.get(key)?;
+            if let Some(records) = project_phoenix::science::contact_routing::observations(board) {
+                Some((key.0.clone(), serde_json::json!({"records": records})))
+            } else if let SystemBlackboard::Viewscreen(board) = board {
+                Some((
+                    key.0.clone(),
+                    serde_json::json!({"requests": board.scored_objectives}),
+                ))
+            } else {
+                None
+            }
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let state = world.get::<ShipJamming>(actor).unwrap();
+    let power = &world.get::<ShipPowerSystem>(actor).unwrap().0;
+    let sources = &world.get::<ShipSystemControlSources>(actor).unwrap().0;
+    serde_json::json!({
+        "tick": world.resource::<project_phoenix::sim_tick::SimTick>().0,
+        "channels": state.0.get(&owner()), "notice": own_notice(app,actor),
+        "source": format!("{:?}",sources.source_for(&owner())),
+        "policy": format!("{:?}",sources.policy_for(&owner())),
+        "work": power.emitted_work(&owner()), "last_fraction": power.last_work_fraction(&owner()),
+        "reserve": power.network().consumers.get(&owner()).map(|consumer|consumer.energy),
+        "radar_work": power.emitted_work(&SystemId("tactical-radar".into())),
+        "radar_reserve": power.network().consumers.get(&SystemId("tactical-radar".into())).map(|consumer|consumer.energy),
+        "tree": world.get::<project_phoenix::ai::state_tree_runtime::ShipAiTreeRuntime>(actor).and_then(|runtime|runtime.0.get(&owner())),
+        "mount": world.get::<project_phoenix::weapons::mounts::ShipMounts>(actor).and_then(|mounts|mounts.0.get(&owner())),
+        "own_pose": format!("{:?}",world.get::<project_phoenix::ship::state::ShipPhysics>(actor)),
+        "permitted": permitted,
+    })
+}
 fn first_difference(a: &serde_json::Value, b: &serde_json::Value, path: &str) -> Option<String> {
     match (a, b) {
         (serde_json::Value::Object(a), serde_json::Value::Object(b)) => {
@@ -124,14 +163,18 @@ fn same(a: &App, b: &App, step: usize) {
 fn ordinary_scoped_request_paid_self_exposure_json360_and_human_stop_use_one_actual_owner() {
     let (mut live, actor) = boot();
     let mut acquired = false;
-    for _ in 0..1800 {
+    let mut diagnostics = Vec::new();
+    for step in 0..1800 {
         live.update();
+        if [0, 60, 180, 600, 1200, 1799].contains(&step) {
+            diagnostics.push(acquisition_diagnostic(&live, actor));
+        }
         if enabled(&live, actor) && paid(&live, actor) && own_notice(&live, actor) == Some(true) {
             acquired = true;
             break;
         }
     }
-    assert!(acquired,"ordinary Comms tree must read its explicit request, acquire permitted fullXYZ and pay the real mounted emitter");
+    assert!(acquired,"ordinary Comms tree must read its explicit request, acquire permitted fullXYZ and pay the real mounted emitter: {}",serde_json::to_string_pretty(&diagnostics).unwrap());
     let contact = live
         .world()
         .get::<ShipJamming>(actor)

@@ -273,6 +273,7 @@ describe('cruiser tactical renderStation', () => {
       blips: [{ uuid: 'e6' }], target_uuid: 'e6',
       target_name: 'Raider', target_stance: 'hostile', target_class: 'Corvette',
       target_bearing: 12, target_range: 88, target_hull_pct: 55,
+      target_protection: { incoming_sector: 42, blocked: true, sample_tick: 12 },
       target_shields: [{ label: 'fore', hp: 50, max_hp: 100 }], target_shield_freq: 0.3,
     };
     cruiserRender(keyed(withFacts), document);
@@ -284,6 +285,7 @@ describe('cruiser tactical renderStation', () => {
       target_bearing: 12,
       target_range: 88,
       target_hull_pct: 55,
+      target_protection: { incoming_sector: 42, blocked: true, sample_tick: 12 },
       target_shields: [{ label: 'fore', hp: 50, max_hp: 100 }],
       target_shield_freq: 0.3,
     });
@@ -299,6 +301,7 @@ describe('cruiser tactical renderStation', () => {
       target_bearing: null,
       target_range: null,
       target_hull_pct: null,
+      target_protection: null,
       target_shields: [],
       target_shield_freq: null,
     });
@@ -448,6 +451,7 @@ describe('destroyer tactical renderStation', () => {
       ...w,
       target_name: 'Raider', target_stance: 'hostile', target_class: 'Corvette',
       target_bearing: 12, target_range: 88, target_hull_pct: 55,
+      target_protection: { incoming_sector: 42, blocked: true, sample_tick: 12 },
       target_shields: [{ label: 'fore', hp: 50, max_hp: 100 }], target_shield_freq: 0.3,
     };
     destroyerRender({ ...payload, systems: { 'tactical-radar': withFacts } }, document);
@@ -459,6 +463,7 @@ describe('destroyer tactical renderStation', () => {
       target_bearing: 12,
       target_range: 88,
       target_hull_pct: 55,
+      target_protection: { incoming_sector: 42, blocked: true, sample_tick: 12 },
       target_shields: [{ label: 'fore', hp: 50, max_hp: 100 }],
       target_shield_freq: 0.3,
     });
@@ -476,6 +481,7 @@ describe('destroyer tactical renderStation', () => {
       target_bearing: null,
       target_range: null,
       target_hull_pct: null,
+      target_protection: null,
       target_shields: [],
       target_shield_freq: null,
     });

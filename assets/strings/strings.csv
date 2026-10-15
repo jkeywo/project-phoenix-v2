@@ -5869,3 +5869,7 @@ weapons.assignments.unavailable,Withheld weapon assignment reference,Selected co
 component.phasers.stop,Stop actual active beam,Stop beam,Strahl stoppen,Stop beam,machine
 semantic_action.tactical.phaser_stop.label,Active beam semantic action,Stop beam,Strahl stoppen,Stop beam,machine
 semantic_action.tactical.phaser_stop.accessibility,Active beam semantic accessible action,Stop the selected active beam,Aktiven ausgewaehlten Strahl stoppen,Stop the selected active beam,machine
+sensing.track.protection.title,Acquired shield ray assessment,Observed shield cover,Beobachtete Schilddeckung,Observed shield cover,machine
+sensing.track.protection.blocked,Observed subject-to-instrument world bearing,Blocked at incoming bearing {bearing}°,Blockiert bei Einfallsrichtung {bearing}°,Blocked at incoming bearing {bearing}°,machine
+sensing.track.protection.open,Observed subject-to-instrument world bearing,Open at incoming bearing {bearing}°,Offen bei Einfallsrichtung {bearing}°,Open at incoming bearing {bearing}°,machine
+sensing.track.protection.sample,Original assessment sample time,Sample tick {tick},Messung Tick {tick},Sample tick {tick},machine

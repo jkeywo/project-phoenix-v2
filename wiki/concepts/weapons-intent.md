@@ -2,7 +2,7 @@
 title: Weapons Intent
 type: concept
 tags: [weapons, tactical, phaser, blaster, torpedo, replication, reconnect]
-sources: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/core/broadcast/lifecycle.rs, crates/phoenix-sim-gameplay/src/weapons/blaster.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, gui/components/ph-phasers-controls.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js, crates/phoenix-sim-gameplay/src/weapons/mount.rs, crates/phoenix-sim-gameplay/src/weapons/pattern.rs, crates/phoenix-sim-gameplay/src/entities/config/weapon_definition.rs, gui/components/weapon-target-controls.js, gui/stations/weapon-target-actions.js, editor/workshop-weapon-groups.js, gui/workshop-weapon-groups-panel.js]
+sources: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/core/broadcast/lifecycle.rs, crates/phoenix-sim-gameplay/src/weapons/blaster.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, gui/components/ph-phasers-controls.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js, crates/phoenix-sim-gameplay/src/weapons/mount.rs, crates/phoenix-sim-gameplay/src/weapons/pattern.rs, crates/phoenix-sim-gameplay/src/entities/config/weapon_definition.rs, gui/components/weapon-target-controls.js, gui/stations/weapon-target-actions.js, editor/workshop-weapon-groups.js, gui/workshop-weapon-groups-panel.js, crates/phoenix-simulation/src/console/weapons/readiness.rs, gui/sensor-tracks.js]
 updated: 2026-10-15
 ---
 
@@ -66,3 +66,15 @@ dangling members. This authors groups for a subsequent Preview/Test or load;
 it does not regroup installed machinery during play.
 
 The four hull variants share one context-scoped Tactical action catalogue. Target choice, phaser mode/fire, blaster charge/fire/cancel, and torpedo volley/fire controls send the pre-existing console actions through the normal action map and admitted command path. A visible blaster press sends exactly one `ChargeBlasterStart` semantic action (instant banks fire from it; charged banks complete on the host); release sends no legacy alias action. Parameter choices are checked against the live Tactical projection, and unqualified keyboard/gamepad shortcuts choose the same ready bank or tube a visible control would, while bank/tube readiness, ammunition, cooldown, and Combat Lock remain server facts. Correlated Tactical commands receive their terminal feedback only from the owning consumer; target selection never patches the browser state optimistically.
+
+Weapon publishers and reconnect use `console/weapons/readiness.rs` to resolve each
+bank's retained assignment through its permitted current observation and actual
+mount bearing. A held or unavailable target does not fall through to the primary
+lock. `PhaserBankState.firing` reports the actual active beam separately from
+post-shot rest, so the existing phaser control exposes Stop only for an owned
+manual bank that is still firing.
+
+`gui/sensor-tracks.js` projects acquired Broad shield cover as one observed
+incoming world bearing and blocked/open result with the original assessment
+tick. Sensors and Tactical display that held ray in their existing contact detail
+rows. It supplies no shield health, complete facing map or protected frequency.

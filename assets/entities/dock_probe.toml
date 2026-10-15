@@ -179,6 +179,14 @@ initial = "balance"
 id = "balance"
 
 [[system.config.ai.tree.state.task]]
+id = "allocation"
+
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "priority-allocation"
+value = { source = "literal", value = true }
+
+[[system.config.ai.tree.state.task]]
 id = "output"
 
 [system.config.ai.tree.state.task.action]

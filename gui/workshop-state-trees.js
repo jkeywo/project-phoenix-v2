@@ -14,7 +14,7 @@ export function systemTreeVocabulary(owner, schema) {
   }
   if (['power_reactor', 'power_battery'].includes(owner?.kind) && profile?.reactor) {
     const reactor = profile.reactor;
-    vocabulary.channels = [...new Set([...(vocabulary.channels || []), 'reactor-generation'])];
+    vocabulary.channels = [...new Set([...(vocabulary.channels || []), 'reactor-generation', 'priority-allocation'])];
     vocabulary.numeric_facts = ['reactor_reserve_fraction', 'reactor_heat_fraction', 'output_actual', 'strike_boost_enabled'];
     vocabulary.numeric_channels = {
       'reactor-output': { min: 0, max: Math.fround(reactor.max_output_per_sec) },

@@ -549,7 +549,9 @@ pub const SNAPSHOT_FORMAT: u32 = 58;
 /// retains its sole canonical physical pose across save/restore.
 /// "0.33" bases torpedo auto-fire on the firing ship's canonical rating,
 /// independent of other ships' human claims and the peer's local projection.
-pub const SIMULATION_RULES: &str = "0.33";
+/// "0.34" lets the ordinary Power tree explicitly select the existing allocation
+/// mode; shipped trees use priorities without changing physical resource tuning.
+pub const SIMULATION_RULES: &str = "0.34";
 
 /// The authored data, computed rather than remembered.
 ///

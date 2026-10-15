@@ -3,7 +3,7 @@ title: Power Runtime
 type: concept
 tags: [power, energy, battery, coolant, heat, ai, continuation]
 sources: [crates/phoenix-sim-gameplay/src/resources/energy.rs, crates/phoenix-sim-gameplay/src/resources/energy_network.rs, crates/phoenix-sim-gameplay/src/modifiers/power_system.rs, crates/phoenix-sim-gameplay/src/ship/power.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/ship/energy_runtime.rs, crates/phoenix-simulation/src/ship/energy_publication.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/snapshot/preflight.rs, crates/phoenix-simulation/src/sim_digest.rs, editor/workshop-energy.js, editor/workshop-energy-ai.js, gui/components/ph-energy-controls.js, gui/stations/energy-actions.js, pasm/spec/design/local-energy-and-thermal.yaml]
-updated: 2026-10-14
+updated: 2026-10-15
 ---
 
 # Power Runtime
@@ -32,6 +32,11 @@ and fine-flow settings transactionally. Human and ordinary reactor AI use the
 same System-addressed commands. `ai_power_allocation` executes the authored
 numeric state tree against permitted Console Power observations; no legacy
 ranked-rung controller is installed. Private tree state survives handoff.
+The optional Boolean `priority-allocation` output selects the existing Minimal
+or Manual mode through normal admission. An absent output preserves the current
+mode. Shipped trees choose priorities so low reserves cannot permanently strand
+a randomly cut branch under unchanged reactor output; no hardware capacity or
+operating cost is increased.
 
 `ship/energy_publication.rs` projects actual reserves, heat, desired/effective
 flows, cuts and coolant. Radar/navigation work is funded once at the physical
@@ -45,7 +50,7 @@ profiles, supported numeric trees and physical consumer composition through its
 existing source/history/validation/Preview/Test workflow. Old packs require
 explicit energy hardware and cannot install both old and new Power controllers.
 
-Snapshot 44/rules 0.16 carry local reserves, thermal/ramp state, allocation intent,
+Snapshots carry local reserves, thermal/ramp state, allocation intent,
 cut/restoration state, fine overrides, funded-work readings and coolant credit.
 Preflight validates identities and physical stock references before restoration;
 all energy owners participate in deterministic digests. Existing transport and

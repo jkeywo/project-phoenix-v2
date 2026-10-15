@@ -80,7 +80,7 @@ describe('visual typed System AI authoring', () => {
     expect(power.facts).toEqual(['alert']); expect(power.numeric_channels).toEqual({ 'reactor-output': { min: 0, max: 240 }, 'reactor-cooling': { min: 0, max: 7 },
       'flow-engine': { min: 0, max: 35 }, 'cooling-engine': { min: 0, max: 3 } });
     expect(power.numeric_facts).toContain('reserve-engine');
-      expect(power.numeric_facts).toContain('strike_boost_enabled'); expect(power.channels).toContain('reactor-generation');
+      expect(power.numeric_facts).toContain('strike_boost_enabled'); expect(power.channels).toContain('reactor-generation'); expect(power.channels).toContain('priority-allocation');
     expect(systemTreeVocabulary({ kind: 'dock' }, schema).sources).not.toContain('number_compare');
     expect(systemTreeVocabulary({ kind: 'dock' }, schema).actions).not.toContain('write_number');
     expect(systemTreeVocabulary({ kind: 'power_reactor' }, schema).actions).not.toContain('write_number');

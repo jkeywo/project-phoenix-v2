@@ -53,7 +53,13 @@ fn app_for(mut content: EntityConfig, memory_tree: bool) -> (App, Entity) {
             .insert("ai".into(), toml::Value::try_from(definition).unwrap());
     }
     let ship = content.ship_config.unwrap();
-    let power = PowerSystem::from_energy(hardware.clone(), ship.clone()).unwrap();
+    let mut power = PowerSystem::from_energy(hardware.clone(), ship.clone()).unwrap();
+    if !memory_tree {
+        // The stock tree's allocation selection is already settled for tests
+        // isolating later flow and knowledge changes. Explicit mode crossings
+        // are exercised below from both canonical starting modes.
+        power.set_mode(phoenix_model::energy::EnergyAllocationMode::Minimal);
+    }
     let (programs, runtimes) = compile_ship_trees_with_energy(&ship, Some(&hardware)).unwrap();
     let mut sources = ShipSystemControlSources::default();
     sources.0.set(reactor(), ControlSource::Ai);
@@ -100,6 +106,81 @@ fn app_for(mut content: EntityConfig, memory_tree: bool) -> (App, Entity) {
 }
 fn fixture() -> (App, Entity) {
     app_for(content(), false)
+}
+fn content_with_allocation(priority: Option<bool>) -> EntityConfig {
+    let mut content = content();
+    let config = content
+        .ship_config
+        .as_mut()
+        .unwrap()
+        .systems
+        .iter_mut()
+        .find(|system| system.id == reactor())
+        .unwrap()
+        .config
+        .as_mut()
+        .unwrap();
+    let tasks = config
+        .get_mut("ai")
+        .unwrap()
+        .get_mut("tree")
+        .unwrap()
+        .as_array_mut()
+        .unwrap()[0]
+        .get_mut("state")
+        .unwrap()
+        .as_array_mut()
+        .unwrap()[0]
+        .get_mut("task")
+        .unwrap()
+        .as_array_mut()
+        .unwrap();
+    tasks.retain(|task| task.get("id").and_then(toml::Value::as_str) != Some("allocation"));
+    if let Some(priority) = priority {
+        tasks.insert(0, toml::Value::try_from(serde_json::json!({
+            "id":"allocation", "action":{"kind":"write", "channel":"priority-allocation", "value":{"source":"literal", "value":priority}}
+        })).unwrap());
+    }
+    content
+}
+
+#[test]
+fn allocation_mode_is_optional_and_uses_the_same_admitted_power_owner() {
+    use phoenix_model::energy::EnergyAllocationMode::{Manual, Minimal};
+    for (output, initial, expected) in [
+        (Some(true), Manual, Minimal),
+        (Some(false), Minimal, Manual),
+        (None, Minimal, Minimal),
+    ] {
+        let (mut app, entity) = app_for(content_with_allocation(output), false);
+        app.world_mut()
+            .get_mut::<ShipPowerSystem>(entity)
+            .unwrap()
+            .0
+            .set_mode(initial);
+        app.world_mut()
+            .run_system_once(crate::ship::power::publish_power_blackboard)
+            .unwrap();
+        app.update();
+        assert_eq!(power(&app, entity).network().mode, expected);
+        let mode_commands: Vec<_> = commands(&app, entity)
+            .into_iter()
+            .filter(|command| matches!(command, SystemControlPayload::SetEnergyMode { .. }))
+            .collect();
+        assert_eq!(
+            mode_commands,
+            if initial == expected {
+                vec![]
+            } else {
+                vec![SystemControlPayload::SetEnergyMode { mode: expected }]
+            }
+        );
+        app.update();
+        assert!(
+            commands(&app, entity).is_empty(),
+            "unchanged allocation is not reissued"
+        );
+    }
 }
 fn power(app: &App, entity: Entity) -> &PowerSystem {
     &app.world().get::<ShipPowerSystem>(entity).unwrap().0

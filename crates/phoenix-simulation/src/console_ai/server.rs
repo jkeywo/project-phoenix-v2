@@ -289,10 +289,16 @@ fn ai_power_allocation(
             programs.0.get(&system),
             &BTreeMap::new(),
             &facts,
-            &BTreeMap::from([(
-                "reactor-generation".into(),
-                energy.reactor.generation_enabled,
-            )]),
+            &BTreeMap::from([
+                (
+                    "reactor-generation".into(),
+                    energy.reactor.generation_enabled,
+                ),
+                (
+                    "priority-allocation".into(),
+                    energy.mode == phoenix_model::energy::EnergyAllocationMode::Minimal,
+                ),
+            ]),
             runtime,
             tick.0,
         ) {
@@ -334,6 +340,25 @@ fn ai_power_allocation(
                     uuid,
                     system.clone(),
                     Control::SetEnergyGeneration { enabled: *enabled },
+                    sources,
+                    &sessions,
+                    Some(config),
+                    &mut admitted,
+                );
+            }
+        }
+        if let Some(priority) = result.intents.get("priority-allocation") {
+            use phoenix_model::energy::EnergyAllocationMode;
+            let mode = if *priority {
+                EnergyAllocationMode::Minimal
+            } else {
+                EnergyAllocationMode::Manual
+            };
+            if mode != energy.mode {
+                emit_ai_command(
+                    uuid,
+                    system.clone(),
+                    Control::SetEnergyMode { mode },
                     sources,
                     &sessions,
                     Some(config),

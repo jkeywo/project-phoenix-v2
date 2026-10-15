@@ -6,7 +6,11 @@ use std::collections::BTreeMap;
 pub fn power_bindings() -> crate::ai::state_tree::SupportedBindings {
     crate::ai::state_tree::SupportedBindings {
         facts: Default::default(),
-        channels: ["reactor-generation".to_owned()].into(),
+        channels: [
+            "reactor-generation".to_owned(),
+            "priority-allocation".to_owned(),
+        ]
+        .into(),
     }
 }
 

@@ -58,3 +58,16 @@ entities:
       rationale:
         - "[ai] The normal Human/Backfill dispatch, priority, paid Security work and authored consequences remain in use. Actual access blockers and crossing interlocks govern movement; recall or machinery loss returns the same team without teleporting. Work begins only at destination and release only at actual home."
         - "[ai] Local-only optional references preserve shipped external-only behavior. Mixed external work waits for actual19craft/transfer custody. Accepted homes/actions/energy/topology, saved cursor/work/result joins and Workshop history/Test are required; a source tracer is not hazard, Medical, boarding or increment20 acceptance. Detailed contract lives in implementation/increment-20.md."
+
+  - decision: redesign-personnel-local-treatment-consumer
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Actual Local Treatment Borrows the Existing Finite Team
+      summary: "Optional care profiles treat a named officer's single coarse condition through a typed Treatment activity in the existing Repair TeamJobs. The actual team and navigation cursor remain exclusive across repair, fitting, external work and treatment; no extra medical roster, controller, health pool or movement state is created."
+      rationale:
+        - "[ai] First patients retain actual home-compartment custody, with accepted treatment equipment in that same compartment. An eligible MedicalCare team must physically reach the patient/service before paid work and return to its actual home before its Job releases. Posting, recall, interruption and restore never teleport a patient or team. One active Treatment claims one patient; this claim is derived from the same actual jobs."
+        - "[ai] Fit/minor/severe conditions live only in PersonnelState. Initial condition may be authored setup; this does not claim injury propagation, away casualties or death delivered. Unfit officers cannot provide expertise or be newly posted. Completed actual treatment changes that same condition to fit once. No automatic deterioration or reroll."
+        - "[ai] The accepted profile binds actual installed service machinery, finite work terms and medication through the established resource service/stock owner. Stock is consumed once when treatment actually begins, with working configured port replenishment in the optional reference. Waiting for medication or power is visible. No free stock, duplicate reservations or refund after committed use."
+        - "[ai] Ordinary Human and Repair AI commands share existing admission and permitted Personnel knowledge; selected plot surgery may use existing human-seeking Console policy rather than a universal manual minigame. Accepted Workshop edit/history/validation/Preview/Test and whole-candidate condition/job/site/stock joins are part of the slice. Native continuation and human acceptance remain explicit integration work."

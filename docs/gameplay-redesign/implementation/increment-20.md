@@ -277,3 +277,29 @@ controls, actual seals, blocked/funded work, malformed no-write candidates,
 fresh blocked/working JSON continuations of 360 steps and normal AFK Backfill
 handoff. Authored assertions are pending evidence, not passing acceptance.
 Medical, real external custody and full increment20 remain open.
+
+
+## Adopted next local consumer: treatment
+
+[ai] Optional treatment extends the existing finite named officer roster with one
+coarse fit/minor/severe condition in PersonnelState. Authored initial injury is a
+setup fact, not evidence of automatic injury, deterioration or casualties. An unfit
+officer provides no expertise and cannot be newly posted; actual completed care
+restores that same condition once.
+
+[ai] A typed Treatment activity borrows the existing Repair TeamJobs slot and its
+one physical navigation cursor. MedicalCare competency is authored on an existing
+finite team; it cannot repair, refit, work abroad or treat another patient at the
+same time. One active job claims one patient. The first supported patient remains
+at its actual home, with configured service equipment in that same compartment.
+The team travels to the patient, starts only on actual arrival with medication
+and paid machinery, and releases only after real return. Recall preserves position
+and already consumed medication. Power/access loss pauses or returns actual work,
+never moves the patient to a convenient location.
+
+[ai] Accepted care work terms, equipment, finite medication stock and configured
+port replenishment must arrive together with Workshop editing and ordinary
+Human/AI controls. Knowledge stays on the existing Repair Console. Explicit
+human-seeking plot surgery remains an authored exception. Physical injury inputs,
+remote casualties and carried-craft custody remain later joins; this local slice
+cannot close increment20 or claim those capabilities.

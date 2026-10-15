@@ -50,6 +50,12 @@ accepted actual actor recipe, owner, source/recipient and original clock before
 restore writes. The same inbox/pending entries participate in the digest; there
 is no separate request inbox or retry queue.
 
+`RegionSignalQuery` also applies the current paid equipment receiver factor
+through the same physical link gate. Each endpoint's own reach is scaled once;
+natural conversation-path attenuation stays separate. See [Electronic
+Equipment](./electronic-equipment.md) for actual source work, self/friendly
+exposure, restore timing and own-receiver notice boundaries.
+
 ## Related
 
 - [Comms Panel](./comms-panel.md)

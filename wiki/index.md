@@ -50,6 +50,7 @@ Current implementation orientation only. For intended design use
 - [Resource Stores and Service Links](./concepts/resource-stores.md) — shared stock/claims, docked replenishment and Workshop authoring
 - [Equipment Fitting](./concepts/equipment-fitting.md) — fixed-slot hardware, actual assemblies, physical team work and recovery
 - [Sensing and Spatial Fields](./concepts/sensing-and-fields.md) — paid enquiries, retained readings, passive reception and shared signal paths
+- [Electronic Equipment](./concepts/electronic-equipment.md) — paid independent Comms interference and shared physical receiver exposure
 - [Weapons Runtime](./concepts/weapons-intent.md)
 - [Weapons Plugin](./concepts/weapons-plugin.md)
 - [Shields Runtime](./concepts/shields-intent.md)

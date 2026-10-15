@@ -995,6 +995,7 @@ impl EntityConfig {
         crate::resources::fitting::CompiledFitting::compile(&config).map_err(SerdeError::custom)?;
         crate::resources::logistics_profile::compile_entity_logistics(&config)
             .map_err(SerdeError::custom)?;
+        weapon_definition::validate_round_feeds(&config).map_err(SerdeError::custom)?;
 
         if config.interior.is_none()
             && config

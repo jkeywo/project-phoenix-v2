@@ -51,6 +51,7 @@ use std::f32::consts::PI;
 /// future TOML fields without a `deny_unknown_fields` compile error.
 #[derive(Clone, Debug)]
 pub struct BlasterBankConfig {
+    pub rounds: Option<phoenix_model::weapon_operation::WeaponRoundFeed>,
     pub impact: phoenix_model::damage::DamageProfile,
     /// Bank identifier (matches the TOML `id` field, e.g. `"fore"`, `"aft"`).
     pub id: String,
@@ -98,6 +99,7 @@ pub struct BlasterBankConfig {
 impl Default for BlasterBankConfig {
     fn default() -> Self {
         Self {
+            rounds: None,
             impact: phoenix_model::damage::DamageProfile::default(),
             id: String::new(),
             facing_deg: 0.0,
@@ -378,8 +380,10 @@ impl BlasterSystem {
     }
 
     /// Paid runtime entry point. Charging advances only by funded work time;
-    /// flight and cooldown use real time. Each simultaneous step is admitted
-    /// atomically before any projectile identity or firing state is changed.
+    /// flight and cooldown use real time. Each listed physical barrel is
+    /// attempted once, in authored order, before minting its projectile ID.
+    /// Refused/unavailable barrels are skipped without another barrel taking
+    /// their place. The due step advances even when no listed barrel can fire.
     #[allow(clippy::too_many_arguments)]
     pub fn tick_with_work(
         &mut self,
@@ -438,29 +442,27 @@ impl BlasterSystem {
         // coarse `dt` spanning several offsets never batches successive steps
         // into a single tick). A single step still emits one event PER barrel,
         // so a simultaneous multi-barrel step fires together on one tick.
-        let elapsed_before = self.volley.volley_elapsed;
         self.volley.volley_elapsed += dt;
         let lifespan = self.config.range / self.config.projectile_speed;
         let mut events = Vec::new();
-        let mut fired_barrels: Vec<u32> = Vec::new();
 
         if self.volley.next_step < self.volley.schedule.len()
             && self.volley.schedule[self.volley.next_step].1 <= self.volley.volley_elapsed
         {
             let barrels = self.volley.schedule[self.volley.next_step].0.clone();
-            if !admit_launch(barrels.len()) {
-                self.volley.volley_elapsed = elapsed_before;
-                return Vec::new();
-            }
+            let mut attempted = std::collections::BTreeSet::new();
+            let mut fired_barrels = Vec::new();
             for &barrel in &barrels {
-                // Origin resolves per barrel; falls back to the first supplied
-                // origin (then the world origin) so a mis-sized origin slice
-                // still fires from a plausible point rather than panicking.
-                let (origin_x, origin_z) = barrel_origins
-                    .get(barrel as usize)
-                    .copied()
-                    .or_else(|| barrel_origins.first().copied())
-                    .unwrap_or((0.0, 0.0));
+                if !attempted.insert(barrel) {
+                    continue;
+                }
+                let Some(&(origin_x, origin_z)) = barrel_origins.get(barrel as usize) else {
+                    continue;
+                };
+                if !origin_x.is_finite() || !origin_z.is_finite() || !admit_launch(barrel as usize)
+                {
+                    continue;
+                }
                 let uuid = next_uuid();
                 let heading = predict_intercept_heading(
                     origin_x,
@@ -493,15 +495,12 @@ impl BlasterSystem {
                     heading,
                     barrel,
                 });
+                fired_barrels.push(barrel);
             }
-            fired_barrels = barrels;
+            self.volley.active_barrels = fired_barrels;
             self.volley.next_step += 1;
             self.volley.current_step = self.volley.next_step as u32;
             self.volley.pending_volley = self.volley.pending_volley.saturating_sub(1);
-        }
-
-        if !fired_barrels.is_empty() {
-            self.volley.active_barrels = fired_barrels;
         }
 
         // Volley complete — start cooldown and clear the active-step indicator.

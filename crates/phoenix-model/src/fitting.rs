@@ -39,6 +39,8 @@ pub struct RefitWorkConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BeamHardware {
+    #[serde(default)]
+    pub operation: crate::weapon_operation::BeamOperation,
     pub beam_range: f32,
     pub auto_arc_deg: f32,
     pub beam_damage_per_sec: f32,

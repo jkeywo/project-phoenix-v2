@@ -5855,3 +5855,12 @@ workshop.damage.emp_stacks,EMP receiver authoring,Maximum resistance stacks,Maxi
 workshop.damage.emp_decay,EMP receiver authoring,Resistance decay interval (seconds),Abklingintervall des Widerstands (Sekunden),Resistance decay interval (seconds),machine
 workshop.damage.save_emp,EMP receiver authoring,Save EMP resistance,EMP-Widerstand speichern,Save EMP resistance,machine
 entity.emp_destroyer.name,Optional authored EMP bolt hull,EMP Destroyer,EMP-Zerstörer,EMP Destroyer,machine
+workshop.weapon.operation,Weapon operating mode,Beam operation,Strahlbetrieb,Beam operation,machine
+workshop.weapon.operation.fixed,Weapon operating mode,Fixed duration,Feste Dauer,Fixed duration,machine
+workshop.weapon.operation.sustained,Weapon operating mode,Sustained until stopped,Anhaltend bis zum Stopp,Sustained until stopped,machine
+workshop.weapon.rounds,Weapon round feed,Consumes finite rounds,Verbraucht endliche Munition,Consumes finite rounds,machine
+workshop.weapon.round_store,Weapon round feed,Local round store,Lokales Munitionslager,Local round store,machine
+workshop.weapon.round_amount,Weapon round feed,Rounds per barrel,Munition je Rohr,Rounds per barrel,machine
+entity.broadside_cruiser.name,Optional finite-round battery hull,Broadside Cruiser,Breitseitenkreuzer,Broadside Cruiser,machine
+weapon.side-battery.label,Finite round weapon bank,Side battery,Seitenbatterie,Side battery,machine
+weapon.kinetic-rounds.label,Finite local ammunition,Kinetic rounds,Kinetische Munition,Kinetic rounds,machine

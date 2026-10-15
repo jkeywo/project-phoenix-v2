@@ -65,6 +65,7 @@ pub struct LastShipAttacker(pub Option<String>);
 /// beam.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ActiveBeamSlot {
+    pub operation: phoenix_model::weapon_operation::BeamOperation,
     pub impact_sample_target: Option<String>,
     pub impact_sample: Option<phoenix_model::damage::HitSample>,
     pub strike_damage_bonus: f32,
@@ -196,6 +197,7 @@ impl ActiveBeam {
         self.per_bank.insert(
             bank.into(),
             ActiveBeamSlot {
+                operation: phoenix_model::weapon_operation::BeamOperation::Fixed,
                 impact_sample_target: None,
                 impact_sample: None,
                 target_uuid: target_uuid.into(),

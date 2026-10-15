@@ -2,6 +2,7 @@ pub mod arc_geometry;
 pub mod beam_render;
 pub mod blaster;
 pub mod mount;
+pub mod operation;
 pub mod pattern;
 pub mod phaser;
 pub mod shield;

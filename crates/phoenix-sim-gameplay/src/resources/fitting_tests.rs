@@ -834,3 +834,61 @@ fn facility_has_real_owned_powered_dock_and_explicit_port_permission() {
         crate::test_fixtures::load_entity_config("assets/entities/manual_trade_port.toml").unwrap();
     validate_refit_facility(&inherited).unwrap();
 }
+
+#[test]
+fn installed_beam_mode_is_the_actual_portable_definition_and_default_stays_fixed() {
+    use phoenix_model::weapon_operation::BeamOperation;
+    let (mut config, _, _) = fixture();
+    let fitting = config.fitting.as_mut().unwrap();
+    let spare = fitting
+        .assemblies
+        .iter()
+        .find(|item| item.id == "fore-beam-spare")
+        .unwrap()
+        .definition
+        .clone();
+    let item = fitting
+        .equipment
+        .iter_mut()
+        .find(|item| item.id == spare)
+        .unwrap();
+    if let EquipmentHardware::Beam(beam) = &mut item.hardware {
+        beam.operation = BeamOperation::Sustained;
+        beam.cycle_jitter = 0.0;
+    }
+    let profile = CompiledFitting::compile(&config).unwrap().unwrap();
+    let mut state = FittingState::from_profile(&profile).unwrap();
+    assert_eq!(
+        profile
+            .effective_config(&state)
+            .unwrap()
+            .weapons_console
+            .unwrap()
+            .phaser_banks[0]
+            .operation,
+        BeamOperation::Fixed
+    );
+    state
+        .stored_to_work(&profile, "fore-beam-spare", 44, "fore-beam")
+        .unwrap();
+    let old = state
+        .remove_installed(&profile, "fore-beam", 44, healthy())
+        .unwrap();
+    state
+        .install_from_work(&profile, "fore-beam", "fore-beam-spare", 44)
+        .unwrap();
+    state
+        .return_to_locker(&profile, &old, 44, "weapons-equipment")
+        .unwrap();
+    let saved: FittingState = serde_json::from_slice(&serde_json::to_vec(&state).unwrap()).unwrap();
+    assert_eq!(
+        profile
+            .effective_config(&saved)
+            .unwrap()
+            .weapons_console
+            .unwrap()
+            .phaser_banks[0]
+            .operation,
+        BeamOperation::Sustained
+    );
+}

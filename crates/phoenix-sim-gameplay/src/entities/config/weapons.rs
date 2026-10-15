@@ -29,6 +29,8 @@ pub type PhaserBankId = String;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct PhaserBankConfig {
+    #[serde(default)]
+    pub operation: phoenix_model::weapon_operation::BeamOperation,
     pub impact: phoenix_model::damage::DamageProfile,
     pub id: PhaserBankId,
     pub facing_deg: f32,
@@ -113,6 +115,8 @@ pub type BlasterBankId = String;
 /// fields (recoil, screenshake, visual variants).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct BlasterBankConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rounds: Option<phoenix_model::weapon_operation::WeaponRoundFeed>,
     pub impact: phoenix_model::damage::DamageProfile,
     pub id: BlasterBankId,
     #[serde(default)]
@@ -141,7 +145,7 @@ pub struct BlasterBankConfig {
     /// Fraction `[0.0, 1.0]` of damage that bypasses shields entirely.
     #[serde(default)]
     pub shield_pierce: f32,
-    /// Recoil impulse magnitude (reserved for a later issue).
+    /// Recoil velocity impulse magnitude opposite the actual projectile bearing.
     #[serde(default)]
     pub recoil_impulse: f32,
     /// Screenshake magnitude (reserved for a later issue).
@@ -209,6 +213,7 @@ impl BlasterBankConfig {
     /// Convert this TOML config into a runtime `crate::weapons::blaster::BlasterBankConfig`.
     pub fn to_runtime(&self) -> crate::weapons::blaster::BlasterBankConfig {
         crate::weapons::blaster::BlasterBankConfig {
+            rounds: self.rounds.clone(),
             impact: self.impact,
             id: self.id.clone(),
             facing_deg: self.facing_deg,

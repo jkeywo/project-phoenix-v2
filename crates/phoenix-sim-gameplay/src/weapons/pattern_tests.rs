@@ -71,3 +71,23 @@ fn implicit_barrel_keeps_uniform_volley_and_origin_only_fallback() {
     assert!(firing_schedule(&[], 0, 0.25).is_empty());
     assert_eq!(barrel_sequence(&[]), vec![(0, 0)]);
 }
+
+#[test]
+fn a_step_cannot_claim_the_same_physical_barrel_twice() {
+    let duplicate = [BarrelPatternStep {
+        barrels: vec![0, 0],
+        offset_secs: 0.0,
+    }];
+    assert!(validate_barrel_pattern("battery", 1, &duplicate).is_err());
+    let repeated_over_time = [
+        BarrelPatternStep {
+            barrels: vec![0],
+            offset_secs: 0.0,
+        },
+        BarrelPatternStep {
+            barrels: vec![0],
+            offset_secs: 0.2,
+        },
+    ];
+    validate_barrel_pattern("battery", 1, &repeated_over_time).unwrap();
+}

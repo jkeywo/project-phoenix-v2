@@ -44,3 +44,4 @@ pub mod emp;
 pub mod logistics_ui;
 pub mod turret;
 pub mod umbilical;
+pub mod weapon_operation;

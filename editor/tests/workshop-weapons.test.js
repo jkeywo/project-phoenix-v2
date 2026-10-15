@@ -106,3 +106,31 @@ describe('Workshop configurable weapon source editing', () => {
     await expect(pending).rejects.toThrow(/stale/); expect(current.read(path)).toBe(source + '# intervening edit\n');
   });
 });
+
+it('preserves sustained and finite-round authoring through accepted edits and inherited reload', async () => {
+  const read = file => fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+  const actual = resolveTemplate('assets/entities/broadside_cruiser.toml', {read}, parse).resolved.value;
+  const baseline = resolveTemplate('assets/entities/alliance_cruiser.toml', {read}, parse).resolved.value;
+  const before = (await import('smol-toml')).stringify(actual), current = draft(before);
+  const rows = inspectWeapons(current, dependencies, path).weapons;
+  const beam = rows.find(row => row.weapon.id === 'phaser-aft'), bolt = rows.find(row => row.weapon.id === 'blaster-side');
+  expect(beam.weapon.delivery.operation).toBe('sustained'); expect(beam.weapon.delivery.cycle_jitter).toBe(0);
+  expect(bolt.weapon.delivery.rounds).toEqual({store:'local-kinetic-rounds',amount:1});
+  expect(bolt.weapon.mount.facing_deg).toBe(90); expect(bolt.weapon.delivery.recoil_impulse).toBe(6);
+  expect(actual.energy.reactor).toEqual(baseline.energy.reactor);
+  expect(actual.logistics.storage.find(row=>row.compartment==='support').space).toBe(baseline.logistics.storage.find(row=>row.compartment==='support').space+36);
+  expect(actual.logistics.storage.find(row=>row.compartment==='weapons').space).toBe(14);
+  expect(actual.infrastructure.capacity.filter(row=>row.id.endsWith('kinetic-rounds')).reduce((sum,row)=>sum+row.amount,0)).toBe(22);
+  for(const rating of actual.station.find(row=>row.id==='tactical').rating) expect([...rating.detailed_systems,...rating.automated_systems]).toContain('blaster-side');
+  bolt.weapon.mount.range=34;
+  const runtime={dependencies:async()=>dependencies,validate:vi.fn(async()=>({accepted:true,findings:[]}))};
+  await applyWeaponOperation({draft:current,runtime,operation:{path,section:'weapon',originalId:'blaster-side',weapon:bolt.weapon}});
+  expect(inspectWeapons(new WorkshopDocument(current.archive()),dependencies,path).weapons.find(row=>row.weapon.id==='blaster-side').weapon.delivery.rounds).toEqual({store:'local-kinetic-rounds',amount:1});
+  current.undo(); expect(current.read(path)).toBe(before); current.redo();
+  for(const edit of [value=>value.delivery.rounds.store='hold-kinetic-rounds',value=>value.delivery.rounds.amount=9]) { const value=structuredClone(bolt.weapon); edit(value); expect(()=>operation(current,{section:'weapon',originalId:'blaster-side',weapon:value})).toThrow(/round|local|capacity/i); }
+  const invalid=structuredClone(beam.weapon); invalid.delivery.cycle_jitter=.1; expect(()=>operation(current,{section:'weapon',originalId:'phaser-aft',weapon:invalid})).toThrow(/jitter/);
+});
+
+it('refuses an explicitly empty or null beam operation rather than defaulting it', () => {
+  for(const mode of ['',null]) { const value=edited(draft());value.delivery.operation=mode;expect(()=>operation(draft(),{section:'weapon',originalId:'beam-a',weapon:value})).toThrow(/operation/); }
+});

@@ -29,6 +29,8 @@ pub struct WeaponDefinition {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WeaponDeliveryConfig {
     Beam {
+        #[serde(default)]
+        operation: phoenix_model::weapon_operation::BeamOperation,
         auto_arc_deg: f32,
         damage_per_sec: f32,
         duration_secs: f32,
@@ -41,6 +43,8 @@ pub enum WeaponDeliveryConfig {
         shield_pierce: f32,
     },
     Bolt {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rounds: Option<phoenix_model::weapon_operation::WeaponRoundFeed>,
         volley_count: u32,
         volley_interval_secs: f32,
         cooldown_secs: f32,
@@ -122,6 +126,7 @@ impl WeaponDefinition {
         )?;
         match &self.delivery {
             WeaponDeliveryConfig::Beam {
+                operation,
                 auto_arc_deg,
                 damage_per_sec,
                 duration_secs,
@@ -144,6 +149,11 @@ impl WeaponDefinition {
                 if !cycle_jitter.is_finite() || !(0.0..1.0).contains(cycle_jitter) {
                     return Err("cycle_jitter must be finite and in [0, 1)".into());
                 }
+                if *operation == phoenix_model::weapon_operation::BeamOperation::Sustained
+                    && *cycle_jitter != 0.0
+                {
+                    return Err("sustained beam operation has no fixed-cycle jitter".into());
+                }
                 if !color.is_empty()
                     && (color.len() != 4
                         || color
@@ -155,6 +165,7 @@ impl WeaponDefinition {
                 pierce(*shield_pierce)?;
             }
             WeaponDeliveryConfig::Bolt {
+                rounds,
                 volley_count,
                 volley_interval_secs,
                 cooldown_secs,
@@ -167,6 +178,9 @@ impl WeaponDefinition {
                 recoil_impulse,
                 screenshake_magnitude,
             } => {
+                if let Some(rounds) = rounds {
+                    rounds.validate()?;
+                }
                 if (*volley_count == 0 && self.pattern.is_empty()) || *damage < 0 {
                     return Err(
                         "bolt requires a nonempty firing cycle and nonnegative damage".into(),
@@ -223,6 +237,7 @@ impl WeaponDefinition {
         let id = self.strategy_id.unwrap_or(self.id);
         let (parent, field, value) = match self.delivery {
             WeaponDeliveryConfig::Beam {
+                operation,
                 auto_arc_deg,
                 damage_per_sec,
                 duration_secs,
@@ -232,6 +247,7 @@ impl WeaponDefinition {
                 shield_pierce,
             } => {
                 let bank = PhaserBankConfig {
+                    operation,
                     impact: self.impact,
                     id,
                     facing_deg: mount.facing_deg,
@@ -254,6 +270,7 @@ impl WeaponDefinition {
                 )
             }
             WeaponDeliveryConfig::Bolt {
+                rounds,
                 volley_count,
                 volley_interval_secs,
                 cooldown_secs,
@@ -267,6 +284,7 @@ impl WeaponDefinition {
                 screenshake_magnitude,
             } => {
                 let bank = BlasterBankConfig {
+                    rounds,
                     impact: self.impact,
                     id,
                     facing_deg: mount.facing_deg,
@@ -317,6 +335,72 @@ impl WeaponDefinition {
         };
         Ok((parent, field, value.map_err(|error| error.to_string())?))
     }
+}
+
+/// Bind finite rounds to a real local capacity owned by this actual bank.
+/// Inventory and Logistics retain the stock; the weapon gets no count mirror.
+pub(super) fn validate_round_feeds(config: &EntityConfig) -> Result<(), String> {
+    let Some(weapons) = &config.weapons_console else {
+        return Ok(());
+    };
+    for bank in &weapons.phaser_banks {
+        if bank.operation == phoenix_model::weapon_operation::BeamOperation::Sustained
+            && bank.cycle_jitter != 0.0
+        {
+            return Err("sustained beam operation has no fixed-cycle jitter".into());
+        }
+    }
+    for bank in &weapons.blaster_banks {
+        let Some(feed) = &bank.rounds else {
+            continue;
+        };
+        feed.validate()?;
+        let owner = crate::ship::system_registry::blaster_bank_system_id(&bank.id)
+            .ok_or("round feed has no actual bank System")?;
+        if !config.ship_config.as_ref().is_some_and(|ship| {
+            ship.systems.iter().any(|system| {
+                system.id == owner && system.kind == crate::ship::system_registry::BLASTER_BANK_KIND
+            })
+        }) {
+            return Err("weapon rounds require their actual fitted bolt bank System".into());
+        }
+        let store = config
+            .logistics
+            .as_ref()
+            .and_then(|profile| profile.stores.iter().find(|store| store.id == feed.store))
+            .ok_or("weapon round feed requires an actual managed local store")?;
+        let room = config
+            .interior
+            .as_ref()
+            .and_then(|layout| layout.placements.get(&owner))
+            .ok_or("round feed bank needs an actual compartment")?;
+        if store.role != phoenix_model::logistics::StoreRole::Local
+            || store.system.as_ref() != Some(&owner)
+            || &store.compartment != room
+        {
+            return Err(
+                "weapon rounds require the bank's own local store in its physical compartment"
+                    .into(),
+            );
+        }
+        let phoenix_model::logistics::ResourceEndpoint::Capacity { id } = &store.endpoint else {
+            return Err("bolt rounds require an actual capacity endpoint".into());
+        };
+        let capacity = config
+            .infrastructure
+            .as_ref()
+            .and_then(|infrastructure| {
+                infrastructure
+                    .capacities
+                    .iter()
+                    .find(|capacity| &capacity.id == id)
+            })
+            .ok_or("weapon round capacity is absent")?;
+        if capacity.ceiling.unwrap_or(capacity.amount) < feed.amount {
+            return Err("weapon rounds per barrel exceed actual capacity".into());
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn compile_weapons(value: &mut toml::Value) -> Result<(), String> {

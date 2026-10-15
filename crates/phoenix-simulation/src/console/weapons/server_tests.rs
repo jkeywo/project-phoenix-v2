@@ -4844,6 +4844,7 @@ fn blaster_hit_emits_ship_destroyed_vfx_on_npc_kill() {
 
     let mut bank =
         crate::weapons::blaster::BlasterSystem::new(crate::weapons::blaster::BlasterBankConfig {
+            rounds: None,
             impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore".into(),
             facing_deg: 0.0,
@@ -4922,6 +4923,7 @@ fn crew_spectator_blaster_kill_retains_remote_and_local_crew_once_without_ending
         }
         let mut bank = crate::weapons::blaster::BlasterSystem::new(
             crate::weapons::blaster::BlasterBankConfig {
+                rounds: None,
                 impact: phoenix_model::damage::DamageProfile::default(),
                 id: "fore".into(),
                 facing_deg: 0.0,
@@ -5039,6 +5041,7 @@ fn blaster_hit_from_an_unidentified_shooter_reports_no_attacker() {
 
     let mut bank =
         crate::weapons::blaster::BlasterSystem::new(crate::weapons::blaster::BlasterBankConfig {
+            rounds: None,
             impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore".into(),
             facing_deg: 0.0,
@@ -5952,6 +5955,7 @@ rank = "Ltn."
                 torpedo_arc_color: vec![],
                 power_multipliers: None,
                 phaser_banks: vec![crate::entities::config::PhaserBankConfig {
+                    operation: Default::default(),
                     impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
@@ -13626,6 +13630,7 @@ fn setup_two_arc_ai_shooter(app: &mut App) -> (Entity, Entity, String, String) {
         .insert(BlasterSystemResource(vec![
             crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    rounds: None,
                     impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
@@ -14731,6 +14736,7 @@ fn tick_blaster_auto_fire_gate_passes_when_tactical_is_ai() {
             npc_physics,
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    rounds: None,
                     impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 180.0, // face toward -Z (toward target)
@@ -14853,6 +14859,7 @@ fn a_target_with_no_blaster_banks_is_still_led() {
             },
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    rounds: None,
                     impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
@@ -14948,6 +14955,7 @@ fn a_blaster_carrying_target_is_led_identically() {
     fn dummy_bank() -> BlasterSystemResource {
         BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
             crate::weapons::blaster::BlasterBankConfig {
+                rounds: None,
                 impact: phoenix_model::damage::DamageProfile::default(),
                 id: "fore".into(),
                 facing_deg: 0.0,
@@ -15074,6 +15082,7 @@ fn tick_blaster_auto_fire_skips_when_target_out_of_range() {
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    rounds: None,
                     impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
@@ -15173,6 +15182,7 @@ fn handle_fire_blaster_reports_the_actual_charge_consumer_outcome() {
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    rounds: None,
                     impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
@@ -15321,6 +15331,7 @@ fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    rounds: None,
                     impact: Default::default(),
                     // Underscore-authored, the spelling the inverse dropped.
                     id: "fore_port".into(),
@@ -15504,6 +15515,7 @@ fn spawn_policy_phaser_npc_at(
 
 fn wide_bank(id: &str, facing_deg: f32) -> crate::entities::config::PhaserBankConfig {
     crate::entities::config::PhaserBankConfig {
+        operation: Default::default(),
         impact: phoenix_model::damage::DamageProfile::default(),
         id: id.into(),
         facing_deg,
@@ -16022,6 +16034,7 @@ fn restraint_is_explicit_and_independent_of_system_group_or_intake() {
 /// the shipped hold-to-fire bank and authors `power_group = "weapons"`.
 fn cold_gate_blaster_bank() -> crate::weapons::blaster::BlasterBankConfig {
     crate::weapons::blaster::BlasterBankConfig {
+        rounds: None,
         impact: phoenix_model::damage::DamageProfile::default(),
         id: "fore".into(),
         facing_deg: 0.0,
@@ -16504,6 +16517,7 @@ fn blaster_bank_idle_policy_holds_fire() {
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    rounds: None,
                     impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
@@ -16599,6 +16613,7 @@ console = "tactical"
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    rounds: None,
                     impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
@@ -17512,6 +17527,7 @@ fn blaster_hit_does_zero_damage_to_local_ship_under_god_mode() {
 
     let mut bank =
         crate::weapons::blaster::BlasterSystem::new(crate::weapons::blaster::BlasterBankConfig {
+            rounds: None,
             impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore".into(),
             facing_deg: 0.0,

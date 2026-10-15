@@ -82,3 +82,7 @@ describe('closed physical fitting authoring', () => {
     expect(draft.read(path)).toBe(source);
   });
 });
+
+it('refuses empty or null portable operation while omitted operation stays fixed', () => {
+  for(const mode of ['',null]) { const {value,profile}=fittingFixture();profile.equipment[1].hardware.operation=mode;expect(()=>validateFitting(profile,value)).toThrow(/beam|hardware/); }
+});

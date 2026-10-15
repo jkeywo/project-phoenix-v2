@@ -171,6 +171,11 @@ impl CompiledFitting {
             match &equipment.hardware {
                 EquipmentHardware::Beam(h) => {
                     h.impact.validate()?;
+                    if h.operation == phoenix_model::weapon_operation::BeamOperation::Sustained
+                        && h.cycle_jitter != 0.0
+                    {
+                        return Err("sustained beam hardware has no fixed-cycle jitter".into());
+                    }
                     if ![
                         h.beam_range,
                         h.auto_arc_deg,
@@ -322,6 +327,7 @@ impl CompiledFitting {
                     .find(|c| c.system == slot.system)
                     .ok_or("beam reserve is absent")?;
                 EquipmentHardware::Beam(BeamHardware {
+                    operation: bank.operation,
                     beam_range: bank.beam_range,
                     auto_arc_deg: bank.auto_arc_deg,
                     beam_damage_per_sec: bank.beam_damage_per_sec,
@@ -372,6 +378,7 @@ impl CompiledFitting {
                         })
                         .ok_or("beam strategy missing")?;
                     bank.beam_range = h.beam_range;
+                    bank.operation = h.operation;
                     bank.auto_arc_deg = h.auto_arc_deg;
                     bank.beam_damage_per_sec = h.beam_damage_per_sec;
                     bank.beam_duration_secs = h.beam_duration_secs;

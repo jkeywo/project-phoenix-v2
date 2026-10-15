@@ -50,9 +50,13 @@ export function mountWorkshopFitting({ root, provider, runtime, draft: getDraft,
     definitionId.value = record.id; definitionInterface.value = record.interface; definitionSize.value = record.size; storage.value = record.storage_space;
     workClass.value = record.work.class; workSecs.value = record.work.work_secs; manual.value = record.work.manual_work_fraction;
     hardware.replaceChildren(el('legend', 'hardware')); hardwareInputs = new Map();
-    if (record.hardware) for (const [key, amount] of Object.entries(record.hardware)) {
+    if (record.hardware) for (const [key, amount] of Object.entries(record.hardware.kind === 'beam' ? { operation: 'fixed', ...record.hardware } : record.hardware)) {
       if (key === 'kind') { hardware.dataset.kind = amount; continue; }
-      if (key === 'impact') {
+      if (key === 'operation') {
+        const control = select('beam-operation');
+        for (const value of ['fixed','sustained']) { const option = el('option'); option.value = value; option.textContent = t('workshop.weapon.operation.' + value); control.append(option); }
+        control.value = amount; hardwareInputs.set(key, control); hardware.append(label(control, 'workshop.weapon.operation'));
+      } else if (key === 'impact') {
         const type = select('damage-type'), penetration = input('penetration', 'number'); fill(type, ['laser', 'physical'], amount.damage_type); penetration.value = amount.penetration;
         const emp = input('emp-enabled', 'checkbox'), duration = input('emp-duration', 'number'); emp.checked = !!amount.emp; duration.value = amount.emp?.duration_secs ?? 6; duration.disabled = !emp.checked;
         emp.addEventListener('change', () => { duration.disabled = !emp.checked; });
@@ -103,7 +107,7 @@ export function mountWorkshopFitting({ root, provider, runtime, draft: getDraft,
   const removeSlot = button('remove-slot', () => { const next = profile(); next.slot = next.slot.filter(row => row.id !== slots.value); next.assembly = next.assembly.filter(item => item.location.kind !== 'installed' || item.location.slot !== slots.value); void apply(next); });
   const saveDefinition = button('save-definition', () => { const next = profile(), values = { kind: hardware.dataset.kind };
     for (const [key, control] of hardwareInputs) values[key] = key === 'impact' ? { damage_type: control.type.value, penetration: control.penetration.valueAsNumber,
-      ...(control.emp.checked ? { emp: { duration_secs: control.duration.valueAsNumber } } : {}) } : control.valueAsNumber;
+      ...(control.emp.checked ? { emp: { duration_secs: control.duration.valueAsNumber } } : {}) } : key === 'operation' ? control.value : control.valueAsNumber;
     const row = { id: definitionId.value, interface: definitionInterface.value, size: definitionSize.valueAsNumber, storage_space: storage.valueAsNumber,
       work: { class: workClass.value, work_secs: workSecs.valueAsNumber, manual_work_fraction: manual.valueAsNumber,
         requirements: requirementRows.map(part => ({ resource: part.resource.value, service: part.service.value, amount: part.amount.valueAsNumber })) }, hardware: values };

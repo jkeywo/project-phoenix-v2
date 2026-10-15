@@ -24,7 +24,7 @@ export function fittingHardware(value, system) {
   const consumer = value.energy?.consumer?.find(row => row.system === system.id);
   if ((!generic && !legacy) || !consumer) throw new Error('Choose an actual beam bank with a canonical local reserve.');
   const bank = generic?.delivery || legacy;
-  return { kind: 'beam', beam_range: generic?.mount.range ?? bank.beam_range, auto_arc_deg: bank.auto_arc_deg,
+  return { kind: 'beam', operation: bank.operation ?? 'fixed', beam_range: generic?.mount.range ?? bank.beam_range, auto_arc_deg: bank.auto_arc_deg,
     beam_damage_per_sec: bank.damage_per_sec ?? bank.beam_damage_per_sec, beam_duration_secs: bank.duration_secs ?? bank.beam_duration_secs,
     cooldown_secs: bank.cooldown_secs, cycle_jitter: bank.cycle_jitter ?? 0, shield_pierce: bank.shield_pierce ?? 0,
     impact: structuredClone(generic?.impact || bank.impact), continuous_cost_per_sec: consumer.continuous_cost_per_sec };
@@ -35,9 +35,10 @@ export function inspectFitting(draft, dependencies, path) {
     rooms: value.interior?.compartment || [], services: value.resource_services || {} };
 }
 const compatible = (slot, equipment) => equipment.hardware.kind === slot.family && equipment.interface === slot.interface && equipment.size <= slot.size;
-const sameHardware = (left, right) => Object.keys(left).length === Object.keys(right).length && Object.keys(left).every(key => typeof left[key] === 'number'
+const sameHardware = (left, right) => { if (left.kind === 'beam') { left = { operation: 'fixed', ...left }; right = { operation: 'fixed', ...right }; }
+  return Object.keys(left).length === Object.keys(right).length && Object.keys(left).every(key => typeof left[key] === 'number'
   ? Math.fround(left[key]) === Math.fround(right[key]) : key === 'impact' ? left.impact?.damage_type === right.impact?.damage_type && Math.fround(left.impact?.penetration) === Math.fround(right.impact?.penetration)
-    && !!left.impact?.emp === !!right.impact?.emp && (!left.impact?.emp || Math.fround(left.impact.emp.duration_secs) === Math.fround(right.impact.emp.duration_secs)) : left[key] === right[key]);
+    && !!left.impact?.emp === !!right.impact?.emp && (!left.impact?.emp || Math.fround(left.impact.emp.duration_secs) === Math.fround(right.impact.emp.duration_secs)) : left[key] === right[key]); };
 
 export function validateFitting(profile, value) {
   if (!closed(profile, ['slot', 'equipment', 'locker', 'assembly'])) throw new Error('Fitting supports only slots, equipment, lockers and actual assemblies.');
@@ -72,7 +73,8 @@ export function validateFitting(profile, value) {
       requirements.add(key);
     }
     if (hardware?.kind === 'beam') {
-      if (!closed(hardware, ['kind', 'beam_range', 'auto_arc_deg', 'beam_damage_per_sec', 'beam_duration_secs', 'cooldown_secs', 'cycle_jitter', 'shield_pierce', 'impact', 'continuous_cost_per_sec'])
+      if (!closed(hardware, ['kind', 'operation', 'beam_range', 'auto_arc_deg', 'beam_damage_per_sec', 'beam_duration_secs', 'cooldown_secs', 'cycle_jitter', 'shield_pierce', 'impact', 'continuous_cost_per_sec'])
+        || !['fixed','sustained'].includes(hardware.operation === undefined ? 'fixed' : hardware.operation) || hardware.operation === 'sustained' && hardware.cycle_jitter !== 0
         || !['beam_range', 'auto_arc_deg', 'beam_damage_per_sec', 'beam_duration_secs'].every(key => positive(hardware[key]))
         || !['cooldown_secs', 'continuous_cost_per_sec'].every(key => finite(hardware[key])) || !finite(hardware.cycle_jitter) || Math.fround(hardware.cycle_jitter) >= 1
         || !finite(hardware.shield_pierce) || hardware.shield_pierce > 1 || !closed(hardware.impact, ['damage_type', 'penetration', 'emp'])

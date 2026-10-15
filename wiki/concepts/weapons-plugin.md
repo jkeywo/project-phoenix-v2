@@ -2,7 +2,7 @@
 title: WeaponsPlugin
 type: concept
 tags: [weapons, tactical, phaser, torpedo, blaster, targeting, ai]
-sources: [crates/phoenix-model/src/turret.rs, crates/phoenix-sim-gameplay/src/weapons/turret.rs, crates/phoenix-simulation/src/weapons/mounts.rs, crates/phoenix-simulation/src/snapshot/mounts.rs, crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-sim-gameplay/src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/weapons/, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml, crates/phoenix-sim-gameplay/src/console/weapons/beam.rs, crates/phoenix-sim-gameplay/src/ship/damage.rs]
+sources: [crates/phoenix-model/src/weapon_operation.rs, crates/phoenix-sim-gameplay/src/weapons/operation.rs, crates/phoenix-model/src/turret.rs, crates/phoenix-sim-gameplay/src/weapons/turret.rs, crates/phoenix-simulation/src/weapons/mounts.rs, crates/phoenix-simulation/src/snapshot/mounts.rs, crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-sim-gameplay/src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/weapons/, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml, crates/phoenix-sim-gameplay/src/console/weapons/beam.rs, crates/phoenix-sim-gameplay/src/ship/damage.rs]
 updated: 2026-10-15
 ---
 
@@ -37,6 +37,22 @@ common barrel planning. The beam, bolt and guided adapters consume those
 mechanisms without changing their cycle state, impact-facing policies or
 admitted command vocabulary. `entities/config/weapon_definition.rs` compiles
 the common authored form into the same strategy parameters at content load.
+
+The closed weapon configuration now supports `BeamOperation::Fixed` (default)
+and `Sustained`, carried by portable beam hardware and the existing active beam
+slot. The pure `beam_work_seconds` helper bounds fixed work by remaining duration
+and sustained work by the real tick. Sustained configuration rejects fixed-cycle
+jitter. Simulation launch/stop and continuation joins remain the integrator's
+pending executor work at this source checkpoint.
+
+Optional bolt `rounds` references the bank's actual same-room Local Capacity
+store. Gameplay `weapons/operation.rs` reserves rounds before the caller stages
+Power, then consumes or releases that exact claim. `tick_with_work` calls admission
+with each actual barrel index, skipping unavailable or refused listed barrels;
+a due attempted step advances even if none fires. Missing origins do not borrow
+another barrel. `recoil_delta` returns the opposite world XZ impulse. These
+helpers keep quantities in the existing Stock owner.
+
 
 `phoenix-model/src/turret.rs` describes the bounded `Turret` System component.
 Gameplay `weapons/turret.rs` owns finite sector traversal and actual bearing;

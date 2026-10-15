@@ -2,6 +2,7 @@ use super::*;
 
 fn make_system() -> BlasterSystem {
     BlasterSystem::new(BlasterBankConfig {
+        rounds: None,
         impact: phoenix_model::damage::DamageProfile::default(),
         id: "fore".to_string(),
         facing_deg: 0.0,
@@ -1233,12 +1234,18 @@ fn bank_state_includes_charge_progress_and_has_charge() {
 }
 
 #[test]
-fn paid_pattern_step_waits_atomically_without_minting_or_losing_cadence() {
+fn best_effort_pattern_skips_unfunded_listed_barrels_without_minting_or_substitution() {
     let mut sys = make_system();
-    sys.config.pattern = vec![crate::weapons::pattern::BarrelPatternStep {
-        barrels: vec![0, 1],
-        offset_secs: 0.0,
-    }];
+    sys.config.pattern = vec![
+        crate::weapons::pattern::BarrelPatternStep {
+            barrels: vec![0, 1],
+            offset_secs: 0.0,
+        },
+        crate::weapons::pattern::BarrelPatternStep {
+            barrels: vec![1],
+            offset_secs: 0.2,
+        },
+    ];
     assert!(sys.request_charge_start());
     let mut minted = 0;
     let mut requested = Vec::new();
@@ -1262,12 +1269,12 @@ fn paid_pattern_step_waits_atomically_without_minting_or_losing_cadence() {
         },
     );
     assert!(denied.is_empty());
-    assert_eq!(requested, vec![2]);
+    assert_eq!(requested, vec![0, 1]);
     assert_eq!(minted, 0);
-    assert_eq!(sys.volley.next_step, 0);
+    assert_eq!(sys.volley.next_step, 1);
     assert_eq!(
-        sys.volley.volley_elapsed, 0.0,
-        "starvation must not compress later steps"
+        sys.volley.volley_elapsed, 0.1,
+        "an attempted step advances without borrowing another barrel"
     );
     assert!(!sys.volley.on_cooldown);
     let events = sys.tick_with_work(
@@ -1280,8 +1287,8 @@ fn paid_pattern_step_waits_atomically_without_minting_or_losing_cadence() {
         0.0,
         0.0,
         "source",
-        &mut |count| {
-            assert_eq!(count, 2);
+        &mut |barrel| {
+            assert_eq!(barrel, 1);
             true
         },
         &mut || {
@@ -1289,9 +1296,65 @@ fn paid_pattern_step_waits_atomically_without_minting_or_losing_cadence() {
             format!("p{minted}")
         },
     );
-    assert_eq!(events.len(), 2);
-    assert_eq!(minted, 2);
-    assert_eq!((events[0].x, events[1].x), (1.0, 3.0));
+    assert_eq!(events.len(), 1);
+    assert_eq!(minted, 1);
+    assert_eq!(events[0].barrel, 1);
+    assert_eq!(events[0].x, 3.0);
+    assert!(sys.volley.on_cooldown);
+}
+
+#[test]
+fn listed_barrels_use_real_round_claims_and_missing_origins_never_borrow_another_mount() {
+    use crate::resources::Stock;
+    use crate::weapons::operation::{claim_rounds, finish_rounds, WeaponRoundFeed};
+    let mut sys = make_system();
+    sys.config.pattern = vec![crate::weapons::pattern::BarrelPatternStep {
+        barrels: vec![2, 0, 1],
+        offset_secs: 0.0,
+    }];
+    assert!(sys.request_charge_start());
+    let mut stock = Stock::new(2, 6).unwrap();
+    stock.reserve("loader-other", 1).unwrap();
+    let feed = WeaponRoundFeed {
+        store: "side-rounds".into(),
+        amount: 1,
+    };
+    let mut attempts = Vec::new();
+    let mut minted = 0;
+    let events = sys.tick_with_work(
+        0.1,
+        0.0,
+        &[(1.0, 0.0), (3.0, 0.0)],
+        0.0,
+        0.0,
+        -10.0,
+        0.0,
+        0.0,
+        "source",
+        &mut |barrel| {
+            attempts.push(barrel);
+            let claim = format!("actual-barrel-{barrel}");
+            if !claim_rounds(&mut stock, &feed, &claim).unwrap() {
+                return false;
+            }
+            finish_rounds(&mut stock, &feed, &claim, true).unwrap()
+        },
+        &mut || {
+            minted += 1;
+            format!("actual-{minted}")
+        },
+    );
+    assert_eq!(
+        attempts,
+        vec![0, 1],
+        "absent barrel2 has no substituted origin or resource call"
+    );
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].barrel, 0);
+    assert_eq!(events[0].x, 1.0);
+    assert_eq!(minted, 1);
+    assert_eq!(stock.level, 1);
+    assert_eq!(stock.reserved["loader-other"], 1);
     assert!(sys.volley.on_cooldown);
 }
 

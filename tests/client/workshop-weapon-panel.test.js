@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi } from 'vitest';
-import { parse } from 'smol-toml';
+import { parse, stringify } from 'smol-toml';
 import { createStoreZip } from '../../editor/mod-pack-export.js';
 import { WorkshopDocument } from '../../editor/workshop-document.js';
 import { damageFixture } from '../../editor/tests/damage-fixture.js';
@@ -49,4 +49,21 @@ describe('Workshop configurable weapon form', () => {
     control('step-barrels-1').value = '9'; control('save').click(); await settle();
     expect(current.read(path)).toBe(before); expect(control('status').textContent).toContain('barrel out of range'); panel.dispose();
   });
+});
+
+it('authors sustained mode without jitter and preserves finite rounds through the real form', async () => {
+  const {current,panel}=fixture(); await settle();
+  control('operation').value='sustained'; control('operation').dispatchEvent(new Event('change'));
+  expect(control('parameter-duration_secs').disabled).toBe(true); expect(control('parameter-cycle_jitter').disabled).toBe(true);
+  control('save').click(); await settle();
+  expect(parse(current.read(path)).weapon[0].delivery).toMatchObject({operation:'sustained',cycle_jitter:0});
+  current.undo();panel.refresh();expect(control('operation').value).toBe('fixed');panel.dispose();
+  const fs=await import('node:fs'), {resolveTemplate}=await import('../../editor/entity-includes.js');
+  const actual=resolveTemplate('assets/entities/broadside_cruiser.toml',{read:file=>fs.existsSync(file)?fs.readFileSync(file,'utf8'):null},parse).resolved.value;
+  const f=fixture(stringify(actual));await settle();
+  control('existing').value=String(actual.weapon.findIndex(row=>row.id==='blaster-side'));control('existing').dispatchEvent(new Event('change'));
+  expect(control('round-store').value).toBe('local-kinetic-rounds');expect(control('rounds-enabled').checked).toBe(true);
+  control('range').value='34';control('save').click();await settle();expect(parse(f.current.read(path)).weapon.find(row=>row.id==='blaster-side').delivery.rounds).toEqual({store:'local-kinetic-rounds',amount:1});
+  control('rounds-enabled').checked=false;control('rounds-enabled').dispatchEvent(new Event('change'));control('save').click();await settle();expect(parse(f.current.read(path)).weapon.find(row=>row.id==='blaster-side').delivery.rounds).toBeUndefined();
+  f.current.undo();f.panel.refresh();expect(control('rounds-enabled').checked).toBe(true);f.panel.dispose();
 });

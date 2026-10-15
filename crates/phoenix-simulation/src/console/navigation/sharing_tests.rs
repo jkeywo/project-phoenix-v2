@@ -161,12 +161,10 @@ fn actual_radio_offline_and_jamming_pause_delivery_without_renewing_sample_time(
         .set_offline(radio, false);
     step(&mut app);
     let original = received(&app, receiver);
-    assert!(
-        original
-            .iter()
-            .any(|sample| sample.kind == NavigationSharedKind::Waypoint
-                && sample.provenance.observed_tick == 0)
-    );
+    assert!(original
+        .iter()
+        .any(|sample| sample.kind == NavigationSharedKind::Waypoint
+            && sample.provenance.observed_tick == 0));
     let source = crate::core::messages::ModifierSource::RegionEffect {
         uuid: uuid::Uuid::from_u128(77),
     };
@@ -190,13 +188,11 @@ fn actual_radio_offline_and_jamming_pause_delivery_without_renewing_sample_time(
         .unwrap()
         .remove_flag(source, crate::core::messages::FlagKind::CommsJammed);
     step(&mut app);
-    assert!(
-        received(&app, receiver)
-            .iter()
-            .any(|sample| sample.kind == NavigationSharedKind::Waypoint
-                && sample.position == [15.0, 16.0]
-                && sample.provenance.observed_tick == 2)
-    );
+    assert!(received(&app, receiver)
+        .iter()
+        .any(|sample| sample.kind == NavigationSharedKind::Waypoint
+            && sample.position == [15.0, 16.0]
+            && sample.provenance.observed_tick == 2));
 }
 
 #[test]
@@ -266,12 +262,10 @@ fn normal_paid_waypoint_and_explicit_sharing_never_replace_recipient_course_or_c
             .unwrap()
             .clone();
         let first = received(&app, receiver);
-        assert!(
-            first
-                .iter()
-                .any(|sample| sample.kind == NavigationSharedKind::Waypoint
-                    && sample.position == [50.0, 60.0])
-        );
+        assert!(first
+            .iter()
+            .any(|sample| sample.kind == NavigationSharedKind::Waypoint
+                && sample.position == [50.0, 60.0]));
         step(&mut app);
         assert_eq!(received(&app, receiver), first);
         assert_eq!(
@@ -313,11 +307,9 @@ fn only_explicit_public_chart_and_permitted_anchor_geometry_enter_the_shared_vie
     assert_eq!(first.len(), 1);
     assert!(matches!(&first[0].kind,NavigationSharedKind::Landmark {id,..} if id=="public-planet"));
     assert!(!serde_json::to_string(&first).unwrap().contains("SECRET"));
-    assert!(
-        !serde_json::to_string(&first)
-            .unwrap()
-            .contains("private-actor")
-    );
+    assert!(!serde_json::to_string(&first)
+        .unwrap()
+        .contains("private-actor"));
     order(
         &mut app,
         sender,
@@ -328,12 +320,10 @@ fn only_explicit_public_chart_and_permitted_anchor_geometry_enter_the_shared_vie
         },
     );
     step(&mut app);
-    assert!(
-        received(&app, receiver)
-            .iter()
-            .any(|sample| sample.kind == NavigationSharedKind::Waypoint
-                && sample.position == [40.0, 0.0])
-    );
+    assert!(received(&app, receiver)
+        .iter()
+        .any(|sample| sample.kind == NavigationSharedKind::Waypoint
+            && sample.position == [40.0, 0.0]));
 }
 #[test]
 fn actual_link_loss_retains_fixed_history_without_refresh_and_json_keeps_receipt_frontier() {

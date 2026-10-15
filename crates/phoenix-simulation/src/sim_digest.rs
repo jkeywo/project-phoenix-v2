@@ -471,6 +471,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("recorded-scans", fold_recorded_scans_namespace),
     ("passive-samples", fold_passive_samples_namespace),
     ("broad-tracks", fold_broad_tracks_namespace),
+    ("navigation-sharing", fold_navigation_sharing_namespace),
 ];
 
 /// The running accumulator after each named stage of the fold.
@@ -2654,6 +2655,32 @@ fn fold_broad_tracks_namespace(world: &World, acc: u64) -> u64 {
                 }
             }
             Some(owners)
+        },
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+
+fn fold_navigation_sharing_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "navigation-sharing",
+        |owner: &crate::console::navigation::sharing::NavigationSharing| {
+            let mut state = owner.0.clone();
+            let canonical = |value| f32::from_bits(canon_f32(value));
+            for observation in state.local.values_mut().chain(
+                state
+                    .received
+                    .values_mut()
+                    .map(|entry| &mut entry.observation),
+            ) {
+                observation.position = observation.position.map(canonical);
+                observation.provenance.observer_position = observation
+                    .provenance
+                    .observer_position
+                    .map(|position| position.map(canonical));
+            }
+            Some(state)
         },
         |acc, state| fold_serde(acc, &state),
     )

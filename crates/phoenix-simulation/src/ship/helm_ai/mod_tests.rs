@@ -36,6 +36,8 @@ fn test_app() -> App {
                 navigation_waypoint: None,
                 civilians: vec![],
                 host_station: None,
+                sharing: None,
+                received_chart: Vec::new(),
             },
         ),
     );

@@ -1436,6 +1436,9 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                     broad: entity
                         .get::<crate::science::broad::BroadTracks>()
                         .map(|tracks| tracks.0.clone()),
+                    navigation_sharing: entity
+                        .get::<crate::console::navigation::sharing::NavigationSharing>()
+                        .map(|owner| owner.0.clone()),
                     fitting: entity
                         .get::<crate::resources::fitting_server::ShipFitting>()
                         .cloned(),

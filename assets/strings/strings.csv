@@ -5781,7 +5781,6 @@ component.scan.effect.sensor_blind,Measured effect signature,Sensor interference
 component.scan.effect.nebula_fog,Measured effect signature,Visual obscuration,Sichtbehinderung,Visual obscuration,machine
 workshop.sensing.default-aim,Focused scanner authoring,Default question,Standardfrage,Default question,machine
 workshop.sensing.forecast,Focused scanner authoring,Enable observed-trend forecast,Prognose aus beobachtetem Verlauf aktivieren,Enable observed-trend forecast,machine
-workshop.sensing.forecast-horizon,Focused scanner authoring,Forecast horizon in seconds,Prognosehorizont in Sekunden,Forecast horizon in seconds,machine
 workshop.sensing.aim-enabled,Focused scanner authoring,Support this question,Diese Frage unterstützen,Support this question,machine
 workshop.sensing.aim-work,Focused scanner authoring,Relative work duration,Relative Arbeitsdauer,Relative work duration,machine
 workshop.sensing.aim-cost,Focused scanner authoring,Relative resource use,Relativer Ressourcenverbrauch,Relative resource use,machine

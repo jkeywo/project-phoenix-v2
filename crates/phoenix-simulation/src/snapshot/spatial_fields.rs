@@ -59,6 +59,7 @@ pub(super) fn validate_roster(
             }
         }
         if (row.region_field.is_some()
+            || row.navigation_sharing.is_some()
             || row.broad.is_some()
             || row.scan.is_some()
             || row.passive.is_some())
@@ -106,6 +107,41 @@ pub(super) fn validate_roster(
                     .iter(world)
                     .find_map(|(entity, uuid)| (uuid.0 == row.uuid).then_some(entity))
             });
+        let navigation_owner = if let Some(entity) = live {
+            world
+                .get::<crate::console::navigation::sharing::NavigationSharingProfile>(entity)
+                .map(|profile| profile.owner.clone())
+        } else if let Some(origin) = &row.spawn {
+            let config = origin
+                .resolve(
+                    &crate::entities::loader::WasmTemplateLoader,
+                    &mut Vec::new(),
+                )
+                .ok_or_else(|| {
+                    (
+                        row.uuid.clone(),
+                        "cannot resolve saved Navigation capability".into(),
+                    )
+                })?;
+            config
+                .navigation_console
+                .and_then(|nav| nav.sharing)
+                .map(|sharing| sharing.system)
+        } else {
+            None
+        };
+        match (&navigation_owner, &row.navigation_sharing) {
+            (None, None) => {}
+            (Some(owner), Some(saved)) => saved
+                .validate_owner(&row.uuid, owner, snapshot.tick)
+                .map_err(|reason| (row.uuid.clone(), reason))?,
+            _ => {
+                return Err((
+                    row.uuid.clone(),
+                    "saved Navigation sharing disagrees with accepted equipment".into(),
+                ))
+            }
+        }
         let expected = if let Some(entity) = live {
             world
                 .get::<crate::regions::field::RegionFieldState>(entity)

@@ -8,6 +8,10 @@ use super::*;
 /// Keyed by the uuid string, never by an ECS handle — see the module docs.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EntityState {
+    /// Navigation's deliberate received fixed-point history and source dating.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub navigation_sharing:
+        Option<phoenix_sim_gameplay::science::navigation_sharing::NavigationSharingState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub broad: Option<std::collections::BTreeMap<SystemId, crate::science::broad::BroadTrackState>>,
     pub uuid: String,

@@ -450,6 +450,16 @@ pub(super) fn validate_entity_resources(
 ) -> Result<(), String> {
     super::fitting::validate_entity(world, entity, row)?;
     match (
+        world.get::<crate::console::navigation::sharing::NavigationSharingProfile>(entity),
+        &row.navigation_sharing,
+    ) {
+        (None, None) => {}
+        (Some(accepted), Some(saved)) => {
+            saved.validate_owner(&row.uuid, &accepted.owner, u64::MAX)?
+        }
+        _ => return Err("saved Navigation sharing disagrees with accepted equipment".into()),
+    }
+    match (
         world.get::<crate::science::broad::BroadProfile>(entity),
         &row.broad,
     ) {

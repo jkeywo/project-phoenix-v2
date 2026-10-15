@@ -768,7 +768,7 @@ export const ACTION_MAP = Object.freeze({
     const correlated = typeof a.correlation === 'string' && a.correlation;
     send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
       ...(correlated ? { correlation: a.correlation } : {}),
-      target: 'navigation',
+      target: controlSystemId(a, 'navigation'),
       payload: { type: 'ClearNavigationWaypoint' },
     });
   },
@@ -811,7 +811,7 @@ export const ACTION_MAP = Object.freeze({
     const correlated = typeof a.correlation === 'string' && a.correlation;
     send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
       ...(correlated ? { correlation: a.correlation } : {}),
-      target: 'navigation',
+      target: controlSystemId(a, 'navigation'),
       payload: { type: 'OrderCivilian', data: { target: a.target, order } },
     });
   },

@@ -175,6 +175,8 @@ pub fn tick_civilian_traffic(
     mut order_sources: Query<(
         &AdmittedCommands,
         Option<&mut crate::ship::power::ShipPowerSystem>,
+        Option<&crate::ship_plugin::ShipConfigComponent>,
+        Option<&crate::console::navigation::sharing::NavigationSharingProfile>,
     )>,
     mut civilians: Query<(
         Entity,
@@ -213,11 +215,25 @@ pub fn tick_civilian_traffic(
     let mut queued: Vec<PendingCivilianOrder> = std::mem::take(&mut civilian_orders_queue.0);
     let mut rejections: Vec<(String, String, String, Option<ActionCorrelationId>)> = Vec::new();
     let mut accepted_feedback: Vec<(String, String, ActionCorrelationId)> = Vec::new();
-    for (admitted, mut power) in order_sources.iter_mut() {
-        for cmd in admitted.for_target(crate::ship::system_registry::NAVIGATION_SYSTEM_ID) {
+    for (admitted, mut power, config, profile) in order_sources.iter_mut() {
+        let owner = crate::console::navigation::server::navigation_owner(config, profile);
+        for cmd in admitted.0.iter().filter(|command| {
+            crate::console::navigation::server::navigation_target(config, &command.target)
+        }) {
             let SystemControlPayload::OrderCivilian { target, order } = &cmd.payload else {
                 continue;
             };
+            if owner.as_ref() != Some(&cmd.target) {
+                if let Some(feedback) = crate::command_admission::feedback::admitted_action_feedback(
+                    cmd,
+                    ActionFeedbackOutcome::Refused,
+                ) {
+                    if let Some(outbox) = outbox.as_deref_mut() {
+                        outbox.push_reliable((feedback.target, feedback.msg));
+                    }
+                }
+                continue;
+            }
             let token = cmd.response_token.clone().unwrap_or_default();
             if order.validate().is_err() {
                 rejections.push((
@@ -230,8 +246,15 @@ pub fn tick_civilian_traffic(
             }
             match resolve_civilian(&runtime, target).filter(|uuid| addressable.contains(uuid)) {
                 Some(uuid) => {
-                    if !power.as_deref_mut().is_some_and(|power| power.0.try_work_discrete(&crate::ship::system_registry::navigation_system_id()).unwrap_or(false)) {
-                        rejections.push((token, target.clone(), "civilian.order.rejected.insufficient_energy".into(), cmd.feedback_correlation.clone()));
+                    if !power.as_deref_mut().is_some_and(|power| {
+                        power.0.try_work_discrete(&cmd.target).unwrap_or(false)
+                    }) {
+                        rejections.push((
+                            token,
+                            target.clone(),
+                            "civilian.order.rejected.insufficient_energy".into(),
+                            cmd.feedback_correlation.clone(),
+                        ));
                         continue;
                     }
                     queued.push(PendingCivilianOrder {

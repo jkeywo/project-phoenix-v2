@@ -369,4 +369,6 @@ pub use materialization::LayerReconcileStatus;
 
 #[cfg(test)]
 mod mission_clock_tests;
+#[cfg(test)]
+mod navigation_sharing_tests;
 mod spatial_fields;

@@ -122,6 +122,11 @@ function finitePosition(value) {
     : null;
 }
 
+function addressed(view, args) {
+  return typeof view.navigation_system_id === 'string' && view.navigation_system_id
+    ? { ...args, control_system_id: view.navigation_system_id } : args;
+}
+
 function surfaceFor(provided, getSurface) {
   return provided || (typeof getSurface === 'function' ? getSurface() : null);
 }
@@ -193,13 +198,13 @@ export function registerNavigationActions(registry, options = {}) {
     actionId, correlation, inputMs, detail, surface,
   } = {}) => {
     const view = navigationActionView(getState());
-    if (!view || view.navigation_auto) return false;
+    if (!view || view.navigation_auto || view.navigation_controllable === false) return false;
     const owner = surfaceFor(surface, getSurface);
     const position = finitePosition(detail)
       || (owner && typeof owner.navigationPlacement === 'function'
         ? finitePosition(owner.navigationPlacement()) : null);
     return position
-      ? send(actionId, correlation, inputMs, 'set_navigation_waypoint', position)
+      ? send(actionId, correlation, inputMs, 'set_navigation_waypoint', addressed(view, position))
       : false;
   });
 
@@ -207,18 +212,18 @@ export function registerNavigationActions(registry, options = {}) {
     actionId, correlation, inputMs, detail, surface,
   } = {}) => {
     const view = navigationActionView(getState());
-    if (!view || view.navigation_auto) return false;
+    if (!view || view.navigation_auto || view.navigation_controllable === false) return false;
     const waypoint = anchoredWaypoint(view, surfaceFor(surface, getSurface), detail);
     return waypoint
-      ? send(actionId, correlation, inputMs, 'set_navigation_waypoint', waypoint)
+      ? send(actionId, correlation, inputMs, 'set_navigation_waypoint', addressed(view, waypoint))
       : false;
   });
 
   registry.register(NAVIGATION_ACTIONS[3], ({ actionId, correlation, inputMs } = {}) => {
     const view = navigationActionView(getState());
     const owner = surfaceFor(null, getSurface);
-    if (!view || view.navigation_auto || !view.waypoint || !owner) return false;
-    return send(actionId, correlation, inputMs, 'clear_navigation_waypoint', {});
+    if (!view || view.navigation_auto || view.navigation_controllable === false || !view.waypoint || !owner) return false;
+    return send(actionId, correlation, inputMs, 'clear_navigation_waypoint', addressed(view, {}));
   });
 
   registry.register(NAVIGATION_ACTIONS[4], ({ detail, surface, settleFeedback } = {}) => {
@@ -234,12 +239,12 @@ export function registerNavigationActions(registry, options = {}) {
     actionId, correlation, inputMs, detail,
   } = {}) => {
     const view = navigationActionView(getState());
-    if (!supportsCivilianOrders || !view || view.navigation_auto) return false;
+    if (!supportsCivilianOrders || !view || view.navigation_auto || view.navigation_controllable === false) return false;
     const available = civilianOrders(view);
     const requested = detail && available.find((entry) => sameCivilianOrder(entry, detail));
     const order = detail ? requested : available[0];
     return order
-      ? send(actionId, correlation, inputMs, 'order_civilian', order)
+      ? send(actionId, correlation, inputMs, 'order_civilian', addressed(view, order))
       : false;
   });
 

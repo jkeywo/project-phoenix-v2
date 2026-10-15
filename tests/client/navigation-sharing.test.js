@@ -10,6 +10,23 @@ const sample=(id='original',position=[5,8])=>({provenance:{sample_id:id,origin:{
 const state=()=>({radar_sharing:[owner()],received_chart:[sample()],navigation_auto:false});
 beforeEach(()=>{document.body.innerHTML='';window.activateSemanticAction=vi.fn();});
 describe('actual Navigation sharing',()=>{
+  it('routes ordinary custom Navigation waypoint, clear and traffic commands through the same owner',()=>{
+    let view={...state(),navigation_system_id:'custom-navigation',navigation_controllable:true,
+      waypoint:{x:5,z:8},civilians:[{uuid:'traffic',order_options:[{order:{verb:'hold'}}]}]};
+    let next=0;const sent=vi.fn(),registry=createNavigationActionRegistry({getState:()=>view,getSurface:()=>({}),sendAction:sent,
+      actionFeedback:new ActionFeedbackLifecycle({correlation:()=>`custom-nav-${++next}`})});
+    registry.activate('navigation.waypoint-place',{context:'navigation',detail:{x:1,z:2}});
+    registry.activate('navigation.waypoint-clear',{context:'navigation'});
+    registry.activate('navigation.civilian-order',{context:'navigation',detail:{target:'traffic',verb:'hold'}});
+    expect(sent.mock.calls.map(([,args])=>args.control_system_id)).toEqual(['custom-navigation','custom-navigation','custom-navigation']);
+    const wire=vi.fn();for(const[name,args]of sent.mock.calls)ACTION_MAP[name](args,wire);
+    expect(wire.mock.calls.map(([,args])=>args.target)).toEqual(['custom-navigation','custom-navigation','custom-navigation']);
+    sent.mockClear();view={...view,navigation_controllable:false};
+    registry.activate('navigation.waypoint-place',{context:'navigation',detail:{x:1,z:2}});
+    registry.activate('navigation.waypoint-clear',{context:'navigation'});
+    registry.activate('navigation.civilian-order',{context:'navigation',detail:{target:'traffic',verb:'hold'}});
+    expect(sent).not.toHaveBeenCalled();
+  });
   it('applies only an explicitly chosen held fixed point through the exact owned normal command',()=>{
     let view=state(),next=0;const sent=vi.fn(),registry=createNavigationActionRegistry({getState:()=>view,sendAction:sent,actionFeedback:new ActionFeedbackLifecycle({correlation:()=>`nav-share-${++next}`})});
     const options={context:'navigation',detail:{owner:'custom-navigation',sample_id:'original'}};

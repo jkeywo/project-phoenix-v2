@@ -107,6 +107,11 @@ measurement, with the original sample clock; a private live anchor cache grants
 no geometry. Received points preserve original provenance across relays and
 never replace the receiving course or Helm clearance. Applying a received point
 uses the ordinary owned, paid `SetNavigationWaypoint` path.
+The Navigation plugin installs the accepted owner and derived chart profile;
+snapshot preflight binds the saved intent/history to that owner and logical
+clock before writes. Capture, restore and the digest carry the same frontier.
+Custom Navigation IDs also own ordinary waypoint and traffic-order payment;
+accepted composition never falls back to an absent canonical ID.
 
 An observer's substituted Sensors reports enter that same instrument-owned track
 lifecycle. They retain the reported position, permitted label and original sample

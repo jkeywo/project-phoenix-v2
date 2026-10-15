@@ -964,6 +964,7 @@ impl EntityConfig {
         {
             projection.validate().map_err(SerdeError::custom)?;
         }
+        crate::science::navigation_sharing::validate_config(&config).map_err(SerdeError::custom)?;
         crate::resources::fitting::CompiledFitting::compile(&config).map_err(SerdeError::custom)?;
         crate::resources::logistics_profile::compile_entity_logistics(&config)
             .map_err(SerdeError::custom)?;

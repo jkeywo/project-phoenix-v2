@@ -1,3 +1,4 @@
+use super::sharing;
 use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
 use bevy::prelude::*;
 
@@ -9,6 +10,46 @@ use crate::core::messages::{
 use crate::ship::system_registry::NAVIGATION_SYSTEM_ID;
 
 pub struct NavigationPlugin;
+
+pub(crate) fn navigation_target(
+    config: Option<&crate::ship_plugin::ShipConfigComponent>,
+    target: &SystemId,
+) -> bool {
+    config.map_or(target.0 == NAVIGATION_SYSTEM_ID, |config| {
+        config
+            .0
+            .system(target)
+            .is_some_and(|system| system.kind == crate::ship::system_registry::NAVIGATION_KIND)
+    })
+}
+
+/// One actual Navigation owns the shared course. Accepted composition never
+/// falls back to a canonical spelling it does not contain. Bare old fixtures
+/// without composition retain their existing canonical address.
+pub(crate) fn navigation_owner(
+    config: Option<&crate::ship_plugin::ShipConfigComponent>,
+    profile: Option<&sharing::NavigationSharingProfile>,
+) -> Option<SystemId> {
+    if let Some(profile) = profile {
+        return config
+            .is_none_or(|config| {
+                config.0.system(&profile.owner).is_some_and(|system| {
+                    system.kind == crate::ship::system_registry::NAVIGATION_KIND
+                })
+            })
+            .then(|| profile.owner.clone());
+    }
+    let Some(config) = config else {
+        return Some(crate::ship::system_registry::navigation_system_id());
+    };
+    let mut owners = config
+        .0
+        .systems
+        .iter()
+        .filter(|system| system.kind == crate::ship::system_registry::NAVIGATION_KIND);
+    let owner = owners.next()?;
+    owners.next().is_none().then(|| owner.id.clone())
+}
 
 impl Plugin for NavigationPlugin {
     fn build(&self, app: &mut App) {
@@ -26,12 +67,10 @@ impl Plugin for NavigationPlugin {
         // Admitted-command consumer (issue #833): `handle_navigation_waypoint`
         // reads the `navigation` system's admitted commands.
         app.register_admitted_consumer(
-            ConsumerMatcher::exact(
-                crate::ship::system_registry::NAVIGATION_KIND,
-                NAVIGATION_SYSTEM_ID,
-            )
-            .with_feedback(
-                crate::command_admission::FeedbackAddress::MatcherSpelling,
+            ConsumerMatcher::kind(crate::ship::system_registry::NAVIGATION_KIND).with_feedback(
+                crate::command_admission::FeedbackAddress::DeclaredKindOrCanonical(
+                    NAVIGATION_SYSTEM_ID,
+                ),
                 &[
                     Payload::SetNavigationWaypoint,
                     Payload::ClearNavigationWaypoint,
@@ -39,6 +78,7 @@ impl Plugin for NavigationPlugin {
                 ],
             ),
         );
+        sharing::register(app);
         // The admitted-waypoint applier moves Input→Physics (issue #830):
         // `operate_navigation_ai` emits its `SetNavigationWaypoint` into
         // `AdmittedCommands` in Physics, and admission clears `AdmittedCommands`
@@ -131,26 +171,25 @@ pub fn operate_civilian_order_ai(
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::server_app::ShipSystemBlackboards,
             Option<&crate::ship_plugin::ShipConfigComponent>,
+            Option<&sharing::NavigationSharingProfile>,
             &mut crate::core::messages::AdmittedCommands,
         ),
         With<crate::server_app::LocalShip>,
     >,
 ) {
-    for (entity_uuid, sources, blackboards, ship_config, mut admitted) in ships.iter_mut() {
-        if !crate::ai::host::ai_operates(
-            &sources.0,
-            &crate::ship::system_registry::navigation_system_id(),
-        ) {
+    for (entity_uuid, sources, blackboards, ship_config, profile, mut admitted) in ships.iter_mut()
+    {
+        let Some(owner) = navigation_owner(ship_config, profile) else {
+            continue;
+        };
+        if !crate::ai::host::ai_operates(&sources.0, &owner) {
             continue;
         }
         let Some(crate::core::messages::SystemBlackboard::Viewscreen(view)) =
             ship_config.and_then(|config| {
                 config
                     .0
-                    .observations_for_system(
-                        &crate::ship::system_registry::navigation_system_id(),
-                        &blackboards.0,
-                    )
+                    .observations_for_system(&owner, &blackboards.0)
                     .get(&crate::ship::system_registry::viewscreen_system_id())
             })
         else {
@@ -190,7 +229,7 @@ pub fn operate_civilian_order_ai(
         if let Some((target, order)) = next {
             emit_ai_command(
                 entity_uuid,
-                crate::ship::system_registry::navigation_system_id(),
+                owner,
                 crate::core::messages::SystemControlPayload::OrderCivilian { target, order },
                 sources,
                 &sessions,
@@ -425,6 +464,7 @@ pub(super) fn handle_navigation_waypoint(
             &mut NavigationWaypoint,
             Option<&mut crate::ship::power::ShipPowerSystem>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
+            Option<&sharing::NavigationSharingProfile>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -432,14 +472,36 @@ pub(super) fn handle_navigation_waypoint(
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
 ) {
-    for (admitted, mut waypoint, mut power, config) in ship_query.iter_mut() {
-        for cmd in admitted.0.iter().filter(|command| config.map_or(command.target.0==NAVIGATION_SYSTEM_ID,|config|config.0.system(&command.target).is_some_and(|system|system.kind==crate::ship::system_registry::NAVIGATION_KIND))) {
+    for (admitted, mut waypoint, mut power, config, profile) in ship_query.iter_mut() {
+        let owner = navigation_owner(config, profile);
+        for cmd in admitted
+            .0
+            .iter()
+            .filter(|command| navigation_target(config, &command.target))
+        {
+            if !matches!(
+                cmd.payload,
+                SystemControlPayload::SetNavigationWaypoint { .. }
+                    | SystemControlPayload::ClearNavigationWaypoint
+            ) {
+                continue;
+            }
+            if owner.as_ref() != Some(&cmd.target) {
+                finish_waypoint_action_feedback(cmd, &mut outbound, ActionFeedbackOutcome::Refused);
+                continue;
+            }
             match &cmd.payload {
                 SystemControlPayload::SetNavigationWaypoint { x, z, source_uuid }
                     if x.is_finite() && z.is_finite() =>
                 {
-                    if !power.as_deref_mut().is_some_and(|power| power.0.try_work_discrete(&cmd.target).unwrap_or(false)) {
-                        finish_waypoint_action_feedback(cmd, &mut outbound, ActionFeedbackOutcome::Refused);
+                    if !power.as_deref_mut().is_some_and(|power| {
+                        power.0.try_work_discrete(&cmd.target).unwrap_or(false)
+                    }) {
+                        finish_waypoint_action_feedback(
+                            cmd,
+                            &mut outbound,
+                            ActionFeedbackOutcome::Refused,
+                        );
                         continue;
                     }
                     // Only the goal is written here. The Channel-3 `NavigateTo`
@@ -513,12 +575,18 @@ fn issue_navigate_to_clearance(
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::ship_plugin::ShipConfigComponent,
             Option<&crate::ship_plugin::HelmWaypointClearance>,
+            Option<&sharing::NavigationSharingProfile>,
         ),
         With<crate::server_app::Ship>,
     >,
     mut coordination_writer: MessageWriter<crate::ship_plugin::CoordinationEnqueue>,
 ) {
-    for (entity, waypoint, mut state, control_sources, ship_config, clearance) in ships.iter_mut() {
+    for (entity, waypoint, mut state, control_sources, ship_config, clearance, profile) in
+        ships.iter_mut()
+    {
+        let Some(navigation_owner) = navigation_owner(Some(ship_config), profile) else {
+            continue;
+        };
         let helm_ai = crate::ship_plugin::helm_axes_operate_ai(control_sources);
         let flipped_to_ai = helm_ai && !state.helm_axes_were_ai;
         state.helm_axes_were_ai = helm_ai;
@@ -557,9 +625,7 @@ fn issue_navigate_to_clearance(
                 // The origin is the navigation system's resolved control
                 // source — derived from target state like every other
                 // post-admission enqueuer, never from the wire path.
-                sender_origin: control_sources
-                    .0
-                    .source_for(&crate::ship::system_registry::navigation_system_id()),
+                sender_origin: control_sources.0.source_for(&navigation_owner),
                 address,
                 payload: crate::core::messages::CoordinationPayload::NavigateTo {
                     generation,
@@ -571,7 +637,7 @@ fn issue_navigate_to_clearance(
                 },
                 presentation,
                 sender_label: crate::ship::coordination::CHATTER_SENDER_NAVIGATION.to_string(),
-                sender_system: crate::ship::system_registry::navigation_system_id(),
+                sender_system: navigation_owner.clone(),
             });
             state.issued_generation = Some(generation);
         }
@@ -663,7 +729,7 @@ fn refresh_anchored_waypoint(
 /// blackboard, and the wire broadcaster is `LocalShip`-filtered — but the AC
 /// asks NPC ships to carry navigation blackboards, so this publishes for every
 /// AI-bearing ship (those carrying `ShipSystemBlackboards`).
-fn publish_navigation_blackboard(
+pub(crate) fn publish_navigation_blackboard(
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     // The civilian traffic picture (issue #1028). Read-only, so this system
@@ -687,6 +753,8 @@ fn publish_navigation_blackboard(
             Option<&crate::ship::components::HumanSeekingHosts>,
             Option<&super::sharing::NavigationSharing>,
             Option<&crate::ship_plugin::ShipSystemControlSources>,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+            Option<&sharing::NavigationSharingProfile>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -696,8 +764,11 @@ fn publish_navigation_blackboard(
     // world picture for everyone, and UUID-sorted so archetype order never
     // reaches the wire.
     let civilians = civilian_traffic_rows(&civilians_q, world_config.as_deref());
-    for (waypoint, is_local, mut bbs, hosts, sharing, sources) in ship_q.iter_mut() {
-        let nav_id=sharing.map_or_else(||SystemId(NAVIGATION_SYSTEM_ID.to_string()),|sharing|sharing.0.owner.clone());
+    for (waypoint, is_local, mut bbs, hosts, sharing, sources, config, profile) in ship_q.iter_mut()
+    {
+        let Some(nav_id) = navigation_owner(config, profile) else {
+            continue;
+        };
         let navigation_waypoint = waypoint.snapshot();
         let mut bb = if is_local {
             NavigationBlackboard {
@@ -707,8 +778,8 @@ fn publish_navigation_blackboard(
                 navigation_waypoint,
                 civilians: civilians.clone(),
                 host_station: hosts.and_then(|h| h.0.get(&nav_id).cloned()),
-                sharing:None,
-                received_chart:Vec::new(),
+                sharing: None,
+                received_chart: Vec::new(),
             }
         } else {
             NavigationBlackboard {
@@ -716,9 +787,11 @@ fn publish_navigation_blackboard(
                 ..Default::default()
             }
         };
-        if let Some(sharing)=sharing {
-            bb.sharing=Some(sharing.0.sharing_view(sources.is_some_and(|sources|super::sharing::operating(sources,&sharing.0.owner))));
-            bb.received_chart=sharing.0.projection();
+        if let Some(sharing) = sharing {
+            bb.sharing = Some(sharing.0.sharing_view(
+                sources.is_some_and(|sources| super::sharing::operating(sources, &sharing.0.owner)),
+            ));
+            bb.received_chart = sharing.0.projection();
         }
         bbs.0
             .insert(nav_id.clone(), SystemBlackboard::Navigation(bb));
@@ -854,6 +927,7 @@ pub fn operate_navigation_ai(
         Option<&crate::ai::server::ObjectiveCursors>,
         Option<&crate::ship_plugin::ShipConfigComponent>,
         Option<&NavigationTargetSelector>,
+        Option<&sharing::NavigationSharingProfile>,
         &mut crate::core::messages::AdmittedCommands,
     )>,
     entities: Query<(
@@ -893,18 +967,19 @@ pub fn operate_navigation_ai(
         cursors,
         ship_config,
         target_selector,
+        sharing_profile,
         mut admitted,
     ) in ships.iter_mut()
     {
+        let Some(navigation_owner) = navigation_owner(ship_config, sharing_profile) else {
+            continue;
+        };
         // Control-Source gate through the shared AI host spine (issue #1208): a
         // human holder (or an offline system) stands the selector down.
         // Navigation resolves a data-driven SELECTOR the spine does not model, so
         // only its gate — the one step it shares with the policy hosts — routes
         // here.
-        if !crate::ai::host::ai_operates(
-            &sources.0,
-            &crate::ship::system_registry::navigation_system_id(),
-        ) {
+        if !crate::ai::host::ai_operates(&sources.0, &navigation_owner) {
             continue;
         }
         // No authored `[navigation_console.selector]` ⇒ no component ⇒ no
@@ -918,10 +993,7 @@ pub fn operate_navigation_ai(
             match ship_config.and_then(|config| {
                 config
                     .0
-                    .observations_for_system(
-                        &crate::ship::system_registry::navigation_system_id(),
-                        &blackboards.0,
-                    )
+                    .observations_for_system(&navigation_owner, &blackboards.0)
                     .get(&crate::ship::system_registry::viewscreen_system_id())
             }) {
                 Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => {
@@ -1128,7 +1200,7 @@ pub fn operate_navigation_ai(
 
         emit_ai_command(
             entity_uuid,
-            crate::ship::system_registry::navigation_system_id(),
+            navigation_owner,
             payload,
             sources,
             &sessions,
@@ -1252,6 +1324,9 @@ pub fn apply_teleport_to_waypoint(
     }
 }
 
+#[cfg(test)]
+#[path = "ownership_tests.rs"]
+mod ownership_tests;
 #[cfg(test)]
 // Fixture ids only (issue #907): a test that needs "some distinct id" has no
 // run to reproduce. Production identity is minted by `crate::world_id`, and

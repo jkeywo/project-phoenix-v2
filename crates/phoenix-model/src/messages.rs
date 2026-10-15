@@ -5684,6 +5684,12 @@ impl Default for SensorsBlackboard {
 /// blackboard (issue #567).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct NavigationBlackboard {
+    /// Deliberate own-faction sharing intent for this actual Navigation owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sharing: Option<crate::sensing_sharing::RadarSharingView>,
+    /// Held fixed observations; applying one remains an ordinary waypoint order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub received_chart: Vec<crate::navigation_sharing::NavigationSharedObservation>,
     /// Detection range for the navigation system chart, in world units.
     #[serde(default = "default_nav_chart_range")]
     pub nav_chart_range: f32,
@@ -5773,6 +5779,8 @@ pub struct CivilianOrderOptionSnapshot {
 impl Default for NavigationBlackboard {
     fn default() -> Self {
         Self {
+            sharing: None,
+            received_chart: Vec::new(),
             nav_chart_range: default_nav_chart_range(),
             nav_chart_shows: Vec::new(),
             nav_chart_selects: Vec::new(),

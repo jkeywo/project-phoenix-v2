@@ -1976,7 +1976,7 @@ function scansPayload(state, systemIds = []) {
 }
 
 function radarSharingPayload(state, systemIds, kind) {
-  const role = kind === 'SensorRadar' ? 'sensor_radar' : 'tactical_radar';
+  const role = kind === 'Navigation' ? 'navigation' : kind === 'SensorRadar' ? 'sensor_radar' : 'tactical_radar';
   return blackboardsOfKind(state, kind, systemIds).flatMap(entry => {
     const sharing = entry.data?.sharing;
     // A permitted feed is information only. The published intent must name its
@@ -2386,6 +2386,10 @@ export function buildNavigationConsoleState(state, systemIds = []) {
   const onScreen = state.currentView === 'NavigationChart';
 
   return {
+    radar_sharing: radarSharingPayload(state, systemIds, 'Navigation'),
+    received_chart: Array.isArray(bb?.received_chart) ? bb.received_chart : [],
+    ...(entry ? { navigation_system_id: entry.systemId,
+      navigation_controllable: systemIds.includes(entry.systemId) && state.controlSources?.[entry.systemId] === 'Human' } : {}),
     blips,
     waypoint:                state.navigationWaypoint || null,
     ship_x:                  state.shipX || 0,

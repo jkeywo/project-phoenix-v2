@@ -12,7 +12,40 @@ pub use phoenix_sim_gameplay::science::navigation_sharing::*;
 pub struct NavigationSharing(pub NavigationSharingState);
 #[derive(Component, Clone, Debug)]
 pub struct NavigationSharingProfile {
+    pub owner: SystemId,
     pub radar: crate::radar_config::RadarConfig,
+}
+
+pub(crate) fn register(app: &mut App) {
+    use crate::authoritative::{DeclareState, StateClass};
+    use crate::command_admission::{ConsumerMatcher, FeedbackAddress, RegisterAdmittedConsumer};
+    use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
+    use crate::sim_sets::{FixedStep, SimSet};
+    app.declare_state::<NavigationSharing>(StateClass::Folded, "navigation-sharing")
+        .declare_state::<NavigationSharingProfile>(StateClass::Derived, "navigation-sharing");
+    app.register_admitted_consumer(
+        ConsumerMatcher::kind_payload(
+            crate::ship::system_registry::NAVIGATION_KIND,
+            Payload::SetRadarSharing,
+        )
+        .with_feedback(
+            FeedbackAddress::DeclaredKindOnly,
+            &[Payload::SetRadarSharing],
+        ),
+    );
+    app.add_systems(
+        FixedUpdate,
+        (
+            apply_commands
+                .in_set(SimSet::Physics)
+                .in_set(FixedStep::ApplyNavigationSharing),
+            tick.in_set(SimSet::Modifiers)
+                .in_set(FixedStep::ShareNavigationObservations)
+                // The public view is frozen; its private current-route gate
+                // must see this interval's completed Broad receipt frontier.
+                .after(crate::science::sharing::deliver),
+        ),
+    );
 }
 
 pub fn install(config: &crate::entities::config::EntityConfig, commands: &mut EntityCommands) {
@@ -27,6 +60,7 @@ pub fn install(config: &crate::entities::config::EntityConfig, commands: &mut En
     commands.insert((
         NavigationSharing(NavigationSharingState::new(nav.sharing.as_ref().unwrap())),
         NavigationSharingProfile {
+            owner: nav.sharing.as_ref().unwrap().system.clone(),
             radar: nav.system_chart.clone(),
         },
     ));
@@ -37,12 +71,16 @@ pub(super) fn operating(sources: &ShipSystemControlSources, owner: &SystemId) ->
         && sources.0.source_for(owner) != crate::ship::control_source::ControlSource::Offline
 }
 pub(crate) fn apply_commands(
-    mut ships: Query<(&AdmittedCommands, &mut NavigationSharing)>,
+    mut ships: Query<(
+        &AdmittedCommands,
+        Option<&ShipConfigComponent>,
+        Option<&mut NavigationSharing>,
+    )>,
     mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
 ) {
-    for (commands, mut sharing) in &mut ships {
+    for (commands, config, mut sharing) in &mut ships {
         for command in &commands.0 {
-            if command.target != sharing.0.owner {
+            if !super::server::navigation_target(config, &command.target) {
                 continue;
             }
             let SystemControlPayload::SetRadarSharing {
@@ -52,11 +90,21 @@ pub(crate) fn apply_commands(
             else {
                 continue;
             };
-            sharing.0.share_own_faction = *share_own_faction;
-            sharing.0.receive = *receive;
+            let applied = sharing
+                .as_deref_mut()
+                .filter(|sharing| sharing.0.owner == command.target)
+                .map(|sharing| {
+                    sharing.0.share_own_faction = *share_own_faction;
+                    sharing.0.receive = *receive;
+                })
+                .is_some();
             if let Some(feedback) = crate::command_admission::feedback::admitted_action_feedback(
                 command,
-                crate::core::messages::ActionFeedbackOutcome::Applied,
+                if applied {
+                    crate::core::messages::ActionFeedbackOutcome::Applied
+                } else {
+                    crate::core::messages::ActionFeedbackOutcome::Refused
+                },
             ) {
                 if let Some(outbound) = &mut outbound {
                     outbound.write(feedback);
@@ -165,7 +213,7 @@ pub(crate) fn tick(
 ) {
     let mut feeds = Vec::new();
     let mut ordered: Vec<_> = ships.iter_mut().collect();
-    ordered.sort_by(|a, b| a.0.0.cmp(&b.0.0));
+    ordered.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
     for (
         uuid,
         transform,

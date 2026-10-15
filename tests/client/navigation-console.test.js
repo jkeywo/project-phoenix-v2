@@ -47,6 +47,7 @@ describe('battleship navigation renderStation', () => {
     expect(el('navigation-map').state).toEqual({
       blips: [{ id: 'b1' }, { id: 'b2' }], regions: [{ id: 'r1' }], range: 8000,
       ship_pos: { x: 12, z: -4 }, ship_heading: 270, waypoint: { name: 'Alpha Point' }, auto: false,
+      navigation_auto: false, radar_sharing: [], received_chart: [],
     });
     expect(el('objective-list').state).toEqual({ objectives: [{ id: 'o1' }] });
     expect(el('civilian-traffic').state).toEqual({ civilians: [{ id: 'c1' }], auto: false });

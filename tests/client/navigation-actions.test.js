@@ -252,6 +252,7 @@ describe('Navigation semantic actions', () => {
       'repair.recall-team',
       'science.shield-focus',
       'sensors.scan',
+      'sensors.attach-reference',
       'sensors.cancel-scan',
       'sensors.passive-enabled',
       'sensors.target-selection',
@@ -336,6 +337,7 @@ describe('Navigation semantic actions', () => {
       'engineering.transfer-resource',
     ].sort());
     expect(idsFor(catalogue, 'sensors')).toEqual([
+      'sensors.attach-reference',
       'sensing.radar-sharing',
       'sensors.scan',
       'sensors.cancel-scan',

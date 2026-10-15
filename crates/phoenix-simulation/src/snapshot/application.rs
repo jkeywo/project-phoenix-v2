@@ -1567,6 +1567,11 @@ pub(super) fn apply_entity_state_with(
     if let Some(saved) = &row.broad {
         entity_mut.insert(crate::science::broad::BroadTracks(saved.clone()));
     }
+    if let Some(saved) = &row.navigation_sharing {
+        entity_mut.insert(crate::console::navigation::sharing::NavigationSharing(
+            saved.clone(),
+        ));
+    }
     if let Some(passive) = &row.passive {
         entity_mut.insert(passive.clone());
     }

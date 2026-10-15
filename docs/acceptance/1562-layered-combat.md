@@ -121,6 +121,31 @@ initialisation and remain under investigation. Preserve the exact continuation
 assertions and record affected retries separately. This is not a passing carrier
 exit or complete combat journey.
 
+The later guided-phase selection against `af38ad5d` ran 45 native tests: 41
+passed and four valid-restore digest comparisons failed
+(`increment15-guided-phase-native-tests-retry.log`). The copied-flight duplication
+and carrier settlement cases now pass; malformed carrier candidates also preserve
+the captured state and digest. The four remaining failures occur on valid restored
+hosts, not on those malformed-candidate refusals. The initial build's three old
+guidance-schema fixtures were migrated with their assertions retained.
+
+Scope diagnostics at `fb70f64c` reproduce the valid-restore failures and identify
+the empty asteroid namespace as the first difference; run, entity and resource
+stages agree. Restore's normal derived radar query registers spatial components
+that the bare fixture had omitted. `cb303175` registers that normal host roster;
+production digest semantics remain unchanged. The affected retry, expanded with
+actual seeker acquisition and same-step interception-before-payload coverage,
+is pending. The diagnostic log is `increment15-carrier-digest-diagnostics.log`;
+an intervening new-fixture constructor build failure is retained separately.
+
+The combined adopted lane/state-owner PASM checks pass: validate reports 1,111
+entities and `Status: OK`, scan reports 3,626 files and 7,735 dependencies, and
+traceability reports 246 rows. This pins the contract preparation through
+`1c297adf`, before the later 22A evidence contract. Current-runtime wiki lint
+resolves 63 source references and 71 index links. Human measured-elevation details
+retain the original sample tick; their three targeted client suites pass 68
+tests, with no browser/device acceptance claimed.
+
 Complete and verify guided-flight/pending-burst continuation, independent flight
 after launcher loss, observed interception and saturation, guidance/link loss,
 independent Science illumination, payload observations and acquired approach

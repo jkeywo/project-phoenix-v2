@@ -231,3 +231,10 @@ foreign stock query or automatic scenario-completion flag is added. Validate the
 actual source/vessel/receiver conservation, unavailable/full service pauses and
 complete fresh-host JSON continuation. This foundation does not finish 21's
 outside-actor goal selection, workforce or whole-increment acceptance.
+
+Transfer also joins the existing Navigation objective-to-waypoint arm used by
+Dock. Resolve its named approach through the identical permitted contact/request
+path and ordinary waypoint/Helm-clearance mechanism. This fills the existing
+Transfer chain's approach consumer; it adds no route controller, private position,
+new observation grant or remote authority. Unknown/obfuscated targets retain the
+same knowledge boundary. Crew-chosen waypoints remain an ordinary alternative.

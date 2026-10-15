@@ -2052,3 +2052,27 @@ describe('fleet capacity', () => {
     expect(overflow.refusals.map((r) => r.reason)).toContain('fleet-full');
   });
 });
+
+describe('nonretained selected-call host media',()=>{
+  for(const fallback of [false,true])it(`uses authenticated targeted Snapshot-only ${fallback?'relay':'direct'} links outside simulation history`,async()=>{
+    const world=makeWorld();const peer=makePeerFactory();
+    const socket=url=>{const value=world.socket(url);value.bufferedAmount=0;return value;};
+    const factories={socket,peer};const ownerMedia=[],twoMedia=[],threeMedia=[];
+    const levers=fallback?transportLeversFromLocation('?transport=ws-relay'):undefined;
+    const lead=await leadOn(world,factories,{levers,onMediaFrame:(raw,slot)=>ownerMedia.push({raw,slot})});
+    const two=await memberOn(world,factories,lead.code.suffix,{levers,onMediaFrame:(raw,slot)=>twoMedia.push({raw,slot})});
+    const three=await memberOn(world,factories,lead.code.suffix,{levers,onMediaFrame:(raw,slot)=>threeMedia.push({raw,slot})});
+    for(const channel of peer.channels)channel.bufferedAmount=0;
+    const media=(from,to)=>JSON.stringify({m:16,t:'media',tick:null,d:{from,to,call_origin_id:'accepted-call',generation:1}});
+    expect(two.member.sendMedia(media(2,1))).toBe(false);
+    lead.fleet.freeze();await settle();
+    expect(two.member.sendMedia(media(2,3))).toBe(true);await settle();
+    expect(ownerMedia).toEqual([]);expect(twoMedia).toEqual([]);expect(threeMedia).toEqual([{raw:media(2,3),slot:1}]);
+    expect(two.member.sendMedia(media(3,1))).toBe(false);
+    expect(lead.fleet.sendMedia(media(1,2))).toBe(true);await settle();
+    expect(twoMedia).toEqual([{raw:media(1,2),slot:1}]);
+    expect(lead.simulationFrames).toEqual([]);expect(two.simulationFrames).toEqual([]);expect(three.simulationFrames).toEqual([]);
+    if(!fallback){const mediaChannels=peer.channels.filter(channel=>channel.sent.some(raw=>{try{return JSON.parse(raw)?.t==='media';}catch{return false;}}));expect(mediaChannels.length).toBeGreaterThan(0);expect(mediaChannels.every(channel=>channel.label==='snapshot')).toBe(true);}
+    three.member.close();two.member.close();lead.fleet.close();
+  });
+});

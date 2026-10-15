@@ -2,11 +2,31 @@
 title: Comms Panel
 type: concept
 tags: [comms, client, inbox, hails, priority, localisation, input, feedback]
-sources: [crates/phoenix-simulation/src/comms/formation.rs, crates/phoenix-simulation/src/comms/planned.rs, crates/phoenix-simulation/src/comms/request_delivery.rs, crates/phoenix-simulation/src/comms/radio_route.rs, assets/entities/relay_cruiser.toml, crates/phoenix-model/src/comms_request.rs, crates/phoenix-simulation/src/comms/requests.rs, crates/phoenix-simulation/src/comms/request_returns.rs, crates/phoenix-simulation/src/snapshot/comms_requests.rs, gui/comms-requests.js, gui/components/ph-comms-text-composer.js, editor/workshop-comms-radio.js, gui/workshop-comms-radio-panel.js, gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/world/server/mod.rs, tests/publisher_ordering.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm/operations/comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
-updated: 2026-10-15
+sources: [crates/phoenix-simulation/src/comms/media_control.rs, crates/phoenix-simulation/src/comms/media_session.rs, crates/phoenix-simulation/src/comms/media_edge.rs, crates/phoenix-simulation/src/comms/media_mesh.rs, gui/comms-media-client.js, gui/fleet-media.js, crates/phoenix-simulation/src/comms/formation.rs, crates/phoenix-simulation/src/comms/planned.rs, crates/phoenix-simulation/src/comms/request_delivery.rs, crates/phoenix-simulation/src/comms/radio_route.rs, assets/entities/relay_cruiser.toml, crates/phoenix-model/src/comms_request.rs, crates/phoenix-simulation/src/comms/requests.rs, crates/phoenix-simulation/src/comms/request_returns.rs, crates/phoenix-simulation/src/snapshot/comms_requests.rs, gui/comms-requests.js, gui/components/ph-comms-text-composer.js, editor/workshop-comms-radio.js, gui/workshop-comms-radio-panel.js, gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/world/server/mod.rs, tests/publisher_ordering.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm/operations/comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
+updated: 2026-10-16
 ---
 
 # Comms Panel
+
+## Selected human media
+
+`comms/media_control.rs` owns the admitted selected call and the current paid
+carrier derived by fixed radio work. `media_session.rs` binds explicit device
+starts to the actual current human operator and physical connection. `media_edge.rs`
+reads those owners in PostUpdate; raw packets cannot issue machinery commands or
+spend power. `media_mesh.rs` carries bounded ephemeral packets over existing
+authenticated fleet links, outside continuation history. Restore clears starts,
+queued bytes and routes while retaining generation high-water; an authenticated
+current peer heartbeat can require a fresh start after host replacement.
+
+The Comms thread's media controls select an actually accepted/heard conversation
+through normal System admission, then require separate local capture consent.
+`gui/comms-media-client.js` handles independent PCM/JPEG packets and bounded
+playback. Native panes and insecure origins report capture unavailable. Ordinary
+AI declines media requests after its normal reading work. `gui/fleet-media.js`
+and the host adapters keep media outside ordinary retained queues and use only
+the negotiated drop-only Snapshot path. Device and two-host acceptance are
+separate from source review and mocked-device tests.
 
 ## Radio authoring
 

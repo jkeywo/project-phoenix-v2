@@ -8,6 +8,9 @@ use std::cell::RefCell;
 thread_local! {
     /// Messages received from JS peers, waiting to be injected into Bevy.
     /// Each entry is (sender_token, json_payload).
+    static MEDIA_MESH_INPUT: RefCell<VecDeque<(u32,String)>>=const{RefCell::new(VecDeque::new())};
+    static MEDIA_MESH_OUTPUT:RefCell<Vec<String>>=const{RefCell::new(Vec::new())};
+    static MEDIA_INPUT: RefCell<(BTreeMap<String,u64>,VecDeque<(String,u64,ClientMessage)>)> = RefCell::new(Default::default());
     static INBOUND_QUEUE: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
 
     /// Disconnect tokens queued by JS, waiting to be injected into Bevy.
@@ -1276,4 +1279,63 @@ pub(super) fn take_continuation_frame_error() -> bool {
 }
 pub(super) fn take_continuation_frames() -> Vec<(u64, u32, String)> {
     CONTINUATION_FRAMES.with(|frames| std::mem::take(&mut *frames.borrow_mut()))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(super) fn enqueue_scoped_media(token: &str, connection: u64, message: Option<ClientMessage>) {
+    MEDIA_INPUT.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        slot.0.insert(token.into(), connection);
+        if let Some(message) = message {
+            if slot.1.len() < 64 {
+                slot.1.push_back((token.into(), connection, message));
+            }
+        }
+    });
+}
+#[cfg(target_arch = "wasm32")]
+pub(super) fn forget_media_connection(token: &str) {
+    MEDIA_INPUT.with(|slot| {
+        slot.borrow_mut().0.remove(token);
+    });
+}
+#[cfg(target_arch = "wasm32")]
+pub(super) fn take_media_input() -> (
+    BTreeMap<String, u64>,
+    VecDeque<(String, u64, ClientMessage)>,
+) {
+    MEDIA_INPUT.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        (slot.0.clone(), std::mem::take(&mut slot.1))
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(super) fn enqueue_media_mesh(slot: u32, raw: &str) {
+    if slot == 0 || phoenix_simulation::comms::media_mesh::MediaHostFrame::decode(raw).is_none() {
+        return;
+    }
+    MEDIA_MESH_INPUT.with(|queue| {
+        let mut queue = queue.borrow_mut();
+        if queue.len() < 64 {
+            queue.push_back((slot, raw.into()));
+        }
+    });
+}
+#[cfg(target_arch = "wasm32")]
+pub(super) fn take_media_mesh_input() -> VecDeque<(u32, String)> {
+    MEDIA_MESH_INPUT.with(|queue| std::mem::take(&mut *queue.borrow_mut()))
+}
+#[cfg(target_arch = "wasm32")]
+pub(super) fn publish_media_mesh(frames: Vec<String>) {
+    MEDIA_MESH_OUTPUT.with(|slot| {
+        *slot.borrow_mut() = frames;
+    });
+}
+#[cfg(target_arch = "wasm32")]
+pub(super) fn take_media_mesh_outbound() -> String {
+    MEDIA_MESH_OUTPUT.with(|slot| {
+        crate::core::codec::to_json(&std::mem::take(&mut *slot.borrow_mut()))
+            .unwrap_or_else(|_| "[]".into())
+    })
 }

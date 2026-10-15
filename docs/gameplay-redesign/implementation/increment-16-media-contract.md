@@ -103,3 +103,15 @@ browser/native staging, including reordered, escaped and malformed envelopes.
 Root delegated media-only central integration to this lane on 2026-10-15;
 root retains final compatibility versions, state census and integrated native
 validation. The native fleet bridge is an independent coordinated donor.
+
+## Live route continuation clarification
+
+An authenticated heartbeat for the current paid accepted call may report the
+receiver's retained generation floor when it has no active matching peer lease.
+The sender raises its ephemeral generation high-water and invalidates a matching
+start at or below that floor. Capture then requires a fresh explicit human start.
+This lets a replacement host process obtain a safe generation without clearing
+the surviving receiver's stale-frame protection. A frame packet cannot carry a
+floor. Wrong call, slot or physical incarnation cannot update it; exhausting the
+bounded generation range refuses further starts instead of wrapping. None of
+these receipt-time actions changes the canonical call or machinery.

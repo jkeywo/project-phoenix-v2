@@ -1045,6 +1045,8 @@ fn wasm_init_inner(test: Option<crate::workshop::test_browser::BrowserTest>) {
             PreUpdate,
             (
                 drain_inbound,
+                drain_media_inbound,
+                drain_media_mesh,
                 drain_gm_roster,
                 // A leave and reopen can be queued in one animation frame. Apply
                 // the world teardown/adoption first, then the new generation's
@@ -1104,6 +1106,12 @@ fn wasm_init_inner(test: Option<crate::workshop::test_browser::BrowserTest>) {
             PostUpdate,
             (
                 flush_outbound,
+                flush_media_outbound
+                    .after(phoenix_simulation::comms::media_edge::process)
+                    .after(flush_outbound),
+                flush_media_mesh
+                    .after(phoenix_simulation::comms::media_edge::process)
+                    .after(flush_outbound),
                 flush_host_channels
                     .after(crate::gm_projection::HeldGmProjection)
                     .after(crate::server::audio_lifecycle::publish_audio_lifecycle)
@@ -1203,7 +1211,95 @@ fn wasm_init_inner(test: Option<crate::workshop::test_browser::BrowserTest>) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_receive_message(sender_token: &str, json: &str) {
+    // Unscoped routes cannot claim a physical incarnation or stage media.
+    if crate::core::codec::media_client_json(json).unwrap_or(true) {
+        return;
+    }
     edge::enqueue_inbound_queue((sender_token.to_string(), json.to_string()));
+}
+
+/// Trusted host adapter supplies the registry-owned physical handle, never the payload.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_receive_scoped_message(sender_token: &str, handle: &str, json: &str) {
+    let Ok(connection) = handle.parse::<u64>() else {
+        return;
+    };
+    if connection.to_string() != handle || crate::lobby::handler::is_reserved_token(sender_token) {
+        return;
+    }
+    let Ok(media) = crate::core::codec::bounded_media_client(json) else {
+        return;
+    };
+    edge::enqueue_scoped_media(sender_token, connection, media.clone());
+    if media.is_none() {
+        wasm_receive_message(sender_token, json);
+    }
+}
+#[cfg(target_arch = "wasm32")]
+fn drain_media_inbound(
+    mut mesh: Option<ResMut<phoenix_simulation::comms::media_mesh::MediaMesh>>,
+    mut media: Option<ResMut<phoenix_simulation::comms::media_edge::MediaEdge>>,
+) {
+    if let Some(mesh) = mesh.as_deref_mut() {
+        mesh.set_supported(true);
+    }
+    let (connections, pending) = edge::take_media_input();
+    if let Some(media) = media.as_deref_mut() {
+        media.sync_connections(connections);
+        for (token, connection, message) in pending {
+            media.offer(token, connection, message);
+        }
+    }
+}
+#[cfg(target_arch = "wasm32")]
+fn flush_media_outbound(
+    mut media: Option<ResMut<phoenix_simulation::comms::media_edge::MediaEdge>>,
+) {
+    let Some(media) = media.as_deref_mut() else {
+        return;
+    };
+    let outgoing = media.take_outbound();
+    if let Some(callback) = edge::outbound_callback() {
+        for (token, message) in outgoing {
+            if let Ok(json) = JsonCodec.encode_server(&message) {
+                let frame = matches!(message, ServerMessage::CommsMediaFrame(_));
+                let _ = callback.call4(
+                    &JsValue::NULL,
+                    &JsValue::from_str(&format!("token:{token}")),
+                    &JsValue::from_str(&json),
+                    &JsValue::from_str(if frame { "snapshot" } else { "reliable" }),
+                    &JsValue::from_bool(frame),
+                );
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_receive_media_mesh(authenticated_slot: u32, json: &str) {
+    edge::enqueue_media_mesh(authenticated_slot, json);
+}
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_take_media_mesh() -> String {
+    edge::take_media_mesh_outbound()
+}
+#[cfg(target_arch = "wasm32")]
+fn drain_media_mesh(mut mesh: Option<ResMut<phoenix_simulation::comms::media_mesh::MediaMesh>>) {
+    let pending = edge::take_media_mesh_input();
+    if let Some(mesh) = mesh.as_deref_mut() {
+        for (slot, raw) in pending {
+            mesh.offer(slot, &raw);
+        }
+    }
+}
+#[cfg(target_arch = "wasm32")]
+fn flush_media_mesh(mut mesh: Option<ResMut<phoenix_simulation::comms::media_mesh::MediaMesh>>) {
+    if let Some(mesh) = mesh.as_deref_mut() {
+        edge::publish_media_mesh(mesh.take_outgoing());
+    }
 }
 
 /// Called by JS with one host-mesh frame from another ship host (issue #1116),
@@ -1485,6 +1581,7 @@ pub fn wasm_mesh_status() -> String {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_player_disconnected(token: &str) {
+    edge::forget_media_connection(token);
     edge::enqueue_disconnect_queue(token.to_string());
 }
 

@@ -22,6 +22,8 @@ pub mod content;
 pub mod formation;
 pub mod jamming;
 pub mod media_control;
+pub mod media_edge;
+pub mod media_mesh;
 pub mod media_session;
 pub(crate) mod planned;
 pub mod radio;

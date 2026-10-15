@@ -279,6 +279,17 @@ pub(crate) fn register(app: &mut App) {
             StateClass::Timer,
             "comms-media-session-leases",
         )
+        .declare_state::<super::media_edge::MediaEdge>(
+            StateClass::Timer,
+            "comms-media-session-leases",
+        )
+        .declare_state::<super::media_mesh::MediaMesh>(
+            StateClass::Timer,
+            "comms-media-session-leases",
+        )
+        .init_resource::<super::media_edge::MediaEdge>()
+        .init_resource::<super::media_mesh::MediaMesh>()
+        .add_systems(PostUpdate, super::media_edge::process)
         .init_resource::<PaidMediaCarriers>()
         .init_resource::<super::media_session::MediaLeases>()
         .add_systems(

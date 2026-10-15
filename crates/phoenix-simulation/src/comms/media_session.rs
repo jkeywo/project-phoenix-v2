@@ -118,6 +118,32 @@ impl MediaLeases {
         let lease = self.leases.get(&operator.token)?;
         (lease.operator == *operator && lease.call == *call).then_some(lease.generation)
     }
+    /// Supplied only by the actual authenticated current paid-call heartbeat.
+    /// This cannot start capture; it can only retire stale consent and reserve
+    /// a generation beyond a surviving receiver's retained stale-frame floor.
+    pub(super) fn raise_floor(
+        &mut self,
+        operator: &MediaOperator,
+        call: &EligibleMediaCall,
+        floor: u32,
+    ) {
+        if floor == 0 || operator.ship != call.local_ship {
+            return;
+        }
+        if self
+            .leases
+            .get(&operator.token)
+            .is_some_and(|lease| lease.operator != *operator || lease.call != *call)
+        {
+            return;
+        }
+        self.high_water = self.high_water.max(floor);
+        if self.leases.get(&operator.token).is_some_and(|lease| {
+            lease.operator == *operator && lease.call == *call && lease.generation <= floor
+        }) {
+            self.leases.remove(&operator.token);
+        }
+    }
     /// `call` is Some ONLY for a genuinely CURRENT paid physical route and
     /// accepted selected lineage. No route/receipt is inferred from this cache.
     /// `now_ms` is a trusted local monotonic adapter clock, never packet input.
@@ -274,5 +300,38 @@ mod tests {
         assert!(leases
             .admit(&operator, Some(&call), &packet(generation, 18), 1002)
             .is_err());
+    }
+    #[test]
+    fn surviving_receiver_floor_requires_new_consent_without_reusing_or_wrapping_generations() {
+        let (operator, call) = authority();
+        let mut replacement = MediaLeases::default();
+        let first = replacement
+            .start(operator.clone(), call.clone(), 0)
+            .unwrap();
+        replacement.raise_floor(&operator, &call, first);
+        assert_eq!(replacement.generation(&operator, &call), None);
+        assert!(replacement
+            .admit(&operator, Some(&call), &packet(first, 1), 1)
+            .is_err());
+        let fresh = replacement
+            .start(operator.clone(), call.clone(), 2)
+            .unwrap();
+        assert!(fresh > first);
+        // An older queued floor cannot retire the newer explicit start.
+        replacement.raise_floor(&operator, &call, first);
+        assert_eq!(replacement.generation(&operator, &call), Some(fresh));
+        // Only the exact current operator fingerprint and selected lineage can
+        // invalidate its consent; process supplies these after actual routing.
+        let mut stale = operator.clone();
+        stale.connection += 1;
+        replacement.raise_floor(&stale, &call, fresh);
+        assert_eq!(replacement.generation(&operator, &call), Some(fresh));
+        let mut other = call.clone();
+        other.origin = "another-call".into();
+        replacement.raise_floor(&operator, &other, fresh);
+        assert_eq!(replacement.generation(&operator, &call), Some(fresh));
+        replacement.raise_floor(&operator, &call, u32::MAX);
+        assert_eq!(replacement.generation(&operator, &call), None);
+        assert!(replacement.start(operator, call, 3).is_err());
     }
 }

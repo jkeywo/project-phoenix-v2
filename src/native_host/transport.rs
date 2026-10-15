@@ -83,7 +83,13 @@ pub struct NativeTransportPlugin;
 impl Plugin for NativeTransportPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(PreUpdate, drain_native_inbound)
-            .add_systems(PostUpdate, flush_native_outbound);
+            .add_systems(PostUpdate, flush_native_outbound)
+            .add_systems(
+                PostUpdate,
+                flush_native_media
+                    .after(phoenix_simulation::comms::media_edge::process)
+                    .after(flush_native_outbound),
+            );
     }
 }
 
@@ -105,6 +111,8 @@ fn drain_native_inbound(
     transport: Option<ResMut<NativeTransportLink>>,
     mut inbound: MessageWriter<InboundMessage>,
     mut disconnects: MessageWriter<PlayerDisconnected>,
+    mut media: Option<ResMut<phoenix_simulation::comms::media_edge::MediaEdge>>,
+    sessions: Option<Res<crate::lobby::Sessions>>,
     log: Option<Res<LogFilterConfig>>,
     role: Option<Res<crate::native_host::session_role::NativeSessionRoleState>>,
 ) {
@@ -118,7 +126,22 @@ fn drain_native_inbound(
                 | crate::native_host::session_role::NativeSessionRole::FleetGameMaster
         )
     });
-    for event in transport.0.poll() {
+    let events = transport.0.poll();
+    if let Some(media) = media.as_deref_mut() {
+        let current = sessions
+            .as_ref()
+            .into_iter()
+            .flat_map(|sessions| sessions.0.players())
+            .filter_map(|player| {
+                transport
+                    .0
+                    .current_connection(&player.token)
+                    .map(|id| (player.token.clone(), id))
+            })
+            .collect();
+        media.sync_connections(current);
+    }
+    for event in events {
         if gm_only {
             crate::pdebug!(
                 log,
@@ -128,10 +151,30 @@ fn drain_native_inbound(
             continue;
         }
         match event {
-            // This generic transport donor refuses transient operation until
-            // the bounded Session media edge is joined in the next donor.
-            TransportEvent::ReceivedScoped { .. } => {}
+            TransportEvent::ReceivedScoped {
+                token,
+                connection,
+                msg,
+            } => {
+                if crate::lobby::handler::is_reserved_token(&token)
+                    || transport.0.current_connection(&token) != Some(connection)
+                {
+                    continue;
+                }
+                if let Some(media) = media.as_deref_mut() {
+                    media.connected(token.clone(), connection);
+                    media.offer(token, connection, msg);
+                }
+            }
             TransportEvent::Received { token, msg } => {
+                if matches!(
+                    msg,
+                    ClientMessage::CommsMediaStart(_)
+                        | ClientMessage::CommsMediaStop(_)
+                        | ClientMessage::CommsMediaFrame(_)
+                ) {
+                    continue;
+                }
                 if crate::lobby::handler::is_reserved_token(&token) {
                     crate::pwarn!(
                         log,
@@ -144,6 +187,9 @@ fn drain_native_inbound(
                 inbound.write(InboundMessage { token, msg });
             }
             TransportEvent::Disconnected { token } => {
+                if let Some(media) = media.as_deref_mut() {
+                    media.disconnected(&token);
+                }
                 if crate::lobby::handler::is_reserved_token(&token) {
                     continue;
                 }
@@ -286,3 +332,35 @@ impl phoenix_transport::Transport<crate::native_host::transport::PhoenixProtocol
 #[cfg(test)]
 #[path = "transport_tests.rs"]
 mod tests;
+
+fn flush_native_media(
+    transport: Option<ResMut<NativeTransportLink>>,
+    mut edge: Option<ResMut<phoenix_simulation::comms::media_edge::MediaEdge>>,
+) {
+    let Some(edge) = edge.as_deref_mut() else {
+        return;
+    };
+    let outgoing = edge.take_outbound();
+    let Some(mut transport) = transport else {
+        return;
+    };
+    for (token, message) in outgoing {
+        let target = Target::Token(token);
+        if matches!(message, ServerMessage::CommsMediaFrame(_)) {
+            transport.0.dispatch_snapshot_only(
+                &target,
+                &message,
+                phoenix_transport::SnapshotBounds {
+                    max_bytes: phoenix_model::comms_media::MAX_MEDIA_JSON_BYTES,
+                    max_buffered_bytes: 32768,
+                },
+            );
+        } else {
+            transport.0.dispatch(TransportDispatch {
+                target: &target,
+                msg: &message,
+                delivery: DeliveryClass::Reliable,
+            });
+        }
+    }
+}

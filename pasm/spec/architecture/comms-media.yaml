@@ -48,12 +48,12 @@ entities:
       status: implemented
       confidence: confirmed
       title: Ephemeral Device Leases
-      summary: Current physical-connection and operator-bound explicit starts with bounded receiver-clock admission. Restore invalidates starts while preserving the live monotonic generation high-water.
+      summary: Current physical-connection and operator-bound explicit starts with bounded receiver-clock admission. Restore preserves generation high-water. An authenticated current paid-call heartbeat can raise the sender floor and require fresh human consent after host replacement; packets cannot set it.
     architecture:
       classification: transport
       owner: selected-human-media-control
       writers: [selected-human-media-control]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/comms/media_session.rs]
-      symbols: [MediaLeases]
+      paths: [crates/phoenix-simulation/src/comms/media_session.rs, crates/phoenix-simulation/src/comms/media_edge.rs, crates/phoenix-simulation/src/comms/media_mesh.rs, src/server/browser_edge.rs, src/native_host/transport.rs]
+      symbols: [MediaLeases, MediaEdge, MediaMesh, MediaHostFrame]

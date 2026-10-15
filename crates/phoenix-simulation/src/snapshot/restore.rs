@@ -318,6 +318,12 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
         );
     }
     super::sensing_publications::restore_held(world, snapshot);
+    if let Some(mut media) = world.get_resource_mut::<crate::comms::media_mesh::MediaMesh>() {
+        media.invalidate();
+    }
+    if let Some(mut edge) = world.get_resource_mut::<crate::comms::media_edge::MediaEdge>() {
+        edge.invalidate();
+    }
     // Device consent never resumes. Retain the live generation high-water so
     // queued pre-restore packets cannot match a fresh explicit start.
     if let Some(mut leases) = world.get_resource_mut::<crate::comms::media_session::MediaLeases>() {

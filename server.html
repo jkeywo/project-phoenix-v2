@@ -6032,6 +6032,7 @@
         onGmJoinStatus: receiveFleetGmJoinStatus,
         onBeginGmJoin: beginFleetGmJoin,
         onRefuseGmJoin: refuseFleetGmJoin,
+        onMediaFrame: (raw, slot) => window.wasmBindings?.wasm_receive_media_mesh?.(slot, raw),
         onSimulationFrame: receiveMeshFrame,
         onContinuation: continueFleetOwner,
         onContinuationFrame: receiveFleetContinuationFrame,
@@ -6168,6 +6169,7 @@
         onGmJoinRequest: receiveFleetGmJoinRequest,
         onGmJoinStatus: receiveFleetGmJoinStatus,
         onGmJoinPending: ({ request }) => receiveFleetGmJoinRequest(request),
+        onMediaFrame: (raw, slot) => window.wasmBindings?.wasm_receive_media_mesh?.(slot, raw),
         onSimulationFrame: receiveMeshFrame,
         onContinuation: continueFleetOwner,
         onContinuationFrame: receiveFleetContinuationFrame,
@@ -6430,6 +6432,7 @@
         return;
       }
       for (const frame of frames) fleetHandle.broadcast(JSON.stringify(frame));
+      try { for (const raw of JSON.parse(window.wasmBindings?.wasm_take_media_mesh?.() || "[]")) fleetHandle.sendMedia?.(raw); } catch (_) {}
       // A terminal join status can publish the public roster. Poll only after
       // the Rust-owned Commit frame above left this host, so peers always see
       // the deterministic proof before the browser projection that follows it.
@@ -8230,8 +8233,10 @@
       const token = hostConnections?.sender(handle);
       if (token == null) return;
       if (typeof wasm_receive_message === 'function') {
-        wasm_receive_message(token, json);
+        if (typeof window !== "undefined" && window.wasmBindings?.wasm_receive_scoped_message) window.wasmBindings.wasm_receive_scoped_message(token, handle, json);
+        else wasm_receive_message(token, json);
       } else {
+        try { if (["CommsMediaStart", "CommsMediaStop", "CommsMediaFrame"].includes(JSON.parse(json)?.type)) return; } catch (_) { return; }
         msgQueue.push([handle, json]);
       }
     }
@@ -8248,7 +8253,7 @@
     // applyHudAudio calls until the host-audio island mounts; that same
     // island assigns the window.__audioConfig/etc. globals directly.
 
-    function routeOutbound(target, payload, deliveryClass) {
+    function routeOutbound(target, payload, deliveryClass, dropOnly = false) {
       // Rust resolves current recipients; the physical adapter chooses a
       // ready snapshot channel or its per-connection reliable fallback.
       //
@@ -8266,7 +8271,7 @@
       // here is a dead link or a bug rather than an ordinary payload — and if
       // one ever does cross the ceiling, ONE client loses that frame instead
       // of the whole bridge losing the flush.
-      const conns = hostConnections?.targets(target, deliveryClass) || [];
+      const conns = hostConnections?.targets(target, deliveryClass, dropOnly) || [];
       for (const c of conns) {
         try {
           c.send(payload);

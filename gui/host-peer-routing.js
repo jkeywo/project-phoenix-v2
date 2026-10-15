@@ -39,6 +39,7 @@ export function createHostConnections(registry, {
         message = JSON.parse(json);
       } catch (_) { return; }
       if (!message || typeof message !== 'object') return;
+      if (['CommsMediaStart','CommsMediaStop','CommsMediaFrame'].includes(message.type) && (json.length > 20480 || new TextEncoder().encode(json).byteLength > 20480)) return;
       const before = registry.sender(handle);
       if (message.type === 'Identify') {
         const claimed = message.data && message.data.token;
@@ -63,12 +64,12 @@ export function createHostConnections(registry, {
     return handle;
   }
 
-  function targets(target, deliveryClass) {
+  function targets(target, deliveryClass, dropOnly = false) {
     const handles = JSON.parse(registry.recipients(target));
     const out = [];
     for (const handle of handles) {
       const conn = connections.get(handle);
-      if (isOpen(conn)) out.push({ send: raw => conn.send(raw, deliveryClass) });
+      if (isOpen(conn)) out.push({ send: raw => dropOnly ? conn.sendSnapshotOnly?.(raw, {maxBytes: 20480, maxBufferedBytes: 32768}) === true : conn.send(raw, deliveryClass) });
     }
     return out;
   }

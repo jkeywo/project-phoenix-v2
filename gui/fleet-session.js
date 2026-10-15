@@ -1,3 +1,4 @@
+import {mediaHostFrame, createFleetMediaGate, FLEET_MEDIA_BOUNDS} from './fleet-media.js';
 /**
  * gui/fleet-session.js — the two ends of a fleet, wired onto the Phoenix
  * transport (issue #1114).
@@ -290,6 +291,7 @@ export function createFleetOwner(opts) {
     onGmJoinStatus = () => {},
     onBeginGmJoin = () => false,
     onRefuseGmJoin = () => false,
+    onMediaFrame = () => {},
     onSimulationFrame = () => {},
     onHostLost = () => {},
     onSlotClaimed = () => {},
@@ -818,7 +820,20 @@ export function createFleetOwner(opts) {
     onConnection: (conn) => {
       const ownerWire = wireFor(conn);
       const receiveContinuationWire = value => ownerWire.receive(value);
+      const receiveMedia = createFleetMediaGate();
       conn.on('data', (raw) => {
+        let candidate; try {candidate = typeof raw === 'string' ? JSON.parse(raw) : raw;} catch {return;}
+        if (candidate?.t === 'media') {
+          if (links.get(conn.peer) !== conn || !fleet.frozen || simulationRosterState !== 'accepted') return;
+          const accepted = receiveMedia(raw), authenticated = connSlots.get(conn.peer);
+          if (!accepted || authenticated == null || accepted.frame.d.from !== authenticated) return;
+          const destination = accepted.frame.d.to;
+          if (destination === hostSlotOrdinal(fleet.owner)) onMediaFrame(accepted.raw, authenticated);
+          else for (const [peer, other] of links) {
+            if (peer !== conn.peer && connSlots.get(peer) === destination) other.sendSnapshotOnly?.(accepted.raw, FLEET_MEDIA_BOUNDS);
+          }
+          return;
+        }
         let envelope;
         try { envelope = receiveContinuationWire(JSON.parse(raw)); } catch (error) { onError('continuation-wire-refused', error.message); conn.close(); return; }
         if (!envelope) return;
@@ -1103,6 +1118,13 @@ export function createFleetOwner(opts) {
      * simulation decodes with, and a second wrapping on this side would be a
      * second place for the two to disagree about the shape.
      */
+    sendMedia(raw) {
+      const frame = mediaHostFrame(raw);
+      if (!frame || !fleet.frozen || simulationRosterState !== 'accepted' || frame.d.from !== hostSlotOrdinal(fleet.owner)) return false;
+      let sent = false;
+      for (const [peer, conn] of links) if (connSlots.get(peer) === frame.d.to) sent = conn.sendSnapshotOnly?.(raw, FLEET_MEDIA_BOUNDS) === true || sent;
+      return sent;
+    },
     broadcast(raw) {
       if (simulationRosterState === 'delivering' && simulationRosterPromise) {
         // `publishRoster` registered its emission continuation on this promise
@@ -1234,6 +1256,7 @@ export function createFleetMember(opts) {
     onGmJoinRequest = () => {},
     onGmJoinStatus = () => {},
     onGmJoinPending = () => {},
+    onMediaFrame = () => {},
     onSimulationFrame = () => {},
     onContinuation = null,
     onError = () => {},
@@ -1246,6 +1269,7 @@ export function createFleetMember(opts) {
   } = opts;
 
   const memberWire = createContinuationWire(raw => joiner.sendFrame(raw));
+  const receiveMedia = createFleetMediaGate();
   const receiveContinuationWire = value => memberWire.receive(value);
   let mine = null;
   let continuation = null;
@@ -1460,6 +1484,12 @@ export function createFleetMember(opts) {
       }
     },
     onData: (frame) => {
+      if (frame?.t === 'media') {
+        if (simulationRosterState !== 'accepted' || !roster?.frozen) return;
+        const accepted = receiveMedia(frame), owner = hostSlotOrdinal(roster.owner);
+        if (accepted && accepted.frame.d.to === hostSlotOrdinal(mine) && owner > 0) onMediaFrame(accepted.raw, owner);
+        return;
+      }
       try { frame = receiveContinuationWire(frame); } catch (error) { onError('continuation-wire-refused', error.message); joiner.close(); return; }
       if (!frame) return;
       if (isContinuationEnvelope(frame)) {
@@ -1681,6 +1711,12 @@ export function createFleetMember(opts) {
      * transport is. See the lead's own `broadcast` for why the frame is sent as
      * it came rather than re-wrapped.
      */
+    sendMedia(raw) {
+      if (promoted) return promoted.sendMedia(raw);
+      const frame = mediaHostFrame(raw);
+      return !!frame && simulationRosterState === 'accepted' && !!roster?.frozen && frame.d.from === hostSlotOrdinal(mine)
+        && joiner.sendSnapshotOnly(raw, FLEET_MEDIA_BOUNDS);
+    },
     broadcast(raw) {
       if (promoted) return promoted.broadcast(raw);
       const wire = continuation ? continuation.broadcast(raw) : raw;

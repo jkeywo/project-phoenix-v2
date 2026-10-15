@@ -6,6 +6,44 @@ fn target(ship: &str, station: &str) -> StationPuppetTarget {
 }
 
 #[test]
+fn actual_gm_promotion_uses_logical_time_instead_of_the_host_epoch() {
+    let mut app = App::new();
+    let mut time = Time::<()>::default();
+    time.advance_by(std::time::Duration::from_secs(700));
+    app.insert_resource(time);
+    let period = crate::sim_tick::sim_tick_period(60.0);
+    app.insert_resource(Time::<Fixed>::from_duration(period));
+    app.insert_resource(crate::sim_tick::SimTick(71));
+    app.init_resource::<StationPuppets>();
+    app.init_resource::<PendingGmStationCommands>();
+    let entity = app
+        .world_mut()
+        .spawn((crate::server_app::Ship, EntityUuid("gm-clock".into())))
+        .id();
+    app.world_mut()
+        .resource_mut::<StationPuppets>()
+        .set_operator(target("gm-clock", "helm"), "gm-1".into(), true);
+    app.add_systems(Update, prepare_station_puppet_fidelity);
+    app.update();
+    let expected = 71.0 * period.as_secs_f64();
+    assert_eq!(
+        app.world()
+            .get::<crate::ai::server::LodTransitionTimer>(entity)
+            .unwrap()
+            .last_state_change_secs
+            .to_bits(),
+        expected.to_bits()
+    );
+    assert!(crate::ai::server::has_ai_high_fidelity_components(
+        &app.world_mut().entity_mut(entity)
+    ));
+    assert_ne!(
+        expected,
+        f64::from(app.world().resource::<Time>().elapsed_secs())
+    );
+}
+
+#[test]
 fn takeover_is_station_scoped_and_an_exact_retry_is_a_no_op() {
     let mut puppets = StationPuppets::default();
     let helm = target("player-1", "helm");

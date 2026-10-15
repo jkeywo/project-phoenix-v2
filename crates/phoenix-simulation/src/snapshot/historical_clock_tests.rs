@@ -7,6 +7,12 @@ fn fixture(tick: u64) -> (World, Entity) {
     world.insert_resource(Time::<Fixed>::from_duration(
         crate::sim_tick::sim_tick_period(60.0),
     ));
+    // Match the capture owner's admitted optional component registry even in
+    // this deliberately minimal World, so it can actually enumerate the row.
+    world.register_component::<ShipPhysics>();
+    world.register_component::<EntitySystemHull>();
+    world.register_component::<crate::console::command::server::ShipStationStances>();
+    world.register_component::<crate::ship_plugin::ShipSystemControlSources>();
     let entity = world
         .spawn((
             EntityUuid("combat-clock".into()),

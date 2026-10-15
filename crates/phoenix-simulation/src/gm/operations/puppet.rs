@@ -531,6 +531,8 @@ impl StationPuppets {
 /// delivery. A second equal GM never resets existing intent or policy state.
 pub fn prepare_station_puppet_fidelity(
     time: Res<Time>,
+    sim_tick: Option<Res<crate::sim_tick::SimTick>>,
+    fixed: Option<Res<Time<Fixed>>>,
     puppets: Res<StationPuppets>,
     pending: Res<PendingGmStationCommands>,
     ships: Query<
@@ -543,6 +545,11 @@ pub fn prepare_station_puppet_fidelity(
     >,
     mut commands: Commands,
 ) {
+    let now = phoenix_sim_contracts::logical_clock::sample(
+        sim_tick.as_deref().map(|tick| tick.0),
+        fixed.as_deref().map(|time| time.timestep().as_secs_f64()),
+        f64::from(time.elapsed_secs()),
+    );
     for (entity, uuid) in &ships {
         if puppets.operates_ship(&uuid.0)
             || pending
@@ -553,7 +560,7 @@ pub fn prepare_station_puppet_fidelity(
             commands.entity(entity).insert((
                 crate::ai::server::ai_high_fidelity_components(),
                 crate::ai::server::LodTransitionTimer {
-                    last_state_change_secs: time.elapsed_secs() as f64,
+                    last_state_change_secs: now,
                 },
             ));
         }

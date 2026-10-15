@@ -3661,6 +3661,10 @@ fn spawn_patrolling_npc(
         .spawn((
             Ship,
             low_lod_equipment(),
+            // These route/cursor fixtures deliberately finish a turn within
+            // one 0.1s step; use real authored fast steering, not absent motors.
+            // 40% of 25 preserves the original 10-unit/s route speed.
+            test_helm_section(25.0, 100.0),
             Transform::from_xyz(x, 0.0, z),
             ShipPhysics {
                 x,

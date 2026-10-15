@@ -18,15 +18,16 @@ pub mod system_status;
 pub mod observation;
 
 pub mod damage;
-pub mod fitting;
 pub mod energy;
+pub mod equipment_recovery_ui;
+pub mod fitting;
 pub mod interior;
 pub mod job;
 pub mod logistics;
-pub mod production;
-pub mod production_ui;
 pub mod ports;
 pub mod ports_ui;
+pub mod production;
+pub mod production_ui;
 pub mod recovery;
 pub mod recovery_ui;
 

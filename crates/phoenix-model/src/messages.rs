@@ -1985,6 +1985,12 @@ pub enum SystemControlPayload {
     CancelRefit {
         slot: String,
     },
+    RecoverEquipment {
+        target_uuid: String,
+        slot: String,
+        destination_locker: String,
+    },
+    CancelEquipmentRecovery {},
     SetRecoveryEnabled {
         enabled: bool,
     },

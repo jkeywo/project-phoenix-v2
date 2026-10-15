@@ -49,8 +49,8 @@ fn physical_teams() -> (RepairTeams, ShipConfig) {
     let interior:crate::ship::interior::InteriorConfig=serde_json::from_value(serde_json::json!({
         "deck":[{"id":"main","label":"test.main","damage_weight":1.0}],
         "compartment":[
-            {"id":"home","deck":"main","label":"test.home","x":0.0,"z":0.0,"width":4.0,"depth":4.0,"material":"bulkhead"},
-            {"id":"engine","deck":"main","label":"test.engine","x":5.0,"z":0.0,"width":4.0,"depth":4.0,"material":"bulkhead"}],
+            {"id":"home","deck":"main","label":"test.home","x":0.0,"z":0.0,"width":4.0,"depth":4.0,"material":"bulkhead","max_hp":100,"recovery_fraction":0.25,"structural_remedy":"structure"},
+            {"id":"engine","deck":"main","label":"test.engine","x":5.0,"z":0.0,"width":4.0,"depth":4.0,"material":"bulkhead","max_hp":100,"recovery_fraction":0.25,"structural_remedy":"structure"}],
         "connection":[{"id":"hall","from":"home","to":"engine","travel_secs":2.0}],
         "placements":{"a":"engine","b":"home"},"team_homes":["home"]
     })).unwrap();

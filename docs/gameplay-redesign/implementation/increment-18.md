@@ -193,6 +193,11 @@ those actual bodies solely for arrival resolution and reports only the supported
 own result. Validate finite representable geometry and stable body ordering;
 ordinary propulsion and static orbital bodies remain unchanged.
 
+The existing per-ship drive map permits only one active Preparing/Committed order.
+A competing Begin refuses before work, and whole-candidate preflight rejects
+multiple active orders. Alternate drives retain their own histories without a
+second mutex, controller or physical arrival writer.
+
 First supported sources use typed optional `arrival_gravity` on the normally
 resolved EntityConfig, explicitly authored through the static World row's
 ordinary overrides. Require an unambiguous finite absolute position and an

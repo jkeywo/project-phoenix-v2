@@ -78,6 +78,8 @@ The scan readout displays this payload without running its own prediction model.
 receivers, ordinary closed AI frames, enabled intent and actual measured samples.
 `science::signatures::observed_signature` measures their strongest actual reactor
 or supported machinery cause, preserving reactor-first and authored-order ties.
+Actual radio/transponder work uses the Comms cause, fitted active instruments
+use ActiveScan, and remaining performed auxiliary work is Unclassified.
 Passive supplies current output and work at its existing measurement boundary;
 the helper stores no extra physical state or observer knowledge.
 Physical producers use actual resource expenditure, mount coverage and signal

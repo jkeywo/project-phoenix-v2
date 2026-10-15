@@ -117,6 +117,15 @@ pub fn compile_ship_trees_with_energy(
                     binding.target_channel,
                 ),
             )
+        } else if system.kind == crate::ship::system_registry::CONCEALMENT_KIND {
+            let binding = phoenix_sim_gameplay::ship::composition::concealment_composition(
+                &system.components,
+            )
+            .ok_or("concealment emitter state tree requires actual composition")?;
+            compile(
+                &definition,
+                &phoenix_sim_gameplay::electronic::concealment::bindings(binding.enabled_channel),
+            )
         } else if system.kind == crate::ship::system_registry::IDENTITY_EMITTER_KIND {
             let binding =
                 phoenix_sim_gameplay::ship::composition::identity_composition(&system.components)

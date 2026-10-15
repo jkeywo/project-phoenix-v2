@@ -6339,3 +6339,14 @@ workshop.world_routes.add,Accepted root route authoring,Add route,Add route,Add 
 workshop.world_routes.save,Accepted root route authoring,Save route,Save route,Save route,source
 workshop.world_routes.remove,Accepted root route authoring,Remove route,Remove route,Remove route,source
 workshop.world_routes.refused,Accepted root route authoring,Route edit refused: {reason},Route edit refused: {reason},Route edit refused: {reason},source
+
+entity.concealment_cruiser.name,Optional concealment reference,Concealment Cruiser,,,
+concealment.title,Equipment detail,Concealment field,,,
+concealment.enabled,Equipment action,Enable concealment,,,
+concealment.enable,Equipment action,Enable field,,,
+concealment.disable,Equipment action,Disable field,,,
+concealment.active,Own equipment status,Field operating,,,
+concealment.waiting,Own equipment status,Waiting for available work,,,
+concealment.off,Own equipment status,Field disabled,,,
+concealment.work,Own equipment detail,Work {paid}% / perceptibility {perceptibility}%,,,
+concealment.signature,Own equipment detail,Operating emission {emission} ({cause}),,,

@@ -1,3 +1,4 @@
+export {initialConcealment, validateConcealmentComposition} from './workshop-concealment.js';
 export {initialIdentity, validateIdentityComposition} from './workshop-identity.js';
 import {validateChannelInitials} from './workshop-protection.js';
 export {initialProtection, validateProtectionComposition} from './workshop-protection.js';

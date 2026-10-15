@@ -218,6 +218,7 @@ type Emitters<'w, 's> = Query<
         &'static Transform,
         &'static ShipPowerSystem,
         Option<&'static ShipConfigComponent>,
+        Option<&'static super::concealment::ConcealmentFields>,
     ),
 >;
 type Receivers<'w, 's> = Query<
@@ -253,7 +254,7 @@ fn tick(
     let mut emissions: Vec<_> = scene
         .p0()
         .iter()
-        .filter_map(|(uuid, transform, power, config)| {
+        .filter_map(|(uuid, transform, power, config, fields)| {
             let reactor_output = if power.0.network().generation_enabled {
                 f64::from(power.0.network().output_actual_per_sec)
             } else {
@@ -272,7 +273,15 @@ fn tick(
                 dt,
             )
             .map(|(strength, signature)| {
-                (uuid.0.clone(), transform.translation, strength, signature)
+                let factor = fields
+                    .filter(|_| config.is_some())
+                    .map_or(1.0, |field| field.perceptibility(tick.0, strength));
+                (
+                    uuid.0.clone(),
+                    transform.translation,
+                    strength * factor,
+                    signature,
+                )
             })
         })
         .collect();

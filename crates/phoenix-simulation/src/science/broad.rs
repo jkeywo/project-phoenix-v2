@@ -146,7 +146,11 @@ pub(crate) fn tick(
         Option<&crate::ship::disablement::DisablementObservation>,
         Option<&crate::entities::spawner::EntityTarget>,
         Option<&crate::ship::shields::ShipShields>,
-        Option<&super::identity::IdentityEmissions>,
+        (
+            Option<&super::identity::IdentityEmissions>,
+            Option<&super::concealment::ConcealmentFields>,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+        ),
     )>,
     mut observers: Query<(
         &EntityUuid,
@@ -297,7 +301,7 @@ pub(crate) fn tick(
                         disabled,
                         target,
                         shields,
-                        identity_emissions,
+                        (identity_emissions, concealment_fields, target_config),
                     ) in &scene
                     {
                         let Some(id) = id
@@ -354,7 +358,16 @@ pub(crate) fn tick(
                             continue;
                         }
                         let position = physical_position(physics, transform);
-                        if !position.is_finite() || position.distance(origin) > range {
+                        let target_factor = super::concealment::perceptibility(
+                            concealment_fields,
+                            power,
+                            target_config,
+                            tick.0,
+                            dt,
+                        );
+                        if !position.is_finite()
+                            || position.distance(origin) > range * target_factor
+                        {
                             continue;
                         }
                         let support = paths.transmission(

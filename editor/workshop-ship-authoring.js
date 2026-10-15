@@ -14,7 +14,7 @@ import { scanPublicationSource } from '../gui/scan-source.js';
 import { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
 export { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
 import { writeStateTrees, writeRepairWorkflow, rebindStateTreeChannel } from './workshop-state-trees.js';
-import { writeSystemComposition, validateTurretComposition, validateIlluminationComposition, validateJammingComposition, validateProtectionComposition, validateIdentityComposition, validateBayComposition, validateDockMovement } from './workshop-system-composition.js';
+import { writeSystemComposition, validateTurretComposition, validateIlluminationComposition, validateJammingComposition, validateProtectionComposition, validateIdentityComposition, validateConcealmentComposition, validateBayComposition, validateDockMovement } from './workshop-system-composition.js';
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
 import { acceptWorkshopChanges } from './workshop-acceptance.js';
@@ -272,6 +272,7 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
     validateJammingComposition(system, operation.components || [], operation.channels || []);
     validateProtectionComposition(system, operation.components || [], operation.channels || [], inspection.composition.resolved.value);
     validateIdentityComposition(system, operation.components || [], operation.channels || [], inspection.composition.resolved.value);
+    validateConcealmentComposition(system, operation.components || [], operation.channels || [], inspection.composition.resolved.value);
     validateDockMovement(operation.components || []);
     validateBayComposition(system,operation.components||[],operation.channels||[]);
     const local = system.local ? before : append(before, { system: [{ id: system.id }] });

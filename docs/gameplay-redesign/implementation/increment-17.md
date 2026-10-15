@@ -495,3 +495,57 @@ suppression, output saturation, sampling timing and scene ordering are unchanged
 Focused owner tests describe reserve operation, ties, ignored equipment and
 saturation. They are formatted source pending the root's coordinated Cargo run;
 this extraction adds no concealment effect or new emission cause.
+
+### Paid concealment leaf handoff
+
+The next source slice intentionally extends signatures to actual radar and
+illumination work, communication and paid auxiliary machinery. It adds a real
+optional ConcealmentEmitter, exact Boolean/PowerInput composition, Operation and
+energy/placement validation, ordinary state-tree controls, shared detail/action
+leaves and the existing Workshop accepted-source pipeline. The reference Cruiser
+retains the base reactor and all existing allocation groups. Only its new finite
+consumer is added under Sensors with provisional suppression/scale data.
+
+`ShipConcealmentEmitters` saves generic enabled intent. `ConcealmentFields` is a
+derived current-tick paid fraction/profile, never prepaid restored work. Payment
+occurs after TickPowerSystem and before ordinary radio work. Broad and Passive
+read actual work at measurement time; focused sensing uses a ParamSet to read
+actual target factors at the existing TickScans boundary, before the scanner's
+own acquisition mutation. Target range/distance/emission gets one factor each.
+No target association, body, alias, stored observation or controller is replaced.
+
+Root integration must add the Model `concealment_ui` module, Boolean
+`SetConcealmentEnabled`, optional `SystemStatus.concealment`, actual Science
+registration/spawn and status projection. It must capture/fold/validate/restore
+`EntityState.concealment_emitters` against accepted source recipes (including
+Disabled actors), clear `ConcealmentFields` on restore, and advance the affected
+compatibility versions. Snapshot row validation follows the identity leaf's
+accepted-recipe precedence and exact roster/channel rules. Root also owns shared
+GUI joins: action-map's `concealment_enabled` → SetConcealmentEnabled; console-core
+registration of `registerConcealmentActions`; and common status mounting/update/
+disposal of `mountConcealmentControls`. No shared shell or central snapshot file
+is changed in this leaf donor.
+
+Pin the named payment/control stages in the existing deterministic order. Broad
+must follow TickScans, and Passive must follow Broad, so later physical samples
+include the actual focused work already performed. A separately reviewed root
+correction must move the existing work-emission map reset to the start of the
+fixed interval: the current Physics energy reset drops earlier paid Input work.
+No second emission store or saved signature is proposed. Complete Input-work
+signature evidence depends on that correction.
+
+Owned Rust source tests cover real reserve payment, partial/unfunded/offline and
+malformed equipment, actual weapon-work leakage with field intent still enabled,
+body/truth preservation and exact canonical intent JSON/roster validation. These
+are unexecuted until the integration owner joins the central hooks. Actual
+Broad/focused/Passive loss/recovery, Human/ordinary-AI full-host operation, exact
+JSON360 continuation/no-write, balance and native/browser acceptance remain open.
+The Workshop/editor/control checks and independent source review are recorded
+with the donor; this is not an increment 17 exit.
+
+Targeted leaf verification: 6 JavaScript tests across concealment controls,
+Workshop concealment and existing identity authoring passed (832ms). Strict
+strings checked 6,290 entries with zero errors/warnings. Workshop built and
+layer dependency checks passed. Craft's independent bounded source review
+passed after correcting the exact component profile type; no Cargo/native
+execution was performed in the worker lane.

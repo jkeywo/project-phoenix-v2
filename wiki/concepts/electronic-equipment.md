@@ -3,6 +3,12 @@ title: Electronic Equipment
 type: concept
 tags: [comms, observations, equipment, simulation]
 sources:
+  - crates/phoenix-sim-gameplay/src/electronic/concealment.rs
+  - crates/phoenix-sim-gameplay/src/science/signatures.rs
+  - crates/phoenix-simulation/src/science/concealment.rs
+  - crates/phoenix-simulation/src/science/passive.rs
+  - crates/phoenix-simulation/src/science/server.rs
+  - editor/workshop-concealment.js
   - crates/phoenix-sim-gameplay/src/electronic/identity.rs
   - crates/phoenix-simulation/src/science/identity.rs
   - crates/phoenix-simulation/src/science/broad.rs
@@ -84,3 +90,15 @@ received Comms evidence are not rewritten. Own shared equipment details expose
 intent and paid activity without a deception-success or observer-attribution bit.
 The optional `identity_cruiser.toml` uses finite existing reactor output and
 ordinary allocation; it adds no crew seat.
+
+The `concealment` leaf uses that supported Boolean/PowerInput composition with
+its own ordinary System tree. `ShipConcealmentEmitters` holds enabled intent;
+`ConcealmentFields` holds only current paid fractions. Payment follows actual
+reactor allocation, and each physical measurement reads current operating work.
+Partial grants reduce the field, and actual emissions weaken it without changing
+enabled intent. Broad range, focused distance and Passive strength each apply
+the target factor once; path and receiver effects remain separate. The accepted
+factor is strictly positive and existing observations retain their normal ages,
+aliases and history. Central host registration, persistence and shared status
+mounting are integration-owned; leaf owner tests alone do not establish those
+host journeys.

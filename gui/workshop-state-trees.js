@@ -8,6 +8,7 @@ export function systemTreeVocabulary(owner, schema) {
   const host = schema.hosts?.[owner?.kind], vocabulary = { ...schema, ...host };
   const profile = owner?.energy_profile;
   if (['illumination','jamming'].includes(owner?.kind)) { const emitter=owner.component?.find(row=>row.kind===`${owner.kind}_emitter`); vocabulary.channels=[emitter?.enabled_channel || 'enabled',emitter?.target_channel || 'target']; }
+  if (owner?.kind === 'concealment') vocabulary.channels = [owner.component?.find(row => row.kind === 'concealment_emitter')?.enabled_channel || 'enabled'];
   if (owner?.kind === 'identity-emitter') vocabulary.channels = [owner.component?.find(row => row.kind === 'identity_emitter')?.enabled_channel || 'enabled'];
   if (owner?.kind === 'signal-protection') vocabulary.channels = [owner.component?.find(row => row.kind === 'signal_protection')?.enabled_channel || 'enabled'];
   if (owner?.kind === 'access-gate') vocabulary.channels = [owner.component?.find(row => row.kind === 'access_boundary')?.sealed_channel || 'sealed'];

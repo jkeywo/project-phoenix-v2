@@ -252,22 +252,30 @@ pub fn tick_scans(
     enquiries: super::enquiry::EnquiryScene,
     mut runtime: Option<ResMut<WorldContentRuntime>>,
     membership: Option<Res<crate::regions::server::RegionMembership>>,
-    mut ships: Query<
-        (
-            Entity,
+    mut operators: ParamSet<(
+        Query<
+            (
+                Entity,
+                &EntityUuid,
+                &Transform,
+                &AdmittedCommands,
+                Option<&mut ShipPowerSystem>,
+                Option<&mut ShipScanRecord>,
+                Option<&crate::ship::compartment_damage::ShipDamage>,
+                Option<&crate::ship_plugin::ShipSystemControlSources>,
+                Option<&crate::ship_plugin::ShipConfigComponent>,
+                Option<&crate::server_app::ShipSystemBlackboards>,
+                Option<&super::broad::BroadTracks>,
+            ),
+            With<crate::server_app::Ship>,
+        >,
+        Query<(
             &EntityUuid,
-            &Transform,
-            &AdmittedCommands,
-            Option<&mut ShipPowerSystem>,
-            Option<&mut ShipScanRecord>,
-            Option<&crate::ship::compartment_damage::ShipDamage>,
-            Option<&crate::ship_plugin::ShipSystemControlSources>,
-            Option<&crate::ship_plugin::ShipConfigComponent>,
-            Option<&crate::server_app::ShipSystemBlackboards>,
-            Option<&super::broad::BroadTracks>,
-        ),
-        With<crate::server_app::Ship>,
-    >,
+            &super::concealment::ConcealmentFields,
+            &ShipPowerSystem,
+            &crate::ship_plugin::ShipConfigComponent,
+        )>,
+    )>,
     subjects: Query<(
         &EntityUuid,
         &Transform,
@@ -312,6 +320,27 @@ pub fn tick_scans(
         || time.map_or(0.0, |time| time.delta_secs()),
         |fixed| fixed.timestep().as_secs_f32(),
     );
+
+    // Read performed operating work here at the existing measurement phase,
+    // not in the earlier field-payment stage. The ParamSet separates this
+    // physical read from each scanner's subsequent own acquisition payment.
+    let target_perceptibility: std::collections::BTreeMap<_, _> = operators
+        .p1()
+        .iter()
+        .map(|(uuid, fields, power, config)| {
+            (
+                uuid.0.clone(),
+                super::concealment::perceptibility(
+                    Some(fields),
+                    Some(power),
+                    Some(config),
+                    now_tick,
+                    dt,
+                ),
+            )
+        })
+        .collect();
+    let mut ships = operators.p0();
 
     // UUID order, not archetype order: two hosts must take the same ship's
     // scans in the same sequence, because each one overwrites that ship's
@@ -615,13 +644,19 @@ pub fn tick_scans(
                 );
                 let receiver_factor =
                     paths.sensors_receiver_factor(ship_pos, &operator_uuid, owner);
+                let target_factor = target_perceptibility
+                    .get(target_uuid)
+                    .copied()
+                    .unwrap_or(1.0);
                 let conditions = ScanConditions {
                     // Path loss reduces usable reach on the same fidelity ladder.
                     // An opaque path cannot be bypassed by unfaded endpoints.
-                    distance: if transmission > 0.0 && receiver_factor > 0.0 {
+                    distance: if transmission > 0.0 && receiver_factor > 0.0 && target_factor > 0.0
+                    {
                         ship_pos.distance(subject_transform.translation)
                             / transmission
                             / receiver_factor
+                            / target_factor
                     } else {
                         f32::INFINITY
                     },

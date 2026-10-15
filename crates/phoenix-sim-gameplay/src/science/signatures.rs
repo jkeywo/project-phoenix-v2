@@ -3,12 +3,13 @@
 //! Callers supply the current measurement interval and authored System order.
 //! This helper owns no history, sensor knowledge or extra simulation state.
 use crate::ship::system_registry::{
-    BLASTER_BANK_KIND, HELM_BOOST_KIND, HELM_ENGINE_KIND, HELM_THRUST_KIND, PHASER_BANK_KIND,
-    SENSORS_KIND, TORPEDO_TUBE_KIND,
+    BLASTER_BANK_KIND, COMMS_KIND, HELM_BOOST_KIND, HELM_ENGINE_KIND, HELM_RADAR_KIND,
+    HELM_THRUST_KIND, IDENTITY_EMITTER_KIND, ILLUMINATION_KIND, PHASER_BANK_KIND, SENSORS_KIND,
+    SENSOR_RADAR_KIND, TACTICAL_RADAR_KIND, TORPEDO_TUBE_KIND,
 };
 use phoenix_model::sensing::PassiveSignature;
 
-/// Preserve the existing Passive instrument's strongest-cause measurement.
+/// Measure the strongest actual operating cause, including paid auxiliary work.
 ///
 /// `reactor_output` is actual output per second (zero when generation is off).
 /// Each machinery entry is its kind and actual emitted work for this interval.
@@ -24,12 +25,22 @@ pub fn observed_signature<'a>(
     for (kind, emitted_work) in machinery {
         let cause = if [HELM_ENGINE_KIND, HELM_THRUST_KIND, HELM_BOOST_KIND].contains(&kind) {
             PassiveSignature::Propulsion
-        } else if kind == SENSORS_KIND {
+        } else if [
+            SENSORS_KIND,
+            HELM_RADAR_KIND,
+            SENSOR_RADAR_KIND,
+            TACTICAL_RADAR_KIND,
+            ILLUMINATION_KIND,
+        ]
+        .contains(&kind)
+        {
             PassiveSignature::ActiveScan
         } else if [PHASER_BANK_KIND, BLASTER_BANK_KIND, TORPEDO_TUBE_KIND].contains(&kind) {
             PassiveSignature::Weapon
+        } else if [COMMS_KIND, IDENTITY_EMITTER_KIND].contains(&kind) {
+            PassiveSignature::Comms
         } else {
-            continue;
+            PassiveSignature::Unclassified
         };
         let measured = emitted_work / f64::from(interval_secs);
         if measured > strength {
@@ -70,10 +81,18 @@ mod tests {
     }
 
     #[test]
-    fn unknown_equipment_does_not_change_the_existing_measurement() {
+    fn paid_auxiliary_work_and_communications_use_closed_causes() {
         assert_eq!(
             observed_signature(2.0, [("unknown", 1000.0), (HELM_BOOST_KIND, 2.0)], 0.5),
-            Some((4.0, PassiveSignature::Propulsion))
+            Some((2000.0, PassiveSignature::Unclassified))
+        );
+        assert_eq!(
+            observed_signature(0.0, [(COMMS_KIND, 2.0)], 0.5),
+            Some((4.0, PassiveSignature::Comms))
+        );
+        assert_eq!(
+            observed_signature(0.0, [(SENSOR_RADAR_KIND, 2.0)], 0.5),
+            Some((4.0, PassiveSignature::ActiveScan))
         );
     }
 

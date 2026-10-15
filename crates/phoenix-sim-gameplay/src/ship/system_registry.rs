@@ -182,6 +182,7 @@ pub const ILLUMINATION_KIND: &str = "illumination";
 pub const JAMMING_KIND: &str = "jamming";
 pub const SIGNAL_PROTECTION_KIND: &str = "signal-protection";
 pub const IDENTITY_EMITTER_KIND: &str = "identity-emitter";
+pub const CONCEALMENT_KIND: &str = "concealment";
 pub const TRANSIT_DRIVE_KIND: &str = "transit-drive";
 pub const CRAFT_BAY_KIND: &str = "craft-bay";
 pub const ACCESS_GATE_KIND: &str = "access-gate";
@@ -554,6 +555,7 @@ impl SystemKindRegistry {
         registry.register_commandable(JAMMING_KIND, ConsoleFamily::Comms)?;
         registry.register_commandable(SIGNAL_PROTECTION_KIND, ConsoleFamily::Sensors)?;
         registry.register_commandable(IDENTITY_EMITTER_KIND, ConsoleFamily::Comms)?;
+        registry.register_commandable(CONCEALMENT_KIND, ConsoleFamily::Science)?;
         registry.register_commandable(TRANSIT_DRIVE_KIND, ConsoleFamily::Helm)?;
         registry.register_commandable(CRAFT_BAY_KIND, ConsoleFamily::Tactical)?;
         registry.register_commandable(ACCESS_GATE_KIND, ConsoleFamily::Access)?;

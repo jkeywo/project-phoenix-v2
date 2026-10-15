@@ -1,6 +1,7 @@
 pub mod scan;
 pub mod sensing;
 pub mod sensing_ai;
+pub mod tracks;
 pub use scan::*;
 /// The blackboard channel key a ship's last scan is published under.
 ///

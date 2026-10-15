@@ -1,0 +1,436 @@
+//! One lifecycle for paid broad observations and their retained predictions.
+//! Actual source IDs remain private routing keys, never association evidence.
+pub use phoenix_model::sensing_tracks::{
+    SensorTrackSnapshot, TrackAssessment, TrackIdentity, TrackStage,
+};
+use phoenix_model::{identity::SystemId, sensing::BroadConfig};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
+
+/// Physical producer input, already limited by actual coverage/visibility.
+/// `support` is this path's attenuation, independent of other contact counts.
+#[derive(Clone, Debug)]
+pub struct BroadMeasurement {
+    pub source: String,
+    pub position: [f32; 2],
+    pub support: f32,
+    pub identity: Option<TrackIdentity>,
+    pub classification: Option<String>,
+    pub assessment: Option<TrackAssessment>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BroadTrack {
+    pub contact_id: String,
+    pub observed_tick: u64,
+    pub position: [f32; 2],
+    pub velocity: Option<[f32; 2]>,
+    pub velocity_error: f32,
+    pub position_error: f32,
+    pub supported_secs: f64,
+    pub refresh_secs: f64,
+    pub identity: Option<TrackIdentity>,
+    pub identity_tick: Option<u64>,
+    pub classification: Option<String>,
+    pub classification_tick: Option<u64>,
+    pub assessment: Option<TrackAssessment>,
+    pub assessment_tick: Option<u64>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BroadTrackState {
+    pub owner: SystemId,
+    pub last_tick: Option<u64>,
+    pub last_sample_tick: Option<u64>,
+    pub sample_elapsed: f64,
+    pub next_contact: u64,
+    pub tracks: BTreeMap<String, BroadTrack>,
+    /// Current measured-source routing only. Cleared whenever a contact is lost.
+    pub current: BTreeMap<String, String>,
+}
+impl BroadTrackState {
+    pub fn new(profile: &BroadConfig) -> Self {
+        Self {
+            owner: profile.system.clone(),
+            last_tick: None,
+            last_sample_tick: None,
+            sample_elapsed: 0.0,
+            next_contact: 1,
+            tracks: BTreeMap::new(),
+            current: BTreeMap::new(),
+        }
+    }
+    /// Returns only the most recently supported physical association. This is
+    /// actuator routing, not public identity evidence or a search over truth.
+    pub fn resolve_current(&self, contact: &str) -> Option<&str> {
+        self.current
+            .iter()
+            .find_map(|(source, id)| (id == contact).then_some(source.as_str()))
+    }
+    pub fn contact_for_source(&self, source: &str) -> Option<&str> {
+        self.current.get(source).map(String::as_str)
+    }
+    pub fn validate(&self, profile: &BroadConfig, tick: u64, fixed_dt: f32) -> Result<(), String> {
+        profile_valid(profile, fixed_dt)?;
+        if self.owner != profile.system
+            || self.next_contact == 0
+            || self.next_contact == u64::MAX
+            || self.last_tick.is_some_and(|last| last > tick)
+            || self
+                .last_sample_tick
+                .is_some_and(|sample| self.last_tick.is_none_or(|last| sample > last))
+            || !self.sample_elapsed.is_finite()
+            || self.sample_elapsed < 0.0
+            || self.sample_elapsed >= f64::from(profile.sample_interval_secs)
+            || self.last_sample_tick.is_none()
+                && (!self.tracks.is_empty() || !self.current.is_empty())
+            || self.last_tick.is_none()
+                && (self.last_sample_tick.is_some()
+                    || self.next_contact != 1
+                    || self.sample_elapsed != 0.0)
+        {
+            return Err("invalid broad observation owner or clock frontier".into());
+        }
+        let mut ids = BTreeSet::new();
+        for (id, track) in &self.tracks {
+            let sequence = id
+                .strip_prefix("contact-")
+                .and_then(|n| n.parse::<u64>().ok());
+            if &track.contact_id != id
+                || sequence.is_none_or(|n| n == 0 || n >= self.next_contact)
+                || !ids.insert(id)
+                || self
+                    .last_sample_tick
+                    .is_none_or(|sample| track.observed_tick > sample)
+                || !track.position.iter().all(|value| value.is_finite())
+                || track
+                    .velocity
+                    .is_some_and(|velocity| !velocity.iter().all(|value| value.is_finite()))
+                || !track.velocity_error.is_finite()
+                || track.velocity_error < 0.0
+                || track.position_error != profile.position_error
+                || !track.supported_secs.is_finite()
+                || track.supported_secs < 0.0
+                || track.supported_secs > f64::from(profile.assessment_secs)
+                || !track.refresh_secs.is_finite()
+                || track.refresh_secs < 0.0
+                || track.refresh_secs > track.supported_secs
+                || [
+                    (track.identity.is_some(), track.identity_tick),
+                    (track.classification.is_some(), track.classification_tick),
+                    (track.assessment.is_some(), track.assessment_tick),
+                ]
+                .into_iter()
+                .any(|(has, tick)| {
+                    has != tick.is_some() || tick.is_some_and(|tick| tick > track.observed_tick)
+                })
+                || track.supported_secs < f64::from(profile.identity_secs)
+                    && track.identity.is_some()
+                || track.supported_secs < f64::from(profile.classification_secs)
+                    && track.classification.is_some()
+                || track.supported_secs < f64::from(profile.assessment_secs)
+                    && track.assessment.is_some()
+            {
+                return Err("invalid retained broad measurement or finding frontier".into());
+            }
+        }
+        let mut associations = BTreeSet::new();
+        for (source, id) in &self.current {
+            if !valid_source(source) || !self.tracks.contains_key(id) || !associations.insert(id) {
+                return Err("invalid current broad contact association".into());
+            }
+        }
+        Ok(())
+    }
+    /// One fixed-step paid observation opportunity, with no contact-count cost.
+    /// The caller supplies a real grant already paid by this broad System.
+    pub fn advance(
+        &mut self,
+        profile: &BroadConfig,
+        tick: u64,
+        fixed_dt: f32,
+        paid_fraction: f32,
+        measurements: &[BroadMeasurement],
+    ) -> Result<(), String> {
+        self.validate(profile, tick, fixed_dt)?;
+        if !paid_fraction.is_finite() || !(0.0..=1.0).contains(&paid_fraction) {
+            return Err("invalid paid broad work fraction".into());
+        }
+        let mut sources = BTreeSet::new();
+        for sample in measurements {
+            if !valid_source(&sample.source)
+                || !sources.insert(&sample.source)
+                || !sample.position.iter().all(|value| value.is_finite())
+                || !sample.support.is_finite()
+                || !(0.0..=1.0).contains(&sample.support)
+            {
+                return Err("invalid or duplicate broad measurement".into());
+            }
+        }
+        if self.last_tick == Some(tick) {
+            return Ok(());
+        }
+        if self.last_tick.is_some_and(|last| tick < last) {
+            return Err("broad work cannot rewind".into());
+        }
+        let mut next = self.clone();
+        next.last_tick = Some(tick);
+        next.sample_elapsed += f64::from(fixed_dt);
+        let due = next.last_sample_tick.is_none()
+            || next.sample_elapsed >= f64::from(profile.sample_interval_secs);
+        next.sample_elapsed %= f64::from(profile.sample_interval_secs);
+        let mut samples: Vec<_> = measurements
+            .iter()
+            .filter(|sample| paid_fraction > 0.0 && sample.support > 0.0)
+            .collect();
+        // New anonymous identities follow measured geometry, not a hidden
+        // UUID ordering. Private routing breaks only indistinguishable ties.
+        samples.sort_by(|a, b| {
+            let a_position = measured_position(a.position, profile.position_error);
+            let b_position = measured_position(b.position, profile.position_error);
+            a_position[0]
+                .total_cmp(&b_position[0])
+                .then_with(|| a_position[1].total_cmp(&b_position[1]))
+                .then_with(|| a.source.cmp(&b.source))
+        });
+        // Two unresolved returns within their measured discs are not secretly
+        // disambiguated by the physical source key, including while crossing.
+        let confused: BTreeSet<_> = samples
+            .iter()
+            .filter(|a| {
+                samples.iter().any(|b| {
+                    a.source != b.source
+                        && distance(
+                            measured_position(a.position, profile.position_error),
+                            measured_position(b.position, profile.position_error),
+                        ) <= f64::from(profile.position_error) * 2.0
+                })
+            })
+            .map(|sample| sample.source.as_str())
+            .collect();
+        next.current.retain(|source, _| {
+            samples.iter().any(|sample| &sample.source == source)
+                && !confused.contains(source.as_str())
+        });
+        if due && !samples.is_empty() {
+            let claimed: BTreeSet<_> = next.current.values().cloned().collect();
+            let candidates: BTreeMap<_, Vec<_>> = samples
+                .iter()
+                .filter(|sample| !next.current.contains_key(&sample.source))
+                .map(|sample| {
+                    let position = measured_position(sample.position, profile.position_error);
+                    let candidates = next
+                        .tracks
+                        .iter()
+                        .filter(|(id, track)| {
+                            !claimed.contains(*id)
+                                && (tick - track.observed_tick) as f64 * f64::from(fixed_dt)
+                                    <= f64::from(profile.track_retention_secs)
+                                && distance(prediction(track, tick, fixed_dt).0, position)
+                                    <= f64::from(prediction(track, tick, fixed_dt).1)
+                                        + f64::from(profile.position_error)
+                                        + (tick - track.observed_tick) as f64
+                                            * f64::from(fixed_dt)
+                                            * f64::from(profile.drift_error_per_sec)
+                        })
+                        .map(|(id, _)| id.clone())
+                        .collect();
+                    (sample.source.clone(), candidates)
+                })
+                .collect();
+            for sample in &samples {
+                if next.current.contains_key(&sample.source) {
+                    continue;
+                }
+                let candidates_for_source = &candidates[&sample.source];
+                let association = (candidates_for_source.len() == 1
+                    && !confused.contains(sample.source.as_str()))
+                .then(|| candidates_for_source[0].clone())
+                .filter(|id| candidates.values().filter(|list| list.contains(id)).count() == 1);
+                let id = if let Some(id) = association {
+                    next.tracks
+                        .get_mut(&id)
+                        .expect("retained association")
+                        .refresh_secs = 0.0;
+                    id
+                } else {
+                    let Some(following) = next
+                        .next_contact
+                        .checked_add(1)
+                        .filter(|next| *next < u64::MAX)
+                    else {
+                        continue;
+                    };
+                    let id = format!("contact-{}", next.next_contact);
+                    next.next_contact = following;
+                    next.tracks.insert(
+                        id.clone(),
+                        BroadTrack {
+                            contact_id: id.clone(),
+                            observed_tick: tick,
+                            position: measured_position(sample.position, profile.position_error),
+                            velocity: None,
+                            velocity_error: 0.0,
+                            position_error: profile.position_error,
+                            supported_secs: 0.0,
+                            refresh_secs: 0.0,
+                            identity: None,
+                            identity_tick: None,
+                            classification: None,
+                            classification_tick: None,
+                            assessment: None,
+                            assessment_tick: None,
+                        },
+                    );
+                    id
+                };
+                next.current.insert(sample.source.clone(), id);
+            }
+        }
+        for sample in &samples {
+            let Some(id) = next.current.get(&sample.source) else {
+                continue;
+            };
+            let track = next.tracks.get_mut(id).expect("checked association");
+            track.supported_secs = (track.supported_secs
+                + f64::from(fixed_dt) * f64::from(paid_fraction) * f64::from(sample.support))
+            .min(f64::from(profile.assessment_secs));
+            track.refresh_secs = (track.refresh_secs
+                + f64::from(fixed_dt) * f64::from(paid_fraction) * f64::from(sample.support))
+            .min(f64::from(profile.assessment_secs));
+            if !due {
+                continue;
+            }
+            let position = measured_position(sample.position, profile.position_error);
+            if tick > track.observed_tick {
+                let elapsed = (tick - track.observed_tick) as f64 * f64::from(fixed_dt);
+                track.velocity = Some(
+                    [
+                        (f64::from(position[0]) - f64::from(track.position[0])) / elapsed,
+                        (f64::from(position[1]) - f64::from(track.position[1])) / elapsed,
+                    ]
+                    .map(bounded_float),
+                );
+                track.velocity_error =
+                    bounded_float(2.0 * f64::from(profile.position_error) / elapsed);
+            }
+            track.position = position;
+            track.observed_tick = tick;
+            if track.refresh_secs >= f64::from(profile.identity_secs) && sample.identity.is_some() {
+                track.identity.clone_from(&sample.identity);
+                track.identity_tick = sample.identity.as_ref().map(|_| tick);
+            }
+            if track.refresh_secs >= f64::from(profile.classification_secs)
+                && sample.classification.is_some()
+            {
+                track.classification.clone_from(&sample.classification);
+                track.classification_tick = sample.classification.as_ref().map(|_| tick);
+            }
+            if track.refresh_secs >= f64::from(profile.assessment_secs)
+                && sample.assessment.is_some()
+            {
+                track.assessment.clone_from(&sample.assessment);
+                track.assessment_tick = sample.assessment.as_ref().map(|_| tick);
+            }
+        }
+        if due && !samples.is_empty() {
+            next.last_sample_tick = Some(tick);
+        }
+        let current: BTreeSet<_> = next.current.values().cloned().collect();
+        next.tracks.retain(|id, track| {
+            current.contains(id)
+                || (tick - track.observed_tick) as f64 * f64::from(fixed_dt)
+                    <= f64::from(profile.track_retention_secs)
+        });
+        next.validate(profile, tick, fixed_dt)?;
+        *self = next;
+        Ok(())
+    }
+    pub fn projection(
+        &self,
+        profile: &BroadConfig,
+        tick: u64,
+        fixed_dt: f32,
+    ) -> Result<Vec<SensorTrackSnapshot>, String> {
+        self.validate(profile, tick, fixed_dt)?;
+        let current: BTreeSet<_> = self.current.values().collect();
+        Ok(self
+            .tracks
+            .values()
+            .map(|track| {
+                let (position, error) = prediction(track, tick, fixed_dt);
+                let age = (tick - track.observed_tick) as f64 * f64::from(fixed_dt);
+                SensorTrackSnapshot {
+                    contact_id: track.contact_id.clone(),
+                    observed_tick: track.observed_tick,
+                    position,
+                    velocity: track.velocity,
+                    position_error: bounded_float(
+                        f64::from(error) + age * f64::from(profile.drift_error_per_sec),
+                    ),
+                    stage: if track.supported_secs >= f64::from(profile.assessment_secs) {
+                        TrackStage::Assessed
+                    } else if track.supported_secs >= f64::from(profile.classification_secs) {
+                        TrackStage::Classified
+                    } else if track.supported_secs >= f64::from(profile.identity_secs) {
+                        TrackStage::Identified
+                    } else {
+                        TrackStage::Return
+                    },
+                    identity: track.identity.clone(),
+                    identity_tick: track.identity_tick,
+                    classification: track.classification.clone(),
+                    classification_tick: track.classification_tick,
+                    assessment: track.assessment.clone(),
+                    assessment_tick: track.assessment_tick,
+                    predicted: !current.contains(&track.contact_id),
+                }
+            })
+            .collect())
+    }
+}
+fn profile_valid(profile: &BroadConfig, fixed_dt: f32) -> Result<(), String> {
+    phoenix_model::sensing::SensingConfig {
+        broad: Some(profile.clone()),
+        ..Default::default()
+    }
+    .validate()?;
+    if !fixed_dt.is_finite() || fixed_dt <= 0.0 {
+        return Err("broad sensing needs a positive fixed tick duration".into());
+    }
+    Ok(())
+}
+fn valid_source(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 128 && !value.chars().any(char::is_control)
+}
+fn bounded_float(value: f64) -> f32 {
+    value.clamp(-f64::from(f32::MAX), f64::from(f32::MAX)) as f32
+}
+fn distance(a: [f32; 2], b: [f32; 2]) -> f64 {
+    let x = f64::from(a[0]) - f64::from(b[0]);
+    let z = f64::from(a[1]) - f64::from(b[1]);
+    // Compare squared distance where possible in callers; this helper's sqrt
+    // is pure platform floating arithmetic, never a source of random evidence.
+    (x * x + z * z).sqrt()
+}
+pub fn measured_position(position: [f32; 2], error: f32) -> [f32; 2] {
+    if error == 0.0 {
+        return position;
+    }
+    let cell = f64::from(error) * std::f64::consts::SQRT_2;
+    position.map(|value| bounded_float(((f64::from(value) / cell).floor() + 0.5) * cell))
+}
+fn prediction(track: &BroadTrack, tick: u64, fixed_dt: f32) -> ([f32; 2], f32) {
+    let age = (tick - track.observed_tick) as f64 * f64::from(fixed_dt);
+    let velocity = track.velocity.unwrap_or([0.0; 2]);
+    (
+        [
+            bounded_float(f64::from(track.position[0]) + age * f64::from(velocity[0])),
+            bounded_float(f64::from(track.position[1]) + age * f64::from(velocity[1])),
+        ],
+        bounded_float(f64::from(track.position_error) + age * f64::from(track.velocity_error)),
+    )
+}
+#[cfg(test)]
+#[path = "tracks_tests.rs"]
+mod tests;

@@ -14,14 +14,20 @@ fn ai_group_work_binds_accepted_job_but_only_the_named_component_credits_the_sit
         .unwrap()
         .unwrap();
     let owner = repair_system_id();
-    let home = &initial.definition.interior.team_homes[0];
+    let ship_config = config.ship_config.as_ref().unwrap();
     let (system, parts) = initial
         .definition
         .components
         .iter()
         .find(|(system, parts)| {
             *system != &owner
-                && initial.definition.interior.placements.get(*system) == Some(home)
+                // A group visits its ordinary router's actual first equipment
+                // room. Engineering owns machinery in multiple compartments;
+                // a team home alone does not establish this request's scope.
+                && crate::console::repair::dispatch::resolve_physical_repair_target(
+                    &repair_group(system, ship_config).target(), ship_config, &initial,
+                ).is_some_and(|selected| initial.definition.interior.placements.get(&selected)
+                    == initial.definition.interior.placements.get(*system))
                 && parts.len() >= 2
                 && parts.values().all(|part| part.field_replaceable)
         })

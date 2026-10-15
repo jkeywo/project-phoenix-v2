@@ -53,6 +53,17 @@ fn prepare() -> (App, Entity) {
 fn admitted_delivery_binds_its_committed_id_and_retains_only_actual_receive_once() {
     let (mut app, actor) = prepare();
     let before = quantity(&app, actor);
+    // Normal delivery cannot exceed the real local demand. Raise it through
+    // its actual operator in the SAME step as the explicit two-unit request.
+    send(
+        &mut app,
+        "gunner",
+        "torpedo-magazine",
+        Control::SetStockTarget {
+            store: "magazine".into(),
+            amount: 4,
+        },
+    );
     send(
         &mut app,
         "engineer",
@@ -166,6 +177,15 @@ fn rejected_request_has_no_binding_and_actual_return_does_not_credit_receive() {
     assert_eq!(quantity(&app, actor), before);
     send(
         &mut app,
+        "gunner",
+        "torpedo-magazine",
+        Control::SetStockTarget {
+            store: "magazine".into(),
+            amount: 4,
+        },
+    );
+    send(
+        &mut app,
         "engineer",
         "logistics",
         Control::DispatchDelivery {
@@ -184,6 +204,17 @@ fn rejected_request_has_no_binding_and_actual_return_does_not_credit_receive() {
         .as_ref()
         .unwrap()
         .job;
+    // Recall this physical batch and withdraw its standing local demand, so
+    // ordinary Human machinery does not correctly schedule a replacement.
+    send(
+        &mut app,
+        "gunner",
+        "torpedo-magazine",
+        Control::SetStockTarget {
+            store: "magazine".into(),
+            amount: 2,
+        },
+    );
     send(
         &mut app,
         "engineer",

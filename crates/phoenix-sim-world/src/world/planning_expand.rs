@@ -143,6 +143,7 @@ impl CompiledPlanning {
                 actor_uuid: actor_uuid.into(),
                 released: BTreeMap::new(),
                 methods,
+                refused_methods: refused_methods.clone(),
             },
             graph,
             refused_methods,
@@ -156,6 +157,12 @@ impl CompiledPlanning {
             || choice.actor_uuid.trim().is_empty()
             || choice.actor_uuid.len() > 256
             || choice.actor_uuid.chars().any(char::is_control)
+            || choice.refused_methods.len() > MAX_EXPANDED_NODES
+            || choice.refused_methods.iter().any(|reason| {
+                reason.is_empty()
+                    || reason.chars().count() > MAX_EXPLANATION_CHARS
+                    || reason.chars().any(char::is_control)
+            })
         {
             return Err("saved plan root/actor mismatch".into());
         }
@@ -305,13 +312,23 @@ impl CompiledPlanning {
                     }
                     if let Some(error) = error {
                         if refused.len() < MAX_EXPANDED_NODES {
-                            refused.push(format!(
-                                "{node} {}::{} method {}: {}",
-                                task_id.library_path,
-                                task_id.task,
-                                method.id,
-                                error.chars().take(512).collect::<String>()
-                            ));
+                            refused.push(
+                                format!(
+                                    "{node} {}::{} method {}: {}",
+                                    task_id.library_path,
+                                    task_id.task,
+                                    method.id,
+                                    error
+                                        .chars()
+                                        .filter(|ch| !ch.is_control())
+                                        .take(MAX_EXPLANATION_CHARS)
+                                        .collect::<String>()
+                                )
+                                .chars()
+                                .filter(|ch| !ch.is_control())
+                                .take(MAX_EXPLANATION_CHARS)
+                                .collect(),
+                            );
                         }
                         if saved.is_some() {
                             return Err(error);

@@ -2,6 +2,41 @@
 use super::{config::WorldConfig, server::WorldContentRuntime};
 use phoenix_sim_world::world::activities::{ActivityRequest, SituationConfig};
 
+pub(crate) const UNSUPPORTED_PRIMITIVE: &str =
+    "primitive unsupported by this actor's actual accepted equipment";
+
+/// Immutable recipe-only capability projection used by saved-choice preflight.
+/// No live actor, current condition, stock or resource reserve participates.
+pub(crate) fn supports_recipe(
+    request: &ActivityRequest,
+    config: &crate::entities::config::EntityConfig,
+) -> Result<bool, String> {
+    Ok(match request {
+        ActivityRequest::Repair { .. } => {
+            let Some((ship, repair)) = config.ship_config.as_ref().zip(config.repair.as_ref())
+            else {
+                return Ok(false);
+            };
+            let Some(damage) = crate::ship::compartment_damage::ShipDamage::from_config(config)?
+            else {
+                return Ok(false);
+            };
+            super::activities::repair_binding_supported(
+                request,
+                ship,
+                &damage,
+                &crate::ship::system_registry::repair_system_id(),
+                repair.repair_team_count as usize,
+            )
+        }
+        ActivityRequest::Delivery { .. } => {
+            crate::resources::logistics_profile::compile_entity_logistics(config)?.is_some_and(
+                |profile| super::activities::delivery_binding_supported(request, &profile),
+            )
+        }
+    })
+}
+
 fn matches_actor(base: &WorldConfig, requested: &str, actor: &str, slot: Option<&str>) -> bool {
     base.validate_situation_actor(requested).is_ok()
         && base.name_to_uuid.get(requested).map_or_else(
@@ -39,7 +74,7 @@ pub(crate) fn advance_for_actor(
             if supports(request) {
                 Ok(())
             } else {
-                Err("primitive unsupported by this actor's actual accepted equipment".into())
+                Err(UNSUPPORTED_PRIMITIVE.into())
             }
         })?;
         (selected.choice, selected.graph)

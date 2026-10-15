@@ -163,6 +163,7 @@ fn explicit_imported_private_closure_and_typed_capability_alternative_form_a_rea
     let (compiled, mut selected) = choose(true);
     assert_eq!(selected.choice.methods["root"].method, "one-team");
     assert_eq!(selected.refused_methods.len(), 1);
+    assert_eq!(selected.choice.refused_methods, selected.refused_methods);
     assert!(selected.refused_methods[0].contains("only team0"));
     assert_eq!(selected.graph.leaves.len(), 2);
     assert_eq!(selected.graph.dependencies.len(), 1);
@@ -341,4 +342,35 @@ fn invalid_export_types_recursion_and_closed_nested_requests_refuse_before_selec
             .is_err(),
         "a supported primitive set does not make a cyclic method usable"
     );
+}
+
+#[test]
+fn original_capability_explanations_are_bounded_and_survive_choice_json() {
+    let compiled = compile(library(true));
+    let selected = compiled
+        .choose("actual-crew", 10, |request| match request {
+            ActivityRequest::Repair { team: 1, .. } => Err(format!(
+                "{}\nnot a current damage fact",
+                "\u{e9}".repeat(900)
+            )),
+            _ => Ok(()),
+        })
+        .unwrap();
+    assert_eq!(selected.choice.refused_methods.len(), 1);
+    assert_eq!(
+        selected.choice.refused_methods[0].chars().count(),
+        MAX_EXPLANATION_CHARS
+    );
+    assert!(!selected.choice.refused_methods[0]
+        .chars()
+        .any(char::is_control));
+    let decoded: PlanChoice =
+        serde_json::from_slice(&serde_json::to_vec(&selected.choice).unwrap()).unwrap();
+    assert_eq!(decoded, selected.choice);
+    let mut forged = decoded.clone();
+    forged
+        .refused_methods
+        .push("x".repeat(MAX_EXPLANATION_CHARS + 1));
+    assert!(compiled.derive(&forged).is_err());
+    assert!(compiled.derive(&decoded).is_ok());
 }

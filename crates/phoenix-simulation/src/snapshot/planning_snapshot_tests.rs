@@ -96,7 +96,7 @@ fn actual_plan_choice_capture_json_restore_and_forged_frontiers_have_no_partial_
     crate::snapshot::activities::validate(&world, &exact).unwrap();
     let before = capture(&world);
     let digest = crate::sim_digest::world_digest(&world);
-    for fault in 0..12 {
+    for fault in 0..14 {
         let mut forged = decoded.clone();
         let scenario = forged.scenario.as_mut().unwrap();
         match fault {
@@ -153,6 +153,18 @@ fn actual_plan_choice_capture_json_restore_and_forged_frontiers_have_no_partial_
                         .push(board.planned_requests[0].clone()),
                 }
             }
+            12 => scenario
+                .plan_choice
+                .as_mut()
+                .unwrap()
+                .refused_methods
+                .push("invented current damage".into()),
+            13 => scenario
+                .plan_choice
+                .as_mut()
+                .unwrap()
+                .refused_methods
+                .push("x".repeat(513)),
             _ => {
                 forged.entities[0].spawn = Some(crate::world::spawn_origin::SpawnOrigin {
                     template_path: if fault == 9 {
@@ -330,10 +342,7 @@ fn immutable_recipe_missing_capability_cannot_borrow_live_replacement_equipment(
     let before = capture(&world);
     let digest = crate::sim_digest::world_digest(&world);
     let error = crate::snapshot::activities::validate(&world, &saved).unwrap_err();
-    assert!(
-        error.contains("cannot resolve activity Repair equipment"),
-        "{error}"
-    );
+    assert!(error.contains("no compatible method"), "{error}");
     assert_eq!(capture(&world), before);
     assert_eq!(crate::sim_digest::world_digest(&world), digest);
 }

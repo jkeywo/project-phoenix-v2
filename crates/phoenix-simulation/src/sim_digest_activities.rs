@@ -234,6 +234,10 @@ pub(super) fn plan(mut acc: u64, value: &phoenix_sim_world::world::planning::Pla
         acc = fold_str(acc, &method.task.task);
         acc = fold_str(acc, &method.method);
     }
+    acc = fold_u64(acc, value.refused_methods.len() as u64);
+    for reason in &value.refused_methods {
+        acc = fold_str(acc, reason);
+    }
     acc = fold_u64(acc, value.released.len() as u64);
     for (node, tick) in &value.released {
         acc = fold_str(acc, node);

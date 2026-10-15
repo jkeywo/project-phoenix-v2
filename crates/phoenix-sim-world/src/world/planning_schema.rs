@@ -14,6 +14,7 @@ pub const MAX_IMPORT_DEPTH: usize = 8;
 pub const MAX_DEFINITIONS: usize = 256;
 pub const MAX_EXPANDED_NODES: usize = 256;
 pub const MAX_LEAVES: usize = 32;
+pub const MAX_EXPLANATION_CHARS: usize = 512;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -229,4 +230,7 @@ pub struct PlanChoice {
     /// Mission release identity; the matching SituationInstance owns execution.
     pub released: BTreeMap<String, u64>,
     pub methods: BTreeMap<String, MethodChoice>,
+    /// Original immutable-capability decisions, never current physical facts.
+    #[serde(default)]
+    pub refused_methods: Vec<String>,
 }

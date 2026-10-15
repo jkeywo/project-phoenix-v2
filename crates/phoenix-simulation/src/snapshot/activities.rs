@@ -65,6 +65,32 @@ fn slot_binding(
     )))
 }
 
+/// The accepted complete base/slot recipe is the historical capability source.
+fn accepted_recipe(
+    world: &World,
+    snapshot: &PhoenixSnapshot,
+    actor: &str,
+) -> Result<crate::entities::config::EntityConfig, String> {
+    if let Some(slot) = actor.strip_prefix("slot:") {
+        return slot_binding(world, snapshot, slot)?
+            .map(|(_, config)| config)
+            .ok_or("cannot resolve accepted activity slot recipe".into());
+    }
+    let base = world
+        .get_resource::<crate::world::config::WorldConfig>()
+        .ok_or("missing accepted activity base-world definition")?;
+    let authored = base
+        .entities
+        .iter()
+        .find(|row| row.name.as_deref() == Some(actor))
+        .ok_or("missing accepted activity actor recipe")?;
+    crate::entities::loader::resolve_entity_via(
+        authored,
+        &crate::entities::config_cache::get_config_cache(),
+        &crate::entities::loader::WasmTemplateLoader,
+    )
+}
+
 /// Derive only the candidate's selected source graph, never the live choice.
 fn planning_frontier(
     world: &World,
@@ -105,6 +131,19 @@ fn planning_frontier(
             };
             if !valid {
                 return Err("saved plan actor disagrees with accepted bootstrap identity".into());
+            }
+            let recipe = accepted_recipe(world, snapshot, actor)?;
+            let expected = compiled.choose(&choice.actor_uuid, choice.chosen_tick, |request| {
+                if crate::world::planning::supports_recipe(request, &recipe)? {
+                    Ok(())
+                } else {
+                    Err(crate::world::planning::UNSUPPORTED_PRIMITIVE.into())
+                }
+            })?;
+            if choice.methods != expected.choice.methods
+                || choice.refused_methods != expected.choice.refused_methods
+            {
+                return Err("saved plan choice/explanations disagree with accepted immutable capability selection".into());
             }
             let graph = compiled.validate_history(choice, &stored.situations, snapshot.tick)?;
             for definition in graph.definitions.values() {
@@ -337,23 +376,7 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
         }
         // Immutable equipment validation also covers retained history. Prefer
         // bootstrap equipment; explicit origins must resolve to that same recipe.
-        let accepted = slot_source
-            .as_ref()
-            .map(|(_, config)| config.clone())
-            .or_else(|| {
-                let authored_entity = world
-                    .get_resource::<crate::world::config::WorldConfig>()?
-                    .entities
-                    .iter()
-                    .find(|entity| entity.name.as_deref() == Some(authored.request.actor()))?;
-                crate::entities::loader::resolve_entity_via(
-                    authored_entity,
-                    &crate::entities::config_cache::get_config_cache(),
-                    &crate::entities::loader::WasmTemplateLoader,
-                )
-                .ok()
-            })
-            .ok_or("cannot resolve accepted immutable activity equipment")?;
+        let accepted = accepted_recipe(world, snapshot, authored.request.actor())?;
         let config = if let Some(origin) = row.and_then(|row| row.spawn.as_ref()) {
             let mut warnings = Vec::new();
             let candidate = origin

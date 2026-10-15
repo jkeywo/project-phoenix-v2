@@ -130,10 +130,78 @@ declared Infrastructure/Umbilical edge contradicted actual consumers. Commits
 not weakened. The initial schedule-failure log SHA256 is
 `a1c9006d102562efffa9b2caa45071bfcc18f682ead7aea44f5410da398a3ca0`.
 
-Positive facility refitting and intact-equipment recovery are additional targeted
-tests in progress, separate from these five passing cases. The authorised pipeline
-has advanced source implementation to increment 14 while those tests run on the
-pinned increment 13 worktree. This does not claim a complete playable/manual exit.
+The following final continuation batch extends this earlier five-case evidence
+with actual facility refitting and intact-equipment recovery. The authorised
+pipeline advanced increment 14 source while isolated increment 13 validation ran.
+## Final isolated continuation evidence
+
+The final increment 13 source checkpoint is `5d5df212`. Its supported frontier is
+protocol 12, snapshot 51 and simulation rules 0.23; later increment 14 migrations
+have separate compatibility versions. Evidence and matching dependency records
+are retained under
+`.phoenix/worktrees/increment-13-fitting-continuation/.phoenix/`, with the complete
+source pins and hashes in `increment13-final-handoff.json`.
+
+The actual host journeys passed **seven cases** at that checkpoint:
+
+```text
+cargo test -p project-phoenix --features headless --test fitting_continuation --test fitting_facility_continuation -- --test-threads=1
+```
+
+The five existing cases cover human and ordinary AI field fitting, physical
+fetching, active removal/installation, no-write forged claims, stale admission
+and fleet peers with different LocalShips. Two additional cases exercise actual
+paid Axiom facility reactor fitting and an intact, condition-bearing assembly
+recovered by the real Recovery tool, stored in finite Support storage, fetched
+by the ordinary Repair team and installed at Weapons. They use admitted human/GM
+commands and authored fixtures rather than direct controller or condition writes.
+Every resumed journey compares complete JSON captures and deterministic digests
+for at least 360 ticks, with exact item identity, condition and parts conservation.
+The final run built in 34.92s; the five-case and two-case executables completed
+in 36.15s and 100.94s. Log `increment13-final-seven-canonical-history.log`, SHA256
+`05cd4b2aa5350126f372fe64090c9095632351f5e72a1a09bfabba90890629c7`.
+Matching rebuilt Simulation dependency records are in
+`final-seven-5d5df2-dependencies/`; the record includes this worktree and the
+canonical historical-clock owner.
+
+Whole-host comparisons exposed real continuation defects in historical combat
+and LOD clocks. Writers and consumers now share the logical fixed-tick clock;
+snapshots copy canonical timestamps rather than subtracting and reconstructing
+floating-point ages. Preflight rejects malformed, future and obsolete age state
+before any writes. High-tick exact-bit and complete-capture controls cover both
+one billion ticks and the accepted `u64` frontier. Separate boundary tests passed
+**five cases** at `5d5df212`:
+
+```text
+cargo test -p project-phoenix --features headless --test snapshot_resume -- fidelity_capture ai_fidelity_timer continuation_memories_replace_bootstrap --test-threads=1
+```
+
+Log `increment13-final-history-snapshot-boundaries-retry.log`, SHA256
+`f28c2398ac9227a251a68416efbc087ed57201a53852839f7ab8e513029fa348`.
+Execution took 11.66s after a 15.75s build. The preceding attempt failed to compile
+an older fixture missing the required impact-sample fields; the correction adds
+explicit absent values and preserves the assertions.
+
+The broader targeted clock/AI owner batch at `93dea473` passed five Gameplay
+cases and **251 Simulation cases**, with **two failures** in legacy assertions
+that compared unbounded yaw directly against a wrapped heading. It is not a green
+full-suite result. The correction compares shortest angular error with the same
+0.01 tolerance and retains all route, motion and cursor assertions. A targeted
+retry of those exact two cases passed at `ac298c76`; production source is unchanged
+between these pins and `5d5df212`. Logs and SHA256 values are:
+
+- `increment13-final-history-owner-corrected.log`:
+  `f3072788eb15cdaed11133042ca07cc22989d56fc3a46942b9359aa5a7eb6754`.
+- `increment13-final-two-route-retries.log`:
+  `16a613a4155e0a6a831ebdf7ce0ea5fe8d36321c4da2d4526c2809302f99b29b`.
+
+An earlier broader filter also selected
+`console::navigation::server::tests::operate_navigation_ai_sets_waypoint_for_distant_target`,
+which failed to produce its expected waypoint. That Navigation owner and harness
+are unchanged from the isolated baseline and do not invoke the changed historical
+clock paths. This remains an unresolved integration finding; no baseline pass or
+broader native-suite pass is claimed. Browser/native human acceptance, complete
+integration gates, balance and workload evidence remain outstanding separately.
 
 ## Human and ordinary AI journeys
 

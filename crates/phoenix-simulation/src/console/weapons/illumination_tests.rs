@@ -397,6 +397,17 @@ fn ordinary_compiled_science_tree_reads_explicit_mission_then_uses_shared_admiss
         );
     let mut app = App::new();
     std::mem::swap(app.world_mut(), &mut world);
+    // The entity fixture supplies physical owners, not App schedule resources.
+    app.world_mut()
+        .init_resource::<bevy::ecs::schedule::Schedules>();
+    app.configure_sets(
+        FixedUpdate,
+        (
+            crate::sim_sets::SimSet::Input,
+            crate::sim_sets::SimSet::Physics,
+        )
+            .chain(),
+    );
     crate::ai::host::register_ai_host_env(&mut app);
     crate::science::reading::register(&mut app);
     register(&mut app);

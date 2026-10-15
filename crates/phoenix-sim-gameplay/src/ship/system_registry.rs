@@ -343,6 +343,8 @@ pub const TACTICAL_RADAR_SYSTEM_ID: &str = "tactical-radar";
 /// station's long-range radar, made damageable/repairable like every other
 /// fine system.
 pub const SENSOR_RADAR_KIND: &str = "sensor_radar";
+pub const PASSIVE_RECEIVER_KIND: &str = "passive_receiver";
+pub const PASSIVE_RECEIVER_SYSTEM_ID: &str = "passive-receiver";
 pub const SENSOR_RADAR_SYSTEM_ID: &str = "sensor-radar";
 
 /// Wire `SystemId` for the Torpedo Magazine fine system (single instance).
@@ -583,6 +585,7 @@ impl SystemKindRegistry {
         // Tactical / sensor radar fine systems
         registry.register_commandable(TACTICAL_RADAR_KIND, ConsoleFamily::Tactical)?;
         registry.register(SENSOR_RADAR_KIND, ConsoleFamily::Sensors)?;
+        registry.register_commandable(PASSIVE_RECEIVER_KIND, ConsoleFamily::Sensors)?;
         // Fine-grained Power systems (issue #513)
         registry.register_commandable(POWER_REACTOR_KIND, ConsoleFamily::Power)?;
         registry.register(POWER_BATTERY_KIND, ConsoleFamily::Power)?;

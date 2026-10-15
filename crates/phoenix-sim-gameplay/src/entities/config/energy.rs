@@ -82,6 +82,7 @@ pub fn requires_energy_profile(kind: &str) -> bool {
             | HELM_RADAR_KIND
             | TACTICAL_RADAR_KIND
             | SENSOR_RADAR_KIND
+            | PASSIVE_RECEIVER_KIND
             | SENSORS_KIND
             | NAVIGATION_KIND
             | COMMS_KIND

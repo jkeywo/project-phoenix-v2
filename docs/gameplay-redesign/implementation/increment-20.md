@@ -182,3 +182,32 @@ Shipped scenarios/hulls and Workshop round trips, no-defaults owner tests, physi
 browser/native journeys, actual risk/workload/conservation comparisons and 2/4/6/8
 human/delegated layouts remain required. Local 20 source does not close external 20,
 19 passenger operations, 21 workforce, human acceptance or the full increment.
+
+## Adopted next local consumer: Security jobs
+
+[ai] Structural migration first: the existing finite Security muster uses the
+shared `TeamJobs<SecurityTeam>` commitment and JobId mint. The previous independently
+saved assignment vector is removed. Existing target/action, paid work, deployment,
+withdrawal, ordinary AI selection and authored World consequences remain equivalent.
+Idle slots project an available team; unavailable idle status is derived from the
+actual System availability rather than persisting a second personnel condition.
+A Job retains its real assignment through return. A completed, recalled or failed
+work result is held by that same activity until the team arrives, when its one
+terminal Job outcome releases the commitment. A new dispatch never replaces a
+returning team. No elapsed work, target or result is reconstructed from an AI claim.
+
+[ai] Capture saves the complete bounded canonical jobs, including next mint,
+workflow state, phase clock and terminal result. Restore validates actual accepted
+owner/team count, unique prior JobIds, finite clock/risk, closed activity/phase,
+nonfuture execution ticks and valid completion/return joins before writes. The
+digest includes that same complete canonical state. Initial idle Security may omit
+the save payload; a used mint or retained terminal outcome cannot be omitted.
+Legacy Security assignment saves require the increment's explicit version refusal;
+there is no runtime old-data adapter.
+
+[ai] Subsequent local work binds an authored compartment to this same activity and
+uses the existing InteriorGraph RouteCursor and actual access blockers. It replaces
+local deployment/return clocks; external crossing remains the explicitly retained
+legacy capability until the real increment19 transfer/custody consumer joins it.
+This structural checkpoint does not claim local routing, treatment, external custody
+or a complete increment20 exit. Root integration owns compatibility versions.

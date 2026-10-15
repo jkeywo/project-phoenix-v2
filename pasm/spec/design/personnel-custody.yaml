@@ -36,3 +36,14 @@ entities:
       summary: "Supported rosters/competencies/postings/risk/treatment/boundary/transport profiles use existing accepted Workshop history/includes/Preview/Test. Canonical team, custody, job and condition state is saved once; whole-candidate capacity/location/claim/clock validation precedes writes. Local source never claims external operations or verified acceptance."
       rationale:
         - "[ai] Prove actual Human/AI travel/work/transfer, finite resources, cancellation, no duplicated identities/bonuses, injury/lethal disclosure, exact outcomes/no reroll and useful loss participation. Fresh JSON continuation requires at least 360 complete capture/digest comparisons, different-LocalShip peers and malformed no-write candidates. Physical browser/native, shipped content, performance and 2/4/6/8-human workload remain separate."
+
+  - decision: redesign-security-shared-job-migration
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Security Assignments Use the Existing Shared Team Commitment
+      summary: "Increment20 structurally moves the finite Security muster onto TeamJobs with one JobId mint and one canonical assignment through deployment, paid work and return. Existing authored action consequences and ordinary AI remain equivalent before local route and medical changes."
+      rationale:
+        - "[ai] Remove the independently saved assignment vector. Idle availability is derived; completion/cancellation/failure remains on the same activity until actual return releases its Job. Returning teams cannot receive a fresh assignment. No duplicate roster, timer, movement, outcome pool or crew AI."
+        - "[ai] Save and digest complete canonical job state including mint, clock and outcomes. Whole candidate validation checks accepted owner/count, IDs, finite phases and nonfuture execution before writes; root advances compatibility and rejects unsupported older payloads. Detail and retained external-crossing boundary live in implementation/increment-20.md."

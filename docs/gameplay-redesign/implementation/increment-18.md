@@ -618,3 +618,22 @@ for dated current inputs, manual breakaway, real paid movement, fresh restore,
 future-generation no-write refusal and AI verb precedence. Native execution and
 physical multiplayer/browser acceptance remain pending; this checkpoint does
 not close increment 18 or claim a completed fleet formation scenario.
+
+
+The restored Helm HUD rebuilds its availability from the same permitted shared
+sample. The existing held-publication restore owner preserves a positive view
+only when it equals that projection at the saved counter or the preceding
+completed publication frontier. Empty held availability remains withheld. This
+never restores the mechanical current-tick input cache. The exact configured
+sample limit and first stale publication have a focused genuine-course source
+witness; native execution remains pending.
+
+`tests/formation_continuation.rs` adds a separate full-host source witness: a
+joined Human leader selects an actual hailable contact and transmits paid FormUp;
+ordinary backfill reading, acceptance, independently earned identity/motion,
+Navigation clearance and Helm travel must produce real actuator work. It then
+compares complete fresh-JSON captures/digests for 360 ordinary updates, including
+an actual Human source turn, checks two malformed generation candidates without
+writes, and requires continued displacement from the paid saved checkpoint.
+This is authored test source until the integrator runs it, with no device or
+multiplayer acceptance claim.

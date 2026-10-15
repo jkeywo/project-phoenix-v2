@@ -557,7 +557,9 @@ pub const SNAPSHOT_FORMAT: u32 = 60;
 /// same-inbox reading/decisions and paid sustained returned outcomes.
 /// "0.36" binds actual Repair and delivery job facts to World situations and
 /// stages their existing script consequences once at the retained event frontier.
-pub const SIMULATION_RULES: &str = "0.36";
+/// "0.37" lets the ordinary Comms policy answer an actually heard/read typed
+/// status request without consulting unknown reverse-link viability.
+pub const SIMULATION_RULES: &str = "0.37";
 
 /// The authored data, computed rather than remembered.
 ///

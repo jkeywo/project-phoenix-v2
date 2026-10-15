@@ -362,6 +362,15 @@ fn boot(world: &str) -> (App, Entity) {
         &mut app,
         "engineering",
         "power-reactor",
+        Control::SetEnergyMode {
+            mode: phoenix_model::energy::EnergyAllocationMode::Manual,
+            cooling_usage: phoenix_model::energy::CoolingUsage::Low,
+        },
+    );
+    control(
+        &mut app,
+        "engineering",
+        "power-reactor",
         Control::SetEnergySystemFlow {
             system: id(BANK),
             flow_per_sec: Some(0.0),

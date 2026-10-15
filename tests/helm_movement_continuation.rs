@@ -168,6 +168,42 @@ fn prepared() -> (App, Entity) {
         ENGINEER,
         "engineering",
         "power-reactor",
+        Control::SetEnergyMode {
+            mode: phoenix_model::energy::EnergyAllocationMode::Manual,
+            cooling_usage: phoenix_model::energy::CoolingUsage::Low,
+        },
+    );
+    // Isolate the actual local reserve debit from stored reactor export. The
+    // prior AI's priority mode deliberately ignores manual fine-flow requests.
+    for owner in ["helm-thrust", "helm-steering", "helm-lateral-thrust"] {
+        control(
+            &mut app,
+            entity,
+            ENGINEER,
+            "engineering",
+            "power-reactor",
+            Control::SetEnergySystemFlow {
+                system: id(owner),
+                flow_per_sec: Some(0.0),
+            },
+        );
+        assert_eq!(
+            app.world()
+                .get::<ShipPowerSystem>(entity)
+                .unwrap()
+                .0
+                .network()
+                .fine_flows
+                .get(&id(owner)),
+            Some(&0.0)
+        );
+    }
+    control(
+        &mut app,
+        entity,
+        ENGINEER,
+        "engineering",
+        "power-reactor",
         Control::SetEnergyGeneration { enabled: false },
     );
     assert!(
@@ -273,6 +309,7 @@ fn joined_direct_force_coast_and_turn_resume_before_ordinary_ai_assisted_handoff
     assert!(power
         .last_work_fraction(&id("helm-thrust"))
         .is_some_and(|fraction| fraction > 0.0));
+    assert!(power.emitted_work(&id("helm-thrust")) > 0.0);
     assert!(power.network().consumers[&id("helm-thrust")].energy < reserve);
     control(
         &mut live,

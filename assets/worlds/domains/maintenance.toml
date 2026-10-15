@@ -24,6 +24,12 @@ kind="primitive"
 id="restore-room"
 parameters=[{name="actor",kind="actor"},{name="team",kind="team"}]
 definition="restoration"
+# Provisional author estimates, never measured completion or work payment.
+[task.forecast]
+min_secs=10
+max_secs=30
+recovery_secs=5
+phase=[{kind="active",offset_secs=0,duration_secs=2,attention_permille=1000},{kind="monitor",offset_secs=2,duration_secs=28,attention_permille=200}]
 [task.request]
 kind="repair"
 actor={source="parameter",name="actor"}
@@ -38,6 +44,11 @@ kind="primitive"
 id="supply-rounds"
 parameters=[{name="actor",kind="actor"}]
 definition="delivery"
+[task.forecast]
+min_secs=2
+max_secs=10
+recovery_secs=2
+phase=[{kind="active",offset_secs=0,duration_secs=1,attention_permille=600},{kind="monitor",offset_secs=1,duration_secs=9,attention_permille=100}]
 [task.request]
 kind="delivery"
 actor={source="parameter",name="actor"}

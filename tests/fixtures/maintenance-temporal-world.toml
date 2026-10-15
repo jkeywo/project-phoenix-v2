@@ -1,0 +1,28 @@
+# Quiet temporal probe; no scripted mission deadlines or resource grants.
+[global]
+seed=156222
+[player_spawn]
+position=[0,0,0]
+[[entity]]
+template_path="assets/entities/alliance_cruiser.toml"
+id="maintenance-ship"
+name="maintenance-ship"
+spawn_on="game_start"
+transform={position=[0,0,0]}
+
+[planning]
+id="maintenance-timed"
+task="maintenance::maintain"
+arguments={actor={kind="actor",value="maintenance-ship"}}
+import=[{path="assets/worlds/domains/maintenance.toml",as="maintenance",names=["maintain"]}]
+
+# Opt-in provisional forecasting. No resource grants or automatic work.
+[[planning.temporal.profile]]
+min_operators=0
+deadline_secs=90
+[[planning.temporal.profile]]
+min_operators=1
+deadline_secs=60
+[[planning.temporal.profile]]
+min_operators=2
+deadline_secs=50

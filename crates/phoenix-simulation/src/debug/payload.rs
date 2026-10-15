@@ -490,6 +490,18 @@ pub struct ScenarioPlanning {
     pub leaves: Vec<ScenarioPlanLeaf>,
     pub dependencies: Vec<phoenix_sim_world::world::planning::Dependency>,
     pub derivation_error: Option<String>,
+    /// Read-only current presentation tick, never a new mission clock.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_tick: Option<u64>,
+    #[serde(default)]
+    pub workload: Vec<ScenarioPlanWorkload>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScenarioPlanWorkload {
+    pub station: phoenix_model::identity::StationId,
+    pub minute: u16,
+    /// Decimal string preserves the exact u128 across a JavaScript boundary.
+    pub attention_nanos: String,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ScenarioPlanLeaf {

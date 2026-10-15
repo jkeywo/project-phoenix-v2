@@ -52,3 +52,26 @@ describe('privileged imported plan inspection',()=>{
     expect(container.querySelector('.ss-plan-method')).toBeNull();
   });
 });
+
+describe('retained temporal decisions',()=>{
+  it('renders committed intervals, original participation and exact workload without changing live evidence',()=>{
+    const container=document.createElement('div');
+    const temporal={profile_index:1,deadline_tick:100,input:{owners:{repair:{source:'human',station:'engineering',rating:'Std'},logistics:{source:'ai'}}},outcome:{state:'committed',nodes:{'root/work':{start_tick:10,end_tick:80}}}};
+    const planning={source:{task:'maintenance::maintain'},choice:{chosen_tick:10,temporal},observed_tick:101,workload:[{station:'engineering',minute:0,attention_nanos:'99999999999999999'}]};
+    renderScenarioStatePanel(container,JSON.stringify({flags:[],triggers:[],planning,situations:[]}));
+    expect(container.querySelector('.ss-plan-schedule').textContent).toContain('committed');
+    expect(container.querySelector('.ss-plan-deadline').textContent).toContain('100');
+    expect(container.querySelector('.ss-plan-interval').textContent).toContain('10 → 80');
+    expect(container.querySelector('.ss-plan-operator').textContent).toContain('engineering');
+    expect(container.querySelector('.ss-plan-workload').textContent).toContain('99999999999999999');
+    expect(container.querySelector('.ss-plan-overdue').textContent).toContain('101');
+    expect(container.querySelector('.ss-situation-job')).toBeNull();
+    expect(container.querySelector('button,input,select')).toBeNull();
+    temporal.outcome={state:'refused',reason:'<unavailable owner>'};
+    planning.workload=[];
+    renderScenarioStatePanel(container,JSON.stringify({flags:[],triggers:[],planning,situations:[]}));
+    expect(container.querySelector('.ss-plan-schedule_refused').textContent).toContain('<unavailable owner>');
+    expect(container.querySelector('unavailable')).toBeNull();
+    expect(container.querySelector('.ss-plan-interval,.ss-plan-overdue')).toBeNull();
+  });
+});

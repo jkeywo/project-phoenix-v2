@@ -2,7 +2,7 @@
 title: Activity Contracts
 type: concept
 tags: [world, activities, repair, logistics, continuation]
-sources: [crates/phoenix-model/src/activity.rs, crates/phoenix-sim-world/src/world/activities.rs, crates/phoenix-sim-world/src/world/planning.rs, crates/phoenix-sim-world/src/world/planning_compile.rs, crates/phoenix-sim-world/src/world/planning_runtime.rs, crates/phoenix-content-preparation/src/world/planning.rs, crates/phoenix-simulation/src/world/planning.rs, gui/planned-requests.js, editor/workshop-planning.js, gui/workshop-planning-panel.js, crates/phoenix-simulation/src/debug/scenario.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/activities.rs, crates/phoenix-simulation/src/world/server/triggers.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/resources/logistics_server.rs, crates/phoenix-simulation/src/snapshot/activities.rs, crates/phoenix-simulation/src/sim_digest_activities.rs, crates/phoenix-sim-gameplay/src/jobs/activity_bindings.rs, crates/phoenix-content-preparation/src/world/activity_bindings.rs, editor/workshop-activities.js, gui/workshop-activities-panel.js, crates/phoenix-simulation/src/debug/scenario.rs]
+sources: [crates/phoenix-model/src/activity.rs, crates/phoenix-sim-world/src/world/activities.rs, crates/phoenix-sim-world/src/world/planning.rs, crates/phoenix-sim-world/src/world/planning_compile.rs, crates/phoenix-sim-world/src/world/planning_runtime.rs, crates/phoenix-sim-world/src/world/planning_temporal.rs, crates/phoenix-simulation/src/world/planning_inputs.rs, crates/phoenix-simulation/src/lobby/crew_replication.rs, crates/phoenix-simulation/src/snapshot/crew_presence.rs, crates/phoenix-content-preparation/src/world/planning.rs, crates/phoenix-simulation/src/world/planning.rs, gui/planned-requests.js, editor/workshop-planning.js, gui/workshop-planning-panel.js, crates/phoenix-simulation/src/debug/scenario.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/activities.rs, crates/phoenix-simulation/src/world/server/triggers.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/resources/logistics_server.rs, crates/phoenix-simulation/src/snapshot/activities.rs, crates/phoenix-simulation/src/sim_digest_activities.rs, crates/phoenix-sim-gameplay/src/jobs/activity_bindings.rs, crates/phoenix-content-preparation/src/world/activity_bindings.rs, editor/workshop-activities.js, gui/workshop-activities-panel.js, crates/phoenix-simulation/src/debug/scenario.rs]
 updated: 2026-10-15
 ---
 
@@ -65,7 +65,30 @@ inspection derives selected methods, source dependencies, original refusal and
 release clocks beside the separate exact situation/job/evidence view; it does
 not choose, release or acknowledge work.
 
+Optional `planning.temporal` profiles and primitive forecasts add bounded tick
+scheduling to that same choice. The pure World owner computes conservative
+max-duration/recovery intervals, exact phase-overlap attention and physical
+resource exclusion; those forecasts claim neither resources nor completed work.
+The saved decision retains its original input, absolute deadline and either
+committed intervals or a recomputed refusal. Actual leaf release additionally
+requires its scheduled start and the same acknowledged physical evidence.
+
+Simulation projects actual source, eligible hosting Station, rating and canonical
+`ShipCrewPresence` into the original forecast. Presence joins existing admitted
+crew rating transitions and mesh capture/restore; default Human controls and
+rating-only GM commands cannot create people. Ordinary in-play reconnect and
+unready retain their established operational authority. Historical validation
+checks immutable Console hosting candidates and Station/rating vocabulary, not
+today's Sessions or a guessed historical Console depth. GM/visiting overrides
+mean the host Station rating alone does not prove a past source.
+
+The same author inspection shows retained temporal decisions, intervals, original
+participation and exact minute workload; its current tick only marks overdue.
+The existing backend-validated source transaction edits nested temporal profiles
+and primitive phases without a second authoring acceptance owner. Estimates in
+the opt-in maintenance fixture remain provisional, not measured human workload.
+
 This first imported maintenance consumer supports one base actor or authored
-launch slot and disjoint finite leaves. Dynamic opportunities, deadline/workload
-scheduling, multi-actor planning and automatic plan repair remain separate work;
-source checks do not establish whole-host or full increment completion.
+launch slot and disjoint finite leaves. Dynamic opportunities, multi-actor
+planning and automatic plan repair remain separate work; source checks do not
+establish whole-host or full increment completion.

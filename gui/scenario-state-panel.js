@@ -288,6 +288,27 @@ export function buildScenarioStatePanel(payload, opts = {}) {
       field('method', `${node}: ${method.task?.library_path}::${method.task?.task} / ${method.method}`);
     }
     for (const reason of Array.isArray(choice?.refused_methods) ? choice.refused_methods : []) field('refused', reason);
+    const temporal = choice?.temporal;
+    if (temporal && typeof temporal === 'object') {
+      const outcome = temporal.outcome;
+      field('schedule', outcome?.state);
+      field('profile', temporal.profile_index);
+      field('deadline', temporal.deadline_tick);
+      if (outcome?.state === 'refused') field('schedule_refused', outcome.reason);
+      if (outcome?.state === 'committed') {
+        for (const [node, interval] of Object.entries(outcome.nodes || {})) {
+          field('interval', `${node}: ${interval.start_tick} → ${interval.end_tick}`);
+        }
+        if (Number.isSafeInteger(plan.observed_tick) && Number.isSafeInteger(temporal.deadline_tick)
+            && plan.observed_tick > temporal.deadline_tick) field('overdue', plan.observed_tick);
+      }
+      for (const [owner, input] of Object.entries(temporal.input?.owners || {})) {
+        field('operator', `${owner}: ${input.source}${input.station ? ' / '+input.station+' / '+input.rating : ''}${input.reason ? ' / '+input.reason : ''}`);
+      }
+      for (const bucket of Array.isArray(plan.workload) ? plan.workload : []) {
+        field('workload', `${bucket.station}: ${bucket.minute} / ${bucket.attention_nanos}`);
+      }
+    }
     for (const leaf of Array.isArray(plan.leaves) ? plan.leaves : []) {
       field('leaf', `${leaf.node}: ${leaf.instance}`);
       field('released', leaf.released_tick);

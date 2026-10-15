@@ -55,3 +55,21 @@ describe('real planning authoring panel',()=>{
     await settle();panel.node.querySelector('#workshop-planning-source').value+='\n# pending';panel.node.querySelector('#workshop-planning-save').click();await settle();draft=pack(world().replace('id = "care"','id = "replacement"'));const before=draft.snapshot();finish({accepted:true});await settle();expect(draft.snapshot()).toEqual(before);expect(original.read(lib)).toBe(library);expect(changed).not.toHaveBeenCalled();expect(operations.busy()).toBe(false);panel.dispose();
   });
 });
+
+describe('temporal declaration and primitive source authoring',()=>{
+  it('keeps nested profiles and forecast phases in the same validated undoable exported transaction',async()=>{
+    const draft=pack(),inspection=inspectPlanning(draft,deps(),path),before=draft.toFiles();
+    const root=parse(inspection.rootSource);
+    root.planning.temporal={profile:[{min_operators:0,deadline_secs:90},{min_operators:2,deadline_secs:50}]};
+    const libSource=parse(library);
+    const primitive=libSource.task.find(task=>task.kind==='primitive');
+    primitive.forecast={min_secs:1,max_secs:5,recovery_secs:1,phase:[{kind:'active',offset_secs:0,duration_secs:1,attention_permille:1000}]};
+    const runtime={validate:vi.fn(async(_,candidate)=>({accepted:parse(candidate.read(path)).planning.temporal.profile[1].deadline_secs===50&&parse(candidate.read(lib)).task.find(task=>task.kind==='primitive').forecast.max_secs===5}))};
+    await applyPlanning({draft,runtime,dependencies:deps(),path,rootSource:stringify(root),libraryPath:lib,librarySource:stringify(libSource)});
+    expect(runtime.validate).toHaveBeenCalledOnce();
+    const exported=new WorkshopDocument(draft.archive());
+    expect(parse(exported.read(path)).planning.temporal).toEqual(root.planning.temporal);
+    expect(parse(exported.read(lib)).task.find(task=>task.kind==='primitive').forecast).toEqual(primitive.forecast);
+    draft.undo();expect(draft.toFiles()).toEqual(before);draft.redo();expect(parse(draft.read(path)).planning.temporal.profile).toHaveLength(2);
+  });
+});

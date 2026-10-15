@@ -310,3 +310,82 @@ fn another_valid_station_cannot_forge_the_historical_owner_host() {
     };
     assert!(validate_forecast_input(&forged, config).is_err());
 }
+
+#[test]
+fn authored_temporal_world_uses_imported_estimates_and_read_only_workload_projection() {
+    let (mut app, actor) = setup(2);
+    let reader = crate::world::load::OverlayFsReader;
+    let mut base = crate::world::load::load(crate::world::load::LoadRequest::new(
+        "tests/fixtures/maintenance-temporal-world.toml",
+        &reader,
+        &crate::world::script::load::NoSiblingScripts,
+        crate::world::load::LoadPolicy::Merge,
+    ))
+    .unwrap()
+    .config;
+    base.name_to_uuid
+        .insert("maintenance-ship".into(), "actual-maintenance".into());
+    app.insert_resource(base);
+    app.world_mut()
+        .get_mut::<ShipCrewPresence>(actor)
+        .unwrap()
+        .0
+        .insert(StationId("engineering".into()));
+    app.world_mut()
+        .get_mut::<crate::ship_plugin::ActiveStationRatings>(actor)
+        .unwrap()
+        .0
+        .insert(StationId("engineering".into()), "Std".into());
+    app.world_mut()
+        .get_mut::<ShipSystemControlSources>(actor)
+        .unwrap()
+        .0
+        .set(
+            SystemId("logistics".into()),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+    let teams = app
+        .world()
+        .get::<ShipRepairTeams>(actor)
+        .unwrap()
+        .0
+        .save_state();
+    with_sources(&mut app, actor);
+    let runtime = app.world().resource::<WorldContentRuntime>();
+    let original = serde_json::to_value(runtime.plan_choice.as_ref().unwrap()).unwrap();
+    let payload = crate::debug::scenario::collect_scenario_state_with_plan(
+        runtime,
+        &crate::objectives::ObjectiveManager::default(),
+        &crate::debug::scenario::TriggerFireRecorder::default(),
+        Some(app.world().resource::<WorldConfig>()),
+    );
+    let view = payload.planning.unwrap();
+    assert_eq!(
+        view.choice
+            .as_ref()
+            .unwrap()
+            .temporal
+            .as_ref()
+            .unwrap()
+            .profile_index,
+        1
+    );
+    assert!(!view.workload.is_empty());
+    assert!(view
+        .workload
+        .iter()
+        .all(|bucket| bucket.station.0 == "engineering"
+            && bucket.attention_nanos.parse::<u128>().unwrap() > 0));
+    assert_eq!(
+        serde_json::to_value(runtime.plan_choice.as_ref().unwrap()).unwrap(),
+        original
+    );
+    assert_eq!(
+        app.world()
+            .get::<ShipRepairTeams>(actor)
+            .unwrap()
+            .0
+            .save_state(),
+        teams
+    );
+}

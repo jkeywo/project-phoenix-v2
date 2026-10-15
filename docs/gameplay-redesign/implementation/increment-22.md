@@ -546,3 +546,15 @@ reconstructs deterministic selection against the accepted complete base/slot
 recipe and checks both the chosen identities and original explanations. Privileged
 Scenario inspection derives the graph and shows original choice/release/evidence
 separately; it cannot choose a replacement or grant gameplay feeds.
+
+
+The first temporal inspection consumer keeps the existing privileged Scenario
+surface read-only. It shows original profile/deadline/decision, exact leaf tick
+intervals and per-Station minute attention area as lossless decimal nanoseconds.
+A current presentation tick marks overdue; it does not edit deadlines or imply
+physical failure. Nested World profiles and primitive forecast phases use the
+existing validated imported-source history/export transaction. The opt-in
+`maintenance-temporal-world.toml` consumes real maintenance primitives; its
+estimates remain explicitly provisional. Historical validation proves authored
+host/rating vocabulary and saved bounded inputs, not a past Console depth from
+the host Station rating: visiting and GM overrides make that inference invalid.

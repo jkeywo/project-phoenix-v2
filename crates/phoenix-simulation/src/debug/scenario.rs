@@ -502,10 +502,22 @@ pub fn collect_scenario_state_with_plan(
         leaves: Vec::new(),
         dependencies: Vec::new(),
         derivation_error: None,
+        observed_tick: None,
+        workload: Vec::new(),
     };
     if let Some(choice) = &runtime.plan_choice {
         match compiled.derive(choice) {
             Ok(graph) => {
+                if let Ok(buckets) = compiled.workload(choice) {
+                    view.workload = buckets
+                        .into_iter()
+                        .map(|bucket| crate::debug::payload::ScenarioPlanWorkload {
+                            station: bucket.station,
+                            minute: bucket.minute,
+                            attention_nanos: bucket.attention_nanos.to_string(),
+                        })
+                        .collect();
+                }
                 view.leaves = graph
                     .leaves
                     .into_iter()
@@ -549,9 +561,10 @@ pub fn publish_scenario_state(
     objectives: Option<Res<ObjectiveManagerRes>>,
     recorder: Res<TriggerFireRecorder>,
     base: Option<Res<WorldConfig>>,
+    tick: Option<Res<crate::sim_tick::SimTick>>,
     mut capture: ResMut<ScenarioStateCapture>,
 ) {
-    let payload = match (runtime.as_deref(), objectives.as_deref()) {
+    let mut payload = match (runtime.as_deref(), objectives.as_deref()) {
         (Some(runtime), Some(objectives)) => {
             collect_scenario_state_with_plan(runtime, &objectives.0, &recorder, base.as_deref())
         }
@@ -564,6 +577,9 @@ pub fn publish_scenario_state(
         // No world loaded — an empty, version-stamped payload.
         (None, _) => ScenarioStatePayload::empty(),
     };
+    if let Some(plan) = payload.planning.as_mut() {
+        plan.observed_tick = tick.as_deref().map(|tick| tick.0);
+    }
     let json = crate::core::codec::encode_scenario_state(&payload);
 
     capture.0 = Some(json);

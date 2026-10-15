@@ -447,7 +447,8 @@ use super::*;
 // 62 retains actual Transit order phases, accepted-course/fuel and arrival receipts.
 // 63 retains immutable HTN method choice and original primitive release ticks.
 /// `64` retains original bounded capability-refusal explanations on PlanChoice.
-pub const SNAPSHOT_FORMAT: u32 = 64;
+/// `65` retains actual onboard signal-protection command intent.
+pub const SNAPSHOT_FORMAT: u32 = 65;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -577,7 +578,9 @@ pub const SNAPSHOT_FORMAT: u32 = 64;
 /// and retains their choice, causal release and original job evidence once.
 /// "0.44" validates original deterministic method selection and explanations
 /// and recognises validated physical flight carriers on delayed rebuild.
-pub const SIMULATION_RULES: &str = "0.44";
+/// "0.45" applies paid equipment interference and allocated protection to exact
+/// actual Comms, Broad, Focused and Passive receiver owners.
+pub const SIMULATION_RULES: &str = "0.45";
 
 /// The authored data, computed rather than remembered.
 ///

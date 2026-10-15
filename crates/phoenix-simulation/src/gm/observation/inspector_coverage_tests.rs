@@ -1247,6 +1247,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     }
     let _ = engineering_console_schema as fn(crate::entities::config::EngineeringConsoleConfig);
     let crate::world::config::WorldConfig {
+        transit_destinations: _,
         situation_definitions: _,
         situations: _,
         planning: _,

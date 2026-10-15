@@ -149,3 +149,46 @@ fn imported_domain_waits_for_existing_source_queue_then_freezes_exact_closure() 
     .unwrap();
     assert!(denied.contains(library) && denied.contains("HTTP 404"));
 }
+
+#[test]
+fn dormant_destination_support_scripts_join_preload_without_activation_requests() {
+    crate::content_ledger::reset();
+    let text = "[[transit_destination]]\nid='outer'\nlabel='world.outer'\ntarget={kind='layer',path='assets/worlds/outer.toml',anchor='arrival'}";
+    let mut sources = Sources(BTreeMap::new());
+    let discover_route = |sources: &Sources| {
+        discover(
+            ROOT,
+            text,
+            &[],
+            &|path| Ok(sources.0.get(path).cloned()),
+            &sources,
+        )
+    };
+    assert_eq!(
+        discover_route(&sources).unwrap().pending,
+        BTreeSet::from(["assets/worlds/outer.toml".into()])
+    );
+    sources.0.insert("assets/worlds/outer.toml".into(), "script='outer.rhai'\nextra_worlds=['assets/worlds/support.toml']\n[anchors]\narrival=[1000,0]".into());
+    assert_eq!(
+        discover_route(&sources).unwrap().pending,
+        BTreeSet::from([
+            "assets/worlds/outer.rhai".into(),
+            "assets/worlds/support.toml".into()
+        ])
+    );
+    sources.0.insert("assets/worlds/outer.rhai".into(), "fn wave(ctx) { ctx.effects.spawn_entity(#{template_path: \"assets/entities/destination-only.toml\"}); }".into());
+    sources.0.insert(
+        "assets/worlds/support.toml".into(),
+        "[global]\ntitle='Support'".into(),
+    );
+    let ready = discover_route(&sources).unwrap();
+    assert!(ready.pending.is_empty());
+    assert_eq!(
+        ready.templates,
+        BTreeSet::from(["assets/entities/destination-only.toml".into()])
+    );
+    assert!(crate::world::config::parse_world(text)
+        .unwrap()
+        .extra_worlds
+        .is_empty());
+}

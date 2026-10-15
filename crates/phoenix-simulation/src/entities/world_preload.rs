@@ -16,8 +16,9 @@ pub(crate) struct Dependencies {
 }
 
 /// `Ok(None)` is an outstanding read; `Err` is terminal. The caller issues the
-/// returned requests and advances this pass when a response arrives. Only root
-/// `extra_worlds` are boot dependencies, matching `world::load::Activate`.
+/// returned requests and advances this pass when a response arrives. Static
+/// support and dormant destination scopes match `world::load::Activate`; this
+/// discovers content and never requests runtime layer activation.
 pub(crate) fn discover(
     path: &str,
     text: &str,
@@ -28,11 +29,18 @@ pub(crate) fn discover(
     let root = crate::world::config::parse_world(text).map_err(|e| format!("{path}: {e}"))?;
     let mut documents = vec![(path.to_string(), text.to_string(), true)];
     let mut result = Dependencies::default();
-    for child in root.extra_worlds.iter().collect::<BTreeSet<_>>() {
-        match read(child).map_err(|e| format!("{child}: {e}"))? {
-            Some(source) => documents.push((child.clone(), source, false)),
+    let mut walk =
+        phoenix_content_preparation::world::transit::SupportingWorldWalk::new(path, &root)?;
+    while let Some(child) = walk.next_path() {
+        match read(&child).map_err(|e| format!("{child}: {e}"))? {
+            Some(source) => {
+                let config = crate::world::config::parse_world(&source)
+                    .map_err(|e| format!("{child}: {e}"))?;
+                walk.accept(&child, &config)?;
+                documents.push((child, source, false));
+            }
             None => {
-                result.pending.insert(child.clone());
+                result.pending.insert(child);
             }
         }
     }

@@ -435,3 +435,41 @@ World arrival records where present. Restore cannot infer it from current render
 content or whichever file loaded most recently. Departure/return and subsequent
 local-jump witnesses must exercise the actual selected/current World recipe scope,
 including relevant static supporting worlds, before claiming that joined exit.
+
+
+## Dormant World content checkpoint
+
+Closed root `transit_destination` rows name an ID, strings key and Base/Layer
+arrival-anchor binding. Activate ingestion, browser dependency discovery and
+Workshop acceptance share the existing supporting-content path: route targets
+and their declared static support are read and validated before the content
+freeze. This prefetch does not enqueue startup activation. Ordinary legacy
+`extra_worlds` keep their previous one-level boot discovery.
+
+Transit support discovery deduplicates paths, preserves the deterministic first
+declaration's loader ancestry and terminates cycles; existing Workshop cycle,
+duplicate and dangling-reference rules still refuse invalid authored graphs.
+Disposable Test checks the selected support and sibling-script closure too.
+Technical bounds are 128 route rows and 128 destination/support Worlds, with
+canonical bounded paths. Supporting files cannot redefine the root catalogue;
+selected anchors must exist in their own World, and simultaneously resident
+route actors need distinct authored names under the existing name mapping.
+
+This is a structural source checkpoint. It adds no playable sector travel,
+physical placement, activation policy, new authoritative location, current-World
+state, route controls or simulation evidence. Those remain the next actual
+Transit consumer; native owner tests are integrator-owned and pending.
+
+## Adopted first Navigation route selection
+
+Use the existing paid Navigation waypoint command to select an exact published,
+permitted authored route anchor. A World-capable drive freezes the unique closed
+route ID, point and Navigation generation from that reading. Matching a guessed
+private anchor against a private recipe is insufficient: the route must also be
+in the same permitted Navigation publication. Ambiguous/shared coordinates are
+refused with an actionable reason. This form adds no second waypoint owner or
+route-selection command; ordinary Navigation can use its existing authored
+Reach-to-anchor policy to select the same course. Free courses remain local.
+Derive immutable accepted route/body recipes at the existing world materialisation
+boundary; the same actual Transit state retains current World context and owns
+paid work/arrival. No private destination actor or file path enters the route UI.

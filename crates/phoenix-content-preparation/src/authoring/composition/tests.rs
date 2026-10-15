@@ -1058,3 +1058,23 @@ fn selection_findings_cover_the_selected_root_and_what_it_composes_only() {
     );
     assert!(located(CHILD).len() == 1 && located("assets/worlds/elsewhere.toml").is_empty());
 }
+
+#[test]
+fn selected_test_checks_dormant_destination_support_composition_and_scripts() {
+    let source = files(&[
+        (ROOT, "[[transit_destination]]\nid='outer'\nlabel='world.outer'\ntarget={kind='layer',path='assets/worlds/outer.toml',anchor='arrival'}"),
+        ("assets/worlds/outer.toml", "extra_worlds=['assets/worlds/support.toml']\n[anchors]\narrival=[1000,0]"),
+        ("assets/worlds/support.toml", "script='support.rhai'\nextra_worlds=['assets/worlds/outer.toml']"),
+        ("assets/worlds/support.rhai", "fn go(ctx) { ctx.effects.load_world(\"assets/worlds/gone.toml\"); }"),
+        (BASE_ROOT, "extra_worlds=['assets/worlds/unrelated-missing.toml']"),
+    ]);
+    let selected = selection_findings(&source, ROOT);
+    assert!(selected
+        .iter()
+        .any(|row| row.category == "world-missing-load-reference"
+            && row.file == "assets/worlds/support.rhai"));
+    assert!(selected.iter().any(
+        |row| row.category == "extra-worlds-cycle" && row.file == "assets/worlds/support.toml"
+    ));
+    assert!(selected.iter().all(|row| row.file != BASE_ROOT));
+}

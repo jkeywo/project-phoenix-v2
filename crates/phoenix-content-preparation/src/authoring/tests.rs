@@ -1058,3 +1058,47 @@ fn actual_bay_authoring_uses_supported_work_and_own_roster_tree_vocabulary() {
         .iter()
         .any(|field| field.contains("phase") || field.contains("uuid")));
 }
+
+#[test]
+fn workshop_destination_acceptance_checks_dormant_supports_and_selected_anchor() {
+    let root = "assets/worlds/root.toml";
+    let mut sources = Sources(BTreeMap::from([
+        (root.into(), "[[transit_destination]]\nid='outer'\nlabel='world.outer'\ntarget={kind='layer',path='assets/worlds/outer.toml',anchor='arrival'}".into()),
+        ("assets/worlds/outer.toml".into(), "extra_worlds=['assets/worlds/support.toml']\n[anchors]\narrival=[1000,0]".into()),
+        ("assets/worlds/support.toml".into(), "[global]\ntitle='Support'".into()),
+    ]));
+    let mut report = WorkshopValidation::default();
+    validate_world(root, &sources, &mut report);
+    assert!(
+        report
+            .findings
+            .iter()
+            .all(|finding| finding.severity != "error"),
+        "{:?}",
+        report.findings
+    );
+    sources.0.remove("assets/worlds/support.toml");
+    let mut missing = WorkshopValidation::default();
+    validate_world(root, &sources, &mut missing);
+    assert!(
+        missing
+            .findings
+            .iter()
+            .any(|finding| finding.file == "assets/worlds/support.toml"
+                && finding.severity == "error")
+    );
+    sources.0.insert(
+        "assets/worlds/support.toml".into(),
+        "[global]\ntitle='Support'".into(),
+    );
+    sources.0.insert(
+        "assets/worlds/outer.toml".into(),
+        "[anchors]\nwrong=[1000,0]".into(),
+    );
+    let mut anchor = WorkshopValidation::default();
+    validate_world(root, &sources, &mut anchor);
+    assert!(anchor
+        .findings
+        .iter()
+        .any(|finding| finding.category == "invalid-transit-destination" && finding.file == root));
+}

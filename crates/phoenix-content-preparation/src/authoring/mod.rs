@@ -628,10 +628,22 @@ pub fn validate_world(path: &str, sources: &Sources, report: &mut WorkshopValida
         }
     };
     let mut children = Vec::new();
-    for child_path in &root.config.extra_worlds {
-        match read(child_path) {
-            Ok(child) => children.push((child_path.clone(), child)),
-            Err(error) => report.error("runtime-world-invalid", child_path, error.to_string()),
+    let mut walk = match crate::world::transit::SupportingWorldWalk::new(path, &root.config) {
+        Ok(walk) => walk,
+        Err(error) => {
+            report.error("runtime-world-invalid", path, error);
+            return;
+        }
+    };
+    while let Some(child_path) = walk.next_path() {
+        match read(&child_path) {
+            Ok(child) => {
+                if let Err(error) = walk.accept(&child_path, &child.config) {
+                    report.error("runtime-world-invalid", &child_path, error);
+                }
+                children.push((child_path, child));
+            }
+            Err(error) => report.error("runtime-world-invalid", &child_path, error.to_string()),
         }
     }
     for world in std::iter::once(&root).chain(children.iter().map(|(_, child)| child)) {
@@ -697,7 +709,8 @@ pub fn validate_world(path: &str, sources: &Sources, report: &mut WorkshopValida
                 .get(&canonical_template_path(path))
                 .map(String::as_str)
                 .unwrap_or("");
-            let mut source = WorldSource::new(path, text, &world.config);
+            let mut source = WorldSource::new(path, text, &world.config)
+                .with_parent_path(walk.parent_path(path));
             if let Some(compiled) = &world.scripts {
                 source = source.with_resolved_script_spawns(&compiled.spawned_templates);
             }

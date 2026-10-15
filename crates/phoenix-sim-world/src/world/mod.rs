@@ -21,3 +21,5 @@ pub mod dispatch {
 }
 
 pub mod craft;
+
+pub mod transit_destinations;

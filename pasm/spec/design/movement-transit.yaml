@@ -158,3 +158,14 @@ entities:
       rationale:
         - "[ai] Adopted with integrator agreement before runtime. Preparing/refused/cancelled work cannot overwrite context. Seed Base or an unambiguous accepted authored-layer mapping; refuse unsupported ambiguity. Existing EntityOriginLayer remains lifetime/script ownership, without reparenting flag chains or unload lists."
         - "[ai] Capture/digest and full no-write preflight bind context to accepted content/source and actual Transit records. Dormant prefetched masses are not physical global obstacles; actual body pose/visibility/removal/physics retain their owners. Actual departure, return and later local jump must prove destination/current-World scope including relevant static supporting worlds."
+
+
+  - decision: first-navigation-world-route-selection
+    core:
+      status: accepted
+      confidence: confirmed
+      title: World Routes Reuse the Existing Paid Navigation Waypoint
+      summary: "First World-route selection uses the existing paid Navigation waypoint at an exact permitted authored route anchor. A World-capable drive freezes the unique closed route ID, point and generation from its permitted Navigation reading; free courses remain local. No new waypoint owner or route command is introduced."
+      rationale:
+        - "[ai] Agreed with the integrator before implementation. The route must be present in the same permitted Navigation publication; a guessed private anchor cannot grant World travel. Ambiguous/shared anchor coordinates refuse with an actionable reason. Existing authored Reach-to-anchor Navigation policy can select the same course."
+        - "[ai] Immutable route and static-body recipes derive at the existing materialisation boundary. The actual Transit owner retains current World context and paid work/arrival; private actors and file paths are not route UI data. Dormant closure checkpoint alone implements neither route operation nor sector travel."

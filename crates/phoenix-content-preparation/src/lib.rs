@@ -35,7 +35,7 @@ pub mod world {
     pub mod craft;
     mod planning;
     pub use phoenix_content::pack_asset_validation;
-    pub use phoenix_sim_world::world::{config, script};
+    pub use phoenix_sim_world::world::{config, script, transit_destinations};
     pub mod load;
     pub mod manifest;
     pub mod mod_pack;

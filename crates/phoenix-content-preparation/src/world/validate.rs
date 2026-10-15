@@ -143,6 +143,9 @@ pub struct WorldSource<'a> {
     pub path: String,
     pub toml: &'a str,
     pub config: &'a WorldConfig,
+    /// Accepted first-declaration loader parent. None is the root World.
+    /// This is preparation metadata, not a second runtime layer owner.
+    parent_path: Option<String>,
     /// Spawn references scanned from the exact resolved script set compiled for
     /// this source (issue #1046). `None` retains the inline-config scan used by
     /// callers that have not compiled scripts; `Some`, including an empty slice,
@@ -157,8 +160,14 @@ impl<'a> WorldSource<'a> {
             path: path.into(),
             toml,
             config,
+            parent_path: None,
             resolved_script_spawns: None,
         }
+    }
+
+    pub fn with_parent_path(mut self, path: Option<&str>) -> Self {
+        self.parent_path = path.map(str::to_owned);
+        self
     }
 
     /// Use the literal spawn references from this source's resolved compiled
@@ -1868,7 +1877,7 @@ pub fn validate_composition_with_fragments(
     template_loader: &dyn TemplateLoader,
     fragments: &dyn FragmentSource,
 ) -> Vec<WorldFinding> {
-    let mut findings = Vec::new();
+    let mut findings = super::transit::destination_findings(root, children);
     findings.extend(validate_arrival_gravity(root, template_loader, true));
     findings.extend(super::craft::findings(root, template_loader, true));
     for child in children {
@@ -1904,8 +1913,8 @@ pub fn validate_composition_with_fragments(
 
     // The chain of ancestor namespaces a `parent.` climb walks: index 0 is the
     // referencing world itself, index 1 its parent, etc. In the additive
-    // `extra_worlds`/root model every child's single parent is the root, so the
-    // climb chain for a child is [child, root]; the root's is [root].
+    // ordinary additive model every child has the root as parent. Recursively
+    // declared Transit support instead carries its accepted loader tree.
     let resolve_all = |ref_world_names: &[String], ancestors: &[&[String]], src: &WorldSource| {
         let mut out = Vec::new();
         for EntityRef { reference, kind } in collect_entity_references(src.config) {
@@ -2131,11 +2140,41 @@ pub fn validate_composition_with_fragments(
     let root_ancestors: Vec<&[String]> = vec![root_names.as_slice()];
     findings.extend(resolve_all(&root_names, &root_ancestors, root));
 
-    // Child references: ancestor chain is [child, root].
+    // Follow the accepted loader tree for recursively prefetched support.
+    // Ordinary additive children retain their existing [child, root] chain.
+    let namespaces: HashMap<&str, Vec<String>> = children
+        .iter()
+        .map(|child| (child.path.as_str(), declared_names(child.config)))
+        .collect();
     for child in children {
-        let names = declared_names(child.config);
-        let ancestors: Vec<&[String]> = vec![names.as_slice(), root_names.as_slice()];
-        findings.extend(resolve_all(&names, &ancestors, child));
+        let names = &namespaces[child.path.as_str()];
+        let mut ancestors: Vec<&[String]> = vec![names.as_slice()];
+        let mut parent = child.parent_path.as_deref();
+        let mut seen = HashSet::from([child.path.as_str()]);
+        let mut valid = true;
+        while let Some(path) = parent {
+            let Some(source) = children
+                .iter()
+                .find(|source| source.path == path)
+                .filter(|_| seen.insert(path))
+            else {
+                findings.push(WorldFinding::error(
+                    "invalid-support-parent",
+                    &child.path,
+                    child.toml,
+                    path,
+                    "supporting World has a missing or cyclic accepted loader parent".into(),
+                ));
+                valid = false;
+                break;
+            };
+            ancestors.push(namespaces[path].as_slice());
+            parent = source.parent_path.as_deref();
+        }
+        if valid {
+            ancestors.push(root_names.as_slice());
+            findings.extend(resolve_all(names, &ancestors, child));
+        }
     }
 
     findings

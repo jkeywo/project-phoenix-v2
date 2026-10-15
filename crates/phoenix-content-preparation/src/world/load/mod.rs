@@ -412,7 +412,8 @@ pub struct LoadedWorld {
     /// The compiled, validated script set, or `None` for a world with no
     /// `script` key or under [`LoadPolicy::Inspect`].
     pub scripts: Option<CompiledScripts>,
-    /// The `extra_worlds` children, loaded and recorded (populated only under
+    /// Static supporting content, including dormant Transit destination scopes,
+    /// loaded and recorded (populated only under
     /// [`LoadPolicy::Activate`]).
     pub children: Vec<LoadedWorld>,
     /// Composition-level validation findings (empty except under
@@ -581,7 +582,7 @@ pub fn load(
 
             records.extend(domain_records);
 
-            // Read, parse, compile and record each `extra_worlds` child. Static
+            // Read, parse, compile and record static supporting content. Static
             // children need their own compiled set HERE, before the content-ledger
             // freeze: their literal sibling-script spawns are part of the declared
             // template set even though runtime layer activation later compiles the
@@ -594,10 +595,17 @@ pub fn load(
             // `build_headless_app` owned its `child_owned` triples.
             let mut children: Vec<LoadedWorld> = Vec::new();
             let mut child_sources: Vec<(String, String)> = Vec::new();
-            for child_path in &config.extra_worlds {
+            let mut walk =
+                super::transit::SupportingWorldWalk::new(&path, &config).map_err(|message| {
+                    LoadError::ChildParseFailed {
+                        path: path.clone(),
+                        message,
+                    }
+                })?;
+            while let Some(child_path) = walk.next_path() {
                 let child_text =
                     reader
-                        .read(child_path)
+                        .read(&child_path)
                         .ok_or_else(|| LoadError::ChildReadFailed {
                             path: child_path.clone(),
                         })?;
@@ -612,8 +620,14 @@ pub fn load(
                         message: "maintenance planning is supported only on the base world".into(),
                     });
                 }
+                walk.accept(&child_path, &child_config).map_err(|message| {
+                    LoadError::ChildParseFailed {
+                        path: child_path.clone(),
+                        message,
+                    }
+                })?;
                 let child_scripts =
-                    compile_scripts(child_path, &child_text, script_resolver, None)?;
+                    compile_scripts(&child_path, &child_text, script_resolver, None)?;
                 records.push(LedgerRecord {
                     path: child_path.clone(),
                     text: child_text.clone(),
@@ -646,7 +660,8 @@ pub fn load(
                 .zip(child_sources.iter())
                 .map(|(child, (child_path, child_text))| {
                     let mut source =
-                        WorldSource::new(child_path.clone(), child_text.as_str(), &child.config);
+                        WorldSource::new(child_path.clone(), child_text.as_str(), &child.config)
+                            .with_parent_path(walk.parent_path(child_path));
                     if let Some(compiled) = child.scripts.as_ref() {
                         source = source.with_resolved_script_spawns(&compiled.spawned_templates);
                     }

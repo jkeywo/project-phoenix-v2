@@ -1271,6 +1271,8 @@ pub struct RawWorld {
     #[serde(default)]
     pub planning: Option<crate::world::planning::PlanningConfig>,
     #[serde(default)]
+    pub transit_destination: Vec<super::transit_destinations::WorldTransitDestination>,
+    #[serde(default)]
     pub situation_definition: Vec<crate::world::activities::SituationDefinition>,
     #[serde(default)]
     pub situation: Vec<crate::world::activities::SituationConfig>,
@@ -2498,6 +2500,8 @@ pub struct WorldConfig {
     pub planning: Option<crate::world::planning::PlanningConfig>,
     /// Derived immutable imported source closure, never snapshot state.
     pub compiled_planning: Option<crate::world::planning::CompiledPlanning>,
+    /// Dormant accepted World routes, not startup layer activation requests.
+    pub transit_destinations: Vec<super::transit_destinations::WorldTransitDestination>,
     pub situation_definitions: Vec<crate::world::activities::SituationDefinition>,
     pub situations: Vec<crate::world::activities::SituationConfig>,
     pub global: GlobalConfig,
@@ -3184,9 +3188,11 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
             .ok_or("unknown situation definition")?;
         checked_instances.arm(instance, definition, 0)?;
     }
+    super::transit_destinations::validate_destinations(&raw.transit_destination)?;
     let config = WorldConfig {
         planning: raw.planning,
         compiled_planning: None,
+        transit_destinations: raw.transit_destination,
         situation_definitions: raw.situation_definition,
         situations: raw.situation,
         global: raw.global,

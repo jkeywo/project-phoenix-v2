@@ -26,10 +26,10 @@
 //! body. A path built from a variable cannot be judged here and is not
 //! listed; a call spelled inside another string literal is.
 //!
-//! The loader reads `extra_worlds` ONE level deep: a child's own
-//! `extra_worlds` are not followed, so a cycle is never an infinite load, but
-//! it is still refused here because the author's intent (a composition graph)
-//! and the runtime's behaviour (a flat list) have silently parted.
+//! Ordinary `extra_worlds` preload remains one level deep. Dormant Transit
+//! destination support is prefetched recursively with deduplication; that
+//! discovery guard does not make cyclic authoring valid. Existing duplicate,
+//! dangling and cycle findings continue to block save/export/disposable Test.
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
@@ -1371,8 +1371,8 @@ pub fn findings(
 }
 
 /// The composition findings a Test selection must clear before it starts:
-/// the rules broken by the selected root, by the worlds its `extra_worlds`
-/// compose and by the sibling scripts those declare, over the captured set
+/// the rules broken by the selected root, its static and dormant destination
+/// support closure, and the sibling scripts those declare, over the captured set
 /// (one flat map, the draft already laid over its dependencies). A Test
 /// runs the exact candidate, so a root that composes a duplicate, cyclic or
 /// dangling reference is refused here as save and export refuse it; what
@@ -1382,7 +1382,24 @@ pub fn selection_findings(files: &BTreeMap<String, String>, root: &str) -> Vec<W
         return Vec::new();
     };
     let mut scope: BTreeSet<String> = BTreeSet::from([root.to_owned()]);
+    // Keep the existing syntax-tolerant selected root findings even when its
+    // runtime schema is invalid; validate_world owns that separate refusal.
     scope.extend(extra_worlds_of(source).into_iter().map(|(child, _)| child));
+    if let Ok(config) = crate::world::config::parse_world(source) {
+        if let Ok(mut walk) = crate::world::transit::SupportingWorldWalk::new(root, &config) {
+            while let Some(path) = walk.next_path() {
+                scope.insert(path.clone());
+                if let Some(config) = files
+                    .get(&path)
+                    .and_then(|text| crate::world::config::parse_world(text).ok())
+                {
+                    // Errors remain the actual runtime-world acceptance gate's
+                    // findings; already discovered applicable rules stay in scope.
+                    let _ = walk.accept(&path, &config);
+                }
+            }
+        }
+    }
     for world in scope.clone() {
         if let Some(sibling) = files
             .get(&world)

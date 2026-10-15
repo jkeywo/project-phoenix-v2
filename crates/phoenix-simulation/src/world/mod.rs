@@ -43,3 +43,6 @@ pub use server::WorldPlugin;
 /// Host content ingestion requests a ledger freeze after world installation.
 #[derive(bevy::prelude::Resource)]
 pub struct PendingHostContentFreeze;
+
+/// Accepted closed World route definitions; execution stays at Transit and layers.
+pub use phoenix_sim_world::world::transit_destinations;

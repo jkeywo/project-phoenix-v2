@@ -255,11 +255,9 @@ impl Plugin for UmbilicalPlugin {
                 handle_umbilical_commands
                     .in_set(crate::sim_sets::FixedStep::HandleUmbilicalCommands)
                     .in_set(crate::sim_sets::SimSet::Input),
-                // Move the capacity this tick — after the dock tick that decides
-                // the docked state this gates on, and BEFORE the infrastructure
-                // tick that applies the queued moves, the same ordering the
-                // tractor's arrest keeps so the flow lands the same tick it is
-                // decided.
+                // Decide transfers after Dock and the infrastructure adjustments
+                // establish this tick's actual capacities. The shared resource
+                // settlement owner applies the queued transfer later this phase.
                 tick_umbilical
                     .in_set(crate::sim_sets::FixedStep::TickUmbilical)
                     .in_set(crate::sim_sets::SimSet::Modifiers)

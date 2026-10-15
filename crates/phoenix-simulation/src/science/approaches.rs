@@ -1,7 +1,7 @@
 //! Helm consumes its Console's permitted measured feeds after publication.
 use crate::{
     core::messages::SystemBlackboard, server_app::ShipSystemBlackboards, ship::state::ShipPhysics,
-    ship_plugin::ShipConfigComponent,
+    ship_plugin::ShipConfigComponent, simmath,
 };
 use bevy::prelude::*;
 
@@ -40,8 +40,11 @@ pub(crate) fn publish(
                 continue;
             }
             let permitted = config.0.observations_for_system(&system.id, &boards.0);
-            let records = permitted
-                .values()
+            let records = config
+                .0
+                .systems
+                .iter()
+                .filter_map(|source| permitted.get(&source.id))
                 .flat_map(|board| match board {
                     SystemBlackboard::Helm(board) => board.tracks.as_deref().unwrap_or_default(),
                     SystemBlackboard::TacticalRadar(board) => {

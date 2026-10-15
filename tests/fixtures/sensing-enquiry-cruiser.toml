@@ -2,6 +2,9 @@
 includes = ["../../assets/entities/alliance_cruiser.toml"]
 [[sensing.focused]]
 system = "sensors"
+# This fixture exercises active-work handoff immediately; shipped reading work
+# remains authored independently and is verified by the reading owner tests.
+reading_ticks = 0
 work_secs = 2
 history_limit = 64
 unfinished_retention_secs = 8

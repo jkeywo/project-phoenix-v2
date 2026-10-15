@@ -32,7 +32,7 @@ pub(crate) fn install(
 }
 
 #[derive(SystemParam)]
-pub(crate) struct EnquiryScene<'w, 's> {
+pub struct EnquiryScene<'w, 's> {
     subjects: Query<
         'w,
         's,

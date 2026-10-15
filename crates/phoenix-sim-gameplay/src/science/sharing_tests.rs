@@ -4,6 +4,7 @@ use phoenix_model::identity::SystemId;
 
 fn profile() -> BroadConfig {
     BroadConfig {
+        reading_ticks: 0,
         system: SystemId("sensor-radar".into()),
         sample_interval_secs: 1.0,
         identity_secs: 0.0,

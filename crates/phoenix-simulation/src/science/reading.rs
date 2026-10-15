@@ -208,7 +208,7 @@ fn advance(
 }
 
 pub fn requested_text<'a>(
-    config: &crate::ship::config::ShipConfig,
+    config: &'a crate::ship::config::ShipConfig,
     boards: &'a ShipSystemBlackboards,
     owner: &SystemId,
 ) -> Option<&'a str> {

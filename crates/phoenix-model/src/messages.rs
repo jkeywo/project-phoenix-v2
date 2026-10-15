@@ -2448,6 +2448,20 @@ pub enum SystemControlPayload {
     SetTransferDirection {
         direction: crate::umbilical::UmbilicalDirection,
     },
+    /// Bind an actual managed Main store; None retains the named-service path.
+    SetTransferStore {
+        store: Option<String>,
+    },
+    SetPortMaintenance {
+        enabled: bool,
+    },
+    /// Human or explicitly trusted mission approval, bound to a physical visit.
+    StartPortOrder {
+        partner_uuid: String,
+        visit: u64,
+        lines: Vec<crate::ports::PortOrderLine>,
+    },
+    StopPortOrder,
     /// Select a discovered rescue contact for the transporter (issue #1348).
     ///
     /// Targets the engineering-owned `transporter` system
@@ -4952,6 +4966,9 @@ pub struct DockBlackboard {
 /// could not start or was stopped.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct UmbilicalBlackboard {
+    pub selected_store: Option<String>,
+    pub port_maintenance: bool,
+    pub port: Option<crate::ports_ui::PortServiceView>,
     #[serde(default)]
     pub selected_resource: String,
     #[serde(default)]

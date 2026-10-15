@@ -68,6 +68,7 @@ impl Plugin for InfrastructurePlugin {
         crate::resources::logistics_server::register(app);
         crate::resources::production_server::register(app);
         crate::resources::recovery_server::register(app);
+        crate::resources::ports_server::register(app);
         app.init_resource::<EffectQueue<crate::resources::server::ResourceTransfer>>()
             .declare_state::<EffectQueue<crate::resources::server::ResourceTransfer>>(
                 StateClass::ClearedAtFold,

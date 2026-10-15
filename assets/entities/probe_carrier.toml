@@ -1443,3 +1443,13 @@ max_cooling_per_sec = 1
 default_cooling_per_sec = 0.1
 priority = 29
 restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-probe-bay"
+parent = "support"
+max_flow_per_sec = 1
+default_flow_per_sec = 0.5
+max_cooling_per_sec = 1
+default_cooling_per_sec = 0.1
+priority = 30
+restore_delay_secs = 0.5

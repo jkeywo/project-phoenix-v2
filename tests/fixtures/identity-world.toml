@@ -1,0 +1,21 @@
+# Two actual same-faction hulls, no scripted damage, grants or observations.
+[global]
+seed=1562171
+[player_spawn]
+position=[0,0,0]
+[[entity]]
+template_path="assets/entities/identity_cruiser.toml"
+id="identity-source"
+name="identity-source"
+spawn_on="game_start"
+transform={position=[0,0,0]}
+[entity.overrides]
+name="True survey ship"
+[[entity]]
+template_path="assets/entities/alliance_cruiser.toml"
+id="identity-observer"
+name="identity-observer"
+spawn_on="game_start"
+transform={position=[20,0,0]}
+[entity.overrides]
+name="Observer"

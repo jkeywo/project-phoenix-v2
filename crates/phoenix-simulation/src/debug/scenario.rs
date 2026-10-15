@@ -483,6 +483,55 @@ pub fn collect_scenario_state_with_fires(
     payload
 }
 
+/// Enrich the same privileged inspection with a derived source graph. It never
+/// chooses a method or reads machinery condition/resources to explain a choice.
+pub fn collect_scenario_state_with_plan(
+    runtime: &WorldContentRuntime,
+    objectives: &ObjectiveManager,
+    recorder: &TriggerFireRecorder,
+    base: Option<&WorldConfig>,
+) -> ScenarioStatePayload {
+    use crate::debug::payload::{ScenarioPlanLeaf, ScenarioPlanning};
+    let mut payload = collect_scenario_state_with_fires(runtime, objectives, recorder);
+    let Some(compiled) = base.and_then(|base| base.compiled_planning.as_ref()) else {
+        return payload;
+    };
+    let mut view = ScenarioPlanning {
+        source: compiled.config().clone(),
+        choice: runtime.plan_choice.clone(),
+        leaves: Vec::new(),
+        dependencies: Vec::new(),
+        derivation_error: None,
+    };
+    if let Some(choice) = &runtime.plan_choice {
+        match compiled.derive(choice) {
+            Ok(graph) => {
+                view.leaves = graph
+                    .leaves
+                    .into_iter()
+                    .map(|(node, leaf)| ScenarioPlanLeaf {
+                        released_tick: choice.released.get(&node).copied(),
+                        node,
+                        instance: leaf.id,
+                        definition: leaf.definition,
+                    })
+                    .collect();
+                view.dependencies = graph.dependencies;
+            }
+            Err(reason) => {
+                view.derivation_error = Some(
+                    reason
+                        .chars()
+                        .take(phoenix_sim_world::world::planning::MAX_EXPLANATION_CHARS)
+                        .collect(),
+                )
+            }
+        }
+    }
+    payload.planning = Some(view);
+    payload
+}
+
 /// Project the scenario state to JSON when capture is enabled (flag-gated).
 ///
 /// Read-only: it borrows the runtime and objective manager by `Res` and writes
@@ -499,15 +548,19 @@ pub fn publish_scenario_state(
     runtime: Option<Res<WorldContentRuntime>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
     recorder: Res<TriggerFireRecorder>,
+    base: Option<Res<WorldConfig>>,
     mut capture: ResMut<ScenarioStateCapture>,
 ) {
     let payload = match (runtime.as_deref(), objectives.as_deref()) {
         (Some(runtime), Some(objectives)) => {
-            collect_scenario_state_with_fires(runtime, &objectives.0, &recorder)
+            collect_scenario_state_with_plan(runtime, &objectives.0, &recorder, base.as_deref())
         }
-        (Some(runtime), None) => {
-            collect_scenario_state_with_fires(runtime, &ObjectiveManager::default(), &recorder)
-        }
+        (Some(runtime), None) => collect_scenario_state_with_plan(
+            runtime,
+            &ObjectiveManager::default(),
+            &recorder,
+            base.as_deref(),
+        ),
         // No world loaded — an empty, version-stamped payload.
         (None, _) => ScenarioStatePayload::empty(),
     };

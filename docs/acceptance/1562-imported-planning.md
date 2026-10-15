@@ -37,5 +37,10 @@ cargo test -p project-phoenix --features headless --test activity_foundation_con
 
 No
 new native execution, full22B exit, crew calibration, scheduling, dynamic plan
-repair or full22 completion is claimed here. Imported-domain authoring and live
-graph inspection remain the next source consumer work.
+repair or full22 completion is claimed here. The subsequent source consumer adds backend-accepted World/library edits in
+existing Scripts history/Test, explicit inherited library materialisation, and
+privileged read-only source/choice/dependency inspection. Original bounded
+capability explanations remain on the same saved choice; candidate preflight
+reconstructs the accepted immutable selection. Five affected client suites pass
+37 cases and the real Workshop bundle builds; native metadata/restore tests and
+actual browser interaction remain separate proof obligations.

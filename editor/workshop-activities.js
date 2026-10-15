@@ -9,7 +9,8 @@ const closed = (value, keys) => object(value) && Object.keys(value).every(key =>
 const id = value => typeof value === 'string' && value.trim().length > 0;
 const same = (a,b) => stable(a) === stable(b);
 function stable(value) { return JSON.stringify(value,(_,row)=>object(row) ? Object.fromEntries(Object.keys(row).sort().map(key=>[key,row[key]])) : row); }
-export const activityWorlds = draft => (draft?.paths() || []).filter(path=>path.startsWith('assets/worlds/') && path.endsWith('.toml') && !draft.isBinary(path));
+export const activityWorlds = draft => (draft?.paths() || []).filter(path=>path.startsWith('assets/worlds/') && path.endsWith('.toml') && !draft.isBinary(path))
+  .filter(path=>{try{return !object(parse(draft.read(path)).domain);}catch{return true;}});
 
 // Only the immutable equipment roots used by this form. Instance overrides
 // replace arrays; doctrine's separate keyed merge is outside this projection.

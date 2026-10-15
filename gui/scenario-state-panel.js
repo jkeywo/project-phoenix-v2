@@ -43,6 +43,7 @@ export function parseScenarioState(json) {
 
 /** Whether every surface on the payload is empty — the "no scenario" state. */
 function isEmptyPayload(payload) {
+  if (payload.planning && typeof payload.planning === 'object') return false;
   return [
     payload.flags,
     payload.objectives,
@@ -266,6 +267,35 @@ export function buildScenarioStatePanel(payload, opts = {}) {
       row.appendChild(el(doc, 'span', 'ss-dossier-provenance', String(entry.provenance)));
       sec.appendChild(row);
     }
+    root.appendChild(sec);
+  }
+
+  // Author-only derived graph; it cannot issue instructions or reinterpret
+  // original capability explanations as current machinery/stock information.
+  if (payload.planning && typeof payload.planning === 'object') {
+    const plan = payload.planning, choice = plan.choice;
+    const sec = section(doc, 'planning', 'settings.debug.scenario.planning.title');
+    const field = (key, value, className=key) => {
+      const row = el(doc, 'div', `ss-plan-${className}`);
+      row.appendChild(el(doc, 'span', '', t(`settings.debug.scenario.planning.${key}`)+': '));
+      row.appendChild(el(doc, 'span', '', value == null ? t('settings.debug.scenario.none') : String(value)));
+      sec.appendChild(row);
+    };
+    field('root', plan.source?.task);
+    field('chosen', choice?.chosen_tick);
+    field('actor', choice?.actor_uuid);
+    for (const [node, method] of Object.entries(choice?.methods || {})) {
+      field('method', `${node}: ${method.task?.library_path}::${method.task?.task} / ${method.method}`);
+    }
+    for (const reason of Array.isArray(choice?.refused_methods) ? choice.refused_methods : []) field('refused', reason);
+    for (const leaf of Array.isArray(plan.leaves) ? plan.leaves : []) {
+      field('leaf', `${leaf.node}: ${leaf.instance}`);
+      field('released', leaf.released_tick);
+    }
+    for (const edge of Array.isArray(plan.dependencies) ? plan.dependencies : []) {
+      field('dependency', `${edge.from} → ${edge.to}: ${edge.when?.kind}${edge.when?.outcome ? ' / '+edge.when.outcome : ''}`);
+    }
+    if (plan.derivation_error) field('error', plan.derivation_error);
     root.appendChild(sec);
   }
 

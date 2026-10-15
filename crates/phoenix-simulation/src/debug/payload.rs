@@ -478,6 +478,25 @@ pub struct ScenarioStatePayload {
     /// facts. Author-only inspection of the existing World owners.
     #[serde(default)]
     pub situations: Vec<ScenarioSituation>,
+    /// Privileged derived source/choice graph, never a gameplay instruction feed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planning: Option<ScenarioPlanning>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScenarioPlanning {
+    pub source: phoenix_sim_world::world::planning::PlanningConfig,
+    pub choice: Option<phoenix_sim_world::world::planning::PlanChoice>,
+    pub leaves: Vec<ScenarioPlanLeaf>,
+    pub dependencies: Vec<phoenix_sim_world::world::planning::Dependency>,
+    pub derivation_error: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScenarioPlanLeaf {
+    pub node: String,
+    pub instance: String,
+    pub definition: String,
+    pub released_tick: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -503,6 +522,7 @@ impl Default for ScenarioStatePayload {
             commitments: Vec::new(),
             dossier: Vec::new(),
             situations: Vec::new(),
+            planning: None,
         }
     }
 }

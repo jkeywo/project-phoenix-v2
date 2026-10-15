@@ -1,9 +1,11 @@
 use super::*;
-use phoenix_sim_world::world::activities::{ActivityRequest, ScenarioCallResult, SituationInstance};
 use phoenix_model::{
     activity::*,
     identity::SystemId,
     job::{JobId, JobOutcome},
+};
+use phoenix_sim_world::world::activities::{
+    ActivityRequest, ScenarioCallResult, SituationInstance,
 };
 
 #[test]
@@ -86,4 +88,62 @@ fn author_inspection_preserves_exact_job_and_pending_vs_acknowledged_frontiers()
         ScenarioCallResult::Refused
     );
     assert!(projected.situations[0].pending.is_empty());
+}
+
+#[test]
+fn original_plan_choice_and_derived_graph_inspection_do_not_release_or_acknowledge_work() {
+    let source =
+        crate::content_fs::read_to_string("tests/fixtures/maintenance-htn-world.toml").unwrap();
+    let mut base = crate::world::config::parse_world(&source).unwrap();
+    let (compiled, _) = phoenix_sim_world::world::planning::CompiledPlanning::load(
+        base.planning.clone().unwrap(),
+        |path| crate::content_fs::read_to_string(path).ok(),
+    )
+    .unwrap();
+    let selected = compiled
+        .choose("actual-ship", 10, |request| match request {
+            ActivityRequest::Repair { team: 1, .. } => Err("requires unavailable team1".into()),
+            _ => Ok(()),
+        })
+        .unwrap();
+    let mut runtime = WorldContentRuntime::default();
+    let mut choice = selected.choice;
+    compiled
+        .release(&mut choice, &mut runtime.situations, "actual-ship", 11)
+        .unwrap();
+    runtime.plan_choice = Some(choice.clone());
+    base.compiled_planning = Some(compiled);
+    let before = runtime.situations.clone();
+    let payload = collect_scenario_state_with_plan(
+        &runtime,
+        &ObjectiveManager::default(),
+        &TriggerFireRecorder::default(),
+        Some(&base),
+    );
+    let plan = payload.planning.unwrap();
+    assert_eq!(plan.choice, Some(choice.clone()));
+    assert_eq!(plan.leaves.len(), 2);
+    assert_eq!(plan.dependencies.len(), 1);
+    assert_eq!(
+        plan.leaves
+            .iter()
+            .filter(|leaf| leaf.released_tick.is_some())
+            .count(),
+        1
+    );
+    assert!(plan.choice.as_ref().unwrap().refused_methods[0].contains("unavailable team1"));
+    assert!(plan.derivation_error.is_none());
+    assert_eq!(runtime.plan_choice, Some(choice));
+    assert_eq!(runtime.situations, before);
+    assert!(runtime.pending_world_events.is_empty());
+    runtime.plan_choice = None;
+    let waiting = collect_scenario_state_with_plan(
+        &runtime,
+        &ObjectiveManager::default(),
+        &TriggerFireRecorder::default(),
+        Some(&base),
+    )
+    .planning
+    .unwrap();
+    assert!(waiting.choice.is_none() && waiting.leaves.is_empty());
 }

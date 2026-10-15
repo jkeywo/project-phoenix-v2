@@ -2,7 +2,7 @@
 title: Activity Contracts
 type: concept
 tags: [world, activities, repair, logistics, continuation]
-sources: [crates/phoenix-model/src/activity.rs, crates/phoenix-sim-world/src/world/activities.rs, crates/phoenix-sim-world/src/world/planning.rs, crates/phoenix-sim-world/src/world/planning_compile.rs, crates/phoenix-sim-world/src/world/planning_runtime.rs, crates/phoenix-content-preparation/src/world/planning.rs, crates/phoenix-simulation/src/world/planning.rs, gui/planned-requests.js, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/activities.rs, crates/phoenix-simulation/src/world/server/triggers.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/resources/logistics_server.rs, crates/phoenix-simulation/src/snapshot/activities.rs, crates/phoenix-simulation/src/sim_digest_activities.rs, crates/phoenix-sim-gameplay/src/jobs/activity_bindings.rs, crates/phoenix-content-preparation/src/world/activity_bindings.rs, editor/workshop-activities.js, gui/workshop-activities-panel.js, crates/phoenix-simulation/src/debug/scenario.rs]
+sources: [crates/phoenix-model/src/activity.rs, crates/phoenix-sim-world/src/world/activities.rs, crates/phoenix-sim-world/src/world/planning.rs, crates/phoenix-sim-world/src/world/planning_compile.rs, crates/phoenix-sim-world/src/world/planning_runtime.rs, crates/phoenix-content-preparation/src/world/planning.rs, crates/phoenix-simulation/src/world/planning.rs, gui/planned-requests.js, editor/workshop-planning.js, gui/workshop-planning-panel.js, crates/phoenix-simulation/src/debug/scenario.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/activities.rs, crates/phoenix-simulation/src/world/server/triggers.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/resources/logistics_server.rs, crates/phoenix-simulation/src/snapshot/activities.rs, crates/phoenix-simulation/src/sim_digest_activities.rs, crates/phoenix-sim-gameplay/src/jobs/activity_bindings.rs, crates/phoenix-content-preparation/src/world/activity_bindings.rs, editor/workshop-activities.js, gui/workshop-activities-panel.js, crates/phoenix-simulation/src/debug/scenario.rs]
 updated: 2026-10-15
 ---
 
@@ -44,9 +44,11 @@ join the content ledger and browser preload before activation. Typed parameters
 and the private call closure are validated before a deterministic compatible
 method is chosen against the actual accepted actor's equipment. The source graph
 is derived; the same World owner retains only the chosen methods, actual actor
-UUID and original released-leaf ticks. A primitive dependency opens only from its
+UUID, original ordered bounded capability refusal reasons and original released-leaf ticks. A primitive dependency opens only from its
 predecessor's acknowledged Accepted/Achieved/Settled/Received/Returned evidence.
-Release and ordinary situation arming commit together.
+Release and ordinary situation arming commit together. Whole-candidate preflight
+reconstructs the deterministic choice from the accepted complete recipe and
+checks method identities plus original reasons before writes.
 
 Own Repair and Logistics publications derive released `planned_requests`.
 These are mission instructions, never assertions about current damage or stock.
@@ -55,6 +57,13 @@ Logistics tree still requires permitted local demand. Human operators may
 undertake a current own-System request through the ordinary correlated dispatch
 action. Received feeds confer knowledge without control. The existing physical
 adapters alone bind accepted JobIds and commit progress/payment/results.
+
+The Scripts workspace edits the World planning declaration and its actually
+imported library source through one backend-validated chronological transaction.
+Inherited library overrides require explicit materialisation. Privileged Scenario
+inspection derives selected methods, source dependencies, original refusal and
+release clocks beside the separate exact situation/job/evidence view; it does
+not choose, release or acknowledge work.
 
 This first imported maintenance consumer supports one base actor or authored
 launch slot and disjoint finite leaves. Dynamic opportunities, deadline/workload

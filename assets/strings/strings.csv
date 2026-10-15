@@ -6161,3 +6161,22 @@ workshop.transit.save_gravity,LocalJump accepted authoring,Save fixed-body gravi
 workshop.transit.refused,LocalJump accepted authoring,Transit edit refused: {reason},Transit edit refused: {reason},Transit edit refused: {reason},source
 planning.request.apply,Planning,Undertake,Ausführen,Undertake,machine
 planning.request.instruction,Planning,"Requested work {id} (tick {tick}): {subject}","Angeforderte Arbeit {id} (Tick {tick}): {subject}","Requested work {id} (tick {tick}): {subject}",machine
+settings.debug.scenario.planning.title,Privileged Scenario plan inspection,Imported plan,,,
+settings.debug.scenario.planning.root,Privileged Scenario plan inspection,Root task,,,
+settings.debug.scenario.planning.chosen,Privileged Scenario plan inspection,Original choice tick,,,
+settings.debug.scenario.planning.actor,Privileged Scenario plan inspection,Accepted actor,,,
+settings.debug.scenario.planning.method,Privileged Scenario plan inspection,Chosen method,,,
+settings.debug.scenario.planning.refused,Privileged Scenario plan inspection,Original capability refusal,,,
+settings.debug.scenario.planning.leaf,Privileged Scenario plan inspection,Primitive activity,,,
+settings.debug.scenario.planning.released,Privileged Scenario plan inspection,Original release tick,,,
+settings.debug.scenario.planning.dependency,Privileged Scenario plan inspection,Required evidence,,,
+settings.debug.scenario.planning.error,Privileged Scenario plan inspection,Graph unavailable,,,
+workshop.planning.title,Workshop imported domain authoring,Imported planning,,,
+workshop.planning.scope,Workshop imported domain authoring,Edit the World declaration and its imported library source. Validation checks typed bindings and supported equipment before saving. Empty declaration disables planning.,,,
+workshop.planning.world,Workshop imported domain authoring,World,,,
+workshop.planning.declaration,Workshop imported domain authoring,Planning declaration (TOML),,,
+workshop.planning.add,Workshop imported domain authoring,Insert maintenance declaration,,,
+workshop.planning.library,Workshop imported domain authoring,Imported library,,,
+workshop.planning.materialize,Workshop imported domain authoring,Include an editable copy of the inherited library in this pack,,,
+workshop.planning.source,Workshop imported domain authoring,Library source (TOML),,,
+workshop.planning.save,Workshop imported domain authoring,Validate and save planning,,,

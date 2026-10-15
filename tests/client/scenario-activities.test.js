@@ -27,3 +27,28 @@ describe('actual bound activity author inspection', () => {
     expect(container.querySelector('button')).toBeNull();
   });
 });
+
+
+describe('privileged imported plan inspection',()=>{
+  it('keeps original chosen/refused/released metadata separate from live job evidence and escapes source text',()=>{
+    const container=document.createElement('div');
+    const planning={source:{task:'maintenance::care'},choice:{chosen_tick:4,actor_uuid:'actual',methods:{root:{task:{library_path:'assets/worlds/lib.toml',task:'care'},method:'<chosen>'}},refused_methods:['<unavailable third team>']},
+      leaves:[{node:'root/repair',instance:'htn/care/root/repair',released_tick:5},{node:'root/supply',instance:'htn/care/root/supply',released_tick:null}],
+      dependencies:[{from:'root/repair',to:'root/supply',when:{kind:'achieved'}}],derivation_error:null};
+    renderScenarioStatePanel(container,JSON.stringify({flags:[],triggers:[],planning,situations:[]}));
+    expect(container.querySelector('.ss-empty')).toBeNull();
+    expect(container.querySelector('.ss-plan-chosen').textContent).toContain('4');
+    expect(container.querySelector('.ss-plan-method').textContent).toContain('<chosen>');
+    expect(container.querySelector('chosen')).toBeNull();
+    expect(container.querySelector('.ss-plan-refused').textContent).toContain('<unavailable third team>');
+    expect(container.querySelector('unavailable')).toBeNull();
+    expect(container.querySelectorAll('.ss-plan-released')[0].textContent).toContain('5');
+    expect(container.querySelectorAll('.ss-plan-released')[1].textContent).not.toContain('5');
+    expect(container.querySelector('.ss-plan-dependency').textContent).toContain('achieved');
+    expect(container.querySelector('button,input,select')).toBeNull();
+    planning.choice=null;planning.leaves=[];planning.dependencies=[];
+    renderScenarioStatePanel(container,JSON.stringify({flags:[],triggers:[],planning}));
+    expect(container.querySelector('.ss-plan-root').textContent).toContain('maintenance::care');
+    expect(container.querySelector('.ss-plan-method')).toBeNull();
+  });
+});

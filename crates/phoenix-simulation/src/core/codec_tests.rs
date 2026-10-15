@@ -3932,6 +3932,7 @@ fn scenario_state_payload_wire_shape_is_pinned() {
             gathered_at_tick: 40,
         }],
         situations: vec![],
+        planning: None,
     };
     let json = crate::core::codec::encode_scenario_state(&payload);
     assert_eq!(

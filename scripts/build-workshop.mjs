@@ -21,7 +21,7 @@ const editorModules = [
   'workshop-personnel',
   'workshop-comms-radio',
   'workshop-guided-profile',
-  'workshop-presets', 'workshop-scripts', 'workshop-activities', 'workshop-script-references', 'workshop-objective-snippet', 'workshop-localisation', 'workshop-slot-authoring', 'script-editor', 'script-editor-view',
+  'workshop-presets', 'workshop-scripts', 'workshop-activities', 'workshop-planning', 'workshop-script-references', 'workshop-objective-snippet', 'workshop-localisation', 'workshop-slot-authoring', 'script-editor', 'script-editor-view',
   'undo-stack', 'validation', 'entity-includes', 'component-schema', 'component-templates', 'world-toml', 'entity-toml',
   'stations-validate', 'marker-validate', 'blaster-validate', 'torpedo-validate', 'barrel-pattern-validate',
   'workshop-test-frame', 'workshop-native-test-view', 'workshop-test-child', 'workshop-test-runtime', 'workshop-test-snapshot', 'workshop-test-breakpoint',

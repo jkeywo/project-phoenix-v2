@@ -8,6 +8,7 @@ import { mountWorkshopFields } from './workshop-fields-panel.js';
 import { mountWorkshopFitting } from './workshop-fitting-panel.js';
 import { mountWorkshopPersonnel } from './workshop-personnel-panel.js';
 import { mountWorkshopActivities } from './workshop-activities-panel.js';
+import { mountWorkshopPlanning } from './workshop-planning-panel.js';
 import { mountWorkshopPorts } from './workshop-ports-panel.js';
 import { mountWorkshopRecovery } from './workshop-recovery-panel.js';
 import { mountWorkshopProduction } from './workshop-production-panel.js';
@@ -240,6 +241,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let slotAuthoringPanel = null;
   let scriptsPanel = null;
   let activitiesPanel = null;
+  let planningPanel = null;
   let spatialPanel = null;
   let layoutMount = null;
   let testLayoutMount = null;
@@ -377,7 +379,10 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   activitiesPanel = mountWorkshopActivities({ root, attach: false, provider, runtime, draft: () => draft,
     ...operations.panel(), test: testWorld,
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
-  scriptsPanel.node.append(activitiesPanel.node);
+  planningPanel = mountWorkshopPlanning({ root, attach: false, provider, runtime, draft: () => draft,
+    ...operations.panel(), test: testWorld,
+    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  scriptsPanel.node.append(activitiesPanel.node, planningPanel.node);
   spatialPanel = mountWorkshopSpatial({ root, attach: false, provider, runtime, draft: () => draft,
     ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
@@ -585,6 +590,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     slotAuthoringPanel?.refresh({ hidden: testing });
     scriptsPanel?.refresh({ hidden: testing });
     activitiesPanel?.refresh({ hidden: testing });
+    planningPanel?.refresh({ hidden: testing });
     spatialPanel?.refresh({ hidden: testing });
     localisationPanel?.refresh();
     toolbar.hidden = layout.hidden = feedback.hidden = findings.hidden = testing;
@@ -1254,6 +1260,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     slotAuthoringPanel?.dispose();
     scriptsPanel?.dispose();
     activitiesPanel?.dispose();
+    planningPanel?.dispose();
     spatialPanel?.dispose();
     layoutMount.dispose();
     controls.destroy();

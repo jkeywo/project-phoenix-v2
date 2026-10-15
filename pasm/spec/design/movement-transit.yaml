@@ -78,3 +78,15 @@ entities:
         - "[ai] Inspection found that actual physics already pays sustained boost from the energy reserve and tick_boost only projects that reserve. active_duration/recharge_duration are compatibility tuning fields unused by that execution path; they do not create a new timer. Preserve existing multipliers, reserve and thermal tuning."
         - "[ai] Retained engagement and current availability remain distinct. Offline/missing equipment cannot grant boost or debit its reserve; an operator can always release their own engaged intent. The existing per-System Boost AI emits the same normal SetBoost commands using the actual authored owner, including custom IDs."
         - "[ai] Phone hold controls must not require a full reserve before re-engagement. Report actual paid fraction and equipment availability separately from retained engagement. Targeted source/owner tests do not claim full increment 18 acceptance."
+
+  - decision: movement-paid-dock-separation
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Normal Dock Separation Holds When Equipment Cannot Work
+      summary: "The existing DockControl clear destination is the sole retained separation progress. Each ordinary separating movement requires the actual installed Dock System's current source, Operation and local continuous work grant. Disabled, Offline or unpaid equipment holds its pose and clear destination until it can resume."
+      rationale:
+        - "[ai] Inspection found the undock branch preceded disabled checks and its returned pose bypassed payment when disabled. Close that actual consumer gap without resetting progress, inventing a timer or creating a second Helm controller. Existing approach ownership and exact mate constraint remain unchanged in this slice."
+        - "[ai] Construct the clear point from canonical physical pose and the actual mating marker's outward direction. Continuing separation needs no new observation of its former mate. Actual Umbilical/services lose their ordinary docked-partner relation on release; they retain their existing interruption/conservation owners."
+        - "[ai] Charge only the granted motion, with finite authored approach speed/clear distance and actual condition fraction. Derived feedback may report separation/progress; saved identity, clear geometry and physical pose remain existing owners. Emergency release is a future explicitly authored supported mechanism with consequences, never an implicit free normal-undock exception."
+        - "[ai] Source cases must cover disabled/source/payment hold, paid resume and JSON continuation with exact physical/reserve state. No new runtime capability is claimed by this contract checkpoint."

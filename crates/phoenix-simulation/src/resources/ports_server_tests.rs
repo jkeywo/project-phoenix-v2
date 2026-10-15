@@ -31,6 +31,7 @@ fn rig(policy: PortServicePolicy) -> (App, Entity, Entity) {
         .replace_capacity_stock("hold-machinery-parts", stock)
         .unwrap();
     drop(inventory);
+    app.update(); // Publish actual receiving room after the completed use.
     (app, ship, provider)
 }
 fn rig_with(
@@ -376,6 +377,16 @@ fn blocked_high_priority_goal_does_not_starve_feasible_lower_goal() {
 #[test]
 fn full_output_bay_uses_its_own_cost_stock_before_other_main_stores() {
     let (mut app, ship, facility) = rig_with(PortServicePolicy::ManualOffer, |content| {
+        // Preserve a full shared bay while making endpoint room: three parts
+        // have already been used and three real alloy units occupy that space.
+        for capacity in &mut content.infrastructure.as_mut().unwrap().capacities {
+            if capacity.id == "hold-machinery-parts" {
+                capacity.amount -= 3;
+            }
+            if capacity.id == "alloy" {
+                capacity.amount += 3;
+            }
+        }
         let logistics = content.logistics.as_mut().unwrap();
         let mut remote = logistics
             .stores

@@ -353,7 +353,7 @@ impl PortOrderState {
             (Some(partner), Some(visit))
                 if valid_uuid(partner)
                     && visit > 0
-                    && visit <= snapshot_tick
+                    && visit <= snapshot_tick.max(1)
                     && !self.lines.is_empty() => {}
             _ => return Err("port order has an invalid partner, visit or selection".into()),
         }

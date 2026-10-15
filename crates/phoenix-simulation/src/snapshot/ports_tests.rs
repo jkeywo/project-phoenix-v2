@@ -20,6 +20,7 @@ fn bare_world() -> World {
     world.init_resource::<crate::gm::operations::puppet::PendingGmStationCommands>();
     world.init_resource::<crate::core::report::MissionReport>();
     world.register_component::<ShipPhysics>();
+    world.register_component::<AsteroidUuid>();
     world.register_component::<EntitySystemHull>();
     world.register_component::<ShipRedAlert>();
     world.register_component::<crate::console::command::server::ShipStationStances>();

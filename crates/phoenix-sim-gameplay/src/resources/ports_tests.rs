@@ -142,6 +142,34 @@ fn first_physical_visit_can_begin_at_tick_zero_without_reissuing_its_quota() {
     state.refresh(&config, 0, &visitors).unwrap();
     assert!(state.initialized);
     let visit = state.visitors[&visitor(2)].visit;
+    let mut approved = PortOrderState::default();
+    approved
+        .approve(
+            &config,
+            &visitor(9),
+            visit,
+            vec![PortOrderLine {
+                offer: "parts".into(),
+                store: "hold-parts".into(),
+                lots: 1,
+            }],
+        )
+        .unwrap();
+    approved.validate(&config, 0).unwrap();
+    assert_eq!(
+        approved
+            .advance(
+                &config,
+                &SystemId("umbilical".into()),
+                0,
+                1.0,
+                5.0,
+                1,
+                |_, _| panic!("bootstrap frontier must not charge work before tick one")
+            )
+            .unwrap(),
+        0
+    );
     state
         .record_delivery(&config, &visitor(2), visit, "parts", 1)
         .unwrap();

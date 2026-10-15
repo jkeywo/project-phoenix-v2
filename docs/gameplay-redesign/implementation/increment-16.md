@@ -1,8 +1,8 @@
 # Increment 16 — Shared Comms channels and remote requests
 
 Adopted contract preparation, 15 October 2026. The user approved continuation
-through24 and dependency-ready parallel work. Runtime entry requires15's initial
-integrated implementation and targeted checks; full completion depends on14/15's
+through 24 and dependency-ready parallel work. Runtime entry requires 15's initial
+integrated implementation and targeted checks; full completion depends on 14/15's
 verified exits. This document changes no ledger status or acceptance result.
 The integrator's [parallel-work contract](parallel-work.md) governs dispatch.
 
@@ -27,15 +27,15 @@ Research is motivation; no competitor timings or additional mechanics are adopte
 | S067; G024 | Protected channels and decoding constrained by actual capability and held keys. Time cannot defeat every protection. Ordinary AI handles feasible work; no cipher puzzle or change to transport security. Audio/video interception remains unselected detail, not an automatic plaintext/media grant. |
 | S101; AD72–74 | Equipment-backed automatic relay routing, explicit pending-order validity/supersession and returned delivery/decision receipts. No message-capacity, traffic-budget or volume-congestion resource. |
 | G040/G041; S068 | Known actor/faction relationships affect supported willingness; retain dated attributed interactions and content-authored terms/settlement. Generic chat does not create a universal contract, morality score or automatic commitment-risk warning. |
-| G042/G044/G109 | Surrender can change supported intent without magical compliance, capture or despawn. Claims, acceptance and actual conduct remain distinct. Pursuit information follows transmitted evidence, not hidden destinations; transit and broader capture consumers join18/20/23. |
+| G042/G044/G109 | Surrender can change supported intent without magical compliance, capture or despawn. Claims, acceptance and actual conduct remain distinct. Pursuit information follows transmitted evidence, not hidden destinations; transit and broader capture consumers join 18/20/23. |
 
 Reference Cruiser Comms owns conversation, requests and signal interpretation;
 Engineering retains stocks/service priorities, Tactical physical commitments,
-and each receiving specialist its own machinery. Later17 assigns jamming and
+and each receiving specialist its own machinery. Later 17 assigns jamming and
 disruption to Comms and electronic protection to Science through authored data.
-Preserve2/4/6/8-seat hull targets, visiting/human-seeking authority and Captain's
+Preserve 2/4/6/8-seat hull targets, visiting/human-seeking authority and Captain's
 lack of a private map. Simple Comms prioritises conversation/requests; later
-middle/detailed electronic-operation controls do not become16 prerequisites.
+middle/detailed electronic-operation controls do not become 16 prerequisites.
 
 ## Extend actual owners
 
@@ -57,7 +57,7 @@ Browser controls render permitted projections and emit ordinary correlated
 System commands. The host composes existing Phoenix transport; it does not
 interpret player prose as structured machinery commands.
 
-Migrate existing hail, reply, addressed script dialogue and shared14 information
+Migrate existing hail, reply, addressed script dialogue and shared 14 information
 links first with equivalent behaviour. Preserve explicit synthetic narrative/GM
 delivery separately from physically emitted traffic; it must not manufacture a
 physical emitter or universal link bypass for ordinary requests.
@@ -165,8 +165,8 @@ acceptance or completion effects. Group displays retain per-recipient outcomes.
    routes without plot regressions; show contextual willingness and behavioural
    surrender without inventing capture or an omniscient faction response.
 
-An integrated16 channel/link/request consumer and fixed shared contract unblock17
-electronic operations and18 formation delivery before16's full exit.19 later uses
+An integrated 16 channel/link/request consumer and fixed shared contract unblock 17
+electronic operations and 18 formation delivery before 16's full exit. 19 later uses
 the same remote order/receipt/link-loss contract; no temporary craft controller.
 20/21/22 may add real action adapters without changing Comms into a planner.
 Coordinate Model dispatch, central schedules, snapshot schema/digest and shared
@@ -198,12 +198,12 @@ relay cycles/ties/loss; captured-versus-never-received decoding; permissions/key
 changes; concurrent threads and protected choices; accepted work after link loss;
 and receipt/knowledge distinctions. Save paid reading/decoding and pending orders/
 receipts, JSON-restore fresh hosts and compare complete captures/digests for at
-least360 subsequent fixed steps; prove two peers with different LocalShips agree.
+least 360 subsequent fixed steps; prove two peers with different LocalShips agree.
 Tampered candidate owners/scopes/clocks/outcomes must refuse without live writes.
 
 Record authored corpus/Workshop round trips, native renderer-independent owner
 tests, built browser text/media journeys, unchanged networking/layer checks and
-appropriate activity/performance comparisons. Test2/4/6/8-human layouts and
+appropriate activity/performance comparisons. Test 2/4/6/8-human layouts and
 delegation, simultaneous conversation/other duties and known overload. Automated
 or source-only proof cannot claim physical-device/media or human workload
-acceptance. Initial16 integration is not its verified exit, nor completion of17–24.
+acceptance. Initial 16 integration is not its verified exit, nor completion of 17–24.

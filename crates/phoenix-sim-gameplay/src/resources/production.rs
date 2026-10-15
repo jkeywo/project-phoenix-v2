@@ -10,6 +10,9 @@ pub use execution::*;
 #[path = "production_stock.rs"]
 mod transactions;
 pub use transactions::*;
+#[path = "production_observation.rs"]
+mod observation;
+pub use observation::*;
 
 pub const FABRICATION_KIND: &str = "fabrication";
 pub type EndpointMap = BTreeMap<ResourceEndpoint, EndpointStock>;
@@ -27,8 +30,14 @@ impl CompiledProduction {
         ship: &ShipConfig,
     ) -> Result<Self, String> {
         if ship
-            .system(&config.system)
-            .is_none_or(|s| s.kind != FABRICATION_KIND)
+            .systems
+            .iter()
+            .filter(|s| s.kind == FABRICATION_KIND)
+            .count()
+            != 1
+            || ship
+                .system(&config.system)
+                .is_none_or(|s| s.kind != FABRICATION_KIND)
             || logistics
                 .graph()
                 .compartment_for_system(&config.system)

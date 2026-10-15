@@ -5,6 +5,9 @@ use crate::{
 };
 use phoenix_model::messages::SystemId;
 
+#[path = "production_observation_tests.rs"]
+mod observation_tests;
+
 struct Fixture {
     profile: CompiledProduction,
     logistics: LogisticsState,

@@ -27,7 +27,7 @@ template_path = "assets/entities/alliance_cruiser.toml"
 id            = "player-ship"
 transform     = { position = [0.0, 0.0, 0.0] }
 spawn_on      = "game_start"
-overrides     = { tags = ["ship"] }
+overrides     = { tags = ["ship"], sensors_console = { long_range_radar = { range = 1200.0, shows = ["ship"], selects = ["ship"] } } }
 
 # SHIP A — scenario explicitly holds weapons.
 [[entity]]

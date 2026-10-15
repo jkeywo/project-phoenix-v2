@@ -21,6 +21,7 @@ pub(crate) fn config() -> ShipConfig {
 pub(crate) fn track(contact: &str) -> SensorTrackSnapshot {
     SensorTrackSnapshot {
         contact_id: contact.into(),
+        observation: None,
         selectable: true,
         observed_tick: 10,
         position: [11.0, 22.0],

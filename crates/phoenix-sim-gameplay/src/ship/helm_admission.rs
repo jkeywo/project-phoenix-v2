@@ -132,8 +132,10 @@ pub fn process_helm_inputs(
         Option<&ShipBoost>,
         Option<&crate::ship::components::ShipConfigComponent>,
         Option<&ShipSystemControlSources>,
-        Has<LocalShip>,
-        Option<&crate::ship::helm_control::CompiledHelmControl>,
+        (
+            Has<LocalShip>,
+            Option<&crate::ship::helm_control::CompiledHelmControl>,
+        ),
     )>,
     mut outbound: Option<
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
@@ -154,8 +156,7 @@ pub fn process_helm_inputs(
         ship_boost,
         ship_config,
         sources,
-        is_local,
-        movement,
+        (is_local, movement),
     ) in ships.iter_mut()
     {
         let mut last_input = if is_local { last_input } else { None };

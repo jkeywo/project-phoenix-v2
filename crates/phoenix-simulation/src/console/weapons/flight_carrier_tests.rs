@@ -23,8 +23,16 @@ fn host_with_registration(reverse: bool) -> App {
     let world = app.world_mut();
     world.insert_resource(crate::sim_tick::SimTick(42));
     world.insert_resource(Time::<Fixed>::default());
+    // Normal hosts own these run-scope defaults before capture. Restore keeps
+    // their presence, which is deliberately represented in the causal digest.
+    world.init_resource::<crate::gm::actions::action::SimulationPaused>();
+    world.init_resource::<crate::gm::actions::action::GmActionJournal>();
+    world.init_resource::<crate::gm::operations::puppet::StationPuppets>();
+    world.init_resource::<crate::gm::operations::puppet::PendingGmStationCommands>();
+    world.init_resource::<crate::core::report::MissionReport>();
     crate::world_id::install(world, crate::world_id::WorldIdMint::default());
     // Actual capture joins use optional registered owners even for bare hosts.
+    world.register_component::<EntityUuid>();
     world.register_component::<crate::ship::state::ShipPhysics>();
     world.register_component::<crate::entities::spawner::EntitySystemHull>();
     world.register_component::<crate::ship::state::ShipRedAlert>();
@@ -651,7 +659,7 @@ fn mixed_source_rehomes_once_independently_of_component_registration_order() {
 
 #[test]
 fn sequential_equipment_replacements_before_flush_cannot_rehome_copies_twice() {
-    for bundled in [false, true] {
+    for (bundled, flush_between) in [(false, false), (true, false), (false, true)] {
         let mut app = host();
         let guided = launched();
         let bolts = emitted_bolts();
@@ -667,6 +675,10 @@ fn sequential_equipment_replacements_before_flush_cannot_rehome_copies_twice() {
             app.world_mut().entity_mut(source).insert((guided, bolts));
         } else {
             app.world_mut().entity_mut(source).insert(guided);
+            if flush_between {
+                app.world_mut().flush();
+                assert_eq!(carriers(app.world_mut()).len(), 1);
+            }
             app.world_mut().entity_mut(source).insert(bolts);
         }
         app.world_mut().flush();

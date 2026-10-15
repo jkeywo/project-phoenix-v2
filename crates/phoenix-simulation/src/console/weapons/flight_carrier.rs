@@ -28,10 +28,12 @@ pub(crate) fn register(app: &mut App) {
     );
     app.world_mut()
         .register_component_hooks::<TorpedoSystemResource>()
-        .on_replace(rehome);
+        .on_replace(rehome)
+        .on_insert(strip_inserted_copies);
     app.world_mut()
         .register_component_hooks::<BlasterSystemResource>()
-        .on_replace(rehome);
+        .on_replace(rehome)
+        .on_insert(strip_inserted_copies);
 }
 
 pub(crate) fn empty() -> TorpedoSystemResource {
@@ -52,6 +54,67 @@ fn enabled(world: &bevy::ecs::world::DeferredWorld) -> bool {
         && world
             .get_resource::<State<crate::core::messages::GamePhase>>()
             .is_none_or(|phase| *phase.get() == crate::core::messages::GamePhase::InProgress)
+}
+
+fn carried_ids(
+    world: &mut World,
+) -> (
+    std::collections::BTreeSet<String>,
+    std::collections::BTreeSet<String>,
+) {
+    let mut query = world.query_filtered::<(
+        Option<&TorpedoSystemResource>,
+        Option<&BlasterSystemResource>,
+    ), With<WeaponFlightCarrier>>();
+    let mut guided_ids = std::collections::BTreeSet::new();
+    let mut bolt_ids = std::collections::BTreeSet::new();
+    for (guided, bolts) in query.iter(world) {
+        if let Some(owner) = guided {
+            guided_ids.extend(owner.0.in_flight.iter().map(|round| round.uuid.clone()));
+        }
+        if let Some(owner) = bolts {
+            bolt_ids.extend(
+                owner
+                    .0
+                    .iter()
+                    .flat_map(|bank| bank.in_flight.iter().map(|round| round.id.clone())),
+            );
+        }
+    }
+    (guided_ids, bolt_ids)
+}
+
+/// A later replacement can insert a copy after an earlier rehome has already
+/// flushed and left the old component empty. Check the inserted records too.
+fn strip_inserted_copies(
+    mut world: bevy::ecs::world::DeferredWorld,
+    context: bevy::ecs::lifecycle::HookContext,
+) {
+    if !enabled(&world) {
+        return;
+    }
+    let source = context.entity;
+    world.commands().queue(move |world: &mut World| {
+        if world.get::<WeaponFlightCarrier>(source).is_some()
+            || world
+                .get_resource::<RestoreGuard>()
+                .is_some_and(|guard| guard.0)
+        {
+            return;
+        }
+        let (guided_ids, bolt_ids) = carried_ids(world);
+        if let Some(mut owner) = world.get_mut::<TorpedoSystemResource>(source) {
+            owner
+                .0
+                .in_flight
+                .retain(|round| !guided_ids.contains(&round.uuid));
+        }
+        if let Some(mut owner) = world.get_mut::<BlasterSystemResource>(source) {
+            for bank in &mut owner.0 {
+                bank.in_flight.retain(|round| !bolt_ids.contains(&round.id));
+            }
+        }
+    });
 }
 
 /// A source removal/replacement is one flight rehome transaction, regardless
@@ -107,28 +170,7 @@ fn rehome(mut world: bevy::ecs::world::DeferredWorld, context: bevy::ecs::lifecy
         // may therefore see copies reintroduced by an earlier replacement.
         // Already-committed actual carriers retain the earliest physical record;
         // these ID sets are derived scratch, never another ownership registry.
-        let (guided_ids, bolt_ids) = {
-            let mut query = world.query_filtered::<(
-                Option<&TorpedoSystemResource>,
-                Option<&BlasterSystemResource>,
-            ), With<WeaponFlightCarrier>>();
-            let mut guided_ids = std::collections::BTreeSet::new();
-            let mut bolt_ids = std::collections::BTreeSet::new();
-            for (guided, bolts) in query.iter(world) {
-                if let Some(owner) = guided {
-                    guided_ids.extend(owner.0.in_flight.iter().map(|round| round.uuid.clone()));
-                }
-                if let Some(owner) = bolts {
-                    bolt_ids.extend(
-                        owner
-                            .0
-                            .iter()
-                            .flat_map(|bank| bank.in_flight.iter().map(|round| round.id.clone())),
-                    );
-                }
-            }
-            (guided_ids, bolt_ids)
-        };
+        let (guided_ids, bolt_ids) = carried_ids(world);
         let mut flights = flights;
         flights.retain(|round| !guided_ids.contains(&round.uuid));
         let mut banks = banks;

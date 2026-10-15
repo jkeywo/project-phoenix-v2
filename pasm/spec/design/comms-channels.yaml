@@ -1,4 +1,16 @@
 entities:
+  - decision: redesign-comms-captured-text-paid-decoding
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Actual Captured Text Decodes Into Evidence Without Participation
+      summary: "Optional installed Comms capture measures original actual paid emissions directly through existing physical paths. Private captured text becomes permitted intercepted evidence only after supported paid decoding; it never becomes an addressed request, receipt or remote control. No human media recording or message-capacity accounting is introduced."
+      rationale:
+        - "[ai] Root approved the bounded consumer before runtime; increment-16-decoding.md fixes acquisition, disclosure, work and continuation. Existing channel IDs/ranges and actually paid listening constrain capture, ignoring audience and key only for direct interception measurement. No historical uncaptured search, synthetic emitter, route disclosure or inferred relay-hop emission."
+        - "Before decoding expose only an opaque own handle, channel, protected/security level, capture clock and work state. Private routing identities, audience, keys, body and source name remain unavailable to UI and AI. Decoded literal claims remain evidence only, incapable of planned receipt/Formation acceptance or responding on another audience's behalf."
+        - "Closed protected levels 1–3 and authored maximum breakable level preserve impossible-without-key traffic. Supported lower tiers need paid codebreaking rather than a secret key; optional authored held-key decoding permits a genuinely owned key to enable higher/cheaper reading, still after paid work. Own keys come from accepted equipment/content, never private enemy profiles. One selected integer frontier uses existing System/controller/admission, no new jobs. Technical retirement is not stock."
+        - "Author through accepted radio/history flows and explicit Console feeds; capture canonical evidence/work in existing snapshot/digest ownership with whole-candidate no-write validation. Actual Human/AI, physical acquisition, early-disclosure refusal, key/ceiling, Workshop and fresh JSON360 evidence remain required; contract alone claims no runtime or increment exit."
   - decision: redesign-comms-first-text-channel-consumer
     core:
       status: accepted

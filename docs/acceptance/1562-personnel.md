@@ -40,3 +40,17 @@ Medical, injury, Security, actual craft transfers, treatment/away outcomes,
 physical browser/native use, crew workload and the complete 20 continuation/
 performance exits remain separate work. No completion or balance claim follows
 from this local source checkpoint.
+
+The later actual-host tracer in `tests/activity_foundation_continuation.rs`
+passes against the joined runtime through `909a47b6` with corrected accepted
+content `33b17e18`. It joins Engineering normally, compares the same optional
+hull with its officer posted versus unposted, and observes the authored 1.25
+multiplier in real reserved, paid Repair progress. A partial-work JSON capture
+continues for 360 complete capture/digest comparisons, recalls the actual team,
+preserves exact one-part use and releases the officer only after home return.
+Three malformed complete custody candidates refuse without capture or digest
+writes. The combined two-test Repair/Personnel executable passes in 10.36 seconds
+(`.phoenix/activity_foundation_continuation-ee39066824d50aa1.exe.current.log`).
+This is actual host continuation evidence for the first local consumer. It does
+not supply the remaining Medical/Security/external operations, different-peer,
+physical-device, performance or full increment 20 acceptance.

@@ -152,5 +152,18 @@
     "client": "38 tests passed across the two matched Transit/shared-console suites; .phoenix/transit-jamming-hud.log. Earlier integrated jammer controls: 52 passed; .phoenix/jamming-integrated-client.log",
     "bundle": "Client build passed, stamp 21/phoenix-base/4; .phoenix/transit-client-build.log",
     "runtime_status": "Actual paid Comms jammer and local Transit core integrated; native and actual-host execution pending. Sensors/protection contract adopted before runtime. No full 17/18 exit."
+  },
+  "actual_host_integrated_retry": {
+    "source": "Runtime through 909a47b6; Personnel test 7341e333 and Transit test 7bb48028; corrected reference data 33b17e18. Already-built executables predate typed channel defaults 37b8b6ba.",
+    "initial_refusal": "All six targets refused initial boot because LocalJump's new local fuel stock lacked explicit Stock feeds. Corrected by adding the exact feed to Helm and Engineering; knowledge isolation remains intact. Original .phoenix/integrated-transit-jamming-host.log retained.",
+    "repair_and_personnel": "2 passed, 10.36 seconds: actual Repair/delivery and same-hull posted versus unposted 1.25 expertise comparison, partial-work JSON360, exact parts and custody; .phoenix/activity_foundation_continuation-ee39066824d50aa1.exe.current.log",
+    "finite_probe": "1 passed, 6.34 seconds; .phoenix/battery_probe_continuation-e2ce3423c7cad293.exe.current.log",
+    "comms": "1 passed, 5.26 seconds; .phoenix/comms_request_continuation-8a5ac6fb18924e9b.exe.current.log",
+    "helm": "1 passed, 5.07 seconds; .phoenix/helm_movement_continuation-7729ded574618af9.exe.current.log",
+    "local_jump": "1 passed, 42.56 seconds: joined preparation, malformed no-write candidates, Human/AI handoff, exact JSON360, one arrival/commit and real finite Logistics replenishment; .phoenix/local_jump_continuation-18e6c4158f340b84.exe.current.log",
+    "jamming": "Failed ordinary-AI emission prerequisite. Explicit public target-name correction b8966838 still fails; diagnostics in progress. .phoenix/jamming-public-target-retry.log",
+    "pdc": "Both actual producer cases still fail after shield uncertainty correction; no observed launch. Read-only timing diagnostics added to distinguish assessment availability from firing geometry. No tuning or assertion change. .phoenix/pdc_gameplay_continuation-fd5a3c46a87ce0da.exe.current.log",
+    "design": "Integrated PASM validate passed, Status OK; .phoenix/electronic-transit-pasm.log. Wiki 74 pages, 72 indexed, 2086 references, no findings; .phoenix/electronic-transit-wiki.log. Strings 6137, zero errors/warnings.",
+    "limitation": "Six passing tests do not establish a passing whole batch, full increment exits, different-LocalShip multiplayer, physical-device or performance/balance/workload acceptance. Final pre-push gates remain pending."
   }
 }

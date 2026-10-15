@@ -9,7 +9,9 @@ The initial local slice is integrated as `7c45dd28` (source checkpoint
 Repair teams, an optional provisional expertise hull, existing-screen controls
 and accepted Workshop roster editing. It keeps the actual team navigation and
 work owners. Independent source reviews and 159 targeted client tests passed
-in the worker; integrated native and 360-step execution are pending.
+in the worker. Later joined-host execution also passes actual posted/unposted
+expertise, finite parts and partial-work custody through 360 complete JSON
+capture/digest comparisons; see the acceptance evidence for source pins and limits.
 Compatibility advances to protocol 16, snapshot 57 and simulation rules 0.29.
 Medical, security, boarding, away/transport/capture joins and the full playable
 exit remain open. See [acceptance evidence](../../acceptance/1562-personnel.md).

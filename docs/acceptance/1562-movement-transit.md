@@ -54,7 +54,19 @@ client/Workshop builds pass. Six of nine new Dock cases pass in the rebuilt nati
 suite. `c46733dd` corrects the missing-physics lifecycle report and two legacy
 tests that moved Transform without canonical ShipPhysics. Their retry is pending.
 
-Local and inter-system transit, formation requests, the small-craft join and their actual fuel/arrival
-continuation remain open. Browser/native device controls, performance, balance and
+Later integrated actual-host evidence supersedes the earlier continuation
+failures above. Joined Direct/coasting/turning and ordinary AI handoff pass the
+complete 360-step JSON capture/digest journey (5.07 seconds). LocalJump also
+passes (42.56 seconds): positive paid partial preparation, three malformed
+no-write candidates, Human release during preparation, exact 360-step continuation,
+one arrival/reset and fuel commitment, then admitted Logistics replenishment
+with exact finite local/hold stock conservation. Runtime is through `909a47b6`,
+test `7bb48028`, corrected accepted stock feeds `33b17e18`; the executable
+predates subsequent typed channel defaults. Logs are
+`.phoenix/helm_movement_continuation-7729ded574618af9.exe.current.log` and
+`.phoenix/local_jump_continuation-18e6c4158f340b84.exe.current.log`.
+
+Inter-system transit, formation requests, the small-craft join and their continuation
+remain open. Browser/native device controls, performance, balance and
 human workload across supported seat counts are unverified. No full integration
 gate, push or increment exit is claimed.

@@ -13,8 +13,8 @@ fn fixture() -> (
     let interior: InteriorConfig = serde_json::from_value(json!({
         "deck":[{"id":"main","label":"Main","damage_weight":1.0}],
         "compartment":[
-            {"id":"home","deck":"main","label":"Home","x":0,"z":0,"width":2,"depth":2,"material":"steel","max_hp":100,"recovery_fraction":0.25},
-            {"id":"work","deck":"main","label":"Work","x":2,"z":0,"width":2,"depth":2,"material":"steel","max_hp":100,"recovery_fraction":0.25}],
+            {"id":"home","deck":"main","label":"Home","x":0,"z":0,"width":2,"depth":2,"material":"steel","max_hp":100,"recovery_fraction":0.25,"structural_remedy":"structural"},
+            {"id":"work","deck":"main","label":"Work","x":2,"z":0,"width":2,"depth":2,"material":"steel","max_hp":100,"recovery_fraction":0.25,"structural_remedy":"structural"}],
         "connection":[{"id":"door","from":"home","to":"work","travel_secs":2}],
         "placements":{},"team_homes":["home","home"]
     })).unwrap();

@@ -160,9 +160,37 @@ fn assert_capture_is_alive(payload: &PhoenixSnapshot, world: &bevy::prelude::Wor
             .iter()
             .any(|room| damage.compartments[&room.id].hp < f64::from(room.max_hp))
     });
+    let observed: Vec<_> = payload
+        .entities
+        .iter()
+        .map(|row| {
+            let views: Vec<_> = row
+                .blackboards
+                .iter()
+                .filter_map(|(source, board)| {
+                    let tracks = project_phoenix::science::contact_routing::observations(board)?;
+                    Some((
+                        source,
+                        tracks
+                            .iter()
+                            .map(|track| {
+                                (
+                                    &track.contact_id,
+                                    track.selectable,
+                                    track.predicted,
+                                    &track.identity,
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                    ))
+                })
+                .collect();
+            (&row.uuid, &row.control, views)
+        })
+        .collect();
     assert!(
         damaged,
-        "no captured ship has taken damage — nothing is shooting"
+        "no captured ship has taken damage — nothing is shooting; acquired={observed:?}"
     );
 }
 

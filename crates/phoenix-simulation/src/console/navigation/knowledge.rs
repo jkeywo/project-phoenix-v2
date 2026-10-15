@@ -56,14 +56,15 @@ impl Environment<'_, '_> {
     }
     /// A shared dated sample keeps its original age. Newer observations may
     /// confirm its instrument but cannot renew the age of an unseen sample.
-    pub(crate) fn formation_sample_current(
+    pub(crate) fn formation_sample_current_at(
         &self,
         entity: Entity,
         config: &ShipConfigComponent,
         boards: &ShipSystemBlackboards,
         course: &phoenix_model::formation::FormationCourse,
+        now: u64,
     ) -> bool {
-        let (Some(now), Some(fixed)) = (self.now(), self.fixed.as_ref()) else {
+        let Some(fixed) = self.fixed.as_ref() else {
             return false;
         };
         if !course.valid_at(now) {

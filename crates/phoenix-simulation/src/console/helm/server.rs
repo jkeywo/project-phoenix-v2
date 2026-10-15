@@ -179,6 +179,7 @@ pub(crate) fn publish_helm_blackboard(
     tick: Option<Res<crate::sim_tick::SimTick>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     fixed: Option<Res<Time<Fixed>>>,
+    navigation_knowledge: crate::console::navigation::knowledge::Environment,
     world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     mut ship_q: Query<
@@ -215,7 +216,10 @@ pub(crate) fn publish_helm_blackboard(
                     Option<&phoenix_sim_gameplay::ship::helm_control::CompiledHelmControl>,
                     Option<&phoenix_sim_gameplay::ship::helm_control::HelmControlState>,
                     Option<&ShipConfigComponent>,
-                    Option<&phoenix_sim_gameplay::ship::helm_control::HelmNavigationInputs>,
+                    (
+                        Entity,
+                        Option<&crate::console::navigation::NavigationWaypoint>,
+                    ),
                 ),
             ),
         ),
@@ -247,7 +251,7 @@ pub(crate) fn publish_helm_blackboard(
             thrust_input,
             lateral_input,
             (broad_profile, broad_state, uuid),
-            (movement_profile, movement_state, ship_config, navigation_inputs),
+            (movement_profile, movement_state, ship_config, (entity, waypoint)),
         ),
     ) in ship_q.iter_mut()
     {
@@ -405,12 +409,24 @@ pub(crate) fn publish_helm_blackboard(
                 },
                 _ => false,
             };
-            let navigation_inputs =
-                navigation_inputs.and_then(|input| input.current(tick.as_ref().map(|tick| tick.0)));
-            let navigation_generation = navigation_inputs
-                .and_then(|input| input.axes.values().next().map(|motion| motion.generation));
-            let navigation_axes = navigation_inputs
-                .map_or_else(Vec::new, |input| input.axes.keys().cloned().collect());
+            // HUD availability is a permitted read-model projection, not the
+            // integrator's ephemeral current-tick input grant. Restore can
+            // rebuild this view without executing machinery or reviving an old
+            // actuator context; the normal applier still creates that context.
+            let (navigation_generation, navigation_axes) = ship_config
+                .zip(tick.as_ref())
+                .map(|(config, tick)| {
+                    super::navigation::availability_at(
+                        &navigation_knowledge,
+                        entity,
+                        config,
+                        &bbs,
+                        profile,
+                        waypoint,
+                        tick.0,
+                    )
+                })
+                .unwrap_or_default();
             Some(HelmMovementView {
                 navigation_generation,
                 navigation_axes,

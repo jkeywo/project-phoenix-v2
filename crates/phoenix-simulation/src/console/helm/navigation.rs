@@ -15,6 +15,26 @@ pub(super) fn motion(
     axis: &SystemId,
     waypoint: Option<&crate::console::navigation::NavigationWaypoint>,
 ) -> Option<NavigationMotion> {
+    motion_at(
+        knowledge,
+        entity,
+        config,
+        boards,
+        axis,
+        waypoint,
+        knowledge.now()?,
+    )
+}
+
+fn motion_at(
+    knowledge: &crate::console::navigation::knowledge::Environment,
+    entity: Entity,
+    config: &ShipConfigComponent,
+    boards: &ShipSystemBlackboards,
+    axis: &SystemId,
+    waypoint: Option<&crate::console::navigation::NavigationWaypoint>,
+    at: u64,
+) -> Option<NavigationMotion> {
     let waypoint = waypoint?;
     let canonical = match waypoint.mode()? {
         crate::console::navigation::WaypointMode::Formation { course } => course,
@@ -51,7 +71,7 @@ pub(super) fn motion(
         // The receiving axis must not correlate another instrument's alias or
         // read the leader's physical truth. Its dated sample never gains age
         // merely because the source has since received another observation.
-        if !knowledge.formation_sample_current(entity, config, boards, course) {
+        if !knowledge.formation_sample_current_at(entity, config, boards, course, at) {
             continue;
         }
         let motion = NavigationMotion {
@@ -65,4 +85,29 @@ pub(super) fn motion(
         current = Some(motion);
     }
     current
+}
+
+/// Same pure read-model projection for normal publication and a validated held
+/// publication frontier. No actuator context, command or work is created.
+pub(crate) fn availability_at(
+    knowledge: &crate::console::navigation::knowledge::Environment,
+    entity: Entity,
+    config: &ShipConfigComponent,
+    boards: &ShipSystemBlackboards,
+    profile: &phoenix_model::helm_control::HelmControlConfig,
+    waypoint: Option<&crate::console::navigation::NavigationWaypoint>,
+    at: u64,
+) -> (Option<u64>, Vec<SystemId>) {
+    let inputs: std::collections::BTreeMap<_, _> = [&profile.thrust, &profile.steering]
+        .into_iter()
+        .chain(profile.lateral.iter())
+        .filter_map(|axis| {
+            motion_at(knowledge, entity, config, boards, axis, waypoint, at)
+                .map(|motion| (axis.clone(), motion))
+        })
+        .collect();
+    (
+        inputs.values().next().map(|motion| motion.generation),
+        inputs.into_keys().collect(),
+    )
 }

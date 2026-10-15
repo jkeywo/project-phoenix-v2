@@ -1,6 +1,6 @@
 pub mod control;
 pub mod dispatch;
-mod navigation;
+pub(crate) mod navigation;
 pub mod server;
 pub mod transit;
 

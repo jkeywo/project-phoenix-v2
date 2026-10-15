@@ -1377,6 +1377,12 @@ fn exercise_formation_follow(app: &mut App) {
             .is_empty(),
         "a pre-restore permitted-input cache is never authoritative continuation"
     );
+    assert_eq!(
+        crate::snapshot::capture(resumed.world()).entities,
+        saved.entities,
+        "the same permitted HUD availability rebuilds without restoring a servo input grant"
+    );
+    exercise_formation_publication_frontier(&mut resumed, resumed_observer);
     app.world_mut()
         .get_mut::<AdmittedCommands>(observer)
         .unwrap()
@@ -1461,4 +1467,109 @@ fn optional_formation_hull_preserves_actual_hardware_and_existing_console_feeds(
         .iter()
         .any(|feed| feed.source.0 == "tactical-radar"
             && feed.kind == phoenix_model::console::ConsoleObservationKind::TacticalRadar));
+}
+
+/// The actual sample/profile use the rig's existing 0.5s fixed clock. Exercise
+/// the precise freshness limit, then FixedLast's next counter, without another
+/// observation, paid work, input grant or independent authoritative clock.
+fn exercise_formation_publication_frontier(app: &mut App, observer: Entity) {
+    use phoenix_sim_gameplay::ship::helm_control::HelmNavigationInputs;
+    let sample = match app
+        .world()
+        .get::<NavigationWaypoint>(observer)
+        .unwrap()
+        .mode()
+        .unwrap()
+    {
+        WaypointMode::Formation { course } => course.measurement.observed_tick,
+        _ => panic!("genuine selected Formation"),
+    };
+    let cadence = app.world().get::<BroadProfile>(observer).unwrap().0
+        [&SystemId("tactical-radar".into())]
+        .profile
+        .sample_interval_secs;
+    let dt = app
+        .world()
+        .resource::<Time<Fixed>>()
+        .timestep()
+        .as_secs_f32();
+    assert_eq!(dt, 0.5);
+    assert_eq!(cadence, dt);
+    let limit = sample + 3;
+    assert!(limit >= app.world().resource::<crate::sim_tick::SimTick>().0);
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = limit;
+    formation_publications(app.world_mut());
+    let available = |app: &App, entity| {
+        app.world()
+            .get::<crate::server_app::ShipSystemBlackboards>(entity)
+            .unwrap()
+            .0
+            .values()
+            .find_map(|board| {
+                let SystemBlackboard::Helm(board) = board else {
+                    return None;
+                };
+                board
+                    .movement
+                    .as_ref()
+                    .map(|view| (view.navigation_generation, view.navigation_axes.clone()))
+            })
+            .unwrap()
+    };
+    let held = available(app, observer);
+    assert!(
+        held.0.is_some() && !held.1.is_empty(),
+        "the original sample remains available at its exact configured limit"
+    );
+    // The complete fixed publication ran at limit. The saved clock is the
+    // next counter; no observation/processing has happened at limit+1 yet.
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = limit + 1;
+    let saved: crate::snapshot::PhoenixSnapshot = serde_json::from_slice(
+        &serde_json::to_vec(&crate::snapshot::capture(app.world())).unwrap(),
+    )
+    .unwrap();
+    let (mut resumed, restored, _) = formation_boot();
+    let result = crate::snapshot::restore(resumed.world_mut(), &saved);
+    assert!(
+        result.is_complete(),
+        "exact held-frontier restore: {:?}",
+        result.gaps
+    );
+    assert_eq!(available(&resumed, restored), held);
+    assert!(resumed
+        .world()
+        .get::<HelmNavigationInputs>(restored)
+        .unwrap()
+        .axes
+        .is_empty());
+    let restored_row = crate::snapshot::capture(resumed.world())
+        .entities
+        .into_iter()
+        .find(|row| row.uuid == "observer")
+        .unwrap();
+    let saved_row = saved
+        .entities
+        .iter()
+        .find(|row| row.uuid == "observer")
+        .unwrap();
+    assert_eq!(
+        restored_row.navigation_waypoint,
+        saved_row.navigation_waypoint
+    );
+    assert_eq!(restored_row.helm_movement, saved_row.helm_movement);
+    assert_eq!(
+        restored_row.broad, saved_row.broad,
+        "holding the HUD publication cannot age or refresh observations"
+    );
+    resumed
+        .world_mut()
+        .run_system_once(crate::console::helm::server::publish_helm_blackboard)
+        .unwrap();
+    assert_eq!(available(&resumed, restored), (None, vec![]), "the next ordinary publication must withhold the now-stale sample; restore cannot rejuvenate it");
+    assert!(resumed
+        .world()
+        .get::<HelmNavigationInputs>(restored)
+        .unwrap()
+        .axes
+        .is_empty());
 }

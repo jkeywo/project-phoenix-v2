@@ -1,0 +1,37 @@
+entities:
+  - decision: redesign-personnel-finite-teams-and-expertise
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Finite Teams Work Without Mandatory Named Officers
+      summary: "Increment 20 extends existing team/job/navigation consumers with stable overlapping competencies and optional exclusive Duty Officer bonuses. Officers travel automatically on the actual ship map; destination bonuses start only on arrival. Basic assistance needs no named operator, rarity ladder or additional AI skill tree."
+      rationale:
+        - "Selected G012/G061/G064/G068–71/G076/G110 and S028–30/S040/S079–82/S085/S087–88/S100/S102; detailed contracts live in docs/gameplay-redesign/implementation/increment-20.md. Local work may follow 15 initial integration/targeted checks under parallel-work; full completion requires 14/19 verified exits. Preparation starts no runtime."
+        - "[ai] First attach actual expertise to an existing Repair team/compatible System using real navigation and finite commitment, then migrate actual Security/Medical consumers. Reuse shared underlying team/jobs, physical cursor and normal admitted Human/AI commands; do not introduce a global crew planner or duplicate movement timer."
+  - decision: redesign-personnel-single-custody-with-carried-craft
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Personnel Have One Actual Location Across Ships and Craft
+      summary: "Shared 19/20 contract: 19 owns actual craft/deployment/motion/capacity; 20 owns actual personnel identity, condition and custody. Passenger lists derive from that same custody. Every person/officer/team is in one actual compartment, carried craft/berth or committed transfer job, never duplicate passenger stock."
+      rationale:
+        - "[ai] Existing navigation owns actual cursor/crossing; assignment is intent, not a second location. Stage actual source, access/link, compatible receiving space and exclusive job/team claim before committing a transfer. Handoff occurs at actual completion. Cancellation/loss retains physical position and supported return/recovery, not instant home/refund or replacement people."
+        - "[ai] Adopt this interface before either passenger implementation without mutual whole-increment completion dependency. Simulation joins actual candidate source/destination owners, including materialised carriers, before restore writes. 16 request/receipt delivery is not custody; 18 motion and 19 craft remain real consumers. 21 workforce uses the same underlying teams/custody."
+  - decision: redesign-personnel-shared-boundaries-medical-and-authority
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Access Safety and Capture Keep One Physical Authority
+      summary: "AD75–76 bind routing and containment to one actual boundary state; automatic routes cannot reopen deliberate seals. Medical uses coarse minor/severe conditions and actual treatment. Explicit lethal circumstances may permanently remove simulated officers while humans retain useful participation. Capture transfers whole-ship operational authority, not partial System controls."
+      rationale:
+        - "[ai] Existing compartment damage, equipment, energy and finite resources govern life support, suppression, isolation and team-built bypasses. No numerical pressure-flow simulator, duplicate door state, automatic deterioration/repeated death rolls, mandatory cloning or routine-healing manoeuvre constraint. G110 permits specific disclosed mission-critical constraints while Helm retains authority."
+        - "G069 away checks display exact percentages and factors. First supported checks include only displayed modifiers in the advertised result; explicit new circumstances do not covertly change it. Persist deterministic outcome frontiers to prevent rerolls. Routine away work follows approved jobs without compulsory prompt sequences."
+        - "AD56–57 whole-ship capture uses actual Session ownership/admission, retains physical assets and individual controllers, and grants readable captured Console records only under normal access with original evidence age/uncertainty. Transport needs suitable established evidence, not a universal pad; signalling/pickup/capacity remain actual."
+  - decision: redesign-personnel-authoring-and-continuation
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Personnel Work Has Accepted Authoring and Complete Continuation
+      summary: "Supported rosters/competencies/postings/risk/treatment/boundary/transport profiles use existing accepted Workshop history/includes/Preview/Test. Canonical team, custody, job and condition state is saved once; whole-candidate capacity/location/claim/clock validation precedes writes. Local source never claims external operations or verified acceptance."
+      rationale:
+        - "[ai] Prove actual Human/AI travel/work/transfer, finite resources, cancellation, no duplicated identities/bonuses, injury/lethal disclosure, exact outcomes/no reroll and useful loss participation. Fresh JSON continuation requires at least 360 complete capture/digest comparisons, different-LocalShip peers and malformed no-write candidates. Physical browser/native, shipped content, performance and 2/4/6/8-human workload remain separate."

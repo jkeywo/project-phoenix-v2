@@ -37,6 +37,129 @@ are not nested physical jobs or a new controller above individual System AI.
 **Exit:** two simultaneous instances, explicit script-call results and physical
 completion evidence operate without duplicate effects or progression ownership.
 
+### 22A first consumers: actual Repair and local delivery
+
+Contract preparation, 15 October 2026. This adopts the early existing-capability
+slice permitted by [parallel work](parallel-work.md); it starts no runtime and
+does not waive 22's full dependency on 21. Keep the existing HTN/Scenario-tree/World
+ownership above and 24's hypothetical opportunity search unchanged.
+
+The first opt-in authored demonstration binds two concurrent situation instances
+to disjoint actual work: one named component/structure repair and one finite
+main-to-local delivery on accepted existing equipment. Use ordinary Human/AI
+commands and actual claims, routes, parts, power and receiving capacity. Do not
+add a generic activity executor, physical job manager or another team/inventory.
+
+The existing evidence boundaries are concrete:
+
+| Existing owner | Usable evidence and limitation |
+|---|---|
+| Gameplay `jobs::repair::{RepairTeams,RepairJobState}` and `jobs/repair_physical.rs` | Ship/System-scoped `JobId` and the actual physical work stage bind work. A successful remedy stages the target change, consumes the recipe claim and advances its stage. `JobOutcome` becomes terminal separately after actual return; a completed team row is replaced on reassignment. A patch or useful repair stage is not proof that all defects are gone. |
+| Gameplay `resources::logistics::{LogisticsState,DeliveryBatch}` | `LogisticsTickResult.completed` contains every batch outcome only after the exact receiving transaction accepts the whole actual batch. Return-to-source completion is Cancelled/returned, not delivery success. Saved `last_outcome` retains one row and cannot preserve several completions for a delayed consumer. |
+| Simulation `console/repair/server.rs` and `resources/logistics_server.rs` | These join real damage, Stock, navigation and power. Publish supported outcomes only after their physical transaction commits; never from a proposed stage, reservation, command feedback or failed staged candidate. Delivery currently checks the result for failure then commits staged owners; 22A must retain its supported outcomes at that commit boundary. |
+| World `world::content::WorldEvent` and Simulation `world/server/{state,triggers,registration}.rs` | `pending_world_events` already crosses the next collection boundary and is saved. `WorldEventBuffer` is replaced by the current pass; it is not a durable journal. Existing Objective instances own objective credit/last-known views, not repair/delivery execution or a reusable situation lifecycle. |
+
+These are extension sites, not claims that an activity adapter or durable physical
+completion journal already exists. Gameplay and World must not import each other.
+Model supplies the narrow shared outcome vocabulary; Simulation connects the
+ordinary physical owner to existing World event collection. Use that existing
+pending-event lifecycle and its snapshot codec, not a parallel universal bus.
+
+#### Binding and supported physical outcomes
+
+Before issuing work, bind the actual actor, owning System, supported work family,
+physical target or source/destination endpoint and requested quantity/outcome.
+When normal admission accepts an actual job, retain its scoped JobId in that
+activity's binding. Job numbers alone are not globally unique. Recipe stages need
+the actual stage identity as well. The adapter must obtain this binding from the
+accepted owner result, not infer it from a later team slot or matching display text.
+A submitted request and `ActionFeedback::Applied` establish at most acceptance;
+neither establishes work achieved or goods received.
+
+Closed owner-produced facts distinguish at least:
+
+- **Repair work achieved:** the actual target, remedy/stage and supported committed
+  result. A structural increment, patch and full component remedy remain different
+  outcomes. Use the actual applied result, not total ship HP, nominal recipe effects
+  or current private state polled later. Subsequent damage does not rewrite this
+  historical result; an activity requiring a current condition states that separate
+  predicate explicitly.
+- **Repair assignment settled:** the same job's actual Completed, Cancelled or
+  Failed outcome after its supported return/lifecycle boundary. Work-achieved and
+  team-available are separate dependencies. Recall does not undo a paid remedy,
+  teleport a returning team or release another job's resources.
+- **Delivery received or returned:** the exact committed batch, destination,
+  commodity and quantity under its accepted endpoint bindings. Issuing, loading,
+  arrival, reserved incoming space and unrelated stock growth are not receipt.
+  A return retains its actual quantity/location and cannot satisfy the destination.
+- **Supported refusal/interruption:** admission refusal, paused/access/parts/power/
+  receiving blockage, cancellation and failure retain their real distinctions.
+  Paused work is not a terminal failure; do not invent death, lost cargo or a
+  successful cancellation where the current physical owner supplies no such fact.
+
+Facts carry the original logical tick and scoped physical identity, with a closed
+family/stage discriminator sufficient to reject duplicate credit. Actual bodies,
+conditions, parts, payloads and job progress remain solely at their current owners.
+World stores only the situation binding, received evidence and progression. An
+adapter is shared across situations; no mission-specific callback mutates machinery.
+
+#### Retention, ordering and exactly-once credit
+
+These retention guarantees apply to admitted, explicitly bound activities. Ordinary
+ship repair/delivery without a planner keeps operating and does not create an
+unacknowledgeable planner backlog or become unavailable merely because no planner
+is installed. Register a binding before its physical work can produce credited
+outcomes; unbound work remains with its ordinary owner and existing scenario rules.
+
+The physical commit and enqueue into the existing saved pending World event owner
+must form one observable fixed-step boundary. Capture cannot expose changed stock/
+condition while omitting its unconsumed completion, or queue an outcome for an
+uncommitted transaction. Collection must fold matching evidence into the World
+instance before the transient buffer is replaced. If scheduling, consumer absence
+or a snapshot barrier can postpone that fold, retain the same unconsumed typed
+outcome in the existing pending owner until acknowledgement; do not rely on Bevy
+reader lifetime, `last_outcome`, terminal team rows or a one-tick polling window.
+
+World's situation record retains the consumed evidence keys and terminal
+transition needed to suppress repeat credit and buffered effects after restore.
+No unbounded global event archive is required: retain pending facts until their
+bound consumer has acknowledged them, and keep the bounded per-instance evidence/
+terminal history required by declared outcomes and persistent consequences. Closed
+limits apply before new activity work is admitted; exhaustion pauses/refuses new
+work without dropping an already committed physical fact. Do not silently evict
+unconsumed completions. Save pending facts and consumption frontiers together.
+
+A physical outcome is credited only to its explicit instance/job binding. The first
+demonstration uses disjoint bindings; any later intentional shared satisfaction
+must be declared, rather than allowing two similar targets or stock polls to award
+cross-instance credit. Script-call success/failure is a separate result of its
+buffered effects; script and tree cannot both own the same progression transition.
+Existing authored scenarios remain opt-in and retain their original trigger credit.
+
+#### First implementation sequence and proof
+
+1. Add the narrow shared fact schema and pure matching/deduplication rules, then
+   wire the actual repair work/settlement and exact delivery Receive boundaries.
+   Preserve ordinary dispatch, operator authority and one controller per System.
+2. Execute the two authored instances through Scenario lifecycles with explicit
+   result bindings, cancellation/failure handling and no HTN resource claims.
+   Only then decompose these real operators in 22B and schedule them in 22C.
+3. Expose accepted source edits, evidence/instance/job inspection and refused
+   bindings through existing Workshop history/includes/Preview/Test. Forecast
+   duration and attention remain labelled estimates until actual measurements.
+
+Prove simultaneous completions, multiple delivery results in one tick, team
+reassignment before the next World read, useful work followed by recall, receiving
+blockage/return, and failed staged payment with no completion. Exercise consumer
+ordering/delay and fresh JSON restore before commit, with a pending fact, after
+consumption and after terminal effects. Compare at least 360 complete captures/
+digests and different-LocalShip peers; no replayed reward, missed result, duplicate
+resource/crew owner or physical rollback. Full-candidate preflight validates actual
+actor/System/job/stage/endpoint bindings, finite result quantities, nonfuture ticks,
+unique evidence keys and coherent pending/consumed/terminal frontiers before writes.
+The actual adapters, authoring and ordinary AI/human evidence are required for 22A;
+a schema or synthetic event-only test cannot establish the consumer exit.
+
 ## 22B — HTN domains and reusable libraries
 
 Support parameterised tasks, alternative methods and partial-order dependencies.

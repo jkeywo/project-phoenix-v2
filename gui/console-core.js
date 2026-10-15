@@ -125,6 +125,7 @@ import { preserveLocaleEditContext } from './locale-edit-context.js';
 export { preserveLocaleEditContext as preserveConsoleEditContext } from './locale-edit-context.js';
 
 const preserveConsoleEditContext = preserveLocaleEditContext;
+const equipmentActionContexts = ['stock', 'fitting', 'guidance', 'illumination', 'jamming'];
 
 export function initConsole({
   name,
@@ -141,7 +142,7 @@ export function initConsole({
   var _actionContext = String(name || '').toLowerCase();
   var _actionContexts = new Set([
     _actionContext,
-    'stock', 'fitting',
+    ...equipmentActionContexts,
     ...(Array.isArray(actionFamilies) ? actionFamilies : [])
       .map((value) => String(value || '').toLowerCase())
       .filter(Boolean),
@@ -367,7 +368,7 @@ export function initConsole({
         // control. Cruiser Comms still has an always-visible inline chart, so
         // that legitimate surface is selected by the `visible` arm above.
         // Stock is a shared policy widget, not an additional chart surface.
-        return visible || ([..._actionContexts].filter(context => !['stock', 'fitting'].includes(context)).length === 1 ? maps[0] : null);
+        return visible || ([..._actionContexts].filter(context => !equipmentActionContexts.includes(context)).length === 1 ? maps[0] : null);
       },
       supportsChart: navigationActions && navigationActions.supportsChart != null
         ? navigationActions.supportsChart === true

@@ -508,3 +508,19 @@ describe('initConsole — payload shape normalisation (#925 regression)', () => 
     expect(received.systems['main-reactor-alpha']).toEqual(flatPayload);
   });
 });
+
+it('routes shared equipment contexts through the real Console seam while exact row permission still gates writes',()=>{
+ const wire=vi.fn();window.__sendAction=wire;
+ const saved=global.BroadcastChannel;global.BroadcastChannel=function(){return{postMessage(){},close(){}}};
+ try {
+  initConsole({name:'comms',render(){}});
+  window.__updateConsole('comms',JSON.stringify({system_status:[{system_id:'own-jammer',jamming:{controllable:true,targets:[{contact:'held'}]},illumination:{controllable:true,targets:[{contact:'held'}]}}]}));
+  expect(window.__supportsSemanticActionContext('jamming')).toBe(true);
+  expect(window.__supportsSemanticActionContext('illumination')).toBe(true);
+  expect(window.__supportsSemanticActionContext('guidance')).toBe(true);
+  expect(window.activateSemanticAction('comms.jamming-target',{context:'jamming',detail:{owner:'own-jammer',target_uuid:'held'}}).handled).toBe(true);
+  expect(window.activateSemanticAction('science.illumination-enabled',{context:'illumination',detail:{owner:'own-jammer',enabled:false}}).handled).toBe(true);
+  expect(window.activateSemanticAction('comms.jamming-target',{context:'jamming',detail:{owner:'foreign',target_uuid:'held'}}).handled).toBe(false);
+  expect(wire.mock.calls.map(([value])=>JSON.parse(value).action)).toEqual(['jamming_target','illumination_enabled']);
+ } finally {global.BroadcastChannel=saved;}
+});

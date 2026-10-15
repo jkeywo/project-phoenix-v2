@@ -33,6 +33,47 @@ fn candidate_field_validates_actual_origin_and_maximum_evolution_effects() {
     assert!(state
         .validate_environment(&RegionShape::Sphere { radius: 2.0 }, &[])
         .is_err());
+    state.profile.evolution.as_mut().unwrap().final_scale = 1e-20;
+    assert!(state
+        .validate_environment(&RegionShape::Sphere { radius: 1e-30 }, &[])
+        .is_err());
+    assert!(state
+        .validate_environment(
+            &RegionShape::Box {
+                half_extents: [1e-30, 1.0, 1.0],
+                yaw: 0.0
+            },
+            &[]
+        )
+        .is_err());
+    assert!(state
+        .validate_environment(
+            &RegionShape::Torus {
+                inner_radius: 0.0,
+                outer_radius: 1e-30
+            },
+            &[]
+        )
+        .is_err());
+    assert!(state
+        .validate_environment(
+            &RegionShape::Torus {
+                inner_radius: 0.0,
+                outer_radius: 1.0
+            },
+            &[]
+        )
+        .is_ok());
+    state.profile.evolution.as_mut().unwrap().final_scale = f32::from_bits(1);
+    assert!(state
+        .validate_environment(
+            &RegionShape::Torus {
+                inner_radius: 1.0,
+                outer_radius: f32::from_bits(1.0_f32.to_bits() + 1)
+            },
+            &[]
+        )
+        .is_err());
 }
 
 fn profile() -> FieldConfig {

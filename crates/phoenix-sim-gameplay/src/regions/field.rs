@@ -58,8 +58,18 @@ impl RegionFieldState {
             .evolution
             .as_ref()
             .map_or(1.0, |end| end.final_scale.max(1.0));
+        let min_scale = self
+            .profile
+            .evolution
+            .as_ref()
+            .map_or(1.0, |end| end.final_scale.min(1.0));
         let finite_scaled =
             |value: f32, multiplier: f32| value.is_finite() && (value * multiplier).is_finite();
+        let positive_geometry = |value: f32| {
+            [min_scale, scale]
+                .into_iter()
+                .all(|scale| finite_scaled(value, scale) && value * scale > 0.0)
+        };
         let dimensions: &[f32] = match shape {
             RegionShape::Sphere { radius } => std::slice::from_ref(radius),
             RegionShape::Box { half_extents, .. } => half_extents,
@@ -67,14 +77,20 @@ impl RegionFieldState {
                 inner_radius,
                 outer_radius,
             } => {
-                if !finite_scaled(*inner_radius, scale) {
+                if *inner_radius != 0.0 && !positive_geometry(*inner_radius) {
                     return Err("field-scaled geometry must remain finite and valid".into());
+                }
+                if [min_scale, scale]
+                    .into_iter()
+                    .any(|scale| inner_radius * scale >= outer_radius * scale)
+                {
+                    return Err("field-scaled annulus must retain positive width".into());
                 }
                 std::slice::from_ref(outer_radius)
             }
         };
-        if dimensions.iter().any(|value| !finite_scaled(*value, scale)) {
-            return Err("field-scaled geometry must remain finite".into());
+        if dimensions.iter().any(|value| !positive_geometry(*value)) {
+            return Err("field-scaled geometry must remain positive and finite".into());
         }
         use super::effects::RegionEffectKind;
         for effect in effects {

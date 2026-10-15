@@ -124,6 +124,16 @@ actual launch, acquired contact, interception, saturation, conservation and
 continuation assertions. Verify accepted loading and observed outcomes before
 claiming a playable missile/PDC engagement or balance result.
 
+The configured opponent produces real paid launches, but the next host probe
+exposes a missing observation join: the ordinary Broad ordnance adapter still
+publishes every projectile as unselectable, irrespective of an explicit Missile
+selection grant. Correct that actual producer to honour the radar's declared
+Missile selection capability and publish the canonical `missile` classification
+through its existing timed acquisition. Default instruments without that grant
+retain unselectable ordnance. Ordinary defensive AI still requires current acquired
+classification, measured height/velocity and real range/geometry; no launcher,
+target intent or private projectile coordinates are published or substituted.
+
 At launch, freeze actual payload properties, consumption, damage/effect profile,
 flight equipment and firing origin. Later ship upgrades, target changes or
 guidance messages cannot increase an in-flight payload or replenish its fuel.

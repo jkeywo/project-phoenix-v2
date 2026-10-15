@@ -113,3 +113,26 @@ before single-row inverse/resource writes as well as whole restore; whole-roster
 checks alone add cross-actor ownership joins. This is source implementation and
 review evidence; native receiver, human UI, ordinary maintenance and independent
 illumination acceptance remain pending.
+
+
+## Independent illumination implementation contract
+
+Science illumination uses a separate composed System: an `illumination_emitter`
+component binds its declared Boolean enabled, EntityTarget target and PowerInput;
+an optional Turret is the existing shared mount, not another tracker. Supported
+finite config is its target mount plus link_range and minimum_transmission. The
+existing paired receiver profile gains default-false
+`accept_external_illumination`, explicitly authored true only on accepting rounds.
+Receiver age remains the original finite maximum_sample_age_secs.
+
+An enabled emitter must have a current permitted XYZ observation, actual mount
+readiness, Operation and paid continuous work. Its airwave can update only an
+already matching actual round through a viable finite source/receiver path.
+There is no source success/receiver census and no Tactical target mutation.
+Beyond the round's own seeker range, a newly observed point is a real steering
+benefit. Loss withholds new readings; the old dated point remains memory. Human
+controls and a single registered closed per-System state tree share ordinary
+on/off and target commands. Tree selection comes from its permitted mission
+request or retained independent target. Workshop composition, authoring data,
+strict channels/owner continuation and exact loss/freshness tests belong to this
+slice. This declaration precedes implementation and claims no playable exit.

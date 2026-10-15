@@ -92,3 +92,31 @@ entities:
       paths: [crates/phoenix-model/src/guided_orders.rs, crates/phoenix-sim-gameplay/src/weapons/guided_orders.rs, crates/phoenix-simulation/src/console/weapons/guidance_link.rs, crates/phoenix-simulation/src/snapshot/guided_source.rs]
       symbols: [GuidedSourceKnowledge, ShipGuidanceKnowledge]
       tests: [crates/phoenix-sim-gameplay/src/weapons/guided_orders_tests.rs, crates/phoenix-simulation/src/console/weapons/guidance_link_tests.rs, crates/phoenix-simulation/src/snapshot/guided_source_tests.rs]
+
+  - decision: independent-mounted-science-illumination
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Science Emits Paid Matching Guidance Without Retarget Authority
+      summary: "An illumination_emitter is a supported composed System with its own Boolean enabled and EntityTarget channels, finite mount and transmission envelope, actual PowerInput and optional shared Turret. It forwards permitted dated XYZ only to receivers explicitly accepting external illumination whose existing physical intent already matches."
+      rationale:
+        - "[ai] The source must satisfy its own observed target/mount readiness, Operation and actual continuous work. No live foreign target pose is acquired by the emitter. Frozen receiver age, range, path and accept_external_illumination limits independently bound delivery; unsupported receivers receive no assistance. There is no redundant source sample-age tuning field."
+        - "[ai] Assistance can refresh a matching round's held measured point beyond its finite own-seeker reach. It never changes its target, payload, endurance or launch authority. Losing work, aim, observations or link withholds new readings; previously accepted points remain original-time memory. The physical receiver census and application result never appear in source feedback."
+        - "[ai] Human controls and the one ordinary per-System closed state tree share the exact enabled/target admission. The tree may retain a selected target or service an explicitly permitted mission request; it never receives a global Tactical selection or hidden physical roster. Science and Tactical can act independently. Workshop edits the supported component/channel/mount/tree data through the existing document transaction."
+  - state: ship-illumination-intent
+    core:
+      status: planned
+      confidence: confirmed
+      origin: ai
+      title: Independent Illumination Command Channels
+      summary: "Per authored emitter System, one generic enabled/target channel map. It stores own source intent only, with no receiver list, duplicate projectile intent or measured-world cache."
+    architecture:
+      classification: authoritative
+      owner: shared-weapon-mount-and-delivery
+      writers: [shared-weapon-mount-and-delivery]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-sim-gameplay/src/weapons/illumination.rs, crates/phoenix-simulation/src/console/weapons/illumination.rs]
+      symbols: [IlluminationConfig, ShipIllumination]
+      tests: [crates/phoenix-sim-gameplay/src/weapons/illumination_tests.rs, crates/phoenix-simulation/src/console/weapons/illumination_tests.rs]

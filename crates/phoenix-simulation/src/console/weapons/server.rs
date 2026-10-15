@@ -182,6 +182,7 @@ impl Plugin for WeaponsPlugin {
                         Payload::ChargeBlasterStart,
                         Payload::ChargeBlasterCancel,
                         Payload::SetWeaponTarget,
+                        Payload::SetAutomaticWeaponTarget,
                         Payload::SetWeaponGroupTarget,
                         Payload::FollowWeaponGroup,
                         Payload::FollowPrimaryTarget,

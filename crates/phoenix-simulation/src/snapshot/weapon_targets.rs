@@ -89,9 +89,23 @@ fn validate(
         if !ship
             .system(owner)
             .is_some_and(|system| is_weapon(&system.kind))
-            || assignment.follows_primary()
+            || assignment.is_empty()
         {
             return Err("invalid or redundant weapon assignment owner".into());
+        }
+        if assignment.automatic.is_some()
+            && ship
+                .system(owner)
+                .is_none_or(|system| system.kind != crate::ship::system_registry::BLASTER_BANK_KIND)
+        {
+            return Err("automatic fallback requires an actual supported blaster owner".into());
+        }
+        if assignment
+            .automatic
+            .as_deref()
+            .is_some_and(|contact| !valid_contact(contact))
+        {
+            return Err("invalid saved automatic weapon contact".into());
         }
         if let Some(group) = &assignment.group {
             if !groups

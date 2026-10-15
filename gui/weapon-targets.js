@@ -6,7 +6,8 @@ function assignmentView(value) {
   const group = value?.group;
   const target = group && (group.target == null || typeof group.target === 'string'
     ? group.target == null ? { mode: 'hold' } : { mode: 'target', contact: group.target } : reference(group.target));
-  return { individual: value?.individual == null ? null : reference(value.individual),
+  return { automatic: value?.automatic == null ? null : reference(value.automatic),
+    individual: value?.individual == null ? null : reference(value.individual),
     group: group ? { group: group.group, target: target.mode === 'target' ? target.contact : null,
       unavailable: target.mode === 'unavailable' } : null };
 }

@@ -49,6 +49,9 @@ fn setup() -> (App, Entity, String) {
             .console = Some(foreign);
     }
     let assignment = WeaponTargetAssignmentView {
+        automatic: Some(Ref::Target {
+            contact: alias.clone(),
+        }),
         group: Some(WeaponGroupAssignmentView {
             group: "main-beams".into(),
             target: Ref::Target {
@@ -198,4 +201,39 @@ fn withheld_stale_and_forged_references_remain_unavailable_and_never_become_hold
             .target,
         Ref::Unavailable
     );
+}
+
+#[test]
+fn automatic_display_keeps_stale_or_forged_references_unavailable_without_rewriting_intent() {
+    let (mut app, ship, alias) = setup();
+    let owner = SystemId("phaser-fore".into());
+    assert_eq!(
+        projected(&mut app).assignments[&owner].automatic,
+        Some(Ref::Target {
+            contact: alias.clone()
+        })
+    );
+    observe(&mut app, "tactical-radar", 1, 0.0);
+    let board = projected(&mut app);
+    assert_eq!(board.assignments[&owner].automatic, Some(Ref::Unavailable));
+    let mut boards = app
+        .world_mut()
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(ship)
+        .unwrap();
+    let SystemBlackboard::Weapons(raw) = boards.0.get_mut(&tactical_station_key()).unwrap() else {
+        unreachable!()
+    };
+    assert_eq!(
+        raw.assignments[&owner].automatic,
+        Some(Ref::Target { contact: alias })
+    );
+    raw.assignments.get_mut(&owner).unwrap().automatic = Some(Ref::Target {
+        contact: "private-forged-actor".into(),
+    });
+    drop(boards);
+    let board = projected(&mut app);
+    assert_eq!(board.assignments[&owner].automatic, Some(Ref::Unavailable));
+    assert!(!serde_json::to_string(&board)
+        .unwrap()
+        .contains("private-forged-actor"));
 }

@@ -292,6 +292,9 @@ impl ReferenceProjection {
                     if let Some(group) = &mut assignment.group {
                         project(&mut group.target);
                     }
+                    if let Some(automatic) = &mut assignment.automatic {
+                        project(automatic);
+                    }
                     if let Some(individual) = &mut assignment.individual {
                         project(individual);
                     }

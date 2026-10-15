@@ -17,6 +17,7 @@ pub struct WeaponAim {
     pub route: String,
     pub position: [f32; 2],
     pub velocity: Option<[f32; 2]>,
+    pub elevation: Option<phoenix_model::sensing_tracks::ObservedElevation>,
     pub measured: bool,
     pub tags: Vec<phoenix_model::tags::EntityTag>,
     pub ordinary_domain: bool,
@@ -24,7 +25,30 @@ pub struct WeaponAim {
 
 impl WeaponAim {
     pub fn allows(&self, filter: Option<&[phoenix_model::tags::EntityTag]>) -> bool {
-        crate::weapons::operation::target_allowed(filter, &self.tags, self.ordinary_domain)
+        (!self.tags.contains(&phoenix_model::tags::EntityTag::Missile) || self.elevation.is_some())
+            && crate::weapons::operation::target_allowed(filter, &self.tags, self.ordinary_domain)
+    }
+
+    /// Legacy ordinary planar targets retain planar aim. An observed missile
+    /// requires its measured height; no hidden physical pose can fill it in.
+    pub fn point_3d(&self, own_height: f32) -> Option<[f32; 3]> {
+        let height = match self.elevation {
+            Some(value) => value.height,
+            None if self.ordinary_domain => own_height,
+            None => return None,
+        };
+        Some([self.position[0], height, self.position[1]])
+    }
+
+    pub fn velocity_3d(&self) -> [f32; 3] {
+        let planar = self.velocity.unwrap_or([0.0, 0.0]);
+        [
+            planar[0],
+            self.elevation
+                .and_then(|value| value.velocity)
+                .unwrap_or(0.0),
+            planar[1],
+        ]
     }
 }
 
@@ -153,6 +177,7 @@ impl WeaponAimInputs<'_, '_> {
                 route: frozen.to_owned(),
                 position: legacy(frozen)?,
                 velocity: None,
+                elevation: None,
                 measured: false,
                 tags: Vec::new(),
                 ordinary_domain: true,
@@ -196,7 +221,7 @@ impl WeaponAimInputs<'_, '_> {
             return false;
         };
         if assignments
-            .and_then(|state| state.0 .0.get(owner))
+            .and_then(|state| state.0.0.get(owner))
             .is_some_and(|state| !state.follows_primary())
         {
             return true;
@@ -208,6 +233,144 @@ impl WeaponAimInputs<'_, '_> {
         } else {
             matches!(boards.0.get(&primary), Some(SystemBlackboard::Viewscreen(board)) if board.combat_lock.is_some())
         }
+    }
+
+    /// Explicit orders, including Hold or an unavailable target, never fall
+    /// through. A defensive fallback is usable only when primary is ineligible.
+    pub fn resolve_allowed(
+        &self,
+        entity: Entity,
+        owner: &SystemId,
+        filter: Option<&[phoenix_model::tags::EntityTag]>,
+        legacy: impl Fn(&str) -> Option<[f32; 2]>,
+    ) -> Option<WeaponAim> {
+        let resolved = self
+            .resolve(entity, owner, &legacy)
+            .filter(|aim| aim.allows(filter));
+        let assignment = self
+            .scopes
+            .get(entity)
+            .ok()
+            .and_then(|row| row.4)
+            .and_then(|state| state.0.0.get(owner));
+        if resolved.is_some() || assignment.is_some_and(|state| state.has_explicit_order()) {
+            return resolved;
+        }
+        self.resolve_reference(entity, owner, assignment?.automatic.as_deref()?, legacy)
+            .filter(|aim| aim.allows(filter))
+    }
+
+    pub fn has_explicit_order(&self, entity: Entity, owner: &SystemId) -> bool {
+        self.scopes
+            .get(entity)
+            .ok()
+            .and_then(|row| row.4)
+            .and_then(|state| state.0.0.get(owner))
+            .is_some_and(|state| state.has_explicit_order())
+    }
+
+    pub fn automatic_contact(&self, entity: Entity, owner: &SystemId) -> Option<String> {
+        self.scopes
+            .get(entity)
+            .ok()?
+            .4?
+            .0
+            .0
+            .get(owner)?
+            .automatic
+            .clone()
+    }
+
+    /// Ordinary defensive policy sees current permitted missile observations.
+    /// Approaching motion and reach are measured facts, not launcher allegiance
+    /// or the missile's hidden attack order. Retain a viable previous choice.
+    pub fn defensive_contact(
+        &self,
+        entity: Entity,
+        owner: &SystemId,
+        mount: &crate::weapons::mount::MountConfig,
+        physics: &crate::ship::state::ShipPhysics,
+    ) -> Option<String> {
+        use phoenix_model::tags::EntityTag;
+        let (boards, config, _, _, _, _, _, _) = self.scopes.get(entity).ok()?;
+        let view = config?.0.observations_for_system(owner, &boards.0);
+        let contacts = boards
+            .0
+            .keys()
+            .filter_map(|key| view.get(key))
+            .filter_map(crate::science::contact_routing::observations)
+            .flatten()
+            .filter(|record| {
+                record.selectable
+                    && !record.predicted
+                    && record
+                        .classification
+                        .as_deref()
+                        .and_then(EntityTag::from_str)
+                        == Some(EntityTag::Missile)
+            })
+            .map(|record| record.contact_id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        let current = self.automatic_contact(entity, owner);
+        let mut candidates = Vec::new();
+        for contact in contacts {
+            let Some(aim) = self
+                .resolve_reference(entity, owner, &contact, |_| None)
+                .filter(|aim| aim.allows(Some(&[EntityTag::Missile])))
+            else {
+                continue;
+            };
+            let Some(velocity) = aim.velocity else {
+                continue;
+            };
+            let Some(point) = aim.point_3d(physics.y) else {
+                continue;
+            };
+            let relative = [
+                f64::from(point[0]) - f64::from(physics.x),
+                f64::from(point[1]) - f64::from(physics.y),
+                f64::from(point[2]) - f64::from(physics.z),
+            ];
+            let own_x = physics.forward_speed * crate::simmath::sin(physics.yaw)
+                + physics.lateral_speed * crate::simmath::cos(physics.yaw);
+            let own_z = -physics.forward_speed * crate::simmath::cos(physics.yaw)
+                + physics.lateral_speed * crate::simmath::sin(physics.yaw);
+            let motion = [
+                f64::from(velocity[0]) - f64::from(own_x),
+                f64::from(
+                    aim.elevation
+                        .and_then(|height| height.velocity)
+                        .unwrap_or(0.0),
+                ) - f64::from(physics.vertical_speed),
+                f64::from(velocity[1]) - f64::from(own_z),
+            ];
+            let approach = relative
+                .into_iter()
+                .zip(motion)
+                .map(|(p, v)| p * v)
+                .sum::<f64>();
+            let speed_sq = motion.into_iter().map(|v| v * v).sum::<f64>();
+            let geometry = self.geometry(entity, owner, mount, &aim, physics);
+            if approach >= 0.0 || speed_sq <= 0.0 || !geometry.in_range {
+                continue;
+            }
+            // Finite turrets may still be traversing towards this designation.
+            // The launch path separately enforces the actual pointing arc.
+            let seconds = -approach / speed_sq;
+            if !seconds.is_finite() {
+                continue;
+            }
+            candidates.push((contact, seconds));
+        }
+        if let Some(current) =
+            current.filter(|current| candidates.iter().any(|(id, _)| id == current))
+        {
+            return Some(current);
+        }
+        candidates
+            .into_iter()
+            .min_by(|(left, lt), (right, rt)| lt.total_cmp(rt).then_with(|| left.cmp(right)))
+            .map(|(contact, _)| contact)
     }
 
     pub fn resolve_reference(
@@ -226,6 +389,7 @@ impl WeaponAimInputs<'_, '_> {
                 route: contact.to_owned(),
                 position: legacy(contact)?,
                 velocity: None,
+                elevation: None,
                 measured: false,
                 tags: Vec::new(),
                 ordinary_domain: true,
@@ -251,6 +415,11 @@ impl WeaponAimInputs<'_, '_> {
             return None;
         }
         let measured = crate::science::contact_routing::measured_machinery(broad, controls);
+        let elevation = if measured {
+            crate::weapons::mounts::measured_elevation(&config.0, boards, broad?, owner, contact)
+        } else {
+            None
+        };
         let position = if measured {
             crate::weapons::mounts::measured_point(&config.0, boards, broad?, owner, contact)?
         } else {
@@ -304,6 +473,7 @@ impl WeaponAimInputs<'_, '_> {
                 route,
                 position,
                 velocity,
+                elevation,
                 measured,
                 tags,
                 ordinary_domain,
@@ -319,7 +489,7 @@ impl WeaponAimInputs<'_, '_> {
         physics: &crate::ship::state::ShipPhysics,
     ) -> crate::core::messages::WeaponTargetGeometry {
         let state = self.scopes.get(entity).ok();
-        crate::weapons::mounts::geometry(
+        let mut geometry = crate::weapons::mounts::geometry(
             state.and_then(|row| row.5),
             state.and_then(|row| row.6),
             owner,
@@ -327,7 +497,16 @@ impl WeaponAimInputs<'_, '_> {
             aim.position,
             [physics.x, physics.z],
             physics.yaw,
-        )
+        );
+        if let Some(elevation) = aim.elevation {
+            let distance = ((f64::from(aim.position[0]) - f64::from(physics.x)).powi(2)
+                + (f64::from(aim.position[1]) - f64::from(physics.z)).powi(2)
+                + (f64::from(elevation.height) - f64::from(physics.y)).powi(2))
+            .sqrt();
+            geometry.in_range = distance.is_finite() && distance <= f64::from(mount.range);
+            geometry.range = distance.min(f64::from(f32::MAX)) as f32;
+        }
+        geometry
     }
 }
 
@@ -379,6 +558,7 @@ fn handle_assignments(
             if !matches!(
                 command.payload,
                 Payload::SetWeaponTarget { .. }
+                    | Payload::SetAutomaticWeaponTarget { .. }
                     | Payload::SetWeaponGroupTarget { .. }
                     | Payload::FollowWeaponGroup
                     | Payload::FollowPrimaryTarget
@@ -390,8 +570,14 @@ fn handle_assignments(
                 if !phoenix_sim_gameplay::weapons::assignments::is_weapon(&system.kind) {
                     return None;
                 }
+                if matches!(command.payload, Payload::SetAutomaticWeaponTarget { .. })
+                    && system.kind != crate::ship::system_registry::BLASTER_BANK_KIND
+                {
+                    return None;
+                }
                 let target = match &command.payload {
                     Payload::SetWeaponTarget { uuid }
+                    | Payload::SetAutomaticWeaponTarget { uuid }
                     | Payload::SetWeaponGroupTarget { uuid, .. } => uuid,
                     Payload::FollowWeaponGroup => {
                         assignments.0.follow_group(&command.target);
@@ -431,6 +617,9 @@ fn handle_assignments(
                     }
                 }
                 match &command.payload {
+                    Payload::SetAutomaticWeaponTarget { uuid } => assignments
+                        .0
+                        .set_automatic(command.target.clone(), uuid.clone()),
                     Payload::SetWeaponTarget { uuid } => assignments
                         .0
                         .set_individual(command.target.clone(), uuid.clone()),
@@ -471,33 +660,73 @@ pub fn effective_weapon_contact(
     controls: Option<&SensingControls>,
     assignments: Option<&ShipWeaponTargets>,
 ) -> Option<String> {
+    effective_weapon_contact_filtered(config, owner, boards, broad, controls, assignments, None)
+}
+
+pub fn effective_weapon_contact_filtered(
+    config: &ShipConfig,
+    owner: &SystemId,
+    boards: &ShipSystemBlackboards,
+    broad: Option<&BroadTracks>,
+    controls: Option<&SensingControls>,
+    assignments: Option<&ShipWeaponTargets>,
+    filter: Option<&[phoenix_model::tags::EntityTag]>,
+) -> Option<String> {
     let view = config.observations_for_system(owner, &boards.0);
     let primary = match view.get(&crate::ship::system_registry::viewscreen_system_id()) {
         Some(SystemBlackboard::Viewscreen(board)) => board.combat_lock.as_deref(),
         _ => None,
     };
-    let explicit = assignments
-        .and_then(|state| state.0 .0.get(owner))
-        .filter(|assignment| !assignment.follows_primary());
-    let selected = match explicit {
-        Some(assignment) => assignment.target(None),
-        None => primary,
-    }?;
-    if !crate::science::contact_routing::measured_machinery(broad, controls) {
-        return Some(selected.to_owned());
+    let assignment = assignments.and_then(|state| state.0.0.get(owner));
+    let normalise = |selected: &str, allow_route: bool| {
+        if !crate::science::contact_routing::measured_machinery(broad, controls) {
+            return Some(selected.to_owned());
+        }
+        let tracks = broad?;
+        if crate::science::contact_routing::resolve(config, boards, Some(tracks), owner, selected)
+            .is_some()
+        {
+            return Some(selected.to_owned());
+        }
+        allow_route
+            .then(|| {
+                crate::science::contact_routing::alias_for_source(
+                    config,
+                    boards,
+                    Some(tracks),
+                    owner,
+                    selected,
+                )
+            })
+            .flatten()
+    };
+    if let Some(explicit) = assignment.filter(|assignment| assignment.has_explicit_order()) {
+        return normalise(explicit.target(None)?, false);
     }
-    let broad = broad?;
-    if crate::science::contact_routing::resolve(config, boards, Some(broad), owner, selected)
-        .is_some()
-    {
-        return Some(selected.to_owned());
-    }
-    // Only the pre-existing primary machinery selection may carry a private
-    // route. Explicit assignments always retain their original public handle.
-    if explicit.is_some() {
-        return None;
-    }
-    crate::science::contact_routing::alias_for_source(config, boards, Some(broad), owner, selected)
+    let eligible = |contact: &str| {
+        let Some(filter) = filter else {
+            return true;
+        };
+        let mut tags = boards
+            .0
+            .keys()
+            .filter_map(|key| view.get(key))
+            .filter_map(crate::science::contact_routing::observations)
+            .flatten()
+            .filter(|record| record.contact_id == contact && record.selectable && !record.predicted)
+            .filter_map(|record| record.classification.as_deref())
+            .map(phoenix_model::tags::EntityTag::from_str);
+        let Some(Some(first)) = tags.next() else {
+            return false;
+        };
+        tags.all(|other| other == Some(first)) && filter.contains(&first)
+    };
+    primary
+        .and_then(|primary| normalise(primary, true))
+        .filter(|contact| eligible(contact))
+        .or_else(|| {
+            normalise(assignment?.automatic.as_deref()?, false).filter(|contact| eligible(contact))
+        })
 }
 
 pub fn effective_weapon_target(

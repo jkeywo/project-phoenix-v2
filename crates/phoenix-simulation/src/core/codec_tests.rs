@@ -19,6 +19,10 @@ fn weapon_assignment_and_stop_controls_round_trip_through_the_existing_command_e
             uuid: Some("radar:contact:7".into()),
         },
         SystemControlPayload::SetWeaponTarget { uuid: None },
+        SystemControlPayload::SetAutomaticWeaponTarget {
+            uuid: Some("radar:contact:9".into()),
+        },
+        SystemControlPayload::SetAutomaticWeaponTarget { uuid: None },
         SystemControlPayload::SetWeaponGroupTarget {
             group: "main-beams".into(),
             uuid: Some("radar:contact:8".into()),

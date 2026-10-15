@@ -64,9 +64,12 @@ export function mountWeaponTargetControls(doc) {
       const target = individual?.mode === 'target' ? individual.contact : !individual ? group?.target : null;
       const name = view.contacts?.find(contact => contact.id === target)?.name || t('weapons.assignments.held_contact');
       const base = group ? t('weapons.assignments.group_base', { group: t(view.groups.find(row => row.id === group.group)?.label || group.group), target: group.unavailable ? t('weapons.assignments.unavailable') : group.target ? (view.contacts?.find(contact => contact.id === group.target)?.name || t('weapons.assignments.held_contact')) : t('weapons.assignments.hold') }) : t('weapons.assignments.primary');
+      const automatic = row.assignment?.automatic;
+      const automaticName = automatic?.mode === 'target' ? (view.contacts?.find(contact => contact.id === automatic.contact)?.name || t('weapons.assignments.held_contact')) : automatic ? t('weapons.assignments.unavailable') : t('weapons.assignments.no_automatic');
       const selected = individual?.mode === 'hold' ? t('weapons.assignments.hold') : individual?.mode === 'target' ? name : individual?.mode === 'unavailable' ? t('weapons.assignments.unavailable') : null;
       control.status.textContent = (!row.controllable ? t(row.auto ? 'console.common.auto' : 'weapons.assignments.read_only') + ' / ' : '')
-        + (selected ? t('weapons.assignments.override', { target: selected }) + ' / ' + base : base);
+        + (selected ? t('weapons.assignments.override', { target: selected }) + ' / ' + base : base)
+        + ' / ' + t('weapons.assignments.automatic', { target: automaticName });
       for (const button of control.buttons) button.disabled = !row.controllable;
       control.picker.disabled = !row.controllable;
     }

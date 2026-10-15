@@ -8,11 +8,11 @@ use crate::simmath;
 use bevy::prelude::*;
 
 use super::shared::{
-    any_blaster_bank_operates_ai, live_entity_xz, system_is_registered, DirectFireGeometry,
+    DirectFireGeometry, any_blaster_bank_operates_ai, live_entity_xz, system_is_registered,
 };
 use super::{
-    AsteroidDestroyedVfx, ShipDestroyedVfx, WeaponActionRefusal, WeaponActionResult,
-    DEFAULT_SHIP_EXPLOSION_RADIUS,
+    AsteroidDestroyedVfx, DEFAULT_SHIP_EXPLOSION_RADIUS, ShipDestroyedVfx, WeaponActionRefusal,
+    WeaponActionResult,
 };
 use crate::core::messages::{GamePhase, ServerMessage, SystemControlPayload};
 use crate::lobby::{Sessions, Target};
@@ -403,9 +403,51 @@ pub(crate) fn tick_blaster_auto_fire(
             let Some(bank_sid) = bank_sid else {
                 continue;
             };
-            let Some(aim) = aims.resolve(ship_entity, &bank_sid, |route| {
-                live_entity_xz(route, &asteroid_q, &entity_q).map(|(x, z)| [x, z])
-            }) else {
+            // This is the existing bank controller, using the same admitted
+            // target intent as its human operator. No launcher allegiance or
+            // private projectile order participates in defensive selection.
+            let automatic = if bank
+                .config
+                .targets
+                .as_ref()
+                .is_some_and(|targets| targets.contains(&phoenix_model::tags::EntityTag::Missile))
+                && !aims.has_explicit_order(ship_entity, &bank_sid)
+            {
+                let selected =
+                    aims.defensive_contact(ship_entity, &bank_sid, &bank.config.mount(), physics);
+                if selected != aims.automatic_contact(ship_entity, &bank_sid) {
+                    crate::command_admission::ai_emit::emit_ai_command(
+                        entity_uuid,
+                        bank_sid.clone(),
+                        crate::core::messages::SystemControlPayload::SetAutomaticWeaponTarget {
+                            uuid: selected.clone(),
+                        },
+                        control_sources,
+                        &sessions,
+                        ship_config_opt,
+                        &mut admitted,
+                    );
+                }
+                selected
+            } else {
+                None
+            };
+            let Some(aim) = aims
+                .resolve_allowed(
+                    ship_entity,
+                    &bank_sid,
+                    bank.config.targets.as_deref(),
+                    |route| live_entity_xz(route, &asteroid_q, &entity_q).map(|(x, z)| [x, z]),
+                )
+                .or_else(|| {
+                    automatic
+                        .as_deref()
+                        .and_then(|contact| {
+                            aims.resolve_reference(ship_entity, &bank_sid, contact, |_| None)
+                        })
+                        .filter(|aim| aim.allows(bank.config.targets.as_deref()))
+                })
+            else {
                 continue;
             };
 

@@ -2129,6 +2129,11 @@ pub enum SystemControlPayload {
     SetWeaponTarget {
         uuid: Option<String>,
     },
+    /// Set or clear only this weapon's public automatic fallback. Explicit
+    /// orders and eligible primary targets keep precedence.
+    SetAutomaticWeaponTarget {
+        uuid: Option<String>,
+    },
     /// Update only the addressed member of an authored prepared group.
     /// An active individual override remains in force until explicitly released.
     SetWeaponGroupTarget {

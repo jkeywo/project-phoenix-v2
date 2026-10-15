@@ -20,10 +20,17 @@ pub struct WeaponGroupAssignmentView {
 pub struct WeaponTargetAssignmentView {
     pub group: Option<WeaponGroupAssignmentView>,
     pub individual: Option<WeaponTargetReference>,
+    pub automatic: Option<WeaponTargetReference>,
 }
 impl From<&WeaponTargetAssignment> for WeaponTargetAssignmentView {
     fn from(intent: &WeaponTargetAssignment) -> Self {
         Self {
+            automatic: intent
+                .automatic
+                .as_ref()
+                .map(|contact| WeaponTargetReference::Target {
+                    contact: contact.clone(),
+                }),
             group: intent
                 .group
                 .as_ref()

@@ -108,7 +108,17 @@ pub fn measured_point(
     owner: &SystemId,
     contact: &str,
 ) -> Option<[f32; 2]> {
-    measured_contact(config, boards, tracks, owner, contact).map(|(_, point)| point)
+    measured_contact(config, boards, tracks, owner, contact).map(|(_, point, _)| point)
+}
+
+pub fn measured_elevation(
+    config: &crate::ship::config::ShipConfig,
+    boards: &crate::server_app::ShipSystemBlackboards,
+    tracks: &crate::science::broad::BroadTracks,
+    owner: &SystemId,
+    contact: &str,
+) -> Option<phoenix_model::sensing_tracks::ObservedElevation> {
+    measured_contact(config, boards, tracks, owner, contact)?.2
 }
 
 fn measured_contact(
@@ -117,7 +127,11 @@ fn measured_contact(
     tracks: &crate::science::broad::BroadTracks,
     owner: &SystemId,
     contact: &str,
-) -> Option<(String, [f32; 2])> {
+) -> Option<(
+    String,
+    [f32; 2],
+    Option<phoenix_model::sensing_tracks::ObservedElevation>,
+)> {
     let view = config.observations_for_system(owner, &boards.0);
     let mut found = None;
     for (instrument, state) in &tracks.0 {
@@ -134,10 +148,20 @@ fn measured_contact(
             let Some(route) = state.resolve_current(contact) else {
                 continue;
             };
-            if record.position.iter().any(|value| !value.is_finite()) {
+            if record.position.iter().any(|value| !value.is_finite())
+                || record
+                    .elevation
+                    .as_ref()
+                    .is_some_and(|value| value.validate().is_err())
+            {
                 return None;
             }
-            let candidate = (route.to_owned(), record.position, record.velocity);
+            let candidate = (
+                route.to_owned(),
+                record.position,
+                record.velocity,
+                record.elevation,
+            );
             if found
                 .as_ref()
                 .is_some_and(|previous| previous != &candidate)
@@ -147,7 +171,7 @@ fn measured_contact(
             found = Some(candidate);
         }
     }
-    found.map(|(route, point, _)| (route, point))
+    found.map(|(route, point, _, elevation)| (route, point, elevation))
 }
 
 fn current_point(
@@ -159,7 +183,7 @@ fn current_point(
     observer: &str,
     overrides: Option<&crate::gm::operations::contact::ContactOverrides>,
 ) -> Option<[f32; 2]> {
-    let (source, point) = measured_contact(config, boards, tracks, owner, contact)?;
+    let (source, point, _) = measured_contact(config, boards, tracks, owner, contact)?;
     if overrides.is_some_and(|overrides| {
         crate::gm::operations::contact::mode(overrides, observer, &source)
             == crate::gm::operations::contact::ContactMode::Conceal
@@ -269,6 +293,10 @@ fn tick(
     time: Res<Time<Fixed>>,
     tick: Res<crate::sim_tick::SimTick>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    blasters: Query<(
+        &crate::entities::spawner::EntityUuid,
+        &crate::console::weapons::BlasterSystemResource,
+    )>,
     mut ships: Query<(
         &crate::entities::spawner::EntityUuid,
         &MountProfiles,
@@ -278,8 +306,7 @@ fn tick(
         &crate::ship_plugin::ShipSystemControlSources,
         &mut crate::ship::power::ShipPowerSystem,
         Option<&crate::ship::compartment_damage::ShipDamage>,
-        Option<&crate::ship::state::ShipPhysics>,
-        &Transform,
+        (Option<&crate::ship::state::ShipPhysics>, &Transform),
         Option<&crate::science::broad::BroadTracks>,
         Option<&crate::science::broad::SensingControls>,
         Option<&crate::console::weapons::assignments::ShipWeaponTargets>,
@@ -304,8 +331,7 @@ fn tick(
             sources,
             mut power,
             damage,
-            physics,
-            transform,
+            (physics, transform),
             tracks,
             controls,
             assignments,
@@ -331,13 +357,25 @@ fn tick(
             let contact = if is_passive {
                 passive_contact(&config.0, boards, tracks, controls, owner)
             } else {
-                crate::console::weapons::assignments::effective_weapon_contact(
+                let filter = blasters
+                    .iter()
+                    .find(|(id, _)| id.0 == uuid)
+                    .and_then(|(_, banks)| {
+                        banks.0.iter().find(|bank| {
+                            crate::ship::system_registry::blaster_bank_system_id(&bank.config.id)
+                                .as_ref()
+                                == Some(owner)
+                        })
+                    })
+                    .and_then(|bank| bank.config.targets.as_deref());
+                crate::console::weapons::assignments::effective_weapon_contact_filtered(
                     &config.0,
                     owner,
                     boards,
                     tracks,
                     controls,
                     assignments,
+                    filter,
                 )
             };
             let point = contact.as_deref().and_then(|contact| {

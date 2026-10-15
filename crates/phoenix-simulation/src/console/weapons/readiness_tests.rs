@@ -26,6 +26,7 @@ fn fixture() -> (World, Entity, String) {
             0.5,
             1.0,
             &[BroadMeasurement {
+                elevation: None,
                 observation: None,
                 source: "private-target".into(),
                 selectable: true,

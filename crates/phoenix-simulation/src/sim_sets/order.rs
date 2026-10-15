@@ -46,7 +46,6 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             ReconcileDirectedTargetControl,
             HandleStationRatingChange,
             HandleCoordinationEnqueue,
-            HandleWeaponAssignments,
             AiPhaserAutoFire,
             TickWeaponsArcRequest,
             HandleSetPhaserMode,
@@ -62,6 +61,10 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             TickNpcAutoMatchFrequency,
             ApplyTacticalFrequencyHint,
             TickBlasterAutoFire,
+            // Settle human and ordinary AI intent together before Physics.
+            // AI-emitted fallback assignments must not be cleared next tick
+            // before their consumer sees them; explicit orders still win.
+            HandleWeaponAssignments,
             OperateExternalRepairAi,
             TrackShieldDamageHistory,
             EmitShieldsCoordination,

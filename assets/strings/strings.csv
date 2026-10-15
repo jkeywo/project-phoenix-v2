@@ -5878,3 +5878,5 @@ workshop.weapon.targets.tags,Weapon target policy,Allowed observed tags,Erlaubte
 workshop.weapon.targets.legacy,Weapon target policy,Ordinary target domains,Gewoehnliche Zielklassen,Ordinary target domains,machine
 workshop.weapon.targets.explicit,Weapon target policy,Explicit observed tags,Explizite beobachtete Tags,Explicit observed tags,machine
 workshop.weapon.targets.hint,Weapon target policy,An explicit empty selection holds fire. Filters do not prevent physical collateral.,Eine explizit leere Auswahl haelt das Feuer. Filter verhindern keine physischen Kollateralschaeden.,An explicit empty selection holds fire. Filters do not prevent physical collateral.,machine
+weapons.assignments.automatic,Read-only weapon automatic fallback,Automatic fallback: {target},Automatisches Ersatzziel: {target},Automatic fallback: {target},machine
+weapons.assignments.no_automatic,No retained automatic weapon fallback,None,Keines,None,machine

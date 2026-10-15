@@ -22,6 +22,7 @@ fn los_measured_ray_miss_spends_work_without_damaging_the_private_named_actor() 
             0.5,
             1.0,
             &[BroadMeasurement {
+                elevation: None,
                 source: "private-target".into(),
                 selectable: true,
                 observation: None,

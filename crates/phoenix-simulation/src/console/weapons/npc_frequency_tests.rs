@@ -242,6 +242,7 @@ fn npc_correlates_distinct_current_aliases_only_through_its_explicit_radar_feed(
                 0.5,
                 1.0,
                 &[BroadMeasurement {
+                    elevation: None,
                     source: "target".into(),
                     selectable: true,
                     observation: None,

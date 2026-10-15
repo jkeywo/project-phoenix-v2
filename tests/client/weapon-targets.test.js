@@ -18,8 +18,8 @@ describe('weapon target assignments', () => {
     const raw = { a: { individual: { mode: 'unavailable' }, group: { group: 'pair', target: { mode: 'unavailable' } } },
       b: { individual: { mode: 'hold' }, group: { group: 'pair', target: { mode: 'target', contact: 'one' } } } };
     const view = weaponTargetsPayload({ systemKinds: { a: 'phaser_bank', b: 'phaser_bank' }, controlSources: { a: 'Human', b: 'Human' } }, ['a', 'b'], raw, []);
-    expect(view.rows[0].assignment).toEqual({ individual: { mode: 'unavailable' }, group: { group: 'pair', target: null, unavailable: true } });
-    expect(view.rows[1].assignment).toEqual({ individual: { mode: 'hold' }, group: { group: 'pair', target: 'one', unavailable: false } });
+    expect(view.rows[0].assignment).toEqual({ automatic: null, individual: { mode: 'unavailable' }, group: { group: 'pair', target: null, unavailable: true } });
+    expect(view.rows[1].assignment).toEqual({ automatic: null, individual: { mode: 'hold' }, group: { group: 'pair', target: 'one', unavailable: false } });
     expect(raw.a.individual.mode).toBe('unavailable');
     const controls = mountWeaponTargetControls(document); document.body.append(controls.node);
     controls.update({ ...view, groups: [{ id: 'pair', label: 'weapon.group.main_beams', members: ['a', 'b'] }] });
@@ -92,5 +92,35 @@ describe('weapon target assignments', () => {
     expect(document.activeElement).toBe(picker); expect(picker.value).toBe('one');
     expect(picker.selectedOptions[0].disabled).toBe(true);
     row.querySelector('button').click(); expect(sendAction).not.toHaveBeenCalled();
+  });
+});
+
+describe('automatic fallback display', () => {
+  afterEach(() => document.body.replaceChildren());
+  it('normalizes only sanitized fallback references and gives no extra controls', () => {
+    const view = weaponTargetsPayload({ systemKinds: { bank: 'blaster_bank' }, controlSources: { bank: 'Human' } }, ['bank'],
+      { bank: { automatic: { mode: 'target', contact: 'current-public-handle' }, individual: { mode: 'hold' } } },
+      [{ uuid: 'current-public-handle', name: 'Measured missile', selectable: true }]);
+    const controls = mountWeaponTargetControls(document); document.body.append(controls.node); controls.update(view);
+    const row = document.querySelector('[data-assignment-key="bank"]');
+    expect(row.textContent).toContain('Automatic fallback: Measured missile');
+    expect(row.textContent).toContain('Hold fire');
+    expect(row.querySelectorAll('button')).toHaveLength(3);
+    const picker = row.querySelector('select'); picker.focus();
+    const stale = weaponTargetsPayload({ systemKinds: { bank: 'blaster_bank' }, controlSources: { bank: 'Human' } }, ['bank'],
+      { bank: { automatic: { mode: 'unavailable', contact: 'private-secret-uuid' } } }, []);
+    controls.update(stale);
+    expect(document.activeElement).toBe(picker);
+    expect(row.textContent).toContain('Automatic fallback: Selected contact unavailable');
+    expect(row.textContent).not.toContain('private-secret-uuid');
+    expect(JSON.stringify(stale)).not.toContain('private-secret-uuid');
+  });
+  it('represents cleared automatic intent as absence rather than Hold', () => {
+    const view = weaponTargetsPayload({ systemKinds: { bank: 'blaster_bank' }, controlSources: { bank: 'Ai' } }, ['bank'], {}, []);
+    expect(view.rows[0].assignment.automatic).toBe(null);
+    const controls = mountWeaponTargetControls(document); document.body.append(controls.node); controls.update(view);
+    const row = document.querySelector('[data-assignment-key="bank"]');
+    expect(row.textContent).toContain('Automatic fallback: None');
+    expect([...row.querySelectorAll('button')].every(button => button.disabled)).toBe(true);
   });
 });

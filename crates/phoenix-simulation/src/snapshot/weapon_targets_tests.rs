@@ -2,10 +2,10 @@ use super::*;
 use crate::console::weapons::assignments::ShipWeaponTargets;
 
 fn fixture() -> (World, Entity, PhoenixSnapshot) {
-    let config = crate::entities::include_resolve::load_entity_config(
-        "assets/entities/alliance_cruiser.toml",
-    )
-    .unwrap();
+    fixture_from("assets/entities/alliance_cruiser.toml")
+}
+fn fixture_from(path: &str) -> (World, Entity, PhoenixSnapshot) {
+    let config = crate::entities::include_resolve::load_entity_config(path).unwrap();
     let mut world = World::new();
     world.register_component::<EntitySystemHull>();
     world.register_component::<EntityShipArcHull>();
@@ -27,7 +27,7 @@ fn fixture() -> (World, Entity, PhoenixSnapshot) {
         .entity_mut(entity)
         .insert(crate::entities::spawner::EntitySpawnOrigin(
             crate::world::spawn_origin::SpawnOrigin {
-                template_path: "assets/entities/alliance_cruiser.toml".into(),
+                template_path: path.into(),
                 name: "assigned-ship".into(),
                 ..Default::default()
             },
@@ -119,4 +119,56 @@ fn forged_ownership_groups_contacts_and_missing_owner_refuse_before_any_write() 
         assert!(!report.is_complete(), "case {case}");
         assert_eq!(capture(&world), before, "case {case} mutated state");
     }
+}
+
+#[test]
+fn automatic_only_rows_round_trip_and_bad_fallbacks_refuse_before_writes() {
+    let (mut world, entity, _) = fixture_from("assets/entities/broadside_cruiser.toml");
+    let owner = SystemId("blaster-side".into());
+    world
+        .get_mut::<ShipWeaponTargets>(entity)
+        .unwrap()
+        .0
+        .set_automatic(owner.clone(), Some("retained-opaque-contact".into()));
+    let saved = capture(&world);
+    let saved: PhoenixSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    validate_roster(&world, &saved).unwrap();
+    world
+        .get_mut::<ShipWeaponTargets>(entity)
+        .unwrap()
+        .0
+        .set_automatic(owner.clone(), None);
+    super::super::application::apply_entity_state(
+        &mut world,
+        entity,
+        &saved.entities[0],
+        saved.tick,
+    );
+    assert_eq!(
+        capture(&world).entities[0].weapon_targets,
+        saved.entities[0].weapon_targets
+    );
+    let before = capture(&world);
+    for contact in ["", "bad\ncontact"] {
+        let mut forged = saved.clone();
+        forged.entities[0]
+            .weapon_targets
+            .as_mut()
+            .unwrap()
+            .set_automatic(owner.clone(), Some(contact.into()));
+        assert!(!restore(&mut world, &forged).is_complete());
+        assert_eq!(capture(&world), before);
+    }
+    let mut forged = saved;
+    forged.entities[0]
+        .weapon_targets
+        .as_mut()
+        .unwrap()
+        .set_automatic(
+            SystemId("phaser-fore".into()),
+            Some("otherwise-valid-handle".into()),
+        );
+    assert!(!restore(&mut world, &forged).is_complete());
+    assert_eq!(capture(&world), before);
 }

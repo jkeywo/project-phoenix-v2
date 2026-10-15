@@ -636,7 +636,6 @@ and urgency context, Console isolation, actual signature consequences, authoring
 and complete fresh-JSON continuation/no-write checks. No S027 runtime is claimed
 by this contract; the actual concealment host proof has priority first.
 
-
 ### Adopted S027 composition and public boundary
 
 The first consumer authors an optional closed `emission_profile` block inside
@@ -663,8 +662,6 @@ and reactor controls remain ordinary usable controls throughout. The authoring
 validator, Workshop transaction, runtime and continuation guards all use this
 same actual System binding. Central messages, registration, status mounts and
 snapshot/digest hooks remain integration-owned; a leaf alone closes no S027 exit.
-<<<<<<< HEAD
-=======
 
 ### S027 leaf handoff and remaining integration
 
@@ -709,32 +706,22 @@ Integration-owned joins are still required before native execution:
   ownership rechecks in the action map and authoritative admission. Warning
   labels never receive or disable a machinery control.
 
-Workshop visual profile editing, integrated client/device/native operation,
-ordinary policy/urgency physical evidence, exact Console isolation and full
-fresh-JSON/no-write continuation remain open. Source review of the bounded Rust
-leaf passed independently; this is neither a compiled implementation nor an
+The visual Workshop leaf uses the existing native `append_table`/`put` editor
+and accepted-source transaction. It explicitly materialises only the selected
+Command profile leaves, keeping inherited machinery/AI inherited; it does not
+rewrite an entire System. Root must mount `mountWorkshopEmissionProfile` with
+the existing draft/busy/Preview/disposable Test callbacks and add
+`guardEmissionProfileReferences` to the shared ship-authoring validation chain.
+The two actual native document proofs in `authoring/emission_profile_tests.rs`
+need their test-module hook and root-owned execution; JavaScript transaction
+tests use an explicit structural-packet model and make no native source
+preservation claim. The profile panel rejects stale/refused/disposed edits and
+reinspects a replaced draft even when its revision/path happen to match.
+
+Focused advisory and Workshop JavaScript tests passed: eight tests across three
+files. Strict strings (6329 entries) and layer rules passed. Independent bounded
+Rust, GUI and Workshop source reviews passed. Integrated client/device/native
+operation, mounted Workshop history/Preview/Test, ordinary policy/urgency
+physical evidence, exact Console isolation and full fresh-JSON/no-write
+continuation remain open; this is neither a compiled implementation nor an
 increment17 exit.
-
-### Actual concealment host proof source
-
-`tests/concealment_continuation.rs` uses the real optional field Cruiser and an
-authored independent observer. Ordinary field AI enables from false initial
-intent, then actual joined Science and Engineering holders control the field
-and reactor. Long Broad retains a permitted focused target while the existing
-narrow Helm radar, finite focused ladder and paid Passive receiver lose and
-recover acquisition from actual reactor output with cloak intent still enabled.
-The fixture authors equipment/geometry and an ordinary Scan objective; it grants
-no power, observation, scan progress or actuator work.
-
-The proof retains earned aliases and partial work, checks actual fully paid
-field operation through 360 complete fresh-JSON captures/digests, refuses three
-malformed whole candidates without writes, clears bootstrap/saved derived work,
-and rejects an Engineering attempt to control Science's field. Its finite
-reference sensing thresholds and timing establish causal coverage, not balance
-or a 2/4/6/8-seat acceptance result.
-
-Independent integration-review source review passed. A read-only resolved-source
-check passed 12 fixture range/profile/group-parent assertions. Rust is formatted;
-native execution awaits the root's central hooks and owner Cargo batch. There is
-no executed full-host or increment17 exit claim from this source handoff.
->>>>>>> e70476d6 (feat(electronic): add owned advisory emission intent leaves)

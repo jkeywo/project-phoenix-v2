@@ -5670,6 +5670,11 @@ kind = "Stock"
 [[console.feed]]
 source = "scan/7:sensors"
 kind = "Scan"
+# Explicit measured Science picture permits correlation with the original acquired handle.
+# This shares observations, not scanner/radar control or co-hosted Console knowledge.
+[[console.feed]]
+source = "sensor-radar"
+kind = "SensorRadar"
 
 
 [[console]]

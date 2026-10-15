@@ -219,3 +219,4 @@ on the next tick.
 The Alliance base hulls declare an actual `Target` capability with ship selection
 tags. Display tags alone do not make an entity selectable: the paid radar record
 and the receiving Console's permitted feed still govern target admission.
+Shield-frequency automation correlates different radar handles only when the weapon Console explicitly receives both current selectable observations and the acquired Scan feed. The ordinary contact resolver may establish that both handles route to the same physical actuator target; acquired reading subject, time and configuration remain unchanged. The curated Tactical/Gunnery SensorRadar feed is an explicit information grant, and losing either current route withholds fresh automatic tuning while history remains visible.

@@ -2492,16 +2492,28 @@ fn tick_npc_auto_match_frequency(
             }) {
                 continue;
             }
-            let Some(finding) = crate::science::shield_enquiry::latest_permitted_finding(
+            // A scanner's original contact handle may differ from this bank's
+            // target handle. Both must currently be permitted by this Console;
+            // only the ordinary actuator resolver may establish equivalence.
+            let aliases = crate::science::contact_routing::aliases_for_source(
                 &ship_config.0,
                 blackboards,
+                tracks,
                 &system.id,
-                &public,
-            ) else {
+                &route,
+            );
+            let Some(finding) =
+                crate::science::shield_enquiry::latest_permitted_finding_for_subjects(
+                    &ship_config.0,
+                    blackboards,
+                    &system.id,
+                    &aliases,
+                )
+            else {
                 continue;
             };
             let candidate = (
-                format!("{}:{}/{}", public.len(), public, finding.configuration),
+                format!("{}:{}/{}", route.len(), route, finding.configuration),
                 finding.frequency,
             );
             if acquired

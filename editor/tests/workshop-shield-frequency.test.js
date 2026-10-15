@@ -34,6 +34,11 @@ describe('shield enquiry equipment accepted source',()=>{
   expect(()=>validateEnquiryObservation({property:[{property:{kind:'shield_frequency'},normal:true,step:.01}]},parse(source))).not.toThrow();
   expect(()=>validateEnquiryObservation({property:[{property:{kind:'shield_frequency'},normal:true,step:.01}]},{})).toThrow();
  });
+ it.each(['alliance_cruiser','dynasty_player_cruiser'])('grants %s weapon findings through explicit Scan and original SensorRadar feeds',hull=>{
+  const value=resolveTemplate('assets/entities/'+hull+'.toml',{read:file=>fs.existsSync(file)?fs.readFileSync(file,'utf8'):null},parse).resolved.value;
+  const owners=value.system.filter(system=>system.kind==='phaser_bank');expect(owners.length).toBeGreaterThan(0);
+  for(const owner of owners){const console=value.console.find(row=>row.id===owner.console);expect(console.feeds).toBeUndefined();expect(console.feed).toEqual(expect.arrayContaining([{source:'scan/7:sensors',kind:'Scan'},{source:'sensor-radar',kind:'SensorRadar'}]));}
+ });
  it('resolves explicit ordinary and rotating special policies without changing other fleet equipment',()=>{
   const resolve=name=>resolveTemplate('assets/entities/'+name+'.toml',{read:file=>fs.existsSync(file)?fs.readFileSync(file,'utf8'):null},parse).resolved.value;
   const ordinary=resolve('alliance_cruiser'),ordinaryFoe=resolve('ship_harrow_standard_shields_cruiser'),special=resolve('ship_harrow_resonant_cruiser'),original=resolve('ship_harrow_cruiser');

@@ -414,11 +414,18 @@ pub fn tick_sensors_frequency_hint(
         ) else {
             continue;
         };
-        let Some(finding) = crate::science::shield_enquiry::latest_permitted_finding(
+        let aliases = crate::science::contact_routing::aliases_for_source(
+            &ship_config.0,
+            blackboards,
+            tracks,
+            &owner,
+            &current_target,
+        );
+        let Some(finding) = crate::science::shield_enquiry::latest_permitted_finding_for_subjects(
             &ship_config.0,
             blackboards,
             &owner,
-            &public_target,
+            &aliases,
         ) else {
             continue;
         };

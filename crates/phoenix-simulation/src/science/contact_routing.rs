@@ -131,6 +131,40 @@ pub fn resolve(
     })
 }
 
+/// Current public handles which this exact consuming Console can independently
+/// route to an already-authorized physical source. This is actuator correlation,
+/// not evidence fusion: the original observations and their times stay intact.
+pub(crate) fn aliases_for_source(
+    config: &ShipConfig,
+    boards: &ShipSystemBlackboards,
+    tracks: Option<&BroadTracks>,
+    consumer: &SystemId,
+    source: &str,
+) -> std::collections::BTreeSet<String> {
+    let Some(tracks) = tracks else {
+        return (!source.is_empty())
+            .then(|| source.to_owned())
+            .into_iter()
+            .collect();
+    };
+    let permitted = config.observations_for_system(consumer, &boards.0);
+    tracks
+        .0
+        .keys()
+        .filter_map(|owner| {
+            permitted
+                .get(&publication_source(config, owner))
+                .and_then(observations)
+        })
+        .flatten()
+        .filter(|record| {
+            resolve(config, boards, Some(tracks), consumer, &record.contact_id).as_deref()
+                == Some(source)
+        })
+        .map(|record| record.contact_id.clone())
+        .collect()
+}
+
 /// Produce an ordinary command argument from an already-held private selection.
 /// This uses the same permitted current observations as human target admission.
 pub fn alias_for_source(

@@ -774,3 +774,158 @@ fn focused_only_scope_cannot_admit_a_guessed_physical_actor() {
         Some(crate::science::ScanRefusal::NoSuchTarget)
     );
 }
+
+#[test]
+fn paid_science_shield_reading_requires_explicit_current_radar_feed_to_match_weapon_alias() {
+    use crate::core::messages::{SystemBlackboard, TacticalRadarBlackboard};
+    use crate::science::{contact_routing, shield_enquiry};
+    use crate::server_app::ShipSystemBlackboards;
+    let subject = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/ship_harrow_resonant_cruiser.toml",
+    )
+    .unwrap();
+    let (mut app, observer) = rig_from(
+        "tests/fixtures/sensing-enquiry-cruiser.toml",
+        false,
+        Some(&subject),
+    );
+    let scanner = SystemId("sensors".into());
+    let bank = SystemId("phaser-fore".into());
+    let radar = SystemId("tactical-radar".into());
+    let science_radar = SystemId("sensor-radar".into());
+    let route = "00000000-0000-0000-0000-000000000142";
+    let before = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(observer)
+        .unwrap()
+        .0
+        .capture_continuation();
+    question(
+        &mut app,
+        observer,
+        phoenix_model::focused_enquiry::FocusedAim::Shields,
+        false,
+    );
+    for _ in 0..45 {
+        step(&mut app);
+    }
+    let acquired = app.world().get::<ShipScanRecord>(observer).unwrap().0[&scanner]
+        .history
+        .last()
+        .unwrap()
+        .clone();
+    assert!(acquired.shield_finding.is_some());
+    let snapshot = crate::core::messages::scan_reading_snapshot_from_reading(&acquired);
+    assert_ne!(snapshot.subject_uuid, route);
+    assert!(
+        app.world()
+            .get::<crate::ship::power::ShipPowerSystem>(observer)
+            .unwrap()
+            .0
+            .capture_continuation()
+            .network
+            .consumers[&scanner]
+            .energy
+            < before.network.consumers[&scanner].energy
+    );
+    // The second instrument must also do actual paid acquisition; no alias or
+    // physical association is injected into either canonical observation owner.
+    app.world_mut()
+        .get_mut::<crate::ship::power::ShipPowerSystem>(observer)
+        .unwrap()
+        .0
+        .work_continuous(&radar, 0.1, 1.0)
+        .unwrap();
+    app.world_mut()
+        .run_system_once(crate::science::broad::tick)
+        .unwrap();
+    let tracks = app
+        .world()
+        .get::<crate::science::broad::BroadTracks>(observer)
+        .unwrap()
+        .clone();
+    let profile = app
+        .world()
+        .get::<crate::science::broad::BroadProfile>(observer)
+        .unwrap();
+    let tick = app.world().resource::<crate::sim_tick::SimTick>().0;
+    let measured = tracks.0[&radar]
+        .projection(&profile.0[&radar].profile, tick, 0.1)
+        .unwrap();
+    let weapon_alias = tracks.0[&radar]
+        .contact_for_source(route)
+        .unwrap()
+        .to_owned();
+    assert_ne!(snapshot.subject_uuid, weapon_alias);
+    let mut boards = app
+        .world()
+        .get::<ShipSystemBlackboards>(observer)
+        .unwrap()
+        .clone();
+    boards.0.insert(
+        radar.clone(),
+        SystemBlackboard::TacticalRadar(TacticalRadarBlackboard {
+            tracks: Some(measured),
+            ..Default::default()
+        }),
+    );
+    let mut config = app
+        .world()
+        .get::<crate::ship_plugin::ShipConfigComponent>(observer)
+        .unwrap()
+        .0
+        .clone();
+    let console = config.system(&bank).unwrap().console.clone().unwrap();
+    let row = config
+        .consoles
+        .iter_mut()
+        .find(|row| row.id == console)
+        .unwrap();
+    let feed = row
+        .feeds
+        .iter()
+        .find(|feed| feed.source == science_radar)
+        .unwrap()
+        .clone();
+    row.feeds.retain(|feed| feed.source != science_radar);
+    assert_eq!(
+        contact_routing::resolve(&config, &boards, Some(&tracks), &bank, &weapon_alias).as_deref(),
+        Some(route)
+    );
+    let aliases =
+        contact_routing::aliases_for_source(&config, &boards, Some(&tracks), &bank, route);
+    assert!(!aliases.contains(&snapshot.subject_uuid));
+    assert!(shield_enquiry::latest_permitted_finding_for_subjects(
+        &config, &boards, &bank, &aliases
+    )
+    .is_none());
+    config
+        .consoles
+        .iter_mut()
+        .find(|row| row.id == console)
+        .unwrap()
+        .feeds
+        .push(feed);
+    let aliases =
+        contact_routing::aliases_for_source(&config, &boards, Some(&tracks), &bank, route);
+    assert!(aliases.contains(&weapon_alias) && aliases.contains(&snapshot.subject_uuid));
+    assert_eq!(
+        shield_enquiry::latest_permitted_finding_for_subjects(&config, &boards, &bank, &aliases),
+        snapshot.shield_finding.as_ref()
+    );
+    // Losing only the original scanner handle withholds automatic reuse while
+    // the other current weapon contact and immutable acquired history remain.
+    let mut lost = tracks;
+    lost.0.remove(&science_radar);
+    let aliases = contact_routing::aliases_for_source(&config, &boards, Some(&lost), &bank, route);
+    assert!(shield_enquiry::latest_permitted_finding_for_subjects(
+        &config, &boards, &bank, &aliases
+    )
+    .is_none());
+    assert_eq!(
+        app.world().get::<ShipScanRecord>(observer).unwrap().0[&scanner]
+            .history
+            .last(),
+        Some(&acquired)
+    );
+}

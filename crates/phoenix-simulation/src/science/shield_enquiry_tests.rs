@@ -68,3 +68,31 @@ fn only_a_qualified_explicitly_permitted_acquired_subject_can_supply_an_advisory
         .retain(|feed| feed.source != source);
     assert!(latest_permitted_finding(&ship, &boards, &repair, "public-return").is_none());
 }
+
+#[test]
+fn equally_recent_contradictory_findings_across_proven_aliases_withhold_advice() {
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap()
+    .ship_config
+    .unwrap();
+    let owner = SystemId("sensors".into());
+    let source = super::super::scan_blackboard_key_for(&owner);
+    let mut boards = ShipSystemBlackboards::default();
+    super::fixture::acquired(&mut boards, "science-handle", 0.2);
+    super::fixture::acquired(&mut boards, "weapon-handle", 0.8);
+    let Some(SystemBlackboard::Scan(scan)) = boards.0.get_mut(&source) else {
+        panic!("Scan");
+    };
+    scan.history[0].taken_at_tick = 10;
+    scan.history[1].taken_at_tick = 10;
+    let original = scan.history.clone();
+    let subjects =
+        std::collections::BTreeSet::from(["science-handle".into(), "weapon-handle".into()]);
+    assert!(latest_permitted_finding_for_subjects(&config, &boards, &owner, &subjects).is_none());
+    let Some(SystemBlackboard::Scan(scan)) = boards.0.get(&source) else {
+        unreachable!();
+    };
+    assert_eq!(scan.history, original);
+}

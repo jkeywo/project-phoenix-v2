@@ -217,3 +217,129 @@ fn npc_uses_effective_per_bank_intent_and_never_substitutes_primary_for_hold_or_
         "conflicting effective subjects withhold shared-actuator advice"
     );
 }
+
+#[test]
+fn npc_correlates_distinct_current_aliases_only_through_its_explicit_radar_feed() {
+    use crate::core::messages::{SensorRadarBlackboard, TacticalRadarBlackboard};
+    use crate::science::broad::{BroadMeasurement, BroadProfile, BroadTracks};
+    let (mut world, ship, _) = fixture();
+    let authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    let profiles = BroadProfile::from_config(&authored).unwrap().unwrap();
+    let mut tracks = BroadTracks::new(&profiles);
+    let mut handles = Vec::new();
+    for (instrument, sensor) in [
+        (SystemId("sensor-radar".into()), true),
+        (SystemId("tactical-radar".into()), false),
+    ] {
+        let state = tracks.0.get_mut(&instrument).unwrap();
+        state
+            .advance(
+                &profiles.0[&instrument].profile,
+                0,
+                0.5,
+                1.0,
+                &[BroadMeasurement {
+                    source: "target".into(),
+                    selectable: true,
+                    observation: None,
+                    position: [4.0, 0.0],
+                    support: 1.0,
+                    identity: None,
+                    classification: None,
+                    assessment: None,
+                }],
+            )
+            .unwrap();
+        let records = state
+            .projection(&profiles.0[&instrument].profile, 0, 0.5)
+            .unwrap();
+        handles.push(records[0].contact_id.clone());
+        world
+            .get_mut::<ShipSystemBlackboards>(ship)
+            .unwrap()
+            .0
+            .insert(
+                instrument,
+                if sensor {
+                    SystemBlackboard::SensorRadar(SensorRadarBlackboard {
+                        tracks: Some(records),
+                        ..Default::default()
+                    })
+                } else {
+                    SystemBlackboard::TacticalRadar(TacticalRadarBlackboard {
+                        tracks: Some(records),
+                        ..Default::default()
+                    })
+                },
+            );
+    }
+    assert_ne!(handles[0], handles[1]);
+    let config = &world.get::<ShipConfigComponent>(ship).unwrap().0;
+    let banks: Vec<_> = config
+        .systems
+        .iter()
+        .filter(|s| s.kind == crate::ship::system_registry::PHASER_BANK_KIND)
+        .map(|s| s.id.clone())
+        .collect();
+    let consoles: Vec<_> = banks
+        .iter()
+        .filter_map(|id| config.system(id).unwrap().console.clone())
+        .collect();
+    let mut targets = super::super::assignments::ShipWeaponTargets::default();
+    for bank in banks {
+        targets.0.set_individual(bank, Some(handles[1].clone()));
+    }
+    world.entity_mut(ship).insert((tracks, targets));
+    crate::science::shield_enquiry::fixture::acquired(
+        &mut world.get_mut::<ShipSystemBlackboards>(ship).unwrap(),
+        &handles[0],
+        0.73,
+    );
+    let original = world.get::<ShipSystemBlackboards>(ship).unwrap().clone();
+    let feeds: Vec<_> = world
+        .get::<ShipConfigComponent>(ship)
+        .unwrap()
+        .0
+        .consoles
+        .iter()
+        .filter(|row| consoles.contains(&row.id))
+        .map(|row| (row.id.clone(), row.feeds.clone()))
+        .collect();
+    for row in &mut world
+        .get_mut::<ShipConfigComponent>(ship)
+        .unwrap()
+        .0
+        .consoles
+    {
+        if consoles.contains(&row.id) {
+            row.feeds.retain(|feed| feed.source.0 != "sensor-radar");
+        }
+    }
+    run(&mut world, 5);
+    assert_eq!(
+        frequency(&world, ship),
+        0.5,
+        "Scan history alone cannot correlate a private route"
+    );
+    for (id, feeds) in feeds {
+        world
+            .get_mut::<ShipConfigComponent>(ship)
+            .unwrap()
+            .0
+            .consoles
+            .iter_mut()
+            .find(|row| row.id == id)
+            .unwrap()
+            .feeds = feeds;
+    }
+    run(&mut world, 5);
+    assert_eq!(frequency(&world, ship), 0.73);
+    assert_eq!(
+        world.get::<ShipSystemBlackboards>(ship).unwrap().0,
+        original.0,
+        "tuning cannot relabel or refresh acquired history"
+    );
+}

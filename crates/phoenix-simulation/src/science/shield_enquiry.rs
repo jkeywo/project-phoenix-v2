@@ -12,6 +12,23 @@ pub fn latest_permitted_finding<'a>(
     consumer: &SystemId,
     public_subject: &str,
 ) -> Option<&'a ShieldFinding> {
+    latest_permitted_finding_for_subjects(
+        config,
+        boards,
+        consumer,
+        &std::collections::BTreeSet::from([public_subject.to_owned()]),
+    )
+}
+
+/// Callers may correlate only public handles which their own Console currently
+/// resolves to its already-authorized target. This never rewrites reading
+/// provenance, refreshes a sample, or grants access to another Scan feed.
+pub fn latest_permitted_finding_for_subjects<'a>(
+    config: &'a ShipConfig,
+    boards: &'a ShipSystemBlackboards,
+    consumer: &SystemId,
+    public_subjects: &std::collections::BTreeSet<String>,
+) -> Option<&'a ShieldFinding> {
     let view = config.observations_for_system(consumer, &boards.0);
     let mut readings = Vec::new();
     let mut sources: Vec<_> = boards.0.keys().collect();
@@ -27,7 +44,7 @@ pub fn latest_permitted_finding<'a>(
             continue;
         }
         readings.extend(scan.history.iter().filter(|reading| {
-            reading.aim == FocusedAim::Shields && reading.subject_uuid == public_subject
+            reading.aim == FocusedAim::Shields && public_subjects.contains(&reading.subject_uuid)
         }));
     }
     let latest = readings.iter().map(|reading| reading.taken_at_tick).max()?;

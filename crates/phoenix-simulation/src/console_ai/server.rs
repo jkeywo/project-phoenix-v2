@@ -1020,12 +1020,19 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
                 target,
             )
         });
-        let acquired = public_target.as_deref().and_then(|subject| {
-            crate::science::shield_enquiry::latest_permitted_finding(
+        let acquired = locked_target.as_deref().and_then(|target| {
+            let aliases = crate::science::contact_routing::aliases_for_source(
+                &ship_config.0,
+                blackboards,
+                tracks,
+                &owner,
+                target,
+            );
+            crate::science::shield_enquiry::latest_permitted_finding_for_subjects(
                 &ship_config.0,
                 blackboards,
                 &owner,
-                subject,
+                &aliases,
             )
         });
         let Some((subject, finding)) = public_target.zip(acquired) else {

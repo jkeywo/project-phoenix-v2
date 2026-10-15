@@ -658,6 +658,26 @@ fn every_alliance_hull_is_an_actual_selectable_ship_and_missing_target_still_den
         let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
         let public = state.projection(&profile, 1, 0.5).unwrap();
         assert!(public.iter().all(|record| !record.selectable), "{hull}");
-        assert!(state.resolve_current(&alias).is_none(), "{hull}");
+        use bevy::ecs::system::RunSystemOnce;
+        app.world_mut()
+            .run_system_once(crate::ship::sensors::publish_sensor_radar_blackboard)
+            .unwrap();
+        let world = app.world();
+        assert!(
+            crate::science::contact_routing::resolve(
+                &world
+                    .get::<crate::ship_plugin::ShipConfigComponent>(observer)
+                    .unwrap()
+                    .0,
+                world
+                    .get::<crate::server_app::ShipSystemBlackboards>(observer)
+                    .unwrap(),
+                world.get::<BroadTracks>(observer),
+                &SystemId("sensors".into()),
+                &alias,
+            )
+            .is_none(),
+            "{hull}"
+        );
     }
 }

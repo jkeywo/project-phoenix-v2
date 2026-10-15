@@ -96,6 +96,12 @@ there is no bootstrap tick where an authored Carried probe operates in space.
 Conditional, layered/additive and runtime Carried authoring are explicitly
 unsupported in this first adapter and refuse before materialization. Later
 lifecycle extensions must reuse the same custody owner.
+Ship tags remain ordinary physical classification, independent of custody. A
+GameStart carried craft follows all explicit unconditional crew launch-slot rows
+and cannot itself be mapped/offered as a crew hull; ambiguous conditional slot
+predecessors refuse. Actual bootstrap repeats the crew-placement refusal before
+minting and applies inactive custody inside the same spawn transaction.
+
 
 The handled probe reuses existing ShipPhysics solely for canonical XYZ/yaw,
 projected by ordinary `sync_ship_position` and retained by ordinary snapshot/digest.
@@ -127,6 +133,16 @@ and recovery use accepted local bay geometry and the same actual body; moving
 launch momentum and propelled rendezvous are not claimed by this stopped-parent
 prototype. Human and the Bay System's ordinary individual AI issue the same
 admitted commands under their actual Console authority.
+
+Handling advances paid work after the existing Dock movement in Modifiers. Once
+that same Job is ready, it retains its actual location until the next ordinary
+backend boundary; there is no second pending queue or saved phase. A derived
+CommitCraftHandling stage at the end of Physics rechecks actual parent motion,
+source/Operation/access, current recovery contact/range and receiving space,
+then commits location and pose once. It runs before Rapier SyncBackend's existing
+removal and body/collider initialization chain, which settles handle detachment
+or reinitialization before Damage. A blocked handoff retains ready paid work
+without charging it again or moving the body. No extra physics step is added.
 
 While carried, derive nonspatial inactive presence from the canonical location.
 The initial adapter may use Bevy Disabled, but must explicitly detach actual Rapier

@@ -6328,3 +6328,14 @@ world.transit.home,Known authored World route,Home,Home,Home,source
 world.transit.outer,Known authored World route,Outer system,Outer system,Outer system,source
 world.entity.sector_outer_body.name,Actual route proof fixed body,Outer giant,Outer giant,Outer giant,source
 world.entity.sector_support_body.name,Actual route proof support body,Support giant,Support giant,Support giant,source
+workshop.world_routes.title,Accepted root route authoring,World routes,World routes,World routes,source
+workshop.world_routes.world,Accepted root route authoring,Selectable root World,Selectable root World,Selectable root World,source
+workshop.world_routes.route,Accepted root route authoring,Existing route,Existing route,Existing route,source
+workshop.world_routes.id,Accepted root route authoring,Route ID,Route ID,Route ID,source
+workshop.world_routes.label,Accepted root route authoring,Label string key,Label string key,Label string key,source
+workshop.world_routes.target,Accepted root route authoring,Destination World,Destination World,Destination World,source
+workshop.world_routes.anchor,Accepted root route authoring,Arrival anchor,Arrival anchor,Arrival anchor,source
+workshop.world_routes.add,Accepted root route authoring,Add route,Add route,Add route,source
+workshop.world_routes.save,Accepted root route authoring,Save route,Save route,Save route,source
+workshop.world_routes.remove,Accepted root route authoring,Remove route,Remove route,Remove route,source
+workshop.world_routes.refused,Accepted root route authoring,Route edit refused: {reason},Route edit refused: {reason},Route edit refused: {reason},source

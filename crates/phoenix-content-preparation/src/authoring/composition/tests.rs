@@ -1078,3 +1078,66 @@ fn selected_test_checks_dormant_destination_support_composition_and_scripts() {
     ));
     assert!(selected.iter().all(|row| row.file != BASE_ROOT));
 }
+
+#[test]
+fn actual_world_route_form_edits_keep_unrelated_source_and_support_existing_array_tables() {
+    let source = "# exact root\n[anchors]\nhome=[0,0,0] # retain anchor\n\n[[transit_destination]]\nid='home' # retained id comment\nlabel='route.home'\ntarget={kind='base',anchor='home'} # retained target comment\n\n[extension]\nkeep=7 # retain unknown\n";
+    let mut files = BTreeMap::from([(ROOT.to_owned(), source.to_owned())]);
+    let dependency = WorkshopDependencies::default();
+    let edited = compose(&files, &dependency, &request(ROOT, source, vec![
+        Edit::Put { path: vec![key("transit_destination"), Segment::Index(0), key("label")], value_source: "\"route.renamed\"".into() },
+        Edit::Put { path: vec![key("transit_destination"), Segment::Index(0), key("target")], value_source: "{kind=\"base\",anchor=\"home\"}".into() },
+        Edit::Insert { path: vec![key("transit_destination")], index: 1, value_source: "{id=\"outer\",label=\"route.outer\",target={kind=\"layer\",path=\"assets/worlds/outer.toml\",anchor=\"arrival\"}}".into() },
+    ])).unwrap();
+    assert!(edited.starts_with("# exact root\n[anchors]\nhome=[0,0,0] # retain anchor\n"));
+    assert!(edited.contains("id='home' # retained id comment"));
+    assert!(edited.contains("# retained target comment"));
+    assert!(edited.contains("[extension]\nkeep=7 # retain unknown\n"));
+    let parsed = crate::world::config::parse_world(&edited).unwrap();
+    assert_eq!(parsed.transit_destinations.len(), 2);
+    assert_eq!(parsed.transit_destinations[0].label, "route.renamed");
+    files.insert(ROOT.into(), edited.clone());
+    let removed = compose(
+        &files,
+        &dependency,
+        &request(
+            ROOT,
+            &edited,
+            vec![Edit::Remove {
+                path: vec![key("transit_destination"), Segment::Index(1)],
+            }],
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        crate::world::config::parse_world(&removed)
+            .unwrap()
+            .transit_destinations
+            .len(),
+        1
+    );
+    let empty = "# keep\n[anchors]\nhome=[0,0,0]\n";
+    files.insert(ROOT.into(), empty.into());
+    let first = compose(
+        &files,
+        &dependency,
+        &request(
+            ROOT,
+            empty,
+            vec![Edit::Put {
+                path: vec![key("transit_destination")],
+                value_source:
+                    "[{id=\"home\",label=\"route.home\",target={kind=\"base\",anchor=\"home\"}}]"
+                        .into(),
+            }],
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        crate::world::config::parse_world(&first)
+            .unwrap()
+            .transit_destinations
+            .len(),
+        1
+    );
+}

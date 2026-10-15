@@ -511,7 +511,26 @@ preparation before JSON restore, full 360-update capture/digest comparisons and
 five malformed no-write candidates. Its native result is integrator-owned and
 pending. Renderer/native human acceptance is also pending.
 
-This checkpoint does not close increment 18. Remaining work includes the basic
-visual World-route catalogue editor, actual FormUp Navigation/Helm consumer,
-formation transit and final multi-seat/native acceptance. No new network or save
+This checkpoint does not close increment 18. Remaining work includes the actual FormUp Navigation/Helm consumer, formation
+transit and final multi-seat/native acceptance. The basic World-route form is
+recorded in the authoring checkpoint below. No new network or save
 mechanism, campaign progression or background sector simulation is introduced.
+
+## Basic World-route authoring checkpoint
+
+The existing Workshop spatial panel now includes a structured route catalogue
+form. It edits actual selectable draft roots, chooses actual accepted target
+Worlds/finite anchors and writes closed Base/Layer bindings. Dependency targets
+remain read-only. Addition, leaf updates and removal use the existing runtime
+TOML editor inside the same accepted-source validation/history transaction.
+Undo/redo, export/reload and disposable Test therefore consume the same source.
+Duplicate IDs or x/z arrival choices, unsupported paths and stale/disposed edits
+refuse without changing accepted history.
+
+Independent source review passed. Focused route/spatial JavaScript: 23 tests
+in four files passed; strings 6322 clean and layer checks passed. A real Rust
+source-editor regression covers existing array-of-table rows, leaf comment
+preservation, insertion, removal and first-row creation; native execution remains
+integrator-owned. This source checkpoint closes the missing basic form, while
+actual browser/native Workshop Test and the remaining increment-18 movement
+acceptance are still open.

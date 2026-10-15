@@ -2,7 +2,7 @@
 title: Navigation Console
 type: entity
 tags: [console, navigation, waypoint, map, radar, ship]
-sources: [gui/components/navigation-sharing-controls.js, gui/transit.js, gui/battleship/navigation.html, gui/cruiser/comms.html, gui/courier/captain.html, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/stations/navigation-actions.js, gui/stations/navigation-action-control.js, gui/semantic-action-registry.js, gui/gamepad-input.js, gui/console-state.js, gui/sim-state.js, gui/action-map.js, gui/hero-bar.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/navigation/mod.rs, crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-sim-gameplay/src/civilian/traffic.rs, crates/phoenix-simulation/src/civilian/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, assets/entities/alliance_battleship.toml, assets/entities/alliance_cruiser.toml, assets/entities/alliance_courier.toml, assets/entities/alliance_destroyer.toml]
+sources: [gui/workshop-world-routes-panel.js, editor/workshop-world-routes.js, gui/components/navigation-sharing-controls.js, gui/transit.js, gui/battleship/navigation.html, gui/cruiser/comms.html, gui/courier/captain.html, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/stations/navigation-actions.js, gui/stations/navigation-action-control.js, gui/semantic-action-registry.js, gui/gamepad-input.js, gui/console-state.js, gui/sim-state.js, gui/action-map.js, gui/hero-bar.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/navigation/mod.rs, crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-sim-gameplay/src/civilian/traffic.rs, crates/phoenix-simulation/src/civilian/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, assets/entities/alliance_battleship.toml, assets/entities/alliance_cruiser.toml, assets/entities/alliance_courier.toml, assets/entities/alliance_destroyer.toml]
 updated: 2026-10-15
 ---
 
@@ -114,3 +114,9 @@ point. A received feed can display those choices without granting control;
 co-hosted tabs do not acquire them implicitly. The GUI carries no content file
 path, destination actor identity or independent travel command. Duplicate x/z
 anchors are unsupported even when authored heights differ.
+
+The Workshop spatial panel edits this root catalogue through
+`gui/workshop-world-routes-panel.js` and `editor/workshop-world-routes.js`.
+It chooses actual target Worlds and anchors, then uses existing runtime
+structural edits and accepted-source validation/history. Dependency targets are
+read-only; no in-game route control or separate document state is involved.

@@ -1,5 +1,6 @@
 import { applySpatialOperation, spatialInventory } from '../editor/workshop-spatial.js';
 import { t } from './strings.js';
+import { mountWorkshopWorldRoutes } from './workshop-world-routes-panel.js';
 
 /** Keyboard-operable visual placement and its equivalent structured form. */
 export function mountWorkshopSpatial({ root, provider, runtime, draft: getDraft, busy, setBusy,
@@ -130,6 +131,7 @@ export function mountWorkshopSpatial({ root, provider, runtime, draft: getDraft,
     moveEntity.disabled = removeEntity.disabled = held || !entity;
     addLayer.disabled = held || !layerPath.value.trim(); addAnchor.disabled = held || !name.value.trim();
     addEntity.disabled = held || !template.value.trim();
+    routesPanel.controls();
   }
 
   function paint() {
@@ -146,7 +148,7 @@ export function mountWorkshopSpatial({ root, provider, runtime, draft: getDraft,
     entities.replaceChildren(...(row?.entities || []).map(item => option(item.index,
       `${item.region ? t('workshop.spatial.region') : t('workshop.spatial.entity')} — ${item.id || item.name || item.template_path}`)));
     if (row?.entities.some(item => String(item.index) === oldEntity)) entities.value = oldEntity; else entities.selectedIndex = -1;
-    paintMap(); controls();
+    paintMap(); controls(); routesPanel.refresh();
   }
 
   async function apply(operation) {
@@ -183,7 +185,9 @@ export function mountWorkshopSpatial({ root, provider, runtime, draft: getDraft,
   layerPath.addEventListener('input', controls); name.addEventListener('input', controls); template.addEventListener('input', controls);
   anchors.addEventListener('change', () => { const row = selectedAnchor(); if (row) selectRow(row, 'anchor'); });
   entities.addEventListener('change', () => { const row = selectedEntity(); if (row) selectRow(row, 'entity'); });
+  const routesPanel = mountWorkshopWorldRoutes({ root: section, runtime, provider, draft: getDraft,
+    dependencies: () => dependencies, busy, setBusy, changed });
   function refresh() { paint(); void loadDependencies(); }
   refresh();
-  return { node: section, refresh, dispose() { disposed = true; generation += 1; section.remove(); } };
+  return { node: section, refresh, dispose() { disposed = true; generation += 1; routesPanel.dispose(); section.remove(); } };
 }

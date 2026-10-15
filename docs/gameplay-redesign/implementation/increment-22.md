@@ -346,6 +346,89 @@ mechanisms revalidate and make actual claims at execution.
 hazard-and-permissions under tighter scheduling to a larger crew. Document actual
 playtest durations; do not treat estimated attention values as measurements.
 
+### 22C first consumer: dated maintenance forecasts
+
+Adopted finite encoding, 15 October 2026. This opt-in extension schedules the
+actual imported internal Repair/local-delivery leaves above. It does not finish
+22C's hazard/permission demonstration, calibrate human attention, or implement
+22D automatic repair. Existing plans without `planning.temporal` are unchanged.
+
+An optional primitive `forecast` declares integer `min_secs`, `max_secs` and
+`recovery_secs`, plus ordered nonoverlapping `phase` rows. Each row has
+`kind = active | monitor`, `offset_secs`, positive `duration_secs` and positive
+`attention_permille` at most 1000. Undeclared time is unattended. Phase intervals
+must fit inside `max_secs`; minimum is positive and no greater than maximum.
+Recovery follows the maximum interval, occupies the same forecast physical
+resource, and has no invented human work. Estimates are authored hypotheses,
+never physical progress, operator skill multipliers or measured playtest results.
+
+`planning.temporal.profile` supplies distinct ascending `min_operators` thresholds
+and positive `deadline_secs`. The first threshold is zero; selection uses the
+highest applicable threshold. Horizon/deadline and each complete duration are
+at most 86400 seconds, with at most 16 phases per primitive and 16 profiles.
+All selected leaves require a forecast when temporal scheduling is enabled.
+The actual positive fixed timestep converts seconds to integer ticks by rounding
+up, with checked arithmetic. The one accepted absolute deadline is original choice
+tick plus that profile's deadline. It never moves after choice. Deadline pressure
+changes only in this opt-in policy; combat effectiveness remains independent.
+
+At original choice, Simulation projects only the bound actor's actual System
+control entries, ordinary authority host and replicated Station Rating. A Human
+operator additionally requires that exact Station in the existing frozen fleet
+crew picture and a current non-Backfill rating. A vacant/default-Human seat is not
+capacity; cohosted Consoles share their one Station operator budget. AI-operated
+owners have no invented human attention demand. Missing/Offline controls or a
+Human source without supported occupied provenance withhold the new schedule.
+Initially vacant seats joined later need a canonical participation-provenance
+extension before this first consumer can count them; local Sessions are never a
+cross-peer fallback. No participant token or new crew owner is introduced.
+
+World computes a deterministic bounded schedule in dependency/topological and
+stable node-id order. It uses conservative maximum duration plus recovery,
+requires every forecast predecessor to finish before its dependent begins, and
+finds the earliest placement whose exact phase overlaps stay within 1000 per
+actual operator. Minute buckets report attention area; they do not replace the
+continuous overlap test. The actual actor/Repair owner/team is an exclusive
+forecast resource; first delivery scheduling conservatively treats its actual
+Logistics owner as exclusive. These are forecasts, never reservations or claims.
+The first accepted schedule must fit wholly within its authored deadline; an
+infeasible graph explains refusal without releasing or dispatching physical work.
+
+The same `PlanChoice` retains original timestep, bounded owner/source/Station/
+rating inputs, selected profile, absolute deadline and exact per-node start/end
+ticks. No new timer, job map, scheduler resource or callback queue is added.
+Release still requires real acknowledged predecessor evidence and additionally
+waits for the forecast earliest start. Early ordinary unbound work stays ordinary;
+late evidence does not become success merely because its forecast elapsed. Late
+actual work retains its valid history and pending requests; inspection reports
+overdue from current tick versus the committed deadline. No automatic cancellation,
+failure, reward or deadline extension is inferred from the forecast.
+
+Full-candidate validation recomputes timing and minute summaries using the saved
+original inputs and immutable source. Validate exact actor/owner identity,
+authored Station/rating vocabulary, bounded control mode and consistent historical
+time/frontier shape. It cannot prove a past disconnection or rating by looking at
+today's Sessions/control source, and does not pretend to reconstruct that history.
+Accepted historical inputs are persisted facts like the original method choice;
+later disconnect, rating, delegation or capability changes never cause fresh
+method/profile selection or erase legitimate history. Current ordinary admission
+and equipment still decide whether physical work can run. Save and fold these
+inputs and resulting commitment once on the existing World owner.
+
+Proof includes independent versus cohosted operators, vacant/AI/Offline controls,
+continuous overload inside one minute, uncertainty/recovery/deadline refusal,
+exact real-evidence release and delayed completion, forged schedule no-write and
+JSON continuation under changed current ratings. Existing accepted-source editing,
+privileged Scenario inspection and ordinary Repair/Logistics requests expose the
+same forecast without gameplay knowledge or authority grants. The quiet imported
+maintenance demonstration supplies the first real consumer; its duration and
+attention values remain provisional until actual playtest measurements.
+
+The later communication primitive requires an explicit adopted join to actual
+ReportStatus read and returned lineage before any authored Scenario permission
+effect may follow. A status report is not permission. Do not create hypothetical
+permission/hazard facts or an invented communication JobId to complete this exit.
+
 ## 22D — Monitoring, repair and authoring
 
 The first accepted-source editor uses the existing World situation arrays and

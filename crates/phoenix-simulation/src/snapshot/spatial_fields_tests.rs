@@ -16,6 +16,7 @@ fn candidate() -> (World, PhoenixSnapshot) {
             1.0,
             1.0,
             &[BroadMeasurement {
+                elevation: None,
                 source: "physical-subject".into(),
                 observation: None,
                 selectable: true,

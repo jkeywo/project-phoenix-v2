@@ -26,6 +26,7 @@ fn rig() -> (
             0.5,
             1.0,
             &[BroadMeasurement {
+                elevation: None,
                 source: "private-physical-identity".into(),
                 selectable: true,
                 observation: None,
@@ -262,6 +263,7 @@ fn duplicate_recorded_mission_names_refuse_instead_of_choosing_hidden_route_orde
     ]
     .into_iter()
     .map(|(source, position)| BroadMeasurement {
+        elevation: None,
         source: source.into(),
         position,
         selectable: true,

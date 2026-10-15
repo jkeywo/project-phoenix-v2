@@ -1,4 +1,71 @@
 use super::*;
+
+#[test]
+fn actual_paid_height_uses_physics_and_distinct_samples_without_live_vertical_velocity() {
+    let (mut app, observer, target, profile) = rig();
+    app.world_mut().get_mut::<ShipPhysics>(target).unwrap().y = 7.2;
+    app.world_mut()
+        .get_mut::<Transform>(target)
+        .unwrap()
+        .translation
+        .y = 900.0;
+    fund(&mut app, observer, &profile, 1.0);
+    let paid = app
+        .world()
+        .get::<ShipPowerSystem>(observer)
+        .unwrap()
+        .0
+        .capture_continuation();
+    app.update();
+    let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
+    let first = state.projection(&profile, 0, 0.5).unwrap()[0].clone();
+    let elevation = first.elevation.unwrap();
+    assert!((elevation.height - 7.2).abs() <= elevation.error);
+    assert_eq!(elevation.error, profile.position_error);
+    assert_eq!(elevation.velocity, None);
+    assert_eq!(
+        app.world()
+            .get::<ShipPowerSystem>(observer)
+            .unwrap()
+            .0
+            .capture_continuation(),
+        paid
+    );
+    app.world_mut().get_mut::<ShipPhysics>(target).unwrap().y = 9.2;
+    app.update();
+    let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
+    assert_eq!(state.projection(&profile, 0, 0.5).unwrap()[0], first);
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 1;
+    fund(&mut app, observer, &profile, 1.0);
+    app.update();
+    let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
+    let next = state.projection(&profile, 1, 0.5).unwrap()[0].clone();
+    let next_elevation = next.elevation.unwrap();
+    assert_eq!(next.observed_tick, 1);
+    assert_eq!(
+        next_elevation.velocity,
+        Some((next_elevation.height - elevation.height) / 0.5)
+    );
+    app.world_mut().get_mut::<ShipPhysics>(target).unwrap().y = 100_000.0;
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 2;
+    fund(&mut app, observer, &profile, 0.0);
+    app.update();
+    let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
+    let held = state.projection(&profile, 2, 0.5).unwrap()[0].clone();
+    assert_eq!(held.observed_tick, 1);
+    assert_eq!(held.elevation, next.elevation);
+    assert!(held.predicted);
+    // Even a newly paid sample cannot see a physically out-of-range Y.
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 3;
+    fund(&mut app, observer, &profile, 1.0);
+    app.update();
+    let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
+    assert_eq!(
+        state.projection(&profile, 3, 0.5).unwrap()[0].elevation,
+        next.elevation
+    );
+    assert!(state.current.is_empty());
+}
 #[test]
 fn actual_in_flight_ordnance_is_measured_without_guidance_or_launcher_intelligence() {
     let (mut app, observer, target, profile) = rig();
@@ -195,6 +262,7 @@ fn paid_sensor_tracks_include_ghosts_without_any_scene_entity_and_keep_unchanged
     let public = state.projection(&profile, 0, 0.5).unwrap();
     let ghost = public.iter().find(|track| track.contact_id == id).unwrap();
     assert_eq!(ghost.position, [500.0, 90.0]);
+    assert_eq!(ghost.elevation, None);
     assert_eq!(ghost.identity.as_ref().unwrap().name, "Reported point");
     assert!(!ghost.selectable);
     assert!(state.resolve_current(&id).is_none());
@@ -390,6 +458,7 @@ fn substituted_sensor_report_gets_own_handle_without_live_geometry_or_facts() {
     let public = state.projection(&profile, 4, 0.5).unwrap();
     assert_eq!(public.len(), 1);
     assert_eq!(public[0].position, [123.0, 456.0]);
+    assert_eq!(public[0].elevation, None);
     assert_eq!(public[0].observed_tick, 2);
     assert_eq!(public[0].identity.as_ref().unwrap().name, "Reported vessel");
     assert!(public[0].identity.as_ref().unwrap().faction.is_none());

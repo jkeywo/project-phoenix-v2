@@ -101,6 +101,7 @@ fn rig_with_aim(
                 0.1,
                 1.0,
                 &[super::super::broad::BroadMeasurement {
+                    elevation: None,
                     observation: None,
                     source: "private-not-a-live-world-entity".into(),
                     selectable: true,

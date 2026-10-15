@@ -122,6 +122,7 @@ fn rig_with(
             0.5,
             paid,
             &[crate::science::broad::BroadMeasurement {
+                elevation: None,
                 source: "finite-source".into(),
                 selectable: true,
                 observation: None,

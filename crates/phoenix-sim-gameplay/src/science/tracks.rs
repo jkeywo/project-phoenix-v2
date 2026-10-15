@@ -2,7 +2,7 @@
 //! Actual source IDs remain private routing keys, never association evidence.
 use phoenix_model::observation::{ObservationMetadata, ObservationSource, ObservationSubject};
 pub use phoenix_model::sensing_tracks::{
-    SensorTrackSnapshot, TrackAssessment, TrackIdentity, TrackStage,
+    ObservedElevation, SensorTrackSnapshot, TrackAssessment, TrackIdentity, TrackStage,
 };
 use phoenix_model::{identity::SystemId, sensing::BroadConfig};
 use serde::{Deserialize, Serialize};
@@ -24,6 +24,8 @@ pub struct BroadMeasurement {
     pub observation: Option<ObservationMetadata>,
     pub selectable: bool,
     pub position: [f32; 2],
+    /// Raw physical height at the same sample; caller cannot supply velocity.
+    pub elevation: Option<ObservedElevation>,
     pub support: f32,
     pub identity: Option<TrackIdentity>,
     pub classification: Option<String>,
@@ -45,6 +47,7 @@ pub struct BroadTrack {
     pub selectable: bool,
     pub observed_tick: u64,
     pub position: [f32; 2],
+    pub elevation: Option<ObservedElevation>,
     pub velocity: Option<[f32; 2]>,
     pub velocity_error: f32,
     pub position_error: f32,
@@ -181,6 +184,12 @@ impl BroadTrackState {
                     .observer_position
                     .is_some_and(|pose| pose.iter().any(|x| !x.is_finite()))
                 || !track.position.iter().all(|value| value.is_finite())
+                || track.elevation.as_ref().is_some_and(|elevation| {
+                    elevation.validate().is_err()
+                        || track.observation.is_some()
+                        || track.observed_tick == 0 && elevation.velocity.is_some()
+                        || track.received.is_none() && elevation.error != profile.position_error
+                })
                 || track
                     .velocity
                     .is_some_and(|velocity| !velocity.iter().all(|value| value.is_finite()))
@@ -320,6 +329,12 @@ impl BroadTrackState {
             if !valid_source(&sample.source)
                 || !sources.insert(&sample.source)
                 || !sample.position.iter().all(|value| value.is_finite())
+                || sample.elevation.as_ref().is_some_and(|elevation| {
+                    elevation.validate().is_err()
+                        || elevation.velocity.is_some()
+                        || elevation.error != profile.position_error
+                        || sample.observation.is_some()
+                })
                 || !sample.support.is_finite()
                 || !(0.0..=1.0).contains(&sample.support)
                 || sample.observation.as_ref().is_some_and(|observation| {
@@ -458,6 +473,7 @@ impl BroadTrackState {
                             selectable: sample.selectable,
                             observed_tick: tick,
                             position: measured_position(sample.position, profile.position_error),
+                            elevation: None,
                             velocity: None,
                             velocity_error: 0.0,
                             position_error: profile.position_error,
@@ -498,6 +514,7 @@ impl BroadTrackState {
                     track.position = sample.position;
                     track.observed_tick = observation.observed_tick.expect("validated report time");
                     track.velocity = None;
+                    track.elevation = None;
                     track.velocity_error = 0.0;
                     track.supported_secs = 0.0;
                     track.refresh_secs = 0.0;
@@ -528,6 +545,7 @@ impl BroadTrackState {
                 track.position = sample_position(sample, profile.position_error);
                 track.observed_tick = tick;
                 track.velocity = None;
+                track.elevation = None;
                 track.velocity_error = 0.0;
             }
             let ambiguous_identity = sample.identity.as_ref().is_some_and(|identity| {
@@ -552,6 +570,24 @@ impl BroadTrackState {
                 continue;
             }
             let position = measured_position(sample.position, profile.position_error);
+            let elevation = sample.elevation.map(|sample| {
+                let height = measured_position([sample.height, 0.0], sample.error)[0];
+                let velocity =
+                    track
+                        .elevation
+                        .filter(|_| tick > track.observed_tick)
+                        .map(|previous| {
+                            bounded_float(
+                                (f64::from(height) - f64::from(previous.height))
+                                    / ((tick - track.observed_tick) as f64 * f64::from(fixed_dt)),
+                            )
+                        });
+                ObservedElevation {
+                    height,
+                    error: sample.error,
+                    velocity,
+                }
+            });
             if tick > track.observed_tick {
                 let elapsed = (tick - track.observed_tick) as f64 * f64::from(fixed_dt);
                 track.velocity = Some(
@@ -565,6 +601,7 @@ impl BroadTrackState {
                     bounded_float(2.0 * f64::from(profile.position_error) / elapsed);
             }
             track.position = position;
+            track.elevation = elevation;
             track.selectable = sample.selectable;
             track.observed_tick = tick;
             if track.refresh_secs >= f64::from(profile.identity_secs) && sample.identity.is_some() {
@@ -631,6 +668,7 @@ impl BroadTrackState {
                         .unwrap_or_default(),
                     references: Vec::new(),
                     contact_id: track.contact_id.clone(),
+                    elevation: track.elevation,
                     observation: track.observation.clone().map(|mut observation| {
                         observation.subject = ObservationSubject::Entity {
                             uuid: track.contact_id.clone(),

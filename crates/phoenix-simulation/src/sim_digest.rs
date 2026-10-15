@@ -2707,6 +2707,11 @@ fn fold_broad_tracks_namespace(world: &World, acc: u64) -> u64 {
                 }
                 for track in state.tracks.values_mut() {
                     track.position = track.position.map(canonical);
+                    if let Some(elevation) = &mut track.elevation {
+                        elevation.height = canonical(elevation.height);
+                        elevation.error = canonical(elevation.error);
+                        elevation.velocity = elevation.velocity.map(canonical);
+                    }
                     track.velocity = track.velocity.map(|velocity| velocity.map(canonical));
                     track.position_error = canonical(track.position_error);
                     track.velocity_error = canonical(track.velocity_error);

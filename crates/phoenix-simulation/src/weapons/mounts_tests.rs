@@ -21,6 +21,7 @@ fn aiming_uses_only_the_same_permitted_current_measurement_and_conceal_wins() {
             0.5,
             1.0,
             &[BroadMeasurement {
+                elevation: None,
                 source: "private-actor".into(),
                 selectable: true,
                 observation: None,
@@ -330,6 +331,7 @@ fn actual_tick_preserves_bearing_and_power_during_refit_and_vacancy_then_resumes
             0.5,
             1.0,
             &[BroadMeasurement {
+                elevation: None,
                 source: "held-target".into(),
                 selectable: true,
                 observation: None,

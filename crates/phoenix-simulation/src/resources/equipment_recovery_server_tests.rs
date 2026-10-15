@@ -206,6 +206,7 @@ fn observe_source(
             0.5,
             paid,
             &[BroadMeasurement {
+                elevation: None,
                 source: uuid,
                 selectable: true,
                 observation: None,

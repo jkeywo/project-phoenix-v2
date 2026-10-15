@@ -88,6 +88,10 @@ paid grant and physical measurements, retains acquired findings with their sampl
 ticks and predicts lost positions using observed motion. Public contact IDs include
 their instrument owner; current actuator routing stays private and expires with
 measured support. Co-hosting instruments does not merge their knowledge.
+Physical returns also carry quantized elevation with their original sample tick
+and error bound. Vertical velocity requires two distinct paid physical samples;
+reports without measured height retain `None`. Held and relayed elevation stays
+dated evidence, and disjoint height intervals cannot fuse as one planar return.
 Generated gameplay rocks participate using their existing `AsteroidUuid`, actual
 physical pose and authored roster tags. Visibility follows the scanner's `shows`
 filter; selection separately follows the rock template's `target.tags` and the

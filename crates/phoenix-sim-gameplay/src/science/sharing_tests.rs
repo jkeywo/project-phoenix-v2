@@ -2,6 +2,61 @@ use super::super::tracks::{BroadMeasurement, TrackIdentity};
 use super::*;
 use phoenix_model::identity::SystemId;
 
+#[test]
+fn relayed_elevation_keeps_its_original_sample_and_rejects_malformed_receipts() {
+    use phoenix_model::sensing_tracks::ObservedElevation;
+    let p = profile();
+    let mut source = observed(1, [20.0, 0.0], [-20.0, 0.0]);
+    source.tracks.values_mut().next().unwrap().elevation = Some(ObservedElevation {
+        height: 30.0,
+        error: p.position_error,
+        velocity: Some(2.0),
+    });
+    let packet = export_samples("source", &source, &p, 1, 1.0).unwrap();
+    let mut receiver = BroadTrackState::new(&p);
+    receive_samples("receiver", &mut receiver, &p, 2, 1.0, &packet).unwrap();
+    let held = projection("receiver", &receiver, &p, 2, 1.0).unwrap()[0].clone();
+    assert_eq!(held.elevation, packet[0].record.elevation);
+    assert_eq!(held.observed_tick, 1);
+    let relay = export_samples("receiver", &receiver, &p, 3, 1.0).unwrap();
+    let mut third: BroadTrackState =
+        serde_json::from_str(&serde_json::to_string(&receiver).unwrap()).unwrap();
+    receive_samples("third", &mut third, &p, 4, 1.0, &relay).unwrap();
+    let later = projection("third", &third, &p, 4, 1.0).unwrap()[0].clone();
+    assert_eq!(later.elevation, held.elevation);
+    assert_eq!(later.observed_tick, 1);
+    let before = receiver.clone();
+    let mut malformed = packet;
+    malformed[0].record.elevation.as_mut().unwrap().error = -1.0;
+    assert!(receive_samples("receiver", &mut receiver, &p, 4, 1.0, &malformed).is_err());
+    assert_eq!(receiver, before);
+}
+
+#[test]
+fn independent_planar_geometry_cannot_fuse_disjoint_observed_heights() {
+    use phoenix_model::sensing_tracks::ObservedElevation;
+    let p = profile();
+    let mut first = observed(1, [-2.0, 0.0], [-30.0, 0.0]);
+    first.tracks.values_mut().next().unwrap().elevation = Some(ObservedElevation {
+        height: 30.0,
+        error: p.position_error,
+        velocity: None,
+    });
+    let mut receiver = observed(1, [2.0, 0.0], [30.0, 0.0]);
+    receiver.tracks.values_mut().next().unwrap().elevation = Some(ObservedElevation {
+        height: -30.0,
+        error: p.position_error,
+        velocity: None,
+    });
+    let packet = export_samples("first", &first, &p, 1, 1.0).unwrap();
+    receive_samples("receiver", &mut receiver, &p, 1, 1.0, &packet).unwrap();
+    let original = receiver.clone();
+    let rows = projection("receiver", &receiver, &p, 1, 1.0).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|row| row.samples.len() == 1));
+    assert_eq!(receiver, original);
+}
+
 fn profile() -> BroadConfig {
     BroadConfig {
         reading_ticks: 0,
@@ -25,6 +80,7 @@ fn observed(tick: u64, position: [f32; 2], pose: [f32; 2]) -> BroadTrackState {
             1.0,
             1.0,
             &[BroadMeasurement {
+                elevation: None,
                 source: "private-target-route".into(),
                 observation: None,
                 selectable: true,
@@ -120,16 +176,12 @@ fn independent_useful_geometry_refines_position_but_a_relay_copy_does_not() {
     receive_samples("receiver", &mut receiver, &p, 1, 1.0, &packet).unwrap();
     let originals = receiver.clone();
     let fused = projection("receiver", &receiver, &p, 1, 1.0).unwrap();
-    assert!(
-        fused
-            .iter()
-            .any(|row| row.position_error < 5.0 && row.samples.len() == 2)
-    );
-    assert!(
-        fused
-            .iter()
-            .all(|row| row.identity.as_ref().unwrap().name == "measured label")
-    );
+    assert!(fused
+        .iter()
+        .any(|row| row.position_error < 5.0 && row.samples.len() == 2));
+    assert!(fused
+        .iter()
+        .all(|row| row.identity.as_ref().unwrap().name == "measured label"));
     assert_eq!(receiver, originals, "fusion has no canonical mutation");
     let mut relay = BroadTrackState::new(&p);
     let receiver_originals = export_samples("receiver", &receiver, &p, 1, 1.0).unwrap();

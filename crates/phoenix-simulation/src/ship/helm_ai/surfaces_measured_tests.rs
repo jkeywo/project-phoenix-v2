@@ -57,6 +57,7 @@ fn rig() -> (World, Entity, crate::core::messages::SystemId, uuid::Uuid) {
             0.5,
             1.0,
             &[BroadMeasurement {
+                elevation: None,
                 source: actual.to_string(),
                 observation: None,
                 selectable: true,
@@ -81,6 +82,7 @@ fn rig() -> (World, Entity, crate::core::messages::SystemId, uuid::Uuid) {
         crate::ship::system_registry::sensor_radar_system_id(),
         SystemBlackboard::SensorRadar(SensorRadarBlackboard {
             tracks: Some(vec![phoenix_model::sensing_tracks::SensorTrackSnapshot {
+                elevation: None,
                 contact_id: "private-science-return".into(),
                 position: [88.0, 99.0],
                 ..observed[0].clone()

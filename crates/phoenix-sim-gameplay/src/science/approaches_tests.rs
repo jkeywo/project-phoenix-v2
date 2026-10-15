@@ -7,6 +7,7 @@ use phoenix_model::{
 
 fn sample() -> SensorTrackSnapshot {
     SensorTrackSnapshot {
+        elevation: None,
         contact_id: "observed-ordnance".into(),
         references: Vec::new(),
         samples: vec![RadarSampleProvenance {

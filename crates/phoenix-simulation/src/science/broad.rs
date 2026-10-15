@@ -260,6 +260,13 @@ pub(crate) fn tick(
                             );
                             if support > 0.0 {
                                 measurements.push(BroadMeasurement {
+                                    elevation: Some(
+                                        phoenix_model::sensing_tracks::ObservedElevation {
+                                            height: position.y,
+                                            error: profile.position_error,
+                                            velocity: None,
+                                        },
+                                    ),
                                     source: projectile.uuid.clone(),
                                     observation: None,
                                     selectable: false,
@@ -376,6 +383,11 @@ pub(crate) fn tick(
                             .or_else(|| name.map(|name| name.0.as_str()))
                             .filter(|name| !name.is_empty());
                         measurements.push(BroadMeasurement {
+                            elevation: Some(phoenix_model::sensing_tracks::ObservedElevation {
+                                height: position.y,
+                                error: profile.position_error,
+                                velocity: None,
+                            }),
                             source: id.to_owned(),
                             observation: None,
                             selectable: target.is_some_and(|target| {
@@ -549,6 +561,7 @@ fn ghost_measurement(
             )
         });
     Some(BroadMeasurement {
+        elevation: None,
         source,
         observation: Some(observation),
         selectable: false,
@@ -573,6 +586,7 @@ fn reported_measurement(
     use phoenix_model::observation::*;
     let sample = state.presented.as_ref()?;
     Some(BroadMeasurement {
+        elevation: None,
         source: source.to_owned(),
         observation: Some(ObservationMetadata::at(
             sample.observed_tick,

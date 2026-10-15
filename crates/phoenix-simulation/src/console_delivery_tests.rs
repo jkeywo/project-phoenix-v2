@@ -188,6 +188,7 @@ fn observe(app: &mut App, owner: &str, tick: u64, paid: f32) -> String {
         .unwrap();
     let state = states.0.get_mut(&owner).unwrap();
     let samples = [BroadMeasurement {
+        elevation: None,
         observation: None,
         source: "hidden".into(),
         selectable: true,

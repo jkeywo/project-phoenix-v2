@@ -48,6 +48,8 @@ command history, lockstep continuation streams, snapshots or digests.
 
 - PCM16 little-endian, mono 16000 Hz: exactly 80 ms / 1280 samples / 2560 bytes.
 - Independent JPEG stills: at most 12288 bytes and two frames per second.
+  Check encoded JPEG dimensions before decoding: width at most 320, height at
+  most 180, and at most 57600 pixels. Capture uses the same bounded canvas.
 - Full encoded JSON: at most 20480 bytes, measured before general ingress staging.
 - Playback: at most 200 ms audio and one pending video frame; drop stale work.
 - Optional generic `sendSnapshotOnly(encoded, {maxBytes, maxBufferedBytes})`

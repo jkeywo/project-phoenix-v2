@@ -2,7 +2,7 @@
 title: Resource Stores and Service Links
 type: concept
 tags: [resources, inventory, torpedoes, infrastructure, umbilical, workshop, continuation]
-sources: [crates/phoenix-sim-gameplay/src/resources/stock.rs, crates/phoenix-sim-gameplay/src/resources/service.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-sim-gameplay/src/infrastructure/condition.rs, crates/phoenix-simulation/src/resources/server.rs, crates/phoenix-simulation/src/umbilical/server.rs, crates/phoenix-simulation/src/infrastructure/server.rs, crates/phoenix-simulation/src/snapshot/preflight.rs, crates/phoenix-simulation/src/sim_digest.rs, editor/workshop-resources.js, gui/workshop-resource-panel.js, crates/phoenix-model/src/logistics.rs, crates/phoenix-sim-gameplay/src/resources/logistics.rs, crates/phoenix-sim-gameplay/src/resources/logistics_state.rs, crates/phoenix-simulation/src/resources/logistics_server.rs, editor/workshop-logistics.js, gui/components/ph-logistics-controls.js, crates/phoenix-model/src/production.rs, crates/phoenix-model/src/recovery.rs, crates/phoenix-sim-gameplay/src/resources/production.rs, crates/phoenix-sim-gameplay/src/resources/recovery.rs, crates/phoenix-simulation/src/resources/production_server.rs, crates/phoenix-simulation/src/resources/recovery_server.rs, editor/workshop-production.js, editor/workshop-resource-recovery.js]
+sources: [crates/phoenix-sim-gameplay/src/resources/stock.rs, crates/phoenix-sim-gameplay/src/resources/service.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-sim-gameplay/src/infrastructure/condition.rs, crates/phoenix-simulation/src/resources/server.rs, crates/phoenix-simulation/src/umbilical/server.rs, crates/phoenix-simulation/src/infrastructure/server.rs, crates/phoenix-simulation/src/snapshot/preflight.rs, crates/phoenix-simulation/src/sim_digest.rs, editor/workshop-resources.js, gui/workshop-resource-panel.js, crates/phoenix-model/src/logistics.rs, crates/phoenix-sim-gameplay/src/resources/logistics.rs, crates/phoenix-sim-gameplay/src/resources/logistics_state.rs, crates/phoenix-simulation/src/resources/logistics_server.rs, editor/workshop-logistics.js, gui/components/ph-logistics-controls.js, crates/phoenix-model/src/production.rs, crates/phoenix-model/src/recovery.rs, crates/phoenix-sim-gameplay/src/resources/production.rs, crates/phoenix-sim-gameplay/src/resources/recovery.rs, crates/phoenix-simulation/src/resources/production_server.rs, crates/phoenix-simulation/src/resources/recovery_server.rs, editor/workshop-production.js, editor/workshop-resource-recovery.js, crates/phoenix-model/src/ports.rs, crates/phoenix-sim-gameplay/src/resources/ports.rs, crates/phoenix-simulation/src/resources/ports_server.rs, crates/phoenix-simulation/src/snapshot/ports.rs, editor/workshop-ports.js]
 updated: 2026-10-15
 ---
 
@@ -35,11 +35,11 @@ Keyed receipts report actual movement, including zero; their queue is transient
 and must drain before a fold. No deferred capacity debit competes with an
 immediately changed magazine.
 
-Snapshot 48/rules 0.20 preserve stocks, claims, timed cargo and fractional flow carry.
+Snapshot 49/rules 0.21 preserve stocks, claims, timed cargo and fractional flow carry.
 Preflight validates tube identity, capacity, timers and claim relationships
 before writes. Resource digests include magazine/tube commitments and facility
 stocks. Other weapon effect state retains its existing deferred fold boundary.
-Services are rederived authored configuration. Protocol 10 carries the current
+Services are rederived authored configuration. Protocol 11 carries the current
 typed stock, logistics, production and recovery controls/readouts; transport and
 delivery classes remain unchanged.
 
@@ -96,4 +96,23 @@ Workshop's production and resource-recovery panels edit these declarations
 through existing accepted-source history, materialisation, validation, Preview
 and disposable Test. The Cruiser recovery probe and finite cargo/deposit
 templates exercise acquisition and optional ore/scrap processing without adding
-a crew seat. Port-goal integration remains a separate in-progress slice.
+a crew seat.
+
+`resources/ports` owns physical-visit identities, delivered-lot quotas and approved
+orders, without owning a second inventory. `ports_server` connects actual Dock
+coupling and explicitly permitted Inventory reports to the existing Umbilical.
+Free allied services replenish authorised targets; manual offers require a human
+order or the typed trusted World effect. Ordinary AI can execute approved work,
+but cannot originate purchasing authority. Empty faction permissions deny access;
+zero quota disables an offer. Positive-quota donations do not spend the outbound
+allowance. Ended visits clear unperformed work while retaining delivered goods.
+
+The resource settlement adapter stages all goods and barter-cost endpoints
+together. Costs require pre-existing available stock; final net quantities and
+shared space permit valid exchanges at full endpoints. Receiving-bay cost stores
+take priority, then stable store identity. Stock, quota and publication commit in
+stable UUID order. Partial Operation faults reduce useful output after energy is
+paid; disabled tools pause. Snapshot preflight checks the complete candidate
+Dock/provider/order roster before writes, and pending port exchanges must drain
+before capture or fold. Workshop edits terms through its existing source/history
+workflow; the Umbilical screen holds editable, visit-bound manual orders.

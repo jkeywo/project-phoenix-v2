@@ -161,3 +161,53 @@ test participants claimed stations without the ordinary Ready step, so real
 command admission refused their controls. The corrected test journey is being
 run separately. These owner results do not establish whole-host continuation,
 browser/native acceptance, workload, performance or completion of increment 12.
+
+## Port implementation checkpoint
+
+The initial integrated port implementation is committed in `bd4fedd6`. Its
+targeted native evidence belongs to isolated revision `5a3ca807`: **58 passed,
+0 failed, 0 ignored** (Model 3, Gameplay 8, Simulation 47). Build took 2m38s;
+execution took 3.40s plus the two pure suites' reported 0.00s each.
+
+```text
+cargo test -p phoenix-model -p phoenix-sim-gameplay -p phoenix-simulation --lib --no-default-features -- resources::ports_server::tests snapshot::ports_tests umbilical::server::tests resources::ports::tests ports::tests core::codec::tests::port_controls system_blackboard_umbilical_round_trips_with_explicit_port_intent complete_active_schema_inventory_is_ratcheted_across_all_five_domains strict_mode_accepts_every_shipped_hull --test-threads=1
+```
+
+Coverage includes actual goods/cost exchange, protected floors, shared receiving
+space and full-endpoint net exchange; free goal maintenance and feasible priority;
+ordinary AI without purchase authority; explicit trusted mission approval;
+permission loss, donation, quota, undocking and partial/disabled machinery;
+candidate-roster no-write refusal, actual barter save/restore and missing-provider
+materialisation; both port wire payloads, shipped hulls and the measured Live
+inventory. The broad `ports::tests` substring also selected existing reports
+cases; 47 is the actual Simulation count, rather than a claimed 47 new port cases.
+
+Log `.phoenix/increment-12-ports-owner-retry3.log`, SHA256
+`bfc2d97089d6a03ebaff08282cd95d3afc301bd445b8de76880dbb0677bcf9e9`.
+Eight owner libraries were refreshed on switching to the isolated tree; the
+modified Gameplay and Simulation libraries were refreshed on subsequent retries.
+Copied dependency records and hashes are retained under
+`.phoenix/increment-12-port-tested-dependencies/`; Gameplay and Simulation records
+identify the tested port worktree.
+
+Earlier runs remain distinct: the initial compile refused an omitted explicit
+EntityConfig field; `d939ec68` passed 16 and failed 17; `caa7d824` passed 54 and
+failed three across the same three crates. The real startup defect was default
+tick zero being mistaken for an already processed physical visit. An explicit
+initialisation fact now preserves idempotence and quota at that frontier; boot
+approval is valid while paid work begins at tick one. Other corrections retain
+finite authored ceilings, publish changed fixture stocks normally, initialise
+ordinary host owners/namespaces in sparse continuation fixtures, and adopt the
+measured 972-row Live inventory and exact fingerprint. No stock, authority,
+shared-space, full-capture or digest assertion was relaxed.
+
+Separate evidence: the trusted World script contract passed its focused case at
+`b2b32387`; port Workshop/client checks and later 17-case validation followup were
+recorded independently by their workers. The merged comment and Workshop wording
+followups do not change the native resource processor. Snapshot 49, rules 0.21,
+protocol 11 and base content epoch 4 explicitly delimit supported state/content.
+
+This is the authorised initial-commit checkpoint. Recovery's exact whole-host
+continuation/clock correction remains in isolated validation; final integrated
+gates, browser/native human journeys, balance, workload and performance remain
+open. Advancing to increment 13 does not mark increment 12's verified exit passed.

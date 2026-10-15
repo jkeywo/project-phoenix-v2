@@ -16,10 +16,16 @@ pub struct CommsChannelConfig {
 #[serde(deny_unknown_fields)]
 pub struct CommsRadioConfig {
     pub system: SystemId,
+    #[serde(default = "default_request_reading_ticks")]
+    pub request_reading_ticks: u32,
     #[serde(default)]
     pub keys: Vec<String>,
     #[serde(rename = "channel")]
     pub channels: Vec<CommsChannelConfig>,
+}
+
+fn default_request_reading_ticks() -> u32 {
+    30
 }
 
 /// Own equipment presentation; held key identities are never published here.
@@ -112,6 +118,7 @@ impl CommsRadioConfig {
         let mut channels = BTreeSet::new();
         let mut keys = BTreeSet::new();
         if !identity(&self.system.0)
+            || self.request_reading_ticks == 0
             || !endpoint_range.is_finite()
             || endpoint_range <= 0.0
             || self.channels.is_empty()

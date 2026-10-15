@@ -6046,3 +6046,4 @@ comms.request.report_status,Generic Comms requests,Report status.,Status melden.
 comms.request.returned_outcome,Generic Comms requests,Request update received.,Anfrageaktualisierung empfangen.,Request update received.,machine
 comms.request.report,Generic Comms requests,Report,Berichten,Report,machine
 comms.request.decline,Generic Comms requests,Decline,Ablehnen,Decline,machine
+workshop.comms_radio.request_reading_ticks,Comms request authoring,AI reading time (logical ticks; blank uses equipment default),KI-Lesezeit (logische Takte; leer nutzt Gerätvorgabe),AI reading time (logical ticks; blank uses equipment default),machine

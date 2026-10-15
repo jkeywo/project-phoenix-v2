@@ -16,9 +16,11 @@ function equipment(entity) {
 }
 export function validateCommsRadio(radio, entity) {
   if (!equipment(entity)) throw new Error('Radio needs the installed Comms System, its owning Console, finite endpoint reach and positive continuous/discrete energy costs.');
-  if (!closed(radio, ['system', 'keys', 'channel']) || radio.system !== 'comms'
+  if (!closed(radio, ['system', 'keys', 'channel', 'request_reading_ticks']) || radio.system !== 'comms'
     || !Array.isArray(radio.keys === undefined ? [] : radio.keys) || !Array.isArray(radio.channel) || !radio.channel.length)
     throw new Error('Configure the canonical Comms owner and at least one supported radio channel.');
+  if (radio.request_reading_ticks !== undefined && (!Number.isSafeInteger(radio.request_reading_ticks) || radio.request_reading_ticks <= 0 || radio.request_reading_ticks > 0xffffffff))
+    throw new Error('Request reading requires positive whole logical ticks.');
   const keys = radio.keys === undefined ? [] : radio.keys, ids = new Set();
   if (keys.some(key => !identity(key)) || new Set(keys).size !== keys.length) throw new Error('Held protection keys require distinct bounded identities.');
   for (const channel of radio.channel) {

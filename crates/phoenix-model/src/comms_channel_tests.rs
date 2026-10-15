@@ -3,6 +3,7 @@ use super::*;
 fn radio() -> CommsRadioConfig {
     CommsRadioConfig {
         system: SystemId("comms".into()),
+        request_reading_ticks: 30,
         keys: vec!["fleet".into()],
         channels: vec![CommsChannelConfig {
             id: "protected".into(),
@@ -18,6 +19,7 @@ fn channels_require_actual_finite_reach_paid_work_and_held_keys() {
     let original = radio();
     assert!(original.validate(100.0).is_ok());
     for mutate in [
+        |r: &mut CommsRadioConfig| r.request_reading_ticks = 0,
         |r: &mut CommsRadioConfig| r.channels[0].range = f32::NAN,
         |r: &mut CommsRadioConfig| r.channels[0].range = 101.0,
         |r: &mut CommsRadioConfig| r.channels[0].work_units = 0,

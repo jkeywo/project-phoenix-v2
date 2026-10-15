@@ -47,3 +47,18 @@ it('refreshes a same-revision replacement document and refuses invalid equipment
   expect(f.draft().read(path)).toBe(before); expect(f.draft().snapshot().history.undo).toHaveLength(0);
   const invalid = entity(); invalid.energy.consumer[0].discrete_cost = 0; const bad = fixture(stringify(invalid)); await settle(); expect(control('save').disabled).toBe(true); expect(control('add-channel').disabled).toBe(true); bad.panel.dispose();
 });
+
+it('edits authored request reading ticks and refuses a same-revision document swap during validation', async () => {
+  const authored = entity(); authored.comms.radio = { system: 'comms', request_reading_ticks: 45, keys: [], channel: [{id:'open',range:80,work_units:1}] };
+  const f=fixture(stringify(authored)); await settle(); expect(control('request-reading').value).toBe('45');
+  control('request-reading').value='92'; control('save').click(); await settle();
+  expect(parse(f.draft().read(path)).comms.radio.request_reading_ticks).toBe(92);
+  let answer; f.runtime.validate.mockImplementationOnce(() => new Promise(resolve => {answer=resolve;}));
+  control('request-reading').value='17'; control('save').click(); await settle();
+  const beforeOld=f.draft().read(path); const old=f.draft();
+  const replacement=entity(); replacement.comms.radio={system:'comms',request_reading_ticks:12,keys:[],channel:[{id:'other',range:40,work_units:2}]};
+  f.replace(stringify(replacement)); const beforeNew=f.draft().read(path); f.panel.refresh();
+  answer({accepted:true}); await settle();
+  expect(old.read(path)).toBe(beforeOld); expect(f.draft().read(path)).toBe(beforeNew);
+  expect(control('request-reading').value).toBe('12'); f.panel.dispose();
+});

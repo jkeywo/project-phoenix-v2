@@ -355,6 +355,7 @@ export const COMPONENT_SCHEMA = {
       { key: 'display_name', type: 'string', optional: true },
       { key: 'radio', type: 'subobject', optional: true, subfields: [
         { key: 'system', type: 'string' },
+        { key: 'request_reading_ticks', type: 'number', optional: true },
         { key: 'keys', type: 'array', items: 'string', default: [] },
         { key: 'channel', type: 'array-of-tables', entryFields: [
           { key: 'id', type: 'string' },

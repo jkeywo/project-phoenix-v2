@@ -7,13 +7,13 @@ const path = 'assets/entities/test.toml', deps = { base_files: {}, packs: [] };
 const entity = () => ({ name: 'Endpoint', comms: { range: 100, hailable: true, display_name: 'Public endpoint' },
   console: [{ id: 'radio-room' }], system: [{ id: 'comms', kind: 'comms', console: 'radio-room' }],
   energy: { consumer: [{ system: 'comms', continuous_cost_per_sec: .05, discrete_cost: 1 }] } });
-const profile = () => ({ system: 'comms', keys: ['crew-key'], channel: [
+const profile = () => ({ system: 'comms', request_reading_ticks: 45, keys: ['crew-key'], channel: [
   { id: 'open', range: 100, work_units: 1 }, { id: 'operations', range: 50, work_units: 2, key: 'crew-key' },
 ] });
 const make = source => new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: '[pack]\nformat=1\nid="radio"\nname="Radio"\nversion="1"\n' }, { path, text: source }]));
 it('validates exact equipment, finite endpoint-bounded channels, paid work and actually held keys', () => {
   validateCommsRadio(profile(), entity());
-  for (const mutate of [p => p.system = 'other', p => p.extra = true, p => p.keys = null, p => p.keys.push('crew-key'),
+  for (const mutate of [p => p.system = 'other', p => p.extra = true, p => p.request_reading_ticks = 0, p => p.request_reading_ticks = 1.5, p => p.request_reading_ticks = 4294967296, p => p.keys = null, p => p.keys.push('crew-key'),
     p => p.keys = ['a'.repeat(129)], p => p.keys = ['é'.repeat(65)], p => p.keys = ['bad\nkey'],
     p => p.channel = [], p => p.channel.push(p.channel[0]), p => p.channel[0].id = 'BAD',
     p => p.channel[0].range = 101, p => p.channel[0].range = 1e-46, p => p.channel[0].range = Infinity,
@@ -37,7 +37,7 @@ it('adds absent radio without changing endpoint, hailability, display name or co
 it('materialises inherited channels and clears inherited protection/keys explicitly through history', async () => {
   const source = 'includes=["base.toml"]\n# child\n', parent = stringify({ ...entity(), comms: { ...entity().comms, radio: profile() } });
   const dependencies = { base_files: { 'assets/entities/base.toml': parent }, packs: [] }, draft = make(source);
-  const value = { system: 'comms', keys: [], channel: [{ id: 'operations', range: 40, work_units: 3 }] };
+  const value = { system: 'comms', request_reading_ticks: 45, keys: [], channel: [{ id: 'operations', range: 40, work_units: 3 }] };
   expect(() => prepareCommsRadioOperation(draft, dependencies, { path, value })).toThrow(/materialise/);
   await applyCommsRadioOperation({ draft, dependencies, runtime: { validate: async () => ({ accepted: true }) }, operation: { path, value, materialise: true } });
   expect(inspectCommsRadio(new WorkshopDocument(draft.archive()), dependencies, path).radio).toEqual(value);

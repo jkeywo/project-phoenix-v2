@@ -345,7 +345,7 @@ impl SituationDefinition {
                     );
                 }
             }
-            if !visited.insert(id) {
+            if !visited.insert(id.clone()) {
                 return Err("cyclic first Scenario lifecycle".into());
             }
             cursor = self

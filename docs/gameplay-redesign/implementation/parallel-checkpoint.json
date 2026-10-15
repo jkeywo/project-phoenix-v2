@@ -60,7 +60,7 @@
     "retry_log": ".phoenix/pdc-producer-helm-retry.log"
   },
   "pending": [
-    "Rebuilt integrated PDC and actual jammer/transit continuations; earlier Helm/Comms/probe/activity passes are pinned below",
+    "Fresh integrated PDC, jammer, Transit and imported-HTN full-host batch at fb255fc4; earlier actual-host passes remain pinned below",
     "Full-host illumination and radio journeys",
     "Remaining runtime scope in increments 16 through 24",
     "Browser/native devices, multiplayer peers, performance, balance and human workload acceptance",
@@ -165,5 +165,18 @@
     "pdc": "Both actual producer cases still fail after shield uncertainty correction; no observed launch. Read-only timing diagnostics added to distinguish assessment availability from firing geometry. No tuning or assertion change. .phoenix/pdc_gameplay_continuation-fd5a3c46a87ce0da.exe.current.log",
     "design": "Integrated PASM validate passed, Status OK; .phoenix/electronic-transit-pasm.log. Wiki 74 pages, 72 indexed, 2086 references, no findings; .phoenix/electronic-transit-wiki.log. Strings 6137, zero errors/warnings.",
     "limitation": "Six passing tests do not establish a passing whole batch, full increment exits, different-LocalShip multiplayer, physical-device or performance/balance/workload acceptance. Final pre-push gates remain pending."
+  },
+  "latest_reviewed_integration": {
+    "source": "fb255fc4: HTN core f8a32b67, root compatibility/schema a7e1bf11, actual-host tracer e93d83f4; protocol22/snapshot63/rules0.43",
+    "compile": "cargo check -p phoenix-simulation --tests --no-default-features: passed39.78s; .phoenix/planner-broad-integrated-check-final.log. Includes four bounded imports/schema/iterator fixture corrections.",
+    "client": "492 passed,6files,1.36s; .phoenix/planning-integrated-client-retry.log. Initial2 Repair DTO expectations corrected for actual optional Personnel/planned defaults.",
+    "bundle": "Client passed22/phoenix-base/4; .phoenix/planning-client-build.log",
+    "layers": "Dependency-tree passed with approved path access; .phoenix/planner-broad-layers-approved.log",
+    "native": "12 passed,1 failed,4682filtered,0.79s; .phoenix/ordnance-jammer-native.log. All7 actual Jam owner cases,4 Jam snapshot/recipe cases and actual paid Broad ordnance privacy/selection regression pass. Alternate-drive bare capture lacked7 legacy optional component registrations;01544273 corrects fixture, rerun pending.",
+    "actual_jammer": "1 passed,7.71s; .phoenix/producer-timing-diagnostics-retry.log, runtime through37b8b6ba and true Input-phase payment observer c0b787fb/1786629d. Ordinary AI reads explicit heard request, pays actual work, complete JSON360 and stop/no-write checks. Same batch PDC2failed; not an all-green batch.",
+    "actual_missiles": "New optional provisional Missile Cruiser7a7ef720 retains ordinary AI/assessment/loading/finite resources, uses artillery hold80 and speed5/range600 rounds. Actual cached host launches2/4 rounds but both PDC cases still fail: .phoenix/pdc-missile-artillery-reference.log,24.07s. Executable predates Broad selection correction5985c80e.",
+    "broad_correction": "5985c80e honors explicit Missile selection grant in actual paid Broad producer and canonical missile classification. Default no-grant remains unselectable; native regression passes, no hidden launcher/guidance/UUID disclosure. Fresh actual-host run pending.",
+    "in_progress": "Fresh4target headless host batch .phoenix/planner-broad-full-host.log at fb255fc4; no result claimed yet.",
+    "limit": "No full increment exit, physical devices, multi-LocalShip acceptance, performance/balance/workload acceptance or final integrated gates. No push."
   }
 }

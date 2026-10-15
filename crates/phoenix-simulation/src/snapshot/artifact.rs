@@ -547,7 +547,9 @@ pub const SNAPSHOT_FORMAT: u32 = 58;
 /// energy owners and the existing finite stock exchange in one transaction.
 /// "0.32" pays controlled Dock separation through actual moving equipment and
 /// retains its sole canonical physical pose across save/restore.
-pub const SIMULATION_RULES: &str = "0.32";
+/// "0.33" bases torpedo auto-fire on the firing ship's canonical rating,
+/// independent of other ships' human claims and the peer's local projection.
+pub const SIMULATION_RULES: &str = "0.33";
 
 /// The authored data, computed rather than remembered.
 ///

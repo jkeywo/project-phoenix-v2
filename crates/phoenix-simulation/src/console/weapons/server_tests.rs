@@ -10104,6 +10104,22 @@ fn npc_torpedo_ai_never_decides_from_the_player_ships_tubes() {
     // selector ranks nothing.
     attach_shipped_weapon_ai(&mut app, armed);
 
+    let npc_station = app
+        .world()
+        .get::<crate::ship_plugin::ShipConfigComponent>(armed)
+        .unwrap()
+        .0
+        .weapons_station()
+        .unwrap();
+    app.world_mut()
+        .get_mut::<crate::ship_plugin::ActiveStationRatings>(armed)
+        .unwrap()
+        .0
+        .insert(
+            npc_station.clone(),
+            crate::ship::rating::BACKFILL_RATING.into(),
+        );
+
     // Deliberately NO `TorpedoSystemResource` component.
     let bare = app
         .world_mut()
@@ -10143,6 +10159,36 @@ fn npc_torpedo_ai_never_decides_from_the_player_ships_tubes() {
             .0
             .is_empty(),
         "an NPC with no torpedo system of its own must not decide from the player ship's global TorpedoSystemResource"
+    );
+
+    // This host's human operates another ship. Its identically named seat is
+    // not this NPC's authority and cannot suppress the NPC's Backfill rating.
+    {
+        let mut sessions = app.world_mut().resource_mut::<crate::lobby::Sessions>();
+        sessions
+            .0
+            .register("other-ship-gunner".into(), "Gunner".into())
+            .unwrap();
+        sessions
+            .0
+            .set_station("other-ship-gunner", Some(npc_station));
+    }
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(armed)
+        .unwrap()
+        .0
+        .clear();
+    app.world_mut()
+        .run_system_once(crate::console_ai::server::ai_torpedo_auto_fire)
+        .unwrap();
+    assert!(
+        app.world()
+            .get::<AdmittedCommands>(armed)
+            .unwrap()
+            .0
+            .iter()
+            .any(|command| matches!(command.payload, SystemControlPayload::FireTorpedo { .. })),
+        "another ship's human Tactical claim cannot stop this NPC's ordinary firing decision"
     );
 }
 

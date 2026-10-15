@@ -440,11 +440,10 @@ fn ai_power_allocation(
 ///   resource across tubes, so its policy is the natural per-system gate
 ///   (no single unified `torpedo_system_id()` exists).
 /// - `AiHighFidelity` (query filter, new constraint vs. the old system).
-/// - Claimed/unclaimed Tactical station distinction (preserved verbatim from
-///   the old block): when a session holds the Tactical station, auto-fire is
-///   additionally gated on the holder's active rating having the
-///   `torpedo_auto_fire` `ai_tuning` rule; when unclaimed, auto-fire is
-///   unconditional. This exact distinction is what
+/// - The firing ship's canonical Tactical rating: Backfill operates normally;
+///   a chosen rating requires its authored `torpedo_auto_fire` tuning. Other
+///   ships' session claims and this peer's local projection cannot gate it.
+///   This chosen-rating distinction is what
 ///   `console::weapons`'s `ai_stops_firing_when_rating_switches_to_std`
 ///   test asserts on.
 pub(crate) fn ai_torpedo_auto_fire(
@@ -563,25 +562,29 @@ pub(crate) fn ai_torpedo_auto_fire(
         }
 
         // The station owning this ship's weapons — resolved per-ship rather
-        // than assumed to be named "tactical". NPCs have no weapons owner, so
-        // the fallback keeps them on the unclaimed (fire unconditionally) path.
+        // than assumed to be named "tactical". Only legacy hulls without a
+        // declared weapons Station use the canonical fallback identity.
         let tactical_station = ship_config.0.weapons_station().unwrap_or_else(|| {
             crate::core::messages::StationId(
                 crate::ship::system_registry::TACTICAL_STATION_ID.into(),
             )
         });
 
-        // Claimed/unclaimed distinction, preserved verbatim from the old
-        // fused block: claimed stations gate on the active rating's
-        // ai_tuning; unclaimed stations fire unconditionally.
-        let auto_fire_enabled = match sessions.0.holder_for_station(&tactical_station) {
-            Some(_) => active_ratings.0.get(&tactical_station).is_some_and(|r| {
-                ship_config
-                    .0
-                    .has_ai_rule(&tactical_station, r, AI_RULE_TORPEDO_AUTO_FIRE)
-            }),
-            None => true,
-        };
+        // Crew claims are host-local, while these ratings belong to this ship
+        // on every peer. Never let a different ship's Tactical holder suppress
+        // an ordinary Backfill tube. Bare legacy fixtures omit the rating map;
+        // accepted stationed ships seed an explicit Backfill or chosen rating.
+        let auto_fire_enabled = active_ratings
+            .0
+            .get(&tactical_station)
+            .is_none_or(|rating| {
+                rating == crate::ship::rating::BACKFILL_RATING
+                    || ship_config.0.has_ai_rule(
+                        &tactical_station,
+                        rating,
+                        AI_RULE_TORPEDO_AUTO_FIRE,
+                    )
+            });
         if !auto_fire_enabled {
             continue;
         }

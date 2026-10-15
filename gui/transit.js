@@ -15,7 +15,7 @@ export function buildTransitDrives(entries,{systemIds=[],controlSources={}}={}) 
       ||(data.last_step_tick!=null&&!stamp(data.last_step_tick))
       ||(data.waiting!=null&&!['unavailable','unfunded','out_of_range','no_placement'].includes(data.waiting))
       ||(data.request!=null&&(!object(data.request)||!identity(data.request.objective_id)||!stamp(data.request.revision)))
-      ||(data.course!=null&&(!object(data.course)||data.course.kind!=='local'||!point(data.course.point)||!stamp(data.course.course_generation)))
+      ||(data.course!=null&&(!object(data.course)||!['local','world'].includes(data.course.kind)||(data.course.kind==='world'&&!identity(data.course.id))||!point(data.course.point)||!stamp(data.course.course_generation)))
       ||(data.actual_arrival!=null&&!point(data.actual_arrival))
       ||(data.phase==='arrived')!==(data.actual_arrival!=null)
       ||(data.phase!=='idle'&&data.course==null)
@@ -32,4 +32,18 @@ export function buildTransitDrives(entries,{systemIds=[],controlSources={}}={}) 
       actual_arrival:data.actual_arrival?[...data.actual_arrival]:null,last_step_tick:data.last_step_tick??null});
   }
   return result.sort((a,b)=>a.system_id.localeCompare(b.system_id));
+}
+
+
+/** Known routes are taken only from the exact permitted Navigation board. */
+export function buildTransitRoutes(rows) {
+  if(!Array.isArray(rows)||rows.length>128)return [];
+  const ids=new Set(),points=new Set(),result=[];
+  for(const row of rows){
+    if(!object(row)||!identity(row.id)||row.id.length>512||!identity(row.label)||!point(row.point))return [];
+    const key=JSON.stringify([row.point[0],row.point[2]]);
+    if(ids.has(row.id)||points.has(key))return [];
+    ids.add(row.id);points.add(key);result.push({id:row.id,label:row.label,point:[...row.point]});
+  }
+  return result;
 }

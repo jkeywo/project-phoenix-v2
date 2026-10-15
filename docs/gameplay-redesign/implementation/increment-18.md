@@ -473,3 +473,45 @@ Reach-to-anchor policy to select the same course. Free courses remain local.
 Derive immutable accepted route/body recipes at the existing world materialisation
 boundary; the same actual Transit state retains current World context and owns
 paid work/arrival. No private destination actor or file path enters the route UI.
+
+
+Every accepted order freezes its original World context so retained completed
+orders on other drives keep their original local gravity scope. The existing
+ship Transit owner retains one latest successful World-arrival stamp (owning
+System, closed route ID and actual arrival tick). This is a causal receipt,
+not another phase, payment ledger or physical-space owner. Only that latest
+frontier determines current World context; with no such arrival the context
+must match actual authored placement. Inactive historical arrivals do not all
+claim to be the ship's current World.
+
+## First physical World-route consumer checkpoint
+
+The optional sector Cruiser extends the existing actual Transit drive. Known
+routes are published on its permitted Navigation board and selected through the
+existing paid waypoint command. World-capable drives freeze the closed route,
+full accepted point and Navigation generation; no private anchor lookup grants
+knowledge. Free courses stay Local. Existing paid preparation, local fuel,
+commitment and next-tick physical arrival are retained.
+
+The ordinary tracked World layer queue loads destination/support parent-first.
+Immutable accepted recipes select relevant static gravity evidence, while the
+same Transit owner retains current World policy, original order context and the
+latest successful World-arrival stamp. Source actors and scripts remain resident;
+travelling never changes EntityOriginLayer. Pre-mint validation refuses ambiguous
+or unsupported layer drive origins. Snapshot preflight retains exact installed
+config/cost checks and validates source/current/frontier/route before writes.
+
+Independent source review covered knowledge, paid ownership, historical drive
+contexts, loader ancestry, pre-mint refusal and GUI/Workshop controls. Targeted
+JavaScript: 35 tests in six files passed; strict strings: 6311 entries, no errors
+or warnings. Rust formatting and source review are not native execution. The
+new actual-host proof exercises paid departure, selected supporting gravity,
+subsequent local travel, return/revisit without restarting scripts, valid layer
+preparation before JSON restore, full 360-update capture/digest comparisons and
+five malformed no-write candidates. Its native result is integrator-owned and
+pending. Renderer/native human acceptance is also pending.
+
+This checkpoint does not close increment 18. Remaining work includes the basic
+visual World-route catalogue editor, actual FormUp Navigation/Helm consumer,
+formation transit and final multi-seat/native acceptance. No new network or save
+mechanism, campaign progression or background sector simulation is introduced.

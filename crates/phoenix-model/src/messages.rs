@@ -5890,6 +5890,9 @@ pub struct NavigationBlackboard {
     /// Targetability filter for the navigation chart.
     #[serde(default)]
     pub nav_chart_selects: Vec<String>,
+    /// Authored known routes, granted only by this exact Navigation publication.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transit_routes: Vec<crate::transit::TransitRouteView>,
     /// Current shared navigation waypoint (supersedes SimSnapshot.navigation_waypoint).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub navigation_waypoint: Option<WaypointSnapshot>,
@@ -5977,6 +5980,7 @@ impl Default for NavigationBlackboard {
             nav_chart_shows: Vec::new(),
             nav_chart_selects: Vec::new(),
             navigation_waypoint: None,
+            transit_routes: Vec::new(),
             civilians: Vec::new(),
             host_station: None,
         }

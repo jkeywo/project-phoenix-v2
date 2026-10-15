@@ -5,6 +5,7 @@ fn order(now: u64, request: Option<(&str, u64)>) -> TransitOrder {
             point: [10.0, 2.0, 0.0],
             course_generation: 7,
         },
+        original_world: TransitWorldBinding::Base,
         origin: [0.0, 2.0, 0.0],
         profile: AcceptedLocalJumpProfile {
             config: LocalJumpConfig {
@@ -12,6 +13,7 @@ fn order(now: u64, request: Option<(&str, u64)>) -> TransitOrder {
                 max_distance: 50.0,
                 scatter_radius: 1.0,
                 gravity_response: 1.0,
+                world_travel: false,
                 fuel: TransitFuel {
                     store: "local-fuel".into(),
                     amount: 2,

@@ -798,3 +798,180 @@ fn competing_actual_drive_begin_refuses_until_arrival_and_forged_parallel_restor
     assert!(drives.0[&alternate].phase.active());
     assert_eq!(drives.0[&owner()], completed);
 }
+
+#[test]
+fn world_course_uses_permitted_two_dimensional_choice_and_full_authored_height() {
+    let authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/sector_jump_cruiser.toml",
+    )
+    .unwrap();
+    let (mut app, entity) = fixture_with_config(authored);
+    let route = TransitRouteView {
+        id: "outer".into(),
+        label: "route.outer".into(),
+        point: [100.0, 42.0, 30.0],
+    };
+    {
+        let mut boards = app
+            .world_mut()
+            .get_mut::<ShipSystemBlackboards>(entity)
+            .unwrap();
+        let SystemBlackboard::Navigation(nav) =
+            boards.0.get_mut(&SystemId("navigation".into())).unwrap()
+        else {
+            panic!("Navigation")
+        };
+        nav.transit_routes = vec![route.clone()];
+    }
+    let read = |app: &App| {
+        course(
+            &app.world().get::<ShipConfigComponent>(entity).unwrap().0,
+            app.world().get::<ShipSystemBlackboards>(entity).unwrap(),
+            &owner(),
+            app.world().get::<NavigationWaypoint>(entity).unwrap(),
+            7.0,
+        )
+    };
+    let Some(TransitDestination::World { point, .. }) = read(&app) else {
+        panic!("the permitted route must remain a World choice at nonzero ship height");
+    };
+    assert_eq!(point, [100.0, 42.0, 30.0]);
+    {
+        let mut boards = app
+            .world_mut()
+            .get_mut::<ShipSystemBlackboards>(entity)
+            .unwrap();
+        let SystemBlackboard::Navigation(nav) =
+            boards.0.get_mut(&SystemId("navigation".into())).unwrap()
+        else {
+            unreachable!()
+        };
+        nav.transit_routes.push(TransitRouteView {
+            id: "ambiguous".into(),
+            point: [100.0, 99.0, 30.0],
+            ..route
+        });
+    }
+    assert!(
+        read(&app).is_none(),
+        "different heights cannot distinguish x/z route choices"
+    );
+    app.world_mut()
+        .get_mut::<ShipSystemBlackboards>(entity)
+        .unwrap()
+        .0
+        .clear();
+    assert!(
+        read(&app).is_none(),
+        "private route recipes cannot replace a permitted reading"
+    );
+}
+
+#[test]
+fn current_world_frontier_preserves_other_drives_original_local_and_world_receipts() {
+    let (mut app, entity) = fixture();
+    command(
+        &mut app,
+        entity,
+        Control::BeginTransitToWaypoint { request: None },
+    );
+    for _ in 0..10 {
+        step(&mut app);
+    }
+    let historical_local =
+        app.world().get::<ShipTransitDrives>(entity).unwrap().0[&owner()].clone();
+    assert!(matches!(
+        historical_local.phase,
+        TransitPhase::Arrived { .. }
+    ));
+    let outer = TransitWorldBinding::Layer {
+        path: "assets/worlds/sector_transit_outer.toml".into(),
+    };
+    let mut recipes = StaticTransitScopes::default();
+    recipes.scopes.insert(
+        TransitWorldBinding::Base,
+        worlds::StaticTransitScope::default(),
+    );
+    recipes
+        .scopes
+        .insert(outer.clone(), worlds::StaticTransitScope::default());
+    for (id, binding, point) in [
+        ("outer", outer.clone(), [100.0, 0.0, 0.0]),
+        ("home", TransitWorldBinding::Base, [0.0; 3]),
+    ] {
+        recipes.routes.insert(
+            id.into(),
+            worlds::AcceptedWorldRoute {
+                view: TransitRouteView {
+                    id: id.into(),
+                    label: format!("route.{id}"),
+                    point,
+                },
+                binding,
+            },
+        );
+    }
+    let arrived = |route: &str, original_world: TransitWorldBinding, tick: u64| {
+        let mut order = historical_local.phase.order().unwrap().clone();
+        order.destination = TransitDestination::World {
+            id: route.into(),
+            point: recipes.routes[route].view.point,
+            course_generation: 1,
+        };
+        order.original_world = original_world;
+        order.profile.config.world_travel = true;
+        let arrival =
+            TransitArrivalSolution::resolve(&order, [0.0; 3], [1.0, 0.0, 0.0], vec![]).unwrap();
+        TransitState {
+            phase: TransitPhase::Arrived {
+                order,
+                commit_tick: tick - 1,
+                arrival,
+                arrival_tick: tick,
+            },
+            last_tick: Some(tick),
+            handled: Default::default(),
+        }
+    };
+    let older = SystemId("older-world-drive".into());
+    let newer = SystemId("newer-world-drive".into());
+    let state = ShipTransitDrives(
+        [
+            (owner(), historical_local.clone()),
+            (
+                older.clone(),
+                arrived("outer", TransitWorldBinding::Base, 20),
+            ),
+            (newer.clone(), arrived("home", outer.clone(), 30)),
+        ]
+        .into(),
+        TransitWorldBinding::Base,
+        Some(TransitWorldArrival {
+            owner: newer,
+            route: "home".into(),
+            tick: 30,
+        }),
+    );
+    assert!(recipes.validate_context(&state, 30).is_ok());
+    assert!(std::ptr::eq(
+        recipes
+            .for_order(state.0[&owner()].phase.order().unwrap())
+            .unwrap(),
+        &recipes.scopes[&TransitWorldBinding::Base]
+    ));
+    assert!(std::ptr::eq(
+        recipes
+            .for_order(state.0[&older].phase.order().unwrap())
+            .unwrap(),
+        &recipes.scopes[&outer]
+    ));
+    let mut forged = state.clone();
+    forged.1 = outer;
+    assert!(recipes.validate_context(&forged, 30).is_err());
+    let mut forged = state.clone();
+    forged.2.as_mut().unwrap().tick = 19;
+    assert!(
+        recipes.validate_context(&forged, 30).is_err(),
+        "older retained arrival cannot become the latest frontier"
+    );
+}

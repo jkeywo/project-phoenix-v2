@@ -6320,3 +6320,11 @@ identity.callsign,Identity transmitter,Callsign: {callsign},,,
 identity.enable,Identity transmitter,Enable transmitter,,,
 identity.disable,Identity transmitter,Disable transmitter,,,
 entity.identity_cruiser.name,Identity transmitter,Transponder Cruiser,,,
+navigation.transit.select,Known authored World route,Set route as course,Set route as course,Set route as course,source
+navigation.transit.known,Known authored World route,Known World routes,Known World routes,Known World routes,source
+workshop.transit.world_travel,Accepted Transit profile,Allow known World routes,Allow known World routes,Allow known World routes,source
+entity.sector_jump_cruiser.name,Optional accepted sector drive reference,World Transit Cruiser,World Transit Cruiser,World Transit Cruiser,source
+world.transit.home,Known authored World route,Home,Home,Home,source
+world.transit.outer,Known authored World route,Outer system,Outer system,Outer system,source
+world.entity.sector_outer_body.name,Actual route proof fixed body,Outer giant,Outer giant,Outer giant,source
+world.entity.sector_support_body.name,Actual route proof support body,Support giant,Support giant,Support giant,source

@@ -1,0 +1,28 @@
+# Actual route/load/paid arrival proof. No machinery or foreign knowledge grants.
+[global]
+seed = 181820
+[player_spawn]
+position = [0,0,0]
+[anchors]
+home = [0,0,0]
+outer = [10000,0,0]
+[[transit_destination]]
+id = "home"
+label = "world.transit.home"
+target = {kind="base",anchor="home"}
+[[transit_destination]]
+id = "outer"
+label = "world.transit.outer"
+target = {kind="layer",path="assets/worlds/sector_transit_outer.toml",anchor="arrival"}
+[[entity]]
+template_path = "assets/entities/sector_jump_cruiser.toml"
+id = "player-ship"
+name = "player-ship"
+spawn_on = "game_start"
+transform = {position=[0,0,0]}
+[[entity]]
+template_path = "assets/entities/planet_gas_giant.toml"
+name = "sector-base-body"
+transform = {position=[13000,0,0]}
+[entity.overrides.arrival_gravity]
+exclusion_radius = 5000

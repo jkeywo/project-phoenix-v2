@@ -115,3 +115,11 @@ it('accepts finite gravity response through the same drive history and rejects i
     f.draft.undo();expect(f.draft.read(path)).toBe(f.source);
   }
 });
+
+it('edits actual World capability through accepted history and refuses non-Boolean capability',async()=>{
+ const f=fixture();await applyTransitOperation({...f,operation:operation(f,{world_travel:true})});
+ expect(inspectTransit(f.draft,f.dependencies,path).drives[0].component[1].config.world_travel).toBe(true);
+ f.draft.undo();expect(inspectTransit(f.draft,f.dependencies,path).drives[0].component[1].config.world_travel).toBeUndefined();f.draft.redo();
+ expect(inspectTransit(new WorkshopDocument(f.draft.archive()),f.dependencies,path).drives[0].component[1].config.world_travel).toBe(true);
+ expect(()=>prepareTransitOperation(f.draft,f.dependencies,operation(f,{world_travel:'yes'}))).toThrow(/Transit/);
+});

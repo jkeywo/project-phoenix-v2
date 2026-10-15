@@ -2,7 +2,7 @@
 title: Navigation Console
 type: entity
 tags: [console, navigation, waypoint, map, radar, ship]
-sources: [gui/battleship/navigation.html, gui/cruiser/comms.html, gui/courier/captain.html, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/stations/navigation-actions.js, gui/stations/navigation-action-control.js, gui/semantic-action-registry.js, gui/gamepad-input.js, gui/console-state.js, gui/sim-state.js, gui/action-map.js, gui/hero-bar.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/navigation/mod.rs, crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-sim-gameplay/src/civilian/traffic.rs, crates/phoenix-simulation/src/civilian/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, assets/entities/alliance_battleship.toml, assets/entities/alliance_cruiser.toml, assets/entities/alliance_courier.toml, assets/entities/alliance_destroyer.toml]
+sources: [gui/components/navigation-sharing-controls.js, gui/transit.js, gui/battleship/navigation.html, gui/cruiser/comms.html, gui/courier/captain.html, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/stations/navigation-actions.js, gui/stations/navigation-action-control.js, gui/semantic-action-registry.js, gui/gamepad-input.js, gui/console-state.js, gui/sim-state.js, gui/action-map.js, gui/hero-bar.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/navigation/mod.rs, crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-sim-gameplay/src/civilian/traffic.rs, crates/phoenix-simulation/src/civilian/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, assets/entities/alliance_battleship.toml, assets/entities/alliance_cruiser.toml, assets/entities/alliance_courier.toml, assets/entities/alliance_destroyer.toml]
 updated: 2026-10-15
 ---
 
@@ -23,9 +23,9 @@ The chart is overhead, north-up, and world-anchored. It draws region hulls — s
 
 ## Selection and waypoint placement
 
-The product registry names twelve Navigation actions: chart, free waypoint
-place, selected-contact anchor, clear waypoint, contact selection, civilian
-order, four map-pan directions, and zoom in/out.
+The product registry includes chart, free waypoint placement, selected-contact
+anchor, clear waypoint, contact selection, civilian order, map pan and zoom,
+shared-waypoint acceptance and authored World-route selection.
 Each has two context-scoped binding slots. The parent gamepad runtime routes by
 the actual claimed Station iframe, so composite hosts retain their real
 `captain` or `comms` context. Horizontal pan uses the left stick, vertical pan
@@ -103,3 +103,14 @@ Dock. The existing selector resolves the Console's known target/contact, emits
 an ordinary waypoint command and issues the normal delayed Helm clearance. It
 does not learn a private facility/ship position from the objective's name. Dock
 and Umbilical retain their own independent work and authority after approach.
+
+## Authored World routes
+
+Optional root `transit_destination` rows become finite ID/label/point choices on
+that exact Navigation board. The shared map controls re-resolve the selected
+route and current Human Navigation owner, then issue the existing paid waypoint
+command using its x/z. A World-capable drive freezes the full accepted route
+point. A received feed can display those choices without granting control;
+co-hosted tabs do not acquire them implicitly. The GUI carries no content file
+path, destination actor identity or independent travel command. Duplicate x/z
+anchors are unsupported even when authored heights differ.

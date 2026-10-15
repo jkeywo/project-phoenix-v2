@@ -23,6 +23,7 @@ fn equipped() -> EntityConfig {
                 max_distance: 100.0,
                 scatter_radius: 1.0,
                 gravity_response: 1.0,
+                world_travel: false,
                 fuel: TransitFuel {
                     store: "local-kinetic-rounds".into(),
                     amount: 2,

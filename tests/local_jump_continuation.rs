@@ -467,3 +467,248 @@ fn actual_hardened_drive_uses_original_gravity_and_keeps_paid_json360_continuati
     assert!(arrived);
     assert_eq!(fuel(&live, actor), 22);
 }
+
+#[test]
+fn actual_world_route_preserves_source_current_scope_return_and_full_json360() {
+    use phoenix_model::transit::{TransitWorldArrival, TransitWorldBinding};
+    use project_phoenix::entities::spawner::EntityUuid;
+    use project_phoenix::world::server::{EntityOriginLayer, WorldLayerMap};
+    const OUTER: &str = "assets/worlds/sector_transit_outer.toml";
+    const SUPPORT: &str = "assets/worlds/sector_transit_support.toml";
+    fn prepare_restore(app: &mut App, saved: &PhoenixSnapshot) {
+        use project_phoenix::snapshot::{reconcile_world_layers, LayerReconcileStatus};
+        for _ in 0..360 {
+            match reconcile_world_layers(app.world_mut(), saved) {
+                LayerReconcileStatus::Ready if ready_to_restore(app.world(), saved) => return,
+                LayerReconcileStatus::Failed(path) => {
+                    panic!("actual layer continuation refused {path}")
+                }
+                LayerReconcileStatus::Ready | LayerReconcileStatus::Waiting => app.update(),
+            }
+        }
+        panic!("actual layer continuation did not become ready");
+    }
+    let boot = || {
+        boot_with(
+            "tests/fixtures/world-transit-world.toml",
+            "assets/entities/sector_jump_cruiser.toml",
+        )
+    };
+    let (mut live, actor) = boot();
+    assert!(
+        live.world().resource::<WorldLayerMap>().0.is_empty(),
+        "dormant content discovery cannot activate destinations"
+    );
+    let boards = live.world().get::<ShipSystemBlackboards>(actor).unwrap();
+    let SystemBlackboard::Navigation(nav) = &boards.0[&id("navigation")] else {
+        panic!("actual Navigation publication");
+    };
+    assert!(nav
+        .transit_routes
+        .iter()
+        .any(|route| route.id == "outer" && route.point == [10000.0, 0.0, 0.0]));
+    control(
+        &mut live,
+        actor,
+        "navigation",
+        Control::SetNavigationWaypoint {
+            x: 10000.0,
+            z: 0.0,
+            source_uuid: None,
+        },
+    );
+    assert_eq!(phase(&live, actor)["phase"], "idle");
+    control(
+        &mut live,
+        actor,
+        "local-jump",
+        Control::BeginTransitToWaypoint { request: None },
+    );
+    assert_eq!(phase(&live, actor)["phase"], "preparing");
+    assert_eq!(phase(&live, actor)["order"]["destination"]["kind"], "world");
+    assert_eq!(
+        live.world().get::<ShipTransitDrives>(actor).unwrap().1,
+        TransitWorldBinding::Base
+    );
+    assert!(
+        live.world().get::<ShipTransitDrives>(actor).unwrap().0[&id("local-jump")].worked_secs()
+            > 0.0
+    );
+    let saved: PhoenixSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
+    let (mut resumed, restored) = boot();
+    prepare_restore(&mut resumed, &saved);
+    assert!(ready_to_restore(resumed.world(), &saved));
+    let actor_uuid = live.world().get::<EntityUuid>(actor).unwrap().0.clone();
+    let before = capture(resumed.world());
+    let digest = world_digest(resumed.world());
+    for fault in 0..5 {
+        let mut candidate = saved.clone();
+        let state = candidate
+            .entities
+            .iter_mut()
+            .find(|row| row.uuid == actor_uuid)
+            .unwrap()
+            .transit
+            .as_mut()
+            .unwrap();
+        match fault {
+            0 => state.1 = TransitWorldBinding::Layer { path: OUTER.into() },
+            1 => {
+                state.2 = Some(TransitWorldArrival {
+                    owner: id("local-jump"),
+                    route: "outer".into(),
+                    tick: candidate.tick + 1,
+                })
+            }
+            _ => {
+                let mut value = serde_json::to_value(&state.0[&id("local-jump")].phase).unwrap();
+                if fault == 2 {
+                    value["order"]["destination"]["id"] = serde_json::json!("unknown");
+                }
+                if fault == 3 {
+                    value["order"]["destination"]["point"][0] = serde_json::json!(10001.0);
+                }
+                if fault == 4 {
+                    value["order"]["original_world"] =
+                        serde_json::json!({"kind":"layer","path":OUTER});
+                }
+                state.0.get_mut(&id("local-jump")).unwrap().phase =
+                    serde_json::from_value(value).unwrap();
+            }
+        }
+        assert!(
+            !restore(resumed.world_mut(), &candidate).is_complete(),
+            "fault{fault}"
+        );
+        assert_eq!(capture(resumed.world()), before);
+        assert_eq!(world_digest(resumed.world()), digest);
+    }
+    assert!(ready_to_restore(resumed.world(), &saved));
+    assert!(restore(resumed.world_mut(), &saved).is_complete());
+    for step in 0..360 {
+        same(&live, &resumed, step);
+        live.update();
+        resumed.update();
+    }
+    same(&live, &resumed, 360);
+    assert_eq!(fuel(&live, actor), 22);
+    assert_eq!(phase(&live, actor)["phase"], "arrived");
+    let expected = TransitWorldBinding::Layer { path: OUTER.into() };
+    assert_eq!(
+        live.world().get::<ShipTransitDrives>(actor).unwrap().1,
+        expected
+    );
+    let position = live.world().get::<ShipPhysics>(actor).unwrap();
+    assert!(
+        (9998.0..=10002.0).contains(&position.x),
+        "selected World must not use the base body's distant gravity policy: {}",
+        position.x
+    );
+    let layer = live.world().resource::<WorldLayerMap>();
+    assert!(layer.0[OUTER].is_active && layer.0[SUPPORT].is_active);
+    assert_eq!(layer.0[SUPPORT].loader_path.as_deref(), Some(OUTER));
+    assert_eq!(layer.0[OUTER].flags.counter("transit_activation_count"), 1);
+    let outer_entity = live
+        .world_mut()
+        .query::<(Entity, &EntityUuid)>()
+        .iter(live.world())
+        .find_map(|(entity, uuid)| {
+            live.world()
+                .resource::<project_phoenix::world::server::WorldContentRuntime>()
+                .name_to_uuid
+                .get("world.entity.sector_outer_body.name")
+                .filter(|id| *id == &uuid.0)
+                .map(|_| entity)
+        })
+        .unwrap();
+    assert!(
+        live.world().get::<EntityOriginLayer>(actor).is_none(),
+        "travel cannot reparent lifetime/script ownership"
+    );
+    // A later free course uses current Outer scope, while a wrong Base fallback
+    // would displace it to about8000. All ordinary command/work/fuel owners remain.
+    for (app, entity) in [(&mut live, actor), (&mut resumed, restored)] {
+        control(
+            app,
+            entity,
+            "navigation",
+            Control::SetNavigationWaypoint {
+                x: 10100.0,
+                z: 0.0,
+                source_uuid: None,
+            },
+        );
+        control(
+            app,
+            entity,
+            "local-jump",
+            Control::BeginTransitToWaypoint { request: None },
+        );
+        assert_eq!(phase(app, entity)["order"]["destination"]["kind"], "local");
+    }
+    for step in 0..360 {
+        same(&live, &resumed, step);
+        live.update();
+        resumed.update();
+    }
+    same(&live, &resumed, 360);
+    let position = live.world().get::<ShipPhysics>(actor).unwrap();
+    assert!(
+        (10098.0..=10102.0).contains(&position.x),
+        "current-scope local arrival: {}",
+        position.x
+    );
+    assert_eq!(fuel(&live, actor), 20);
+    for (target, expected_fuel, expected_world) in [
+        (0.0, 18, TransitWorldBinding::Base),
+        (10000.0, 16, expected),
+    ] {
+        for (app, entity) in [(&mut live, actor), (&mut resumed, restored)] {
+            control(
+                app,
+                entity,
+                "navigation",
+                Control::SetNavigationWaypoint {
+                    x: target,
+                    z: 0.0,
+                    source_uuid: None,
+                },
+            );
+            control(
+                app,
+                entity,
+                "local-jump",
+                Control::BeginTransitToWaypoint { request: None },
+            );
+        }
+        for step in 0..360 {
+            same(&live, &resumed, step);
+            live.update();
+            resumed.update();
+        }
+        same(&live, &resumed, 360);
+        assert_eq!(fuel(&live, actor), expected_fuel);
+        assert_eq!(
+            live.world().get::<ShipTransitDrives>(actor).unwrap().1,
+            expected_world
+        );
+        assert_eq!(
+            live.world().resource::<WorldLayerMap>().0[OUTER]
+                .flags
+                .counter("transit_activation_count"),
+            1,
+            "return cannot restart retained layer scripts"
+        );
+        assert!(
+            live.world().get_entity(outer_entity).is_ok(),
+            "return retains the actual source entity"
+        );
+    }
+    let final_saved: PhoenixSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
+    let (mut fresh, _) = boot();
+    prepare_restore(&mut fresh, &final_saved);
+    assert!(restore(fresh.world_mut(), &final_saved).is_complete());
+    same(&live, &fresh, 0);
+}

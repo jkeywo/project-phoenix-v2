@@ -70,7 +70,7 @@ fn validate_arrival_gravity(
                 super::transit::body_for_row(row, &resolved).map(|_| ())
             }
         } else {
-            Err("arrival_gravity first supports base World static rows only; additive/layer gravity is not yet supported".into())
+            Err("arrival_gravity requires a base World or an explicitly accepted static Transit World scope".into())
         };
         if let Err(message) = result {
             let reference = row.name.as_deref().unwrap_or(&row.template_path);
@@ -1545,9 +1545,38 @@ pub fn validate_supporting_world(
     fragments: &dyn FragmentSource,
     active_anchors: &[String],
 ) -> Vec<WorldFinding> {
+    validate_supporting_world_with_arrival(
+        source,
+        template_loader,
+        fragments,
+        active_anchors,
+        false,
+        source.path.is_empty(),
+    )
+}
+
+/// The actual tracked layer owner supplies this permission only for an accepted
+/// immutable Transit scope. Dynamic/script-spawned gravity remains unsupported.
+pub fn validate_supporting_world_with_arrival(
+    source: &WorldSource,
+    template_loader: &dyn TemplateLoader,
+    fragments: &dyn FragmentSource,
+    active_anchors: &[String],
+    static_arrival_scope: bool,
+    transit_origin_supported: bool,
+) -> Vec<WorldFinding> {
     let mut findings = Vec::new();
-    findings.extend(validate_arrival_gravity(source, template_loader, false));
+    findings.extend(validate_arrival_gravity(
+        source,
+        template_loader,
+        static_arrival_scope,
+    ));
     findings.extend(super::craft::findings(source, template_loader, false));
+    findings.extend(validate_transit_origin(
+        source,
+        template_loader,
+        transit_origin_supported,
+    ));
 
     let mut composed_seen = HashSet::new();
     findings.extend(validate_template_composition_in(
@@ -1880,9 +1909,25 @@ pub fn validate_composition_with_fragments(
     let mut findings = super::transit::destination_findings(root, children);
     findings.extend(validate_arrival_gravity(root, template_loader, true));
     findings.extend(super::craft::findings(root, template_loader, true));
+    let transit_origins = super::transit::origin_bindings(
+        root.config,
+        children
+            .iter()
+            .map(|source| (source.path.as_str(), source.config)),
+    )
+    .unwrap_or_default();
     for child in children {
-        findings.extend(validate_arrival_gravity(child, template_loader, false));
+        findings.extend(validate_arrival_gravity(
+            child,
+            template_loader,
+            !root.config.transit_destinations.is_empty(),
+        ));
         findings.extend(super::craft::findings(child, template_loader, false));
+        findings.extend(validate_transit_origin(
+            child,
+            template_loader,
+            transit_origins.contains_key(&child.path),
+        ));
     }
 
     findings.extend(validate_ship_slot_capacity_in(root, template_loader));
@@ -2204,3 +2249,24 @@ mod tests;
 #[cfg(test)]
 #[path = "transit_validation_tests.rs"]
 mod transit_validation_tests;
+
+/// The ordinary candidate gate checks every literal script/declarative spawn.
+/// The actual pure dispatch owner repeats the origin permission for computed paths.
+fn validate_transit_origin(
+    source: &WorldSource,
+    loader: &dyn TemplateLoader,
+    supported: bool,
+) -> Vec<WorldFinding> {
+    if supported {
+        return Vec::new();
+    }
+    collect_spawned_instances(source).into_iter().filter_map(|instance|{
+        let template=loader.load_template(&instance.template_path)?;
+        let resolved=match &instance.overrides {Some(overrides)=>crate::entities::loader::apply_overrides(&template,overrides).ok()?,None=>template};
+        resolved.ship_config.as_ref()?.systems.iter().any(|system|system.kind==phoenix_sim_gameplay::ship::system_registry::TRANSIT_DRIVE_KIND).then(||WorldFinding {
+            severity:Severity::Error,category:"unsupported-transit-origin",
+            message:"layer-authored Transit requires one unambiguous accepted current World context".into(),
+            source:SourceLocation {file:instance.site_file(source),line:instance.site_line(source),reference:instance.label.clone()},
+        })
+    }).collect()
+}

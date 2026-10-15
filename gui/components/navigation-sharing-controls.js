@@ -1,18 +1,27 @@
 import { t, wireText } from '../strings.js';
 import { mountRadarSharingControls } from './radar-sharing-controls.js';
-import { NAVIGATION_SHARED_WAYPOINT_ACTION_ID } from '../stations/navigation-actions.js';
+import { NAVIGATION_SHARED_WAYPOINT_ACTION_ID, NAVIGATION_WORLD_ROUTE_ACTION_ID } from '../stations/navigation-actions.js';
 
 export const navigationSharingState = view => ({ radar_sharing: view?.radar_sharing || [],
-  received_chart: view?.received_chart || [], navigation_auto: !!view?.navigation_auto });
+  received_chart: view?.received_chart || [], navigation_auto: !!view?.navigation_auto,
+  transit_routes: view?.transit_routes || [], navigation_system_id:view?.navigation_system_id,
+  navigation_controllable:view?.navigation_controllable===true });
 
 /** Fixed received observations: changing course always remains an explicit act. */
 export function mountNavigationSharingControls(doc) {
   const node=doc.createElement('section'),sharing=mountRadarSharingControls(doc),list=doc.createElement('div'),rows=new Map();
+  const routes=doc.createElement('select'),choose=doc.createElement('button'),routeBox=doc.createElement('div');
+  choose.type='button';choose.textContent=t('navigation.transit.select');routes.setAttribute('aria-label',t('navigation.transit.known'));routeBox.append(routes,choose);
+  let routeState=null,routeKey=null;choose.dataset.worldRoute='';routes.dataset.worldRoutes='';choose.addEventListener('click',()=>{if(choose.disabled||!routeState)return;doc.defaultView?.activateSemanticAction?.(NAVIGATION_WORLD_ROUTE_ACTION_ID,{source:'control',context:'navigation',detail:{id:routes.value}});});
   const title=doc.createElement('h4');title.textContent=t('navigation.sharing.received');
-  node.append(sharing.node,title,list);node.dataset.navigationSharing='';
+  node.append(sharing.node,title,list,routeBox);node.dataset.navigationSharing='';
   node.addEventListener('keydown',event=>{if(!['Tab','Escape'].includes(event.key))event.stopPropagation();});
   return {node,update(state={}) {
     state ||= {};
+    routeState=state;
+    const choices=Array.isArray(state.transit_routes)?state.transit_routes:[],selected=routes.value;
+    const key=JSON.stringify(choices);if(key!==routeKey){routeKey=key;routes.replaceChildren(...choices.map(route=>{const option=doc.createElement('option');option.value=route.id;option.textContent=wireText(route.label);return option;}));if(choices.some(route=>route.id===selected))routes.value=selected;}
+    choose.disabled=state.navigation_controllable!==true||!!state.navigation_auto||choices.length===0;routes.disabled=choose.disabled;routeBox.hidden=choices.length===0;
     const owners=(state.radar_sharing || []).filter(row=>row.role==='navigation');sharing.update(owners);
     const owner=owners.find(row=>row.controllable && row.can_operate),present=new Set();
     for(const sample of state.received_chart || []) {
@@ -31,6 +40,6 @@ export function mountNavigationSharingControls(doc) {
       row.text.textContent=t('navigation.sharing.sample',{name,x:sample.position[0],z:sample.position[1],source:wireText(sample.provenance.origin?.source),tick:sample.provenance.observed_tick});
     }
     for(const [id,row]of rows)if(!present.has(id)){row.value=null;row.group.remove();rows.delete(id);}
-    title.hidden=rows.size===0;node.hidden=owners.length===0 && rows.size===0;
-  },dispose(){sharing.dispose();for(const row of rows.values())row.value=null;rows.clear();node.remove();}};
+    title.hidden=rows.size===0;node.hidden=owners.length===0 && rows.size===0 && choices.length===0;
+  },dispose(){routeState=null;sharing.dispose();for(const row of rows.values())row.value=null;rows.clear();node.remove();}};
 }

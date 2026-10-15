@@ -102,6 +102,20 @@ pub fn compile_world_scripts(
     // The materialization chain flushes this per-App result before spawning.
     // Reset even on a script-free reload of an App that previously failed.
     commands.insert_resource(ScriptActivationGate::default());
+    if let Some(config) = world_config.as_deref() {
+        match crate::console::helm::transit::StaticTransitScopes::build(config) {
+            Ok(scopes) => {
+                commands.insert_resource(scopes);
+            }
+            Err(error) => {
+                bevy::log::error!(
+                    "compile_world_scripts: refused accepted Transit World recipes: {error}"
+                );
+                commands.insert_resource(ScriptActivationGate { blocked: true });
+                return;
+            }
+        }
+    }
 
     // Prefer scripts already compiled at build time (issue #1214): the headless
     // path runs the world through `world::load::load` once and hands the result

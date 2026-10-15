@@ -87,6 +87,9 @@ pub struct LayerValidationContext<'a> {
     pub template_loader: &'a dyn crate::entities::loader::TemplateLoader,
     pub fragment_source: &'a dyn crate::entities::include_resolve::FragmentSource,
     pub declared_anchors: Vec<String>,
+    /// Accepted immutable Transit support paths, not arbitrary load permission.
+    pub static_transit_worlds: std::collections::BTreeSet<String>,
+    pub accepted_transit_origins: std::collections::BTreeSet<String>,
 }
 
 impl<'a> LayerValidationContext<'a> {
@@ -102,6 +105,8 @@ impl<'a> LayerValidationContext<'a> {
             template_loader,
             fragment_source,
             declared_anchors,
+            static_transit_worlds: Default::default(),
+            accepted_transit_origins: Default::default(),
         }
     }
 }
@@ -339,11 +344,13 @@ where
         if let Some(compiled) = scripts.as_ref() {
             source = source.with_resolved_script_spawns(&compiled.spawned_templates);
         }
-        crate::world::validate::validate_supporting_world(
+        crate::world::validate::validate_supporting_world_with_arrival(
             &source,
             validation.template_loader,
             validation.fragment_source,
             &validation.declared_anchors,
+            validation.static_transit_worlds.contains(path),
+            validation.accepted_transit_origins.contains(path),
         )
     };
     if crate::world::validate::has_error(&composition_findings) {

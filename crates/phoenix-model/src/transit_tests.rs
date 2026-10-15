@@ -61,6 +61,7 @@ fn profile() -> AcceptedLocalJumpProfile {
             max_distance: 1000.0,
             scatter_radius: 5.0,
             gravity_response: 1.0,
+            world_travel: false,
             fuel: TransitFuel {
                 store: "drive-fuel".into(),
                 amount: 2,

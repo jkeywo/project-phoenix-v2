@@ -1,0 +1,12 @@
+# Optional actual World-capable drive: same finite work/fuel/Power hardware.
+# Local and World travel use this same accepted profile, with provisional range.
+includes = ["local_jump_cruiser.toml"]
+name = "entity.sector_jump_cruiser.name"
+[[system]]
+id = "local-jump"
+[[system.component]]
+kind = "transit_drive"
+id = "drive"
+[system.component.config]
+world_travel = true
+max_distance = 20000

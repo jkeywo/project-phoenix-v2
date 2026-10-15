@@ -74,6 +74,8 @@ pub const WORLD_MODIFIER_SOURCE_ID: &str = "world";
 /// per-field, not per-struct — see each field, and `DispatchContext`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LayerView {
+    /// Derived accepted source-context permission for computed pre-mint spawns.
+    pub transit_origin_supported: bool,
     /// The layer's own flag store. **Must be the live store** — same rule, and
     /// same reason, as `DispatchContext::base_flags`.
     pub flags: FlagStore,
@@ -1149,6 +1151,19 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
             if let Err(reason) = config.validate_field_at_origin(resolved_position) {
                 out.override_failures
                     .push(format!("SpawnEntity '{name}' refused: {reason}"));
+                return out;
+            }
+            if context.origin_layer.as_ref().is_some_and(|path| {
+                context
+                    .layers
+                    .get(path)
+                    .is_none_or(|layer| !layer.transit_origin_supported)
+            }) && config.ship_config.as_ref().is_some_and(|ship| {
+                ship.systems
+                    .iter()
+                    .any(|system| system.kind == crate::ship::system_registry::TRANSIT_DRIVE_KIND)
+            }) {
+                out.override_failures.push(format!("SpawnEntity '{name}' refused: layer Transit source context is unsupported or ambiguous"));
                 return out;
             }
             if config.arrival_gravity.is_some() {

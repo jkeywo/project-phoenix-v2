@@ -201,3 +201,56 @@ pub fn destination_findings(
     }
     findings
 }
+
+/// Shared immutable mapping from authored source layer to its unique accepted
+/// current-World context. Ambiguous support is deliberately absent/refused.
+pub fn origin_bindings<'a>(
+    root: &crate::world::config::WorldConfig,
+    documents: impl IntoIterator<Item = (&'a str, &'a crate::world::config::WorldConfig)>,
+) -> Result<std::collections::BTreeMap<String, phoenix_model::transit::TransitWorldBinding>, String>
+{
+    use crate::world::transit_destinations::WorldTransitTarget;
+    use phoenix_model::transit::TransitWorldBinding;
+    use std::collections::{BTreeMap, BTreeSet};
+    let configs: BTreeMap<_, _> = documents.into_iter().collect();
+    let mut matches = BTreeMap::<String, BTreeSet<TransitWorldBinding>>::new();
+    if root.transit_destinations.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    for path in &root.extra_worlds {
+        matches
+            .entry(path.clone())
+            .or_default()
+            .insert(TransitWorldBinding::Base);
+    }
+    for row in &root.transit_destinations {
+        let WorldTransitTarget::Layer { path, .. } = &row.target else {
+            continue;
+        };
+        let binding = TransitWorldBinding::Layer { path: path.clone() };
+        let mut seen = BTreeSet::new();
+        let mut pending = vec![path.as_str()];
+        while let Some(path) = pending.pop() {
+            if !seen.insert(path) {
+                continue;
+            }
+            if seen.len() > 128 {
+                return Err("Transit source context exceeds supported World bound".into());
+            }
+            let config = configs
+                .get(path)
+                .ok_or("Transit source context has missing supporting content")?;
+            matches
+                .entry(path.into())
+                .or_default()
+                .insert(binding.clone());
+            pending.extend(config.extra_worlds.iter().map(String::as_str));
+        }
+    }
+    Ok(matches
+        .into_iter()
+        .filter_map(|(path, bindings)| {
+            (bindings.len() == 1).then(|| (path, bindings.into_iter().next().expect("one context")))
+        })
+        .collect())
+}

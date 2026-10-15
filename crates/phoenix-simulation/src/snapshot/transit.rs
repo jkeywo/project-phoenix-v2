@@ -15,6 +15,23 @@ fn validate_row(
         (Some(_), Some(saved)) => {
             let ship = ship.expect("actual drive roster");
             saved.validate(ship, tick)?;
+            let scopes = world.get_resource::<crate::console::helm::transit::StaticTransitScopes>();
+            if let Some(scopes) = scopes {
+                scopes.validate_context(saved, tick)?;
+            } else if saved.1 != phoenix_model::transit::TransitWorldBinding::Base
+                || saved.0.values().any(|state| {
+                    state.phase.order().is_some_and(|order| {
+                        matches!(
+                            order.destination,
+                            phoenix_model::transit::TransitDestination::World { .. }
+                        )
+                    })
+                })
+            {
+                return Err(
+                    "saved Transit World context requires its accepted immutable recipes".into(),
+                );
+            }
             let period = world
                 .get_resource::<Time<bevy::time::Fixed>>()
                 .ok_or("Transit continuation requires its actual fixed clock")?
@@ -76,7 +93,7 @@ fn validate_row(
                         .get_resource::<crate::world::config::WorldConfig>()
                         .ok_or("saved arrival requires its accepted base World")?;
                     crate::console::helm::transit::placement::validate_saved(
-                        state, &row.uuid, owner, base,
+                        state, &row.uuid, owner, base, scopes,
                     )?;
                 }
             }
@@ -108,6 +125,42 @@ pub(super) fn validate_roster(
                     .find_map(|(entity, id)| (id.0 == row.uuid).then_some(entity))
             });
         let ship = accepted_ship(world, live, row).map_err(|reason| (row.uuid.clone(), reason))?;
+        if let Some(saved) = row.transit.as_ref().filter(|saved| saved.2.is_none()) {
+            let mut declarations = snapshot.layer_flags.iter().filter(|layer| {
+                layer
+                    .declared_entity_uuids
+                    .iter()
+                    .any(|uuid| uuid.as_deref() == Some(row.uuid.as_str()))
+            });
+            let declared = declarations.next().map(|layer| layer.path.as_str());
+            if declarations.next().is_some() {
+                return Err((
+                    row.uuid.clone(),
+                    "Transit source has multiple actual lifetime owners".into(),
+                ));
+            }
+            let layer = row
+                .spawn
+                .as_ref()
+                .and_then(|spawn| spawn.layer_path.as_deref())
+                .or(declared);
+            let expected = match layer {
+                None => phoenix_model::transit::TransitWorldBinding::Base,
+                Some(path) => world
+                    .get_resource::<crate::console::helm::transit::StaticTransitScopes>()
+                    .ok_or_else(|| {
+                        (
+                            row.uuid.clone(),
+                            "layer-authored Transit lacks accepted current World recipes".into(),
+                        )
+                    })?
+                    .binding_for_origin(path)
+                    .map_err(|error| (row.uuid.clone(), error))?,
+            };
+            if saved.1 != expected {
+                return Err((row.uuid.clone(),"Transit without a World arrival must retain its actual authored source context".into()));
+            }
+        }
         validate_row(world, row, live, ship.as_ref(), snapshot.tick)
             .map_err(|reason| (row.uuid.clone(), reason))?;
     }
@@ -121,6 +174,29 @@ pub(super) fn validate_live(
     tick: u64,
 ) -> Result<(), String> {
     let ship = accepted_ship(world, Some(entity), row)?;
+    if let Some(saved) = row.transit.as_ref().filter(|saved| saved.2.is_none()) {
+        let layer = row
+            .spawn
+            .as_ref()
+            .and_then(|spawn| spawn.layer_path.as_deref())
+            .or_else(|| {
+                world
+                    .get::<crate::world::server::EntityOriginLayer>(entity)
+                    .map(|origin| origin.0.as_str())
+            });
+        let expected = match layer {
+            None => phoenix_model::transit::TransitWorldBinding::Base,
+            Some(path) => world
+                .get_resource::<crate::console::helm::transit::StaticTransitScopes>()
+                .ok_or("layer-authored Transit lacks accepted current World recipes")?
+                .binding_for_origin(path)?,
+        };
+        if saved.1 != expected {
+            return Err(
+                "Transit without World arrival differs from actual authored source context".into(),
+            );
+        }
+    }
     validate_row(world, row, Some(entity), ship.as_ref(), tick)
 }
 

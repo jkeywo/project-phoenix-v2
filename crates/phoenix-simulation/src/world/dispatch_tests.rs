@@ -98,6 +98,7 @@ impl Fixture {
 
 fn layer(loader_path: Option<&str>) -> LayerView {
     LayerView {
+        transit_origin_supported: false,
         flags: FlagStore::new(),
         loader_path: loader_path.map(str::to_string),
         anchors: HashMap::new(),

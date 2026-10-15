@@ -828,6 +828,7 @@ fn refresh_anchored_waypoint(
 /// asks NPC ships to carry navigation blackboards, so this publishes for every
 /// AI-bearing ship (those carrying `ShipSystemBlackboards`).
 pub(crate) fn publish_navigation_blackboard(
+    transit: Option<Res<crate::console::helm::transit::StaticTransitScopes>>,
     knowledge: super::knowledge::Environment,
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
@@ -887,6 +888,9 @@ pub(crate) fn publish_navigation_blackboard(
         let mut bb = if is_local {
             NavigationBlackboard {
                 course_generation: waypoint.generation(),
+                transit_routes: transit
+                    .as_deref()
+                    .map_or_else(Vec::new, |scopes| scopes.views()),
                 nav_chart_range: cfg.nav_chart_range,
                 nav_chart_shows: cfg.nav_chart_shows.clone(),
                 nav_chart_selects: cfg.nav_chart_selects.clone(),
@@ -899,6 +903,9 @@ pub(crate) fn publish_navigation_blackboard(
         } else {
             NavigationBlackboard {
                 course_generation: waypoint.generation(),
+                transit_routes: transit
+                    .as_deref()
+                    .map_or_else(Vec::new, |scopes| scopes.views()),
                 navigation_waypoint,
                 ..Default::default()
             }

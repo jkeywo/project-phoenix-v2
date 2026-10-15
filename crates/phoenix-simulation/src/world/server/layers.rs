@@ -199,6 +199,7 @@ pub(super) fn apply_loaded_layer(
     id_mint: Option<&crate::world_id::EntityMint>,
     now_tick: u64,
     root_tick_hz: f32,
+    transit_scopes: Option<&crate::console::helm::transit::StaticTransitScopes>,
     test_trace: Option<&mut crate::workshop::test_trace::TestTrace>,
 ) {
     let crate::world::layers::LoadedLayer {
@@ -320,6 +321,7 @@ pub(super) fn apply_loaded_layer(
         commands
             .entity(spawned)
             .insert(EntityOriginLayer(path.to_string()));
+        crate::console::helm::transit::seed_layer_origin(&mut commands.entity(spawned), path);
     }
 
     let delayed_unload_resolve = matches!(
@@ -338,6 +340,7 @@ pub(super) fn apply_loaded_layer(
         path.to_string(),
         WorldRuntime {
             inspection_config: Some(Box::new(scenario_config.clone())),
+            transit_origin: transit_scopes.and_then(|scopes| scopes.binding_for_origin(path).ok()),
             is_active: true,
             activation_order,
             spawned_entities,
@@ -451,7 +454,10 @@ pub(super) fn apply_world_layer_changes(
     // no digest folds it, and a fresh app starts it empty.
     mut toml_retries: Local<HashMap<String, u32>>,
     sim_tick: Option<Res<crate::sim_tick::SimTick>>,
-    base_world: Option<Res<crate::world::config::WorldConfig>>,
+    world_context: (
+        Option<Res<crate::world::config::WorldConfig>>,
+        Option<Res<crate::console::helm::transit::StaticTransitScopes>>,
+    ),
     // A layer-owned dialogue is executable scenario state just like its queued
     // callback. Keep the comms surfaces optional for bare loader fixtures, but
     // retire all of them atomically when the owner unloads.
@@ -463,6 +469,7 @@ pub(super) fn apply_world_layer_changes(
     if pending.0.is_empty() {
         return;
     }
+    let (base_world, transit_scopes) = world_context;
 
     let changes: Vec<WorldLayerChange> = pending.0.drain(..).collect();
     let now_tick = sim_tick.as_deref().map_or(0, |tick| tick.0);
@@ -552,12 +559,18 @@ pub(super) fn apply_world_layer_changes(
                         }
                     }
                 }
-                let validation = layer_validation_context(
+                let mut validation = layer_validation_context(
                     base_world.as_deref(),
                     &layer_map,
                     &template_loader,
                     &fragment_source,
                 );
+                validation.static_transit_worlds = transit_scopes
+                    .as_deref()
+                    .map_or_else(Default::default, |scopes| scopes.static_worlds());
+                validation.accepted_transit_origins = transit_scopes
+                    .as_deref()
+                    .map_or_else(Default::default, |scopes| scopes.origin_worlds());
                 let result = evaluate_layer_load(
                     &path,
                     already_loaded,
@@ -647,6 +660,7 @@ pub(super) fn apply_world_layer_changes(
                             id_mint.as_deref(),
                             now_tick,
                             root_tick_hz,
+                            transit_scopes.as_deref(),
                             test_trace.as_deref_mut(),
                         );
                     }
@@ -685,12 +699,18 @@ pub(super) fn apply_world_layer_changes(
                             layer_map.0.insert(path, WorldRuntime::default());
                         }
                         WorldFetchState::Ready(_) => {
-                            let validation = layer_validation_context(
+                            let mut validation = layer_validation_context(
                                 base_world.as_deref(),
                                 &layer_map,
                                 &template_loader,
                                 &fragment_source,
                             );
+                            validation.static_transit_worlds = transit_scopes
+                                .as_deref()
+                                .map_or_else(Default::default, |scopes| scopes.static_worlds());
+                            validation.accepted_transit_origins = transit_scopes
+                                .as_deref()
+                                .map_or_else(Default::default, |scopes| scopes.origin_worlds());
                             let result = evaluate_layer_load(
                                 &path,
                                 layer_map.0.contains_key(&path),
@@ -736,6 +756,7 @@ pub(super) fn apply_world_layer_changes(
                                             id_mint.as_deref(),
                                             now_tick,
                                             root_tick_hz,
+                                            transit_scopes.as_deref(),
                                             test_trace.as_deref_mut(),
                                         );
                                     }
@@ -777,6 +798,7 @@ pub(super) fn apply_world_layer_changes(
                     id_mint.as_deref(),
                     now_tick,
                     root_tick_hz,
+                    transit_scopes.as_deref(),
                     test_trace.as_deref_mut(),
                 );
             }

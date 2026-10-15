@@ -14,6 +14,7 @@
  */
 import { makeCaptainRender } from '../stations/captain-console.js';
 import { familyView } from '../console-payload.js';
+import { navigationSharingState } from '../components/navigation-sharing-controls.js';
 
 export const renderStation = makeCaptainRender({
   captainView: (s) => familyView(s, 'captain'),
@@ -91,7 +92,7 @@ export const renderStation = makeCaptainRender({
       navEl.state = {
         blips: nav.blips || [], regions: nav.regions || [], range: nav.radar_range || 800,
         ship_pos: { x: nav.ship_x || 0, z: nav.ship_z || 0 }, ship_heading: nav.ship_heading || 0,
-        waypoint: nav.waypoint || null, auto: !!nav.navigation_auto,radar_sharing:nav.radar_sharing || [],received_chart:nav.received_chart || [],navigation_auto:!!nav.navigation_auto,
+        waypoint: nav.waypoint || null, auto: !!nav.navigation_auto,...navigationSharingState(nav),
       };
     }
 

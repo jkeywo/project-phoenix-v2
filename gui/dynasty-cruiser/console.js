@@ -5,6 +5,7 @@
  * underlying system contract.
  */
 import { familyView } from '../console-payload.js';
+import { navigationSharingState } from '../components/navigation-sharing-controls.js';
 import { makeCaptainRender } from '../stations/captain-console.js';
 import { makeHelmRender, renderDockPanel, renderTowLoadPanel } from '../stations/helm-console.js';
 import { makeTacticalRender } from '../stations/tactical-console.js';
@@ -61,7 +62,7 @@ export function renderHelm(s, doc = document) {
       blips: nav.blips || [], regions: nav.regions || [], range: nav.radar_range || 800,
       ship_pos: { x: nav.ship_x || 0, z: nav.ship_z || 0 },
       ship_heading: nav.ship_heading || 0, waypoint: nav.waypoint || null,
-      auto: !!nav.navigation_auto,radar_sharing:nav.radar_sharing || [],received_chart:nav.received_chart || [],navigation_auto:!!nav.navigation_auto,
+      auto: !!nav.navigation_auto,...navigationSharingState(nav),
     };
   }
 }

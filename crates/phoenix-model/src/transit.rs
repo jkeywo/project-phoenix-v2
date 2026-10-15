@@ -146,10 +146,16 @@ pub struct LocalJumpConfig {
         skip_serializing_if = "is_unit_gravity_response"
     )]
     pub gravity_response: f32,
+    /// May bind an explicitly known authored World route; free courses stay local.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub world_travel: bool,
     pub fuel: TransitFuel,
     /// Existing per-System text reading; zero is immediate compatibility tuning.
     #[serde(default)]
     pub reading_ticks: u32,
+}
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 fn unit_gravity_response() -> f32 {
     1.0
@@ -208,14 +214,22 @@ pub enum TransitDestination {
         point: [f32; 3],
         course_generation: u64,
     },
+    World {
+        id: String,
+        point: [f32; 3],
+        course_generation: u64,
+    },
 }
 impl TransitDestination {
     pub fn point(&self) -> [f32; 3] {
         match self {
-            Self::Local { point, .. } => *point,
+            Self::Local { point, .. } | Self::World { point, .. } => *point,
         }
     }
     pub fn validate(&self) -> Result<(), String> {
+        if matches!(self, Self::World {id, ..} if !identity(id)) {
+            return Err("World transit needs a bounded closed route identity".into());
+        }
         if self.point().into_iter().any(|value| !value.is_finite()) {
             return Err("transit course requires finite representable geometry".into());
         }
@@ -241,3 +255,64 @@ impl ArrivalGravityConfig {
 #[cfg(test)]
 #[path = "transit_tests.rs"]
 mod tests;
+
+/// Current accepted arrival-policy context, not physical membership or lifetime.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TransitWorldBinding {
+    #[default]
+    Base,
+    Layer {
+        path: String,
+    },
+}
+
+impl TransitWorldBinding {
+    pub fn is_base(&self) -> bool {
+        matches!(self, Self::Base)
+    }
+    pub fn validate(&self) -> Result<(), String> {
+        if let Self::Layer { path } = self {
+            if !identity(path)
+                || !path.starts_with("assets/worlds/")
+                || !path.ends_with(".toml")
+                || path.contains(char::from(92))
+                || path
+                    .split('/')
+                    .any(|part| part.is_empty() || part == "." || part == "..")
+            {
+                return Err("Transit World context needs a canonical accepted World path".into());
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Latest actual successful World arrival. It owns no work, placement or payment.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TransitWorldArrival {
+    pub owner: crate::identity::SystemId,
+    pub route: String,
+    pub tick: u64,
+}
+
+/// Authored known routes on the permitted Navigation publication. No paths or actors.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TransitRouteView {
+    pub id: String,
+    pub label: String,
+    pub point: [f32; 3],
+}
+impl TransitRouteView {
+    pub fn validate(&self) -> Result<(), String> {
+        if !identity(&self.id)
+            || !identity(&self.label)
+            || !self.point.iter().all(|value| value.is_finite())
+        {
+            return Err("invalid known authored Transit route".into());
+        }
+        Ok(())
+    }
+}

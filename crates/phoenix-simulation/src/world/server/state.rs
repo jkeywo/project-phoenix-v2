@@ -289,6 +289,9 @@ pub struct PendingScenarioLoad(pub Vec<String>);
 /// [`crate::world::trigger_registry::WorldTriggerRegistry::remove_layer`] matches on at unload.
 #[derive(Clone, Debug, Default)]
 pub struct WorldRuntime {
+    /// Derived accepted authored-origin permission; rebuilt with content, never
+    /// captured/folded as mutable current location or read from Live inspection.
+    pub transit_origin: Option<phoenix_model::transit::TransitWorldBinding>,
     /// Parsed effective definition retained for read-only Live inspection.
     /// Runtime authority continues to live in the specialised fields below;
     /// this copy is never read by simulation systems.
@@ -781,6 +784,7 @@ pub(crate) fn project_layer_views(layer_map: Option<&WorldLayerMap>) -> HashMap<
                     (
                         path.clone(),
                         LayerView {
+                            transit_origin_supported: wr.transit_origin.is_some(),
                             flags: wr.flags.clone(),
                             loader_path: wr.loader_path.clone(),
                             anchors: wr.anchors.clone(),

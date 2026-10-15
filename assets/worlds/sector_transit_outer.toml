@@ -1,0 +1,15 @@
+# Dormant accepted destination. Its ordinary layer owner spawns entities/scripts.
+extra_worlds = ["assets/worlds/sector_transit_support.toml"]
+[anchors]
+arrival = [10000,0,0]
+[[entity]]
+template_path = "assets/entities/planet_gas_giant.toml"
+name = "world.entity.sector_outer_body.name"
+transform = {position=[10400,0,0]}
+[entity.overrides.arrival_gravity]
+exclusion_radius = 256
+[script]
+entry = """
+on_world_loaded("record_activation");
+fn record_activation(ctx) { ctx.flags.transit_activation_count += 1; }
+"""

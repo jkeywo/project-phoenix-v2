@@ -169,3 +169,14 @@ entities:
       rationale:
         - "[ai] Agreed with the integrator before implementation. The route must be present in the same permitted Navigation publication; a guessed private anchor cannot grant World travel. Ambiguous/shared anchor coordinates refuse with an actionable reason. Existing authored Reach-to-anchor Navigation policy can select the same course."
         - "[ai] Immutable route and static-body recipes derive at the existing materialisation boundary. The actual Transit owner retains current World context and paid work/arrival; private actors and file paths are not route UI data. Dormant closure checkpoint alone implements neither route operation nor sector travel."
+
+
+  - decision: retained-transit-world-arrival-frontier
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Retained Transit Receipts Keep Their Original World Scope
+      summary: "Each accepted order freezes its original World context. One minimal latest successful World-arrival stamp remains in the existing ship Transit owner; it retains owner, closed route identity and actual arrival tick without another phase or payment state."
+      rationale:
+        - "[ai] Independent review identified that another drive or a later local order can leave older Arrived receipts behind. Validate those against their own immutable original/selected scope, never the ship's later current scope. Only the latest World-arrival frontier determines current context."
+        - "[ai] With no successful World-arrival stamp, context must equal actual authored origin. A completed World arrival updates context and stamp together; earlier inactive receipts remain historical. Capture, fold and no-write preflight preserve and cross-check this causal frontier."

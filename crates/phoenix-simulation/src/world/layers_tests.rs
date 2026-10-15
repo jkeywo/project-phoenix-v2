@@ -453,3 +453,39 @@ fn load_parse_failure_warns_and_marks_broken() {
         result.warnings[0]
     );
 }
+
+#[test]
+fn literal_layer_drive_requires_accepted_origin_before_mint() {
+    let path = "assets/worlds/outer.toml";
+    let source="[[entity]]\ntemplate_path='assets/entities/sector_jump_cruiser.toml'\nname='layer-drive'\ntransform={position=[10000,0,0]}";
+    let templates = crate::entities::loader::WasmTemplateLoader;
+    let fragments = crate::entities::include_resolve::HostFragmentSource;
+    let mut validation = LayerValidationContext::new(&templates, &fragments, Vec::new());
+    let refused = evaluate_layer_load(
+        path,
+        false,
+        Some(source),
+        &crate::world::script::load::NoSiblingScripts,
+        &validation,
+        || panic!("unsupported source must refuse before mint"),
+    );
+    assert!(matches!(refused.outcome, LayerLoadOutcome::ParseFailed));
+    assert!(refused
+        .warnings
+        .iter()
+        .any(|reason| reason.contains("Transit")));
+    validation.accepted_transit_origins.insert(path.into());
+    let accepted = evaluate_layer_load(
+        path,
+        false,
+        Some(source),
+        &crate::world::script::load::NoSiblingScripts,
+        &validation,
+        counter_uuids(),
+    );
+    assert!(
+        matches!(accepted.outcome, LayerLoadOutcome::Loaded(_)),
+        "{:?}",
+        accepted.outcome
+    );
+}

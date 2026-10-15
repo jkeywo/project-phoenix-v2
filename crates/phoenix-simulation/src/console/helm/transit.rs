@@ -21,6 +21,10 @@ mod ai;
 #[path = "transit_placement.rs"]
 pub(crate) mod placement;
 
+#[path = "transit_worlds.rs"]
+mod worlds;
+pub(crate) use worlds::StaticTransitScopes;
+
 pub(crate) fn register(app: &mut App) {
     use crate::{
         authoritative::{DeclareState, StateClass},
@@ -47,6 +51,10 @@ pub(crate) fn register(app: &mut App) {
     app.declare_state::<ShipTransitDrives>(StateClass::Folded, "transit-drive-orders")
         .declare_state::<TransitReadouts>(StateClass::Derived, "transit-last-step-readouts")
         .declare_state::<StaticArrivalPolicy>(StateClass::Derived, "static-arrival-body-policy")
+        .declare_state::<StaticTransitScopes>(
+            StateClass::Derived,
+            "accepted-static-transit-world-recipes",
+        )
         .add_systems(
             FixedUpdate,
             ai::operate
@@ -77,6 +85,7 @@ pub(crate) fn register(app: &mut App) {
 }
 
 pub(crate) fn publish(
+    scopes: Option<Res<StaticTransitScopes>>,
     mut ships: Query<(
         &ShipConfigComponent,
         &ShipSystemControlSources,
@@ -124,9 +133,17 @@ pub(crate) fn publish(
                     _ => false,
                 };
             let can_begin = !drives.0.values().any(|state| state.phase.active())
+                && scopes
+                    .as_deref()
+                    .map_or(drives.1 == TransitWorldBinding::Base, |scopes| {
+                        scopes.validate_context(drives, u64::MAX).is_ok()
+                    })
                 && allowed
                 && physics.is_some()
                 && current.as_ref().is_some_and(|destination| {
+                    if !known_route(destination, scopes.as_deref()) {
+                        return false;
+                    }
                     let Some(power) = power else {
                         return false;
                     };
@@ -142,6 +159,7 @@ pub(crate) fn publish(
                     let own = physics.expect("physical owner checked");
                     TransitOrder {
                         destination: destination.clone(),
+                        original_world: drives.1.clone(),
                         origin: [own.x, own.y, own.z],
                         profile: AcceptedLocalJumpProfile {
                             config: binding.config.clone(),
@@ -213,7 +231,12 @@ pub struct TransitReadouts(pub BTreeMap<SystemId, TransitAdvance>);
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ShipTransitDrives(pub BTreeMap<SystemId, TransitState>);
+pub struct ShipTransitDrives(
+    pub BTreeMap<SystemId, TransitState>,
+    /// Actual accepted current arrival-policy context, independent of origin lifetime.
+    pub TransitWorldBinding,
+    pub Option<TransitWorldArrival>,
+);
 
 impl ShipTransitDrives {
     pub fn from_ship(ship: &crate::ship::config::ShipConfig) -> Option<Self> {
@@ -223,13 +246,33 @@ impl ShipTransitDrives {
             .filter(|system| system.kind == crate::ship::system_registry::TRANSIT_DRIVE_KIND)
             .map(|system| (system.id.clone(), TransitState::default()))
             .collect();
-        (!states.is_empty()).then_some(Self(states))
+        (!states.is_empty()).then_some(Self(states, TransitWorldBinding::Base, None))
     }
     pub fn validate(
         &self,
         ship: &crate::ship::config::ShipConfig,
         tick: u64,
     ) -> Result<(), String> {
+        self.1.validate()?;
+        if let Some(receipt) = &self.2 {
+            if receipt.tick == 0
+                || receipt.tick > tick
+                || self
+                    .0
+                    .get(&receipt.owner)
+                    .is_none_or(|state| state.last_tick.is_none_or(|last| last < receipt.tick))
+                || ship
+                    .system(&receipt.owner)
+                    .and_then(|system| transit_composition(&system.components))
+                    .is_none_or(|binding| !binding.config.world_travel)
+                || receipt.route.trim().is_empty()
+                || receipt.route.len() > 512
+                || receipt.route.chars().any(char::is_control)
+                || !self.0.contains_key(&receipt.owner)
+            {
+                return Err("invalid latest actual World-arrival frontier".into());
+            }
+        }
         let expected = Self::from_ship(ship).unwrap_or_default();
         if !self.0.keys().eq(expected.0.keys()) {
             return Err("saved Transit owner roster differs from accepted actual drives".into());
@@ -283,6 +326,11 @@ pub(crate) fn tick(
     now: Res<crate::sim_tick::SimTick>,
     fixed: Res<Time<Fixed>>,
     world: Res<crate::world::config::WorldConfig>,
+    context: (
+        Option<Res<StaticTransitScopes>>,
+        Option<Res<crate::world::server::WorldLayerMap>>,
+        Option<ResMut<crate::world::server::PendingWorldLayerChanges>>,
+    ),
     mut runtime: Option<ResMut<crate::world::server::WorldContentRuntime>>,
     pending_capacity: Option<
         Res<crate::effect_queue::EffectQueue<crate::infrastructure::CapacityAdjustment>>,
@@ -293,6 +341,7 @@ pub(crate) fn tick(
             &Transform,
             &StaticArrivalPolicy,
             Option<&ShipPhysics>,
+            Option<&crate::world::server::EntityOriginLayer>,
         ),
         Without<ShipTransitDrives>,
     >,
@@ -314,9 +363,14 @@ pub(crate) fn tick(
     )>,
 ) {
     let dt = fixed.timestep().as_secs_f64();
-    let accepted = placement::accepted_bodies(&world).ok();
+    let (scopes, layers, mut pending_layers) = context;
+    let accepted_base = world
+        .transit_destinations
+        .is_empty()
+        .then(|| placement::accepted_bodies(&world).ok())
+        .flatten();
     let mut body_points = BTreeMap::new();
-    for (uuid, transform, policy, physics) in &bodies {
+    for (uuid, transform, policy, physics, origin) in &bodies {
         let point = physics.map_or(transform.translation.to_array(), |physics| {
             [physics.x, physics.y, physics.z]
         });
@@ -325,7 +379,11 @@ pub(crate) fn tick(
         body_points
             .entry(uuid.0.as_str())
             .and_modify(|entry| *entry = None)
-            .or_insert(Some((point, &policy.0)));
+            .or_insert(Some((
+                point,
+                &policy.0,
+                origin.map(|origin| origin.0.as_str()),
+            )));
     }
     let mut order: Vec<_> = ships.iter().map(|(uuid, ..)| uuid.0.clone()).collect();
     order.sort();
@@ -357,10 +415,26 @@ pub(crate) fn tick(
             let debit = pending.entry(change.capacity.clone()).or_default();
             *debit = debit.saturating_add(change.delta.saturating_neg());
         }
+        let mut arrived_world = None;
         for (owner, state) in &mut drives.0 {
             if state.last_tick == Some(now.0) {
                 continue;
             }
+            let selected_scope = state
+                .phase
+                .order()
+                .and_then(|order| scopes.as_deref()?.for_order(order));
+            let layers_ready = selected_scope.is_none_or(|scope| {
+                worlds::ensure_layers(
+                    scope,
+                    scopes.as_deref().expect("scope owner"),
+                    layers.as_deref(),
+                    pending_layers.as_deref_mut(),
+                    state.phase.order().is_some_and(|order| {
+                        matches!(order.destination, TransitDestination::World { .. })
+                    }),
+                )
+            });
             let mut staged_power = power.as_deref().map(|power| power.0.clone());
             let mut staged_inventory = inventory.as_deref().map(|inventory| inventory.0.clone());
             let mut flags = Vec::new();
@@ -413,19 +487,43 @@ pub(crate) fn tick(
                     )
                 },
                 |order, _| {
-                    let accepted = accepted.as_ref()?;
-                    if accepted.iter().any(|body| {
-                        world
-                            .name_to_uuid
-                            .get(&body.body_id)
+                    if !layers_ready {
+                        return None;
+                    }
+                    let recipes = if let Some(scope) = selected_scope {
+                        scope.bodies.clone()
+                    } else if order.original_world == TransitWorldBinding::Base
+                        && matches!(order.destination, TransitDestination::Local { .. })
+                    {
+                        accepted_base
+                            .as_ref()?
+                            .iter()
+                            .cloned()
+                            .map(|body| (None, body))
+                            .collect()
+                    } else {
+                        return None;
+                    };
+                    if recipes.iter().any(|(source, body)| {
+                        runtime
+                            .as_deref()
+                            .and_then(|runtime| runtime.name_to_uuid.get(&body.body_id))
+                            .or_else(|| world.name_to_uuid.get(&body.body_id))
                             .and_then(|uuid| body_points.get(uuid.as_str()).copied().flatten())
-                            .is_none_or(|(point, policy)| {
-                                point != body.position || *policy != body.policy
+                            .is_none_or(|(point, policy, origin)| {
+                                point != body.position
+                                    || *policy != body.policy
+                                    || source.as_deref() != origin
                             })
                     }) {
                         return None;
                     }
-                    placement::solution(order, &uuid.0, owner, accepted.clone())
+                    placement::solution(
+                        order,
+                        &uuid.0,
+                        owner,
+                        recipes.into_iter().map(|(_, body)| body).collect(),
+                    )
                 },
             );
             match result {
@@ -439,6 +537,23 @@ pub(crate) fn tick(
                         inventory.0 = next;
                     }
                     if let TransitAdvance::Arrived { point } = result {
+                        if let Some(TransitDestination::World { id, .. }) =
+                            state.phase.order().map(|order| &order.destination)
+                        {
+                            arrived_world = scopes
+                                .as_deref()
+                                .and_then(|scopes| scopes.routes.get(id))
+                                .map(|route| {
+                                    (
+                                        route.binding.clone(),
+                                        TransitWorldArrival {
+                                            owner: owner.clone(),
+                                            route: id.clone(),
+                                            tick: now.0,
+                                        },
+                                    )
+                                });
+                        }
                         if let Some(physics) = physics.as_deref_mut() {
                             physics.x = point[0];
                             physics.y = point[1];
@@ -457,6 +572,10 @@ pub(crate) fn tick(
                 }
                 Err(error) => warn!("Transit {} refused invalid causal step: {error}", owner.0),
             }
+        }
+        if let Some((binding, receipt)) = arrived_world {
+            drives.1 = binding;
+            drives.2 = Some(receipt);
         }
     }
 }
@@ -484,9 +603,28 @@ pub(super) fn course(
         return None;
     }
     let point = board.navigation_waypoint.as_ref()?;
-    let destination = TransitDestination::Local {
-        point: [point.x, height, point.z],
-        course_generation: board.course_generation,
+    let point = [point.x, height, point.z];
+    let mut matching = board.transit_routes.iter().filter(|route| {
+        route.point[0] == point[0] && route.point[2] == point[2] && route.validate().is_ok()
+    });
+    let matched = matching.next();
+    if matching.next().is_some() {
+        return None;
+    }
+    let destination = if let Some(route) = matched {
+        if !binding.config.world_travel {
+            return None;
+        }
+        TransitDestination::World {
+            id: route.id.clone(),
+            point: route.point,
+            course_generation: board.course_generation,
+        }
+    } else {
+        TransitDestination::Local {
+            point,
+            course_generation: board.course_generation,
+        }
     };
     destination.validate().ok()?;
     Some(destination)
@@ -514,6 +652,7 @@ fn visible_request(
 
 pub(crate) fn handle_commands(
     tick: Res<crate::sim_tick::SimTick>,
+    scopes: Option<Res<StaticTransitScopes>>,
     mut outbox: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
     mut ships: Query<(
         &AdmittedCommands,
@@ -561,7 +700,13 @@ pub(crate) fn handle_commands(
                 .0
                 .iter()
                 .any(|(owner, state)| owner != &command.target && state.phase.active());
-            let applied = if !online(sources, &command.target) {
+            let original_world = drives.1.clone();
+            let current_valid = scopes
+                .as_deref()
+                .map_or(original_world == TransitWorldBinding::Base, |scopes| {
+                    scopes.validate_context(&drives, tick.0).is_ok()
+                });
+            let applied = if !current_valid || !online(sources, &command.target) {
                 false
             } else if let Some(state) = drives.0.get_mut(&command.target) {
                 match &command.payload {
@@ -570,6 +715,9 @@ pub(crate) fn handle_commands(
                         let order = physics.zip(waypoint).and_then(|(physics, waypoint)| {
                             let destination =
                                 course(&config.0, boards, &command.target, waypoint, physics.y)?;
+                            if !known_route(&destination, scopes.as_deref()) {
+                                return None;
+                            }
                             if request.as_ref().is_some_and(|key| {
                                 !visible_request(&config.0, boards, &command.target, key)
                             }) {
@@ -583,6 +731,7 @@ pub(crate) fn handle_commands(
                                 .find(|consumer| consumer.system == command.target)?;
                             Some(TransitOrder {
                                 destination,
+                                original_world: original_world.clone(),
                                 origin: [physics.x, physics.y, physics.z],
                                 profile: AcceptedLocalJumpProfile {
                                     config: binding.config.clone(),
@@ -683,3 +832,47 @@ fn work(
 #[cfg(test)]
 #[path = "transit_tests.rs"]
 mod tests;
+
+fn known_route(destination: &TransitDestination, scopes: Option<&StaticTransitScopes>) -> bool {
+    match destination {
+        TransitDestination::Local { .. } => true,
+        TransitDestination::World { id, point, .. } => scopes
+            .and_then(|scopes| scopes.routes.get(id))
+            .is_some_and(|route| route.view.point == *point),
+    }
+}
+
+/// Explicit real authored-layer spawn join; never invoked during a restore.
+/// EntityOriginLayer retains lifetime/script ownership independently.
+pub(crate) fn seed_layer_origin(commands: &mut EntityCommands, path: &str) {
+    let path = path.to_owned();
+    commands.queue(move |mut entity: EntityWorldMut| {
+        if !entity.contains::<ShipTransitDrives>() {
+            return;
+        }
+        let binding = entity.world_scope(|world| {
+            world
+                .get_resource::<StaticTransitScopes>()
+                .ok_or_else(|| "actual Transit World recipes are absent".to_owned())
+                .and_then(|scopes| scopes.binding_for_origin(&path))
+        });
+        match binding {
+            Ok(binding) => {
+                entity
+                    .get_mut::<ShipTransitDrives>()
+                    .expect("checked actual drive")
+                    .1 = binding;
+            }
+            Err(error) => {
+                // Unsupported binding is explicit and cannot grant base policy.
+                bevy::log::error!(
+                    "refused layer-authored Transit World binding for {path}: {error}"
+                );
+                entity
+                    .get_mut::<ShipTransitDrives>()
+                    .expect("checked actual drive")
+                    .1 = TransitWorldBinding::Layer { path };
+            }
+        }
+    });
+}

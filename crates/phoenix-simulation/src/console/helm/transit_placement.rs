@@ -68,13 +68,24 @@ pub(crate) fn validate_saved(
     uuid: &str,
     owner: &SystemId,
     world: &crate::world::config::WorldConfig,
+    scopes: Option<&StaticTransitScopes>,
 ) -> Result<(), String> {
     let (order, arrival) = match &state.phase {
         TransitPhase::Committed { order, arrival, .. }
         | TransitPhase::Arrived { order, arrival, .. } => (order, arrival),
         _ => return Ok(()),
     };
-    let expected = solution(order, uuid, owner, accepted_bodies(world)?)
+    let bodies = if let Some(scope) = scopes.and_then(|scopes| scopes.for_order(order)) {
+        scope.bodies.iter().map(|(_, body)| body.clone()).collect()
+    } else if order.original_world == TransitWorldBinding::Base
+        && matches!(order.destination, TransitDestination::Local { .. })
+        && world.transit_destinations.is_empty()
+    {
+        accepted_bodies(world)?
+    } else {
+        return Err("saved Transit arrival lacks its accepted current/selected World scope".into());
+    };
+    let expected = solution(order, uuid, owner, bodies)
         .ok_or("saved accepted arrival has no supported deterministic solution")?;
     if &expected != arrival {
         return Err(

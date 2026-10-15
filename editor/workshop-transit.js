@@ -19,10 +19,11 @@ export function validateTransitEntity(entity) {
       || (system.channel || []).length || !components.every(row => identity(row.id))
       || inputs[0].id === drive.id || drive.power_input !== inputs[0].id
       || !closed(inputs[0], ['kind', 'id']) || !closed(drive, ['kind', 'id', 'power_input', 'navigation_source', 'config'])
-      || !closed(config, ['preparation_work_secs', 'max_distance', 'scatter_radius', 'gravity_response', 'fuel', 'reading_ticks'])
+      || !closed(config, ['preparation_work_secs', 'max_distance', 'scatter_radius', 'gravity_response', 'world_travel', 'fuel', 'reading_ticks'])
       || !positive(config.preparation_work_secs) || !positive(config.max_distance)
       || !finite(config.scatter_radius) || config.scatter_radius < 0
       || (config.gravity_response !== undefined && (!finite(config.gravity_response) || config.gravity_response < 0))
+      || (config.world_travel !== undefined && typeof config.world_travel !== 'boolean')
       || !closed(config.fuel, ['store', 'amount']) || typeof config.fuel.store !== 'string' || !config.fuel.store.trim()
       || !Number.isSafeInteger(config.fuel.amount) || config.fuel.amount <= 0
       || (config.reading_ticks !== undefined && (!Number.isInteger(config.reading_ticks) || config.reading_ticks < 0 || config.reading_ticks > 4294967295)))

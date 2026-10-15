@@ -57,6 +57,7 @@ fn fixture() -> (World, Entity) {
             point: [100.0, 0.0, 30.0],
             course_generation: 7,
         },
+        original_world: TransitWorldBinding::Base,
         origin: [0.0; 3],
         profile: AcceptedLocalJumpProfile {
             config: binding.config.clone(),

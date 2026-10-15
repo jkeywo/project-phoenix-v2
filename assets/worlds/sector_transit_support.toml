@@ -1,0 +1,7 @@
+# Static support follows the selected destination's existing loader parent.
+[[entity]]
+template_path = "assets/entities/planet_gas_giant.toml"
+name = "world.entity.sector_support_body.name"
+transform = {position=[11000,0,0]}
+[entity.overrides.arrival_gravity]
+exclusion_radius = 32

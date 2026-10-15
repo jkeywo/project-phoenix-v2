@@ -1422,6 +1422,10 @@ pub(crate) fn apply_dispatch_result(
                         commands
                             .entity(spawned)
                             .insert(EntityOriginLayer(path.clone()));
+                        crate::console::helm::transit::seed_layer_origin(
+                            &mut commands.entity(spawned),
+                            path,
+                        );
                     }
                 }
             }

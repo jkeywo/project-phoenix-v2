@@ -10,6 +10,7 @@ export function mountWorkshopTransit({ root, provider, runtime, draft: getDraft,
   const label = (control, key) => { const node = el('label', null, key); node.htmlFor = control.id; node.append(control); return node; };
   const node = el('section', 'panel'), template = el('select', 'template'), owner = el('select', 'owner'), nav = el('select', 'navigation'), fuel = el('select', 'fuel');
   const materialise = el('input', 'materialise'); materialise.type = 'checkbox';
+  const worldTravel=el('input','world-travel');worldTravel.type='checkbox';
   const numbers = Object.fromEntries(['preparation_work_secs', 'max_distance', 'scatter_radius', 'gravity_response', 'amount', 'reading_ticks'].map(key => {
     const input = el('input', key); input.type = 'number'; input.step = ['amount', 'reading_ticks'].includes(key) ? '1' : 'any'; input.min = ['scatter_radius', 'gravity_response', 'reading_ticks'].includes(key) ? '0' : '0.000001'; return [key, input];
   }));
@@ -19,7 +20,7 @@ export function mountWorkshopTransit({ root, provider, runtime, draft: getDraft,
   for (const button of [save, saveGravity, show, fly]) button.type = 'button';
   show.textContent = t('workshop.entity.preview'); fly.textContent = t('workshop.entity.test');
   node.append(el('h3', null, 'title'), el('p', null, 'hint'), label(template, 'template'), label(owner, 'owner'), label(nav, 'navigation'), label(fuel, 'fuel'),
-    ...Object.entries(numbers).map(([key, input]) => label(input, key)), label(materialise, 'materialise'), save,
+    ...Object.entries(numbers).map(([key, input]) => label(input, key)), label(worldTravel,'world_travel'),label(materialise, 'materialise'), save,
     label(gravity, 'gravity'), label(radius, 'radius'), saveGravity, show, fly, status);
   let dependencies = null, inspection = null, disposed = false, loading = false, generation = 0, observed = null, observedDraft = null;
   const options = (select, values) => {
@@ -29,7 +30,7 @@ export function mountWorkshopTransit({ root, provider, runtime, draft: getDraft,
     const blocked = disposed || loading || busy() || !inspection;
     for (const control of node.querySelectorAll('input,select,button')) control.disabled = blocked;
     template.disabled = disposed || loading || busy() || !dependencies;
-    for (const control of [owner, nav, fuel, ...Object.values(numbers), save]) control.disabled ||= !inspection?.drives.length;
+    for (const control of [owner, nav, fuel, worldTravel, ...Object.values(numbers), save]) control.disabled ||= !inspection?.drives.length;
     radius.disabled ||= !gravity.checked;
   }
   function selectDrive() {
@@ -39,6 +40,7 @@ export function mountWorkshopTransit({ root, provider, runtime, draft: getDraft,
     options(fuel, (entity?.logistics?.store || []).filter(row => row.system === owner.value && row.role === 'local' && row.endpoint?.kind === 'capacity').map(row => row.id));
     nav.value = component?.navigation_source || ''; fuel.value = component?.config.fuel.store || '';
     for (const [key, input] of Object.entries(numbers)) input.value = component ? String(key === 'amount' ? component.config.fuel.amount : component.config[key] ?? (key === 'gravity_response' ? 1 : 0)) : '';
+    worldTravel.checked=component?.config.world_travel===true;
     controls();
   }
   function inspect(force = false) {
@@ -78,7 +80,7 @@ export function mountWorkshopTransit({ root, provider, runtime, draft: getDraft,
     if (!inspection?.drives.length) return;
     commit({ path: template.value, owner: owner.value, navigation_source: nav.value, materialise: materialise.checked,
       config: { preparation_work_secs: Number(numbers.preparation_work_secs.value), max_distance: Number(numbers.max_distance.value),
-        scatter_radius: Number(numbers.scatter_radius.value), gravity_response: Number(numbers.gravity_response.value), reading_ticks: Number(numbers.reading_ticks.value), fuel: { store: fuel.value, amount: Number(numbers.amount.value) } } });
+        world_travel:worldTravel.checked,scatter_radius: Number(numbers.scatter_radius.value), gravity_response: Number(numbers.gravity_response.value), reading_ticks: Number(numbers.reading_ticks.value), fuel: { store: fuel.value, amount: Number(numbers.amount.value) } } });
   });
   saveGravity.addEventListener('click', () => commit({ type: 'gravity', path: template.value, materialise: materialise.checked,
     value: gravity.checked ? { exclusion_radius: Number(radius.value) } : false }));

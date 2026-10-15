@@ -199,3 +199,35 @@ fn support_walk_keeps_actual_declaring_world_parent_and_refuses_excess_scope() {
         parent = Some(path);
     }
 }
+
+#[test]
+fn shared_source_contexts_are_unique_or_explicitly_unsupported() {
+    use crate::world::config::parse_world;
+    use phoenix_model::transit::TransitWorldBinding;
+    let root=parse_world("[[transit_destination]]\nid='a'\nlabel='a'\ntarget={kind='layer',path='assets/worlds/a.toml',anchor='arrival'}\n[[transit_destination]]\nid='b'\nlabel='b'\ntarget={kind='layer',path='assets/worlds/b.toml',anchor='arrival'}").unwrap();
+    let a = parse_world("extra_worlds=['assets/worlds/shared.toml']").unwrap();
+    let b = parse_world("extra_worlds=['assets/worlds/shared.toml']").unwrap();
+    let shared = crate::world::config::WorldConfig::default();
+    let contexts = origin_bindings(
+        &root,
+        [
+            ("assets/worlds/a.toml", &a),
+            ("assets/worlds/b.toml", &b),
+            ("assets/worlds/shared.toml", &shared),
+        ],
+    )
+    .unwrap();
+    assert_eq!(
+        contexts["assets/worlds/a.toml"],
+        TransitWorldBinding::Layer {
+            path: "assets/worlds/a.toml".into()
+        }
+    );
+    assert_eq!(
+        contexts["assets/worlds/b.toml"],
+        TransitWorldBinding::Layer {
+            path: "assets/worlds/b.toml".into()
+        }
+    );
+    assert!(!contexts.contains_key("assets/worlds/shared.toml"));
+}

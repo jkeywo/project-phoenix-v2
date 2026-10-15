@@ -24,6 +24,8 @@ pub fn bindings() -> crate::ai::state_tree::SupportedBindings {
 #[serde(deny_unknown_fields)]
 pub struct TransitOrder {
     pub destination: TransitDestination,
+    #[serde(default, skip_serializing_if = "TransitWorldBinding::is_base")]
+    pub original_world: TransitWorldBinding,
     pub origin: [f32; 3],
     pub profile: AcceptedLocalJumpProfile,
     pub accepted_tick: u64,
@@ -32,7 +34,13 @@ pub struct TransitOrder {
 impl TransitOrder {
     pub fn validate(&self, now: u64) -> Result<(), String> {
         self.destination.validate()?;
+        self.original_world.validate()?;
         self.profile.validate()?;
+        if matches!(self.destination, TransitDestination::World { .. })
+            && !self.profile.config.world_travel
+        {
+            return Err("accepted drive does not support World routes".into());
+        }
         if let Some(request) = &self.request {
             request.validate()?;
         }

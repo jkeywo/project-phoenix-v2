@@ -2,7 +2,7 @@ import {plannedRequests} from './planned-requests.js';
 import { personnelPayload } from './personnel.js';
 import { weaponTargetsPayload } from './weapon-targets.js';
 import { buildHelmMovement } from './helm-movement.js';
-import { buildTransitDrives } from './transit.js';
+import { buildTransitDrives, buildTransitRoutes } from './transit.js';
 import { scanPublicationOwner } from './scan-source.js';
 import { buildReferenceControls } from './sensor-references.js';
 import { observationTickFor } from './observation-details.js';
@@ -2420,6 +2420,7 @@ export function buildNavigationConsoleState(state, systemIds = []) {
   return {
     radar_sharing: radarSharingPayload(state, systemIds, 'Navigation'),
     received_chart: Array.isArray(bb?.received_chart) ? bb.received_chart : [],
+    transit_routes: buildTransitRoutes(bb?.transit_routes),
     ...(entry ? { navigation_system_id: entry.systemId,
       navigation_controllable: systemIds.includes(entry.systemId) && state.controlSources?.[entry.systemId] === 'Human' } : {}),
     blips,

@@ -12,6 +12,7 @@ import {
   COMMS_SEND_TEXT_ACTION_ID,
   COMMS_SEND_REQUEST_ACTION_ID,
   COMMS_MARK_READ_ACTION_ID,
+  COMMS_SELECT_MEDIA_ACTION_ID,
   createCommsActionRegistry,
   currentCommsMessage,
 } from '../../gui/stations/comms-actions.js';
@@ -38,11 +39,28 @@ function key(code, overrides = {}) {
 }
 
 describe('Comms semantic action family', () => {
+  it('selects only an own received accepted media record through normal correlated System control', () => {
+    const sendAction = vi.fn();
+    const message = {id:'actual-message', transmission:{origin_id:'actual-call', received_tick:12,
+      content:{kind:'request', request:{media_call:{mode:'audio'}}}},
+      request_progress:{facts:{decision:{choice:'accept',tick:13}}}};
+    let view = {messages:[message], comms_auto:false};
+    const actions = registry({getState:()=>view, getCurrentMessage:()=>message, sendAction});
+    expect(actions.activate(COMMS_SELECT_MEDIA_ACTION_ID, {context:'comms',source:'control'}).handled).toBe(true);
+    expect(sendAction).toHaveBeenLastCalledWith('set_comms_media_call', expect.objectContaining({origin_id:'actual-call'}));
+    expect(actions.activate(COMMS_SELECT_MEDIA_ACTION_ID, {context:'comms',source:'control',detail:{origin_id:'foreign'}}).handled).toBe(false);
+    view = {...view, comms_auto:true};
+    expect(actions.activate(COMMS_SELECT_MEDIA_ACTION_ID, {context:'comms',source:'control',detail:{origin_id:null}}).handled).toBe(false);
+    view = {...view, comms_auto:false};
+    expect(actions.activate(COMMS_SELECT_MEDIA_ACTION_ID, {context:'comms',source:'control',detail:{origin_id:null}}).handled).toBe(true);
+    expect(sendAction).toHaveBeenLastCalledWith('set_comms_media_call', expect.objectContaining({origin_id:null}));
+  });
   it('publishes every shipped action with stable context and two remappable device slots', () => {
     expect(COMMS_ACTIONS.map((entry) => entry.id)).toEqual([
       COMMS_HAIL_ACTION_ID,
       COMMS_SEND_REQUEST_ACTION_ID,
       COMMS_MARK_READ_ACTION_ID,
+      COMMS_SELECT_MEDIA_ACTION_ID,
       COMMS_SELECT_MESSAGE_ACTION_ID,
       COMMS_RESPOND_ACTION_ID,
       COMMS_CLEAR_ACTION_ID,
@@ -52,7 +70,7 @@ describe('Comms semantic action family', () => {
     for (const action of COMMS_ACTIONS) {
       expect(action.contexts).toEqual([COMMS_ACTION_CONTEXT]);
       expect(action.bindings).toHaveLength(2);
-      if ([COMMS_SEND_REQUEST_ACTION_ID, COMMS_MARK_READ_ACTION_ID].includes(action.id)) {
+      if ([COMMS_SEND_REQUEST_ACTION_ID, COMMS_MARK_READ_ACTION_ID, COMMS_SELECT_MEDIA_ACTION_ID].includes(action.id)) {
         expect(action.bindings).toEqual([null, null]); // new controls are remappable, initially unbound
       } else {
         expect(action.bindings[0]).toMatchObject({ type: 'keyboard' });

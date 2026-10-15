@@ -16,7 +16,8 @@ function equipment(entity) {
 }
 export function validateCommsRadio(radio, entity) {
   if (!equipment(entity)) throw new Error('Radio needs the installed Comms System, its owning Console, finite endpoint reach and positive continuous/discrete energy costs.');
-  if (!closed(radio, ['system', 'keys', 'channel', 'request_reading_ticks']) || radio.system !== 'comms'
+  if (!closed(radio, ['system', 'keys', 'channel', 'request_reading_ticks', 'media']) || radio.system !== 'comms'
+    || (radio.media !== undefined && !['audio', 'audio_video'].includes(radio.media))
     || !Array.isArray(radio.keys === undefined ? [] : radio.keys) || !Array.isArray(radio.channel) || !radio.channel.length)
     throw new Error('Configure the canonical Comms owner and at least one supported radio channel.');
   if (radio.request_reading_ticks !== undefined && (!Number.isSafeInteger(radio.request_reading_ticks) || radio.request_reading_ticks <= 0 || radio.request_reading_ticks > 0xffffffff))

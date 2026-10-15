@@ -13,6 +13,8 @@ const profile = () => ({ system: 'comms', request_reading_ticks: 45, keys: ['cre
 const make = source => new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: '[pack]\nformat=1\nid="radio"\nname="Radio"\nversion="1"\n' }, { path, text: source }]));
 it('validates exact equipment, finite endpoint-bounded channels, paid work and actually held keys', () => {
   validateCommsRadio(profile(), entity());
+  for (const media of ['audio', 'audio_video']) validateCommsRadio({...profile(), media}, entity());
+  for (const media of ['voice_ai', true, null, '']) expect(() => validateCommsRadio({...profile(), media}, entity())).toThrow();
   for (const mutate of [p => p.system = 'other', p => p.extra = true, p => p.request_reading_ticks = 0, p => p.request_reading_ticks = 1.5, p => p.request_reading_ticks = 4294967296, p => p.keys = null, p => p.keys.push('crew-key'),
     p => p.keys = ['a'.repeat(129)], p => p.keys = ['é'.repeat(65)], p => p.keys = ['bad\nkey'],
     p => p.channel = [], p => p.channel.push(p.channel[0]), p => p.channel[0].id = 'BAD',

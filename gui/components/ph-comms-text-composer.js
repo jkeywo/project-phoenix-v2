@@ -13,7 +13,9 @@ export class PhCommsTextComposer extends PhElement {
       <label>${t('comms.radio.audience')}<select id="audience"></select></label>
       <textarea id="body" aria-label="${t('comms.radio.body')}" maxlength="4096"></textarea>
       <button id="send" type="button">${t('comms.send_text')}</button>
-      <button id="request" type="button">${t('comms.request.report_status')}</button></fieldset>
+      <button id="request" type="button">${t('comms.request.report_status')}</button>
+      <button id="audio-call" type="button" hidden>${t('comms.request.media_audio')}</button>
+      <button id="video-call" type="button" hidden>${t('comms.request.media_video')}</button></fieldset>
       <details><summary>${t('comms.request.form_up')}</summary>
       <fieldset id="formation-controls"><legend>${t('comms.request.formation_slot_title')}</legend>
       <label>X<input id="slot-x" type="number" step="1" min="-1000000" max="1000000" value="-40"></label>
@@ -27,11 +29,19 @@ export class PhCommsTextComposer extends PhElement {
   onTemplate() {
     this.channel = this.$('channel'); this.audience = this.$('audience');
     this.body = this.$('body'); this.controls = this.$('controls'); this.pending = null;
+    this.audience.addEventListener('change', () => {if (this.state) this.render(this.state);});
     this.$('send').addEventListener('click', () => this.submit());
     this.$('request').addEventListener('click', () => {
       if (!this.controls.disabled) window.activateSemanticAction?.(COMMS_SEND_REQUEST_ACTION_ID,
         {source:'control', detail:{...this.draft(), request:'report_status'}});
     });
+    for (const [id, mode] of [['audio-call', 'audio'], ['video-call', 'audio_video']]) {
+      this.$(id).addEventListener('click', () => {
+        if (this.$(id).disabled || this.$(id).hidden) return;
+        window.activateSemanticAction?.(COMMS_SEND_REQUEST_ACTION_ID,
+          {source:'control', detail:{...this.draft(), request:{media_call:{mode}}}});
+      });
+    }
     this.$('form-up').addEventListener('click', () => {
       if (this.$('formation-controls').disabled) return;
       const draft = this.draft();
@@ -89,6 +99,11 @@ export class PhCommsTextComposer extends PhElement {
         .map(contact => [`contact:${contact.uuid || contact.id}`, contact.name || contact.uuid || contact.id]),
     ]);
     this.controls.disabled = state.comms_auto || !state.channels?.length;
+    for (const [id, capable] of [['audio-call', ['audio', 'audio_video'].includes(state.media_capability)],
+      ['video-call', state.media_capability === 'audio_video']]) {
+      this.$(id).hidden = !capable;
+      this.$(id).disabled = this.controls.disabled || !this.audience.value.startsWith('contact:');
+    }
     this.$('formation-controls').disabled = this.controls.disabled || !this.audience.value.startsWith('contact:');
     const planned = (state.planned_requests || []).filter(row => row.request === 'report_status'
       && (state.channels || []).some(channel => channel.id === row.channel)

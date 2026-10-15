@@ -11,7 +11,7 @@ import { defineStationAction, createCorrelatedActionSender, keyboard, gamepad } 
 
 import { ACTION_FEEDBACK_STATE } from '../action-feedback.js';
 import { isLatestLiveCriticalMessage } from '../comms-state.js';
-import { visibleCommsMessages, structuredComms, normalizeCommsRequest } from '../comms-requests.js';
+import { visibleCommsMessages, structuredComms, normalizeCommsRequest, mediaCallOrigin } from '../comms-requests.js';
 import { familyView } from '../console-payload.js';
 import { createSemanticActionRegistry } from '../semantic-action-registry.js';
 
@@ -24,6 +24,7 @@ export const COMMS_SHOW_ON_SCREEN_ACTION_ID = 'comms.show-on-screen';
 export const COMMS_SEND_TEXT_ACTION_ID = 'comms.send-text';
 export const COMMS_SEND_REQUEST_ACTION_ID = 'comms.send-request';
 export const COMMS_MARK_READ_ACTION_ID = 'comms.mark-read';
+export const COMMS_SELECT_MEDIA_ACTION_ID = 'comms.select-media';
 
 function action(id, label, keyboardBinding, gamepadBinding, feedback = 'authoritative') {
   return defineStationAction({ id, contexts: [COMMS_ACTION_CONTEXT], labelKey: `comms.${label}`,
@@ -58,7 +59,8 @@ export const COMMS_SHOW_ON_SCREEN_ACTION = action(
 
 export const COMMS_ACTIONS = Object.freeze([
   COMMS_HAIL_ACTION,
-  ...[[COMMS_SEND_REQUEST_ACTION_ID, 'request.report_status'], [COMMS_MARK_READ_ACTION_ID, 'request.mark_read']]
+  ...[[COMMS_SEND_REQUEST_ACTION_ID, 'request.report_status'], [COMMS_MARK_READ_ACTION_ID, 'request.mark_read'],
+    [COMMS_SELECT_MEDIA_ACTION_ID, 'media.select']]
     .map(([id, label]) => defineStationAction({id, contexts:[COMMS_ACTION_CONTEXT], labelKey:`comms.${label}`, bindings:[null,null], feedback:'authoritative'})),
   COMMS_SELECT_MESSAGE_ACTION,
   COMMS_RESPOND_ACTION,
@@ -109,6 +111,15 @@ export function registerCommsActions(registry, options = {}) {
     const selected = getCurrentMessage ? getCurrentMessage() : null;
     return selected || currentCommsMessage(view);
   };
+  registry.register(COMMS_ACTIONS.find(entry => entry.id === COMMS_SELECT_MEDIA_ACTION_ID),
+    ({actionId, correlation, inputMs, detail} = {}) => {
+      const view = commsActionView(getState());
+      if (!view || view.comms_auto || !sendAction) return false;
+      const origin = detail?.origin_id === null ? null : detail?.origin_id ?? mediaCallOrigin(activeMessage(view));
+      if (origin === null && detail?.origin_id !== null) return false;
+      if (origin !== null && !(view.messages || []).some(message => mediaCallOrigin(message) === origin)) return false;
+      return send(actionId, correlation, inputMs, 'set_comms_media_call', {origin_id: origin});
+    });
 
   registry.register(COMMS_HAIL_ACTION, ({
     actionId, correlation, inputMs, detail,

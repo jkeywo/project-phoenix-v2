@@ -6395,3 +6395,22 @@ navigation.formation.suggestion,Actual Navigation formation intent,{name}: slot 
 navigation.formation.paused,Actual Navigation formation intent,Leader measurement unavailable; course paused,Leader measurement unavailable; course paused,Leader measurement unavailable; course paused,source
 navigation.formation.selected,Actual Navigation formation intent,Leader selected; Helm controls movement,Leader selected; Helm controls movement,Leader selected; Helm controls movement,source
 entity.formation_cruiser.name,Optional formation coordination ship,Formation Cruiser,Formation Cruiser,Formation Cruiser,source
+
+comms.request.media_audio,Selected human media,Request audio call,,,
+comms.request.media_video,Selected human media,Request audio and video call,,,
+comms.request.accept_media,Selected human media,Accept call,,,
+comms.media.start,Selected human media,Start microphone and camera,,,
+comms.media.stop,Selected human media,Stop call devices,,,
+comms.media.remote_video,Selected human media,Remote camera,,,
+comms.media.unavailable,Selected human media,Call devices unavailable on this surface,,,
+comms.media.stopped,Selected human media,Call devices stopped,,,
+comms.media.starting,Selected human media,Requesting local device permission,,,
+comms.media.waiting,Selected human media,Waiting for both call participants to start,,,
+comms.media.active,Selected human media,Call devices active,,,
+comms.media.select,Selected human media,Use this accepted call,,,
+comms.media.clear,Selected human media,Clear selected call,,,
+comms.media.start_audio,Selected human media,Start microphone,,,
+workshop.comms_radio.media,Comms equipment,Human media capability,,,
+workshop.comms_radio.media_none,Comms equipment,No human media,,,
+workshop.comms_radio.media_audio,Comms equipment,Audio,,,
+workshop.comms_radio.media_video,Comms equipment,Audio and video,,,

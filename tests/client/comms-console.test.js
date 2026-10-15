@@ -16,7 +16,7 @@
  * stores a readable property and we assert the exact object the console
  * pushed, with no shadow-DOM machinery in the way.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { t } from '../../gui/strings.js';
 import { renderStation as battleshipRender } from '../../gui/battleship/comms.console.js';
 import { renderStation as rawCruiserRender } from '../../gui/cruiser/comms.console.js';
@@ -61,6 +61,25 @@ const FIXTURES = {
     '<span id="footer-right"></span>' +
     '<span id="comms-auto-badge" hidden></span>',
 };
+
+it('mounts selected-call controls in the real Comms thread and uses the normal semantic selector', () => {
+  mount(FIXTURES.battleship);
+  const activate = vi.fn();
+  const client = {state:()=>({call_origin_id:null}), setCanvas:vi.fn(), stop:vi.fn(),
+    subscribe(listener) {listener({supported:true,status:'stopped',eligible:false,connected:true}); return () => {};}};
+  window.phoenixMediaClient = client; window.activateSemanticAction = activate;
+  try {
+    battleshipRender({messages:[{id:'heard',thread_id:'radio-thread',body:'Call',is_read:true,
+      sender_uuid:'peer',sender_name:'Peer',transmission:{origin_id:'actual-call',received_tick:12,
+        content:{kind:'request',request:{media_call:{mode:'audio'}}}},
+      request_progress:{facts:{decision:{choice:'accept',tick:13}}}}], contacts:[],comms_auto:false}, document);
+    const select = [...el('comms-thread-panel').querySelectorAll('button')]
+      .find(button => button.textContent === t('comms.media.select'));
+    expect(select).toBeTruthy(); select.click();
+    expect(activate).toHaveBeenCalledWith('comms.select-media', {source:'control',detail:{origin_id:'actual-call'}});
+    expect(client.setCanvas).toHaveBeenCalled();
+  } finally {delete window.phoenixMediaClient; delete window.activateSemanticAction;}
+});
 
 // ── Battleship: the reference hull, flat `comms` family ───────────────────────
 describe('battleship comms renderStation', () => {

@@ -963,6 +963,14 @@ export const ACTION_MAP = Object.freeze({
       payload:{type:'SendCommsRequest',data:{channel:a.channel,audience:a.audience,request,...(a.planned_request ? {planned_request:a.planned_request} : {})}},
     });
   },
+  set_comms_media_call: (a, send) => {
+    if (a.origin_id !== null && typeof a.origin_id !== 'string') return;
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? {correlation:a.correlation} : {}), target:'comms',
+      payload:{type:'SetCommsMediaCall',data:{origin_id:a.origin_id}},
+    });
+  },
   mark_comms_read: (a, send) => {
     if (!a.message_id) return;
     const correlated = typeof a.correlation === 'string' && a.correlation;

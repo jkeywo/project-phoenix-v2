@@ -28,10 +28,29 @@ export function requestStatus(message) {
 /** Closed wire vocabulary; returns a fresh finite Formation value. */
 export function normalizeCommsRequest(value) {
   if (value === 'report_status') return value;
+  if (value && typeof value === 'object' && !Array.isArray(value)
+      && Object.keys(value).join() === 'media_call') {
+    const body = value.media_call;
+    return body && typeof body === 'object' && !Array.isArray(body)
+      && Object.keys(body).join() === 'mode' && ['audio', 'audio_video'].includes(body.mode)
+      ? {media_call: {mode: body.mode}} : null;
+  }
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).join() !== 'form_up') return null;
   const body = value.form_up;
   if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).join() !== 'slot'
     || !Array.isArray(body.slot) || body.slot.length !== 2
     || !body.slot.every(axis => Number.isInteger(axis) && Math.abs(axis) <= 1000000)) return null;
   return {form_up:{slot:[...body.slot]}};
+}
+
+/** UI candidacy from an actually heard own inbox copy, never remote viability. */
+export function mediaCallOrigin(message) {
+  const wire = message?.transmission;
+  if (!Number.isSafeInteger(wire?.received_tick) || wire.received_tick < 0) return null;
+  const outcome = wire.content?.kind === 'outcome' ? wire.content.outcome : null;
+  const request = normalizeCommsRequest(outcome?.request?.request ?? wire.content?.request);
+  const decision = outcome?.facts?.decision ?? message.request_progress?.facts?.decision;
+  if (!request?.media_call || decision?.choice !== 'accept') return null;
+  const origin = outcome?.request?.origin_id ?? wire.origin_id;
+  return typeof origin === 'string' && origin.length > 0 && origin.length <= 128 ? origin : null;
 }

@@ -148,6 +148,7 @@
        and defines window.applyTutorialAction for the inline script). -->
   <script type="module" src="gui/tutorial-state.js"></script>
   <script type="module" src="gui/comms-state.js"></script>
+  <script type="module" src="gui/comms-media-client.js"></script>
   <!-- ICE/TURN server list, relay probe and the connect/backoff schedules the
        transport is tuned by (issues #603, #1226). -->
   <script type="module" src="gui/connection-manager.js"></script>
@@ -2461,6 +2462,7 @@
         window.__privateAlerts?.reset();
       }
       lastConnectionState = state;
+      window.phoenixMediaClient?.setConnected(state === 'ready');
       chromeSetConnectionStatus(state);
       // Which pre-play surface is up STILL does not depend on the link state
       // (issue #1359 — priority is the whole rule), and nothing below changes
@@ -2810,6 +2812,13 @@
     // what `window.connectionManager` used to be before #1112 retired PeerJS.
     let activeLink = null;
     function currentLink() { return activeLink; }
+    function ensureMediaClient() {
+      if (!window.phoenixMediaClient && window.PhoenixCommsMedia) {
+        window.phoenixMediaClient = window.PhoenixCommsMedia.createCommsMediaClient({getLink:currentLink, win:window});
+        window.phoenixMediaClient.setConnected(lastConnectionState === 'ready');
+      }
+      return window.phoenixMediaClient;
+    }
 
     function send(type, data) {
       const link = currentLink();
@@ -4104,6 +4113,11 @@
     // -- Incoming message handler --------------------------------
 
     function handleMessage(msg) {
+      // Ephemeral bytes and leases never enter reducers, working views or saves.
+      const media = ensureMediaClient();
+      if (msg?.type === 'CommsMediaState') {media?.update(msg.data); return;}
+      if (msg?.type === 'CommsMediaFrame') {media?.receive(msg.data); return;}
+      if (msg?.type === 'Welcome' || msg?.type === 'WorldSetup') media?.update({eligible:false});
       window.phLocale?.capture?.(msg);
       // The host has said something, so the console's panels are showing real
       // numbers rather than their empty shape — it may leave CONNECTING (PRD
@@ -4759,6 +4773,7 @@
         send: (type, payload, deliveryClass) => {
           if (joiner) joiner.send(type, payload, deliveryClass);
         },
+        sendSnapshotOnly: (encoded, bounds) => joiner?.sendSnapshotOnly(encoded, bounds) === true,
         retryNow: () => {
           if (joiner) joiner.retryNow();
           else attempt(lastTyped);

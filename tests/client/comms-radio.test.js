@@ -13,6 +13,22 @@ function setup() {
 }
 afterEach(() => {document.body.replaceChildren(); delete window.activateSemanticAction;});
 describe('radio text command and local draft', () => {
+  it('offers media only from actual published capability and one selected Contact', () => {
+    const el = setup();
+    const audio = el.shadowRoot.getElementById('audio-call'), video = el.shadowRoot.getElementById('video-call');
+    expect(audio.hidden).toBe(true);
+    el.state = {...state(), media_capability:'audio_video'};
+    expect(audio.disabled).toBe(true);
+    el.audience.value = 'contact:peer'; el.audience.dispatchEvent(new Event('change'));
+    expect(audio.disabled).toBe(false); expect(video.hidden).toBe(false);
+    window.activateSemanticAction = vi.fn(); audio.click(); video.click();
+    expect(window.activateSemanticAction.mock.calls.map(args => args[1].detail.request))
+      .toEqual([{media_call:{mode:'audio'}}, {media_call:{mode:'audio_video'}}]);
+    el.state = {...state(), media_capability:'audio'};
+    expect(video.hidden).toBe(true);
+    el.state = {...state(), media_capability:'audio_video', comms_auto:true};
+    expect(audio.disabled).toBe(true);
+  });
   it('renders sent and received facts without interpreting message markup or claiming remote acceptance', () => {
     document.body.innerHTML='<ph-comms-current-message></ph-comms-current-message>';
     const message = {id:'sent', sender_name:'Source', body:'<b>literal text</b>', thread_id:'radio/public/all', responses:[], transmission:{received_tick:null}};

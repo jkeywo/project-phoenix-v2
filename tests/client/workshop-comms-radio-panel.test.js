@@ -48,6 +48,19 @@ it('refreshes a same-revision replacement document and refuses invalid equipment
   const invalid = entity(); invalid.energy.consumer[0].discrete_cost = 0; const bad = fixture(stringify(invalid)); await settle(); expect(control('save').disabled).toBe(true); expect(control('add-channel').disabled).toBe(true); bad.panel.dispose();
 });
 
+it('round trips actual equipment media capability through the existing Workshop transaction and history', async () => {
+  const authored = entity(); authored.comms.radio = {system:'comms', media:'audio_video', keys:[],
+    channel:[{id:'open',range:80,work_units:1}]};
+  const f = fixture(stringify(authored)); await settle();
+  expect(control('media').value).toBe('audio_video');
+  control('media').value = 'audio'; control('save').click(); await settle();
+  expect(parse(f.draft().read(path)).comms.radio.media).toBe('audio');
+  f.draft().undo(); f.panel.refresh(); expect(control('media').value).toBe('audio_video');
+  f.draft().redo(); f.panel.refresh(); expect(control('media').value).toBe('audio');
+  control('media').value = ''; control('save').click(); await settle();
+  expect(parse(f.draft().read(path)).comms.radio.media).toBeUndefined();
+  f.panel.dispose();
+});
 it('edits authored request reading ticks and refuses a same-revision document swap during validation', async () => {
   const authored = entity(); authored.comms.radio = { system: 'comms', request_reading_ticks: 45, keys: [], channel: [{id:'open',range:80,work_units:1}] };
   const f=fixture(stringify(authored)); await settle(); expect(control('request-reading').value).toBe('45');

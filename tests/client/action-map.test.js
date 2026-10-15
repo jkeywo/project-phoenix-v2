@@ -122,6 +122,7 @@ describe('ACTION_MAP', () => {
       'jamming_target',
       'mark_comms_read',
       'send_comms_request',
+      'set_comms_media_call',
       'send_comms_text',
       'set_duty_officer_posting',
       'set_duty_officer_destination',

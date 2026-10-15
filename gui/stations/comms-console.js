@@ -45,7 +45,9 @@
  *   `(s, view, doc, t, activeMessage)` after the common panels are set.
  */
 
-import {visibleCommsMessages} from '../comms-requests.js';
+import {visibleCommsMessages, mediaCallOrigin} from '../comms-requests.js';
+import {mountCommsMediaControls} from '../comms-media-client.js';
+import {COMMS_SELECT_MEDIA_ACTION_ID} from './comms-actions.js';
 import { t } from '../strings.js';
 import { setAutoState } from '../console-ui.js';
 import { setConsoleOverlay } from '../console-overlays.js';
@@ -81,6 +83,7 @@ export function makeCommsRender(variant) {
   let showCleared = false;
   let boundComposer = null;
   let lastState = null;
+  let mediaControls = null;
 
   const commsView = (s) => (variant.commsView ? variant.commsView(s) : s);
 
@@ -213,6 +216,31 @@ export function makeCommsRender(variant) {
     const contacts = Array.isArray(view.contacts) ? view.contacts : [];
     const threads = sortedThreadsFrom(msgs, contacts);
     const open = resolveOpen(msgs);
+    let mediaClient = null;
+    try {mediaClient = doc.defaultView?.parent?.phoenixMediaClient;} catch { /* cross-origin/standalone */ }
+    const mediaHost = ids.threadPanel && doc.getElementById(ids.threadPanel);
+    if (mediaClient && mediaHost) {
+      if (!mediaControls || mediaControls.client !== mediaClient) {
+        mediaControls?.dispose();
+        const section = doc.createElement('section'), select = doc.createElement('button'), clear = doc.createElement('button');
+        select.type = clear.type = 'button';
+        select.textContent = t('comms.media.select'); clear.textContent = t('comms.media.clear');
+        section.append(select, clear); mediaHost.append(section);
+        const disposeMedia = mountCommsMediaControls(section, mediaClient, t);
+        const controls = {client: mediaClient, section, select, clear, origin: null,
+          dispose() {disposeMedia(); section.remove();}};
+        select.addEventListener('click', () => doc.defaultView?.activateSemanticAction?.(COMMS_SELECT_MEDIA_ACTION_ID,
+          {source:'control', detail:{origin_id:controls.origin}}));
+        clear.addEventListener('click', () => doc.defaultView?.activateSemanticAction?.(COMMS_SELECT_MEDIA_ACTION_ID,
+          {source:'control', detail:{origin_id:null}}));
+        doc.defaultView?.addEventListener('pagehide', () => controls.dispose(), {once:true});
+        mediaControls = controls;
+      }
+      mediaControls.origin = mediaCallOrigin(open.active);
+      mediaControls.section.hidden = !!view.comms_auto || (!mediaControls.origin && !mediaClient.state().call_origin_id);
+      mediaControls.select.disabled = !!view.comms_auto || !mediaControls.origin;
+      mediaControls.clear.disabled = !!view.comms_auto;
+    }
     const openSummary = open.threadId == null
       ? null
       : threads.find((thread) => thread.thread_id === open.threadId) || null;

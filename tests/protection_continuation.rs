@@ -20,7 +20,7 @@ const TOKEN: &str = "protection-operator";
 fn id(value: &str) -> SystemId {
     SystemId(value.into())
 }
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Debug)]
 struct PaidWitness {
     tick: Option<u64>,
     protection: f64,
@@ -143,6 +143,55 @@ fn paid(app: &App) -> bool {
         )
         && witness.protection > 0.0
         && witness.jammer > 0.0
+}
+#[track_caller]
+fn assert_paid(app: &mut App) {
+    if paid(app) {
+        return;
+    }
+    let tick = app
+        .world()
+        .resource::<project_phoenix::sim_tick::SimTick>()
+        .0;
+    let mut query = app.world_mut().query::<(
+        &project_phoenix::entities::spawner::EntityUuid,
+        &ShipConfigComponent,
+        &ShipSystemControlSources,
+        &ShipPowerSystem,
+        Option<&ShipSignalProtection>,
+        Option<&ShipJamming>,
+        Option<&project_phoenix::ship::state::ShipPhysics>,
+    )>();
+    let mut evidence = Vec::new();
+    for (uuid, config, sources, power, protection, jammer, pose) in query.iter(app.world()) {
+        if protection.is_none() && jammer.is_none() {
+            continue;
+        }
+        let owner = if protection.is_some() {
+            id(OWNER)
+        } else {
+            id("comms-jamming")
+        };
+        evidence.push(serde_json::json!({
+            "actor":uuid.0,"owner":owner.0,"source":format!("{:?}",sources.0.source_for(&owner)),
+            "offline":sources.0.is_offline(&owner),
+            "reserve":format!("{:?}",power.0.network().consumers.get(&owner)),
+            "groups":format!("{:?}",power.0.network().groups),
+            "emitted":power.0.emitted_work(&owner),
+            "protection_enabled":protection.map(|state|state.enabled(&config.0,&owner)),
+            "protection_priorities":protection.map(|state|state.priorities(&config.0,&owner)),
+            "jammer_enabled":jammer.map(|state|state.enabled(&config.0,&owner)),
+            "jammer_target":jammer.and_then(|state|state.target(&config.0,&owner)),
+            "pose":pose.map(|pose|[pose.x,pose.y,pose.z,pose.yaw]),
+        }));
+    }
+    evidence.sort_by(|a, b| a["actor"].as_str().cmp(&b["actor"].as_str()));
+    assert!(
+        paid(app),
+        "current paid protection/jammer required at tick{tick}; witness={:?}; actualowners={}",
+        app.world().resource::<PaidWitness>(),
+        serde_json::to_string(&evidence).unwrap()
+    );
 }
 fn state(app: &App, actor: Entity) -> &ShipSignalProtection {
     app.world().get::<ShipSignalProtection>(actor).unwrap()
@@ -317,7 +366,7 @@ fn ordinary_protection_and_independent_jammer_restore_exactly_then_human_priorit
                 systems: vec![id("tactical-radar"), id("comms"), id("sensors")],
             },
         );
-        assert!(paid(app));
+        assert_paid(app);
         assert_eq!(app.world().resource::<PaidWitness>().suppression, 0.0);
         assert_eq!(notice(app,entity),Some(true),"capacity3 funds whole radar2 plus sensors1, leaving Comms unprotected while both peers still pay");
         control(
@@ -326,7 +375,7 @@ fn ordinary_protection_and_independent_jammer_restore_exactly_then_human_priorit
                 systems: vec![id("comms"), id("sensors")],
             },
         );
-        assert!(paid(app));
+        assert_paid(app);
         assert!(app.world().resource::<PaidWitness>().suppression > 0.0);
         assert_eq!(notice(app, entity), Some(false));
         control(app, Control::SetSignalProtectionEnabled { enabled: false });

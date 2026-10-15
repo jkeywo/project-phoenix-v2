@@ -478,11 +478,110 @@ source is integrated as `f394aafc`. They exercise actual widgets, keyboard
 release and correlated action-map envelopes with opaque contacts; they do not
 establish Rust/WASM acquisition or admission behavior.
 
-Unified native validation now runs in
+At the initial handoff, unified native validation ran in
 `.phoenix/worktrees/increment-14-native-validation`, initially pinned to
 `b5d9710e`. Its first compilation found three Navigation test-harness errors
 before executing tests. The reviewed fixture corrections are main `75ccfb94`
-(donor `4f0b2fe4`); the same affected batch is retrying. Whole-host enquiries,
-Navigation continuation and the combined playable exit remain pending. Root
+(donor `4f0b2fe4`). At that handoff, whole-host enquiries,
+Navigation continuation and the combined playable exit were pending. Root
 continues increment 15 source in isolated worktrees; its contract `ee3bd7b0`
 and in-progress implementation are not completion evidence.
+
+### Unified native validation and continuation
+
+The isolated native stream starts at integrated `b5d9710e`. Its logs, exact
+source pins, status files, byte-preserving library refresh records and matching
+Cargo dependency records are retained under `.phoenix/increment14-native-validation/`.
+The shared Cargo target was used sequentially; no other worker compiled during
+this stream.
+
+The selected Simulation owner batch first ran **120 passed / 13 failed**.
+Corrections restore actual finite machinery in sparse fixtures, register the
+actual optional capture owners, use the actual permitted publication kind and
+retain exact equality assertions. The existing supported publication registry
+now also recognises Navigation, SensorRadar and TacticalRadar instance IDs;
+wrong-kind and unregistered feeds still fail validation.
+
+At `7c3d6717`, **132 passed / 1 failed**. The remaining focused continuation
+fixture was missing normal publication and field-cache rebuilding. Its affected
+retry at `a7e3a492` passed the exact 360-step JSON and digest comparison. This
+combination covers the selected 133 cases; it is not a fresh all-133 passing run.
+The associated Gameplay selection at `670d577f` passed **6 cases**, including
+real custom-ID publication round trips and wrong-kind rejection.
+
+Actual headless continuation exposed a separate runtime publication-frontier
+bug: publishers run before the logical counter advances, but restore rebuilt
+held radar uncertainty at the next counter. `92a9b793` preserves only saved
+tracks that agree exactly with the canonical instrument state at the saved or
+preceding fixed step, after rebuilding missing views. Its affected **10 cases
+passed**, including exact focused continuation, positive paid radar acquisition,
+forged/missing/wrong-kind/lost-current publication refusals, spatial-field
+continuation, Navigation sharing and historical forecasts.
+
+At `3cce032e`, the actual `sensing_enquiry_continuation` journey passed **1 case**:
+ordinary Identify/Ready/rating admission, a paid intrusive Resources enquiry,
+AI handoff preserving that same observed request and mode, a later ordinary
+General enquiry, detectable passive scan exposure, exactly one contextual World
+reaction, 360 exact complete captures/digests and forged candidate no-write
+checks. The two actual `snapshot_resume navigation_` cases also passed.
+
+The multiplayer batch at that pin was **16 passed / 2 failed**. The failures
+were retained: the old guard read retired hull percentage state, then correctly
+measured physical damage and exposed Alliance ships lacking an actual Target
+capability. The four base hulls now explicitly declare ship selection tags.
+Their paid four-hull regression passes, including removal of actual Target
+withholding both public selection and Console routing; display tags are never a
+selection fallback.
+
+The resulting real combat then exposed an entity-digest restore mismatch:
+shield-only beams retained a target key without a physical sample, although the
+snapshot stores only complete retained samples. `ff85bb09` installs the key only
+when a real physical hit returns a sample. Its actual writer test passes through
+shield-only contact without physical RNG, then hull damage, sample reuse and
+retargeting. Snapshot format and digest folding remain unchanged.
+
+The full `lockstep_snapshot_transfer` binary then passed **18/18 cases** at
+`ff85bb09` (2m03 build, 39.77s execution). This includes actual compartment damage,
+exact transferred digest at tick 399 and 120 subsequent identical ticks, paused
+restore, GM join/reconnect, corruption refusal and persisted-dimension coverage.
+The same production checkpoint passed the shield-only beam case, the four-hull
+Target case and two physical beam restore guards. Two additional older repair
+fixtures failed in that broader six-case selection; their affected retry is
+recorded separately rather than calling the six-case batch green.
+At `e0341119`, those two affected repair fixtures pass (2m57 build, 1.07s
+execution). The duplicate-task negative checks the exact earlier physical-task
+preflight refusal and keeps all no-write checks. The positive runs the three
+ordinary fitted publishers before capture in its bare host; full capture equality
+and exact one-time parts consumption remain unchanged. This is a two-case
+fixture retry, not a repeat of the six-case batch.
+
+```text
+cargo test -p project-phoenix --features headless --test sensing_enquiry_continuation -- --test-threads=1
+cargo test -p project-phoenix --features headless --test snapshot_resume navigation_ -- --test-threads=1
+cargo test -p project-phoenix --features headless --test lockstep_snapshot_transfer -- --test-threads=1
+```
+
+| Log in `.phoenix/increment14-native-validation/` | Source | Result | SHA256 |
+| --- | --- | --- | --- |
+| `owner-final.log` | `7c3d6717` | 132 pass / 1 fail | `13eb67a9b4574bde84f2e523f29d10c009364457e960fb493746da8e73ffe128` |
+| `focused-fields.log` | `a7e3a492` | affected 1 pass | `6ff6482a5b2f7cd43c1945b5a0b38e52ea471a2568699f1ef79742771e8f7318` |
+| `publication-owner.log` | `92a9b793` | affected 10 pass | `2a02a6579ae5627e2c047eaf3db0ad90786766f3dfe17f04b002f234f41119c0` |
+| `wholehost-verified-enquiry.log` | `3cce032e` | 1 pass | `0af61331460d7b7cc78767a83bde769405c65ec5024194a1a16329bcfb4954ac` |
+| `wholehost-verified-navigation.log` | `3cce032e` | 2 pass | `90310fd5de7e01b77485ab8c659bb92146e728f120187ed236657f36d558182e` |
+| `beam-pair-owner.log` | `ff85bb09` | 4 pass / 2 fail | `38918b034b27b49846419cb5f8460130643417a7fc2085752a7807594aecaebb` |
+| `beam-pair-mesh.log` | `ff85bb09` | 18 pass | `0f9b30aa643003ef525282e8dd8f74ad0f4b2debb8f88d427a960b326f6c26a5` |
+| `repair-fixture-owner.log` | `e0341119` | affected 2 pass | `4e7437f0525a8ac0e88e856ed1390db9cf2c59d3070411291d23d52cb5c92278` |
+
+These selections overlap; their counts must not be added into a suite total.
+
+Known headless-build warnings remain for two native audio methods unused by this
+feature combination, repeated process-global Bevy logger setup, and the duel's
+dynamically computed template outside the frozen content ledger. These are
+retained in the logs, not reported as warning-free acceptance.
+
+These are automated, scoped results. They do not constitute the repository's
+full integrated gates, balance/performance/activity evidence, native monitor or
+human acceptance. The ignored legacy reconnect baselines were not run or counted.
+The unselected older survey save journey still requires migration from raw UUID
+scan requests and instantaneous scan timing; its compile-time field access was
+updated without claiming that journey passed.

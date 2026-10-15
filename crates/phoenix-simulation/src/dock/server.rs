@@ -1026,7 +1026,9 @@ pub fn tick_dock(
         // trying (`engaged`) or holding (`docked`); an idle dock merely
         // publishing "no markers" or "nothing in range" is not an attempt and
         // opens nothing.
-        if dock.engaged() || dock.docked {
+        // A missing required physical owner holds the relationship without
+        // attempting work. Do not turn that pause into a fresh failed task.
+        if (!dock.config.moves_body || physics.is_some()) && (dock.engaged() || dock.docked) {
             let work = if !dock.docked && out.docked {
                 Some(PhysicalWork::Formed {
                     target: out.docking_target.as_deref(),

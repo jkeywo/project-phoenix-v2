@@ -676,6 +676,9 @@ fn a_dock_refused_before_it_mates_still_opens_and_closes_one_activation() {
     let (mut app, operator) = engage_world();
     // Move the operator far beyond the authored range before the first tick,
     // so the mate never forms.
+    // Move the canonical physical owner; Transform alone is a stale display
+    // pose and deliberately cannot move accepted Dock equipment.
+    app.world_mut().get_mut::<ShipPhysics>(operator).unwrap().x = 9000.0;
     app.world_mut()
         .entity_mut(operator)
         .insert(Transform::from_xyz(9000.0, 0.0, 0.0));
@@ -720,6 +723,9 @@ fn a_mate_that_drifts_out_of_range_ends_the_standing_activation() {
             .docked
     );
 
+    // Move the canonical physical owner; Transform alone is a stale display
+    // pose and deliberately cannot move accepted Dock equipment.
+    app.world_mut().get_mut::<ShipPhysics>(operator).unwrap().x = 9000.0;
     app.world_mut()
         .entity_mut(operator)
         .insert(Transform::from_xyz(9000.0, 0.0, 0.0));

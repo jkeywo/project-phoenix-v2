@@ -67,3 +67,14 @@ entities:
       summary: "Supported finite profiles and controls use existing accepted Workshop source/history/includes/Preview/Test, normal admitted Human/AI actions and immediate snapshot/digest integration. Whole-candidate owner/phase/clock/geometry/resource preflight precedes writes; initial source does not claim a verified playable exit."
       rationale:
         - "[ai] Actual assisted/direct, stale match, coupled/separating and paid transit checkpoints require fresh JSON bootstrap with at least 360 complete capture/digest comparisons and different-LocalShip peer proof. Shipped content, gameplay/movement comparisons, physical browser/native controls and 2/4/6/8-human workload/performance acceptance remain distinct."
+
+  - decision: movement-sustained-boost-existing-owner
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Sustained Boost Uses the Existing Paid Drive
+      summary: "Boost engagement is operator intent, not a universal timed burst. The existing sole Helm physics integrator applies only the exact authored Boost System's available, condition-scaled local work grant. Partial reserve permits engagement; exhaustion or thermal stop withholds actuation without inventing another duration or controller."
+      rationale:
+        - "[ai] Inspection found that actual physics already pays sustained boost from the energy reserve and tick_boost only projects that reserve. active_duration/recharge_duration are compatibility tuning fields unused by that execution path; they do not create a new timer. Preserve existing multipliers, reserve and thermal tuning."
+        - "[ai] Retained engagement and current availability remain distinct. Offline/missing equipment cannot grant boost or debit its reserve; an operator can always release their own engaged intent. The existing per-System Boost AI emits the same normal SetBoost commands using the actual authored owner, including custom IDs."
+        - "[ai] Phone hold controls must not require a full reserve before re-engagement. Report actual paid fraction and equipment availability separately from retained engagement. Targeted source/owner tests do not claim full increment 18 acceptance."

@@ -462,7 +462,8 @@ use super::*;
 /// `75` retains enabled intent for accepted fitted concealment equipment.
 /// `76` retains optional plan executions, original opportunity evidence and replies.
 /// `77` retains requested officer destinations and shared physical escort jobs.
-pub const SNAPSHOT_FORMAT: u32 = 77;
+/// `78` retains heard formation lineage and dated measured Navigation courses.
+pub const SNAPSHOT_FORMAT: u32 = 78;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -619,7 +620,9 @@ pub const SNAPSHOT_FORMAT: u32 = 77;
 /// "0.58" moves actual retained personnel through owned finite carried berths
 /// using existing exclusive teams, routes, Bay claims and ordinary Repair AI.
 /// "0.59" refuses stale officer dispatch before any job, claim or identity mint.
-pub const SIMULATION_RULES: &str = "0.59";
+/// "0.60" selects formation courses only from heard acceptance and an earned
+/// leader measurement, retaining intent while missing evidence pauses the course.
+pub const SIMULATION_RULES: &str = "0.60";
 
 /// The authored data, computed rather than remembered.
 ///

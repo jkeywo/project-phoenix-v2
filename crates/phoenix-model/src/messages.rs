@@ -48,7 +48,8 @@ use uuid::Uuid;
 /// Revision 32 carries own optional-work offer context and inspected opportunity history.
 /// Revision 33 carries finite carried-personnel destinations and escort controls.
 /// Revision 34 binds officer dispatch to the destination request actually shown.
-pub const PROTOCOL_VERSION: u32 = 34;
+/// Revision 35 carries permitted formation coordination and measured Navigation intent.
+pub const PROTOCOL_VERSION: u32 = 35;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).

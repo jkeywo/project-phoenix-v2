@@ -1,0 +1,38 @@
+entities:
+  - decision: redesign-movement-single-physical-executor
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Direct and Assisted Helm Share Actual Actuators
+      summary: "Increment 18 extends existing Helm intent and physics with desired speed/absolute heading assistance, visible direct-control toggle and equipment-limited sustained boost. Capital ships remain planar except limited collision avoidance; actual small craft use full 3D. No parallel physics or second System controller."
+      rationale:
+        - "Selected G027/G032/G045 and S041/S044–53/S083–84; docs/gameplay-redesign/implementation/increment-18.md fixes scope and evidence. Under the approved parallel-work contract, runtime may follow 15 initial integration/targeted checks; full completion retains 14/15 verified prerequisites. Remote formation joins 16, not a silent dependency waiver."
+        - "[ai] Extend existing ship/helm intent, per-axis ordinary AI, console/helm admission and ShipPhysics integration. Human direct input, assistance and delegated AI remain mutually exclusive intent writers. Mode switches preserve actual motion, paid resources and conditions. Ordinary propulsion consumes electrical energy; finite fuel belongs long-distance travel."
+  - decision: redesign-movement-observed-relative-intent
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Relative Assistance Uses Held Evidence and Local Authority
+      summary: "Match Speed persists on the same measured contact's last observed speed, holds with stale feedback after loss and cancels on throttle/explicit toggle. Helm retains heading. Optional routes/formations use ordinary received intent and actual local capabilities, without perfect range/aspect holding or central fleet control."
+      rationale:
+        - "[ai] Store public handle and original sampled speed/tick as local intent, not a duplicate truth map. Unknown velocity is unavailable rather than zero; prediction/loss cannot read current actor motion. Reacquisition does not substitute a different contact. Existing collision and physical holds still constrain execution."
+        - "[ai]16 requests/receipts distinguish sending, recipient acceptance and actual formation/readiness. Link loss preserves accepted onboard work under its policy, not unseen new orders. Human breakaway remains normal authority. Navigation publication does not engage autopilot or seize human Helm."
+        - "S053 formation jumps use the best participating drive stats, with each member's own working drive capable of the jump type and actual authority/readiness/resource commitment. Shared scatter-then-gravity translation preserves actual relative offsets, without slot snapping, guaranteed clearance or carrying a disabled/no-drive hull. First supported profiles declare effective-stat combination and membership/interruption; neither weakest-drive tuning nor independent scatter can silently replace the selected contract."
+  - decision: redesign-movement-dock-and-transit-conservation
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Dock Separation and Configured Transit Preserve Physical Consequences
+      summary: "Extend actual Dock/mating with visible equipment/state-dependent separation and supported emergency release; actual Tractor/Umbilical/services remain separate owners. Supported local jump and discrete transit consume real resources/fuel, use deterministic scatter-then-gravity-push arrival and preserve canonical transition phases."
+      rationale:
+        - "[ai] Delegated approach/manual takeover uses one existing Helm controller; physical release does not require rediscovering a held mate. New coupling still needs permitted evidence and actual geometry. No universal damage penalty or scripted checklist is implied."
+        - "Local jumps require no universal receiving anchor and reset velocity in the local navigation frame. Inter-system drive accuracy/gravity and velocity/heading are explicit profiles. Static orbital bodies remain static. Researched portal/instant-kill alternatives are not automatically selected."
+        - "[ai] Reuse actual Stock/resource grants, world transition/content binding and deterministic mint/RNG. Preparation, commitment and arrival retain payment/side-effect frontiers; interruption/restore cannot duplicate fuel, arrival or entities. Physical placement inspects actual bounds only for resolution, never hidden navigation advice."
+  - decision: redesign-movement-authoring-and-continuation
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Movement Extensions Are Authorable and Continuable
+      summary: "Supported finite profiles and controls use existing accepted Workshop source/history/includes/Preview/Test, normal admitted Human/AI actions and immediate snapshot/digest integration. Whole-candidate owner/phase/clock/geometry/resource preflight precedes writes; initial source does not claim a verified playable exit."
+      rationale:
+        - "[ai] Actual assisted/direct, stale match, coupled/separating and paid transit checkpoints require fresh JSON bootstrap with at least 360 complete capture/digest comparisons and different-LocalShip peer proof. Shipped content, gameplay/movement comparisons, physical browser/native controls and 2/4/6/8-human workload/performance acceptance remain distinct."

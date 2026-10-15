@@ -16,7 +16,20 @@ const GHOST: &str = "assets/entities/ghost.toml";
 /// Test may select and a world may offer.
 const HULL_SOURCE: &str = "class='lancer'\nname='Test hull'\n\
 [[station]]\nid='captain'\nname='Captain'\ndescription='Test station'\nrank='captain'\n\
-[[system]]\nid='boost'\nkind='helm_boost'\nconsole='captain-display'\n[[console]]\nid='captain-display'\nhome_station='captain'\nscreen='gui/cruiser/captain.html'\n";
+[[system]]\nid='red-alert'\nkind='red_alert'\nconsole='captain-display'\n[[console]]\nid='captain-display'\nhome_station='captain'\nscreen='gui/cruiser/captain.html'\n";
+
+#[test]
+fn catalogue_choice_hull_is_runtime_accepted_control_only_equipment() {
+    let hull: crate::entities::config::EntityConfig = toml::from_str(HULL_SOURCE)
+        .expect("catalogue hull must satisfy the actual accepted equipment schema");
+    assert!(hull.class.is_some());
+    let ship = hull.ship_config.expect("actual ship configuration");
+    assert_eq!(ship.systems.len(), 1);
+    assert_eq!(
+        ship.systems[0].kind,
+        phoenix_sim_gameplay::ship::system_registry::RED_ALERT_KIND
+    );
+}
 
 /// A pack manifest with an unknown top-level key, two roots (one in the
 /// draft, one beneath it) and a curated ship the world does not offer.

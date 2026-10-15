@@ -1,5 +1,12 @@
 //! Bridge real committed owner results into the existing pending World owner.
 use crate::world::server::WorldContentRuntime;
+#[path = "activity_communication.rs"]
+mod communication;
+pub(crate) use communication::{
+    bind_communication_request, communication_request_release, communication_requests,
+    observe_communication_receipts, prepare_communication_request,
+    validate_planned_communication_reading,
+};
 use phoenix_model::{
     activity::{ActivityFact, ActivityJob, ActivityOutcome},
     identity::SystemId,
@@ -45,7 +52,8 @@ pub(crate) fn arm_for_actor(
         let mut bound = config.clone();
         match &mut bound.request {
             ActivityRequest::Repair { actor: target, .. }
-            | ActivityRequest::Delivery { actor: target, .. } => *target = actor.into(),
+            | ActivityRequest::Delivery { actor: target, .. }
+            | ActivityRequest::Communication { actor: target, .. } => *target = actor.into(),
         }
         if let Some(definition) = runtime
             .situation_definitions
@@ -75,16 +83,19 @@ pub(crate) fn record(
         let Some(fact) = runtime.situations.fact(&scope, tick, outcome) else {
             continue;
         };
-        // Each armed instance reserved exactly one achieved and one settled
-        // slot (or a single delivery terminal slot). Unacknowledged facts are
-        // retained here, never evicted or refreshed by later physical work.
-        let achieved = matches!(fact.outcome, ActivityOutcome::RepairAchieved { .. });
-        let occupied=runtime.pending_world_events.iter().any(|event|matches!(event,WorldEvent::Activity(existing) if existing.instance==fact.instance && matches!(existing.outcome,ActivityOutcome::RepairAchieved {..})==achieved));
-        if !occupied {
-            runtime
-                .pending_world_events
-                .push(WorldEvent::Activity(fact));
-        }
+        retain_fact(runtime, fact);
+    }
+}
+
+/// Same bounded pending owner for physical and communication achievements and
+/// terminal results. First actual receipt wins; no repeated event refresh.
+fn retain_fact(runtime: &mut WorldContentRuntime, fact: ActivityFact) {
+    let occupied = runtime.pending_world_events.iter().any(|event| matches!(event,
+        WorldEvent::Activity(existing) if existing.instance == fact.instance && existing.is_achievement() == fact.is_achievement()));
+    if !occupied {
+        runtime
+            .pending_world_events
+            .push(WorldEvent::Activity(fact));
     }
 }
 
@@ -174,10 +185,7 @@ pub fn validate_pending(
     let mut candidate = runtime.clone();
     let mut keys = std::collections::BTreeSet::new();
     for fact in pending {
-        let slot = (
-            fact.instance.clone(),
-            matches!(fact.outcome, ActivityOutcome::RepairAchieved { .. }),
-        );
+        let slot = (fact.instance.clone(), fact.is_achievement());
         if !keys.insert(slot) {
             return Err("duplicate pending activity evidence slot".into());
         }
@@ -185,7 +193,7 @@ pub fn validate_pending(
             .instances
             .get(&fact.instance)
             .is_some_and(|instance| {
-                if matches!(fact.outcome, ActivityOutcome::RepairAchieved { .. }) {
+                if fact.is_achievement() {
                     instance.achieved.is_some()
                 } else {
                     instance.settled.is_some()

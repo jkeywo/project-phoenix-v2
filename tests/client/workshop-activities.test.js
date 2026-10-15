@@ -91,3 +91,23 @@ describe('structured activity Workshop controls',()=>{
     expect(operations.busy()).toBe(true);draft=documentFor(source());panel.dispose();finish({accepted:true});await settle();expect(original.snapshot()).toEqual(before);expect(operations.busy()).toBe(false);
   });
 });
+
+describe('communication activity authoring',()=>{
+  it('accepts only actual supported radio owners and declared base recipients through validated history',async()=>{
+    const value=profile();value.system.push({id:'comms',kind:'comms',console:'engineering'});value.comms={radio:{system:'comms',request_reading_ticks:30,channel:[{id:'public',range:200,work_units:1}]}};
+    const dependencies={base_files:{[hull]:stringify(value)},packs:[]};
+    const world=parse(source());world.entity.push({template_path:hull,name:'port',spawn_on:'game_start'});
+    const draft=documentFor(stringify(world));
+    const definitions=[{id:'report',initial:'heard',state:[{id:'heard',when:{kind:'communication_reported'}}]}];
+    const rows=[{id:'contact',definition:'report',request:{kind:'communication',actor:'ship',owner:'comms',recipient:'port',channel:'public',request:'report_status'}}];
+    const inspection=inspectActivities(draft,dependencies,path);validateActivities(definitions,rows,inspection.actors);
+    for(const edit of [row=>row.request.recipient='slot:player',row=>row.request.recipient='unknown',row=>row.request.owner='repair',row=>row.request.channel='private',row=>row.request.request='order_attack']){
+      const candidate=structuredClone(rows);edit(candidate[0]);expect(()=>validateActivities(definitions,candidate,inspection.actors)).toThrow();
+    }
+    const before=draft.toFiles(),runtime={validate:vi.fn(async()=>({accepted:true}))};
+    await applyActivities({draft,dependencies,runtime,path,definitions,situations:rows});
+    expect(runtime.validate).toHaveBeenCalledOnce();
+    expect(parse(new WorkshopDocument(draft.archive()).read(path)).situation).toEqual(rows);
+    draft.undo();expect(draft.toFiles()).toEqual(before);draft.redo();expect(parse(draft.read(path)).situation[0].request).toEqual(rows[0].request);
+  });
+});

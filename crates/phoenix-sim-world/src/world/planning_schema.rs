@@ -112,6 +112,7 @@ pub struct PlanningConfig {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OperatorFamily {
+    CommunicationReportStatus,
     RepairInternal,
     DeliveryLocal,
 }
@@ -192,6 +193,13 @@ pub struct Dependency {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RequestTemplate {
+    Communication {
+        actor: Argument,
+        owner: Argument,
+        recipient: Argument,
+        channel: String,
+        request: phoenix_model::comms_request::GenericCommsRequest,
+    },
     Repair {
         actor: Argument,
         owner: Argument,

@@ -88,6 +88,13 @@ pub(super) fn candidates(
 
 pub(super) fn supports(request: &ActivityRequest, config: &EntityConfig) -> Result<bool, String> {
     match request {
+        ActivityRequest::Communication { owner, channel, .. } => Ok(config
+            .ship_config
+            .as_ref()
+            .zip(config.comms.as_ref().and_then(|row| row.radio.as_ref()))
+            .is_some_and(|(ship, radio)| {
+                activity_bindings::communication_supported(owner, channel, ship, radio)
+            })),
         ActivityRequest::Repair {
             owner,
             team,
@@ -153,10 +160,30 @@ pub(super) fn supports(request: &ActivityRequest, config: &EntityConfig) -> Resu
 pub(super) fn findings(source: &WorldSource, loader: &dyn TemplateLoader) -> Vec<WorldFinding> {
     let mut findings = Vec::new();
     for situation in &source.config.situations {
-        let result=candidates(situation.request.actor(),source,loader).and_then(|configs|{
+        let result = (|| {
+            if let ActivityRequest::Communication { recipient, .. } = &situation.request {
+                if recipient.starts_with("slot:") {
+                    return Err(
+                        "communication recipient requires a declared base-world actor".into(),
+                    );
+                }
+                source.config.validate_situation_actor(recipient)?;
+                for target in candidates(recipient, source, loader)? {
+                    if target
+                        .comms
+                        .as_ref()
+                        .and_then(|row| row.radio.as_ref())
+                        .is_none()
+                    {
+                        return Err("communication recipient lacks actual radio equipment".into());
+                    }
+                }
+            }
+            candidates(situation.request.actor(),source,loader).and_then(|configs|{
             for config in configs {if !supports(&situation.request,&config)? {return Err("request/goal is outside the actual Repair visit/team/remedy or approved delivery route on an offered hull".into());}}
             Ok(())
-        });
+        })
+        })();
         if let Err(error) = result {
             // A browser preload which cannot yet answer a template lookup is
             // not evidence that the immutable equipment is absent. Its final

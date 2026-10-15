@@ -119,6 +119,7 @@ fn with_sources(app: &mut App, actor: Entity) {
                 &team_owner,
                 count,
             ),
+            ActivityRequest::Communication { .. } => false,
             ActivityRequest::Delivery { .. } => {
                 crate::world::activities::delivery_binding_supported(request, &logistics)
             }

@@ -20,7 +20,7 @@ export function mountWorkshopActivities({root,provider,runtime,draft:getDraft,bu
     const row={fieldset,name,states:[]};definitionRows.push(row);
     fieldset.append(label(name,'definition'),states);
     function addState(value={id:'',when:{kind:'accepted'}}) {
-      const box=el('fieldset'),name=input('state-'+serial++,value.id),when=select('condition-'+serial++,['accepted','achieved','settled','received','returned'].map(key=>[key,t('workshop.activities.condition.'+key)]),value.when.kind);
+      const box=el('fieldset'),name=input('state-'+serial++,value.id),when=select('condition-'+serial++,['accepted','achieved','settled','received','returned','communication_read','communication_reported','communication_declined'].map(key=>[key,t('workshop.activities.condition.'+key)]),value.when.kind);
       const outcome=select('outcome-'+serial++,['completed','cancelled','failed'].map(key=>[key,t('workshop.activities.outcome.'+key)]),value.when.outcome);
       const script=input('script-'+serial++,value.call?.script || ''),fn=input('function-'+serial++,value.call?.function || '');
       const state={box,name,when,outcome,script,fn};row.states.push(state);
@@ -36,7 +36,7 @@ export function mountWorkshopActivities({root,provider,runtime,draft:getDraft,bu
   }
   function addInstance(value={id:'',definition:'',request:{kind:'repair'}}) {
     const fieldset=el('fieldset'),name=input('instance-'+serial++,value.id),definition=input('binding-'+serial++,value.definition);
-    const actor=select('actor-'+serial++,inspection.actors.map(row=>[row.id,row.id]),value.request.actor),kind=select('kind-'+serial++,[['repair',t('workshop.activities.repair')],['delivery',t('workshop.activities.delivery')]],value.request.kind),body=el('div');
+    const actor=select('actor-'+serial++,inspection.actors.map(row=>[row.id,row.id]),value.request.actor),kind=select('kind-'+serial++,[['repair',t('workshop.activities.repair')],['delivery',t('workshop.activities.delivery')],['communication',t('workshop.activities.communication')]],value.request.kind),body=el('div');
     const row={fieldset,name,definition,actor,kind,read:()=>null};instanceRows.push(row);
     function detail(request={}) {
       body.replaceChildren();const profile=inspection.actors.find(row=>row.id===actor.value)?.profiles[0],choices=activityChoices(profile || {});
@@ -51,6 +51,13 @@ export function mountWorkshopActivities({root,provider,runtime,draft:getDraft,bu
         body.append(label(owner,'owner'),label(team,'team'),label(visit,'visit'),label(target,'target'),label(goal,'goal'));
         row.read=()=>{const work=JSON.parse(target.value);return{kind:'repair',actor:actor.value,owner:owner.value,team:team.valueAsNumber,
           request:visit.value==='exact'?{type:'Work',data:work}:JSON.parse(visit.value),target:work,goal:goal.value};};
+      } else if(kind.value==='communication') {
+        const owner=select('owner-'+serial++,[...new Set(choices.communications.map(row=>row.owner))].map(row=>[row,row]),request.owner);
+        const channel=select('channel-'+serial++,choices.communications.map(row=>[row.channel,row.channel]),request.channel);
+        const recipients=inspection.actors.filter(row=>row.id!==actor.value && !row.id.startsWith('slot:') && row.profiles.length && row.profiles.every(profile=>profile.comms?.radio));
+        const recipient=select('recipient-'+serial++,recipients.map(row=>[row.id,row.id]),request.recipient);
+        body.append(label(owner,'owner'),label(recipient,'recipient'),label(channel,'channel'));
+        row.read=()=>({kind:'communication',actor:actor.value,owner:owner.value,recipient:recipient.value,channel:channel.value,request:'report_status'});
       } else {
         const route=select('route-'+serial++,choices.deliveries.map(row=>[json(row),row.owner+': '+row.source+' → '+row.destination+' ('+row.commodity+')']),undefined);
         const found=choices.deliveries.find(row=>row.owner===request.owner&&row.source===request.source&&row.destination===request.destination&&row.commodity===request.commodity);if(found)route.value=json(found);

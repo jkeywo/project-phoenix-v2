@@ -341,6 +341,8 @@ export function buildScenarioStatePanel(payload, opts = {}) {
       const fields = [
         ['definition', state.definition], ['request', JSON.stringify(state.request)],
         ['armed', state.armed_tick], ['job', state.accepted?.identity?.kind === 'physical' ? state.accepted.identity.job : null],
+        ['transmission', state.accepted?.identity?.kind === 'communication' ? state.accepted.identity.origin_id : null],
+        ['recipient', state.accepted?.identity?.kind === 'communication' ? state.accepted.identity.recipient : null],
         ['accepted', state.accepted_tick], ['achieved', state.achieved?.tick],
         ['settled', state.settled?.tick], ['outcome', state.settled ? JSON.stringify(state.settled.outcome) : null],
         ['state', state.state],

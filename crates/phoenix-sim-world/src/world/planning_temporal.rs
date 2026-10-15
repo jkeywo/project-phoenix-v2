@@ -229,12 +229,18 @@ fn add(left: u64, right: u64) -> Result<u64, String> {
         .ok_or("forecast logical clock overflow".into())
 }
 fn owner(request: &ActivityRequest) -> &SystemId {
-    match request {
-        ActivityRequest::Repair { owner, .. } | ActivityRequest::Delivery { owner, .. } => owner,
-    }
+    request.owner()
 }
 fn same_resource(left: &ActivityRequest, right: &ActivityRequest) -> bool {
     match (left, right) {
+        (
+            ActivityRequest::Communication {
+                actor: a, owner: x, ..
+            },
+            ActivityRequest::Communication {
+                actor: b, owner: y, ..
+            },
+        ) => a == b && x == y,
         (
             ActivityRequest::Repair {
                 actor: a,

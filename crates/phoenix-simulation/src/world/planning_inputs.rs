@@ -16,15 +16,11 @@ pub(crate) struct ForecastSources<'a> {
 impl ForecastSources<'_> {
     pub fn project(&self, graph: &Decomposition) -> ForecastInput {
         use crate::ship::control_source::ControlSource;
-        use phoenix_sim_world::world::activities::ActivityRequest;
         let owners = graph
             .leaves
             .values()
             .map(|row| {
-                let owner = match &row.request {
-                    ActivityRequest::Repair { owner, .. }
-                    | ActivityRequest::Delivery { owner, .. } => owner,
-                };
+                let owner = row.request.owner();
                 let value = if !self.sources.0.entries().any(|(id, _)| id == owner) {
                     OwnerInput::Unavailable {
                         reason: UnavailableReason::MissingSource,

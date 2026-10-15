@@ -99,6 +99,15 @@ pub enum RepairAchievement {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ActivityOutcome {
+    CommunicationRead {
+        reference: crate::comms_request::CommsRequestReference,
+        read_tick: u64,
+        receipt_origin_id: String,
+    },
+    CommunicationReturned {
+        outcome: crate::comms_request::CommsRequestOutcome,
+        receipt_origin_id: String,
+    },
     RepairAchieved {
         stage: u64,
         target: RepairWorkTarget,
@@ -124,6 +133,8 @@ pub enum ActivityEvidenceKey {
     RepairAchieved { stage: u64 },
     RepairSettled,
     Delivery,
+    CommunicationRead {},
+    CommunicationReturned {},
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -142,7 +153,17 @@ impl ActivityFact {
             }
             ActivityOutcome::RepairSettled { .. } => ActivityEvidenceKey::RepairSettled,
             ActivityOutcome::Delivery { .. } => ActivityEvidenceKey::Delivery,
+            ActivityOutcome::CommunicationRead { .. } => ActivityEvidenceKey::CommunicationRead {},
+            ActivityOutcome::CommunicationReturned { .. } => {
+                ActivityEvidenceKey::CommunicationReturned {}
+            }
         }
+    }
+    pub fn is_achievement(&self) -> bool {
+        matches!(
+            self.outcome,
+            ActivityOutcome::RepairAchieved { .. } | ActivityOutcome::CommunicationRead { .. }
+        )
     }
     pub fn validate(&self, now: u64) -> Result<(), String> {
         if self.instance.trim().is_empty()
@@ -153,10 +174,41 @@ impl ActivityFact {
             return Err("invalid activity evidence identity/tick".into());
         }
         self.scope.validate(now)?;
-        if self.scope.physical_job().is_none() {
-            return Err("physical outcome has a nonphysical execution identity".into());
+        match &self.outcome {
+            ActivityOutcome::CommunicationRead {
+                reference,
+                read_tick,
+                receipt_origin_id,
+            } => {
+                self.validate_communication(reference, receipt_origin_id)?;
+                if *read_tick < reference.heard_tick || *read_tick > self.tick {
+                    return Err(
+                        "communication read evidence must precede its actual heard receipt".into(),
+                    );
+                }
+                return Ok(());
+            }
+            ActivityOutcome::CommunicationReturned {
+                outcome,
+                receipt_origin_id,
+            } => {
+                self.validate_communication(&outcome.request, receipt_origin_id)?;
+                outcome.validate(self.tick).map_err(str::to_owned)?;
+                if outcome.facts.decision.is_none() {
+                    return Err("communication terminal evidence requires an actual reported or declined decision".into());
+                }
+                return Ok(());
+            }
+            _ if self.scope.physical_job().is_none() => {
+                return Err("physical outcome has a nonphysical execution identity".into());
+            }
+            _ => {}
         }
         match &self.outcome {
+            ActivityOutcome::CommunicationRead { .. }
+            | ActivityOutcome::CommunicationReturned { .. } => {
+                unreachable!("handled communication evidence")
+            }
             ActivityOutcome::RepairAchieved {
                 stage,
                 target,
@@ -208,6 +260,32 @@ impl ActivityFact {
                     return Err("invalid committed delivery result".into());
                 }
             }
+        }
+        Ok(())
+    }
+    fn validate_communication(
+        &self,
+        reference: &crate::comms_request::CommsRequestReference,
+        receipt: &str,
+    ) -> Result<(), String> {
+        reference.validate(self.tick).map_err(str::to_owned)?;
+        let ActivityExecutionIdentity::Communication {
+            origin_id,
+            recipient,
+            emitted_tick,
+        } = &self.scope.identity
+        else {
+            return Err("communication evidence has a physical execution identity".into());
+        };
+        if reference.origin_id != *origin_id
+            || reference.source_ship != self.scope.actor
+            || reference.recipient_ship != *recipient
+            || reference.emitted_tick != *emitted_tick
+            || receipt.trim().is_empty()
+            || receipt.len() > 256
+            || receipt.chars().any(char::is_control)
+        {
+            return Err("communication evidence disagrees with its actual emission lineage".into());
         }
         Ok(())
     }

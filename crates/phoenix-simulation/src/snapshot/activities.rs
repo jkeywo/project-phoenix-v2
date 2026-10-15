@@ -66,7 +66,7 @@ fn slot_binding(
 }
 
 /// The accepted complete base/slot recipe is the historical capability source.
-fn accepted_recipe(
+pub(super) fn accepted_recipe(
     world: &World,
     snapshot: &PhoenixSnapshot,
     actor: &str,
@@ -222,6 +222,7 @@ fn planning_frontier(
 }
 
 pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), String> {
+    super::activity_communication::validate_emissions(snapshot)?;
     let Some(stored) = snapshot.scenario.as_ref() else {
         if world
             .get_resource::<WorldContentRuntime>()
@@ -302,6 +303,9 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
             }
             | ActivityRequest::Delivery {
                 actor: expected, ..
+            }
+            | ActivityRequest::Communication {
+                actor: expected, ..
             } => *expected = actor.into(),
         }
         if !valid_actor
@@ -315,19 +319,19 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
         // owner to have removed/reassigned its row. Never demand today's slot
         // still contain yesterday's completed job.
         let terminal = instance.settled.is_some()
-            || pending.iter().any(|fact| {
-                fact.instance == *id
-                    && !matches!(fact.outcome, ActivityOutcome::RepairAchieved { .. })
-            });
+            || pending
+                .iter()
+                .any(|fact| fact.instance == *id && !fact.is_achievement());
         // Loss of a declared actor preserves own accepted intent/history, but
         // cannot invent a terminal settlement. Present actors must still carry
         // their exact active job; absent actors use immutable provenance below.
         if let (Some(scope), Some(row)) = (instance.accepted.as_ref().filter(|_| !terminal), row) {
-            let physical_job = scope
-                .physical_job()
-                .ok_or("physical activity has a nonphysical accepted identity")?;
             match &instance.request {
+                ActivityRequest::Communication { .. } => {}
                 ActivityRequest::Repair { team, .. } => {
+                    let physical_job = scope
+                        .physical_job()
+                        .ok_or("Repair activity requires actual physical JobId")?;
                     let job = row
                         .repair
                         .as_ref()
@@ -377,6 +381,9 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
                     amount,
                     ..
                 } => {
+                    let physical_job = scope
+                        .physical_job()
+                        .ok_or("delivery activity requires actual physical JobId")?;
                     let batch = row
                         .logistics
                         .as_ref()
@@ -430,6 +437,11 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
             accepted
         };
         match &instance.request {
+            ActivityRequest::Communication { .. } => {
+                super::activity_communication::validate_instance(
+                    world, snapshot, instance, authored, &config, &pending, id,
+                )?;
+            }
             ActivityRequest::Repair { target, .. } => {
                 let ship = config
                     .ship_config
@@ -574,6 +586,18 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
                     continue;
                 }
                 let supported = match &config.request {
+                    ActivityRequest::Communication { owner, channel, .. } => live
+                        .and_then(|entity| {
+                            Some((
+                                world.get::<crate::ship_plugin::ShipConfigComponent>(entity)?,
+                                world.get::<crate::comms::radio::RadioProfile>(entity)?,
+                            ))
+                        })
+                        .is_some_and(|(ship, radio)| {
+                            crate::jobs::activity_bindings::communication_supported(
+                                owner, channel, &ship.0, &radio.0,
+                            )
+                        }),
                     ActivityRequest::Repair { .. } => live
                         .and_then(|entity| {
                             Some((

@@ -371,6 +371,7 @@ pub(crate) use materialization::spawn_from_origin;
 pub use materialization::LayerReconcileStatus;
 
 mod activities;
+mod activity_communication;
 pub(crate) use activities::validate_single_row as validate_activity_single_row;
 mod craft;
 mod emp;

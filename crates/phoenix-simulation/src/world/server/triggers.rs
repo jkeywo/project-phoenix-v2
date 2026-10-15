@@ -121,6 +121,7 @@ pub(crate) fn collect_world_events(
     tick: Option<Res<crate::sim_tick::SimTick>>,
     base_world: Option<Res<crate::world::config::WorldConfig>>,
     fixed: Option<Res<Time<Fixed>>>,
+    comms_inbox: Option<Res<crate::comms::server::CommsInboxRes>>,
     planning_actors: Query<(
         &crate::entities::spawner::EntityUuid,
         Option<&crate::ship_slots::AuthoredShipSlotId>,
@@ -132,6 +133,7 @@ pub(crate) fn collect_world_events(
         Option<&crate::ship_plugin::ActiveStationRatings>,
         Option<&crate::lobby::crew_replication::ShipCrewPresence>,
         Option<&crate::ship_plugin::HumanSeekingHosts>,
+        Option<&crate::comms::radio::RadioProfile>,
     )>,
     hulls: Query<(
         &crate::entities::spawner::EntityUuid,
@@ -140,13 +142,39 @@ pub(crate) fn collect_world_events(
     )>,
 ) {
     if let Some(tick) = tick {
+        if let Some(inbox) = comms_inbox.as_deref() {
+            crate::world::activities::observe_communication_receipts(
+                &mut runtime,
+                &inbox.0.messages(),
+                tick.0,
+            );
+        }
         crate::world::activities::acknowledge_pending(&mut runtime, tick.0);
         if let Some(base) = base_world.as_deref() {
             let mut actors = planning_actors.iter().collect::<Vec<_>>();
             actors.sort_by(|left, right| left.0 .0.cmp(&right.0 .0));
-            for (uuid, slot, config, damage, teams, logistics, sources, ratings, presence, hosts) in
-                actors
+            for (
+                uuid,
+                slot,
+                config,
+                damage,
+                teams,
+                logistics,
+                sources,
+                ratings,
+                presence,
+                hosts,
+                radio,
+            ) in actors
             {
+                crate::world::activities::arm_for_actor(
+                    &mut runtime,
+                    base,
+                    &uuid.0,
+                    slot.map(|id| id.0.as_str()),
+                    tick.0,
+                    |request| matches!(request, phoenix_sim_world::world::activities::ActivityRequest::Communication { owner, channel, .. } if radio.is_some_and(|radio| crate::jobs::activity_bindings::communication_supported(owner, channel, &config.0, &radio.0))),
+                );
                 let forecast = sources
                     .zip(ratings)
                     .zip(presence)
@@ -169,6 +197,15 @@ pub(crate) fn collect_world_events(
                     tick.0,
                     forecast.as_ref(),
                     |request| match request {
+                        phoenix_sim_world::world::activities::ActivityRequest::Communication {
+                            owner,
+                            channel,
+                            ..
+                        } => radio.is_some_and(|radio| {
+                            crate::jobs::activity_bindings::communication_supported(
+                                owner, channel, &config.0, &radio.0,
+                            )
+                        }),
                         phoenix_sim_world::world::activities::ActivityRequest::Repair {
                             ..
                         } => damage.zip(teams).is_some_and(|(damage, teams)| {

@@ -1,0 +1,25 @@
+# Actual base-actor communications and internal work. No synthetic message,
+# paid work, resource grant or permission assertion is authored here.
+[global]
+seed=1562224
+[player_spawn]
+position=[0,0,0]
+[[entity]]
+template_path="assets/entities/alliance_cruiser.toml"
+id="planned-ship"
+name="planned-ship"
+spawn_on="game_start"
+transform={position=[0,0,0]}
+[[entity]]
+template_path="assets/entities/alliance_cruiser.toml"
+id="status-reporter"
+name="status-reporter"
+spawn_on="game_start"
+transform={position=[80,0,0]}
+[planning]
+id="communication-maintenance"
+task="contact::restore-after-report"
+arguments={actor={kind="actor",value="planned-ship"}}
+import=[{path="assets/worlds/domains/communication-maintenance.toml",as="contact",names=["restore-after-report"]}]
+[script]
+setup="fn credit_report(ctx) { ctx.flags.increment(\"actual_status_report\", 1); }"

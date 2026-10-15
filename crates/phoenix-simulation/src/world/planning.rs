@@ -15,6 +15,13 @@ pub(crate) fn supports_recipe(
     config: &crate::entities::config::EntityConfig,
 ) -> Result<bool, String> {
     Ok(match request {
+        ActivityRequest::Communication { owner, channel, .. } => config
+            .ship_config
+            .as_ref()
+            .zip(config.comms.as_ref().and_then(|row| row.radio.as_ref()))
+            .is_some_and(|(ship, radio)| {
+                crate::jobs::activity_bindings::communication_supported(owner, channel, ship, radio)
+            }),
         ActivityRequest::Repair { .. } => {
             let Some((ship, repair)) = config.ship_config.as_ref().zip(config.repair.as_ref())
             else {
@@ -168,7 +175,8 @@ pub(crate) fn requests(
             row.request.actor() == actor
                 && match &row.request {
                     ActivityRequest::Repair { owner: target, .. }
-                    | ActivityRequest::Delivery { owner: target, .. } => target == owner,
+                    | ActivityRequest::Delivery { owner: target, .. }
+                    | ActivityRequest::Communication { owner: target, .. } => target == owner,
                 }
         })
         .collect()

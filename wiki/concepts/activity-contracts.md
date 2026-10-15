@@ -102,3 +102,20 @@ committed decision freezes this first recovery path. Preflight recomputes every
 record, including exact changed owners and clocks; release uses the effective
 commitment. Original and revised decisions remain separately visible. This is
 refusal recovery, not unfinished-job replanning or a capability-loss solution.
+
+
+Communication primitives reuse the same situation/fact history with a closed
+ActivityExecution reference: actual physical JobId or actual Comms origin and
+recipient/emission identity. Only already-known current own Comms contacts enter
+planned communication publications. The normal paid SendCommsRequest consumes an
+exclusive prepared World binding; a payment refusal drops it without acceptance.
+Normal Comms AI uses its existing policy and reading owner to send that command.
+
+The canonical retained Request retries through ordinary paid radio operation.
+World observes only the issuer's own sent lineage and actually heard returned
+Outcomes. Original reading/report clocks and actual receipt clocks remain distinct;
+ReportStatus does not grant permission. Candidate validation reconciles retained
+requests, accepted scopes and receipt evidence before writes. The imported
+communication-maintenance domain and existing Workshop source/activity editors
+use these same closed operators and read/reported/declined conditions. Actual
+whole-host, peer and human workload acceptance remains separate from source tests.

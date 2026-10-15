@@ -81,6 +81,10 @@ pub(super) fn fact(mut acc: u64, value: &ActivityFact) -> u64 {
     acc = scope(acc, &value.scope);
     acc = fold_u64(acc, value.tick);
     match &value.outcome {
+        ActivityOutcome::CommunicationRead { .. } => fold_serde(fold_u64(acc, 3), &value.outcome),
+        ActivityOutcome::CommunicationReturned { .. } => {
+            fold_serde(fold_u64(acc, 4), &value.outcome)
+        }
         ActivityOutcome::RepairAchieved {
             stage,
             target: work,
@@ -131,6 +135,9 @@ pub(super) fn instances(mut acc: u64, values: &SituationInstances) -> u64 {
         acc = fold_str(acc, value.request.actor());
         acc = fold_str(acc, &value.request.owner().0);
         match &value.request {
+            ActivityRequest::Communication { .. } => {
+                acc = fold_serde(fold_u64(acc, 2), &value.request);
+            }
             ActivityRequest::Repair {
                 team,
                 request,

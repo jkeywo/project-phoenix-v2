@@ -47,6 +47,26 @@ pub(super) fn findings(source: &WorldSource, loader: &dyn TemplateLoader) -> Vec
                 instances.arm(row, definition, 0)?;
             }
             for row in selected.graph.leaves.values() {
+                if let phoenix_sim_world::world::activities::ActivityRequest::Communication {
+                    recipient,
+                    ..
+                } = &row.request
+                {
+                    if recipient.starts_with("slot:") {
+                        return Err("first communication activity recipient must be a declared base-world actor".into());
+                    }
+                    source.config.validate_situation_actor(recipient)?;
+                    for target in activity_bindings::candidates(recipient, source, loader)? {
+                        if target
+                            .comms
+                            .as_ref()
+                            .and_then(|row| row.radio.as_ref())
+                            .is_none()
+                        {
+                            return Err("communication activity recipient requires actual supported radio equipment".into());
+                        }
+                    }
+                }
                 let definition = selected
                     .graph
                     .definitions

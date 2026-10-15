@@ -106,6 +106,7 @@ fn advance(app: &mut App, actor: Entity) {
             ActivityRequest::Repair { .. } => crate::world::activities::repair_binding_supported(
                 request, &config, &damage, &owner, count,
             ),
+            ActivityRequest::Communication { .. } => false,
             ActivityRequest::Delivery { .. } => {
                 crate::world::activities::delivery_binding_supported(request, &logistics)
             }

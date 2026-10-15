@@ -92,6 +92,16 @@ fn validate_parameters(parameters: &[Parameter]) -> Result<(), String> {
 fn template_arguments(request: &RequestTemplate) -> Vec<(&Argument, ParameterKind)> {
     use ParameterKind as Kind;
     match request {
+        RequestTemplate::Communication {
+            actor,
+            owner,
+            recipient,
+            ..
+        } => vec![
+            (actor, Kind::Actor),
+            (owner, Kind::System),
+            (recipient, Kind::Actor),
+        ],
         RequestTemplate::Repair {
             actor,
             owner,
@@ -343,6 +353,14 @@ impl CompiledPlanning {
                         forecast,
                         ..
                     } => {
+                        if let RequestTemplate::Communication { channel, .. } = request {
+                            if !phoenix_model::comms_channel::channel_id(channel) {
+                                return Err(
+                                    "communication primitive requires a supported authored channel"
+                                        .into(),
+                                );
+                            }
+                        }
                         if let Some(forecast) = forecast {
                             forecast.validate()?;
                         }
@@ -350,6 +368,9 @@ impl CompiledPlanning {
                             return Err("primitive references absent Scenario definition".into());
                         }
                         let family = match request {
+                            RequestTemplate::Communication { .. } => {
+                                OperatorFamily::CommunicationReportStatus
+                            }
                             RequestTemplate::Repair { .. } => OperatorFamily::RepairInternal,
                             RequestTemplate::Delivery { .. } => OperatorFamily::DeliveryLocal,
                         };

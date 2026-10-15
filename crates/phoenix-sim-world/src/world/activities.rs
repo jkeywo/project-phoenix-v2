@@ -16,6 +16,13 @@ pub use phoenix_model::activity::RepairGoal;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ActivityRequest {
+    Communication {
+        actor: String,
+        owner: SystemId,
+        recipient: String,
+        channel: String,
+        request: phoenix_model::comms_request::GenericCommsRequest,
+    },
     Repair {
         actor: String,
         owner: SystemId,
@@ -36,12 +43,16 @@ pub enum ActivityRequest {
 impl ActivityRequest {
     pub fn actor(&self) -> &str {
         match self {
-            Self::Repair { actor, .. } | Self::Delivery { actor, .. } => actor,
+            Self::Repair { actor, .. }
+            | Self::Delivery { actor, .. }
+            | Self::Communication { actor, .. } => actor,
         }
     }
     pub fn owner(&self) -> &SystemId {
         match self {
-            Self::Repair { owner, .. } | Self::Delivery { owner, .. } => owner,
+            Self::Repair { owner, .. }
+            | Self::Delivery { owner, .. }
+            | Self::Communication { owner, .. } => owner,
         }
     }
     fn validate(&self) -> Result<(), String> {
@@ -49,6 +60,19 @@ impl ActivityRequest {
             return Err("activity requires actual actor/System".into());
         }
         match self {
+            Self::Communication {
+                recipient, channel, ..
+            } => {
+                if recipient.trim().is_empty()
+                    || recipient.len() > 256
+                    || recipient.chars().any(char::is_control)
+                    || recipient.starts_with("slot:")
+                    || recipient == self.actor()
+                    || !phoenix_model::comms_channel::channel_id(channel)
+                {
+                    return Err("communication activity requires a declared distinct base-world recipient and supported channel".into());
+                }
+            }
             Self::Repair {
                 request: phoenix_model::messages::RepairTarget::Station(id),
                 ..
@@ -112,6 +136,20 @@ impl ActivityRequest {
         }
         match (self, other) {
             (
+                Self::Communication {
+                    recipient: a,
+                    channel: b,
+                    request: c,
+                    ..
+                },
+                Self::Communication {
+                    recipient: x,
+                    channel: y,
+                    request: z,
+                    ..
+                },
+            ) => a == x && b == y && c == z,
+            (
                 Self::Repair {
                     team: a, target: x, ..
                 },
@@ -136,6 +174,14 @@ impl ActivityRequest {
     }
     fn matches(&self, outcome: &ActivityOutcome) -> bool {
         match (self, outcome) {
+            (
+                Self::Communication { request, .. },
+                ActivityOutcome::CommunicationRead { reference, .. },
+            ) => request == &reference.request,
+            (
+                Self::Communication { request, .. },
+                ActivityOutcome::CommunicationReturned { outcome, .. },
+            ) => request == &outcome.request.request,
             (
                 Self::Repair { target, goal, .. },
                 ActivityOutcome::RepairAchieved {
@@ -200,6 +246,9 @@ impl ActivityRequest {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SituationCondition {
+    CommunicationRead {},
+    CommunicationReported {},
+    CommunicationDeclined {},
     Accepted,
     Achieved,
     Settled { outcome: JobOutcome },
@@ -211,8 +260,11 @@ impl SituationCondition {
     /// HTN release. No live condition, job slot or stock polling is involved.
     pub fn satisfied_tick(&self, instance: &SituationInstance) -> Option<u64> {
         match self {
+            Self::CommunicationRead {} => instance.achieved.as_ref().filter(|fact| matches!(fact.outcome, ActivityOutcome::CommunicationRead { .. })).map(|fact| fact.tick),
+            Self::CommunicationReported {} => instance.settled.as_ref().filter(|fact| matches!(&fact.outcome, ActivityOutcome::CommunicationReturned { outcome, .. } if outcome.facts.report.is_some())).map(|fact| fact.tick),
+            Self::CommunicationDeclined {} => instance.settled.as_ref().filter(|fact| matches!(&fact.outcome, ActivityOutcome::CommunicationReturned { outcome, .. } if outcome.facts.decision.as_ref().is_some_and(|decision| decision.choice == phoenix_model::comms_request::CommsRequestDecision::Decline))).map(|fact| fact.tick),
             Self::Accepted => instance.accepted.as_ref().and(instance.accepted_tick),
-            Self::Achieved => instance.achieved.as_ref().filter(|fact| matches!(fact.outcome, ActivityOutcome::RepairAchieved { .. })).map(|fact| fact.tick),
+            Self::Achieved => instance.achieved.as_ref().filter(|fact| fact.is_achievement()).map(|fact| fact.tick),
             Self::Settled { outcome } => instance.settled.as_ref().filter(|fact| matches!(&fact.outcome, ActivityOutcome::RepairSettled { outcome: actual } if actual == outcome)).map(|fact| fact.tick),
             Self::Received => instance.settled.as_ref().filter(|fact| matches!(fact.outcome, ActivityOutcome::Delivery { returned: false, .. })).map(|fact| fact.tick),
             Self::Returned => instance.settled.as_ref().filter(|fact| matches!(fact.outcome, ActivityOutcome::Delivery { returned: true, .. })).map(|fact| fact.tick),
@@ -455,7 +507,10 @@ impl SituationInstances {
         if !instance.request.matches(&outcome) {
             return None;
         }
-        let achieved = matches!(outcome, ActivityOutcome::RepairAchieved { .. });
+        let achieved = matches!(
+            outcome,
+            ActivityOutcome::RepairAchieved { .. } | ActivityOutcome::CommunicationRead { .. }
+        );
         if if achieved {
             instance.achieved.is_some()
         } else {
@@ -484,21 +539,21 @@ impl SituationInstances {
         {
             return Err("activity evidence binding mismatch".into());
         }
-        let impossible_order = match &fact.outcome {
-            ActivityOutcome::RepairAchieved { .. } => instance
+        let impossible_order = if fact.is_achievement() {
+            instance
                 .settled
                 .as_ref()
-                .is_some_and(|settled| fact.tick > settled.tick),
-            ActivityOutcome::RepairSettled { .. } => instance
+                .is_some_and(|settled| fact.tick > settled.tick)
+        } else {
+            instance
                 .achieved
                 .as_ref()
-                .is_some_and(|achieved| achieved.tick > fact.tick),
-            _ => false,
+                .is_some_and(|achieved| achieved.tick > fact.tick)
         };
         if impossible_order {
-            return Err("repair achievement occurs after assignment settlement".into());
+            return Err("activity achievement follows terminal settlement".into());
         }
-        let slot = if matches!(fact.outcome, ActivityOutcome::RepairAchieved { .. }) {
+        let slot = if fact.is_achievement() {
             &mut instance.achieved
         } else {
             &mut instance.settled
@@ -572,6 +627,7 @@ impl SituationInstances {
             definition.validate()?;
         }
         let mut scopes = BTreeSet::new();
+        let mut origins = BTreeSet::new();
         for (id, instance) in &self.instances {
             instance.request.validate()?;
             let definition = definitions
@@ -588,10 +644,29 @@ impl SituationInstances {
                 return Err("invalid activity acceptance frontier".into());
             }
             if let Some(scope) = &instance.accepted {
+                if let ActivityExecutionIdentity::Communication { origin_id, .. } = &scope.identity
+                {
+                    if !origins.insert((&scope.actor, origin_id)) {
+                        return Err(
+                            "one emitted origin cannot bind multiple communication activities"
+                                .into(),
+                        );
+                    }
+                }
                 if scope.actor != instance.request.actor()
                     || &scope.owner != instance.request.owner()
                     || scope.validate(now).is_err()
-                    || scope.physical_job().is_none()
+                    || matches!(&scope.identity, ActivityExecutionIdentity::Communication { emitted_tick, .. } if Some(*emitted_tick) != instance.accepted_tick)
+                    || matches!(
+                        (&instance.request, &scope.identity),
+                        (
+                            ActivityRequest::Communication { .. },
+                            ActivityExecutionIdentity::Physical { .. }
+                        ) | (
+                            ActivityRequest::Repair { .. } | ActivityRequest::Delivery { .. },
+                            ActivityExecutionIdentity::Communication { .. }
+                        )
+                    )
                     || !scopes.insert(scope)
                 {
                     return Err("invalid/duplicate activity job binding".into());
@@ -613,10 +688,11 @@ impl SituationInstances {
             if instance
                 .achieved
                 .as_ref()
-                .is_some_and(|fact| !matches!(fact.outcome, ActivityOutcome::RepairAchieved { .. }))
-                || instance.settled.as_ref().is_some_and(|fact| {
-                    matches!(fact.outcome, ActivityOutcome::RepairAchieved { .. })
-                })
+                .is_some_and(|fact| !fact.is_achievement())
+                || instance
+                    .settled
+                    .as_ref()
+                    .is_some_and(|fact| fact.is_achievement())
             {
                 return Err("invalid activity evidence slot".into());
             }

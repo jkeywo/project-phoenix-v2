@@ -16,7 +16,7 @@ export const activityWorlds = draft => (draft?.paths() || []).filter(path=>path.
 // replace arrays; doctrine's separate keyed merge is outside this projection.
 function equipment(base, overrides) {
   const merge = (a,b) => object(a) && object(b) ? {...a,...Object.fromEntries(Object.entries(b).map(([key,value])=>[key,merge(a[key],value)]))} : structuredClone(b);
-  const keys = ['tags','repair','interior','damage','system','console','station','shield_arc','logistics','infrastructure'];
+  const keys = ['tags','repair','interior','damage','system','console','station','shield_arc','logistics','infrastructure','comms'];
   const take = row => Object.fromEntries(keys.filter(key=>Object.hasOwn(row || {},key)).map(key=>[key,row[key]]));
   return merge(take(base),take(overrides));
 }
@@ -46,10 +46,12 @@ export function activityChoices(profile) {
     const from=(profile.logistics?.store || []).find(row=>row.id===to.source);
     if(from?.role==='main' && to.role==='local' && from.resource===to.resource) deliveries.push({owner:handling.system,source:from.id,destination:to.id,commodity:to.resource,max:handling.max_batch});
   }
-  return {systems,targets,deliveries};
+  const communications=(profile.comms?.radio?.channel || []).map(row=>({owner:profile.comms.radio.system,channel:row.id}));
+  return {systems,targets,deliveries,communications};
 }
 function supports(request, profile) {
-  const {systems,targets,deliveries}=activityChoices(profile);
+  const {systems,targets,deliveries,communications}=activityChoices(profile);
+  if(request.kind==='communication') return request.request==='report_status' && systems.some(row=>row.id===request.owner && row.kind==='comms') && communications.some(row=>row.owner===request.owner && row.channel===request.channel);
   if(request.kind==='delivery') return deliveries.some(row=>row.owner===request.owner && row.source===request.source && row.destination===request.destination && row.commodity===request.commodity && request.amount<=row.max);
   if(!profile.damage || !systems.some(row=>row.id===request.owner && row.kind==='repair') || !Number.isInteger(request.team) || request.team<0 || request.team>255 || request.team>=profile.repair?.repair_team_count
     || !targets.some(row=>same(row.target,request.target) && row.goals.includes(request.goal))) return false;
@@ -74,7 +76,7 @@ export function validateActivities(definitions,situations,actors) {
     while(cursor!=null) {
       const state=def.state.find(row=>row.id===cursor);
       if(!state || seen.has(cursor) || !closed(state,['id','when','call','next']) || !closed(state.when,['kind','outcome'])
-        || !['accepted','achieved','settled','received','returned'].includes(state.when.kind)
+        || !['accepted','achieved','settled','received','returned','communication_read','communication_reported','communication_declined'].includes(state.when.kind)
         || (state.when.kind==='settled' ? !['completed','cancelled','failed'].includes(state.when.outcome) : Object.hasOwn(state.when,'outcome'))
         || (state.call!=null && (!closed(state.call,['script','function']) || !id(state.call.script) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(state.call.function)))) throw Error('Use an acyclic exact evidence condition and a named Scenario function.');
       seen.add(cursor);cursor=state.next;
@@ -84,10 +86,10 @@ export function validateActivities(definitions,situations,actors) {
   for(let i=0;i<situations.length;i++) {
     const row=situations[i], request=row.request, actor=actors.find(actor=>actor.id===request?.actor);
     if(!closed(row,['id','definition','request']) || !definitions.some(def=>def.id===row.definition) || !actor?.profiles.length || !id(request.owner)
-      || !(request.kind==='repair' ? closed(request,['kind','actor','owner','team','request','target','goal']) : request.kind==='delivery' && closed(request,['kind','actor','owner','source','destination','commodity','amount']) && Number.isSafeInteger(request.amount) && request.amount>0)
+      || !(request.kind==='repair' ? closed(request,['kind','actor','owner','team','request','target','goal']) : (request.kind==='delivery' && closed(request,['kind','actor','owner','source','destination','commodity','amount']) && Number.isSafeInteger(request.amount) && request.amount>0) || (request.kind==='communication' && closed(request,['kind','actor','owner','recipient','channel','request']) && !request.recipient?.startsWith('slot:') && request.recipient!==request.actor && actors.some(row=>row.id===request.recipient && row.profiles.length && row.profiles.every(profile=>profile.comms?.radio)) && request.request==='report_status'))
       || !actor.profiles.every(profile=>supports(request,profile))) throw Error('Bind an actual declared actor, owning System and supported physical request/goal on every offered hull.');
     for(const previous of situations.slice(0,i)) { const a=previous.request,b=request;
-      if(a.actor===b.actor && a.owner===b.owner && a.kind===b.kind && (a.kind==='repair' ? a.team===b.team || same(a.target,b.target) : a.source===b.source && a.destination===b.destination)) throw Error('Activity requests must be disjoint.'); }
+      if(a.actor===b.actor && a.owner===b.owner && a.kind===b.kind && (a.kind==='repair' ? a.team===b.team || same(a.target,b.target) : a.kind==='delivery' ? a.source===b.source && a.destination===b.destination : a.recipient===b.recipient && a.channel===b.channel && a.request===b.request)) throw Error('Activity requests must be disjoint.'); }
   }
 }
 function write(source,definitions,situations) {

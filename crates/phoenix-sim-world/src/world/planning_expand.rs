@@ -44,6 +44,19 @@ fn instantiate(
         };
     }
     Ok(match template {
+        RequestTemplate::Communication {
+            actor,
+            owner,
+            recipient,
+            channel,
+            request,
+        } => ActivityRequest::Communication {
+            actor: get!(actor, Actor),
+            owner: get!(owner, System),
+            recipient: get!(recipient, Actor),
+            channel: channel.clone(),
+            request: *request,
+        },
         RequestTemplate::Repair {
             actor,
             owner,
@@ -91,6 +104,11 @@ fn root_actor(arguments: &BTreeMap<String, Value>) -> Result<&str, String> {
 }
 fn compatible(condition: &SituationCondition, request: &ActivityRequest) -> bool {
     match condition {
+        SituationCondition::CommunicationRead {}
+        | SituationCondition::CommunicationReported {}
+        | SituationCondition::CommunicationDeclined {} => {
+            matches!(request, ActivityRequest::Communication { .. })
+        }
         SituationCondition::Accepted => true,
         SituationCondition::Achieved | SituationCondition::Settled { .. } => {
             matches!(request, ActivityRequest::Repair { .. })

@@ -149,3 +149,18 @@ pub fn delivery_supported(
 #[cfg(test)]
 #[path = "activity_bindings_tests.rs"]
 mod tests;
+
+/// Immutable equipment support, shared by source preparation and live arming.
+/// Current contact knowledge, radio paths and energy are ordinary runtime gates.
+pub fn communication_supported(
+    owner: &SystemId,
+    channel: &str,
+    config: &ShipConfig,
+    radio: &phoenix_model::comms_channel::CommsRadioConfig,
+) -> bool {
+    &radio.system == owner
+        && radio.channels.iter().any(|row| row.id == channel)
+        && config
+            .system(owner)
+            .is_some_and(|system| system.kind == crate::ship::system_registry::COMMS_KIND)
+}

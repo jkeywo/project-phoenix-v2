@@ -3239,6 +3239,17 @@ impl WorldConfig {
     pub fn validate_situation_actors(&self) -> Result<(), String> {
         for instance in &self.situations {
             self.validate_situation_actor(instance.request.actor())?;
+            if let super::activities::ActivityRequest::Communication { recipient, .. } =
+                &instance.request
+            {
+                if recipient.starts_with("slot:") {
+                    return Err(
+                        "communication activity recipient requires a declared base-world actor"
+                            .into(),
+                    );
+                }
+                self.validate_situation_actor(recipient)?;
+            }
         }
         Ok(())
     }

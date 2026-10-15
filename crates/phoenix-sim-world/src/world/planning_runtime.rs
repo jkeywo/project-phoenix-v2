@@ -18,9 +18,9 @@ impl Decomposition {
     fn bound(&self, node: &str, choice: &PlanChoice) -> SituationConfig {
         let mut config = self.leaves[node].clone();
         match &mut config.request {
-            ActivityRequest::Repair { actor, .. } | ActivityRequest::Delivery { actor, .. } => {
-                *actor = choice.actor_uuid.clone()
-            }
+            ActivityRequest::Repair { actor, .. }
+            | ActivityRequest::Delivery { actor, .. }
+            | ActivityRequest::Communication { actor, .. } => *actor = choice.actor_uuid.clone(),
         }
         config
     }

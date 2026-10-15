@@ -18,7 +18,7 @@ pub struct IssuedGuidanceOrder {
 #[serde(deny_unknown_fields)]
 pub struct GuidanceAcknowledgement {
     pub order: IssuedGuidanceOrder,
-    /// When a viable return link actually brought the acknowledgement home.
+    /// When a viable return link reported this order heard, not accepted/applied.
     pub received_tick: u64,
 }
 

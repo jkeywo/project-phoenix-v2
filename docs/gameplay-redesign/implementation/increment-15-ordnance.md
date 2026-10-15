@@ -92,3 +92,24 @@ illumination can supply a dated matching point beyond the round's seeker reach;
 it cannot change Tactical's intent. Link loss stops new observations and leaves
 the old measured point as memory. These declarations precede the corresponding
 runtime/authoring/continuation implementation and make no exit claim.
+
+
+### Receiver source checkpoint
+
+The actual receiver handler now stages the local paid order before attempting
+physical delivery. Its return receipt means **heard**, even when an independent
+onboard permission prevents applying that intent. Missing remote equipment,
+interception and loss of link provide no private refusal detail. The current
+source tube and the emitted frozen receiver must each permit the outward and
+return paths. Source-known records retain original sample/proof time and known
+launch endurance without projecting remote survival.
+
+Human and the existing tube AI deliver through one Physics handler **after** the
+current flight advance and ordinary tube AI, **before** actual firing. An order
+therefore steers on the next flight advance for either controller. Refresh follows
+actual firing and advancement, retaining delayed launch provenance by its first
+actual emitted ID rather than a second burst counter. Row-local source joins run
+before single-row inverse/resource writes as well as whole restore; whole-roster
+checks alone add cross-actor ownership joins. This is source implementation and
+review evidence; native receiver, human UI, ordinary maintenance and independent
+illumination acceptance remain pending.

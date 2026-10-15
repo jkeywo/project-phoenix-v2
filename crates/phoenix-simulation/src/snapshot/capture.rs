@@ -1438,6 +1438,9 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                         .flatten(),
                     power: capture_power(entity),
                     mounts: entity.get::<crate::weapons::mounts::ShipMounts>().cloned(),
+                    guided_source: entity
+                        .get::<crate::console::weapons::guidance_link::ShipGuidanceKnowledge>()
+                        .map(|state| state.0.clone()),
                     weapon_targets: entity
                         .get::<crate::console::weapons::assignments::ShipWeaponTargets>()
                         .map(|state| state.0.clone()),

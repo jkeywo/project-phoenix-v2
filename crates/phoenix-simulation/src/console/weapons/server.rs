@@ -106,6 +106,7 @@ impl Plugin for WeaponsPlugin {
         // lifecycle runner receives only the registered callbacks.
         super::blackboard::register_weapons_replication_lifecycle(app);
         super::flight_carrier::register(app);
+        super::guidance_link::register(app);
         // The AI host spine's read-only world context (issue #1207): the phaser,
         // blaster, torpedo, doctrine and tactical-selector hosts in this plugin
         // now consume `AiHostEnv`, a bare-`Res` param, so every app that runs
@@ -149,6 +150,8 @@ impl Plugin for WeaponsPlugin {
                 crate::command_admission::FeedbackAddress::MatcherSpelling,
                 &[
                     Payload::FireTorpedo,
+                    Payload::RetargetGuidedRound,
+                    Payload::StopGuidedRoundGuidance,
                     Payload::SetTorpedoVolleyTarget,
                     Payload::SetWeaponTarget,
                     Payload::SetWeaponGroupTarget,

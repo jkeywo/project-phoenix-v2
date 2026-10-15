@@ -10,6 +10,8 @@ use super::*;
 pub struct EntityState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weapon_targets: Option<phoenix_sim_gameplay::weapons::assignments::WeaponTargetAssignments>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guided_source: Option<phoenix_model::guided_orders::GuidedSourceKnowledge>,
     /// Nonspatial owner of already-launched rounds after launcher removal.
     #[serde(default, skip_serializing_if = "is_false")]
     pub weapon_flight_carrier: bool,

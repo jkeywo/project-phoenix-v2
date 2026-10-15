@@ -11,6 +11,7 @@ pub mod beam;
 pub mod blackboard;
 pub mod blaster;
 pub mod flight_carrier;
+pub mod guidance_link;
 pub(crate) mod guided_advance;
 pub(crate) mod pdc;
 mod round_work;

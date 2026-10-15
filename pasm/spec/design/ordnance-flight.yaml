@@ -78,7 +78,7 @@ entities:
         - "[ai] A current permitted XYZ target reading requires actual observed elevation and retains the original radar samples and optional report metadata. Link delivery never renews sample age. Stop changes physical guidance intent only when actually received, without destroying the round, payload or endurance. Science illumination is an independently controlled paid observation aid for matching existing intent, never a Tactical retarget authority."
   - state: guided-source-order-knowledge
     core:
-      status: planned
+      status: implemented
       confidence: confirmed
       origin: ai
       title: Source-Owned Guided Launch and Order Knowledge
@@ -89,6 +89,6 @@ entities:
       writers: [shared-weapon-mount-and-delivery]
     implementation:
       status: declared
-      paths: [crates/phoenix-model/src/guided_orders.rs, crates/phoenix-sim-gameplay/src/weapons/guided_orders.rs, crates/phoenix-simulation/src/console/weapons/guidance_link.rs]
+      paths: [crates/phoenix-model/src/guided_orders.rs, crates/phoenix-sim-gameplay/src/weapons/guided_orders.rs, crates/phoenix-simulation/src/console/weapons/guidance_link.rs, crates/phoenix-simulation/src/snapshot/guided_source.rs]
       symbols: [GuidedSourceKnowledge, ShipGuidanceKnowledge]
-      tests: [crates/phoenix-sim-gameplay/src/weapons/guided_orders_tests.rs, crates/phoenix-simulation/src/console/weapons/guidance_link_tests.rs]
+      tests: [crates/phoenix-sim-gameplay/src/weapons/guided_orders_tests.rs, crates/phoenix-simulation/src/console/weapons/guidance_link_tests.rs, crates/phoenix-simulation/src/snapshot/guided_source_tests.rs]

@@ -1224,6 +1224,10 @@ pub(crate) fn apply_entity_state(world: &mut World, entity: Entity, row: &Entity
         bevy::log::error!("refused repair job restore for {}: {}", row.uuid, reason);
         return;
     }
+    if let Err(reason) = super::guided_source::validate_entity(world, Some(entity), row, tick) {
+        bevy::log::error!("refused guided source restore for {}: {}", row.uuid, reason);
+        return;
+    }
     if let Err(reason) = super::preflight::validate_entity_resources(world, entity, row) {
         bevy::log::error!("refused resource restore for {}: {}", row.uuid, reason);
         return;
@@ -1586,6 +1590,12 @@ pub(super) fn apply_entity_state_with(
     }
     if let Some(saved) = &row.mounts {
         entity_mut.insert(saved.clone());
+    }
+    if let Some(saved) = &row.guided_source {
+        entity_mut
+            .insert(crate::console::weapons::guidance_link::ShipGuidanceKnowledge(saved.clone()));
+    } else {
+        entity_mut.remove::<crate::console::weapons::guidance_link::ShipGuidanceKnowledge>();
     }
     if let Some(saved) = &row.weapon_targets {
         entity_mut.insert(crate::console::weapons::assignments::ShipWeaponTargets(

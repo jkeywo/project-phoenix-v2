@@ -97,11 +97,37 @@ pub(super) fn validate_roster(snapshot: &PhoenixSnapshot) -> Result<(), (String,
         .map(|row| &row.uuid)
         .chain(snapshot.asteroids.iter().map(|row| &row.uuid))
         .collect();
+    let mut burst_launches = BTreeSet::new();
     for row in &snapshot.entities {
         let Some(weapons) = &row.weapons else {
             continue;
         };
         validate_weapon_state(weapons).map_err(|reason| (row.uuid.clone(), reason))?;
+        for burst in &weapons.bursts {
+            if !burst_launches.insert(&burst.launch_uuid) {
+                return Err((
+                    row.uuid.clone(),
+                    "guided burst launch identity is claimed by two owners".into(),
+                ));
+            }
+            if let Some(first) = snapshot
+                .entities
+                .iter()
+                .filter_map(|row| row.weapons.as_ref())
+                .flat_map(|weapons| &weapons.torpedoes_in_flight)
+                .find(|round| round.uuid == burst.launch_uuid)
+            {
+                if first.source_uuid != burst.source_uuid
+                    || first.tube_id != burst.tube_id
+                    || first.profile != burst.profile
+                {
+                    return Err((
+                        row.uuid.clone(),
+                        "guided burst disagrees with its first actual emitted owner/profile".into(),
+                    ));
+                }
+            }
+        }
         for round in &weapons.torpedoes_in_flight {
             if let Some(observation) = &round.last_guidance {
                 observation

@@ -194,6 +194,8 @@ pub enum FixedStep {
     AiShieldFocus,
     TrackShieldDamageHistory,
     HandleFireTorpedo,
+    HandleGuidanceCommands,
+    RefreshGuidanceKnowledge,
     HandleTorpedoMagazineInterSystem,
     HandlePowerMessages,
     TickPowerSystem,

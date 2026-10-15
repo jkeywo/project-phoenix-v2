@@ -513,6 +513,10 @@ pub fn validate_torpedo_tubes(tubes: &[TorpedoTubeConfig]) -> Result<(), String>
     }
     let mut seen = std::collections::HashSet::new();
     for t in tubes {
+        // The full owning SystemId is retained in closed guidance provenance.
+        if t.id.trim().is_empty() || t.id.len() > 115 || t.id.chars().any(char::is_control) {
+            return Err("torpedo tube id must be nonblank, at most 115 UTF-8 bytes, and contain no control characters; shorten the id and update its System references".into());
+        }
         crate::weapons::operation::validate_target_filter(t.targets.as_deref())?;
         if !seen.insert(t.id.as_str()) {
             return Err(format!("duplicate torpedo tube id '{}'", t.id));

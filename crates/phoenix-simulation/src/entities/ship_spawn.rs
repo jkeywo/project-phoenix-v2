@@ -653,6 +653,7 @@ fn install_torpedoes(config: &EntityConfig, cmds: &mut EntityCommands) {
         cmds.insert(crate::console::weapons::TorpedoSystemResource(
             torpedo_system,
         ));
+        cmds.insert(crate::console::weapons::guidance_link::ShipGuidanceKnowledge::default());
 
         // Per-tube torpedo load + launch AI policies (issue #782): each tube's
         // inline authored `ai` block. A tube that authors none contributes no

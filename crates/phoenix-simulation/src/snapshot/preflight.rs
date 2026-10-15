@@ -449,6 +449,7 @@ pub(super) fn validate_entity_resources(
     row: &EntityState,
 ) -> Result<(), String> {
     super::fitting::validate_entity(world, entity, row)?;
+    super::guided_source::validate_entity(world, Some(entity), row, u64::MAX)?;
     match (
         world.get::<crate::console::navigation::sharing::NavigationSharingProfile>(entity),
         &row.navigation_sharing,

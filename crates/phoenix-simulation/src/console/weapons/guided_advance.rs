@@ -11,6 +11,7 @@ pub(crate) fn advance_torpedo_flights(
             Option<&crate::entities::spawner::EntityUuid>,
             &mut TorpedoSystemResource,
             Option<&mut crate::ship::power::ShipPowerSystem>,
+            Option<&mut super::guidance_link::ShipGuidanceKnowledge>,
         ),
         Or<(
             With<crate::server_app::Ship>,
@@ -22,6 +23,7 @@ pub(crate) fn advance_torpedo_flights(
         Query<(), With<crate::server_app::Ship>>,
     ),
     damage_query: Query<&crate::ship::compartment_damage::ShipDamage>,
+    tick: Option<Res<crate::sim_tick::SimTick>>,
     snapshot: Res<TorpedoTargetSnapshot>,
     mut outbox: ResMut<SimOutbox>,
     mint: crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Projectile as usize }>,
@@ -32,7 +34,7 @@ pub(crate) fn advance_torpedo_flights(
     let mut any_ship_component = false;
     let mut shooter_order: Vec<((String, bevy::ecs::entity::EntityIndex), Entity)> = torpedo_sys_q
         .iter()
-        .map(|(entity, uuid, _, _)| {
+        .map(|(entity, uuid, _, _, _)| {
             (
                 (
                     uuid.map(|u| u.0.clone()).unwrap_or_default(),
@@ -45,7 +47,8 @@ pub(crate) fn advance_torpedo_flights(
     shooter_order.sort();
 
     for shooter in shooter_order.into_iter().map(|(_, entity)| entity) {
-        let Ok((_, _, mut torpedo_sys, mut power)) = torpedo_sys_q.get_mut(shooter) else {
+        let Ok((_, _, mut torpedo_sys, mut power, mut knowledge)) = torpedo_sys_q.get_mut(shooter)
+        else {
             continue;
         };
         any_ship_component = true;
@@ -55,6 +58,12 @@ pub(crate) fn advance_torpedo_flights(
                 damage.factor(system, phoenix_model::damage::DamageBinding::Operation) > 0.0
             })
         };
+        let burst_origins: std::collections::BTreeMap<_, _> = torpedo_sys
+            .0
+            .burst_states
+            .iter()
+            .map(|burst| (burst.tube_id.clone(), burst.launch_uuid.clone()))
+            .collect();
         let result = torpedo_sys.0.advance_with_work(
             dt,
             guidance,
@@ -110,6 +119,21 @@ pub(crate) fn advance_torpedo_flights(
             if let Some(torpedo) = torpedo_sys.0.in_flight.iter_mut().find(|t| t.uuid == uuid) {
                 // Snapshot the same combined strike/Operation multiplier for burst rounds.
                 torpedo.strike_damage_bonus = multiplier - 1.0;
+                if let (Some(knowledge), Some(tick)) = (knowledge.as_deref_mut(), tick.as_deref()) {
+                    if let Some(command) = burst_origins
+                        .get(&tube)
+                        .and_then(|id| knowledge.0.launch_commands.get(id))
+                        .cloned()
+                    {
+                        super::guidance_link::record_emitted(
+                            knowledge,
+                            torpedo,
+                            command.target,
+                            command.sampled_tick,
+                            tick.0,
+                        );
+                    }
+                }
             }
             outbox.push_reliable((
                 Target::All,

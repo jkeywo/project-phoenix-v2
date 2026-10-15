@@ -322,12 +322,17 @@ pub(crate) fn handle_fire_torpedo(
             // which says what that group is at. Both `Option<&_>` — a fixture
             // that spawns neither is a ship the question cannot be asked of.
             Option<&crate::ship_plugin::ShipConfigComponent>,
-            Option<&mut crate::ship::power::ShipPowerSystem>,
+            (
+                Option<&mut crate::ship::power::ShipPowerSystem>,
+                Option<&mut super::guidance_link::ShipGuidanceKnowledge>,
+            ),
         ),
         With<crate::server_app::Ship>,
     >,
     physical: Query<&crate::ship::compartment_damage::ShipDamage>,
     aims: super::assignments::WeaponAimInputs,
+    guidance: super::guidance_link::GuidanceMeasurements,
+    tick: Option<Res<crate::sim_tick::SimTick>>,
     legacy_positions: Query<(
         Option<&crate::entities::spawner::EntityUuid>,
         Option<&AsteroidUuid>,
@@ -382,7 +387,7 @@ pub(crate) fn handle_fire_torpedo(
             behaviour_opt,
             origin_layer_opt,
             ship_config_opt,
-            mut power_opt,
+            (mut power_opt, mut knowledge),
         )) = ship_q.get_mut(shooter)
         else {
             continue;
@@ -666,6 +671,15 @@ pub(crate) fn handle_fire_torpedo(
             let launch_heading = physics.yaw + tube_bearing.to_radians();
             let source_uuid = source_uuid_opt.map(|u| u.0.clone());
             let homing_uuid = aim.map(|aim| aim.route);
+            let launch_contact = target_uuid.clone().or_else(|| {
+                homing_uuid
+                    .as_deref()
+                    .and_then(|route| guidance.alias_for_route(shooter, &cmd.target, route))
+            });
+            let launch_sample = launch_contact
+                .as_deref()
+                .and_then(|contact| guidance.sample(shooter, &cmd.target, contact))
+                .map(|reading| reading.sampled_tick);
             // Resolve one world-XZ origin per authored barrel marker (issue
             // #766), mirroring `tick_blaster_system`. A tube with no barrels
             // authored yields an empty slice, so `launch_with_barrels` falls
@@ -722,6 +736,39 @@ pub(crate) fn handle_fire_torpedo(
                         // One immutable launch multiplier snapshots paid strike bonus
                         // together with machinery Operation loss; finite and >= -1.
                         torpedo.strike_damage_bonus = multiplier - 1.0;
+                    }
+                    if let (Some(knowledge), Some(tick), Some(round)) = (
+                        knowledge.as_deref_mut(),
+                        tick.as_deref(),
+                        torpedo_sys
+                            .in_flight
+                            .iter()
+                            .find(|round| round.uuid == launched_uuid),
+                    ) {
+                        super::guidance_link::record_emitted(
+                            knowledge,
+                            round,
+                            launch_contact.clone(),
+                            launch_sample,
+                            tick.0,
+                        );
+                        if torpedo_sys
+                            .burst_states
+                            .iter()
+                            .any(|burst| burst.launch_uuid == launched_uuid)
+                        {
+                            phoenix_sim_gameplay::weapons::guided_orders::note_launch_command(
+                                &mut knowledge.0,
+                                launched_uuid.clone(),
+                                phoenix_model::guided_orders::KnownGuidedLaunchCommand {
+                                    tube: cmd.target.clone(),
+                                    issued_tick: tick.0,
+                                    target: launch_contact.clone(),
+                                    sampled_tick: launch_sample,
+                                },
+                                tick.0,
+                            );
+                        }
                     }
                     any_fired = true;
                     // The immediate torpedo's real spawn origin (barrel marker

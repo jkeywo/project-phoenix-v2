@@ -48,3 +48,22 @@ physical interception without target truth, an unfunded later boost, exact
 active-flight/pending-burst continuation, invalid no-write candidates and two
 hosts projecting different LocalShips. Authoring and actual human/AI journeys
 remain part of the complete slice, not proven by these pure contracts.
+
+## Guidance observation and link checkpoint
+
+The next implementation slice replaces the shared live-position guidance map
+with per-round observations. The collision roster remains available only to
+physical impact processing. Frozen seeker equipment defines finite range,
+three-dimensional forward arc and minimum Sensors-path transmission. Optional
+receiver equipment defines a finite Comms link and minimum transmission. Absence
+of either item withholds that capability.
+
+Each actual Torpedo retains its last accepted XYZ observation, original sample
+tick and closed seeker/Console provenance. It may continue steering toward that
+held point after observation loss; the point never follows hidden target motion.
+Remote retarget/stop commands address the actual owning tube and actual round,
+use existing authority and paid machinery, and preserve the observation's
+original time. Stop cancels guidance while preserving the physical flight.
+Science illumination remains a separate paid, mounted System and cannot retarget
+Tactical or gate an otherwise viable shot. These are selected contracts; runtime,
+Workshop and continuation evidence are recorded with their later checkpoints.

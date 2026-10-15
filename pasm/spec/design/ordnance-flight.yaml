@@ -52,3 +52,15 @@ entities:
       paths: [crates/phoenix-simulation/src/console/weapons/flight_carrier.rs, crates/phoenix-simulation/src/snapshot/restore.rs]
       symbols: [RestoreGuard]
       tests: [crates/phoenix-simulation/src/console/weapons/flight_carrier_tests.rs]
+
+  - decision: guided-round-finite-observations-and-links
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Guided Flight Uses Its Own Finite Observations
+      summary: "Each emitted round freezes optional finite seeker and guidance receiver equipment in its existing launch profile. Its actual vector retains one last accepted guidance observation with original sample tick and provenance. Physical collision truth never becomes an unlimited guidance feed."
+      rationale:
+        - "[ai] Seeker observations sample only the round's current intended physical route within actual round-local three-dimensional range, forward arc and Sensors path transmission. Missing, out-of-range or occluded subjects provide no new observation. No seeker means no autonomous acquisition; retained observations remain at their original measured point and sample time. Movement, endurance, interception and physical proximity remain the existing owners."
+        - "[ai] Remote intent changes address the actual source tube and actual emitted round, require its frozen receiver and the live source equipment's normal ownership, Operation condition and paid work, and traverse a finite Comms path. The target must be a current permitted Console measurement; receipt never renews its original sample tick. Cancelling guidance clears guidance intent without deleting or detonating the actual round, changing payload or replenishing endurance. Independent rounds refuse remote changes."
+        - "[ai] Science illumination is independently authored System equipment with its own target/enabled commands, shared mount geometry and paid work. It can provide bounded assistance through explicit observation feeds and supported receiver equipment. It never changes Tactical's selected target, grants launch authority or becomes a universal firing-permission requirement. Human and ordinary per-System AI use the same admission and supported observations."
+        - "[ai] Seeker/receiver fields and retained observation provenance/timing are closed, finite, saved and folded on the existing projectile record. Whole-candidate restore rejects malformed or future observations before writes. Reference equipment receives explicit finite authored profiles; unsupported old state is refused rather than given an unlimited legacy seeker. This declaration precedes its runtime, authoring and continuation checkpoints and claims no completed playable exit."

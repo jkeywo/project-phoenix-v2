@@ -6610,3 +6610,15 @@ system = "resource-recovery"
 range = 8
 units_per_sec = 2
 resources = [ "torpedoes", "coolant", "machinery_parts", "structural_parts", "alloy", "ore", "scrap" ]
+
+# Prepared assignments change each member's base intent; an individual override
+# remains until that bank explicitly rejoins. No live group membership editing.
+[[weapons_console.group]]
+id = "main-beams"
+label = "weapon.group.main_beams"
+members = ["phaser-fore", "phaser-aft"]
+
+[[weapons_console.group]]
+id = "missiles"
+label = "weapon.group.missiles"
+members = ["torpedo-tube-fore-port", "torpedo-tube-fore-starboard", "torpedo-tube-aft"]

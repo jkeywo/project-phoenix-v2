@@ -1,3 +1,4 @@
+import { registerWeaponTargetActions } from './weapon-target-actions.js';
 import { registerLogisticsActions } from './logistics-actions.js';
 /**
  * Context-scoped Tactical semantic actions.
@@ -122,6 +123,7 @@ function tube(view, selected, eligible) {
 /** Register Tactical adapters against this console document's existing transport. */
 export function registerTacticalActions(registry, options = {}) {
   registerLogisticsActions(registry, options);
+  registerWeaponTargetActions(registry, options);
   if (!registry || typeof registry.register !== 'function') {
     throw new TypeError('tactical action registration requires a registry');
   }

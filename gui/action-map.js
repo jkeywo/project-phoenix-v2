@@ -65,6 +65,10 @@ function logisticsCommand(type, fields) {
 }
 
 export const ACTION_MAP = Object.freeze({
+  set_weapon_target: logisticsCommand('SetWeaponTarget', ['uuid']),
+  set_weapon_group_target: logisticsCommand('SetWeaponGroupTarget', ['group', 'uuid']),
+  follow_weapon_group: logisticsCommand('FollowWeaponGroup', []),
+  follow_primary_target: logisticsCommand('FollowPrimaryTarget', []),
   fitting_recover: logisticsCommand('RecoverEquipment', ['target_uuid', 'slot', 'destination_locker']),
   fitting_recover_cancel: logisticsCommand('CancelEquipmentRecovery', []),
   fitting_request: logisticsCommand('RequestEquipment', ['slot', 'equipment']),

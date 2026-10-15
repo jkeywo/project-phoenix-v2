@@ -1,3 +1,4 @@
+import { mountWeaponTargetControls } from '../components/weapon-target-controls.js';
 /**
  * gui/stations/tactical-console.js — one Tactical renderer, four hulls
  * (issue #1234, T4.C2 of the console-seam programme).
@@ -90,6 +91,10 @@ export function makeTacticalRender(variant) {
     // highlight ring. Setting only the latter — the pre-#1234 bug on three
     // hulls — left the inner radar blind to the lock.
     const radarEl = doc.getElementById(ids.radar);
+    if (radarEl) {
+      if (!radarEl._weaponTargetControls) { radarEl._weaponTargetControls = mountWeaponTargetControls(doc); radarEl.before(radarEl._weaponTargetControls.node); }
+      radarEl._weaponTargetControls.update(w.weapon_targets || null);
+    }
     if (radarEl) {
       if (!radarEl._sharingControls) { radarEl._sharingControls = mountRadarSharingControls(doc); radarEl.before(radarEl._sharingControls.node); }
       radarEl._sharingControls.update(w.radar_sharing || []);

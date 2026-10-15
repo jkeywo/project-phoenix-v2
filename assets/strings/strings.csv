@@ -5802,3 +5802,34 @@ workshop.helm_projection.horizon,Helm display authoring,Forecast horizon (second
 workshop.helm_projection.materialise,Helm display authoring,Override inherited projection,Geerbte Projektion überschreiben,Override inherited projection,machine
 workshop.helm_projection.save,Helm display authoring,Save Helm projection,Steuerprojektion speichern,Save Helm projection,machine
 workshop.helm_projection.refused,Helm display authoring,Helm projection refused: {reason},Steuerprojektion abgelehnt: {reason},Helm projection refused: {reason},machine
+weapons.assignments.title,Weapon assignments,Weapon assignments,Waffenzuweisungen,Weapon assignments,machine
+weapons.assignments.assign,Weapon assignments,Assign,Zuweisen,Assign,machine
+weapons.assignments.hold,Weapon assignments,Hold fire,Feuer einstellen,Hold fire,machine
+weapons.assignments.rejoin,Weapon assignments,Follow group,Gruppe folgen,Follow group,machine
+weapons.assignments.primary,Weapon assignments,Follow primary Combat Lock,Primaerer Zielerfassung folgen,Follow primary Combat Lock,machine
+weapons.assignments.held_contact,Weapon assignments,Previously selected contact,Zuvor gewaehlter Kontakt,Previously selected contact,machine
+weapons.assignments.group_base,Weapon assignments,{group}: {target},{group}: {target},{group}: {target},machine
+weapons.assignments.members,Weapon assignments,Controls {count} of {total} members,Steuert {count} von {total} Mitgliedern,Controls {count} of {total} members,machine
+weapon.group.main_beams,Weapon assignments,Main beams,Hauptstrahlenwaffen,Main beams,machine
+weapon.group.missiles,Weapon assignments,Missiles,Raketen,Missiles,machine
+workshop.weapon_groups.title,Weapon assignments,Prepared weapon groups,Vorbereitete Waffengruppen,Prepared weapon groups,machine
+workshop.weapon_groups.template,Weapon assignments,Entity template,Entitaetsvorlage,Entity template,machine
+workshop.weapon_groups.group,Weapon assignments,Prepared group,Vorbereitete Gruppe,Prepared group,machine
+workshop.weapon_groups.new,Weapon assignments,New group,Neue Gruppe,New group,machine
+workshop.weapon_groups.save,Weapon assignments,Save groups,Gruppen speichern,Save groups,machine
+workshop.weapon_groups.remove,Weapon assignments,Remove group,Gruppe entfernen,Remove group,machine
+workshop.weapon_groups.id,Weapon assignments,Group ID,Gruppen-ID,Group ID,machine
+workshop.weapon_groups.label,Weapon assignments,Label string ID,Beschriftungs-ID,Label string ID,machine
+workshop.weapon_groups.members,Weapon assignments,Weapon Systems,Waffensysteme,Weapon Systems,machine
+workshop.weapon_groups.materialise,Weapon assignments,Materialise inherited groups,Geerbte Gruppen uebernehmen,Materialise inherited groups,machine
+workshop.weapon_groups.refused,Weapon assignments,Group edit refused: {reason},Gruppenaenderung abgelehnt: {reason},Group edit refused: {reason},machine
+semantic_action.weapon_targets.target.label,Weapon assignments,Assign weapon target,Waffenziel zuweisen,Assign weapon target,machine
+semantic_action.weapon_targets.target.accessibility,Weapon assignments,Assign weapon target,Waffenziel zuweisen,Assign weapon target,machine
+semantic_action.weapon_targets.group.label,Weapon assignments,Assign group target,Gruppenziel zuweisen,Assign group target,machine
+semantic_action.weapon_targets.group.accessibility,Weapon assignments,Assign group target,Gruppenziel zuweisen,Assign group target,machine
+semantic_action.weapon_targets.rejoin.label,Weapon assignments,Follow prepared group,Vorbereiteter Gruppe folgen,Follow prepared group,machine
+semantic_action.weapon_targets.rejoin.accessibility,Weapon assignments,Follow prepared group,Vorbereiteter Gruppe folgen,Follow prepared group,machine
+semantic_action.weapon_targets.primary.label,Weapon assignments,Follow primary Combat Lock,Primaerer Zielerfassung folgen,Follow primary Combat Lock,machine
+semantic_action.weapon_targets.primary.accessibility,Weapon assignments,Follow primary Combat Lock,Primaerer Zielerfassung folgen,Follow primary Combat Lock,machine
+weapons.assignments.read_only,Weapon assignment read-only summary,Read only,Schreibgeschuetzt,Read only,machine
+weapons.assignments.override,Weapon individual override summary,Override: {target},Einzelziel: {target},Override: {target},machine

@@ -1215,17 +1215,10 @@ pub(super) fn apply_entity_state_with(
     entity: Entity,
     row: &EntityState,
     tick: u64,
-    restored_at: f32,
+    _restored_at: f32,
     restored_alert_tick: bevy::ecs::change_detection::Tick,
 ) {
     super::fitting::apply(world, entity, row);
-    let lod_transition = row
-        .ai_fidelity
-        .as_ref()
-        .and_then(|state| state.last_transition_age_secs)
-        .map(|age| {
-            crate::ai::lod_clock::restore_timestamp(world, tick, age, f64::from(restored_at))
-        });
     let mut entity_mut = world.entity_mut(entity);
     if let Some(saved) = &row.equipment_recovery {
         entity_mut.insert(saved.clone());
@@ -1278,7 +1271,7 @@ pub(super) fn apply_entity_state_with(
     // land; a Low capture restored onto High must remove them before any
     // high-fidelity system can observe the stale bootstrap marker.
     if let Some(ai_fidelity) = &row.ai_fidelity {
-        apply_ai_fidelity(&mut entity_mut, ai_fidelity, lod_transition);
+        apply_ai_fidelity(&mut entity_mut, ai_fidelity);
     }
     if let Some(mut sources) = entity_mut.get_mut::<crate::ship_plugin::ShipSystemControlSources>()
     {
@@ -1761,16 +1754,12 @@ pub(super) fn apply_frequency_hint(
 ///
 /// The insert/remove unit is the same canonical bundle `lod_ai_ships` uses.
 /// `LodTransitionTimer` is intentionally outside that bundle, so its presence
-/// is replaced separately and its process-local timestamp is rebased from the
-/// captured fixed-clock age. A complete High bundle and a present timer are
+/// is replaced separately and its canonical logical timestamp copied exactly.
+/// A complete High bundle and a present timer are
 /// updated in place: removing and reinserting an already-correct bundle would
 /// make an unnecessary archetype round-trip, and archetype iteration order is
 /// itself determinism-sensitive (see `AiHighFidelity`'s write-guard history).
-pub(super) fn apply_ai_fidelity(
-    entity: &mut EntityWorldMut<'_>,
-    stored: &AiFidelityState,
-    transition_timestamp: Option<f64>,
-) {
+pub(super) fn apply_ai_fidelity(entity: &mut EntityWorldMut<'_>, stored: &AiFidelityState) {
     use crate::ai::server::{
         ai_high_fidelity_components, AiHighFidelityComponents, LodTransitionTimer,
     };
@@ -1786,7 +1775,7 @@ pub(super) fn apply_ai_fidelity(
         entity.remove::<AiHighFidelityComponents>();
     }
 
-    match transition_timestamp {
+    match stored.last_transition_secs {
         Some(last_state_change_secs) => {
             if let Some(mut timer) = entity.get_mut::<LodTransitionTimer>() {
                 timer.last_state_change_secs = last_state_change_secs;

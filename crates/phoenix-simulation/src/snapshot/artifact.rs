@@ -430,7 +430,7 @@ use super::*;
 /// `49` adds physical port visits, approved lot orders and paid transfer meters,
 /// and carries exact Duration mission age in this same unreleased batch.
 /// `50` adds actual portable equipment, physical refitting and intact recovery.
-/// `51` retains exact canonical logical combat timestamps across long runs.
+/// `51` retains exact canonical logical combat/LOD timestamps across long runs.
 pub const SNAPSHOT_FORMAT: u32 = 51;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than

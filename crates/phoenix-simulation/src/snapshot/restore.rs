@@ -48,7 +48,7 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
         report.gaps.push(gap);
         return report;
     }
-    if let Err((uuid, reason)) = super::combat_clock::validate(world, snapshot) {
+    if let Err((uuid, reason)) = super::historical_clock::validate(world, snapshot) {
         report
             .gaps
             .push(RestoreGap::ResourceStateInvalid { uuid, reason });

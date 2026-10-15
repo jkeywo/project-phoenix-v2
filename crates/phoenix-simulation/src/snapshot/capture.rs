@@ -525,17 +525,14 @@ pub(super) fn hull_rows(hull: &crate::ship::damage::SystemHull) -> Vec<(String, 
 /// from whichever lifecycle component happens to be present is what makes the
 /// boolean exhaustive: a ship carrying neither half is explicitly Low rather
 /// than silently absent from the format-14 payload.
-pub(super) fn capture_ai_fidelity(
-    entity: EntityRef<'_>,
-    captured_at: f64,
-) -> Option<AiFidelityState> {
+pub(super) fn capture_ai_fidelity(entity: EntityRef<'_>) -> Option<AiFidelityState> {
     entity
         .contains::<crate::server_app::Ship>()
         .then(|| AiFidelityState {
             high_fidelity: entity.contains::<crate::ai::server::AiHighFidelity>(),
-            last_transition_age_secs: entity
+            last_transition_secs: entity
                 .get::<crate::ai::server::LodTransitionTimer>()
-                .map(|timer| captured_at - timer.last_state_change_secs),
+                .map(|timer| timer.last_state_change_secs),
         })
 }
 
@@ -1382,9 +1379,7 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                         .and_then(|state| state.0.clone()),
                     ai_fidelity: context
                         .ai_fidelity
-                        .then(|| {
-                            capture_ai_fidelity(entity, crate::ai::lod_clock::from_world(world))
-                        })
+                        .then(|| capture_ai_fidelity(entity))
                         .flatten(),
                     control: capture_controls(entity),
                     drive: context.drives.then(|| capture_drives(entity)).flatten(),

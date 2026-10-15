@@ -2272,11 +2272,10 @@ fn high_fidelity_capture_repairs_a_partial_bootstrap_bundle() {
 }
 
 /// `lod_ai_ships` demotes on `age >= 2.0`, so moving the timestamp by even one
-/// representable value changes the first eligible tick. Snapshot format 14
-/// stores the age and restore must rebase that exact boundary onto the fresh
-/// process clock, not copy the source process's absolute timestamp.
+/// representable value changes the first eligible tick. The canonical logical
+/// timestamp must survive a fresh host's different elapsed epoch exactly.
 #[test]
-fn ai_fidelity_timer_rebases_exact_dwell_boundary() {
+fn ai_fidelity_timer_keeps_exact_logical_dwell_boundary() {
     use bevy::prelude::{Entity, Fixed, Time};
     use project_phoenix::ai::lod::{evaluate_lod, LodState};
     use project_phoenix::ai::server::{AiHighFidelity, LodTransitionTimer};
@@ -2284,7 +2283,15 @@ fn ai_fidelity_timer_rebases_exact_dwell_boundary() {
 
     let mut live = duel();
     step(&mut live, CAPTURE_AT);
-    let captured_at = f64::from(live.world().resource::<Time<Fixed>>().elapsed_secs());
+    let captured_at = live
+        .world()
+        .resource::<project_phoenix::sim_tick::SimTick>()
+        .0 as f64
+        * live
+            .world()
+            .resource::<Time<Fixed>>()
+            .timestep()
+            .as_secs_f64();
     let (source_entity, source_uuid) = {
         let world = live.world_mut();
         let mut query = world.query::<(Entity, &EntityUuid, &AiHighFidelity)>();
@@ -2306,9 +2313,9 @@ fn ai_fidelity_timer_rebases_exact_dwell_boundary() {
             .iter()
             .find(|row| row.uuid == source_uuid)
             .and_then(|row| row.ai_fidelity.as_ref())
-            .and_then(|state| state.last_transition_age_secs),
-        Some(2.0),
-        "capture records the exact inclusive dwell boundary"
+            .and_then(|state| state.last_transition_secs),
+        Some(captured_at - 2.0),
+        "capture records the exact logical transition timestamp"
     );
 
     let mut resumed = boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &payload);
@@ -2323,7 +2330,15 @@ fn ai_fidelity_timer_rebases_exact_dwell_boundary() {
     let report = restore(resumed.world_mut(), &payload);
     assert!(report.is_complete(), "gaps: {:?}", report.gaps);
 
-    let restored_at = f64::from(resumed.world().resource::<Time<Fixed>>().elapsed_secs());
+    let restored_at = resumed
+        .world()
+        .resource::<project_phoenix::sim_tick::SimTick>()
+        .0 as f64
+        * resumed
+            .world()
+            .resource::<Time<Fixed>>()
+            .timestep()
+            .as_secs_f64();
     let timer = resumed
         .world()
         .get::<LodTransitionTimer>(restored_entity)
@@ -2344,7 +2359,7 @@ fn ai_fidelity_timer_rebases_exact_dwell_boundary() {
             0.2,
         ),
         LodState::Low,
-        "the rebased age lands on the inclusive dwell boundary"
+        "the logical timestamp retains the inclusive dwell boundary"
     );
 }
 

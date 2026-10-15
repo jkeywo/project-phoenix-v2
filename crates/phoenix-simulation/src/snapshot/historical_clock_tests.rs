@@ -10,6 +10,11 @@ fn fixture(tick: u64) -> (World, Entity) {
     let entity = world
         .spawn((
             EntityUuid("combat-clock".into()),
+            crate::server_app::Ship,
+            crate::ai::server::ai_high_fidelity_components(),
+            crate::ai::server::LodTransitionTimer {
+                last_state_change_secs: 0.0,
+            },
             ShipRedAlert(false),
             RecentCombatActivity::default(),
         ))
@@ -18,7 +23,7 @@ fn fixture(tick: u64) -> (World, Entity) {
 }
 
 #[test]
-fn canonical_combat_snapshot_keeps_old_event_bits_at_arbitrary_accepted_ticks() {
+fn canonical_history_keeps_old_combat_and_lod_event_bits_at_arbitrary_accepted_ticks() {
     for tick in [1_000_000_000, u64::MAX - 360] {
         let (mut live, entity) = fixture(tick);
         let period = crate::sim_tick::sim_tick_period(60.0).as_secs_f64();
@@ -27,6 +32,10 @@ fn canonical_combat_snapshot_keeps_old_event_bits_at_arbitrary_accepted_ticks() 
             (107.0 * period) as f32,
             (tick as f64 * period) as f32,
         ];
+        let transition = 87.0 * period;
+        live.get_mut::<crate::ai::server::LodTransitionTimer>(entity)
+            .unwrap()
+            .last_state_change_secs = transition;
         live.get_mut::<RecentCombatActivity>(entity)
             .unwrap()
             .replace_continuation(
@@ -51,6 +60,14 @@ fn canonical_combat_snapshot_keeps_old_event_bits_at_arbitrary_accepted_ticks() 
                 actual.2.unwrap().to_bits()
             ],
             original.map(f32::to_bits)
+        );
+        assert_eq!(
+            resumed
+                .get::<crate::ai::server::LodTransitionTimer>(restored)
+                .unwrap()
+                .last_state_change_secs
+                .to_bits(),
+            transition.to_bits()
         );
         for step in 0..360 {
             live.resource_mut::<SimTick>().0 = tick + step;
@@ -102,6 +119,45 @@ fn old_epoch_age_keys_cannot_decode_as_canonical_combat_history() {
         r#"{"last_damage_taken_age_secs":0.25,"prev_hull":73.0}"#
     )
     .is_err());
+    assert!(serde_json::from_str::<AiFidelityState>(
+        r#"{"high_fidelity":true,"last_transition_age_secs":0.25}"#
+    )
+    .is_err());
+}
+
+#[test]
+fn malformed_lod_history_refuses_the_whole_candidate_before_any_write() {
+    for value in [f64::NAN, f64::INFINITY, -1.0, 10.0] {
+        for missing_entity in [false, true] {
+            let (mut world, _) = fixture(71);
+            let before = capture(&world);
+            let mut saved = before.clone();
+            saved.tick = 99;
+            saved.entities[0].red_alert = Some(true);
+            let row = if missing_entity {
+                saved.entities.push(EntityState {
+                    uuid: "not-materialized".into(),
+                    ..Default::default()
+                });
+                saved.entities.last_mut().unwrap()
+            } else {
+                &mut saved.entities[0]
+            };
+            row.ai_fidelity = Some(AiFidelityState {
+                high_fidelity: true,
+                last_transition_secs: Some(value),
+            });
+            let report = restore(&mut world, &saved);
+            assert!(
+                matches!(report.gaps.as_slice(), [RestoreGap::ResourceStateInvalid {reason, ..}] if reason.contains("LOD timestamp")),
+                "{report:?}"
+            );
+            assert_eq!(report.entities_restored, 0);
+            assert_eq!(report.entities_spawned, 0);
+            assert_eq!(report.despawned, 0);
+            assert_eq!(capture(&world), before);
+        }
+    }
 }
 
 #[test]

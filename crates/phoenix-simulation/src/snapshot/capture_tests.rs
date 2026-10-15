@@ -141,7 +141,7 @@ fn capture_projects_ship_fidelity_and_resource_motion_on_the_fixed_clock() {
         rows[1].ai_fidelity,
         Some(AiFidelityState {
             high_fidelity: true,
-            last_transition_age_secs: Some(0.75)
+            last_transition_secs: Some(2.25)
         })
     );
     assert_eq!(

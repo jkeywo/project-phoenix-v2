@@ -1079,15 +1079,15 @@ pub struct DriveState {
 /// high-fidelity bundle and its absence is meaningful (a ship in its first Low
 /// stretch has never transitioned), so its presence is preserved independently.
 ///
-/// The timer's process-local timestamp is projected as an age against the same
-/// fixed-step clock `lod_ai_ships` reads. Restore rebases that age onto the fresh
-/// process so the first eligible demotion tick does not move.
+/// The canonical logical timestamp is copied exactly so the first eligible
+/// demotion tick cannot move when a fresh host has a different elapsed epoch.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AiFidelityState {
     #[serde(default)]
     pub high_fidelity: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_transition_age_secs: Option<f64>,
+    pub last_transition_secs: Option<f64>,
 }
 
 /// One asteroid's authoritative state.

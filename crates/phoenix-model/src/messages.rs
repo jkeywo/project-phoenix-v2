@@ -39,7 +39,8 @@ use uuid::Uuid;
 /// Revision 23 carries own signal protection and privileged imported-plan views.
 /// Revision 24 carries admitted crew presence, Bay controls and shared Security jobs.
 /// Revision 25 distinguishes physical-job and real-transmission activity evidence.
-pub const PROTOCOL_VERSION: u32 = 25;
+/// Revision 26 carries own planned Comms requests and actual local Security routes.
+pub const PROTOCOL_VERSION: u32 = 26;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).

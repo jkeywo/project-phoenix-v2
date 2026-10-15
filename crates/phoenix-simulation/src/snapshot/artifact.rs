@@ -451,7 +451,9 @@ use super::*;
 /// `66` retains canonical crew presence, dated temporal decisions, actual probe
 /// custody/Bay work and complete shared Security jobs, including consumed IDs.
 /// `67` distinguishes physical JobIds from actual transmission execution identity.
-pub const SNAPSHOT_FORMAT: u32 = 67;
+/// `68` retains actual planned radio emission/receipt bindings and local Security
+/// team routes rather than reconstructing work from a scenario instruction.
+pub const SNAPSHOT_FORMAT: u32 = 68;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -586,7 +588,9 @@ pub const SNAPSHOT_FORMAT: u32 = 67;
 /// "0.46" uses actual compatible paid relay routes, dated crew-bound scheduling,
 /// canonical stored probe lifecycles and complete shared Security commitments.
 /// "0.47" validates activity evidence against its closed execution family.
-pub const SIMULATION_RULES: &str = "0.47";
+/// "0.48" joins actual paid communication execution to HTN evidence and routes
+/// local Security work through the installed compartment graph.
+pub const SIMULATION_RULES: &str = "0.48";
 
 /// The authored data, computed rather than remembered.
 ///

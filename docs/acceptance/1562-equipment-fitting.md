@@ -94,6 +94,47 @@ requests only after the current operator's permitted live fitting rows arrive.
 The source checkpoint does not establish shared inventory, physical availability
 or command authority from a favourite.
 
+## Integrated physical-work and whole-host evidence
+
+At `5d10104d` on the pinned increment 13 validation worktree, the combined
+Gameplay/Simulation owner command passed **43 Gameplay and 15 Simulation cases**:
+
+```text
+cargo test -p phoenix-sim-gameplay -p phoenix-simulation --lib --no-default-features -- jobs::repair resources::fitting::tests resources::fitting_server::tests resources::equipment_recovery_server::tests snapshot::fitting --test-threads=1
+```
+
+The owner log SHA256 is
+`511c9e3125089c66d48ca8c2aab2f4e69e9b58f07eb3e8a7f1728bc9328855a9`.
+The worktree `.phoenix/worktrees/increment-13-fitting-continuation/.phoenix/`
+retains `increment13-owner-evidence.json` and matching dependency records.
+
+At `98dfee5c` (integrated as `0bba857a`), the actual host command passed **five
+cases**, with 39.17 seconds of test execution:
+
+```text
+cargo test -p project-phoenix --features headless --test fitting_continuation -- --test-threads=1
+```
+
+This covers human and ordinary AI field fitting, exact parts consumption and
+physical item identity, active Fetching/Removing/Installing continuation over at
+least 360 ticks with complete JSON and digest comparisons, malformed restore
+no-write checks, stale-holder/report-only refusals, and fleet peers using different
+LocalShips. Log SHA256:
+`18e2c7ae40dee5b7c3246c6bd83d4dc5eeee796c41987142116c7ab970860223`.
+`increment13-wholehost-evidence.json` retains configuration and source records.
+
+Earlier runs failed compilation on two Presentation facade paths, then failed
+schedule initialisation: fitting ran before the damage state it required, and a
+declared Infrastructure/Umbilical edge contradicted actual consumers. Commits
+`ac709766`, `16d51971` and `0bba857a` fix these causes; passing assertions were
+not weakened. The initial schedule-failure log SHA256 is
+`a1c9006d102562efffa9b2caa45071bfcc18f682ead7aea44f5410da398a3ca0`.
+
+Positive facility refitting and intact-equipment recovery are additional targeted
+tests in progress, separate from these five passing cases. The authorised pipeline
+has advanced source implementation to increment 14 while those tests run on the
+pinned increment 13 worktree. This does not claim a complete playable/manual exit.
+
 ## Human and ordinary AI journeys
 
 1. Load each shipped seat-count hull and an affected scenario through the normal

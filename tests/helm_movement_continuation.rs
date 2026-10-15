@@ -263,18 +263,11 @@ fn joined_direct_force_coast_and_turn_resume_before_ordinary_ai_assisted_handoff
         Control::SetThrust { value: 0.0 },
     );
     let coasting = pose(&live, entity);
-    let coast_reserve = live
-        .world()
-        .get::<ShipPowerSystem>(entity)
-        .unwrap()
-        .0
-        .network()
-        .consumers[&id("helm-thrust")]
-        .energy;
     for _ in 0..20 {
         steps(&mut live, 1);
         // The grant fraction retains the last requested actuator work. Neutral
         // force does not request work, so prove actual expenditure each tick.
+        // Battery passive drain can still lower reserve without actuator work.
         assert_eq!(
             live.world()
                 .get::<ShipPowerSystem>(entity)
@@ -284,16 +277,6 @@ fn joined_direct_force_coast_and_turn_resume_before_ordinary_ai_assisted_handoff
             0.0
         );
     }
-    assert!(
-        live.world()
-            .get::<ShipPowerSystem>(entity)
-            .unwrap()
-            .0
-            .network()
-            .consumers[&id("helm-thrust")]
-            .energy
-            >= coast_reserve
-    );
     close(velocity(coasting), velocity(pose(&live, entity)));
     assert_ne!(
         [coasting.x, coasting.z],

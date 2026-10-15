@@ -1,0 +1,217 @@
+use super::*;
+use crate::server::measured_contacts::tests::{config, grant_to_viewscreen, science_board, track};
+
+fn app() -> (App, Entity, Entity) {
+    let mut app = App::new();
+    app.insert_resource(State::new(GamePhase::InProgress));
+    app.add_systems(Update, sync_contact_visuals);
+    let mut config = config();
+    grant_to_viewscreen(&mut config);
+    let observer = app
+        .world_mut()
+        .spawn((
+            LocalShip,
+            EntityUuid("observer".into()),
+            SensingControls(Default::default()),
+            ShipConfigComponent(config),
+            science_board(track("observed-alias")),
+            ShipViewMode::default(),
+            Visibility::Visible,
+            Transform::IDENTITY,
+        ))
+        .id();
+    let actor = app
+        .world_mut()
+        .spawn((
+            EntityUuid("private-live-actor".into()),
+            Visibility::Visible,
+            Transform::from_xyz(900.0, 40.0, 800.0).with_rotation(Quat::from_rotation_y(1.5)),
+        ))
+        .id();
+    (app, observer, actor)
+}
+
+#[test]
+fn proxy_uses_recorded_position_and_style_without_mutating_live_pose() {
+    let (mut app, observer, actor) = app();
+    let actual_pose = *app.world().get::<Transform>(actor).unwrap();
+    let mut world = WorldConfig::default();
+    world.render = Some(
+        toml::from_str("[contact_proxy]\nminimum_radius = 12\ncolour = [0.1,0.2,0.3]").unwrap(),
+    );
+    app.insert_resource(world);
+    app.update();
+    assert_eq!(
+        app.world().get::<Visibility>(actor),
+        Some(&Visibility::Hidden)
+    );
+    assert_eq!(app.world().get::<Transform>(actor), Some(&actual_pose));
+    assert_eq!(
+        app.world().get::<Visibility>(observer),
+        Some(&Visibility::Visible)
+    );
+    let mut proxies = app
+        .world_mut()
+        .query::<(&ContactProxy, &Transform, Option<&EntityUuid>)>();
+    let (proxy, transform, id) = proxies.single(app.world()).unwrap();
+    assert_eq!(proxy.contact, "observed-alias");
+    assert_eq!(proxy.radius, 12.0);
+    assert_eq!(proxy.colour, [0.1, 0.2, 0.3]);
+    assert_eq!(transform.translation, Vec3::new(11.0, 0.0, 22.0));
+    assert_eq!(transform.rotation, Quat::IDENTITY);
+    assert!(
+        id.is_none(),
+        "presentation proxies are not simulated actors"
+    );
+}
+
+#[test]
+fn loss_or_missing_knowledge_removes_proxy_without_restoring_omniscient_meshes() {
+    let (mut app, observer, actor) = app();
+    app.update();
+    assert_eq!(
+        app.world_mut()
+            .query::<&ContactProxy>()
+            .iter(app.world())
+            .count(),
+        1
+    );
+    app.world_mut()
+        .entity_mut(observer)
+        .remove::<ShipSystemBlackboards>();
+    app.update();
+    assert_eq!(
+        app.world_mut()
+            .query::<&ContactProxy>()
+            .iter(app.world())
+            .count(),
+        0
+    );
+    assert_eq!(
+        app.world().get::<Visibility>(actor),
+        Some(&Visibility::Hidden)
+    );
+    app.world_mut()
+        .entity_mut(observer)
+        .remove::<SensingControls>();
+    app.update();
+    assert_eq!(
+        app.world().get::<Visibility>(actor),
+        Some(&Visibility::Visible)
+    );
+}
+
+#[test]
+fn charted_bodies_remain_visible_and_phase_exit_restores_original_visibility() {
+    let (mut app, _, actor) = app();
+    let landmark = app
+        .world_mut()
+        .spawn((
+            EntityUuid("known-moon".into()),
+            EntityTagsSection(vec![crate::console_delivery::CHARTED_TAG.into()]),
+            Visibility::Visible,
+        ))
+        .id();
+    app.update();
+    assert_eq!(
+        app.world().get::<Visibility>(landmark),
+        Some(&Visibility::Visible)
+    );
+    app.insert_resource(State::new(GamePhase::Lobby));
+    app.update();
+    assert_eq!(
+        app.world().get::<Visibility>(actor),
+        Some(&Visibility::Visible)
+    );
+    assert_eq!(
+        app.world_mut()
+            .query::<&ContactProxy>()
+            .iter(app.world())
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn accepted_ship_destruction_keeps_foreign_meshes_hidden_and_clears_proxies() {
+    let (mut app, observer, actor) = app();
+    let mut accepted = crate::lobby::server::ShipClientConfigResource::default();
+    accepted.0.system_kinds.insert(
+        "sensor-radar".into(),
+        crate::ship::system_registry::SENSOR_RADAR_KIND.into(),
+    );
+    app.insert_resource(accepted);
+    app.update();
+    app.world_mut().entity_mut(observer).despawn();
+    app.update();
+    assert_eq!(
+        app.world().get::<Visibility>(actor),
+        Some(&Visibility::Hidden)
+    );
+    assert_eq!(
+        app.world_mut()
+            .query::<&ContactProxy>()
+            .iter(app.world())
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn observer_conceal_overrides_charted_mesh_permission_and_normal_restores_it() {
+    let (mut app, _, _) = app();
+    let landmark = app
+        .world_mut()
+        .spawn((
+            EntityUuid("known-moon".into()),
+            EntityTagsSection(vec![crate::console_delivery::CHARTED_TAG.into()]),
+            Visibility::Visible,
+        ))
+        .id();
+    let mut runtime = crate::world::server::WorldContentRuntime::default();
+    crate::gm_contact::set(
+        &mut runtime.contact_overrides,
+        "observer",
+        "known-moon",
+        crate::gm_contact::ContactMode::Conceal,
+    );
+    app.insert_resource(runtime);
+    app.update();
+    assert_eq!(
+        app.world().get::<Visibility>(landmark),
+        Some(&Visibility::Hidden)
+    );
+    crate::gm_contact::set(
+        &mut app
+            .world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .contact_overrides,
+        "observer",
+        "known-moon",
+        crate::gm_contact::ContactMode::Normal,
+    );
+    app.update();
+    assert_eq!(
+        app.world().get::<Visibility>(landmark),
+        Some(&Visibility::Visible)
+    );
+}
+
+#[test]
+fn late_model_children_cannot_override_hidden_actor_with_explicit_visible() {
+    let (mut app, _, actor) = app();
+    app.update();
+    let late_child = app.world_mut().spawn(Visibility::Visible).id();
+    app.world_mut().entity_mut(actor).add_child(late_child);
+    app.update();
+    assert_eq!(
+        app.world().get::<Visibility>(late_child),
+        Some(&Visibility::Hidden)
+    );
+    app.insert_resource(State::new(GamePhase::Lobby));
+    app.update();
+    assert_eq!(
+        app.world().get::<Visibility>(late_child),
+        Some(&Visibility::Visible)
+    );
+}

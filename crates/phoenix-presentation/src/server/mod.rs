@@ -1,7 +1,9 @@
 pub mod asset_preload;
 pub mod audio;
 pub mod audio_lifecycle;
+pub(crate) mod contact_visuals;
 pub mod native_visuals;
+pub(crate) mod measured_contacts;
 pub mod pfx;
 pub mod radar;
 pub mod reference_grid;

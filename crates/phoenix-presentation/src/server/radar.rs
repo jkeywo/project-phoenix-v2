@@ -234,7 +234,11 @@ pub fn spawn_viewscreen_radar_widgets(
             console_radar: ConsoleRadar::ViewscreenHelm,
             range: helm_radar.range,
             orientation: OrientationMode::ShipRelative,
-            filter: radar_filter_from_shows(&helm_radar.shows),
+            filter: {
+                let mut filter = radar_filter_from_shows(&helm_radar.shows);
+                filter.0.insert(crate::gm_contact::BASIC_RADAR_TAG.into());
+                filter
+            },
             world_centred: false,
             auto_scale: None,
         },
@@ -314,10 +318,21 @@ pub(crate) fn sync_server_radar_bridge(
     tick: Option<Res<crate::sim_tick::SimTick>>,
     mut commands: Commands,
     world: Option<Res<WorldResource>>,
+    render_config: Option<Res<crate::world::config::WorldConfig>>,
     contact_runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    accepted: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
     observer_q: Query<&crate::entities::spawner::EntityUuid, With<crate::server_app::LocalShip>>,
     view_mode_q: Query<&crate::ship::state::ShipViewMode, With<crate::server_app::LocalShip>>,
     physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
+    measured_q: Query<
+        (
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+            Option<&crate::server_app::ShipSystemBlackboards>,
+            Option<&crate::science::broad::SensingControls>,
+            &crate::ship::state::ShipViewMode,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
     objectives: Option<Res<crate::world::server::ObjectiveManagerRes>>,
     objective_instances: Option<Res<crate::world::server::ObjectiveInstanceManagerRes>>,
     mut widgets: Query<(
@@ -327,7 +342,23 @@ pub(crate) fn sync_server_radar_bridge(
         &mut RadarBlipMap,
     )>,
 ) {
-    let Some(world) = world else { return };
+    let measured = measured_q.single().ok();
+    let restricted = super::measured_contacts::restricted(
+        accepted.as_deref(),
+        measured.is_some_and(|(_, _, controls, _)| controls.is_some()),
+    );
+    // A missing observer cannot select a Console or retain an old live picture.
+    if restricted && (observer_q.single().is_err() || measured.is_none()) {
+        for (_, _, _, mut map) in &mut widgets {
+            for (_, entity) in map.blips.drain() {
+                commands.entity(entity).try_despawn();
+            }
+            if let Some(entity) = map.center.take() {
+                commands.entity(entity).try_despawn();
+            }
+        }
+        return;
+    }
     let view_mode = view_mode_q
         .single()
         .map(|vm| vm.view_mode.clone())
@@ -343,6 +374,50 @@ pub(crate) fn sync_server_radar_bridge(
         return;
     };
     let physics = physics_q.single().ok().copied().unwrap_or_default();
+    if restricted {
+        let (config, boards, _, view) = measured.expect("checked live scope");
+        let projected = if matches!(
+            active,
+            ConsoleRadar::ViewscreenSystemChart | ConsoleRadar::ViewscreenNav
+        ) {
+            world
+                .as_ref()
+                .map(|world| {
+                    super::measured_contacts::chart_rows(&world.0.entities, |source| {
+                        !super::measured_contacts::concealed(
+                            contact_runtime.as_deref(),
+                            observer_q.single().map_or("", |id| id.0.as_str()),
+                            source,
+                        )
+                    })
+                })
+                .unwrap_or_default()
+        } else {
+            let style = render_config
+                .as_ref()
+                .and_then(|world| world.render.as_ref())
+                .map(|render| render.contact_proxy.clone())
+                .unwrap_or_default();
+            let contacts = config
+                .zip(boards)
+                .map(|(config, boards)| super::measured_contacts::contacts(&config.0, boards, view))
+                .unwrap_or_default();
+            super::measured_contacts::radar_rows(&contacts, &style)
+        };
+        bridge_sim_to_radar(
+            &mut commands,
+            widget,
+            &mut map,
+            RadarCenterPose {
+                x: physics.x,
+                z: physics.z,
+                yaw: physics.yaw,
+            },
+            &projected,
+        );
+        return;
+    }
+    let Some(world) = world else { return };
     let ship_id = observer_q.single().map_or("", |id| id.0.as_str());
     let mut scoped_objectives = objectives
         .as_ref()
@@ -440,14 +515,13 @@ fn toggle_viewscreen_radar_widgets(
     // otherwise a radar container's visibility is set once at the single
     // Lobby→InProgress transition and never reflects a later SetView (e.g.
     // Helm's ON SCREEN button) requesting Radar/SensorsRadar/NavigationChart.
-    if !state.is_changed() && view_mode_changed.is_empty() {
+    let view_mode = view_mode_q.and_then(|q| q.single().ok().map(|vm| vm.view_mode.clone()));
+    if !state.is_changed() && view_mode_changed.is_empty() && view_mode.is_some() {
         return;
     }
-    let view_mode = view_mode_q
-        .and_then(|q| q.single().ok().map(|vm| vm.view_mode.clone()))
-        .unwrap_or(crate::core::messages::ViewMode::Camera(
-            crate::core::messages::CameraView::default(),
-        ));
+    let view_mode = view_mode.unwrap_or(crate::core::messages::ViewMode::Camera(
+        crate::core::messages::CameraView::default(),
+    ));
 
     let in_game = state.get() == &GamePhase::InProgress;
 

@@ -3,6 +3,65 @@ use crate::server_app::LocalShip;
 use crate::ship::state::ShipViewMode;
 
 #[test]
+fn fitted_cinematic_camera_drops_live_foreign_tracking_and_keeps_own_look_ahead() {
+    let target_id = uuid::Uuid::from_u128(42);
+    for fitted in [false, true] {
+        let mut app = App::new();
+        app.init_resource::<Time>().init_resource::<Time<Fixed>>();
+        app.insert_resource(CinematicCameraState {
+            current_target: Some(target_id),
+            ..Default::default()
+        });
+        app.add_systems(Update, cinematic_camera);
+        let mut mode = ShipViewMode::default();
+        mode.force_view_mode(Some(ViewMode::Cinematic));
+        let config = toml::from_str::<crate::entities::config::CinematicCameraConfig>(
+            "position = [0.0, 8.0, 15.0]",
+        )
+        .unwrap();
+        let own = app
+            .world_mut()
+            .spawn((
+                LocalShip,
+                EntityUuid("own".into()),
+                mode,
+                ShipPhysics::default(),
+                CinematicCameraSection(config),
+                Transform::IDENTITY,
+            ))
+            .id();
+        if fitted {
+            app.world_mut()
+                .entity_mut(own)
+                .insert(crate::science::broad::SensingControls(Default::default()));
+        }
+        let actual = Transform::from_xyz(50.0, 0.0, -25.0);
+        let foreign = app
+            .world_mut()
+            .spawn((EntityUuid(target_id.to_string()), actual))
+            .id();
+        let camera = app
+            .world_mut()
+            .spawn((GameCamera, Transform::IDENTITY))
+            .id();
+        app.update();
+        assert_eq!(app.world().get::<Transform>(foreign), Some(&actual));
+        assert_eq!(
+            app.world()
+                .resource::<CinematicCameraState>()
+                .current_target,
+            (!fitted).then_some(target_id)
+        );
+        if fitted {
+            assert_eq!(
+                app.world().get::<Transform>(camera).unwrap().translation,
+                Vec3::new(0.0, 8.0, 15.0)
+            );
+        }
+    }
+}
+
+#[test]
 fn crew_spectator_camera_follows_selected_ship_without_moving_local_identity() {
     let mut app = App::new();
     app.init_resource::<Time>().init_resource::<Time<Fixed>>();

@@ -753,6 +753,14 @@ fn cinematic_camera(
     physics_q: Query<(&ShipPhysics, Option<&RenderInterp>), With<crate::server_app::LocalShip>>,
     cinematic_q: Query<&CinematicCameraSection, With<crate::server_app::LocalShip>>,
     local_q: Query<&EntityUuid, With<crate::server_app::LocalShip>>,
+    fitted_observer: Query<
+        (),
+        (
+            With<crate::server_app::LocalShip>,
+            With<crate::science::broad::SensingControls>,
+        ),
+    >,
+    accepted: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
     all_entities: Query<(&EntityUuid, &Transform, Option<&FactionComponent>), Without<GameCamera>>,
     faction_registry: Option<Res<FactionRegistryResource>>,
     time: Res<Time>,
@@ -833,6 +841,12 @@ fn cinematic_camera(
     });
     let entity_snapshot: Vec<(String, Vec3, Option<uuid::Uuid>)> = all_entities
         .iter()
+        // The old UUID target interface cannot track observer-local measured
+        // aliases. Until it can, fitted views retain own-ship look-ahead rather
+        // than steering the shared camera toward hidden live actor positions.
+        .filter(|_| {
+            !super::measured_contacts::restricted(accepted.as_deref(), !fitted_observer.is_empty())
+        })
         .filter(|(eu, _, _)| local_uuid_str.as_ref().is_none_or(|lu| eu.0 != *lu))
         .map(|(eu, tf, faction)| (eu.0.clone(), tf.translation, faction.map(|f| f.0)))
         .collect();

@@ -149,6 +149,8 @@ pub struct AmbientLightConfig {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct RenderConfig {
+    /// Generic unknown/uncertain contact proxies, independent of hidden hull geometry.
+    pub contact_proxy: crate::world::contact_render_config::ContactProxyConfig,
     /// WebGL2 viewscreen motes, single-cascade shadows and approximate flare.
     pub web: crate::world::native_render_config::WebRenderConfig,
     /// Native viewscreen motes, star shadows and depth-occluded lens flare.
@@ -207,6 +209,7 @@ pub struct RenderConfig {
 impl Default for RenderConfig {
     fn default() -> Self {
         Self {
+            contact_proxy: crate::world::contact_render_config::ContactProxyConfig::default(),
             hdr: true,
             native: crate::world::native_render_config::NativeRenderConfig::default(),
             web: crate::world::native_render_config::WebRenderConfig::default(),

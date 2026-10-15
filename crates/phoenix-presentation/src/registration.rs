@@ -99,6 +99,7 @@ pub fn add_presentation_plugins(app: &mut App) {
                     .run_if(in_state(GamePhase::Loading))
                     .before(crate::sim_sets::SimSet::Input),
             );
+        crate::server::contact_visuals::register(app);
     }
 }
 

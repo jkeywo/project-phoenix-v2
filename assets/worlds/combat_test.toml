@@ -239,6 +239,13 @@
 # kind; the selected hull resolves it after the lobby locks the ship.
 scenario_detail_floor = ["navigation"]
 
+# Generic measured returns share one authored style; hidden hull size and rig
+# never determine the uncertainty envelope or unknown radar marker.
+[render.contact_proxy]
+minimum_radius = 2.0
+colour = [0.55, 0.8, 1.0]
+radar_icon = "__gm_basic_contact"
+
 [global]
 seed = 475
 title = "world.combat_test.global.title"

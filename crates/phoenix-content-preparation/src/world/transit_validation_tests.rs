@@ -2,6 +2,9 @@ use super::*;
 
 struct BodyTemplate;
 impl TemplateLoader for BodyTemplate {
+    fn absence_is_final(&self) -> bool {
+        true
+    }
     fn load_template(&self, _path: &str) -> Option<crate::entities::config::EntityConfig> {
         Some(crate::entities::config::EntityConfig {
             mass: crate::entities::config::DEFAULT_ENTITY_MASS,
@@ -79,6 +82,9 @@ exclusion_radius=10
 fn exact_existing_resolved_script_spawn_inventory_rejects_gravity_template_at_its_source() {
     struct GravityTemplate;
     impl TemplateLoader for GravityTemplate {
+        fn absence_is_final(&self) -> bool {
+            true
+        }
         fn load_template(&self, _: &str) -> Option<crate::entities::config::EntityConfig> {
             Some(crate::entities::config::EntityConfig {
                 arrival_gravity: Some(phoenix_model::transit::ArrivalGravityConfig {

@@ -1,0 +1,43 @@
+# Actual hazard repair and heard-report clearance; existing equipment and crew.
+# No synthetic message, paid work or resource grant. Forecasts are provisional.
+# The host proof supplies its incident through actual Damage.apply_hit; this
+# quiet source alone does not yet author a positive physical hazard.
+[global]
+seed=1562224
+[player_spawn]
+position=[0,0,0]
+[[entity]]
+template_path="assets/entities/alliance_cruiser.toml"
+id="planned-ship"
+name="planned-ship"
+spawn_on="game_start"
+transform={position=[0,0,0]}
+[[entity]]
+template_path="tests/fixtures/hailable-cruiser.toml"
+id="status-reporter"
+name="status-reporter"
+spawn_on="game_start"
+transform={position=[80,0,0]}
+[planning]
+id="hazard-clearance"
+task="contact::stabilise-and-clear"
+arguments={actor={kind="actor",value="planned-ship"}}
+import=[{path="assets/worlds/domains/hazard-clearance.toml",as="contact",names=["stabilise-and-clear"]}]
+[[planning.temporal.profile]]
+min_operators=0
+deadline_secs=60
+[[planning.temporal.profile]]
+min_operators=1
+deadline_secs=45
+[[planning.temporal.profile]]
+min_operators=2
+deadline_secs=25
+
+[script]
+setup='''
+// This authored Scenario consequence is separate from the status report itself.
+fn grant_clearance(ctx) { ctx.flags.set("clearance_granted"); }
+fn credit_clearance(ctx) { ctx.flags.increment("clearance_applied", 1); }
+fn credit_hazard(ctx) { ctx.flags.increment("hazard_stabilised", 1); }
+'''
+

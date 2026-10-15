@@ -538,3 +538,104 @@ fn refusal_reconsideration_is_bounded_and_cannot_extend_an_expired_deadline() {
         .validate_history(&late, &SituationInstances::default(), deadline + 1)
         .unwrap();
 }
+
+#[test]
+fn authored_hazard_clearance_domain_overlaps_only_independent_actual_operator_budgets() {
+    const DOMAIN: &str = "assets/worlds/domains/hazard-clearance.toml";
+    let mut root = config();
+    root.id = "hazard-clearance".into();
+    root.task = "care::stabilise-and-clear".into();
+    root.imports[0].path = DOMAIN.into();
+    root.imports[0].names = vec!["stabilise-and-clear".into()];
+    root.temporal = Some(TemporalPolicy {
+        profiles: vec![
+            DifficultyProfile {
+                min_operators: 0,
+                deadline_secs: 60,
+            },
+            DifficultyProfile {
+                min_operators: 1,
+                deadline_secs: 45,
+            },
+            DifficultyProfile {
+                min_operators: 2,
+                deadline_secs: 25,
+            },
+        ],
+    });
+    let (compiled, _) = CompiledPlanning::load(root, |path| {
+        (path == DOMAIN).then(|| {
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../assets/worlds/domains/hazard-clearance.toml"
+            ))
+            .into()
+        })
+    })
+    .unwrap();
+    let input = |shared| ForecastInput {
+        tick_nanos: 100_000_000,
+        owners: BTreeMap::from([
+            (
+                SystemId("repair".into()),
+                OwnerInput::Human {
+                    station: StationId("engineering".into()),
+                    rating: "Manual".into(),
+                },
+            ),
+            (
+                SystemId("comms".into()),
+                OwnerInput::Human {
+                    station: StationId(if shared { "engineering" } else { "comms" }.into()),
+                    rating: "Manual".into(),
+                },
+            ),
+        ]),
+    };
+    let mut separate = compiled.choose("actual-crew", 100, |_| Ok(())).unwrap();
+    compiled
+        .commit_schedule(&mut separate.choice, input(false))
+        .unwrap();
+    let separate_schedule = separate.choice.temporal.as_ref().unwrap();
+    assert_eq!(separate_schedule.profile_index, 2);
+    assert_eq!(separate_schedule.deadline_tick, 350);
+    let separate_nodes = separate_schedule.nodes().unwrap();
+    assert_eq!(separate_nodes["root/hazard"].start_tick, 100);
+    assert_eq!(separate_nodes["root/permission"].start_tick, 100);
+    let mut shared = compiled.choose("actual-crew", 100, |_| Ok(())).unwrap();
+    compiled
+        .commit_schedule(&mut shared.choice, input(true))
+        .unwrap();
+    let shared_schedule = shared.choice.temporal.as_ref().unwrap();
+    assert_eq!(shared_schedule.profile_index, 1);
+    assert_eq!(shared_schedule.deadline_tick, 550);
+    let shared_nodes = shared_schedule.nodes().unwrap();
+    assert_eq!(shared_nodes["root/hazard"].start_tick, 100);
+    assert!(
+        shared_nodes["root/permission"].start_tick >= 220,
+        "one operator cannot simultaneously do full-attention Comms and hazard monitoring"
+    );
+    let mut instances = SituationInstances::default();
+    assert_eq!(
+        compiled
+            .release(&mut shared.choice, &mut instances, "actual-crew", 100)
+            .unwrap(),
+        vec!["htn/hazard-clearance/root/hazard"]
+    );
+    let clock = shared.choice.temporal.as_ref().unwrap().deadline_tick;
+    compiled
+        .release(&mut shared.choice, &mut instances, "actual-crew", 400)
+        .unwrap();
+    assert_eq!(
+        shared.choice.temporal.as_ref().unwrap().deadline_tick,
+        clock,
+        "late actual work never resets the announced deadline"
+    );
+    assert!(
+        instances
+            .instances
+            .values()
+            .all(|row| row.accepted.is_none() && row.achieved.is_none() && row.settled.is_none()),
+        "forecast release creates no physical/radio completion"
+    );
+}

@@ -682,3 +682,24 @@ hazard and permission concurrently; cohosted Consoles share their actual operato
 attention budget. Declared temporal profiles and phase estimates remain provisional
 until native and human timing evidence is recorded. The original commitment and
 deadline never reset after late evidence or a callback refusal.
+
+
+The opt-in `hazard-clearance-world.toml` imports the same actual Repair and
+Communication owners concurrently. Only its successful authored `grant_clearance`
+callback creates the narrative clearance; the next state consumes that exact
+application receipt. Its separate/cohosted operator test uses real authored domain
+phases and distinct deadline profiles. It demonstrates the scheduler rule rather
+than measured human timing or the full two-/six-seat exit: profile thresholds count
+operators involved in those leaves, and two Cruiser crew can already divide
+Engineering and Comms. Broader Helm/personnel/transit obligations and human trials
+remain required before claiming the crew-size experience is complete.
+
+
+The host probe `hazard_clearance_continuation` supplies one positive incident
+through the existing physical Damage.apply_hit owner, then requires ordinary
+Repair restoration, paid radio work, an actually heard report and the explicit
+clearance callback. It captures partial real AI reading and compares complete
+fresh-JSON continuation for 1200 updates plus malformed-clock no-write checks.
+This source checkpoint has not yet run natively. The quiet fixture by itself does
+not create a hazard; an authored encounter cause and measured human workload remain
+open, rather than treating a clean ship or pure forecast as positive hazard work.

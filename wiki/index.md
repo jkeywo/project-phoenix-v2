@@ -49,6 +49,7 @@ Current implementation orientation only. For intended design use
 - [Recorded Observations](./concepts/recorded-observations.md)
 - [Resource Stores and Service Links](./concepts/resource-stores.md) — shared stock/claims, docked replenishment and Workshop authoring
 - [Equipment Fitting](./concepts/equipment-fitting.md) — fixed-slot hardware, actual assemblies, physical team work and recovery
+- [Physical Craft Handling](./concepts/physical-craft-handling.md) — actual probe custody, paid Bay Jobs, stored presence and canonical continuation
 - [Sensing and Spatial Fields](./concepts/sensing-and-fields.md) — paid enquiries, retained readings, passive reception and shared signal paths
 - [Electronic Equipment](./concepts/electronic-equipment.md) — paid independent Comms interference and shared physical receiver exposure
 - [Weapons Runtime](./concepts/weapons-intent.md)

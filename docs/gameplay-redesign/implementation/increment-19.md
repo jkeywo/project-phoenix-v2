@@ -93,6 +93,15 @@ Conditional, layered/additive and runtime Carried authoring are explicitly
 unsupported in this first adapter and refuse before materialization. Later
 lifecycle extensions must reuse the same custody owner.
 
+The handled probe reuses existing ShipPhysics solely for canonical XYZ/yaw,
+projected by ordinary `sync_ship_position` and retained by ordinary snapshot/digest.
+The actual bay completion writes the release pose once, alongside the existing
+sanctioned Dock mechanical writer. This installs no Ship, PhysicsConfig, Helm,
+propulsion or additional integration loop. The first fixed probe retains finite
+pose and zero forward/lateral/vertical velocities; candidate preflight enforces
+those limits. Do not add a second saved CraftPose or treat missing movable-parent
+motion as stationary merely because the probe itself has no engines.
+
 The same actual probe has exactly one canonical location: `Carried { parent, bay }`
 or `Deployed`. One actual BayJob owns accepted launch/recovery work and progress;
 Launching/Recovering are projections of that job, not another saved phase/progress

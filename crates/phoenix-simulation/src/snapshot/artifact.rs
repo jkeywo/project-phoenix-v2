@@ -569,7 +569,9 @@ pub const SNAPSHOT_FORMAT: u32 = 62;
 /// actual current-step result with radio, receipts and observation links.
 /// "0.41" advances one actual paid local Transit order per ship, with fixed
 /// accepted navigation and static arrival policy through the existing physics owner.
-pub const SIMULATION_RULES: &str = "0.41";
+/// "0.42" honours explicit instrument Missile selection and normal acquired
+/// classification in the actual paid Broad ordnance producer.
+pub const SIMULATION_RULES: &str = "0.42";
 
 /// The authored data, computed rather than remembered.
 ///

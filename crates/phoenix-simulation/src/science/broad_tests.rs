@@ -139,6 +139,67 @@ fn actual_in_flight_ordnance_is_measured_without_guidance_or_launcher_intelligen
         .unwrap();
     assert_eq!(held[0].observed_tick, 0);
     assert!(held[0].predicted && held[0].position[0] < 100.0);
+    // An explicit instrument grant makes actual measured ordnance targetable;
+    // classification and velocity still need ordinary paid distinct samples.
+    app.world_mut()
+        .get_mut::<BroadProfile>(observer)
+        .unwrap()
+        .0
+        .get_mut(&profile.system)
+        .unwrap()
+        .radar
+        .selects
+        .push(phoenix_model::tags::EntityTag::Missile);
+    app.world_mut()
+        .get_mut::<crate::server_app::TorpedoSystemResource>(observer)
+        .unwrap()
+        .0
+        .in_flight[0]
+        .x = 20.0;
+    for now in 3..=10 {
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = now;
+        fund(&mut app, observer, &profile, 1.0);
+        app.update();
+        if now == 3 {
+            let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
+            assert!(
+                state.projection(&profile, now, 0.5).unwrap()[0]
+                    .classification
+                    .is_none(),
+                "selection permission cannot grant instant classification"
+            );
+        }
+    }
+    let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
+    let acquired = state.projection(&profile, 10, 0.5).unwrap();
+    assert_eq!(acquired.len(), 1);
+    assert!(acquired[0].selectable && !acquired[0].predicted);
+    assert_eq!(acquired[0].classification.as_deref(), Some("missile"));
+    assert!(acquired[0].velocity.is_some() && acquired[0].elevation.unwrap().velocity.is_some());
+    assert!(acquired[0].identity.is_none());
+    let wire = serde_json::to_string(&acquired).unwrap();
+    for forbidden in [
+        "private-projectile-uuid",
+        "secret-guidance-target",
+        "secret-launcher",
+        "secret-tube",
+    ] {
+        assert!(!wire.contains(forbidden));
+    }
+    app.world_mut()
+        .get_mut::<BroadProfile>(observer)
+        .unwrap()
+        .0
+        .get_mut(&profile.system)
+        .unwrap()
+        .radar
+        .selects
+        .clear();
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 11;
+    fund(&mut app, observer, &profile, 1.0);
+    app.update();
+    let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
+    assert!(!state.projection(&profile, 11, 0.5).unwrap()[0].selectable);
 }
 #[test]
 fn streamed_rock_actor_uses_authored_tags_paid_observation_and_normal_contact_alias() {

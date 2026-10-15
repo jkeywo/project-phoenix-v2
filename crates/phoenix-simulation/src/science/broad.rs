@@ -269,11 +269,13 @@ pub(crate) fn tick(
                                     ),
                                     source: projectile.uuid.clone(),
                                     observation: None,
-                                    selectable: false,
+                                    selectable: radar
+                                        .selects
+                                        .contains(&phoenix_model::tags::EntityTag::Missile),
                                     position: [position.x, position.z],
                                     support,
                                     identity: None,
-                                    classification: Some("torpedo".into()),
+                                    classification: Some("missile".into()),
                                     assessment: None,
                                 });
                             }

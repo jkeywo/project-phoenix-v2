@@ -947,22 +947,12 @@ pub fn reconcile_runtime_entities(
     let observer = local.iter().next();
     let chart_removed = reported_snapshot.iter().any(|uuid| {
         !current.contains_key(uuid)
-            && world.0.entities.iter().any(|entity| {
-                entity.uuid == *uuid
-                    && entity
-                        .tags
-                        .iter()
-                        .any(|tag| tag == crate::console_delivery::CHARTED_TAG)
-            })
-            && !observer.is_some_and(|observer| {
-                content.as_ref().is_some_and(|content| {
-                    crate::gm::operations::contact::mode(
-                        &content.contact_overrides,
-                        &observer.0,
-                        uuid,
-                    ) == crate::gm::operations::contact::ContactMode::Conceal
-                })
-            })
+            && super::entity_removal::visible_chart_record(
+                &world,
+                uuid,
+                observer.map(|observer| observer.0.as_str()),
+                content.as_deref(),
+            )
     });
     for uuid in &reported_snapshot {
         if !current.contains_key(uuid) {

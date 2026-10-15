@@ -1,4 +1,5 @@
 use super::*;
+use crate::lobby::WorldResource;
 use crate::ship::compartment_damage::ShipDamage;
 use crate::sim_rng::InstallSimRng;
 

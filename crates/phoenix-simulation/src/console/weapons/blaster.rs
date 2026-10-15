@@ -15,7 +15,7 @@ use super::{
     DEFAULT_SHIP_EXPLOSION_RADIUS,
 };
 use crate::core::messages::{GamePhase, ServerMessage, SystemBlackboard, SystemControlPayload};
-use crate::lobby::{Sessions, Target, WorldResource};
+use crate::lobby::{Sessions, Target};
 
 /// This ship's **Combat Lock** from its frozen viewscreen blackboard (issue
 /// #829): the ship-wide target every weapons firing path reads, in place of the
@@ -839,22 +839,19 @@ pub(crate) fn tick_blaster_system(
 /// latch, the world snapshot it edits, the three destruction event writers, the
 /// balance telemetry sink, and the tracked-entity registry it forgets a kill
 /// from. Mirrors [`super::beam::BeamApplySinks`] but keeps `outbox` non-optional,
-/// exactly as this system's standalone parameter was. A signature grouping only:
-/// every field keeps its type and `Option` fallback, so the access set is
-/// byte-for-byte unchanged, and the system destructures it back to its original
-/// locals at entry.
+/// exactly as this system's standalone parameter was. The shared removal bundle
+/// samples chart visibility before removing the existing roster metadata.
 #[derive(bevy::ecs::system::SystemParam)]
-pub(crate) struct BlasterHitSinks<'w> {
+pub(crate) struct BlasterHitSinks<'w, 's> {
     pub mission: crate::crew_spectator::CrewMissionPolicy<'w>,
     pub outbox: ResMut<'w, SimOutbox>,
     pub next_state: Option<ResMut<'w, NextState<GamePhase>>>,
     pub game_over_reason: Option<ResMut<'w, GameOverReason>>,
-    pub world: ResMut<'w, WorldResource>,
+    pub removal: crate::server_app::entity_removal::EntityRemoval<'w, 's>,
     pub destroyed_events: MessageWriter<'w, crate::ai::server::AiEntityDestroyed>,
     pub vfx_events: MessageWriter<'w, AsteroidDestroyedVfx>,
     pub ship_vfx_events: MessageWriter<'w, ShipDestroyedVfx>,
     pub balance_events: Option<ResMut<'w, Messages<crate::core::balance::BalanceEvent>>>,
-    pub tracked: Option<ResMut<'w, crate::server_app::TrackedEntities>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -914,12 +911,11 @@ pub(crate) fn handle_blaster_hits(
         mut outbox,
         mut next_state,
         mut game_over_reason,
-        mut world,
+        mut removal,
         mut destroyed_events,
         mut vfx_events,
         mut ship_vfx_events,
         mut balance_events,
-        mut tracked,
     } = sinks;
 
     let sim_rng = &ambient.rng;
@@ -1179,7 +1175,7 @@ pub(crate) fn handle_blaster_hits(
                         .find(|(u, ..)| u == &det.target_uuid)
                         .map(|(_, x, z, _)| (*x, *z))
                         .unwrap_or((0.0, 0.0));
-                    world.0.entities.retain(|a| a.uuid != det.target_uuid);
+                    removal.remove(&det.target_uuid, Some(&mut outbox));
                     if is_asteroid {
                         vfx_events.write(AsteroidDestroyedVfx { x: hit_x, z: hit_z });
                         outbox.push_reliable((
@@ -1207,9 +1203,6 @@ pub(crate) fn handle_blaster_hits(
                                 uuid: det.target_uuid.clone(),
                             },
                         ));
-                        if let Some(t) = tracked.as_mut() {
-                            t.forget(&det.target_uuid);
-                        }
                         // EntityDestroyed for the blaster kill, co-located with
                         // the AiEntityDestroyed write (exactly once). Killer =
                         // the firing ship (issue #841).

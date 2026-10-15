@@ -106,9 +106,8 @@ pub(crate) struct CollisionBodies<'w, 's> {
 /// message queue, the phase / game-over latch, the debug damage log, the
 /// NPC-despawn and balance message streams, the world resource, deferred
 /// commands, and the tracked-entity registry. Gathered into a `SystemParam`
-/// bundle (issue #1199); every field keeps its exact `ResMut` / `Option<ResMut>`
-/// / `MessageWriter` / `Commands` type, so the access set is unchanged, and the
-/// system destructures it back to its original locals at entry.
+/// bundle (issue #1199). The shared removal member additionally reads existing
+/// chart visibility; collision response and event ordering remain local here.
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct CollisionSinks<'w, 's> {
     pub mission: crate::crew_spectator::CrewMissionPolicy<'w>,
@@ -117,15 +116,12 @@ pub(crate) struct CollisionSinks<'w, 's> {
     pub game_over_reason: ResMut<'w, GameOverReason>,
     pub damage_log: ResMut<'w, DamageLog>,
     pub destroyed_events: MessageWriter<'w, crate::ai::server::AiEntityDestroyed>,
-    pub world: ResMut<'w, WorldResource>,
+    pub removal: crate::server_app::entity_removal::EntityRemoval<'w, 's>,
     pub commands: Commands<'w, 's>,
     // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
     // registered the message still pass Bevy's parameter validation.
     pub balance_events:
         Option<ResMut<'w, bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>>,
-    // See `tick_beams_apply_damage` (issue #838): forget the killed uuid from
-    // the registry so the reconcile sweep does not re-emit `EntityDespawned`.
-    pub tracked: Option<ResMut<'w, TrackedEntities>>,
 }
 
 pub(crate) fn handle_collisions(
@@ -151,10 +147,9 @@ pub(crate) fn handle_collisions(
         mut game_over_reason,
         mut damage_log,
         mut destroyed_events,
-        mut world,
+        mut removal,
         mut commands,
         mut balance_events,
-        mut tracked,
     } = sinks;
 
     let dt = time.delta_secs();
@@ -552,7 +547,7 @@ pub(crate) fn handle_collisions(
             // NPC destruction: mirror the beam-kill path so downstream world
             // triggers and clients update consistently.
             if let Some(uuid) = ship_uuid {
-                world.0.entities.retain(|e| e.uuid != uuid.0);
+                removal.remove(&uuid.0, Some(&mut outbox));
                 destroyed_events.write(crate::ai::server::AiEntityDestroyed {
                     entity_uuid: uuid.0.clone(),
                 });
@@ -562,9 +557,6 @@ pub(crate) fn handle_collisions(
                         uuid: uuid.0.clone(),
                     },
                 ));
-                if let Some(t) = tracked.as_mut() {
-                    t.forget(&uuid.0);
-                }
                 // EntityDestroyed for the NPC death, co-located with the
                 // AiEntityDestroyed write. Environmental death → no killer.
                 if let Some(msgs) = balance_events.as_mut() {

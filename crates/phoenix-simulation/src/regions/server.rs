@@ -376,15 +376,12 @@ fn apply_damage_zone_damage(
     mut destroyed_events: Option<
         ResMut<bevy::ecs::message::Messages<crate::ai::server::AiEntityDestroyed>>,
     >,
-    mut world: Option<ResMut<crate::lobby::WorldResource>>,
+    mut removal: crate::server_app::entity_removal::EntityRemoval,
     mut commands: Commands,
     mut balance_events: Option<
         ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
     >,
     sim_rng: crate::sim_rng::LiveStream<'_, { crate::sim_rng::SimStream::RegionDamage as usize }>,
-    // See `tick_beams_apply_damage` (issue #838): forget the killed uuid from
-    // the registry so the reconcile sweep does not re-emit `EntityDespawned`.
-    mut tracked: Option<ResMut<crate::server_app::TrackedEntities>>,
     // `Option<Res<_>>` so bare-`App` fixtures with no `LogFilterConfig`
     // inserted still pass parameter validation (see logging macro docs).
     log_cfg: Option<Res<crate::logging::LogFilterConfig>>,
@@ -660,9 +657,7 @@ fn apply_damage_zone_damage(
                     // NPC destruction: mirror the beam-kill path so downstream
                     // world triggers and clients update consistently.
                     if let Some(uuid) = ship_uuid {
-                        if let Some(ref mut world) = world {
-                            world.0.entities.retain(|e| e.uuid != uuid.0);
-                        }
+                        removal.remove(&uuid.0, outbox.as_deref_mut());
                         if let Some(ref mut msgs) = destroyed_events {
                             msgs.write(crate::ai::server::AiEntityDestroyed {
                                 entity_uuid: uuid.0.clone(),
@@ -675,9 +670,6 @@ fn apply_damage_zone_damage(
                                     uuid: uuid.0.clone(),
                                 },
                             ));
-                        }
-                        if let Some(t) = tracked.as_mut() {
-                            t.forget(&uuid.0);
                         }
                         // EntityDestroyed for the NPC death, co-located with the
                         // AiEntityDestroyed write. Damage zone → no killer.

@@ -12,7 +12,7 @@ use crate::core::messages::{
     SystemBlackboard, SystemControlPayload,
 };
 use crate::entities::spawner::{EntitySystemHull, FactionComponent};
-use crate::lobby::{Target, WorldResource};
+use crate::lobby::Target;
 use crate::server_app::{AsteroidUuid, GameOverReason, SimOutbox};
 use crate::ship::state::ShipPhysics;
 use crate::ship_plugin::ShipSystemControlSources;
@@ -1507,14 +1507,13 @@ pub(crate) fn tick_beams_prepare(
 /// balance telemetry sink, and the tracked-entity registry it forgets a kill
 /// from.
 ///
-/// A signature grouping only — every field keeps the exact type and `Option`
-/// fallback it had as a standalone parameter, so the access set is byte-for-byte
-/// unchanged. `tick_beams_apply_damage` destructures it back to its original
-/// `world` / `outbox` / … locals at entry, leaving the body untouched.
+/// The removal bundle also reads the existing local observer's Conceal decision
+/// before removing chart metadata. Other damage and presentation outputs retain
+/// their existing optional fixture fallbacks.
 #[derive(bevy::ecs::system::SystemParam)]
-pub(crate) struct BeamApplySinks<'w> {
+pub(crate) struct BeamApplySinks<'w, 's> {
     pub mission: crate::crew_spectator::CrewMissionPolicy<'w>,
-    pub world: ResMut<'w, WorldResource>,
+    pub removal: crate::server_app::entity_removal::EntityRemoval<'w, 's>,
     pub outbox: Option<ResMut<'w, SimOutbox>>,
     pub next_state: Option<ResMut<'w, NextState<GamePhase>>>,
     pub game_over_reason: Option<ResMut<'w, GameOverReason>>,
@@ -1522,7 +1521,6 @@ pub(crate) struct BeamApplySinks<'w> {
     pub vfx_events: MessageWriter<'w, AsteroidDestroyedVfx>,
     pub ship_vfx_events: MessageWriter<'w, ShipDestroyedVfx>,
     pub balance_events: Option<ResMut<'w, Messages<crate::core::balance::BalanceEvent>>>,
-    pub tracked: Option<ResMut<'w, crate::server_app::TrackedEntities>>,
 }
 
 /// The ambient resources used by beam damage: a mutable seeded RNG declaration
@@ -1587,12 +1585,10 @@ pub(crate) fn tick_beams_apply_damage(
     // bundled as one `SystemParam` (issue #1185). See [`BeamApplyAmbient`].
     ambient: BeamApplyAmbient,
 ) {
-    // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged
-    // (issue #1185). Bundling the parameters does not alter their types, their
-    // `Option` fallbacks, or the system's access set.
+    // Keep damage/event sinks local while lifecycle metadata has one shared owner.
     let BeamApplySinks {
         mission,
-        mut world,
+        mut removal,
         mut outbox,
         mut next_state,
         mut game_over_reason,
@@ -1600,7 +1596,6 @@ pub(crate) fn tick_beams_apply_damage(
         mut vfx_events,
         mut ship_vfx_events,
         mut balance_events,
-        mut tracked,
     } = sinks;
     let BeamApplyAmbient {
         sim_rng,
@@ -2059,10 +2054,7 @@ pub(crate) fn tick_beams_apply_damage(
                 state.end_beam_early = true;
                 continue;
             }
-            world
-                .0
-                .entities
-                .retain(|a| a.uuid != state.effective_target_uuid);
+            removal.remove(&state.effective_target_uuid, outbox.as_deref_mut());
             if target_asteroid_destroyed {
                 vfx_events.write(AsteroidDestroyedVfx {
                     x: state.effective_target_x,
@@ -2092,11 +2084,6 @@ pub(crate) fn tick_beams_apply_damage(
                             uuid: state.effective_target_uuid.clone(),
                         },
                     ));
-                }
-                // Forget the uuid so the reconcile sweep does not re-emit
-                // (issue #838, single-emission invariant).
-                if let Some(t) = tracked.as_mut() {
-                    t.forget(&state.effective_target_uuid);
                 }
                 // EntityDestroyed for the NPC kill, co-located with the
                 // AiEntityDestroyed write so it fires exactly once. Killer

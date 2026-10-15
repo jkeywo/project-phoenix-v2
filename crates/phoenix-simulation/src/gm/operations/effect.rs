@@ -653,8 +653,7 @@ pub fn apply_gm_direct_effects(
     mut balance_events: Option<
         ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
     >,
-    mut world: Option<ResMut<crate::lobby::WorldResource>>,
-    mut tracked: Option<ResMut<crate::server_app::TrackedEntities>>,
+    mut removal: crate::server_app::entity_removal::EntityRemoval,
     log_cfg: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
     if pending.is_empty() {
@@ -859,9 +858,7 @@ pub fn apply_gm_direct_effects(
         // Non-crewed target: despawn and report, exactly as the zone and beam
         // kill paths do. A crewed hull is never despawned — the run ends and
         // the report reads from the wreck.
-        if let Some(world) = world.as_mut() {
-            world.0.entities.retain(|entity| entity.uuid != uuid);
-        }
+        removal.remove(&uuid, outbox.as_deref_mut());
         if is_asteroid {
             if let Some(ob) = outbox.as_mut() {
                 ob.push_reliable((
@@ -881,11 +878,6 @@ pub fn apply_gm_direct_effects(
                     ServerMessage::EntityDespawned { uuid: uuid.clone() },
                 ));
             }
-        }
-        // Forget the uuid so the reconcile sweep does not re-emit
-        // `EntityDespawned` (issue #838, single-emission invariant).
-        if let Some(tracked) = tracked.as_mut() {
-            tracked.forget(&uuid);
         }
         if let Some(msgs) = balance_events.as_mut() {
             msgs.write(crate::core::balance::BalanceEvent::EntityDestroyed {

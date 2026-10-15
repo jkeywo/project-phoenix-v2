@@ -1048,10 +1048,9 @@ pub(crate) fn tick_torpedo_lifecycle(
         ResMut<TorpedoSystemResource>,
         Query<(), With<crate::server_app::Ship>>,
     ),
-    // `world` + the reported registry bundled into one param to stay under
-    // Bevy's 16-parameter ceiling (issue #838). `world_tracked.world` is the
-    // former `world: ResMut<WorldResource>`.
-    mut world_tracked: crate::server_app::WorldAndTracked,
+    // Roster/tracked removal and its read-only chart visibility share one param
+    // so this lifecycle stays within Bevy's parameter ceiling.
+    mut removal: crate::server_app::entity_removal::EntityRemoval,
     time: Res<Time>,
     mut outbox: ResMut<SimOutbox>,
     mut hull_query: Query<
@@ -1106,8 +1105,6 @@ pub(crate) fn tick_torpedo_lifecycle(
     let id_mint = id_mint.as_deref();
     let log = &ambient.log;
     let dt = time.delta_secs();
-    // Alias so the `world.0.entities` read sites below read naturally.
-    let world = &mut world_tracked.world;
     let mut weapons_target_opt = weapons_target_q.single_mut().ok();
     let target_positions = &snapshot.target_positions;
     let targets = &snapshot.targets;
@@ -1645,7 +1642,7 @@ pub(crate) fn tick_torpedo_lifecycle(
                 }
             }
         } else if asteroid_destroyed {
-            world.0.entities.retain(|a| a.uuid != target_uuid);
+            removal.remove(&target_uuid, Some(&mut outbox));
             vfx_events.write(AsteroidDestroyedVfx { x: hit_x, z: hit_z });
             outbox.push_reliable((
                 Target::All,
@@ -1661,7 +1658,7 @@ pub(crate) fn tick_torpedo_lifecycle(
                 }
             }
         } else if non_local_ship_destroyed {
-            world.0.entities.retain(|a| a.uuid != target_uuid);
+            removal.remove(&target_uuid, Some(&mut outbox));
             destroyed_events.write(crate::ai::server::AiEntityDestroyed {
                 entity_uuid: target_uuid.clone(),
             });
@@ -1676,9 +1673,6 @@ pub(crate) fn tick_torpedo_lifecycle(
                     uuid: target_uuid.clone(),
                 },
             ));
-            if let Some(t) = world_tracked.tracked.as_mut() {
-                t.forget(&target_uuid);
-            }
             // EntityDestroyed for the torpedo kill, co-located with the
             // AiEntityDestroyed write (exactly once). Killer = launching ship.
             if let Some(ref mut msgs) = balance_events {

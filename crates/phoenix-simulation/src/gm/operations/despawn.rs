@@ -105,6 +105,7 @@ pub fn remove_entity(world: &mut World, entity: Entity) -> Vec<GmRemovalReferenc
     let Some(uuid) = world.get::<EntityUuid>(entity).map(|uuid| uuid.0.clone()) else {
         return cleared;
     };
+    crate::server_app::entity_removal::remove_scripted_entity_record(world, &uuid);
     if let Some(mut content) = world.get_resource_mut::<crate::world::server::WorldContentRuntime>()
     {
         // The removed entity's OWN observations, and every other observer's

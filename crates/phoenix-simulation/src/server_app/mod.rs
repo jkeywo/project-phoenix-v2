@@ -77,6 +77,7 @@ mod broadcast;
 mod broadcast_publish;
 mod collision;
 mod components;
+pub(crate) mod entity_removal;
 mod registration;
 mod world_setup;
 

@@ -141,9 +141,12 @@ fn control(app: &mut App, token: &str, station: &str, target: &str, payload: Con
 }
 
 fn boot() -> (App, Entity) {
+    boot_hull(HULL)
+}
+fn boot_hull(hull: &str) -> (App, Entity) {
     let mut app = build_headless_app(&HeadlessArgs {
         world_path: WORLD.into(),
-        ship_path: HULL.into(),
+        ship_path: hull.into(),
         deterministic: true,
         seed: Some(156222),
         ..Default::default()
@@ -528,4 +531,188 @@ fn actual_repair_and_delivery_credit_once_across_partial_work_json_and_360_host_
         serde_json::json!("refused")
     );
     assert!(repair.state.is_none() && delivery.state.is_none());
+}
+
+/// Exercises the actual optional Personnel hull, not a fabricated officer or
+/// work-multiplier component. Both ships have identical incidents and paid
+/// machinery; the control ship leaves its same authored officer unposted.
+#[test]
+fn actual_officer_posting_improves_paid_repair_and_preserves_custody_through_json() {
+    use phoenix_model::personnel::OfficerLocation;
+    const PERSONNEL: &str = "assets/entities/personnel_cruiser.toml";
+    let (mut live, actor) = boot_hull(PERSONNEL);
+    let (mut ordinary, ordinary_actor) = boot_hull(PERSONNEL);
+    for (app, posting) in [(&mut live, Some(0)), (&mut ordinary, None)] {
+        control(
+            app,
+            TOKEN,
+            "engineering",
+            "repair",
+            Control::SetDutyOfficerPosting {
+                officer: "repair-chief".into(),
+                team_idx: posting,
+            },
+        );
+    }
+    assert_eq!(capture(live.world()).tick, capture(ordinary.world()).tick);
+    let healthy = incident(&mut live, actor);
+    assert_eq!(incident(&mut ordinary, ordinary_actor), healthy);
+    let original_parts = parts(&live, actor);
+    for app in [&mut live, &mut ordinary] {
+        control(
+            app,
+            TOKEN,
+            "engineering",
+            "repair",
+            Control::DispatchRepairTeam {
+                team_idx: 0,
+                target: RepairTarget::Work(RepairWorkTarget::Compartment {
+                    compartment: "engineering".into(),
+                }),
+            },
+        );
+    }
+    let progress = |app: &App, entity| {
+        app.world()
+            .get::<ShipRepairTeams>(entity)
+            .unwrap()
+            .0
+            .job_state()
+            .physical_work
+            .values()
+            .filter(|work| work.reserved)
+            .map(|work| work.progress)
+            .sum::<f32>()
+    };
+    let mut observed_bonus = false;
+    for _ in 0..120 {
+        let boosted = progress(&live, actor);
+        let baseline = progress(&ordinary, ordinary_actor);
+        if boosted > 0.0 && baseline > 0.0 {
+            assert!(
+                boosted > baseline,
+                "real expertise must advance actual work: {boosted}/{baseline}"
+            );
+            assert!((boosted / baseline - 1.25).abs() < 0.01);
+            assert!(
+                live.world()
+                    .get::<ShipPowerSystem>(actor)
+                    .unwrap()
+                    .0
+                    .emitted_work(&id("repair"))
+                    > 0.0
+            );
+            observed_bonus = true;
+            break;
+        }
+        live.update();
+        ordinary.update();
+    }
+    assert!(
+        observed_bonus,
+        "both ordinary teams must reach actual paid partial work"
+    );
+    let saved: PhoenixSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
+    let officer_row = saved
+        .entities
+        .iter()
+        .position(|row| row.personnel.is_some())
+        .unwrap();
+    assert_eq!(
+        saved.entities[officer_row]
+            .personnel
+            .as_ref()
+            .unwrap()
+            .officers["repair-chief"]
+            .location,
+        OfficerLocation::WithRepairTeam { team_idx: 0 }
+    );
+    let (mut resumed, restored) = boot_hull(PERSONNEL);
+    assert!(ready_to_restore(resumed.world(), &saved));
+    let before = capture(resumed.world());
+    let digest_before = world_digest(resumed.world());
+    for fault in 0..3 {
+        let mut forged = saved.clone();
+        let row = &mut forged.entities[officer_row];
+        match fault {
+            0 => row.personnel = None,
+            1 => {
+                row.personnel
+                    .as_mut()
+                    .unwrap()
+                    .officers
+                    .get_mut("repair-chief")
+                    .unwrap()
+                    .changed_tick = saved.tick + 1
+            }
+            _ => {
+                row.personnel
+                    .as_mut()
+                    .unwrap()
+                    .officers
+                    .get_mut("repair-chief")
+                    .unwrap()
+                    .location = OfficerLocation::WithRepairTeam { team_idx: 99 }
+            }
+        }
+        assert!(
+            !restore(resumed.world_mut(), &forged).is_complete(),
+            "forged personnel{fault}"
+        );
+        assert_eq!(capture(resumed.world()), before);
+        assert_eq!(world_digest(resumed.world()), digest_before);
+    }
+    let result = restore(resumed.world_mut(), &saved);
+    assert!(result.is_complete(), "{:?}", result.gaps);
+    let mut recalled = false;
+    for step in 0..360 {
+        assert_same(&live, &resumed, step);
+        if !recalled && hp(&live, actor) == healthy {
+            for app in [&mut live, &mut resumed] {
+                send(
+                    app,
+                    TOKEN,
+                    ClientMessage::ControlSystem {
+                        target: id("repair"),
+                        payload: Control::RecallRepairTeam { team_idx: 0 },
+                    },
+                );
+            }
+            recalled = true;
+        }
+        live.update();
+        resumed.update();
+    }
+    assert_same(&live, &resumed, 360);
+    assert!(recalled);
+    assert_eq!(hp(&live, actor), healthy);
+    assert_eq!(hp(&resumed, restored), healthy);
+    assert_eq!(parts(&live, actor), original_parts - 1);
+    // A normal release is allowed only after the actual team returns home.
+    for app in [&mut live, &mut resumed] {
+        control(
+            app,
+            TOKEN,
+            "engineering",
+            "repair",
+            Control::SetDutyOfficerPosting {
+                officer: "repair-chief".into(),
+                team_idx: None,
+            },
+        );
+    }
+    assert_same(&live, &resumed, 364);
+    let final_snapshot = capture(live.world());
+    assert_eq!(
+        final_snapshot.entities[officer_row]
+            .personnel
+            .as_ref()
+            .unwrap()
+            .officers["repair-chief"]
+            .location,
+        OfficerLocation::AtCompartment {
+            compartment: "engineering".into()
+        }
+    );
 }

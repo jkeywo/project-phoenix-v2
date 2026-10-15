@@ -13,6 +13,7 @@ export function mountWorkshopSensing({ root, provider, runtime, draft: getDraft,
   const console = el('select', 'console'), group = el('select', 'group'), room = el('select', 'room'), newId = input('new-id'); newId.value = 'passive-receiver';
   const bindings = Object.fromEntries(["combat_lock","science_target"].map(key=>[key,el("select",key)]));
   const rows = {}; let inspection = null, dependencies = null, disposed = false, loading = false, observed = null, generation = 0;
+  const navOwner=el('select','navigation-owner'),navShare=input('navigation-share','checkbox'),navReceive=input('navigation-receive','checkbox');
   node.append(el('h3', null, 'title'), el('p', null, 'hint'), label(template, 'template'), label(materialise, 'materialise'), ...Object.entries(bindings).map(([key,control])=>label(control,key)), status);
   const defaults = { focused: { reading_ticks: 120, work_secs: 1, history_limit: 32, unfinished_retention_secs: 0 }, broad: { reading_ticks: 120, sample_interval_secs: .5, identity_secs: 1, classification_secs: 3, assessment_secs: 6, position_error: 2, drift_error_per_sec: .5, track_retention_secs: 60 }, passive: { sample_interval_secs: .5, min_signal_strength: .01, bearing_error_rad: .15, mount: { facing_deg: 0, arc_deg: 360, range: 100 } } };
   const hosts = {}, sequences = {};
@@ -115,8 +116,12 @@ export function mountWorkshopSensing({ root, provider, runtime, draft: getDraft,
       const eligible=inspection?.systems.some(system=>system.id===row.system.value && ['sensor_radar','tactical_radar'].includes(system.kind));
       for(const key of ['share_own_faction','receive']) { row.fields[key].parentElement.hidden=!eligible;row.fields[key].disabled=blocked||!eligible; }
     }
+    navSave.disabled=blocked || !inspection?.resolved.value.navigation_console || !navOwner.value;
   }
   function paint() {
+    const sharing=inspection.resolved.value.navigation_console?.sharing;
+    fill(navOwner,['',...inspection.systems.filter(system=>system.kind==='navigation').map(system=>system.id)],sharing?.system || inspection.systems.find(system=>system.kind==='navigation')?.id || '');
+    navShare.checked=sharing?.share_own_faction ?? false;navReceive.checked=sharing?.receive ?? true;
     for(const [binding,kind] of [["combat_lock","tactical_radar"],["science_target","sensors"]]) fill(bindings[binding],["",...inspection.systems.filter(system=>system.kind===kind).map(system=>system.id)],inspection.sensing?.control?.[binding] || "");
     for (const role of Object.keys(sensingRoles)) {
       for (const child of [...hosts[role].children].slice(1)) child.remove(); rows[role].clear(); sequences[role] = 0;
@@ -152,6 +157,15 @@ export function mountWorkshopSensing({ root, provider, runtime, draft: getDraft,
       error: error => { status.textContent = t('workshop.sensing.refused', { reason: error.report?.findings?.[0]?.message || error.message }); }, release: controls });
   }
   const save = el('button', 'save', 'save'); save.type = 'button'; save.addEventListener('click', () => void apply());
+  const navSave=el('button','navigation-save','save');navSave.type='button';navOwner.addEventListener('change',controls);
+  navSave.addEventListener('click',()=>{
+    if(busy() || !inspection)return;const token=++generation;
+    const operation={type:'navigation-sharing',path:template.value,materialise:materialise.checked,value:{system:navOwner.value,share_own_faction:navShare.checked,receive:navReceive.checked}};
+    void runWorkshopMutation({setBusy,current:()=>!disposed&&token===generation,start:controls,
+      invoke:()=>applySensingOperation({draft:getDraft(),provider,runtime,dependencies,operation,current:()=>!disposed&&token===generation}),
+      success:()=>{changed(operation.path);inspect(true);status.textContent=t('workshop.changed');},error:error=>{status.textContent=t('workshop.sensing.refused',{reason:error.message});},release:controls});
+  });
+  const nav=el('fieldset');nav.append(el('legend',null,'navigation-sharing'),label(navOwner,'system'),label(navShare,'share_own_faction'),label(navReceive,'receive'),navSave);node.append(nav);
   const fit = el('button', 'fit', 'fit'); fit.type = 'button'; fit.addEventListener('click', () => void apply({ type: 'sensing-fit-passive', new_system: newId.value, console: console.value, group: group.value, compartment: room.value }));
   node.append(save, el('h4', null, 'fit'), label(newId, 'new-id'), label(console, 'console'), label(group, 'group'), label(room, 'room'), fit);
   const addObservationButton=el('button','observation-add','add-property'); addObservationButton.type='button'; addObservationButton.addEventListener('click',()=>{addObservation();controls();});

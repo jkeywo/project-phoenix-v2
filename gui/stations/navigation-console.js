@@ -27,6 +27,7 @@
 
 import { t } from '../strings.js';
 import { setAutoState } from '../console-ui.js';
+import { navigationSharingState } from '../components/navigation-sharing-controls.js';
 
 /**
  * Build a Navigation `renderStation(s, doc)` for one hull from its `variant`.
@@ -52,6 +53,7 @@ export function makeNavigationRender(variant) {
           blips: s.blips || [], regions: s.regions || [], range: s.radar_range || 5000,
           ship_pos: { x: s.ship_x || 0, z: s.ship_z || 0 }, ship_heading: s.ship_heading || 0,
           waypoint: s.waypoint || null, auto: !!s.navigation_auto,
+          ...navigationSharingState(s),
         };
       }
     }

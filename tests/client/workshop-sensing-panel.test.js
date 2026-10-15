@@ -30,6 +30,13 @@ function fixture(withoutPassive = false, dual = false, configure = () => {}) {
   return { draft, runtime, panel, source };
 }
 describe('Workshop structured sensing controls', () => {
+  it('edits Navigation sharing through its own accepted source transaction',async()=>{
+    const {draft,panel,runtime}=fixture();await settle();
+    const before=parse(draft.read(path));control('navigation-share').checked=true;control('navigation-receive').checked=false;
+    control('navigation-save').click();await settle();
+    const value=parse(draft.read(path));expect(value.navigation_console.sharing).toEqual({system:'navigation',share_own_faction:true,receive:false});
+    expect(value.navigation_console.system_chart).toEqual(before.navigation_console.system_chart);expect(value.sensing).toEqual(before.sensing);expect(runtime.validate).toHaveBeenCalled();panel.dispose();
+  });
   it('edits own-faction sharing and optional forecast on canonical accepted profiles', async () => {
     const {draft,panel}=fixture();await settle();
     control('share_own_faction-0').checked=true;control('receive-0').checked=false;

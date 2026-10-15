@@ -101,10 +101,38 @@ function replaceSectionSource(source, section, profile) {
   return after.slice(0, spans[0].start) + text + after.slice(spans[0].start);
 }
 export function guardSensingReferences(value, proposed) {
+  if(value.navigation_console?.sharing) validateNavigationSharing(value.navigation_console.sharing,proposed);
   if (!value.sensing) return;
   try { validateSensing(value.sensing, proposed); } catch (error) { throw new Error('Update the affected Sensing profile first: ' + error.message); }
 }
+export function validateNavigationSharing(sharing,value) {
+  const system=authoredAndGeneratedSystems(value).find(row=>row.id===sharing?.system);
+  if(!closed(sharing,['system','share_own_faction','receive']) || !system || system.kind!=='navigation'
+    || !value.console?.some(console=>console.id===system.console)
+    || (sharing.share_own_faction!==undefined && typeof sharing.share_own_faction!=='boolean')
+    || (sharing.receive!==undefined && typeof sharing.receive!=='boolean')
+    || !positive(value.navigation_console?.system_chart?.range))throw new Error('Navigation sharing needs an actual Navigation owner, finite chart coverage and boolean intent.');
+}
+function prepareNavigationSharingOperation(draft,dependencies,operation) {
+  const inspection=inspectSensing(draft,dependencies,operation.path),before=draft.read(operation.path);
+  if(!operation.materialise && inspection.fields.some(row=>(row.path==='navigation_console'||row.path.startsWith('navigation_console.'))&&row.owner!==operation.path))throw new Error('Explicitly materialise inherited Navigation before editing sharing.');
+  const nav=structuredClone(inspection.resolved.value.navigation_console);
+  if(!nav)throw new Error('Configure actual Navigation chart hardware first.');
+  nav.sharing=structuredClone(operation.value);validateNavigationSharing(nav.sharing,{...inspection.resolved.value,navigation_console:nav});
+  const headers=[...before.matchAll(/^[ \t]*\[{1,2}([^\r\n]+?)\]{1,2}[ \t]*(?:#.*)?(?:\r?\n|$)/gm)].map(match=>({start:match.index,name:match[1].replace(/\]$/,'').trim()}));
+  const spans=headers.filter(row=>row.name==='navigation_console'||row.name.startsWith('navigation_console.')).map(row=>{
+    let end=headers.find(next=>next.start>row.start)?.start??before.length;
+    const tail=before.slice(row.start,end).match(/(?:^|\n)((?:[ \t]*(?:#[^\r\n]*)?\r?\n)+)$/)?.[1];if(tail?.includes('#'))end-=tail.length;
+    return {start:row.start,end};
+  });
+  if(!spans.length && parse(before).navigation_console!==undefined)throw new Error('Expand inline Navigation into tables before editing.');
+  const nl=before.includes('\r\n')?'\r\n':'\n',text=stringify({navigation_console:nav}).trim().replace(/\n/g,nl)+nl;
+  let source=before;for(const span of spans.slice().reverse())source=source.slice(0,span.start)+source.slice(span.end);
+  source=spans.length?source.slice(0,spans[0].start)+text+source.slice(spans[0].start):source+nl+text;
+  return {changes:[{path:operation.path,before,after:source}]};
+}
 export function prepareSensingOperation(draft, dependencies, operation, schema) {
+  if(operation.type==='navigation-sharing')return prepareNavigationSharingOperation(draft,dependencies,operation);
   const before = draft.read(operation.path); let source = before;
   let inspection = inspectSensing(draft, dependencies, operation.path);
   if (!operation.materialise && inspection.fields.some(field => (field.path === 'sensing' || field.path.startsWith('sensing.')) && field.owner !== operation.path)) throw new Error('Explicitly materialise inherited sensing before editing.');

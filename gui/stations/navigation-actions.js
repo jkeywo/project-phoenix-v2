@@ -30,6 +30,7 @@ export const NAVIGATION_CHART_ACTION_ID = 'navigation.chart';
 export const NAVIGATION_WAYPOINT_PLACE_ACTION_ID = 'navigation.waypoint-place';
 export const NAVIGATION_WAYPOINT_ANCHOR_ACTION_ID = 'navigation.waypoint-anchor';
 export const NAVIGATION_WAYPOINT_CLEAR_ACTION_ID = 'navigation.waypoint-clear';
+export const NAVIGATION_SHARED_WAYPOINT_ACTION_ID = 'navigation.shared-waypoint';
 export const NAVIGATION_CONTACT_ACTION_ID = 'navigation.contact-selection';
 export const NAVIGATION_CIVILIAN_ORDER_ACTION_ID = 'navigation.civilian-order';
 export const NAVIGATION_PAN_LEFT_ACTION_ID = 'navigation.map-pan-left';
@@ -87,6 +88,7 @@ export const NAVIGATION_ACTIONS = Object.freeze([
   action(NAVIGATION_PAN_DOWN_ACTION_ID, 'pan_down', key('ArrowDown', { ctrlKey: true }), button('right-trigger'), 'local'),
   action(NAVIGATION_ZOOM_IN_ACTION_ID, 'zoom_in', key('Equal'), axis('right-stick-y', 'negative'), 'local'),
   action(NAVIGATION_ZOOM_OUT_ACTION_ID, 'zoom_out', key('Minus'), axis('right-stick-y', 'positive'), 'local'),
+  action(NAVIGATION_SHARED_WAYPOINT_ACTION_ID,'sharing.apply',null,null),
 ]);
 
 export function navigationActionView(state) {
@@ -172,6 +174,14 @@ export function registerNavigationActions(registry, options = {}) {
   const supportsChart = options.supportsChart !== false;
   const supportsCivilianOrders = options.supportsCivilianOrders !== false;
   const send = createCorrelatedActionSender(sendAction);
+  registry.register(NAVIGATION_ACTIONS.at(-1),({actionId,correlation,inputMs,detail}={})=>{
+    const view=navigationActionView(getState());
+    const owner=view?.radar_sharing?.find(row=>row.owner===detail?.owner && row.role==='navigation' && row.controllable && row.can_operate);
+    const sample=view?.received_chart?.find(sample=>sample.provenance?.sample_id===detail?.sample_id);
+    if(!owner || view.navigation_auto || !sample || !['waypoint','landmark'].includes(sample.kind?.kind)
+      || !Array.isArray(sample.position) || sample.position.length!==2 || !sample.position.every(Number.isFinite))return false;
+    return send(actionId,correlation,inputMs,'set_navigation_waypoint',{control_system_id:owner.owner,x:sample.position[0],z:sample.position[1]});
+  });
 
   registry.register(NAVIGATION_ACTIONS[0], ({ actionId, correlation, inputMs } = {}) => {
     const view = navigationActionView(getState());

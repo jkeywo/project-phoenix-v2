@@ -5,5 +5,6 @@
 //! keep resolving.
 
 pub mod server;
+pub mod sharing;
 
 pub use server::*;

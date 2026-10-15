@@ -1,0 +1,36 @@
+import { t, wireText } from '../strings.js';
+import { mountRadarSharingControls } from './radar-sharing-controls.js';
+import { NAVIGATION_SHARED_WAYPOINT_ACTION_ID } from '../stations/navigation-actions.js';
+
+export const navigationSharingState = view => ({ radar_sharing: view?.radar_sharing || [],
+  received_chart: view?.received_chart || [], navigation_auto: !!view?.navigation_auto });
+
+/** Fixed received observations: changing course always remains an explicit act. */
+export function mountNavigationSharingControls(doc) {
+  const node=doc.createElement('section'),sharing=mountRadarSharingControls(doc),list=doc.createElement('div'),rows=new Map();
+  const title=doc.createElement('h4');title.textContent=t('navigation.sharing.received');
+  node.append(sharing.node,title,list);node.dataset.navigationSharing='';
+  node.addEventListener('keydown',event=>{if(!['Tab','Escape'].includes(event.key))event.stopPropagation();});
+  return {node,update(state={}) {
+    state ||= {};
+    const owners=(state.radar_sharing || []).filter(row=>row.role==='navigation');sharing.update(owners);
+    const owner=owners.find(row=>row.controllable && row.can_operate),present=new Set();
+    for(const sample of state.received_chart || []) {
+      if(!sample?.provenance?.sample_id || !Array.isArray(sample.position) || sample.position.length!==2 || !sample.position.every(Number.isFinite)
+        || !['waypoint','landmark'].includes(sample.kind?.kind))continue;
+      const id=sample.provenance.sample_id;present.add(id);let row=rows.get(id);
+      if(!row) {
+        const group=doc.createElement('div'),text=doc.createElement('p'),button=doc.createElement('button');button.type='button';button.textContent=t('navigation.sharing.apply');
+        row={group,text,button,value:null};button.addEventListener('click',()=>{
+          if(!row.value || button.disabled)return;
+          doc.defaultView?.activateSemanticAction?.(NAVIGATION_SHARED_WAYPOINT_ACTION_ID,{source:'control',context:'navigation',detail:{sample_id:row.value.sample_id,owner:row.value.owner}});
+        });group.append(text,button);list.append(group);rows.set(id,row);
+      }
+      row.value={sample_id:id,owner:owner?.owner};row.button.disabled=!owner || !!state.navigation_auto;
+      const name=sample.kind.kind==='landmark'?wireText(sample.kind.name):t('navigation.sharing.waypoint');
+      row.text.textContent=t('navigation.sharing.sample',{name,x:sample.position[0],z:sample.position[1],source:wireText(sample.provenance.origin?.source),tick:sample.provenance.observed_tick});
+    }
+    for(const [id,row]of rows)if(!present.has(id)){row.value=null;row.group.remove();rows.delete(id);}
+    title.hidden=rows.size===0;node.hidden=owners.length===0 && rows.size===0;
+  },dispose(){sharing.dispose();for(const row of rows.values())row.value=null;rows.clear();node.remove();}};
+}

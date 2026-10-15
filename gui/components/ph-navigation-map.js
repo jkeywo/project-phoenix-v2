@@ -9,6 +9,7 @@ import { textScaleOf } from './ph-scope-chrome.js';
 import { rovingKeyTarget } from '../roving-tabindex.js';
 import { PhElement, phDefine } from './ph-element.js';
 import { activateNavigationAction } from '../stations/navigation-action-control.js';
+import { mountNavigationSharingControls } from './navigation-sharing-controls.js';
 import {
   NAVIGATION_CONTACT_ACTION_ID,
   NAVIGATION_PAN_DOWN_ACTION_ID,
@@ -179,6 +180,10 @@ export class PhNavigationMap extends PhElement {
   }
 
   onTemplate() {
+    this.sharingControls=mountNavigationSharingControls(this.ownerDocument);
+    this.sharingControls.node.style.cssText='position:absolute;top:0;right:0;z-index:4;max-height:40%;max-width:min(100%,24rem);overflow:auto;background:var(--deep,#08111a);padding:.5rem';
+    this.shadowRoot.querySelector('div').append(this.sharingControls.node);
+    this.sharingControls.update();
     this.canvas = this.shadowRoot.querySelector('canvas');
     this.ctx = this.canvas.getContext('2d', { alpha: false });
     this.needsRender = true;
@@ -285,6 +290,7 @@ export class PhNavigationMap extends PhElement {
     const retained = this.#pendingConsoleView || this.consoleView();
     const previousSelection = this.navigationSelectedUuid();
     this.#state = val;
+    this.sharingControls?.update(val);
     if (retained) this.applyConsoleView(retained);
     if (previousSelection && !this.navigationSelectedUuid()) {
       this.#pendingConsoleView = null;

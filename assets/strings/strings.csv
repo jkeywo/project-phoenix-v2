@@ -1,5 +1,10 @@
 id,context,en,de,de_source,de_provenance
-sensing.sharing.title,Radar sharing,Faction radar sharing,Fraktionsradar teilen,Faction radar sharing,machine
+sensing.sharing.title,Sharing,Sharing,Teilen,Sharing,machine
+navigation.sharing.received,Navigation sharing,Received chart and waypoints,Empfangene Karte und Wegpunkte,Received chart and waypoints,machine
+navigation.sharing.apply,Navigation sharing,Apply as own waypoint,Als eigenen Wegpunkt übernehmen,Apply as own waypoint,machine
+navigation.sharing.waypoint,Navigation sharing,Shared waypoint,Geteilter Wegpunkt,Shared waypoint,machine
+navigation.sharing.sample,Navigation sharing,{name} · {x} / {z} · {source} · sample tick {tick},{name} · {x} / {z} · {source} · Messtakt {tick},{name} · {x} / {z} · {source} · sample tick {tick},machine
+workshop.sensing.navigation-sharing,Workshop sensing,Navigation sharing,Navigation teilen,Navigation sharing,machine
 sensing.sharing.share,Radar sharing,Share with own faction,Mit eigener Fraktion teilen,Share with own faction,machine
 sensing.sharing.receive,Radar sharing,Receive faction feeds,Fraktionsmeldungen empfangen,Receive faction feeds,machine
 sensing.sharing.hint,Radar sharing,Sharing requires an actual Comms link. Lost links retain dated observations.,Teilen erfordert eine tatsächliche Kommunikationsverbindung. Bei Verbindungsverlust bleiben datierte Beobachtungen erhalten.,Sharing requires an actual Comms link. Lost links retain dated observations.,machine

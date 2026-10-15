@@ -3,23 +3,23 @@ import { createSemanticActionRegistry } from '../semantic-action-registry.js';
 import { familyView } from '../console-payload.js';
 
 export const RADAR_SHARING_ACTION_ID = 'sensing.radar-sharing';
-export const RADAR_SHARING_CONTEXTS = ['sensors', 'science', 'captain', 'tactical'];
-const definition = defineStationAction({ id: RADAR_SHARING_ACTION_ID, contexts: RADAR_SHARING_CONTEXTS,
+export const RADAR_SHARING_CONTEXTS = ['sensors', 'science', 'captain', 'tactical', 'navigation', 'comms'];
+export const RADAR_SHARING_ACTION = defineStationAction({ id: RADAR_SHARING_ACTION_ID, contexts: RADAR_SHARING_CONTEXTS,
   labelKey: 'sensing.sharing.title', bindings: [null, null] });
 
 export function radarSharingRows(payload) {
-  const rows = [payload, familyView(payload, 'sensors'), familyView(payload, 'tactical')]
+  const rows = [payload, familyView(payload, 'sensors'), familyView(payload, 'tactical'),familyView(payload,'navigation')]
     .flatMap(view => Array.isArray(view?.radar_sharing) ? view.radar_sharing : []);
   const result = new Map();
   for (const row of rows) if (typeof row?.owner === 'string' && row.owner
-    && ['sensor_radar', 'tactical_radar'].includes(row.role)
+    && ['sensor_radar', 'tactical_radar','navigation'].includes(row.role)
     && typeof row.share_own_faction === 'boolean' && typeof row.receive === 'boolean'
     && !result.has(row.owner)) result.set(row.owner, row);
   return [...result.values()];
 }
 export function registerRadarSharingActions(registry, options = {}) {
   const send = createCorrelatedActionSender(options.sendAction);
-  registry.register(definition, ({ actionId, correlation, inputMs, detail } = {}) => {
+  registry.register(RADAR_SHARING_ACTION, ({ actionId, correlation, inputMs, detail } = {}) => {
     const row = radarSharingRows(options.getState?.()).find(row => row.owner === detail?.owner);
     if (!row?.controllable || !row.can_operate || typeof detail?.share_own_faction !== 'boolean' || typeof detail?.receive !== 'boolean') return false;
     return send(actionId, correlation, inputMs, 'set_radar_sharing', {

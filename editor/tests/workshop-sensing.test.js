@@ -5,11 +5,22 @@ import { damageFixture } from './damage-fixture.js';
 import { WorkshopDocument } from '../workshop-document.js';
 import { createStoreZip } from '../mod-pack-export.js';
 import { resolveTemplate } from '../entity-includes.js';
-import { inspectSensing, validateSensing, prepareSensingOperation, applySensingOperation, guardSensingReferences, validateEnquiryObservation, prepareEnquiryObservationOperation, applyEnquiryObservationOperation } from '../workshop-sensing.js';
+import { inspectSensing, validateSensing, prepareSensingOperation, applySensingOperation, guardSensingReferences, validateEnquiryObservation, prepareEnquiryObservationOperation, applyEnquiryObservationOperation, validateNavigationSharing } from '../workshop-sensing.js';
 const path = 'assets/entities/test.toml', base = 'assets/entities/base.toml', deps = { base_files: {}, packs: [] };
 const make = text => new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: '[pack]\nformat=1\nid="test"\nname="Test"\nversion="1"\n' }, { path, text }]));
 function fixture() { const out = damageFixture(); out.schema.console_instance_publication_kinds.passive_receiver = 'Passive'; return out; }
 describe('accepted-source independent sensing instruments', () => {
+  it('keeps Navigation sharing on its actual owner and guards compound removal',()=>{
+    const {value,schema}=fixture(),source=stringify(value),draft=make(source),sharing={system:'navigation',share_own_faction:true,receive:false};
+    const change=prepareSensingOperation(draft,deps,{type:'navigation-sharing',path,value:sharing},schema).changes[0];
+    const after=parse(change.after);expect(after.navigation_console.sharing).toEqual(sharing);expect(after.sensing).toEqual(value.sensing);expect(after.navigation_console.system_chart).toEqual(value.navigation_console.system_chart);
+    expect(()=>validateNavigationSharing({...sharing,system:'helm-radar'},after)).toThrow(/Navigation/);
+    expect(()=>guardSensingReferences(after,{...after,system:after.system.filter(row=>row.id!=='navigation')})).toThrow(/Navigation/);
+    for(const hull of ['alliance_cruiser','dynasty_player_cruiser']) {
+      const actual=resolveTemplate(`assets/entities/${hull}.toml`,{read:file=>fs.existsSync(file)?fs.readFileSync(file,'utf8'):null},parse).resolved.value;
+      expect(actual.navigation_console.sharing).toEqual({...sharing,share_own_faction:false,receive:true});validateNavigationSharing(actual.navigation_console.sharing,actual);
+    }
+  });
   it('keeps curated sharing off by choice and refuses unsupported owner or malformed policy', () => {
     for(const hull of ['alliance_cruiser','dynasty_player_cruiser']) {
       const value=resolveTemplate(`assets/entities/${hull}.toml`,{read:file=>fs.existsSync(file)?fs.readFileSync(file,'utf8'):null},parse).resolved.value;
@@ -78,6 +89,15 @@ describe('accepted-source independent sensing instruments', () => {
     expect(() => prepareSensingOperation(draft, dependencies, { path, value: profile }, schema)).toThrow(/materialise/);
     const after = prepareSensingOperation(draft, dependencies, { path, value: profile, materialise: true }, schema).changes[0].after;
     expect(resolveTemplate(path, { [path]: after, [base]: original }, parse).resolved.value.sensing).toEqual(profile); expect(draft.read(path)).toBe(source);
+  });
+  it('materialises Navigation sharing without changing inherited chart or selector semantics',()=>{
+    const {value,schema}=fixture(),original=stringify(value),source='includes=["base.toml"]\n# child commentary\n',draft=make(source),dependencies={base_files:{[base]:original},packs:[]};
+    const operation={type:'navigation-sharing',path,value:{system:'navigation',share_own_faction:true,receive:false}};
+    expect(()=>prepareSensingOperation(draft,dependencies,operation,schema)).toThrow(/materialise/);
+    const after=prepareSensingOperation(draft,dependencies,{...operation,materialise:true},schema).changes[0].after;
+    const resolved=resolveTemplate(path,{[path]:after,[base]:original},parse).resolved.value;
+    expect({...resolved.navigation_console,sharing:undefined}).toEqual({...value.navigation_console,sharing:undefined});
+    expect(resolved.navigation_console.sharing).toEqual(operation.value);expect(after).toContain('# child commentary');expect(draft.read(path)).toBe(source);
   });
   it('fits actual receiver hardware with finite reserve and physical room plus exact feed and lower-rating AI', () => {
     const { value, schema } = fixture(), profile = structuredClone(value.sensing), id = profile.passive[0].system;

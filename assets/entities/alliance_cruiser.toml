@@ -962,6 +962,11 @@ shows = [ "player", "asteroid", "asteroid_field", "ship", "station", "planet", "
 
 [navigation_console]
 
+[navigation_console.sharing]
+system = "navigation"
+share_own_faction = false
+receive = true
+
 [navigation_console.system_chart]
 range = 800
 shows = [ "region", "asteroid_field", "star", "planet", "moon", "station", "player", "objective_marker" ]

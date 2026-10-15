@@ -9,7 +9,7 @@ export function mountRadarSharingControls(doc) {
     if (disposed) return;
     const present = new Set();
     for (const value of values || []) {
-      if (!value?.owner || !['sensor_radar','tactical_radar'].includes(value.role)) continue;
+      if (!value?.owner || !['sensor_radar','tactical_radar','navigation'].includes(value.role)) continue;
       present.add(value.owner); let row = rows.get(value.owner);
       if (!row) {
         const fieldset = doc.createElement('fieldset'), legend = doc.createElement('legend'), summary = doc.createElement('p');
@@ -23,7 +23,7 @@ export function mountRadarSharingControls(doc) {
             const current = row.value;
             if (disposed || !current?.controllable || !current.can_operate || control.disabled) return;
             doc.defaultView?.activateSemanticAction?.(RADAR_SHARING_ACTION_ID, { source:'control',
-              context:current.role==='tactical_radar'?'tactical':'sensors', detail:{owner:current.owner,
+              context:current.role==='navigation'?'navigation':current.role==='tactical_radar'?'tactical':'sensors', detail:{owner:current.owner,
                 share_own_faction:inputs.share_own_faction.checked,receive:inputs.receive.checked} });
           });
         }

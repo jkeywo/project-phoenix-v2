@@ -13,6 +13,7 @@ import { MOD_ACTIONS } from './editor-mod-actions.js';
 import { NAVIGATION_ACTIONS } from './stations/navigation-actions.js';
 import { TACTICAL_ACTIONS } from './stations/tactical-actions.js';
 import { ENGINEERING_ACTIONS } from './stations/engineering-actions.js';
+import { RADAR_SHARING_ACTION } from './stations/radar-sharing-actions.js';
 
 export function createClientSemanticActionRegistry({ adapters = {}, actionFeedback } = {}) {
   const registry = createSemanticActionRegistry({ actionFeedback });
@@ -23,6 +24,7 @@ export function createClientSemanticActionRegistry({ adapters = {}, actionFeedba
     ...COMMS_ACTIONS,
     ...SENSOR_SCIENCE_ACTIONS,
     ...NAVIGATION_ACTIONS,
+    RADAR_SHARING_ACTION,
     ...ENGINEERING_ACTIONS,
     ...MOD_ACTIONS,
     ...FITTING_ACTIONS,

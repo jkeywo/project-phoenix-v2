@@ -7,6 +7,7 @@ import {
   NAVIGATION_ACTION_CONTEXT,
   NAVIGATION_ACTION_CONTEXTS,
   NAVIGATION_ACTIONS,
+  NAVIGATION_SHARED_WAYPOINT_ACTION_ID,
   NAVIGATION_CHART_ACTION_ID,
   NAVIGATION_CIVILIAN_ORDER_ACTION_ID,
   NAVIGATION_CONTACT_ACTION_ID,
@@ -161,7 +162,7 @@ function idsFor(catalogue, context) {
 
 describe('Navigation semantic actions', () => {
   it('publishes every shipped Navigation intent in its real host contexts with two device slots', () => {
-    expect(NAVIGATION_ACTIONS).toHaveLength(12);
+    expect(NAVIGATION_ACTIONS).toHaveLength(13);
     expect(NAVIGATION_ACTION_CONTEXTS).toEqual(['navigation', 'comms', 'captain']);
     for (const action of NAVIGATION_ACTIONS) {
       if (action.id === NAVIGATION_CHART_ACTION_ID
@@ -171,6 +172,7 @@ describe('Navigation semantic actions', () => {
         expect(action.contexts).toEqual(NAVIGATION_ACTION_CONTEXTS);
       }
       expect(action.bindings).toHaveLength(2);
+      if(action.id===NAVIGATION_SHARED_WAYPOINT_ACTION_ID){expect(action.bindings).toEqual([null,null]);continue;}
       expect(action.bindings[0]?.type).toBe('keyboard');
       expect(action.bindings[1]?.type).toBe('gamepad');
       if (action.id === NAVIGATION_CONTACT_ACTION_ID
@@ -241,6 +243,8 @@ describe('Navigation semantic actions', () => {
       'navigation.waypoint-anchor',
       'navigation.waypoint-clear',
       'navigation.waypoint-place',
+      'navigation.shared-waypoint',
+      'sensing.radar-sharing',
       'power.decrease-allocation',
       'power.increase-allocation',
       'repair.dispatch-team',
@@ -248,6 +252,8 @@ describe('Navigation semantic actions', () => {
       'repair.recall-team',
       'science.shield-focus',
       'sensors.scan',
+      'sensors.cancel-scan',
+      'sensors.passive-enabled',
       'sensors.target-selection',
       'sensors.viewscreen',
       'logistics.dispatch',
@@ -290,6 +296,8 @@ describe('Navigation semantic actions', () => {
       'navigation.waypoint-anchor',
       'navigation.waypoint-clear',
       'navigation.waypoint-place',
+      'navigation.shared-waypoint',
+      'sensing.radar-sharing',
     ].sort());
     expect(idsFor(catalogue, 'engineering')).toEqual([
       'engineering.tractor',
@@ -328,6 +336,10 @@ describe('Navigation semantic actions', () => {
       'engineering.transfer-resource',
     ].sort());
     expect(idsFor(catalogue, 'sensors')).toEqual([
+      'sensing.radar-sharing',
+      'sensors.scan',
+      'sensors.cancel-scan',
+      'sensors.passive-enabled',
       'sensors.cancel-impulse',
       'sensors.target-selection',
       'sensors.viewscreen',

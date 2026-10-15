@@ -10,6 +10,7 @@ sources:
   - crates/phoenix-sim-gameplay/src/science/tracks.rs
   - crates/phoenix-sim-gameplay/src/science/sharing.rs
   - crates/phoenix-simulation/src/science/sharing.rs
+  - crates/phoenix-simulation/src/console/navigation/sharing.rs
   - crates/phoenix-sim-gameplay/src/science/sensing.rs
   - crates/phoenix-simulation/src/science/broad.rs
   - crates/phoenix-simulation/src/science/contact_routing.rs
@@ -97,6 +98,15 @@ route. The public projection may narrow compatible, reciprocally unambiguous
 independent error discs; exports retain the original samples. Copies and relays
 never add independent support. `radar-sharing-controls.js` presents the exact
 owned radar's controls, while foreign feeds remain informational.
+
+`navigation_console.sharing` binds Navigation's distinct waypoint/chart feed to
+its actual System. The adjacent `NavigationSharing` frontier holds dated fixed
+points from the source's own course and explicitly charted landmarks within its
+configured chart coverage. A mobile anchor contributes only its permitted held
+measurement, with the original sample clock; a private live anchor cache grants
+no geometry. Received points preserve original provenance across relays and
+never replace the receiving course or Helm clearance. Applying a received point
+uses the ordinary owned, paid `SetNavigationWaypoint` path.
 
 An observer's substituted Sensors reports enter that same instrument-owned track
 lifecycle. They retain the reported position, permitted label and original sample

@@ -7,6 +7,9 @@ use super::*;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NavigationConsoleConfig {
+    /// Deliberate sharing by this actual Navigation owner; omission is legacy.
+    #[serde(default)]
+    pub sharing: Option<phoenix_model::sensing_sharing::RadarSharingConfig>,
     /// System chart radar config for the Navigation console.
     #[serde(default)]
     pub system_chart: crate::radar_config::RadarConfig,

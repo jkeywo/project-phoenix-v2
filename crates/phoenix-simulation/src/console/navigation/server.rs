@@ -418,12 +418,13 @@ impl NavClearanceIssueState {
 
 use crate::command_admission::finish_action_feedback as finish_waypoint_action_feedback;
 
-fn handle_navigation_waypoint(
+pub(super) fn handle_navigation_waypoint(
     mut ship_query: Query<
         (
             &AdmittedCommands,
             &mut NavigationWaypoint,
             Option<&mut crate::ship::power::ShipPowerSystem>,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -431,13 +432,13 @@ fn handle_navigation_waypoint(
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
 ) {
-    for (admitted, mut waypoint, mut power) in ship_query.iter_mut() {
-        for cmd in admitted.for_target(NAVIGATION_SYSTEM_ID) {
+    for (admitted, mut waypoint, mut power, config) in ship_query.iter_mut() {
+        for cmd in admitted.0.iter().filter(|command| config.map_or(command.target.0==NAVIGATION_SYSTEM_ID,|config|config.0.system(&command.target).is_some_and(|system|system.kind==crate::ship::system_registry::NAVIGATION_KIND))) {
             match &cmd.payload {
                 SystemControlPayload::SetNavigationWaypoint { x, z, source_uuid }
                     if x.is_finite() && z.is_finite() =>
                 {
-                    if !power.as_deref_mut().is_some_and(|power| power.0.try_work_discrete(&crate::ship::system_registry::navigation_system_id()).unwrap_or(false)) {
+                    if !power.as_deref_mut().is_some_and(|power| power.0.try_work_discrete(&cmd.target).unwrap_or(false)) {
                         finish_waypoint_action_feedback(cmd, &mut outbound, ActionFeedbackOutcome::Refused);
                         continue;
                     }
@@ -684,6 +685,8 @@ fn publish_navigation_blackboard(
             // and optional access filters no archetype — the matched set, and
             // so the iteration order, is exactly what it was.
             Option<&crate::ship::components::HumanSeekingHosts>,
+            Option<&super::sharing::NavigationSharing>,
+            Option<&crate::ship_plugin::ShipSystemControlSources>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -693,10 +696,10 @@ fn publish_navigation_blackboard(
     // world picture for everyone, and UUID-sorted so archetype order never
     // reaches the wire.
     let civilians = civilian_traffic_rows(&civilians_q, world_config.as_deref());
-    let nav_id = SystemId(NAVIGATION_SYSTEM_ID.to_string());
-    for (waypoint, is_local, mut bbs, hosts) in ship_q.iter_mut() {
+    for (waypoint, is_local, mut bbs, hosts, sharing, sources) in ship_q.iter_mut() {
+        let nav_id=sharing.map_or_else(||SystemId(NAVIGATION_SYSTEM_ID.to_string()),|sharing|sharing.0.owner.clone());
         let navigation_waypoint = waypoint.snapshot();
-        let bb = if is_local {
+        let mut bb = if is_local {
             NavigationBlackboard {
                 nav_chart_range: cfg.nav_chart_range,
                 nav_chart_shows: cfg.nav_chart_shows.clone(),
@@ -704,6 +707,8 @@ fn publish_navigation_blackboard(
                 navigation_waypoint,
                 civilians: civilians.clone(),
                 host_station: hosts.and_then(|h| h.0.get(&nav_id).cloned()),
+                sharing:None,
+                received_chart:Vec::new(),
             }
         } else {
             NavigationBlackboard {
@@ -711,6 +716,10 @@ fn publish_navigation_blackboard(
                 ..Default::default()
             }
         };
+        if let Some(sharing)=sharing {
+            bb.sharing=Some(sharing.0.sharing_view(sources.is_some_and(|sources|super::sharing::operating(sources,&sharing.0.owner))));
+            bb.received_chart=sharing.0.projection();
+        }
         bbs.0
             .insert(nav_id.clone(), SystemBlackboard::Navigation(bb));
     }

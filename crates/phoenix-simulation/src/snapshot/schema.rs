@@ -575,7 +575,7 @@ pub struct IntentSnapshotState {
     pub manoeuvre: Option<String>,
 }
 
-/// Per-ship combat-memory timestamps projected as ages against `Time<Fixed>`.
+/// Per-ship combat-memory timestamps projected as ages on the logical tick clock.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct RecentCombatActivityState {
     #[serde(default, skip_serializing_if = "Option::is_none")]

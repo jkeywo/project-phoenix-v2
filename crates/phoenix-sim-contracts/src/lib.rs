@@ -14,6 +14,7 @@ pub mod flags;
 pub mod fleet;
 pub mod identity;
 pub mod logging;
+pub mod logical_clock;
 pub mod messages;
 pub mod modifiers;
 pub mod objective_utility;

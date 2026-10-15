@@ -1406,7 +1406,10 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                         .flatten(),
                     sensors_threat: capture_sensors_threat(entity),
                     intent_narration: capture_intent_narration(entity),
-                    recent_combat: capture_recent_combat(entity, context.captured_at),
+                    recent_combat: capture_recent_combat(
+                        entity,
+                        crate::ai::lod_clock::from_world(world) as f32,
+                    ),
                     frequency_hint: capture_frequency_hints(entity),
                     phaser_frequency: capture_ship_phaser_frequencies(entity),
                     tactical_frequency_hint: capture_tactical_frequency_hints(entity),

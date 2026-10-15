@@ -326,6 +326,8 @@ pub(crate) fn clear_last_attacker_on_red_alert_off(
 /// doctrine pool — i.e. behaves exactly as before.
 pub(crate) fn publish_viewscreen_blackboard(
     time: Res<Time>,
+    sim_tick: Option<Res<crate::sim_tick::SimTick>>,
+    fixed: Option<Res<Time<Fixed>>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
     objective_instances: Option<Res<crate::world::server::ObjectiveInstanceManagerRes>>,
@@ -428,7 +430,11 @@ pub(crate) fn publish_viewscreen_blackboard(
                         last_damage_taken_secs,
                         last_hostile_fire_taken_secs,
                     ),
-                    time.elapsed_secs(),
+                    phoenix_sim_contracts::logical_clock::elapsed_secs(
+                        sim_tick.as_deref(),
+                        fixed.as_deref(),
+                        time.elapsed_secs(),
+                    ),
                     attacked_memory_secs,
                 ),
             };

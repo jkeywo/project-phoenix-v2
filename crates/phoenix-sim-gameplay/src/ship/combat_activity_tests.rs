@@ -86,3 +86,26 @@ fn hostile_fire_records_activity_and_resets_flag() {
     );
     assert!(!app.world().get::<ShipAttackedThisTick>(ship).unwrap().0);
 }
+
+#[test]
+fn actual_combat_writer_uses_logical_tick_despite_a_different_host_epoch() {
+    let (mut app, ship) = app_with_hull(test_hull(10.0));
+    let period = phoenix_sim_contracts::sim_tick::sim_tick_period(60.0);
+    app.insert_resource(Time::<Fixed>::from_duration(period));
+    app.insert_resource(phoenix_sim_contracts::sim_tick::SimTick(71));
+    app.world_mut()
+        .get_mut::<ShipAttackedThisTick>(ship)
+        .unwrap()
+        .0 = true;
+    app.world_mut()
+        .get_mut::<WeaponFiredThisTick>(ship)
+        .unwrap()
+        .0 = true;
+    app.update();
+    let expected = (71.0 * period.as_secs_f64()) as f32;
+    let activity = activity_for(&mut app, ship);
+    assert_eq!(activity.last_damage_taken, Some(expected));
+    assert_eq!(activity.last_hostile_fire_taken, Some(expected));
+    assert_eq!(activity.last_weapon_fired, Some(expected));
+    assert_ne!(expected, app.world().resource::<Time>().elapsed_secs());
+}

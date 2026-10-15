@@ -5,13 +5,13 @@ use bevy::prelude::*;
 /// resource. Updated by `update_combat_activity` (SimSet::Broadcast).
 #[derive(Component, Clone, Debug, Default)]
 pub struct RecentCombatActivity {
-    /// Simulation time (elapsed_secs) when damage was last taken, if any.
+    /// Logical simulation time when damage was last taken, if any.
     pub last_damage_taken: Option<f32>,
-    /// Simulation time (elapsed_secs) when hostile fire last targeted this
+    /// Logical simulation time when hostile fire last targeted this
     /// ship, even if shields absorbed the hit before hull damage leaked
     /// through.
     pub last_hostile_fire_taken: Option<f32>,
-    /// Simulation time (elapsed_secs) when a weapon was last fired, if any.
+    /// Logical simulation time when a weapon was last fired, if any.
     pub last_weapon_fired: Option<f32>,
     /// Hull total at the end of the previous tick, used to detect damage.
     pub prev_hull: f32,
@@ -49,6 +49,8 @@ impl RecentCombatActivity {
 /// mutated hull/attacker/weapon-fired.
 pub fn update_combat_activity(
     time: Res<Time>,
+    sim_tick: Option<Res<phoenix_sim_contracts::sim_tick::SimTick>>,
+    fixed: Option<Res<Time<Fixed>>>,
     mut ships: Query<
         (
             Option<&crate::entities::spawner::EntitySystemHull>,
@@ -60,7 +62,11 @@ pub fn update_combat_activity(
         With<crate::server_app::Ship>,
     >,
 ) {
-    let now = time.elapsed_secs();
+    let now = phoenix_sim_contracts::logical_clock::elapsed_secs(
+        sim_tick.as_deref(),
+        fixed.as_deref(),
+        time.elapsed_secs(),
+    );
 
     for (hull_comp, damage, mut activity, mut weapon_fired, mut attacked) in ships.iter_mut() {
         // Check for hull decrease against prev_hull snapshot.

@@ -557,6 +557,7 @@ fn entity_direct_fire_banks(
 /// their entry.
 pub(crate) fn aggregate_doctrine_blackboards(
     time: Res<Time>,
+    fixed: Option<Res<Time<Fixed>>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     // `ai`-category decision-trace instrumentation (issue #1146). `Option<Res>`
     // for the usual bare-`App` reason (a fixture need not insert either); with
@@ -591,10 +592,12 @@ pub(crate) fn aggregate_doctrine_blackboards(
         )>,
     >,
 ) {
-    // Sim seconds off the fixed clock — Bevy context-switches `Res<Time>` to
-    // `Time<Fixed>` inside `FixedUpdate`, so this is the tick's own elapsed
-    // time and never a wall clock (AGENTS.md #7).
-    let now = time.elapsed_secs();
+    // Combat memories survive a fresh host epoch on this shared tick clock.
+    let now = phoenix_sim_contracts::logical_clock::elapsed_secs(
+        sim_tick.as_deref(),
+        fixed.as_deref(),
+        time.elapsed_secs(),
+    );
     let attacked_memory_secs = world_config
         .as_deref()
         .map(|wc| wc.global.attacked_memory_secs)

@@ -59,3 +59,22 @@ fn actual_world_without_logical_clock_uses_the_same_generic_time_as_lod() {
         "Fixed-only capture fixtures retain their supported fallback"
     );
 }
+
+#[test]
+fn f32_combat_history_reconstructs_its_actual_event_tick_before_age_projection() {
+    let mut world = World::new();
+    let period = crate::sim_tick::sim_tick_period(60.0);
+    world.insert_resource(Time::<Fixed>::from_duration(period));
+    world.insert_resource(crate::sim_tick::SimTick(103));
+    let timestamp = sample(Some(87), Some(period.as_secs_f64()), 0.0) as f32;
+    let age = from_world(&world) as f32 - timestamp;
+    let restored = restore_timestamp(&world, 103, f64::from(age), 700.0) as f32;
+    assert_eq!(timestamp.to_bits(), restored.to_bits());
+    for tick in 104..464 {
+        world.resource_mut::<crate::sim_tick::SimTick>().0 = tick;
+        assert_eq!(
+            (from_world(&world) as f32 - timestamp).to_bits(),
+            (from_world(&world) as f32 - restored).to_bits()
+        );
+    }
+}

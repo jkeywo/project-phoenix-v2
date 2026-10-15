@@ -404,6 +404,7 @@ fn handle_set_objective_priority(
 /// `ControlSource::Ai`.
 fn operate_captain_ai(
     time: Res<Time>,
+    fixed: Option<Res<Time<Fixed>>>,
     // `ai`-category decision-trace instrumentation (issue #1146). `Option<Res>`
     // for the bare-`App` reason the macro docs give; with `ai` logging off the
     // trace is skipped and the red-alert decision is unchanged.
@@ -436,7 +437,11 @@ fn operate_captain_ai(
         Option<&crate::entities::spawner::EntityName>,
     )>,
 ) {
-    let now = time.elapsed_secs();
+    let now = phoenix_sim_contracts::logical_clock::elapsed_secs(
+        sim_tick.as_deref(),
+        fixed.as_deref(),
+        time.elapsed_secs(),
+    );
     let registry = faction_registry.as_deref().map(|r| &r.0);
 
     for (

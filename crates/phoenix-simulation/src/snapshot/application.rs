@@ -1226,6 +1226,23 @@ pub(super) fn apply_entity_state_with(
         .map(|age| {
             crate::ai::lod_clock::restore_timestamp(world, tick, age, f64::from(restored_at))
         });
+    let combat_timestamps = row.recent_combat.as_ref().map(|state| {
+        [
+            state.last_damage_taken_age_secs,
+            state.last_hostile_fire_taken_age_secs,
+            state.last_weapon_fired_age_secs,
+        ]
+        .map(|age| {
+            age.map(|age| {
+                crate::ai::lod_clock::restore_timestamp(
+                    world,
+                    tick,
+                    f64::from(age),
+                    f64::from(restored_at),
+                ) as f32
+            })
+        })
+    });
     let mut entity_mut = world.entity_mut(entity);
     if let Some(saved) = &row.equipment_recovery {
         entity_mut.insert(saved.clone());
@@ -1471,7 +1488,11 @@ pub(super) fn apply_entity_state_with(
         apply_intent_narration(&mut entity_mut, intent_narration);
     }
     if let Some(recent_combat) = &row.recent_combat {
-        apply_recent_combat(&mut entity_mut, recent_combat, restored_at);
+        apply_recent_combat(
+            &mut entity_mut,
+            recent_combat,
+            combat_timestamps.expect("combat row has canonical timestamps"),
+        );
     }
     if let Some(frequency_hint) = &row.frequency_hint {
         apply_frequency_hint(&mut entity_mut, frequency_hint);
@@ -1731,21 +1752,15 @@ pub(super) fn apply_intent_narration(
 pub(super) fn apply_recent_combat(
     entity: &mut EntityWorldMut<'_>,
     stored: &RecentCombatActivityState,
-    restored_at: f32,
+    timestamps: [Option<f32>; 3],
 ) {
     if let Some(mut activity) =
         entity.get_mut::<crate::ship::combat_activity::RecentCombatActivity>()
     {
         activity.replace_continuation(
-            stored
-                .last_damage_taken_age_secs
-                .map(|age| restored_at - age),
-            stored
-                .last_hostile_fire_taken_age_secs
-                .map(|age| restored_at - age),
-            stored
-                .last_weapon_fired_age_secs
-                .map(|age| restored_at - age),
+            timestamps[0],
+            timestamps[1],
+            timestamps[2],
             stored.prev_hull,
         );
     }

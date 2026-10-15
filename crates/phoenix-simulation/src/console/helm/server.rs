@@ -533,20 +533,46 @@ pub(crate) fn publish_helm_blackboard(
         }
 
         // ── Lateral thrust blackboard ───────────────────────────────────────
-        let lt_sid = lateral_thrust_system_id();
-        let lt_is_online =
-            !crate::ship::compartment_damage::operation_disabled(damage, hull, &lt_sid);
-        let lt_auto = sources
-            .map(|s| s.0.policy_for(&lt_sid).operate_ai)
-            .unwrap_or(false);
-        bbs.0.insert(
-            lt_sid,
-            SystemBlackboard::HelmLateralThrust(HelmLateralThrustBlackboard {
-                lateral_input: last_input.lateral,
-                is_online: lt_is_online,
-                auto: lt_auto,
-            }),
-        );
+        let lateral_owner = if let Some(profile) = movement_profile {
+            profile.0.lateral.clone()
+        } else if let Some(config) = ship_config {
+            let mut owners =
+                config.0.systems.iter().filter(|system| {
+                    system.kind == crate::ship::system_registry::LATERAL_THRUST_KIND
+                });
+            let first = owners.next().map(|system| system.id.clone());
+            if owners.next().is_none() {
+                first
+            } else {
+                None
+            }
+        } else {
+            Some(lateral_thrust_system_id())
+        };
+        // A previous fixed-ID projection is not another source of authority.
+        if lateral_owner.as_ref() != Some(&lateral_thrust_system_id()) {
+            bbs.0.remove(&lateral_thrust_system_id());
+        }
+        if let Some(lt_sid) = lateral_owner {
+            let lt_is_online =
+                sources.is_none_or(|sources| {
+                    sources.0.entries().any(|(owner, _)| owner == &lt_sid)
+                        && !sources.0.is_offline(&lt_sid)
+                        && sources.0.source_for(&lt_sid)
+                            != crate::ship::control_source::ControlSource::Offline
+                }) && !crate::ship::compartment_damage::operation_disabled(damage, hull, &lt_sid);
+            let lt_auto = sources
+                .map(|sources| sources.0.policy_for(&lt_sid).operate_ai)
+                .unwrap_or(false);
+            bbs.0.insert(
+                lt_sid,
+                SystemBlackboard::HelmLateralThrust(HelmLateralThrustBlackboard {
+                    lateral_input: last_input.lateral,
+                    is_online: lt_is_online,
+                    auto: lt_auto,
+                }),
+            );
+        }
     }
 }
 

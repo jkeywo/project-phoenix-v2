@@ -944,3 +944,6 @@ fn publish_writes_engine_and_lateral_entries_for_npc_ship() {
         "expected NPC helm-lateral-thrust entry"
     );
 }
+
+#[path = "lateral_owner_tests.rs"]
+mod lateral_owner_tests;

@@ -157,5 +157,15 @@ equipment, stock replenishment and active-state save/reconnect. Review corrected
 physical-hit and barrel behavior independently and run the affected owner tests.
 Record representative combat and non-combat activity across supported hull sizes.
 
+The later Science illumination source checkpoint is integrated as `28ac5475`,
+`c1273952` and `60718b3d`, with the registration/provenance compile correction in
+`32e15426`. It uses an independently controlled, paid mounted emitter and frozen
+receiver opt-in; it does not choose Tactical's target or replace a round's target
+intent. The optional six-seat illumination Cruiser supplies actual finite energy,
+damage and compartment bindings. Supported guided profile authoring and exact-owner
+controls are included. The integrated test compile check and 548-test client run
+pass; new native emitter/snapshot cases and the full-host illumination journey
+remain unverified. This does not close the combat exit above.
+
 Repository integration gates run once on the integrated result before a push.
 No push has been requested or performed for this work.

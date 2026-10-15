@@ -34,9 +34,15 @@ fn steps(app: &mut App, count: usize) {
     }
 }
 fn boot() -> (App, Entity) {
+    boot_with(
+        "tests/fixtures/local-jump-world.toml",
+        "assets/entities/local_jump_cruiser.toml",
+    )
+}
+fn boot_with(world_path: &str, ship_path: &str) -> (App, Entity) {
     let mut app = build_headless_app(&HeadlessArgs {
-        world_path: "tests/fixtures/local-jump-world.toml".into(),
-        ship_path: "assets/entities/local_jump_cruiser.toml".into(),
+        world_path: world_path.into(),
+        ship_path: ship_path.into(),
         deterministic: true,
         seed: Some(181820),
         ..Default::default()
@@ -369,4 +375,96 @@ fn actual_joined_partial_jump_json360_handoff_arrival_and_finite_replenishment()
         received,
         "actual paid batch must reach the drive's own Capacity endpoint"
     );
+}
+
+#[test]
+fn actual_hardened_drive_uses_original_gravity_and_keeps_paid_json360_continuation() {
+    let boot = || {
+        boot_with(
+            "tests/fixtures/gravity-hardened-jump-world.toml",
+            "assets/entities/gravity_hardened_jump_cruiser.toml",
+        )
+    };
+    let (mut live, actor) = boot();
+    control(
+        &mut live,
+        actor,
+        "navigation",
+        Control::SetNavigationWaypoint {
+            x: 100.0,
+            z: 0.0,
+            source_uuid: None,
+        },
+    );
+    control(
+        &mut live,
+        actor,
+        "local-jump",
+        Control::BeginTransitToWaypoint { request: None },
+    );
+    assert_eq!(phase(&live, actor)["phase"], "preparing");
+    assert!(
+        live.world().get::<ShipTransitDrives>(actor).unwrap().0[&id("local-jump")].worked_secs()
+            > 0.0
+    );
+    let saved: PhoenixSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
+    let (mut resumed, restored) = boot();
+    assert!(ready_to_restore(resumed.world(), &saved));
+    let before = capture(resumed.world());
+    let digest = world_digest(resumed.world());
+    for fault in 0..2 {
+        let mut forged = saved.clone();
+        let row = forged
+            .entities
+            .iter_mut()
+            .find(|row| row.transit.is_some())
+            .unwrap();
+        let state = row
+            .transit
+            .as_mut()
+            .unwrap()
+            .0
+            .get_mut(&id("local-jump"))
+            .unwrap();
+        let phoenix_sim_gameplay::ship::transit::TransitPhase::Preparing { order, .. } =
+            &mut state.phase
+        else {
+            panic!("actual partial drive")
+        };
+        if fault == 0 {
+            order.profile.config.gravity_response = 0.5;
+        } else {
+            order.profile.commit_energy *= 0.5;
+        }
+        assert!(!restore(resumed.world_mut(), &forged).is_complete());
+        assert_eq!(capture(resumed.world()), before);
+        assert_eq!(world_digest(resumed.world()), digest);
+    }
+    assert!(restore(resumed.world_mut(), &saved).is_complete());
+    let mut arrived = false;
+    for step in 0..360 {
+        same(&live, &resumed, step);
+        for (app, entity) in [(&live, actor), (&resumed, restored)] {
+            let value = phase(app, entity);
+            let committed = matches!(value["phase"].as_str(), Some("committed" | "arrived"));
+            assert_eq!(fuel(app, entity), if committed { 22 } else { 24 });
+            if value["phase"] == "arrived" {
+                let position = app.world().get::<ShipPhysics>(entity).unwrap();
+                let radius =
+                    ((position.x - 300.0).powi(2) + position.y.powi(2) + position.z.powi(2)).sqrt();
+                assert!((198.0..=202.0).contains(&radius), "the selected course is inside original512 but outside effective128 exclusion: {radius}");
+                assert!(
+                    radius > 75.0,
+                    "ordinary real planet collider remains outside arrival"
+                );
+                arrived = true;
+            }
+        }
+        live.update();
+        resumed.update();
+    }
+    same(&live, &resumed, 360);
+    assert!(arrived);
+    assert_eq!(fuel(&live, actor), 22);
 }

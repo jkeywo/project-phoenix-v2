@@ -1,0 +1,19 @@
+# Quiet actual LocalJump consumer proof, with a distant explicit fixed body.
+# No injected controllers, resources, observations or arrival coordinates.
+[global]
+seed = 181820
+[player_spawn]
+position = [0, 0, 0]
+[[entity]]
+template_path = "assets/entities/gravity_hardened_jump_cruiser.toml"
+id = "player-ship"
+name = "player-ship"
+spawn_on = "game_start"
+transform = { position = [0, 0, 0] }
+[[entity]]
+template_path = "assets/entities/planet_gas_giant.toml"
+id = "fixed-body"
+name = "fixed-body"
+transform = { position = [300, 0, 0] }
+[entity.overrides.arrival_gravity]
+exclusion_radius = 512

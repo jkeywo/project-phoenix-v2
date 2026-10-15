@@ -427,3 +427,61 @@ Workshop composition and the action-map inventory passed 128 JavaScript tests
 across three files. Actual native identity continuation and the corrected
 commitment/clearance scenarios still require execution; these compile/client
 results do not close the increment.
+## Adopted next bounded slice: operating signatures and concealment
+
+S026 will be a real optional fitted ConcealmentEmitter, with its own existing
+System admission/Console/compartment and one ordinary state-tree controller.
+One generic Boolean enabled channel and actual PowerInput/Operation use the
+same supported composition pattern as physical identity equipment. Current
+continuous work and conditions bound its field; no saved prepaid field, hidden
+observer target list, invisibility flag or new actor/controller is introduced.
+
+First extract the existing actual operating-signature calculation from Passive
+into a shared pure measurement helper with equivalent strongest-cause/tie
+behaviour. Its real consumers are Passive and this concealment calculation.
+Then extend intentional signature evidence with a small closed set of actual
+reactor, propulsion, active sensing, weapon, communication and other machinery
+causes. Read actual reactor output and System work at the existing physical
+sampling boundary. No desired power, attempted command, private target or
+foreign observer awareness can substitute for performed operation. Evaluate
+signatures at the existing actual measurement phase after same-tick machinery
+work; do not cache a pre-work signature or apply the target factor twice. Keep source
+identity private; these are measured strengths/causes under ordinary coverage.
+
+The first concealment profile declares finite maximum suppression strictly
+between zero and one and a positive emission scale. A current paid work fraction
+bounds suppression. Physical perceptibility is
+`1 - max_suppression * paid_fraction / (1 + actual_emission / emission_scale)`.
+Use widened finite arithmetic and stable actual System order, with one selected
+active fitted field per ship. Zero/unprocessed/unfunded/Offline/disabled equipment
+is neutral. Suppression remains strictly short of perfect invisibility.
+
+Apply this target perceptibility once to Broad and focused acquisition coverage
+and once to the actual emission strength sampled by Passive. Receiver jamming,
+protection, natural path attenuation, terrain and instrument power remain their
+existing separate factors. This modifies whether the physical return can be
+acquired, never its real geometry, actor, observer-local aim alias or true body.
+Current real emissions weaken suppression while the cloak remains enabled;
+reactor-off operation from finite local reserves can be quieter. No universal
+weapon/transmission-to-uncloak rule or invented incompatibility is added.
+
+Lost acquisition follows the existing history/prediction/uncertainty rules.
+Do not erase earned samples, rewrite other Console records or mint a public
+cloaked/success/deception bit. Own equipment details may show enabled, funded
+activity and own measured operating causes; they reveal no receiver census or
+enemy awareness. Workshop authors the actual profile, energy, conditions,
+placement and supported Boolean tree. Reference tuning remains provisional.
+
+Canonical enabled intent participates immediately in the existing snapshot,
+digest and restore contracts. Current paid field/signature views are derived
+and cleared before restored consumers, with no bootstrap work. Prove ordinary
+AI and Human control, funded/partial/unfunded operation, an actual acquired
+contact lost/recovered by real operation changes while cloak intent remains on,
+retained history/real-body targeting, explicit Console isolation, Workshop and
+fresh JSON360/no-write continuation. Compare deliberate sensing/balance changes
+separately from the behaviour-preserving extraction.
+
+S027 low-emission human warnings and explicit ordinary-AI intent/context, plus
+S021 bounded information/access/disruption objectives, remain subsequent selected
+consumers. This adopted slice does not claim them satisfied by a cloak toggle or
+by existing ReportStatus alone.

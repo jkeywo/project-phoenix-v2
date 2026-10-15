@@ -169,6 +169,7 @@ pub fn project(
         .values()
         .filter(|launch| &launch.tube == tube)
         .map(|launch| GuidedOrderView {
+            revision: launch.issued.revision,
             round_uuid: launch.round_uuid.clone(),
             tube: launch.tube.clone(),
             target: launch.issued.target.clone(),
@@ -183,6 +184,9 @@ pub fn project(
                 .as_ref()
                 .is_none_or(|receipt| receipt.order != launch.issued),
             can_retarget: source_operable && launch.receiver.is_some(),
+            can_stop: source_operable
+                && launch.receiver.is_some()
+                && launch.issued.target.is_some(),
         })
         .collect()
 }
@@ -210,4 +214,27 @@ pub fn note_launch_command(
     }
     state.launch_commands.insert(first_emitted_id, command);
     true
+}
+
+/// Maintain an operator's existing target only when its original evidence
+/// advances. No physical roster, acknowledgement guess or periodic paid retry
+/// is needed; explicit stop remains stopped even when new readings appear.
+pub fn maintenance_requests(
+    state: &GuidedSourceKnowledge,
+    tube: &SystemId,
+    mut sample_tick: impl FnMut(&str) -> Option<u64>,
+) -> Vec<(String, String)> {
+    state
+        .launches
+        .values()
+        .filter_map(|launch| {
+            if &launch.tube != tube || launch.receiver.is_none() {
+                return None;
+            }
+            let target = launch.issued.target.as_ref()?;
+            let observed = sample_tick(target)?;
+            (launch.issued.sampled_tick.is_none_or(|old| observed > old))
+                .then(|| (launch.round_uuid.clone(), target.clone()))
+        })
+        .collect()
 }

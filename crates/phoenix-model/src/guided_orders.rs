@@ -58,6 +58,7 @@ pub struct GuidedSourceKnowledge {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GuidedOrderView {
+    pub revision: u64,
     pub round_uuid: String,
     pub tube: SystemId,
     pub target: Option<String>,
@@ -66,4 +67,19 @@ pub struct GuidedOrderView {
     pub acknowledged_tick: Option<u64>,
     pub unresolved: bool,
     pub can_retarget: bool,
+    pub can_stop: bool,
+}
+
+/// Own launch knowledge and current permitted target choices only.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GuidanceControlsView {
+    pub rounds: Vec<GuidedOrderView>,
+    pub targets: Vec<GuidanceTargetOption>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GuidanceTargetOption {
+    pub contact: String,
+    pub name: Option<String>,
 }

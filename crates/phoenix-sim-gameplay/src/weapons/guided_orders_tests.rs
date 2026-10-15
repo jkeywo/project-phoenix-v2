@@ -295,3 +295,37 @@ fn delayed_emission_uses_its_actual_first_id_not_a_later_order_on_the_same_tube(
         Some("different-public-contact")
     );
 }
+
+#[test]
+fn ordinary_maintenance_forwards_new_original_samples_once_and_preserves_explicit_stop() {
+    let mut state = GuidedSourceKnowledge::default();
+    let launch = launch("own-emitted-round", 100);
+    let tube = launch.tube.clone();
+    assert!(note_launch(&mut state, launch, 100));
+    assert!(maintenance_requests(&state, &tube, |_| Some(99)).is_empty());
+    let work = maintenance_requests(&state, &tube, |_| Some(101));
+    assert_eq!(
+        work,
+        vec![("own-emitted-round".into(), "opaque-contact-7".into())]
+    );
+    let order = issue(
+        &mut state,
+        &tube,
+        &work[0].0,
+        Some(work[0].1.clone()),
+        Some(101),
+        102,
+    )
+    .unwrap();
+    assert!(acknowledge(&mut state, &tube, &work[0].0, &order, 102));
+    for _ in 0..360 {
+        assert!(maintenance_requests(&state, &tube, |_| Some(101)).is_empty());
+    }
+    assert_eq!(maintenance_requests(&state, &tube, |_| Some(103)).len(), 1);
+    issue(&mut state, &tube, "own-emitted-round", None, None, 104).unwrap();
+    assert!(maintenance_requests(&state, &tube, |_| Some(105)).is_empty());
+    assert!(
+        maintenance_requests(&state, &SystemId("another-tube".into()), |_| Some(106)).is_empty()
+    );
+    assert!(!project(&state, &tube, true)[0].can_stop);
+}

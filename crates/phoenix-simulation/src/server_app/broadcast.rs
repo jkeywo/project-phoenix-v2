@@ -985,6 +985,9 @@ fn build_system_status(
             }
         }
     }
+    for (owner, row) in &mut status {
+        row.guidance = crate::console::weapons::guidance_ui::project(world, entity, owner);
+    }
     let owners = config
         .0
         .systems

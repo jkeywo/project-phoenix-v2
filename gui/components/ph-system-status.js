@@ -1,3 +1,4 @@
+import { mountGuidanceControls } from './guidance-controls.js';
 /** Shared equipment indicators and permitted fitting reports. No simulation state. */
 import { t, wireText } from '../strings.js';
 import { createFocusTrap } from '../focus-trap.js';
@@ -44,8 +45,8 @@ export function mountSystemStatus(document) {
       let entry = detailRows.get(row.system_id);
       if (!entry) {
         const node = document.createElement('section'), heading = document.createElement('h3'), facts = document.createElement('div');
-        const fitting = mountFittingControls(document), recovery = mountEquipmentRecoveryControls(document); node.append(heading, facts, fitting.node, recovery.node); detail.append(node);
-        entry = { node, heading, facts, fitting, recovery, signature: null }; detailRows.set(row.system_id, entry);
+        const fitting = mountFittingControls(document), recovery = mountEquipmentRecoveryControls(document), guidance = mountGuidanceControls(document); node.append(heading, facts, fitting.node, recovery.node, guidance.node); detail.append(node);
+        entry = { node, heading, facts, fitting, recovery, guidance, signature: null }; detailRows.set(row.system_id, entry);
       }
       const label = statusLabel(row); if (entry.heading.textContent !== label) entry.heading.textContent = label;
       const signature = JSON.stringify([row.reasons, row.physical]);
@@ -66,8 +67,9 @@ export function mountSystemStatus(document) {
       }
       entry.fitting.update(row.system_id, row.fitting || [], row.delegated || selected === delegatedSelection);
       entry.recovery.update(row.system_id, row.equipment_recovery, row.delegated || selected === delegatedSelection);
+      entry.guidance.update(row.system_id, row.guidance, row.delegated || selected === delegatedSelection);
     }
-    for (const [id, entry] of detailRows) if (!seen.has(id)) { entry.fitting.dispose(); entry.recovery.dispose(); entry.node.remove(); detailRows.delete(id); }
+    for (const [id, entry] of detailRows) if (!seen.has(id)) { entry.fitting.dispose(); entry.recovery.dispose(); entry.guidance.dispose(); entry.node.remove(); detailRows.delete(id); }
   }
 
   function open(id) { selected = id; paintDetails(); if (selected === null) return; dialog.hidden = false; trap.activate(); }
@@ -107,6 +109,6 @@ export function mountSystemStatus(document) {
       root.hidden = !rows.length;
       if (selected !== null) paintDetails();
     },
-    dispose() { close(); plans.dispose(); for (const entry of detailRows.values()) { entry.fitting.dispose(); entry.recovery.dispose(); } detailRows.clear(); root.remove(); dialog.remove(); },
+    dispose() { close(); plans.dispose(); for (const entry of detailRows.values()) { entry.fitting.dispose(); entry.recovery.dispose(); entry.guidance.dispose(); } detailRows.clear(); root.remove(); dialog.remove(); },
   };
 }

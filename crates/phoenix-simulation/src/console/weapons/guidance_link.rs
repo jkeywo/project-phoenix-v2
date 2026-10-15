@@ -66,6 +66,40 @@ impl GuidanceMeasurements<'_, '_> {
         contact: &str,
     ) -> Option<GuidanceObservation> {
         let (observer, config, boards, tracks, controls) = self.scopes.get(entity).ok()?;
+        GuidanceContext {
+            observer,
+            config,
+            boards,
+            tracks,
+            controls,
+            tick: self.tick.as_deref()?.0,
+            runtime: self.runtime.as_deref(),
+        }
+        .sample(owner, contact)
+    }
+}
+
+/// The same scope feeds command validation, source controls and ordinary AI.
+/// It contains no foreign physical pose or remote lifetime/health frontier.
+pub(crate) struct GuidanceContext<'a> {
+    pub observer: &'a EntityUuid,
+    pub config: &'a ShipConfigComponent,
+    pub boards: &'a ShipSystemBlackboards,
+    pub tracks: &'a BroadTracks,
+    pub controls: Option<&'a SensingControls>,
+    pub tick: u64,
+    pub runtime: Option<&'a crate::world::server::WorldContentRuntime>,
+}
+impl GuidanceContext<'_> {
+    pub fn sample(&self, owner: &SystemId, contact: &str) -> Option<GuidanceObservation> {
+        let Self {
+            observer,
+            config,
+            boards,
+            tracks,
+            controls,
+            ..
+        } = *self;
         let route = crate::science::contact_routing::resolve_machinery(
             Some(&config.0),
             Some(boards),
@@ -74,7 +108,7 @@ impl GuidanceMeasurements<'_, '_> {
             owner,
             contact,
         )?;
-        if self.runtime.as_ref().is_some_and(|runtime| {
+        if self.runtime.is_some_and(|runtime| {
             crate::gm::operations::contact::mode(&runtime.contact_overrides, &observer.0, &route)
                 == crate::gm::operations::contact::ContactMode::Conceal
         }) {
@@ -113,7 +147,7 @@ impl GuidanceMeasurements<'_, '_> {
                 observation: record.observation.clone(),
             },
         };
-        result.validate(self.tick.as_deref()?.0).ok()?;
+        result.validate(self.tick).ok()?;
         Some(result)
     }
 }

@@ -455,6 +455,7 @@ pub(crate) fn ai_torpedo_auto_fire(
     // runs this host must register it (`register_ai_host_env`) or fail loudly at
     // schedule build, so a bare `App` cannot silently diverge from production.
     ai_env: crate::ai::host::AiHostEnv,
+    guidance: crate::console::weapons::guidance_link::GuidanceMeasurements,
     // Objective-contributed Command stances (issue #1110). `Option<Res<_>>` so a
     // bare-`App` weapons fixture with no world plugin reads no contributions.
     active_objective_stances: Option<Res<crate::console::command::server::ActiveObjectiveStances>>,
@@ -469,6 +470,7 @@ pub(crate) fn ai_torpedo_auto_fire(
             &crate::server_app::ShipSystemBlackboards,
             Option<&crate::console::weapons::TorpedoSystemResource>,
             Option<&crate::console::weapons::TorpedoTubeAiPolicies>,
+            Option<&crate::console::weapons::guidance_link::ShipGuidanceKnowledge>,
             &mut crate::core::messages::AdmittedCommands,
             // Issue #872: this ship's own red-alert state, seeded as a typed
             // fact for the tube's authored LAUNCH predicate. `Option<&_>` for
@@ -510,6 +512,7 @@ pub(crate) fn ai_torpedo_auto_fire(
         blackboards,
         torpedo_sys_comp,
         tube_policies,
+        guidance_knowledge,
         mut admitted,
         red_alert_opt,
         stances_opt,
@@ -610,6 +613,41 @@ pub(crate) fn ai_torpedo_auto_fire(
             let Some(target) = crate::ship::system_registry::torpedo_tube_system_id(tube_id) else {
                 continue;
             };
+            // Maintain the last explicit own order, independently of today's
+            // primary target. Only a newer original permitted reading triggers
+            // another paid issue; explicit stop is never undone by maintenance.
+            if torpedo_sys.config.receiver.is_some()
+                && crate::ai::host::ai_operates(&control_sources.0, &target)
+            {
+                if let Some(knowledge) = guidance_knowledge {
+                    for (round_uuid, target_uuid) in
+                        phoenix_sim_gameplay::weapons::guided_orders::maintenance_requests(
+                            &knowledge.0,
+                            &target,
+                            |contact| {
+                                aims.resolve_reference(ship_entity, &target, contact, |_| None)
+                                    .filter(|aim| aim.allows(tube.targets.as_deref()))?;
+                                guidance
+                                    .sample(ship_entity, &target, contact)
+                                    .map(|reading| reading.sampled_tick)
+                            },
+                        )
+                    {
+                        crate::command_admission::ai_emit::emit_ai_command(
+                            entity_uuid,
+                            target.clone(),
+                            crate::core::messages::SystemControlPayload::RetargetGuidedRound {
+                                round_uuid,
+                                target_uuid,
+                            },
+                            control_sources,
+                            &sessions,
+                            Some(ship_config),
+                            &mut admitted,
+                        );
+                    }
+                }
+            }
             let Some(aim) = aims.resolve(ship_entity, &target, |route| {
                 asteroid_q
                     .iter()

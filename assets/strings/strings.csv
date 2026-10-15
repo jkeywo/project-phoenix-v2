@@ -5884,3 +5884,20 @@ weapons.assignments.no_automatic,No retained automatic weapon fallback,None,Kein
 sensing.track.elevation.title,Paid measured target altitude,Observed altitude,Beobachtete Hoehe,Observed altitude,machine
 sensing.track.elevation.value,Original acquired altitude and uncertainty,{height} ± {error} AU,{height} ± {error} AU,{height} ± {error} AU,machine
 sensing.track.elevation.sample,Original altitude sample time,Sample tick {tick},Messung Tick {tick},Sample tick {tick},machine
+guidance.title,Guided round source controls,Guided rounds,Lenkwaffen,Guided rounds,machine
+guidance.round,Guided round source controls,Own launch,Eigener Abschuss,Own launch,machine
+guidance.target,Guided round source controls,Guidance target,Lenkziel,Guidance target,machine
+guidance.send,Guided round source controls,Send target reading,Zielmessung senden,Send target reading,machine
+guidance.stop,Guided round source controls,Stop guidance,Lenkung stoppen,Stop guidance,machine
+guidance.round_number,Guided round source controls,Round {number},Flugkörper {number},Round {number},machine
+guidance.empty,Guided round source controls,No retained launch records,Keine gespeicherten Abschüsse,No retained launch records,machine
+guidance.launched,Guided round source controls,Launched locally; remote state unknown,Lokal gestartet; entfernter Zustand unbekannt,Launched locally; remote state unknown,machine
+guidance.unresolved,Guided round source controls,Order sent; awaiting receipt,Befehl gesendet; Empfang ausstehend,Order sent; awaiting receipt,machine
+guidance.heard,Guided round source controls,Order heard; application and survival unknown,Befehl empfangen; Ausführung und Zustand unbekannt,Order heard; application and survival unknown,machine
+guidance.intent,Guided round source controls,Sent target: {target},Gesendetes Ziel: {target},Sent target: {target},machine
+guidance.held,Guided round source controls,Previously selected contact,Zuvor gewählter Kontakt,Previously selected contact,machine
+guidance.stopped,Guided round source controls,Stop guidance requested,Lenkungsstopp angefordert,Stop guidance requested,machine
+semantic_action.guidance.target.label,Guided round source controls,Send guided-round target,Lenkwaffenziel senden,Send guided-round target,machine
+semantic_action.guidance.target.accessibility,Guided round source controls,Send a permitted target reading to an own launched round,Eine erlaubte Zielmessung an einen eigenen Flugkörper senden,Send a permitted target reading to an own launched round,machine
+semantic_action.guidance.stop.label,Guided round source controls,Stop guided-round guidance,Lenkwaffenlenkung stoppen,Stop guided-round guidance,machine
+semantic_action.guidance.stop.accessibility,Guided round source controls,Send stop guidance to an own launched round,Lenkungsstopp an einen eigenen Flugkörper senden,Send stop guidance to an own launched round,machine

@@ -45,6 +45,8 @@ pub struct SystemStatus {
     pub fitting_planner: Option<FittingPlannerContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub equipment_recovery: Option<crate::equipment_recovery_ui::EquipmentRecoveryView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guidance: Option<crate::guided_orders::GuidanceControlsView>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,6 +122,7 @@ impl SystemStatus {
             fitting: Vec::new(),
             fitting_planner: None,
             equipment_recovery: None,
+            guidance: None,
         };
         if offline && !matches!(damage, Some(DamageTier::Disabled | DamageTier::Destroyed)) {
             status.unavailable(StatusReasonCode::Offline, None);

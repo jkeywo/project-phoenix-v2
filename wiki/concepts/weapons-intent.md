@@ -2,7 +2,7 @@
 title: Weapons Intent
 type: concept
 tags: [weapons, tactical, phaser, blaster, torpedo, replication, reconnect]
-sources: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/core/broadcast/lifecycle.rs, crates/phoenix-sim-gameplay/src/weapons/blaster.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, gui/components/ph-phasers-controls.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js, crates/phoenix-sim-gameplay/src/weapons/mount.rs, crates/phoenix-sim-gameplay/src/weapons/pattern.rs, crates/phoenix-sim-gameplay/src/entities/config/weapon_definition.rs, gui/components/weapon-target-controls.js, gui/stations/weapon-target-actions.js, editor/workshop-weapon-groups.js, gui/workshop-weapon-groups-panel.js, crates/phoenix-simulation/src/console/weapons/readiness.rs, gui/sensor-tracks.js]
+sources: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/core/broadcast/lifecycle.rs, crates/phoenix-sim-gameplay/src/weapons/blaster.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, gui/components/ph-phasers-controls.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js, crates/phoenix-sim-gameplay/src/weapons/mount.rs, crates/phoenix-sim-gameplay/src/weapons/pattern.rs, crates/phoenix-sim-gameplay/src/entities/config/weapon_definition.rs, gui/components/weapon-target-controls.js, gui/stations/weapon-target-actions.js, editor/workshop-weapon-groups.js, gui/workshop-weapon-groups-panel.js, crates/phoenix-simulation/src/console/weapons/readiness.rs, gui/sensor-tracks.js, crates/phoenix-simulation/src/console/weapons/guidance_link.rs, crates/phoenix-simulation/src/console/weapons/guidance_ui.rs, crates/phoenix-sim-gameplay/src/weapons/guided_orders.rs, gui/components/guidance-controls.js, gui/stations/guidance-actions.js]
 updated: 2026-10-15
 ---
 
@@ -78,3 +78,26 @@ manual bank that is still firing.
 incoming world bearing and blocked/open result with the original assessment
 tick. Sensors and Tactical display that held ray in their existing contact detail
 rows. It supplies no shield health, complete facing map or protected frequency.
+
+
+## Own launched-round guidance
+
+`ShipGuidanceKnowledge` records only identities actually emitted by this source,
+their tube/known launch endurance, local issued orders and heard receipts. It is
+separate from actual physical flight. Hidden interception or loss of link cannot
+remove a source row or reveal remote health/pose. Pending delayed emissions use
+the original public launch command keyed by the first actual emitted ID.
+
+Actual tube System details expose those own launch records plus exact permitted
+current XYZ target choices. `guidance_ui.rs` does not enumerate surviving remote
+rounds. Shared status controls use correlated exact-tube commands and preserve
+focused native choices. Delegated summaries are read-only. A receipt is labelled
+heard, with application and survival unknown; it is never labelled accepted.
+
+The existing ordinary tube AI can forward a newer original observation for its
+last explicit own target through the same admitted paid receiver handler. It
+does not repeatedly pay for the same reading or revive an explicit stop. Human
+and AI delivery follow the current flight advance, so a newly heard order can
+steer on the next advance. Original sample/provenance ages remain unchanged.
+Native receiver/continuation and independent illumination acceptance are tracked
+separately from the focused JavaScript controls tests.

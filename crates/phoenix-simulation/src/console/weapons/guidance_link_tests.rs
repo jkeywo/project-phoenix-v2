@@ -373,3 +373,230 @@ fn measurement_reader_refuses_conflicting_copies_and_unbound_console() {
     }
     assert!(sample(&mut f, &SystemId("torpedo-tube-fore-port".into())).is_none());
 }
+
+#[test]
+fn human_projection_uses_only_own_orders_and_exact_full_xyz_console_choices() {
+    let mut f = fixture();
+    let config = f
+        .app
+        .world()
+        .get::<ShipConfigComponent>(f.source)
+        .unwrap()
+        .0
+        .clone();
+    crate::ship::rating::apply_rating(
+        &config,
+        &crate::core::messages::StationId("tactical".into()),
+        "Std",
+        &mut f
+            .app
+            .world_mut()
+            .get_mut::<ShipSystemControlSources>(f.source)
+            .unwrap()
+            .0,
+    );
+    let before = super::super::guidance_ui::project(f.app.world(), f.source, &f.tube).unwrap();
+    assert_eq!(before.rounds.len(), 1);
+    assert_eq!(before.rounds[0].revision, 0);
+    assert_eq!(
+        before
+            .targets
+            .iter()
+            .map(|row| row.contact.as_str())
+            .collect::<Vec<_>>(),
+        vec![f.contact.as_str()]
+    );
+    assert!(before.rounds[0].can_stop);
+    f.app
+        .world_mut()
+        .get_mut::<TorpedoSystemResource>(f.source)
+        .unwrap()
+        .0
+        .apply_interception("own-emitted-round", f32::MAX)
+        .unwrap();
+    assert_eq!(
+        super::super::guidance_ui::project(f.app.world(), f.source, &f.tube).unwrap(),
+        before,
+        "secret remote interception must not alter source rows or availability"
+    );
+    if let SystemBlackboard::TacticalRadar(board) = f
+        .app
+        .world_mut()
+        .get_mut::<ShipSystemBlackboards>(f.source)
+        .unwrap()
+        .0
+        .get_mut(&SystemId("tactical-radar".into()))
+        .unwrap()
+    {
+        board.tracks.as_mut().unwrap()[0].elevation = None;
+    }
+    let heightless = super::super::guidance_ui::project(f.app.world(), f.source, &f.tube).unwrap();
+    assert!(heightless.targets.is_empty());
+    assert_eq!(heightless.rounds, before.rounds);
+    assert!(super::super::guidance_ui::project(
+        f.app.world(),
+        f.source,
+        &SystemId("helm-thrust".into())
+    )
+    .is_none());
+}
+
+#[test]
+fn ordinary_existing_tube_ai_forwards_newer_original_evidence_once_through_normal_admission() {
+    let mut f = fixture();
+    retarget(&mut f);
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    let profile = config
+        .sensing
+        .unwrap()
+        .broad
+        .into_iter()
+        .find(|profile| profile.system.0 == "tactical-radar")
+        .unwrap();
+    f.app
+        .world_mut()
+        .resource_mut::<crate::sim_tick::SimTick>()
+        .0 = 101;
+    let mut tracks = f.app.world_mut().get_mut::<BroadTracks>(f.source).unwrap();
+    let state = tracks.0.get_mut(&profile.system).unwrap();
+    state
+        .advance(
+            &profile,
+            101,
+            1.0 / 60.0,
+            1.0,
+            &[crate::science::broad::BroadMeasurement {
+                source: "private-target".into(),
+                selectable: true,
+                observation: None,
+                position: [20.0, -30.0],
+                elevation: Some(phoenix_model::sensing_tracks::ObservedElevation {
+                    height: 3.0,
+                    error: profile.position_error,
+                    velocity: None,
+                }),
+                support: 1.0,
+                identity: None,
+                classification: None,
+                assessment: None,
+            }],
+        )
+        .unwrap();
+    let records = phoenix_sim_gameplay::science::sharing::projection(
+        "source",
+        state,
+        &profile,
+        101,
+        1.0 / 60.0,
+    )
+    .unwrap();
+    drop(tracks);
+    if let SystemBlackboard::TacticalRadar(board) = f
+        .app
+        .world_mut()
+        .get_mut::<ShipSystemBlackboards>(f.source)
+        .unwrap()
+        .0
+        .get_mut(&profile.system)
+        .unwrap()
+    {
+        board.tracks = Some(records);
+    }
+    crate::ai::host::register_ai_host_env(&mut f.app);
+    f.app
+        .world_mut()
+        .entity_mut(f.source)
+        .insert(crate::ai::server::AiHighFidelity);
+    f.app
+        .world_mut()
+        .get_mut::<AdmittedCommands>(f.source)
+        .unwrap()
+        .0
+        .clear();
+    f.app
+        .world_mut()
+        .run_system_once(crate::console_ai::server::ai_torpedo_auto_fire)
+        .unwrap();
+    let requests: Vec<_> = f
+        .app
+        .world()
+        .get::<AdmittedCommands>(f.source)
+        .unwrap()
+        .0
+        .iter()
+        .filter(|command| {
+            matches!(
+                command.payload,
+                SystemControlPayload::RetargetGuidedRound { .. }
+            )
+        })
+        .collect();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].target, f.tube);
+    assert_eq!(
+        requests[0].payload,
+        SystemControlPayload::RetargetGuidedRound {
+            round_uuid: "own-emitted-round".into(),
+            target_uuid: f.contact.clone()
+        }
+    );
+    let initial = energy(&f);
+    f.app
+        .world_mut()
+        .run_system_once(handle_guidance_commands)
+        .unwrap();
+    assert!(energy(&f) < initial);
+    assert_eq!(round(&f).last_guidance.as_ref().unwrap().sampled_tick, 101);
+    assert!(known(&f).acknowledged.is_some());
+    f.app
+        .world_mut()
+        .get_mut::<AdmittedCommands>(f.source)
+        .unwrap()
+        .0
+        .clear();
+    f.app
+        .world_mut()
+        .run_system_once(crate::console_ai::server::ai_torpedo_auto_fire)
+        .unwrap();
+    assert!(!f
+        .app
+        .world()
+        .get::<AdmittedCommands>(f.source)
+        .unwrap()
+        .0
+        .iter()
+        .any(|command| matches!(
+            command.payload,
+            SystemControlPayload::RetargetGuidedRound { .. }
+        )));
+    send(
+        &mut f,
+        SystemControlPayload::StopGuidedRoundGuidance {
+            round_uuid: "own-emitted-round".into(),
+        },
+    );
+    f.app
+        .world_mut()
+        .get_mut::<AdmittedCommands>(f.source)
+        .unwrap()
+        .0
+        .clear();
+    f.app
+        .world_mut()
+        .run_system_once(crate::console_ai::server::ai_torpedo_auto_fire)
+        .unwrap();
+    assert!(!f
+        .app
+        .world()
+        .get::<AdmittedCommands>(f.source)
+        .unwrap()
+        .0
+        .iter()
+        .any(|command| matches!(
+            command.payload,
+            SystemControlPayload::RetargetGuidedRound { .. }
+        )));
+}

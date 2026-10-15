@@ -65,6 +65,8 @@ function logisticsCommand(type, fields) {
 }
 
 export const ACTION_MAP = Object.freeze({
+  guidance_target: logisticsCommand('RetargetGuidedRound', ['round_uuid', 'target_uuid']),
+  guidance_stop: logisticsCommand('StopGuidedRoundGuidance', ['round_uuid']),
   set_weapon_target: logisticsCommand('SetWeaponTarget', ['uuid']),
   set_weapon_group_target: logisticsCommand('SetWeaponGroupTarget', ['group', 'uuid']),
   follow_weapon_group: logisticsCommand('FollowWeaponGroup', []),

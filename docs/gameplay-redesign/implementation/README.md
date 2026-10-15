@@ -28,6 +28,15 @@ are stable. Full completion dependencies and permitted early slices are separate
 the ledger. The integrator owns shared schemas, schedules, versions and final gates.
 Per-increment commits and all outstanding acceptance remain required.
 
+Prepared lane contracts describe the next consumers; they are not completion
+evidence:
+
+| Lane | Contracts |
+|---|---|
+| Communications | [16 — channels and requests](increment-16.md), then [17 — electronic operations](increment-17.md) |
+| Movement and craft | [18 — movement and transit](increment-18.md), then [19 — deployables and craft](increment-19.md) |
+| Personnel and facilities | [20 — personnel and custody](increment-20.md), [21 — facilities and outside actors](increment-21.md), then [22 — mission planning](increment-22.md) |
+
 ## Working contract
 
 On 15 October 2026 the user extended active implementation through increment 24,

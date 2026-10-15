@@ -53,3 +53,1132 @@ penetration = 25
 [[weapon.pattern]]
 barrels = [ 0, 1 ]
 offset_secs = 0
+
+# Provisional precision instrument: complete atomic profiles, higher actual work.
+[[sensing.focused]]
+reading_ticks = 120
+system = "sensors"
+work_secs = 2
+history_limit = 64
+unfinished_retention_secs = 0
+
+[sensing.focused.forecast]
+horizon_secs = 120
+
+[[sensing.focused.aims]]
+aim = "environment"
+work_multiplier = 1
+resource_multiplier = 1
+
+[[sensing.focused.aims]]
+aim = "resources"
+work_multiplier = 1
+resource_multiplier = 2
+intrusive = true
+
+[[sensing.focused.aims]]
+aim = "anomaly"
+work_multiplier = 2
+resource_multiplier = 1
+
+[[sensing.focused.aims]]
+aim = "shields"
+work_multiplier = 2
+resource_multiplier = 1
+
+[[sensing.broad]]
+reading_ticks = 120
+system = "sensor-radar"
+sample_interval_secs = 0.5
+identity_secs = 1
+classification_secs = 3
+assessment_secs = 6
+position_error = 2
+drift_error_per_sec = 0.5
+track_retention_secs = 60
+
+[[sensing.broad]]
+reading_ticks = 120
+system = "tactical-radar"
+sample_interval_secs = 0.5
+identity_secs = 1
+classification_secs = 3
+assessment_secs = 6
+position_error = 0.05
+drift_error_per_sec = 0.5
+track_retention_secs = 60
+
+[[sensing.broad]]
+reading_ticks = 120
+system = "helm-radar"
+sample_interval_secs = 0.5
+identity_secs = 1
+classification_secs = 3
+assessment_secs = 6
+position_error = 2
+drift_error_per_sec = 0.5
+track_retention_secs = 60
+
+[[sensing.passive]]
+system = "passive-receiver"
+sample_interval_secs = 0.5
+min_signal_strength = 0.01
+bearing_error_rad = 0.15
+
+[sensing.passive.mount]
+facing_deg = 0
+arc_deg = 120
+range = 100
+
+[sensing.control]
+combat_lock = "tactical-radar"
+science_target = "sensors"
+
+[[sensing.sharing]]
+system = "sensor-radar"
+share_own_faction = false
+receive = true
+
+[[sensing.sharing]]
+system = "tactical-radar"
+share_own_faction = false
+receive = true
+
+[energy.reactor]
+sustainable_output_per_sec = 31.7
+max_output_per_sec = 47.55
+ramp_per_sec = 7.925
+initial_output_per_sec = 31.7
+initial_energy = 71.325
+initial_heat = 0
+max_cooling_per_sec = 19.02
+default_cooling_per_sec = 6.34
+
+[energy.reactor.reserve]
+capacity = 95.1
+max_intake_per_sec = 63.4
+passive_loss_at_full_per_sec = 0.951
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.reactor.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "dock"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "helm-thrust"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "helm-steering"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "helm-radar"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "tactical-radar"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1.5
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "helm-impulse"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "helm-boost"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "helm-lateral-thrust"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "phaser-fore"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "phaser-aft"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "torpedo-magazine"
+initial_energy = 7.5
+initial_heat = 0
+continuous_cost_per_sec = 0
+discrete_cost = 1
+
+[energy.consumer.reserve]
+capacity = 10
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "torpedo-tube-fore-port"
+initial_energy = 7.5
+initial_heat = 0
+continuous_cost_per_sec = 0
+discrete_cost = 1
+
+[energy.consumer.reserve]
+capacity = 10
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "torpedo-tube-fore-starboard"
+initial_energy = 7.5
+initial_heat = 0
+continuous_cost_per_sec = 0
+discrete_cost = 1
+
+[energy.consumer.reserve]
+capacity = 10
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "torpedo-tube-aft"
+initial_energy = 7.5
+initial_heat = 0
+continuous_cost_per_sec = 0
+discrete_cost = 1
+
+[energy.consumer.reserve]
+capacity = 10
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "sensors"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 1
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "sensor-radar"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "navigation"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 1
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "repair"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "tractor"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "umbilical"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "comms"
+initial_energy = 7.5
+initial_heat = 0
+continuous_cost_per_sec = 0.05
+discrete_cost = 1
+
+[energy.consumer.reserve]
+capacity = 10
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "security"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 1
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "shield-arc-fore"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 0
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "shield-arc-port"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 0
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "shield-arc-aft"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 0
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "shield-arc-starboard"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 0
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "logistics"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "fabrication"
+initial_energy = 22.5
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 30
+max_intake_per_sec = 2
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "resource-recovery"
+initial_energy = 15
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 20
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.2
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "passive-receiver"
+initial_energy = 7.5
+initial_heat = 0
+continuous_cost_per_sec = 0.1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 10
+max_intake_per_sec = 0.25
+passive_loss_at_full_per_sec = 0.05
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "blaster-side"
+initial_energy = 5
+initial_heat = 0
+continuous_cost_per_sec = 0
+discrete_cost = 0.25
+
+[energy.consumer.reserve]
+capacity = 5
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.3
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.group]]
+id = "helm"
+max_flow_per_sec = 18
+default_flow_per_sec = 10.35
+max_cooling_per_sec = 45
+default_cooling_per_sec = 9
+priority = 0
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "weapons"
+max_flow_per_sec = 10
+default_flow_per_sec = 7.45
+max_cooling_per_sec = 35
+default_cooling_per_sec = 7
+priority = 1
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "shields"
+max_flow_per_sec = 8
+default_flow_per_sec = 4.6
+max_cooling_per_sec = 20
+default_cooling_per_sec = 4
+priority = 2
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "sensors"
+max_flow_per_sec = 4
+default_flow_per_sec = 3.3
+max_cooling_per_sec = 10
+default_cooling_per_sec = 2.1
+priority = 3
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "comms"
+max_flow_per_sec = 3
+default_flow_per_sec = 3
+max_cooling_per_sec = 10
+default_cooling_per_sec = 2
+priority = 4
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "support"
+max_flow_per_sec = 4
+default_flow_per_sec = 3.15
+max_cooling_per_sec = 10
+default_cooling_per_sec = 2
+priority = 5
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-dock"
+parent = "helm"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 0
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-helm-thrust"
+parent = "helm"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 1
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-helm-steering"
+parent = "helm"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 2
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-helm-radar"
+parent = "helm"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 3
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-tactical-radar"
+parent = "weapons"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 4
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-helm-impulse"
+parent = "helm"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 5
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-helm-boost"
+parent = "helm"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 6
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-helm-lateral-thrust"
+parent = "helm"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 7
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-phaser-fore"
+parent = "weapons"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 8
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-phaser-aft"
+parent = "weapons"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 9
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-torpedo-magazine"
+parent = "weapons"
+max_flow_per_sec = 1
+default_flow_per_sec = 1
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 10
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-torpedo-tube-fore-port"
+parent = "weapons"
+max_flow_per_sec = 1
+default_flow_per_sec = 1
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 11
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-torpedo-tube-fore-starboard"
+parent = "weapons"
+max_flow_per_sec = 1
+default_flow_per_sec = 1
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 12
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-torpedo-tube-aft"
+parent = "weapons"
+max_flow_per_sec = 1
+default_flow_per_sec = 1
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 13
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-sensors"
+parent = "sensors"
+max_flow_per_sec = 2
+default_flow_per_sec = 2
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 14
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-sensor-radar"
+parent = "sensors"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 15
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-navigation"
+parent = "comms"
+max_flow_per_sec = 2
+default_flow_per_sec = 2
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 16
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-repair"
+parent = "support"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 17
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-tractor"
+parent = "helm"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 18
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-umbilical"
+parent = "helm"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 19
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-comms"
+parent = "comms"
+max_flow_per_sec = 1
+default_flow_per_sec = 1
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 20
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-security"
+parent = "support"
+max_flow_per_sec = 2
+default_flow_per_sec = 2
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 21
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-shield-arc-fore"
+parent = "shields"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 22
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-shield-arc-port"
+parent = "shields"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 23
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-shield-arc-aft"
+parent = "shields"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 24
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-shield-arc-starboard"
+parent = "shields"
+max_flow_per_sec = 2
+default_flow_per_sec = 1.15
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 25
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-logistics"
+parent = "support"
+max_flow_per_sec = 2
+default_flow_per_sec = 1
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 26
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-fabrication"
+parent = "support"
+max_flow_per_sec = 2
+default_flow_per_sec = 1
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 27
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-resource-recovery"
+parent = "support"
+max_flow_per_sec = 1
+default_flow_per_sec = 1
+max_cooling_per_sec = 5
+default_cooling_per_sec = 1
+priority = 28
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-passive-receiver"
+parent = "sensors"
+max_flow_per_sec = 0.25
+default_flow_per_sec = 0.15
+max_cooling_per_sec = 1
+default_cooling_per_sec = 0.1
+priority = 29
+restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "energy-blaster-side"
+parent = "weapons"
+max_flow_per_sec = 1
+default_flow_per_sec = 0.5
+max_cooling_per_sec = 1
+default_cooling_per_sec = 0.25
+priority = 30
+restore_delay_secs = 0.5

@@ -16,16 +16,19 @@ range = 600
 
 [[weapon]]
 id = "torpedo-tube-fore_port"
+barrels = ["torpedo_port"]
 [weapon.mount]
 range = 600
 
 [[weapon]]
 id = "torpedo-tube-fore_starboard"
+barrels = ["torpedo_starboard"]
 [weapon.mount]
 range = 600
 
 [[weapon]]
 id = "torpedo-tube-aft"
+barrels = ["torpedo_aft"]
 [weapon.mount]
 range = 600
 

@@ -40,6 +40,7 @@ entities:
       summary: "Increment 8 includes validated authored coefficients, human controls and shared local status, ordinary individual System AI using supported reusable state trees, Workshop editing/preview/Test, and deterministic authoritative continuation. Each reserve, heat, ramp, requested/effective allocation, coolant remainder and AI memory participates in snapshots, restore and digests. Existing transport and knowledge limits remain unchanged."
       rationale:
         - "[ai] Extend the closed state-tree input/output vocabulary for numeric readings, comparisons and bounded allocation actions, without Workshop programming or a second controller. Initial implementation commits may precede isolated validation under the user's worktree workflow; completion requires evidence and dependency-order integration of fixes."
+        - "[ai] The same Power tree may explicitly write the optional Boolean priority-allocation channel: true selects the existing Minimal priority allocator, false the existing Manual allocator through normal SetEnergyMode admission. No output preserves the current mode. Shipped ordinary AI opts into priorities so deficit-driven fill requests cannot indefinitely strand a randomly cut branch while its fixed reactor output remains unchanged. This changes authored AI allocation behavior, not hardware output, capacity, costs or cut rules. Human and Offline Power owners do not evaluate or emit."
   - decision: reactor-generation-independent-of-capacitor-export
     core:
       status: accepted

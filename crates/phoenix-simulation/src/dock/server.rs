@@ -325,19 +325,34 @@ pub fn handle_dock_commands(
         &Transform,
         &mut DockControl,
         Option<&EntityUuid>,
+        Option<&crate::ship_plugin::ShipConfigComponent>,
+        Option<&crate::server_app::ShipSystemBlackboards>,
+        Option<&crate::science::broad::BroadTracks>,
+        Option<&crate::science::broad::SensingControls>,
     )>,
     mut outbound: Option<
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
 ) {
-    for (admitted, transform, mut dock, uuid) in ships.iter_mut() {
+    for (admitted, transform, mut dock, uuid, config, boards, tracks, controls) in ships.iter_mut()
+    {
         // Clone the resolved target string before mutating the component below.
         // The id itself remains authored topology, not a per-command decision.
         let system_id = dock.system_id.0.clone();
         for cmd in admitted.for_target(&system_id) {
             let outcome = match &cmd.payload {
                 SystemControlPayload::Dock if !dock.engaged() => {
-                    match dock.available_target.clone() {
+                    match dock.available_target.clone().filter(|target| {
+                        crate::science::contact_routing::machinery_alias(
+                            config.map(|config| &config.0),
+                            boards,
+                            tracks,
+                            controls,
+                            &dock.system_id,
+                            target,
+                        )
+                        .is_some()
+                    }) {
                         Some(target) => {
                             dock.set_engaged(true);
                             dock.docked = false;
@@ -479,13 +494,26 @@ pub fn operate_dock_ai(
         Option<&crate::ship_plugin::ShipConfigComponent>,
         &DockControl,
         &crate::server_app::ShipSystemBlackboards,
+        Option<&crate::science::broad::BroadTracks>,
+        Option<&crate::science::broad::SensingControls>,
         &ShipAiTreePrograms,
         &ShipAiTreeRuntime,
         &mut crate::core::messages::AdmittedCommands,
     )>,
 ) {
-    for (entity, uuid, sources, config, dock, blackboards, programs, runtimes, mut admitted) in
-        ships.iter_mut()
+    for (
+        entity,
+        uuid,
+        sources,
+        config,
+        dock,
+        blackboards,
+        tracks,
+        controls,
+        programs,
+        runtimes,
+        mut admitted,
+    ) in ships.iter_mut()
     {
         if !sources.0.policy_for(&dock.system_id).operate_ai {
             continue;
@@ -507,10 +535,26 @@ pub fn operate_dock_ai(
         };
 
         let ready = directive_target.as_deref().is_some_and(|name| {
-            let resolved = resolve_dock_target(name, runtime.as_deref());
+            let resolved = if crate::science::contact_routing::measured_machinery(tracks, controls)
+            {
+                config
+                    .zip(tracks)
+                    .and_then(|(config, tracks)| {
+                        crate::science::contact_routing::request_contact(
+                            &config.0,
+                            blackboards,
+                            tracks,
+                            &dock.system_id,
+                            name,
+                        )
+                    })
+                    .map(|(_, source)| source)
+            } else {
+                Some(resolve_dock_target(name, runtime.as_deref()))
+            };
             dock.available_target
                 .as_deref()
-                .is_some_and(|a| a == resolved)
+                .is_some_and(|a| Some(a) == resolved.as_deref())
         });
         let Some(program) = programs.0.get(&dock.system_id) else {
             continue;
@@ -1034,7 +1078,13 @@ fn close_in_world_dir(own: Pose, mate: Vec3, engage_distance: f32) -> Option<Vec
 /// this existed. No English crosses: target names are world entity name ids and
 /// the refusal is the pure module's `strings.csv` id.
 pub fn publish_dock_blackboard(
-    mut ships: Query<(&DockControl, &mut crate::server_app::ShipSystemBlackboards)>,
+    mut ships: Query<(
+        &DockControl,
+        &mut crate::server_app::ShipSystemBlackboards,
+        Option<&crate::ship_plugin::ShipConfigComponent>,
+        Option<&crate::science::broad::BroadTracks>,
+        Option<&crate::science::broad::SensingControls>,
+    )>,
     named: Query<(&EntityUuid, &EntityName)>,
 ) {
     let name_of = |uuid: &Option<String>| -> Option<String> {
@@ -1045,17 +1095,47 @@ pub fn publish_dock_blackboard(
                 .map(|(_, name)| name.0.clone())
         })
     };
-    for (dock, mut blackboards) in ships.iter_mut() {
+    for (dock, mut blackboards, config, tracks, controls) in ships.iter_mut() {
         let key = &dock.system_id;
+        let measured = crate::science::contact_routing::measured_machinery(tracks, controls);
+        let known = |target: &str| {
+            crate::science::contact_routing::machinery_alias(
+                config.map(|config| &config.0),
+                Some(&blackboards),
+                tracks,
+                controls,
+                key,
+                target,
+            )
+            .is_some()
+        };
+        let available = dock.available_target.clone().filter(|target| known(target));
+        let name = |target: Option<&str>| {
+            if measured {
+                config.zip(tracks).and_then(|(config, tracks)| {
+                    target.and_then(|target| {
+                        crate::science::contact_routing::identity_for_source(
+                            &config.0,
+                            &blackboards,
+                            tracks,
+                            key,
+                            target,
+                        )
+                    })
+                })
+            } else {
+                name_of(&target.map(str::to_owned))
+            }
+        };
         let blackboard = SystemBlackboard::Dock(DockBlackboard {
             range: dock.config.range,
-            available: dock.available_target.is_some() && !dock.docked,
-            available_target: dock.available_target.clone(),
-            available_target_name: name_of(&dock.available_target),
+            available: available.is_some() && !dock.docked,
+            available_target: available.clone(),
+            available_target_name: name(available.as_deref()),
             engaged: dock.engaged(),
             docked: dock.docked,
             docked_to: dock.docked_partner().map(|s| s.to_string()),
-            docked_to_name: name_of(&dock.docked_partner().map(|s| s.to_string())),
+            docked_to_name: name(dock.docked_partner()),
             refusal: dock.last_refusal.map(|r| r.string_id().to_string()),
         });
         if blackboards.0.get(key) != Some(&blackboard) {

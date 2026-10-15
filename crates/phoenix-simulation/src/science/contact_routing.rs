@@ -11,6 +11,80 @@ pub fn publication_source(_config: &ShipConfig, owner: &SystemId) -> SystemId {
     owner.clone()
 }
 
+pub(crate) fn measured_machinery(
+    tracks: Option<&BroadTracks>,
+    controls: Option<&super::broad::SensingControls>,
+) -> bool {
+    tracks.is_some() || controls.is_some()
+}
+
+/// The no-fallback boundary also applies to focused-only fitted hulls. A
+/// missing/empty permitted Broad picture never turns a guessed UUID into input.
+pub(crate) fn resolve_machinery(
+    config: Option<&ShipConfig>,
+    boards: Option<&ShipSystemBlackboards>,
+    tracks: Option<&BroadTracks>,
+    controls: Option<&super::broad::SensingControls>,
+    consumer: &SystemId,
+    presentation: &str,
+) -> Option<String> {
+    if !measured_machinery(tracks, controls) {
+        return (!presentation.is_empty()).then(|| presentation.to_owned());
+    }
+    resolve(config?, boards?, Some(tracks?), consumer, presentation)
+}
+
+pub(crate) fn machinery_alias(
+    config: Option<&ShipConfig>,
+    boards: Option<&ShipSystemBlackboards>,
+    tracks: Option<&BroadTracks>,
+    controls: Option<&super::broad::SensingControls>,
+    consumer: &SystemId,
+    source: &str,
+) -> Option<String> {
+    if !measured_machinery(tracks, controls) {
+        return (!source.is_empty()).then(|| source.to_owned());
+    }
+    alias_for_source(config?, boards?, Some(tracks?), consumer, source)
+}
+
+/// A mission's named request is not detection. Resolve it only through one
+/// unambiguous current, selectable record the consuming Console already holds.
+pub(crate) fn request_contact(
+    config: &ShipConfig,
+    boards: &ShipSystemBlackboards,
+    tracks: &BroadTracks,
+    consumer: &SystemId,
+    request: &str,
+) -> Option<(String, String)> {
+    if let Some(source) = resolve(config, boards, Some(tracks), consumer, request) {
+        return Some((request.to_owned(), source));
+    }
+    let view = config.observations_for_system(consumer, &boards.0);
+    let mut matches = std::collections::BTreeMap::new();
+    for owner in tracks.0.keys() {
+        let Some(public) = view.get(owner).and_then(observations) else {
+            continue;
+        };
+        for record in public {
+            if record.contact_id != request
+                && !record.identity.as_ref().is_some_and(|identity| {
+                    identity.name == request
+                        || identity.references.iter().any(|name| name == request)
+                })
+            {
+                continue;
+            }
+            if let Some(source) =
+                resolve(config, boards, Some(tracks), consumer, &record.contact_id)
+            {
+                matches.insert(record.contact_id.clone(), source);
+            }
+        }
+    }
+    (matches.len() == 1).then(|| matches.into_iter().next().unwrap())
+}
+
 pub fn observations(board: &SystemBlackboard) -> Option<&[SensorTrackSnapshot]> {
     match board {
         SystemBlackboard::SensorRadar(board) => board.tracks.as_deref(),

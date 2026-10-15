@@ -288,17 +288,32 @@ pub fn handle_transporter_commands(
         &crate::core::messages::AdmittedCommands,
         &mut Transporter,
         Option<&EntityUuid>,
+        Option<&crate::ship_plugin::ShipConfigComponent>,
+        Option<&crate::server_app::ShipSystemBlackboards>,
+        Option<&crate::science::broad::BroadTracks>,
+        Option<&crate::science::broad::SensingControls>,
     )>,
 ) {
-    for (admitted, mut transporter, uuid) in ships.iter_mut() {
+    for (admitted, mut transporter, uuid, config, boards, tracks, controls) in ships.iter_mut() {
         for cmd in admitted.for_target(TRANSPORTER_SYSTEM_ID) {
             match &cmd.payload {
-                SystemControlPayload::TransportSelectContact { uuid: selected }
+                SystemControlPayload::TransportSelectContact { uuid: selected } => {
+                    let Some(selected) = crate::science::contact_routing::resolve_machinery(
+                        config.map(|config| &config.0),
+                        boards,
+                        tracks,
+                        controls,
+                        &cmd.target,
+                        selected,
+                    ) else {
+                        transporter.last_refusal = Some(TransportRefusal::NoContact);
+                        continue;
+                    };
                     // A fresh selection ends any running transport of the old
                     // contact (the operator turned the beam elsewhere) and resets
                     // the recovery accrual. Selecting the SAME contact again is
                     // idempotent — it does not restart a running transport.
-                    if transporter.selected_contact.as_deref() != Some(selected.as_str()) => {
+                    if transporter.selected_contact.as_deref() != Some(selected.as_str()) {
                         if transporter.active_contact.is_some() {
                             push_lifecycle(
                                 lifecycle.as_deref_mut(),
@@ -309,13 +324,33 @@ pub fn handle_transporter_commands(
                                 },
                             );
                         }
-                        transporter.selected_contact = Some(selected.clone());
+                        transporter.selected_contact = Some(selected);
                         transporter.transporting = false;
                         transporter.active_contact = None;
                         transporter.progress = 0.0;
                         transporter.last_refusal = None;
                     }
+                }
                 SystemControlPayload::StartTransport => {
+                    if crate::science::contact_routing::measured_machinery(tracks, controls)
+                        && !transporter
+                            .selected_contact
+                            .as_deref()
+                            .is_some_and(|selected| {
+                                crate::science::contact_routing::machinery_alias(
+                                    config.map(|config| &config.0),
+                                    boards,
+                                    tracks,
+                                    controls,
+                                    &cmd.target,
+                                    selected,
+                                )
+                                .is_some()
+                            })
+                    {
+                        transporter.last_refusal = Some(TransportRefusal::NoContact);
+                        continue;
+                    }
                     transporter.transporting = true;
                     transporter.last_refusal = None;
                 }
@@ -758,12 +793,24 @@ pub fn operate_transporter_ai(
         Option<&crate::ship_plugin::ShipConfigComponent>,
         &Transporter,
         &crate::server_app::ShipSystemBlackboards,
+        Option<&crate::science::broad::BroadTracks>,
+        Option<&crate::science::broad::SensingControls>,
         Has<TransporterAiEngaged>,
         &mut crate::core::messages::AdmittedCommands,
     )>,
 ) {
-    for (entity, uuid, sources, config, transporter, blackboards, host_engaged, mut admitted) in
-        ships.iter_mut()
+    for (
+        entity,
+        uuid,
+        sources,
+        config,
+        transporter,
+        blackboards,
+        tracks,
+        controls,
+        host_engaged,
+        mut admitted,
+    ) in ships.iter_mut()
     {
         if !sources.0.policy_for(&transporter_system_id()).operate_ai {
             continue;
@@ -793,13 +840,30 @@ pub fn operate_transporter_ai(
         let mut payloads: Vec<SystemControlPayload> = Vec::new();
         match directive_target {
             Some(name) => {
-                let resolved = resolve_directive_target(&name, runtime.as_deref());
+                let target =
+                    if crate::science::contact_routing::measured_machinery(tracks, controls) {
+                        config.zip(tracks).and_then(|(config, tracks)| {
+                            crate::science::contact_routing::request_contact(
+                                &config.0,
+                                blackboards,
+                                tracks,
+                                &transporter_system_id(),
+                                &name,
+                            )
+                        })
+                    } else {
+                        let resolved = resolve_directive_target(&name, runtime.as_deref());
+                        Some((resolved.clone(), resolved))
+                    };
+                // Lack of current evidence pauses new decisions without ending
+                // already-admitted physical rescue work.
+                let Some((alias, resolved)) = target else {
+                    continue;
+                };
                 let selected_on_target =
                     transporter.selected_contact.as_deref() == Some(resolved.as_str());
                 if !selected_on_target {
-                    payloads.push(SystemControlPayload::TransportSelectContact {
-                        uuid: resolved.clone(),
-                    });
+                    payloads.push(SystemControlPayload::TransportSelectContact { uuid: alias });
                 }
                 if !transporter.transporting {
                     payloads.push(SystemControlPayload::StartTransport);
@@ -918,19 +982,47 @@ pub fn record_civilian_casualties(
 /// Publish each transporter-carrying ship's blackboard under its system id
 /// (issue #1348).
 pub fn publish_transporter_blackboard(
-    mut ships: Query<(&Transporter, &mut crate::server_app::ShipSystemBlackboards)>,
+    mut ships: Query<(
+        &Transporter,
+        &mut crate::server_app::ShipSystemBlackboards,
+        Option<&crate::ship_plugin::ShipConfigComponent>,
+        Option<&crate::science::broad::BroadTracks>,
+        Option<&crate::science::broad::SensingControls>,
+    )>,
     contacts: Query<(&EntityUuid, Option<&EntityName>, &CivilianRescue)>,
 ) {
     let key = transporter_system_id();
-    for (transporter, mut blackboards) in ships.iter_mut() {
-        let (name, discovered, remaining) = match transporter.selected_contact.as_deref() {
-            Some(sel) => contacts
-                .iter()
-                .find(|(u, _, _)| u.0 == sel)
-                .map(|(_, n, r)| (n.map(|n| n.0.clone()), r.revealed, r.remaining()))
-                .unwrap_or((None, false, 0)),
-            None => (None, false, 0),
-        };
+    for (transporter, mut blackboards, config, tracks, controls) in ships.iter_mut() {
+        let (name, discovered, remaining) =
+            if crate::science::contact_routing::measured_machinery(tracks, controls) {
+                let name = config.zip(tracks).and_then(|(config, tracks)| {
+                    transporter
+                        .selected_contact
+                        .as_deref()
+                        .and_then(|selected| {
+                            crate::science::contact_routing::identity_for_source(
+                                &config.0,
+                                &blackboards,
+                                tracks,
+                                &key,
+                                selected,
+                            )
+                        })
+                });
+                // Existing General enquiries do not measure personnel. Withhold
+                // live revealed/count truth until an actual held observation can
+                // support it; own transport intent and paid progress remain public.
+                (name, false, 0)
+            } else {
+                match transporter.selected_contact.as_deref() {
+                    Some(sel) => contacts
+                        .iter()
+                        .find(|(u, _, _)| u.0 == sel)
+                        .map(|(_, n, r)| (n.map(|n| n.0.clone()), r.revealed, r.remaining()))
+                        .unwrap_or((None, false, 0)),
+                    None => (None, false, 0),
+                }
+            };
         let blackboard = SystemBlackboard::Transporter(TransporterBlackboard {
             range: transporter.config.range,
             selected_contact: transporter.selected_contact.clone(),

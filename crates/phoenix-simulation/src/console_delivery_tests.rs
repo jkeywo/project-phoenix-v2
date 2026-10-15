@@ -261,6 +261,106 @@ fn only_board(message: &ServerMessage) -> &SystemBlackboard {
 }
 
 #[test]
+fn machinery_reference_boards_keep_physical_work_but_expose_only_held_contact_and_scan_facts() {
+    let mut app = fixture();
+    let alias = observe(&mut app, "sensor-radar", 0, 1.0);
+    let owner = SystemId("sensor-radar".into());
+    let originals = [
+        SystemBlackboard::Dock(crate::core::messages::DockBlackboard {
+            available: true,
+            available_target: Some("hidden".into()),
+            available_target_name: Some("SECRET".into()),
+            engaged: true,
+            docked: true,
+            docked_to: Some("hidden".into()),
+            docked_to_name: Some("SECRET".into()),
+            ..Default::default()
+        }),
+        SystemBlackboard::Tractor(crate::core::messages::TractorBlackboard {
+            engaged: true,
+            coupled_target: Some("hidden".into()),
+            coupled_target_name: Some("SECRET".into()),
+            ..Default::default()
+        }),
+        SystemBlackboard::Transporter(crate::core::messages::TransporterBlackboard {
+            selected_contact: Some("hidden".into()),
+            selected_contact_name: Some("SECRET".into()),
+            discovered: true,
+            civilians_remaining: 917,
+            transporting: true,
+            progress: 0.25,
+            ..Default::default()
+        }),
+    ];
+    for original in &originals {
+        let mut board = original.clone();
+        capture(&mut app).references.board(&owner, &mut board);
+        let wire = serde_json::to_string(&board).unwrap();
+        assert!(!wire.contains("hidden") && !wire.contains("SECRET") && !wire.contains("917"));
+        assert!(wire.contains(&alias));
+        match board {
+            SystemBlackboard::Dock(board) => {
+                assert!(board.engaged && board.docked && board.available);
+                assert!(board.docked_to_name.is_none());
+            }
+            SystemBlackboard::Tractor(board) => assert!(board.engaged),
+            SystemBlackboard::Transporter(board) => {
+                assert!(board.transporting);
+                assert_eq!(board.progress, 0.25);
+                assert!(!board.discovered);
+                assert_eq!(board.civilians_remaining, 0);
+            }
+            _ => unreachable!(),
+        }
+    }
+    // A General structure reading contains no personnel quantity. Even with
+    // that held reading, a supplied live count must remain unavailable.
+    let entity = local_ship(&mut app);
+    let scan_key = crate::science::scan_blackboard_key_for(&SystemId("sensors".into()));
+    app.world_mut()
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(entity)
+        .unwrap()
+        .0
+        .insert(
+            scan_key,
+            SystemBlackboard::Scan(crate::core::messages::ScanBlackboard {
+                owner: Some(SystemId("sensors".into())),
+                reading: Some(crate::core::messages::ScanReadingSnapshot {
+                    subject_uuid: alias.clone(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+        );
+    let mut board = originals[2].clone();
+    capture(&mut app).references.board(&owner, &mut board);
+    let SystemBlackboard::Transporter(board) = board else {
+        unreachable!()
+    };
+    assert!(!board.discovered);
+    assert_eq!(board.civilians_remaining, 0);
+    observe(&mut app, "sensor-radar", 1, 0.0);
+    for mut board in originals {
+        capture(&mut app).references.board(&owner, &mut board);
+        let wire = serde_json::to_string(&board).unwrap();
+        assert!(!wire.contains("hidden") && !wire.contains("SECRET") && !wire.contains(&alias));
+        match board {
+            SystemBlackboard::Dock(board) => {
+                assert!(board.docked && board.engaged && !board.available)
+            }
+            SystemBlackboard::Tractor(board) => assert!(board.engaged),
+            SystemBlackboard::Transporter(board) => {
+                assert!(board.transporting);
+                assert_eq!(board.progress, 0.25);
+                assert!(!board.discovered);
+                assert_eq!(board.civilians_remaining, 0);
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[test]
 fn helm_aliases_require_the_actual_instrument_publication_not_the_motion_aggregate() {
     let mut app = fixture();
     let alias = observe(&mut app, "helm-radar", 0, 1.0);

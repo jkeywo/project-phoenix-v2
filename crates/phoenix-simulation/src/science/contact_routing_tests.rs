@@ -180,3 +180,111 @@ fn sharing_a_host_station_does_not_grant_an_unbound_console_contact() {
     )
     .is_none());
 }
+
+#[test]
+fn machinery_requests_use_only_unambiguous_recorded_identity_and_never_private_names() {
+    let (config, mut boards, tracks, owner, contact) = rig();
+    assert!(request_contact(
+        &config,
+        &boards,
+        &tracks,
+        &owner,
+        "private-physical-identity"
+    )
+    .is_none());
+    assert_eq!(
+        request_contact(&config, &boards, &tracks, &owner, &contact),
+        Some((contact.clone(), "private-physical-identity".into()))
+    );
+    let Some(SystemBlackboard::SensorRadar(board)) = boards.0.get_mut(&owner) else {
+        panic!()
+    };
+    board.tracks.as_mut().unwrap()[0].identity =
+        Some(phoenix_model::sensing_tracks::TrackIdentity {
+            name: "Recorded rescue ship".into(),
+            faction: None,
+            references: vec!["mission-rescue".into()],
+        });
+    for name in ["Recorded rescue ship", "mission-rescue"] {
+        assert_eq!(
+            request_contact(&config, &boards, &tracks, &owner, name),
+            Some((contact.clone(), "private-physical-identity".into()))
+        );
+    }
+    let Some(SystemBlackboard::SensorRadar(board)) = boards.0.get_mut(&owner) else {
+        panic!()
+    };
+    board.tracks.as_mut().unwrap()[0].predicted = true;
+    assert!(request_contact(&config, &boards, &tracks, &owner, "mission-rescue").is_none());
+}
+
+#[test]
+fn fitted_focus_only_machinery_has_no_raw_uuid_fallback() {
+    let (config, boards, _, owner, _) = rig();
+    let controls = super::super::broad::SensingControls(Default::default());
+    assert!(resolve_machinery(
+        Some(&config),
+        Some(&boards),
+        None,
+        Some(&controls),
+        &owner,
+        "private-physical-identity"
+    )
+    .is_none());
+    assert!(machinery_alias(
+        Some(&config),
+        Some(&boards),
+        None,
+        Some(&controls),
+        &owner,
+        "private-physical-identity"
+    )
+    .is_none());
+    assert_eq!(
+        resolve_machinery(None, None, None, None, &owner, "legacy"),
+        Some("legacy".into())
+    );
+}
+
+#[test]
+fn duplicate_recorded_mission_names_refuse_instead_of_choosing_hidden_route_order() {
+    let (config, mut boards, mut tracks, owner, _) = rig();
+    let authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    let profiles = BroadProfile::from_config(&authored).unwrap().unwrap();
+    let profile = &profiles.0[&owner].profile;
+    let state = tracks.0.get_mut(&owner).unwrap();
+    let samples: Vec<_> = [
+        ("private-physical-identity", [20.0, 30.0]),
+        ("other-private", [100.0, 120.0]),
+    ]
+    .into_iter()
+    .map(|(source, position)| BroadMeasurement {
+        source: source.into(),
+        position,
+        selectable: true,
+        observation: None,
+        support: 1.0,
+        identity: None,
+        classification: None,
+        assessment: None,
+    })
+    .collect();
+    state.advance(profile, 1, 0.5, 1.0, &samples).unwrap();
+    let mut public = state.projection(profile, 1, 0.5).unwrap();
+    assert_eq!(public.len(), 2);
+    for record in &mut public {
+        record.identity = Some(phoenix_model::sensing_tracks::TrackIdentity {
+            name: "Same observed name".into(),
+            faction: None,
+            references: Vec::new(),
+        });
+    }
+    let Some(SystemBlackboard::SensorRadar(board)) = boards.0.get_mut(&owner) else {
+        panic!()
+    };
+    board.tracks = Some(public);
+    assert!(request_contact(&config, &boards, &tracks, &owner, "Same observed name").is_none());
+}

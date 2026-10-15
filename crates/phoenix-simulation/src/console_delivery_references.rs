@@ -257,6 +257,29 @@ impl ReferenceProjection {
                 board.locked_target =
                     alias(board.locked_target.as_deref(), Some(TACTICAL_RADAR_KIND));
             }
+            SystemBlackboard::Dock(board) => {
+                let available = self.resolve(source, board.available_target.as_deref(), None);
+                board.available_target = available.as_ref().map(|contact| contact.id.clone());
+                board.available_target_name = available.and_then(|contact| contact.name);
+                board.available &= board.available_target.is_some();
+                let coupled = self.resolve(source, board.docked_to.as_deref(), None);
+                board.docked_to = coupled.as_ref().map(|contact| contact.id.clone());
+                board.docked_to_name = coupled.and_then(|contact| contact.name);
+            }
+            SystemBlackboard::Tractor(board) => {
+                let coupled = self.resolve(source, board.coupled_target.as_deref(), None);
+                board.coupled_target = coupled.as_ref().map(|contact| contact.id.clone());
+                board.coupled_target_name = coupled.and_then(|contact| contact.name);
+            }
+            SystemBlackboard::Transporter(board) => {
+                let target = self.resolve(source, board.selected_contact.as_deref(), None);
+                // A General structure reading contains no personnel count.
+                // Neither detection nor that old reading permits a live poll.
+                board.discovered = false;
+                board.civilians_remaining = 0;
+                board.selected_contact = target.as_ref().map(|contact| contact.id.clone());
+                board.selected_contact_name = target.and_then(|contact| contact.name);
+            }
             SystemBlackboard::Sensors(board) => {
                 board.science_target_uuid = alias(
                     board.science_target_uuid.as_deref(),

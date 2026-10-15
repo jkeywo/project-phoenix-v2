@@ -481,12 +481,25 @@ pub fn operate_tractor_ai(
         &TractorBeam,
         Option<&TacticalRadarSelection>,
         &crate::server_app::ShipSystemBlackboards,
+        Option<&crate::science::broad::BroadTracks>,
+        Option<&crate::science::broad::SensingControls>,
         Has<TractorAiEngaged>,
         &mut crate::core::messages::AdmittedCommands,
     )>,
 ) {
-    for (entity, uuid, sources, config, beam, lock, blackboards, host_engaged, mut admitted) in
-        ships.iter_mut()
+    for (
+        entity,
+        uuid,
+        sources,
+        config,
+        beam,
+        lock,
+        blackboards,
+        tracks,
+        controls,
+        host_engaged,
+        mut admitted,
+    ) in ships.iter_mut()
     {
         // Only when the tractor is AI-controlled — the same `operate_ai` gate a
         // human tenure token faces from the other side of admission.
@@ -516,9 +529,25 @@ pub fn operate_tractor_ai(
         };
 
         let ready = directive_target.as_deref().is_some_and(|name| {
-            let resolved = resolve_directive_target(name, runtime.as_deref());
+            let resolved = if crate::science::contact_routing::measured_machinery(tracks, controls)
+            {
+                config
+                    .zip(tracks)
+                    .and_then(|(config, tracks)| {
+                        crate::science::contact_routing::request_contact(
+                            &config.0,
+                            blackboards,
+                            tracks,
+                            &tractor_system_id(),
+                            name,
+                        )
+                    })
+                    .map(|(_, source)| source)
+            } else {
+                Some(resolve_directive_target(name, runtime.as_deref()))
+            };
             lock.and_then(|l| l.0.as_deref())
-                .is_some_and(|locked| locked == resolved)
+                .is_some_and(|locked| Some(locked) == resolved.as_deref())
         });
         let facts = OperationFacts {
             order_present: directive_target.is_some(),
@@ -601,6 +630,10 @@ pub fn tick_tractor(
             Option<&EntitySystemHull>,
             Option<&ShipDamage>,
             Option<&EntityUuid>,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
+            Option<&crate::server_app::ShipSystemBlackboards>,
+            Option<&crate::science::broad::BroadTracks>,
+            Option<&crate::science::broad::SensingControls>,
         )>,
         // Every entity's position, to resolve the locked target's separation.
         Query<(&EntityUuid, &Transform)>,
@@ -624,20 +657,48 @@ pub fn tick_tractor(
         .p0()
         .iter()
         .filter(|(_, beam, ..)| beam.engaged)
-        .map(|(entity, beam, selection, transform, hull, damage, uuid)| {
-            let power_level = u8::MAX;
-            let disabled = operation_disabled(damage, hull, &tractor_system_id());
-            Row {
+        .map(
+            |(
                 entity,
-                uuid: uuid.cloned(),
-                lock: selection.and_then(|s| s.0.clone()),
-                operator_pos: transform.translation,
-                power_level,
-                disabled,
-                range: beam.config.range,
-                min_power_level: beam.config.min_power_level,
-            }
-        })
+                beam,
+                selection,
+                transform,
+                hull,
+                damage,
+                uuid,
+                config,
+                boards,
+                tracks,
+                controls,
+            )| {
+                let power_level = u8::MAX;
+                let disabled = operation_disabled(damage, hull, &tractor_system_id());
+                Row {
+                    entity,
+                    uuid: uuid.cloned(),
+                    // Inspect the final Input selection here, after both target
+                    // and engage commands. An already coupled hold remains real;
+                    // a new or changed subject requires this Console's evidence.
+                    lock: selection.and_then(|s| s.0.clone()).filter(|target| {
+                        beam.coupled_target.as_deref() == Some(target.as_str())
+                            || crate::science::contact_routing::machinery_alias(
+                                config.map(|config| &config.0),
+                                boards,
+                                tracks,
+                                controls,
+                                &tractor_system_id(),
+                                target,
+                            )
+                            .is_some()
+                    }),
+                    operator_pos: transform.translation,
+                    power_level,
+                    disabled,
+                    range: beam.config.range,
+                    min_power_level: beam.config.min_power_level,
+                }
+            },
+        )
         .collect();
     if rows.is_empty() {
         return;
@@ -1011,17 +1072,37 @@ pub fn arrest_held_declines(
 /// existed. No English crosses: the target name is a world entity name id and
 /// the refusal is the pure module's `strings.csv` id.
 pub fn publish_tractor_blackboard(
-    mut ships: Query<(&TractorBeam, &mut crate::server_app::ShipSystemBlackboards)>,
+    mut ships: Query<(
+        &TractorBeam,
+        &mut crate::server_app::ShipSystemBlackboards,
+        Option<&crate::ship_plugin::ShipConfigComponent>,
+        Option<&crate::science::broad::BroadTracks>,
+        Option<&crate::science::broad::SensingControls>,
+    )>,
     named: Query<(&EntityUuid, &EntityName)>,
 ) {
     let key = tractor_system_id();
-    for (beam, mut blackboards) in ships.iter_mut() {
-        let target_name = beam.coupled_target.as_ref().and_then(|uuid| {
-            named
-                .iter()
-                .find(|(id, _)| &id.0 == uuid)
-                .map(|(_, name)| name.0.clone())
-        });
+    for (beam, mut blackboards, config, tracks, controls) in ships.iter_mut() {
+        let target_name = if crate::science::contact_routing::measured_machinery(tracks, controls) {
+            config.zip(tracks).and_then(|(config, tracks)| {
+                beam.coupled_target.as_deref().and_then(|target| {
+                    crate::science::contact_routing::identity_for_source(
+                        &config.0,
+                        &blackboards,
+                        tracks,
+                        &key,
+                        target,
+                    )
+                })
+            })
+        } else {
+            beam.coupled_target.as_ref().and_then(|uuid| {
+                named
+                    .iter()
+                    .find(|(id, _)| &id.0 == uuid)
+                    .map(|(_, name)| name.0.clone())
+            })
+        };
         let blackboard = SystemBlackboard::Tractor(TractorBlackboard {
             range: beam.config.range,
             engaged: beam.engaged,

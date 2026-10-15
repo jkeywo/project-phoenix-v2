@@ -80,6 +80,177 @@ fn world_operator(world: &mut World) -> Entity {
     q.iter(world).next().expect("one operator")
 }
 
+fn measured_rescue_picture(world: &mut World, operator: Entity) -> String {
+    use crate::science::broad::{BroadMeasurement, BroadProfile, BroadTrackState, BroadTracks};
+    let authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_destroyer.toml",
+    )
+    .unwrap();
+    let config = authored.ship_config.clone().unwrap();
+    let power = crate::modifiers::power_system::PowerSystem::from_energy(
+        authored.energy.clone().unwrap(),
+        config.clone(),
+    )
+    .unwrap();
+    let profiles = BroadProfile::from_config(&authored).unwrap().unwrap();
+    let owner = crate::ship::system_registry::sensor_radar_system_id();
+    let profile = &profiles.0[&owner].profile;
+    let mut state = BroadTrackState::new(profile);
+    state
+        .advance(
+            profile,
+            0,
+            0.5,
+            1.0,
+            &[BroadMeasurement {
+                source: "uuid-lighter".into(),
+                selectable: true,
+                observation: None,
+                position: [100.0, 0.0],
+                support: 1.0,
+                identity: None,
+                classification: None,
+                assessment: None,
+            }],
+        )
+        .unwrap();
+    let public = state.projection(profile, 0, 0.5).unwrap();
+    let alias = public[0].contact_id.clone();
+    let mut boards = world
+        .get::<crate::server_app::ShipSystemBlackboards>(operator)
+        .cloned()
+        .unwrap_or_default();
+    boards.0.insert(
+        owner.clone(),
+        SystemBlackboard::SensorRadar(crate::core::messages::SensorRadarBlackboard {
+            tracks: Some(public),
+            ..Default::default()
+        }),
+    );
+    world.entity_mut(operator).insert((
+        crate::ship_plugin::ShipConfigComponent(config),
+        boards,
+        BroadTracks(BTreeMap::from([(owner, state)])),
+        crate::science::broad::SensingControls(authored.sensing.unwrap().control),
+        crate::ship::power::ShipPowerSystem(power),
+    ));
+    alias
+}
+
+#[test]
+fn measured_selection_resolves_alias_refuses_guessed_uuid_and_keeps_stop_after_evidence_loss() {
+    let (mut world, operator, contact) = rescue_world(3);
+    let alias = measured_rescue_picture(&mut world, operator);
+    world
+        .entity_mut(operator)
+        .insert(admitted(SystemControlPayload::TransportSelectContact {
+            uuid: "uuid-lighter".into(),
+        }));
+    world.run_system_once(handle_transporter_commands).unwrap();
+    assert!(world
+        .get::<Transporter>(operator)
+        .unwrap()
+        .selected_contact
+        .is_none());
+    world
+        .entity_mut(operator)
+        .insert(admitted(SystemControlPayload::TransportSelectContact {
+            uuid: alias.clone(),
+        }));
+    world.run_system_once(handle_transporter_commands).unwrap();
+    assert_eq!(
+        world
+            .get::<Transporter>(operator)
+            .unwrap()
+            .selected_contact
+            .as_deref(),
+        Some("uuid-lighter")
+    );
+    world
+        .entity_mut(operator)
+        .insert(admitted(SystemControlPayload::StartTransport));
+    world.run_system_once(handle_transporter_commands).unwrap();
+    world.run_system_once(tick_transport).unwrap();
+    assert!(world.get::<Transporter>(operator).unwrap().transporting);
+    assert!(
+        world.get::<CivilianRescue>(contact).unwrap().recovered > 0
+            || world.get::<Transporter>(operator).unwrap().progress > 0.0,
+        "actual finite consumer work must progress"
+    );
+    // Held physical work remains real even when the public association goes.
+    world
+        .get_mut::<crate::science::broad::BroadTracks>(operator)
+        .unwrap()
+        .0
+        .values_mut()
+        .for_each(|state| state.current.clear());
+    world
+        .run_system_once(publish_transporter_blackboard)
+        .unwrap();
+    let SystemBlackboard::Transporter(board) = &world
+        .get::<crate::server_app::ShipSystemBlackboards>(operator)
+        .unwrap()
+        .0[&transporter_system_id()]
+    else {
+        panic!()
+    };
+    assert!(board.transporting);
+    assert!(board.selected_contact_name.is_none());
+    assert!(!board.discovered);
+    assert_eq!(board.civilians_remaining, 0);
+    world
+        .entity_mut(operator)
+        .insert(admitted(SystemControlPayload::StopTransport));
+    world.run_system_once(handle_transporter_commands).unwrap();
+    assert!(!world.get::<Transporter>(operator).unwrap().transporting);
+}
+
+#[test]
+fn measured_rescue_ai_uses_recorded_request_handle_not_world_name_to_uuid() {
+    let (mut world, operator) = backfill_world(
+        vec![scored(
+            "rescue",
+            5.0,
+            AiDirective::Rescue {
+                target: "mission-rescue".into(),
+            },
+        )],
+        false,
+        false,
+    );
+    let alias = measured_rescue_picture(&mut world, operator);
+    let mut runtime = WorldContentRuntime::default();
+    runtime
+        .name_to_uuid
+        .insert("mission-rescue".into(), "uuid-lighter".into());
+    world.insert_resource(runtime);
+    world.run_system_once(operate_transporter_ai).unwrap();
+    assert!(
+        admitted_payloads(&mut world, operator).is_empty(),
+        "mission lookup is not observation"
+    );
+    let owner = crate::ship::system_registry::sensor_radar_system_id();
+    let mut boards = world.get_mut::<ShipSystemBlackboards>(operator).unwrap();
+    let Some(SystemBlackboard::SensorRadar(board)) = boards.0.get_mut(&owner) else {
+        panic!()
+    };
+    board.tracks.as_mut().unwrap()[0].identity =
+        Some(phoenix_model::sensing_tracks::TrackIdentity {
+            name: "Held rescue identity".into(),
+            faction: None,
+            references: vec!["mission-rescue".into()],
+        });
+    drop(boards);
+    world.run_system_once(operate_transporter_ai).unwrap();
+    assert_eq!(
+        admitted_payloads(&mut world, operator),
+        vec![
+            SystemControlPayload::TransportSelectContact { uuid: alias },
+            SystemControlPayload::StartTransport
+        ]
+    );
+}
+
 #[test]
 fn a_discovered_in_range_contact_is_recovered_over_ticks_and_opens_one_activation() {
     let (mut world, operator, contact) = rescue_world(2);

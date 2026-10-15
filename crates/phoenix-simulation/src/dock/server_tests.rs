@@ -23,6 +23,43 @@ fn control() -> DockControl {
     control_with_id(DOCK_SYSTEM_ID)
 }
 
+#[test]
+fn fitted_focus_only_dock_refuses_unobserved_available_target_but_undock_remains_physical() {
+    use bevy::ecs::system::RunSystemOnce;
+    let mut world = World::new();
+    let mut dock = control();
+    dock.available_target = Some("unobserved-partner".into());
+    let operator = world
+        .spawn((
+            dock,
+            Transform::default(),
+            crate::science::broad::SensingControls(Default::default()),
+            crate::core::messages::AdmittedCommands(vec![correlated_dock_command(
+                SystemControlPayload::Dock,
+                "unobserved",
+            )]),
+        ))
+        .id();
+    world.run_system_once(handle_dock_commands).unwrap();
+    let dock = world.get::<DockControl>(operator).unwrap();
+    assert!(!dock.engaged());
+    assert_eq!(dock.last_refusal, Some(DockRefusal::NoTarget));
+    let mut dock = world.get_mut::<DockControl>(operator).unwrap();
+    dock.set_engaged(true);
+    dock.docked = true;
+    dock.set_docking_target(Some("physical-partner".into()));
+    drop(dock);
+    world
+        .entity_mut(operator)
+        .insert(crate::core::messages::AdmittedCommands(vec![
+            correlated_dock_command(SystemControlPayload::Undock, "release"),
+        ]));
+    world.run_system_once(handle_dock_commands).unwrap();
+    let dock = world.get::<DockControl>(operator).unwrap();
+    assert!(!dock.engaged() && !dock.docked);
+    assert!(dock.undock_target.is_some());
+}
+
 fn correlated_dock_command(payload: SystemControlPayload, correlation: &str) -> AdmittedCommand {
     AdmittedCommand {
         target: SystemId(DOCK_SYSTEM_ID.into()),

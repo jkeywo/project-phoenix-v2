@@ -31,6 +31,58 @@ fn beam() -> TractorBeam {
 }
 
 #[test]
+fn fitted_tractor_checks_new_subject_after_input_but_preserves_an_existing_physical_hold() {
+    use bevy::ecs::system::RunSystemOnce;
+    let mut world = World::new();
+    let mut time = Time::<()>::default();
+    time.advance_by(std::time::Duration::from_millis(100));
+    world.insert_resource(time);
+    let mut beam = beam();
+    beam.config.min_power_level = 0;
+    let operator = world
+        .spawn((
+            beam,
+            Transform::default(),
+            crate::science::broad::SensingControls(Default::default()),
+            TacticalRadarSelection(None),
+            crate::core::messages::AdmittedCommands(vec![correlated_tractor_command(
+                "engage",
+                SystemControlPayload::EngageTractor,
+            )]),
+        ))
+        .id();
+    world.spawn((
+        EntityUuid("target".into()),
+        Transform::from_xyz(10.0, 0.0, 0.0),
+    ));
+    world.run_system_once(handle_tractor_commands).unwrap();
+    // A target command can land after Engage in Input; validation must inspect
+    // that final selection in Modifiers rather than the earlier Input value.
+    world.get_mut::<TacticalRadarSelection>(operator).unwrap().0 = Some("target".into());
+    world.run_system_once(tick_tractor).unwrap();
+    let held = world.get::<TractorBeam>(operator).unwrap();
+    assert!(!held.engaged);
+    assert!(held.coupled_target.is_none());
+    assert_eq!(held.last_refusal, Some(TractorRefusal::NoLock));
+    let mut held = world.get_mut::<TractorBeam>(operator).unwrap();
+    held.engaged = true;
+    held.coupled_target = Some("target".into());
+    drop(held);
+    world.run_system_once(tick_tractor).unwrap();
+    let held = world.get::<TractorBeam>(operator).unwrap();
+    assert!(held.engaged);
+    assert_eq!(held.coupled_target.as_deref(), Some("target"));
+    assert_eq!(held.last_refusal, Some(TractorRefusal::Unpowered));
+    world
+        .entity_mut(operator)
+        .insert(crate::core::messages::AdmittedCommands(vec![
+            correlated_tractor_command("release", SystemControlPayload::ReleaseTractor),
+        ]));
+    world.run_system_once(handle_tractor_commands).unwrap();
+    assert!(!world.get::<TractorBeam>(operator).unwrap().engaged);
+}
+
+#[test]
 fn tractor_feedback_waits_for_the_authoritative_hold_verdict() {
     let mut app = App::new();
     app.add_message::<PendingTractorActionFeedback>()

@@ -67,6 +67,10 @@ fn actual_final_root_failures_keep_typed_source_outcome_and_commit_no_buffered_e
         (6,"fn offer(ctx) {ctx.flags.forbidden=1;#{message:\"No choices\",responses:[]}}",OpportunitySourceFailure::Shape),
         (7,"fn offer(ctx) {ctx.flags.forbidden=1;#{message:\"No callable choice\",responses:[#{text:\"Choose\",on_pick:\"absent\"}]}}",OpportunitySourceFailure::Unresolved),
     ] {
+        // Existing decision 10 deliberately panics on script runtime errors in
+        // development. Release reaches the fail-closed SourceUnavailable branch;
+        // the separate debug witness below pins the intentional panic policy.
+        if index == 2 && cfg!(debug_assertions) { continue; }
         let (mut app,mut open)=fixture(body);
         if index==3 {open.root_fn="missing".into();}
         if index==4 {open.script_path="missing.rhai".into();}
@@ -79,6 +83,17 @@ fn actual_final_root_failures_keep_typed_source_outcome_and_commit_no_buffered_e
         assert!(app.world().resource::<WorldScriptRuntime>().pending_comms_opens.is_empty());
         assert!(app.world().resource::<CommsRuntime>().active_dialogues.is_empty());
     }
+}
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "refused")]
+fn thrown_offer_preserves_existing_development_script_failure_policy() {
+    let (mut app, open) = fixture("fn offer(ctx) {ctx.flags.forbidden=1;throw \"refused\";}");
+    app.world_mut()
+        .resource_mut::<WorldScriptRuntime>()
+        .pending_comms_opens
+        .push(open);
+    app.update();
 }
 #[test]
 fn budget_deferral_keeps_same_original_offer_and_legacy_tail_policy_then_enters_once() {

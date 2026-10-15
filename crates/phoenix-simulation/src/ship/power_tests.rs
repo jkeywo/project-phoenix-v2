@@ -108,6 +108,38 @@ fn app_with(config: EntityConfig) -> (App, Entity) {
             config.infrastructure.as_ref().unwrap(),
         )),
     ));
+    assert!(app
+        .world()
+        .get::<crate::console::repair::server::ShipRepairTeams>(entity)
+        .is_some());
+    assert!(app
+        .world()
+        .get::<crate::ship::shields::ShipShields>(entity)
+        .is_some());
+    // Sparse owner apps still register the complete existing capture schema.
+    // An absent optional type must not hide the real shield/repair machinery.
+    app.world_mut()
+        .register_component::<crate::console::weapons::beam::ActiveBeam>();
+    app.world_mut()
+        .register_component::<crate::console::weapons::beam::PhaserCooldown>();
+    app.world_mut()
+        .register_component::<crate::console::weapons::TorpedoSystemResource>();
+    app.world_mut()
+        .register_component::<crate::entities::spawner::EntityShipArcHull>();
+    app.world_mut()
+        .register_component::<crate::console::repair::server::ShipRepairTeams>();
+    app.world_mut()
+        .register_component::<crate::console::repair::server::RepairRequestQueue>();
+    app.world_mut()
+        .register_component::<crate::ship_plugin::RepairHumanAlerted>();
+    app.world_mut()
+        .register_component::<crate::server_app::ShipSystemBlackboards>();
+    app.world_mut()
+        .register_component::<crate::ai::server::ObjectiveCursors>();
+    app.world_mut()
+        .register_component::<crate::console::weapons::blaster::BlasterSystemResource>();
+    app.world_mut()
+        .register_component::<crate::ship::shields::ShipShields>();
     // Preserve the ordinary capture registration gate without constructing a
     // separate save-only Power projection.
     app.world_mut()

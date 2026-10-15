@@ -202,7 +202,7 @@
     "lanes": "All three implementation agents interrupted; preserve their worktrees and uncommitted work. No dependent increment exit claimed.",
     "native": "Actual-host planner/PDC/protection batch still compiling at pause request. Stop after this commit; incomplete execution is not a passing test result. Log .phoenix/planner-pdc-protection-integrated-retry.log.",
     "pdc": "Cached executable with optional reference data physically intercepted all4 rounds across2cycles; existing saturation assertion fails. Prepare a genuinely heavier concurrent two-NPC attack on resume without weakening bank limits, real-impact or conservation checks.",
-    "remaining": "Actual Logistics frontier diagnosis, protection host execution, source-only owner tests and remaining16\u201324 scope remain open. No push."
+    "remaining": "Actual Logistics frontier diagnosis, protection host execution, source-only owner tests and remaining16–24 scope remain open. No push."
   },
   "resumed_checkpoint": {
     "date": "2026-10-15",
@@ -210,6 +210,19 @@
     "status": "User resumed implementation through24. Communications, craft and planner worktrees preserved and restarted; independent local Personnel/facility and PDC validation subtasks use isolated worktrees.",
     "native": "First resumed batch failed linking before tests with1785 unresolved anonymous LLVM symbols in Simulation output. After the earlier forced pause, cargo clean -p phoenix-simulation removed only that package artifacts; same actual-host3target batch is rebuilding in .phoenix/resumed-planner-pdc-protection-native-clean-retry.log. No passing native result claimed.",
     "reviews": "Temporal source review found historical owner/Station eligibility and actual-holder presence gaps. Corrections in the planner worktree pending review/integration. Craft continuation must include Disabled stored actors in canonical capture/roster/digest without re-enabling operational queries.",
-    "pending": "All remaining16\u201324 runtime joins and acceptance remain open; no push or full exit."
+    "pending": "All remaining16–24 runtime joins and acceptance remain open; no push or full exit."
+  },
+  "resumed_validation": {
+    "date": "2026-10-15",
+    "integrated_source": "0c79e1a2; protocol25/snapshot67/rules0.47",
+    "reviewed_joins": "Real finite Bay/probe custody and ordinary controls/Workshop; canonical Disabled actor capture/action addressing; one Presentation visibility gate; Security shared TeamJobs; closed physical-versus-Comms ActivityExecution identity; actual drive gravity-response configuration. Each substantive donor received independent source review.",
+    "content_owner": "30 passed,0 failed,290 filtered; cargo test -p phoenix-content-preparation --lib -- craft planning authoring::tests::; .phoenix/resumed-craft-content-owner-tests-current-fixture.log. Seven initial authoring failures were stale epoch3 dependencies versus current epoch4 packs and an invalid legacy equipment fixture. Original negative mismatch/include/curation assertions retained; production conversion guards unchanged.",
+    "renderer_free": "cargo check -p phoenix-simulation --tests --no-default-features passed44.55s at aa53accf runtime; .phoenix/resumed-simulation-renderer-free-check-final.log. Later gravity/action-target donors require their native check.",
+    "gameplay_owner": "5 Security tests passed in .phoenix/resumed-shared-jobs-owner-tests-retry.log; 9 Bay/profile tests passed in .phoenix/resumed-bay-owner-tests.log. These cover their earlier pinned runtime before local Security routes/gravity additions.",
+    "client": "36 passed across6 integrated Bay/protection/shared status/composition/Transit files,7.07s; .phoenix/resumed-merged-bay-protection-gravity-client.log. The merged check caught omitted Bay editor eligibility; 4a404a01 restores supported controls without changing validation.",
+    "pdc_prior_native": "The fresh single-attack interception test passed with finite payment, launcher-loss rebuild and full JSON360/digest comparison. Prior two-tube reference did not saturate actual defence; reviewed85f17216 adds a physically concurrent two-NPC attack, with native stronger assertions pending.",
+    "planner_prior_native": "Two actual repair/personnel cases passed; imported HTN test exposed an insufficient6s continuation window for authored5s return travel plus2s work. Reviewed572e7934 extends comparison to1200steps, retaining real stock/payment/credit assertions. Fresh native result pending.",
+    "running": "Actual5target headless batch at0c79e1a2: activity_foundation_continuation, pdc_gameplay_continuation, protection_continuation, comms_relay_continuation, physical_probe_continuation. --no-fail-fast collects all target results. .phoenix/resumed-five-host-integration.log; no result claimed while compiling.",
+    "open": "Joint planned Comms execution donor, remaining16-24 runtime scope, authored Patrol/War/Sandbox and generation/Director, integrated owner/native checks, physical-device/multiplayer/workload/performance/balance evidence and final pre-push gates. No full increment exit or push."
   }
 }

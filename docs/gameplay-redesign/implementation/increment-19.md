@@ -78,6 +78,12 @@ ordinary accepted energy/damage/sensor profiles supply actual capability.
 the same admitted owner: launch addresses an own stored identity, recovery resolves
 an exact current permitted contact, and physical placement checks reveal no hidden
 obstacle facts. Each per-bay job wraps the existing actual Job vocabulary.
+`CancelCraftHandling` settles that Job as Cancelled and releases its receiving
+claim while the craft remains at its actual Carried/Deployed location. The settled
+Job records performed work and spent resources are not refunded. A later explicit
+assignment gets a new JobId and full handling requirement. In contrast, loss of
+condition, motion eligibility, access or power pauses the same active assignment
+and can resume its existing work; cancellation does not hold a bay indefinitely.
 
 Initial `carried_by = { parent, bay }` belongs to the ordinary authored World row,
 referencing a declared base actor and actual Bay System. Resolve and commit it

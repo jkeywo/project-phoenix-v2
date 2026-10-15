@@ -162,10 +162,16 @@ pub(super) fn settle(
         };
         if !super::server::signal_comms_in_range(
             paths,
-            source.point,
-            receiver.point,
-            transmitting.range * source.listening,
-            receiving.range * receiver.listening,
+            super::server::SignalEndpoint {
+                point: source.point,
+                range: transmitting.range * source.listening,
+                receiver: Some((&source.uuid, &source.radio.system)),
+            },
+            super::server::SignalEndpoint {
+                point: receiver.point,
+                range: receiving.range * receiver.listening,
+                receiver: Some((&receiver.uuid, &receiver.radio.system)),
+            },
         ) {
             continue;
         }

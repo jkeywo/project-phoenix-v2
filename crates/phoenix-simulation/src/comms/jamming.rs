@@ -319,12 +319,13 @@ pub(crate) fn tick(
 
 /// Only the shared physical signal query calls this. No target/source identities
 /// or membership escape to controller facts or the receiving Console.
-pub(crate) fn receiver_factor(
+pub(crate) fn receiver_exposure(
     mut sources: Vec<(&EntityUuid, &JammingEmissions)>,
     tick: Option<u64>,
     paths: &crate::regions::signal_path::RegionSignalQuery,
     receiver: Vec3,
-) -> (f32, bool) {
+    effect: phoenix_sim_gameplay::electronic::jamming::JammingEffect,
+) -> (f64, bool) {
     sources.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
     let mut total = 0.0_f64;
     let mut complete = true;
@@ -335,11 +336,22 @@ pub(crate) fn receiver_factor(
             complete = false;
             continue;
         }
-        for emission in readout.entries.values() {
+        for emission in readout
+            .entries
+            .values()
+            .filter(|emission| emission.profile.effect == effect)
+        {
             let path = paths.transmission(
                 Vec3::from_array(emission.origin),
                 receiver,
-                crate::regions::signal_path::SignalClass::Comms,
+                match effect {
+                    phoenix_sim_gameplay::electronic::jamming::JammingEffect::Comms => {
+                        crate::regions::signal_path::SignalClass::Comms
+                    }
+                    phoenix_sim_gameplay::electronic::jamming::JammingEffect::Sensors => {
+                        crate::regions::signal_path::SignalClass::Sensors
+                    }
+                },
             );
             total += exposure(
                 &emission.profile,
@@ -351,10 +363,7 @@ pub(crate) fn receiver_factor(
             );
         }
     }
-    (
-        phoenix_sim_gameplay::regions::interference::endpoint_factor(false, total),
-        complete,
-    )
+    (total, complete)
 }
 pub(crate) fn has_emitters(owners: Query<&ShipJamming>) -> bool {
     !owners.is_empty()
@@ -577,7 +586,12 @@ pub(crate) fn register(app: &mut App) {
 fn refresh_jammed_comms_range(
     comms: ResMut<CommsRuntime>,
     ship_q: Query<
-        (&Transform, Option<&crate::comms::CommsRange>),
+        (
+            &Transform,
+            Option<&crate::comms::CommsRange>,
+            Option<&EntityUuid>,
+            Option<&crate::comms::radio::RadioProfile>,
+        ),
         With<crate::server_app::LocalShip>,
     >,
     // Every hull the frozen roster put in the world, for the host-neutral half
@@ -589,6 +603,8 @@ fn refresh_jammed_comms_range(
         &crate::lockstep::FleetSlotOf,
         &Transform,
         Option<&crate::comms::CommsRange>,
+        Option<&EntityUuid>,
+        Option<&crate::comms::radio::RadioProfile>,
     )>,
     entity_q: Query<(
         &crate::entities::spawner::EntityUuid,
@@ -596,6 +612,7 @@ fn refresh_jammed_comms_range(
         &crate::comms::CommsRange,
         Option<&crate::comms::CommsHailable>,
         Option<&crate::entities::spawner::EntityName>,
+        Option<&crate::comms::radio::RadioProfile>,
     )>,
     signals: crate::regions::signal_path::RegionSignalQuery,
 ) {
@@ -604,7 +621,7 @@ fn refresh_jammed_comms_range(
 
 #[cfg(test)]
 #[path = "jamming_tests.rs"]
-mod tests;
+pub(crate) mod tests;
 
 pub(crate) fn project(
     world: &World,

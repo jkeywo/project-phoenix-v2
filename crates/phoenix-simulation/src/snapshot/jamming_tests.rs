@@ -70,7 +70,7 @@ fn actual_installed_channels_json_and_single_row_apply_keep_one_owner_without_re
     );
     let factor = world
         .run_system_once(|paths: crate::regions::signal_path::RegionSignalQuery| {
-            paths.comms_receiver_factor(Vec3::ZERO)
+            paths.comms_receiver_factor(Vec3::ZERO, None)
         })
         .unwrap();
     assert_eq!(

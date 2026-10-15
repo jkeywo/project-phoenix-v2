@@ -1,6 +1,7 @@
 use super::*;
 fn profile() -> JammingConfig {
     JammingConfig {
+        effect: JammingEffect::Comms,
         mount: MountConfig {
             facing_deg: 0.0,
             fire_arc_deg: 60.0,

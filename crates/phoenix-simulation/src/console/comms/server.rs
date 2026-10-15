@@ -129,7 +129,13 @@ pub(crate) fn publish_comms_blackboard(
             physics
                 .map(|pose| Vec3::new(pose.x, pose.y, pose.z))
                 .or_else(|| transform.map(|transform| transform.translation))
-                .and_then(|point| paths.comms_receiver_interference(point))
+                .and_then(|point| {
+                    paths.comms_receiver_interference(
+                        point,
+                        uuid.zip(radio)
+                            .map(|(uuid, radio)| (uuid.0.as_str(), &radio.0.system)),
+                    )
+                })
         };
         bb.channels = radio
             .into_iter()

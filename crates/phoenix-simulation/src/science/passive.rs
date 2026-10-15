@@ -387,7 +387,8 @@ fn tick(
             {
                 continue;
             }
-            mount.range *= paid;
+            mount.range *=
+                paid * paths.sensors_receiver_factor(transform.translation, &uuid.0, system);
             let mut signals = Vec::new();
             for (source, position, emitted, signature) in &emissions {
                 if source == &uuid.0 {
@@ -510,3 +511,7 @@ pub(crate) fn publish(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "passive_interference_tests.rs"]
+mod interference_tests;

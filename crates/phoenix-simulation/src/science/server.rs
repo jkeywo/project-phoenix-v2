@@ -612,11 +612,15 @@ pub fn tick_scans(
                     subject_transform.translation,
                     crate::regions::signal_path::SignalClass::Sensors,
                 );
+                let receiver_factor =
+                    paths.sensors_receiver_factor(ship_pos, &operator_uuid, owner);
                 let conditions = ScanConditions {
                     // Path loss reduces usable reach on the same fidelity ladder.
                     // An opaque path cannot be bypassed by unfaded endpoints.
-                    distance: if transmission > 0.0 {
-                        ship_pos.distance(subject_transform.translation) / transmission
+                    distance: if transmission > 0.0 && receiver_factor > 0.0 {
+                        ship_pos.distance(subject_transform.translation)
+                            / transmission
+                            / receiver_factor
                     } else {
                         f32::INFINITY
                     },

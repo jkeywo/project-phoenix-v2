@@ -329,10 +329,16 @@ pub(crate) fn tick_radio(
                 };
                 if !super::server::signal_comms_in_range(
                     &paths,
-                    source.point,
-                    receiver.point,
-                    profile.range * source.listening,
-                    receiving.range * receiver.listening,
+                    super::server::SignalEndpoint {
+                        point: source.point,
+                        range: profile.range * source.listening,
+                        receiver: Some((&source.uuid, &source.radio.system)),
+                    },
+                    super::server::SignalEndpoint {
+                        point: receiver.point,
+                        range: receiving.range * receiver.listening,
+                        receiver: Some((&receiver.uuid, &receiver.radio.system)),
+                    },
                 ) {
                     continue;
                 }

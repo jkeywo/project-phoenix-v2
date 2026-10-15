@@ -18,7 +18,7 @@ fn factor(world: &mut World, point: Vec3) -> f32 {
     world
         .run_system_once(
             move |paths: crate::regions::signal_path::RegionSignalQuery| {
-                paths.comms_receiver_factor(point)
+                paths.comms_receiver_factor(point, None)
             },
         )
         .unwrap()
@@ -27,13 +27,52 @@ fn fixture() -> (World, Entity, Entity, String) {
     fixture_with_faction(None)
 }
 fn fixture_with_faction(faction: Option<&str>) -> (World, Entity, Entity, String) {
-    let config = crate::entities::include_resolve::load_entity_config(
-        "assets/entities/jamming_cruiser.toml",
+    fixture_for_effect(
+        faction,
+        phoenix_sim_gameplay::electronic::jamming::JammingEffect::Comms,
+        false,
     )
-    .unwrap();
-    let target_config = crate::entities::include_resolve::load_entity_config(
-        "assets/entities/alliance_cruiser.toml",
-    )
+}
+pub(crate) fn fixture_for_effect(
+    faction: Option<&str>,
+    effect: phoenix_sim_gameplay::electronic::jamming::JammingEffect,
+    protected: bool,
+) -> (World, Entity, Entity, String) {
+    let source =
+        crate::entities::include_resolve::resolve_from_disk("assets/entities/jamming_cruiser.toml")
+            .unwrap()
+            .toml;
+    let mut raw: toml::Value = toml::from_str(&source).unwrap();
+    let system = raw["system"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|system| system["id"].as_str() == Some(OWNER))
+        .unwrap();
+    let component = system["component"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|component| component["kind"].as_str() == Some("jamming_emitter"))
+        .unwrap();
+    component["config"]["effect"] = match effect {
+        phoenix_sim_gameplay::electronic::jamming::JammingEffect::Comms => "comms",
+        phoenix_sim_gameplay::electronic::jamming::JammingEffect::Sensors => "sensors",
+    }
+    .into();
+    if effect == phoenix_sim_gameplay::electronic::jamming::JammingEffect::Sensors {
+        // Explicit accepted finite source receiver: self-exposure must not make
+        // this intended sustained producer lose its own20-unit measured aim.
+        // The affected target retains its real50-unit Tactical instrument.
+        raw["weapons_console"]["radar"]["range"] = 200.0.into();
+    }
+    let config =
+        crate::entities::config::EntityConfig::from_toml(&toml::to_string(&raw).unwrap()).unwrap();
+    let target_config = crate::entities::include_resolve::load_entity_config(if protected {
+        "assets/entities/protection_cruiser.toml"
+    } else {
+        "assets/entities/alliance_cruiser.toml"
+    })
     .unwrap();
     let target_config = faction.map_or_else(
         || target_config.clone(),
@@ -104,7 +143,7 @@ fn command(world: &mut World, source: Entity, payload: Control) {
     world.run_system_once(handle_commands).unwrap();
     world.get_mut::<AdmittedCommands>(source).unwrap().0.clear();
 }
-fn prepare(world: &mut World, source: Entity, contact: &str) {
+pub(crate) fn prepare(world: &mut World, source: Entity, contact: &str) {
     command(
         world,
         source,
@@ -354,10 +393,16 @@ fn shared_actual_signal_gate_scales_each_endpoint_once_and_recovers_after_stop()
                 move |paths: crate::regions::signal_path::RegionSignalQuery| {
                     super::super::server::signal_comms_in_range(
                         &paths,
-                        Vec3::ZERO,
-                        Vec3::new(0.0, 0.0, -100.0),
-                        range,
-                        400.0,
+                        super::super::server::SignalEndpoint {
+                            point: Vec3::ZERO,
+                            range,
+                            receiver: None,
+                        },
+                        super::super::server::SignalEndpoint {
+                            point: Vec3::new(0.0, 0.0, -100.0),
+                            range: 400.0,
+                            receiver: None,
+                        },
                     )
                 },
             )
@@ -412,7 +457,7 @@ fn actual_late_spawn_never_creates_free_global_denial_or_erases_current_paid_pee
     let notice = |world: &mut World| {
         world
             .run_system_once(|paths: crate::regions::signal_path::RegionSignalQuery| {
-                paths.comms_receiver_interference(Vec3::ZERO)
+                paths.comms_receiver_interference(Vec3::ZERO, None)
             })
             .unwrap()
     };
@@ -542,4 +587,332 @@ fn actual_radio_loses_friendly_and_other_faction_links_without_changing_local_em
         }
     }
     assert!(local.windows(2).all(|pair|pair[0]==pair[1]),"sender's original fact and finite radio debit never reveal hidden reception or affiliation");
+}
+
+fn owned_factor(
+    world: &mut World,
+    point: Vec3,
+    observer: &str,
+    system: &str,
+    sensors: bool,
+) -> f32 {
+    let observer = observer.to_owned();
+    let system = id(system);
+    world
+        .run_system_once(
+            move |paths: crate::regions::signal_path::RegionSignalQuery| {
+                if sensors {
+                    paths.sensors_receiver_factor(point, &observer, &system)
+                } else {
+                    paths.comms_receiver_factor(point, Some((&observer, &system)))
+                }
+            },
+        )
+        .unwrap()
+}
+#[test]
+fn actual_paid_protection_reduces_only_exact_current_receiver_exposure_without_coordinate_ownership(
+) {
+    let (mut world, source, receiver, contact) = fixture_for_effect(
+        None,
+        phoenix_sim_gameplay::electronic::jamming::JammingEffect::Comms,
+        true,
+    );
+    prepare(&mut world, source, &contact);
+    world.run_system_once(tick).unwrap();
+    let point = Vec3::new(0.0, 0.0, -20.0);
+    let before = owned_factor(&mut world, point, "actual-receiver", "comms", false);
+    assert!(before > 0.0 && before < 1.0);
+    let link = |world: &mut World| {
+        world
+            .run_system_once(|paths: crate::regions::signal_path::RegionSignalQuery| {
+                super::super::server::signal_comms_in_range(
+                    &paths,
+                    super::super::server::SignalEndpoint {
+                        point: Vec3::ZERO,
+                        range: 100.0,
+                        receiver: Some(("jam-source", &id("comms"))),
+                    },
+                    super::super::server::SignalEndpoint {
+                        point: Vec3::new(0.0, 0.0, -20.0),
+                        range: 50.0,
+                        receiver: Some(("actual-receiver", &id("comms"))),
+                    },
+                )
+            })
+            .unwrap()
+    };
+    assert!(
+        !link(&mut world),
+        "unprotected actual receiving endpoint denies link"
+    );
+    let reserve = world
+        .get::<ShipPowerSystem>(receiver)
+        .unwrap()
+        .0
+        .network()
+        .consumers[&id("signal-protection")]
+        .energy;
+    world
+        .run_system_once(crate::science::protection::tick)
+        .unwrap();
+    assert!(
+        world
+            .get::<ShipPowerSystem>(receiver)
+            .unwrap()
+            .0
+            .network()
+            .consumers[&id("signal-protection")]
+            .energy
+            < reserve
+    );
+    assert_eq!(
+        owned_factor(&mut world, point, "actual-receiver", "comms", false),
+        1.0
+    );
+    assert!(
+        link(&mut world),
+        "paid exact receiver protection restores the same link"
+    );
+    assert_eq!(
+        owned_factor(
+            &mut world,
+            point,
+            "actual-receiver",
+            "tactical-radar",
+            false
+        ),
+        before,
+        "unallocated actual System cannot borrow protection"
+    );
+    assert_eq!(
+        owned_factor(&mut world, point, "another-actor", "comms", false),
+        before,
+        "coincident coordinates do not imply same equipment owner"
+    );
+    assert_eq!(
+        factor(&mut world, point),
+        before,
+        "range-only endpoint has no owned protection"
+    );
+    world.resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+    world.run_system_once(tick).unwrap();
+    assert_eq!(
+        owned_factor(&mut world, point, "actual-receiver", "comms", false),
+        before,
+        "prior protection work cannot be reused"
+    );
+    world
+        .run_system_once(crate::science::protection::tick)
+        .unwrap();
+    assert_eq!(
+        owned_factor(&mut world, point, "actual-receiver", "comms", false),
+        1.0
+    );
+}
+fn fund_radar(world: &mut World, receiver: Entity) {
+    world
+        .get_mut::<ShipPowerSystem>(receiver)
+        .unwrap()
+        .0
+        .work_continuous(&id("tactical-radar"), 1.0 / 60.0, 1.0)
+        .unwrap();
+}
+#[test]
+fn sensors_effect_actual_broad_acquisition_loss_and_priority_recovery_preserve_held_original_sample(
+) {
+    use phoenix_sim_gameplay::ship::composition::CommandChannelValue;
+    let (mut world, source, receiver, contact) = fixture_for_effect(
+        None,
+        phoenix_sim_gameplay::electronic::jamming::JammingEffect::Sensors,
+        true,
+    );
+    prepare(&mut world, source, &contact);
+    world.resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+    let baseline = world.resource::<crate::sim_tick::SimTick>().0;
+    fund_radar(&mut world, receiver);
+    world.run_system_once(crate::science::broad::tick).unwrap();
+    assert!(world
+        .get::<crate::science::broad::BroadTracks>(receiver)
+        .unwrap()
+        .0[&id("tactical-radar")]
+        .current
+        .contains_key("jam-source"));
+    world.resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+    world.run_system_once(tick).unwrap();
+    assert_eq!(
+        owned_factor(
+            &mut world,
+            Vec3::new(0.0, 0.0, -20.0),
+            "actual-receiver",
+            "comms",
+            false
+        ),
+        1.0,
+        "Sensors effect is not a Comms effect"
+    );
+    fund_radar(&mut world, receiver);
+    world.run_system_once(crate::science::broad::tick).unwrap();
+    let now = world.resource::<crate::sim_tick::SimTick>().0;
+    let profile = &world
+        .get::<crate::science::broad::BroadProfile>(receiver)
+        .unwrap()
+        .0[&id("tactical-radar")]
+        .profile;
+    let state = &world
+        .get::<crate::science::broad::BroadTracks>(receiver)
+        .unwrap()
+        .0[&id("tactical-radar")];
+    assert!(
+        !state.current.contains_key("jam-source"),
+        "paid jammer makes20 outside actual50 scaled reach"
+    );
+    let held = state.projection(profile, now, 1.0 / 60.0).unwrap();
+    assert!(
+        held.iter()
+            .any(|record| record.predicted && record.observed_tick == baseline),
+        "equipment denial retains old dated evidence"
+    );
+    world
+        .get_mut::<crate::science::protection::ShipSignalProtection>(receiver)
+        .unwrap()
+        .0
+        .get_mut(&id("signal-protection"))
+        .unwrap()
+        .set(
+            "priorities",
+            CommandChannelValue::SystemPriority(vec![
+                id("tactical-radar"),
+                id("comms"),
+                id("sensors"),
+            ]),
+        )
+        .unwrap();
+    world.resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+    world
+        .run_system_once(crate::science::protection::tick)
+        .unwrap();
+    world.run_system_once(tick).unwrap();
+    assert!(
+        world
+            .get::<JammingEmissions>(source)
+            .unwrap()
+            .entries
+            .contains_key(&id(OWNER)),
+        "recovery must not be transmitter loss"
+    );
+    fund_radar(&mut world, receiver);
+    world.run_system_once(crate::science::broad::tick).unwrap();
+    assert!(
+        world
+            .get::<crate::science::broad::BroadTracks>(receiver)
+            .unwrap()
+            .0[&id("tactical-radar")]
+            .current
+            .contains_key("jam-source"),
+        "own paid priority allocation restores actual acquisition"
+    );
+}
+
+#[test]
+fn actual_focused_fidelity_uses_the_same_receiver_factor_once_and_paid_protection_restores_precision(
+) {
+    use phoenix_sim_gameplay::ship::composition::CommandChannelValue;
+    let mut bands = Vec::new();
+    for protect in [false, true] {
+        let (mut world, source, receiver, contact) = fixture_for_effect(
+            None,
+            phoenix_sim_gameplay::electronic::jamming::JammingEffect::Sensors,
+            true,
+        );
+        prepare(&mut world, source, &contact);
+        world
+            .get_mut::<crate::science::protection::ShipSignalProtection>(receiver)
+            .unwrap()
+            .0
+            .get_mut(&id("signal-protection"))
+            .unwrap()
+            .set(
+                "priorities",
+                CommandChannelValue::SystemPriority(if protect {
+                    vec![id("sensors")]
+                } else {
+                    vec![]
+                }),
+            )
+            .unwrap();
+        let first = world.resource::<crate::sim_tick::SimTick>().0 + 1;
+        for now in first..first + 125 {
+            world.resource_mut::<crate::sim_tick::SimTick>().0 = now;
+            for (actor, owner) in [(source, "tactical-radar"), (receiver, "sensor-radar")] {
+                world
+                    .get_mut::<ShipPowerSystem>(actor)
+                    .unwrap()
+                    .0
+                    .work_continuous(&id(owner), 1.0 / 60.0, 1.0)
+                    .unwrap();
+            }
+            world.run_system_once(crate::science::broad::tick).unwrap();
+            world
+                .run_system_once(
+                    crate::console::weapons::blackboard::publish_tactical_radar_blackboard,
+                )
+                .unwrap();
+            world
+                .run_system_once(crate::ship::sensors::publish_sensor_radar_blackboard)
+                .unwrap();
+            if now == first {
+                let alias = world
+                    .get::<crate::science::broad::BroadTracks>(receiver)
+                    .unwrap()
+                    .0[&id("sensor-radar")]
+                    .contact_for_source("jam-source")
+                    .unwrap()
+                    .to_owned();
+                world
+                    .get_mut::<AdmittedCommands>(receiver)
+                    .unwrap()
+                    .0
+                    .push(AdmittedCommand {
+                        target: id("sensors"),
+                        payload: Control::ScanTarget {
+                            uuid: alias,
+                            aim: Default::default(),
+                            intrusive: false,
+                        },
+                        response_token: None,
+                        feedback_correlation: None,
+                    });
+            }
+            world
+                .run_system_once(crate::science::protection::tick)
+                .unwrap();
+            world.run_system_once(tick).unwrap();
+            assert!(world
+                .get::<JammingEmissions>(source)
+                .unwrap()
+                .entries
+                .contains_key(&id(OWNER)));
+            world.run_system_once(crate::science::tick_scans).unwrap();
+            world
+                .get_mut::<AdmittedCommands>(receiver)
+                .unwrap()
+                .0
+                .clear();
+            let record = &world
+                .get::<crate::science::ShipScanRecord>(receiver)
+                .unwrap()
+                .0[&id("sensors")];
+            if let Some(reading) = &record.last {
+                bands.push(reading.band.clone());
+                break;
+            }
+        }
+        assert_eq!(
+            bands.len(),
+            if protect { 2 } else { 1 },
+            "actual finite focused work must complete"
+        );
+    }
+    assert_eq!(bands,vec!["coarse","detailed"],"equipment loss applies once on existing fidelity ladder; funded exact protection restores precision");
 }

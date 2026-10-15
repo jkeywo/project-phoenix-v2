@@ -19,6 +19,8 @@ pub enum JammingEffect {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JammingConfig {
+    #[serde(default)]
+    pub effect: JammingEffect,
     pub mount: MountConfig,
     pub falloff: FieldFalloff,
     pub strength: f32,

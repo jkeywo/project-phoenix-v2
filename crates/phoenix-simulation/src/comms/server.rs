@@ -25,6 +25,7 @@ use crate::console::comms::server::{
     handle_show_on_screen,
 };
 use crate::core::messages::{CommsContact, CommsMessage, ServerMessage, StationId, ViewMode};
+use crate::entities::spawner::EntityUuid;
 use crate::lobby::{Sessions, Target};
 use crate::server_app::SimOutbox;
 use crate::world::server::ObjectiveManagerRes;
@@ -750,24 +751,32 @@ fn auto_clear_on_screen_message(
 /// front-end this is the roster's ONLY source; the union rule and the
 /// deterministic append order still live in `crate::comms::roster`, where they
 /// now keep the per-tick re-derivation idempotent.
+/// Read-only actual radio endpoint identity. Range-only legacy actors have no
+/// owned System protection; coordinates never imply an equipment owner.
+pub(crate) struct SignalEndpoint<'a> {
+    pub point: Vec3,
+    pub range: f32,
+    pub receiver: Option<(&'a str, &'a crate::core::messages::SystemId)>,
+}
 pub(crate) fn signal_comms_in_range(
     signals: &crate::regions::signal_path::RegionSignalQuery,
-    start: Vec3,
-    end: Vec3,
-    own_range: f32,
-    other_range: f32,
+    source: SignalEndpoint<'_>,
+    destination: SignalEndpoint<'_>,
 ) -> bool {
-    let transmission =
-        signals.transmission(start, end, crate::regions::signal_path::SignalClass::Comms);
-    let own_factor = signals.comms_receiver_factor(start);
-    let other_factor = signals.comms_receiver_factor(end);
+    let transmission = signals.transmission(
+        source.point,
+        destination.point,
+        crate::regions::signal_path::SignalClass::Comms,
+    );
+    let own_factor = signals.comms_receiver_factor(source.point, source.receiver);
+    let other_factor = signals.comms_receiver_factor(destination.point, destination.receiver);
     transmission > 0.0
         && own_factor > 0.0
         && other_factor > 0.0
         && crate::comms::in_range(
-            start.distance(end) / transmission,
-            own_range * own_factor,
-            other_range * other_factor,
+            source.point.distance(destination.point) / transmission,
+            source.range * own_factor,
+            destination.range * other_factor,
         )
 }
 
@@ -807,7 +816,12 @@ pub(crate) fn information_endpoint_available(
 pub(crate) fn update_comms_range_flags(
     mut comms: ResMut<CommsRuntime>,
     ship_q: Query<
-        (&Transform, Option<&crate::comms::CommsRange>),
+        (
+            &Transform,
+            Option<&crate::comms::CommsRange>,
+            Option<&EntityUuid>,
+            Option<&crate::comms::radio::RadioProfile>,
+        ),
         With<crate::server_app::LocalShip>,
     >,
     // Every hull the frozen roster put in the world, for the host-neutral half
@@ -819,6 +833,8 @@ pub(crate) fn update_comms_range_flags(
         &crate::lockstep::FleetSlotOf,
         &Transform,
         Option<&crate::comms::CommsRange>,
+        Option<&EntityUuid>,
+        Option<&crate::comms::radio::RadioProfile>,
     )>,
     entity_q: Query<(
         &crate::entities::spawner::EntityUuid,
@@ -826,6 +842,7 @@ pub(crate) fn update_comms_range_flags(
         &crate::comms::CommsRange,
         Option<&crate::comms::CommsHailable>,
         Option<&crate::entities::spawner::EntityName>,
+        Option<&crate::comms::radio::RadioProfile>,
     )>,
     signals: crate::regions::signal_path::RegionSignalQuery,
 ) {
@@ -840,15 +857,29 @@ pub(crate) fn update_comms_range_flags(
         crate::command_admission::HostSlot,
         HashMap<String, bool>,
     > = std::collections::BTreeMap::new();
-    for (slot, hull_tf, hull_range) in fleet_q.iter() {
+    for (slot, hull_tf, hull_range, hull_uuid, hull_radio) in fleet_q.iter() {
         let hull_range = hull_range.map(|r| r.0).unwrap_or(0.0);
         let hull_pos = hull_tf.translation;
         let flags: HashMap<String, bool> = entity_q
             .iter()
-            .map(|(uuid, tf, range, _, _)| {
+            .map(|(uuid, tf, range, _, _, radio)| {
                 (
                     uuid.0.clone(),
-                    signal_comms_in_range(&signals, hull_pos, tf.translation, hull_range, range.0),
+                    signal_comms_in_range(
+                        &signals,
+                        SignalEndpoint {
+                            point: hull_pos,
+                            range: hull_range,
+                            receiver: hull_uuid
+                                .zip(hull_radio)
+                                .map(|(uuid, radio)| (uuid.0.as_str(), &radio.0.system)),
+                        },
+                        SignalEndpoint {
+                            point: tf.translation,
+                            range: range.0,
+                            receiver: radio.map(|radio| (uuid.0.as_str(), &radio.0.system)),
+                        },
+                    ),
                 )
             })
             .collect();
@@ -864,7 +895,7 @@ pub(crate) fn update_comms_range_flags(
         comms.fleet_range_flags = fleet_next;
     }
 
-    let Some((ship_tf, ship_range_opt)) = ship_q.iter().next() else {
+    let Some((ship_tf, ship_range_opt, ship_uuid, ship_radio)) = ship_q.iter().next() else {
         // No ship: either lobby/pure-handler tests (range tracking never
         // activated — preserve default-true semantics) or the ship was
         // destroyed mid-game. In the latter case, do NOT reset
@@ -905,9 +936,22 @@ pub(crate) fn update_comms_range_flags(
     // `merge_entity_contacts` is what imposes the deterministic append order.
     let mut live: HashSet<String> = HashSet::new();
     let mut derived_contacts: Vec<crate::comms::EntityContact> = Vec::new();
-    for (uuid, tf, range, hailable, entity_name) in entity_q.iter() {
-        let in_range =
-            signal_comms_in_range(&signals, ship_pos, tf.translation, ship_range, range.0);
+    for (uuid, tf, range, hailable, entity_name, radio) in entity_q.iter() {
+        let in_range = signal_comms_in_range(
+            &signals,
+            SignalEndpoint {
+                point: ship_pos,
+                range: ship_range,
+                receiver: ship_uuid
+                    .zip(ship_radio)
+                    .map(|(uuid, radio)| (uuid.0.as_str(), &radio.0.system)),
+            },
+            SignalEndpoint {
+                point: tf.translation,
+                range: range.0,
+                receiver: radio.map(|radio| (uuid.0.as_str(), &radio.0.system)),
+            },
+        );
         let prior = comms.range_flags.insert(uuid.0.clone(), in_range);
         if prior != Some(in_range) {
             any_changed = true;

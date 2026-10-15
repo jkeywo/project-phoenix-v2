@@ -103,6 +103,7 @@ struct Feed {
     owner: SystemId,
     position: Vec3,
     range: f32,
+    radio: Option<SystemId>,
     faction: uuid::Uuid,
     kind: String,
     samples: Vec<SharedRadarSample>,
@@ -120,6 +121,7 @@ type Observer = (
     &'static BroadProfile,
     &'static BroadTracks,
     Option<&'static crate::modifiers::ShipModifiers>,
+    Option<&'static crate::comms::radio::RadioProfile>,
 );
 
 /// Stage all outgoing originals before mutating any recipient. Relaying cannot
@@ -147,6 +149,7 @@ pub(crate) fn deliver(
         profiles,
         tracks,
         modifiers,
+        radio,
     ) in &ships.p0()
     {
         if !crate::comms::server::information_endpoint_available(config, controls, modifiers) {
@@ -158,6 +161,7 @@ pub(crate) fn deliver(
             entity,
             position,
             range.0,
+            radio.map(|radio| radio.0.system.clone()),
             faction.0,
             profiles.clone(),
             config
@@ -193,6 +197,7 @@ pub(crate) fn deliver(
                     owner: owner.clone(),
                     position,
                     range: range.0,
+                    radio: radio.map(|radio| radio.0.system.clone()),
                     faction: faction.0,
                     kind: system.kind.clone(),
                     samples,
@@ -203,7 +208,7 @@ pub(crate) fn deliver(
     feeds.sort_by(|a, b| a.sender.cmp(&b.sender).then_with(|| a.owner.cmp(&b.owner)));
     recipients.sort_by(|a, b| a.0.cmp(&b.0));
     let mut owners = ships.p1();
-    for (uuid, entity, position, range, faction, profiles, kinds, operating) in recipients {
+    for (uuid, entity, position, range, radio, faction, profiles, kinds, operating) in recipients {
         let Ok(mut tracks) = owners.get_mut(entity) else {
             continue;
         };
@@ -225,10 +230,19 @@ pub(crate) fn deliver(
                         && &feed.kind == kind
                         && crate::comms::server::signal_comms_in_range(
                             &signals,
-                            feed.position,
-                            position,
-                            feed.range,
-                            range,
+                            crate::comms::server::SignalEndpoint {
+                                point: feed.position,
+                                range: feed.range,
+                                receiver: feed
+                                    .radio
+                                    .as_ref()
+                                    .map(|owner| (feed.sender.as_str(), owner)),
+                            },
+                            crate::comms::server::SignalEndpoint {
+                                point: position,
+                                range,
+                                receiver: radio.as_ref().map(|owner| (uuid.as_str(), owner)),
+                            },
                         )
                 })
                 .flat_map(|feed| feed.samples.iter().cloned())

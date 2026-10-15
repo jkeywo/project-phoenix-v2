@@ -218,6 +218,7 @@ pub(crate) fn tick(
             if paid > 0.0 {
                 let radar = &instrument.radar;
                 let range = radar.range
+                    * paths.sensors_receiver_factor(origin, &observer.0, system)
                     * modifiers.map_or(1.0, |modifiers| {
                         modifiers.get(
                             &match ship_config.0.system(system).map(|s| s.kind.as_str()) {

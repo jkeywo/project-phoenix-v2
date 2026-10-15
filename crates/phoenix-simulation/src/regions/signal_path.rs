@@ -29,28 +29,83 @@ pub struct RegionSignalQuery<'w, 's> {
             &'static crate::comms::jamming::JammingEmissions,
         ),
     >,
+    protection: Query<
+        'w,
+        's,
+        (
+            &'static EntityUuid,
+            &'static crate::science::protection::ProtectionGrants,
+        ),
+    >,
     tick: Option<Res<'w, SimTick>>,
     fixed: Option<Res<'w, Time<Fixed>>>,
 }
 
 impl RegionSignalQuery<'_, '_> {
-    /// Endpoint exposure only. Natural segment transmission below is unchanged.
-    pub(crate) fn comms_receiver_factor(&self, point: Vec3) -> f32 {
-        crate::comms::jamming::receiver_factor(
+    /// Actual endpoint equipment contributes once; the natural path below is
+    /// always evaluated separately, including emitter-to-receiver attenuation.
+    fn equipment_factor(
+        &self,
+        effect: phoenix_sim_gameplay::electronic::jamming::JammingEffect,
+        point: Vec3,
+        receiver: Option<(&str, &crate::core::messages::SystemId)>,
+    ) -> (f32, bool) {
+        let (exposure, complete) = crate::comms::jamming::receiver_exposure(
             self.jamming.iter().collect(),
             self.tick.as_ref().map(|tick| tick.0),
             self,
             point,
+            effect,
+        );
+        let suppression = receiver
+            .zip(self.tick.as_ref())
+            .and_then(|((uuid, system), tick)| {
+                self.protection
+                    .iter()
+                    .find(|(actual, _)| actual.0 == uuid)
+                    .map(|(_, grants)| grants.suppression_for(system, tick.0))
+            })
+            .unwrap_or(0.0);
+        (
+            phoenix_sim_gameplay::electronic::protection::receiver_factor(exposure, suppression)
+                .unwrap_or(1.0),
+            complete,
+        )
+    }
+    pub(crate) fn comms_receiver_factor(
+        &self,
+        point: Vec3,
+        receiver: Option<(&str, &crate::core::messages::SystemId)>,
+    ) -> f32 {
+        self.equipment_factor(
+            phoenix_sim_gameplay::electronic::jamming::JammingEffect::Comms,
+            point,
+            receiver,
         )
         .0
     }
-
-    pub(crate) fn comms_receiver_interference(&self, point: Vec3) -> Option<bool> {
-        let (factor, complete) = crate::comms::jamming::receiver_factor(
-            self.jamming.iter().collect(),
-            self.tick.as_ref().map(|tick| tick.0),
-            self,
+    pub(crate) fn sensors_receiver_factor(
+        &self,
+        point: Vec3,
+        observer: &str,
+        system: &crate::core::messages::SystemId,
+    ) -> f32 {
+        self.equipment_factor(
+            phoenix_sim_gameplay::electronic::jamming::JammingEffect::Sensors,
             point,
+            Some((observer, system)),
+        )
+        .0
+    }
+    pub(crate) fn comms_receiver_interference(
+        &self,
+        point: Vec3,
+        receiver: Option<(&str, &crate::core::messages::SystemId)>,
+    ) -> Option<bool> {
+        let (factor, complete) = self.equipment_factor(
+            phoenix_sim_gameplay::electronic::jamming::JammingEffect::Comms,
+            point,
+            receiver,
         );
         (complete || factor < 1.0).then_some(factor < 1.0)
     }

@@ -183,6 +183,7 @@ struct Feed {
     faction: uuid::Uuid,
     pose: Vec3,
     range: f32,
+    radio: Option<SystemId>,
     samples: Vec<NavigationSharedObservation>,
 }
 
@@ -209,6 +210,7 @@ pub(crate) fn tick(
         Option<&crate::science::broad::BroadTracks>,
         Option<&crate::modifiers::ShipModifiers>,
         &mut NavigationSharing,
+        Option<&crate::comms::radio::RadioProfile>,
     )>,
 ) {
     let mut feeds = Vec::new();
@@ -228,6 +230,7 @@ pub(crate) fn tick(
         tracks,
         modifiers,
         sharing,
+        radio,
     ) in &mut ordered
     {
         if !operating(sources, &sharing.0.owner) {
@@ -295,6 +298,7 @@ pub(crate) fn tick(
                 faction: faction.0,
                 pose,
                 range: range.0,
+                radio: radio.map(|radio| radio.0.system.clone()),
                 samples: sharing.0.exports(),
             });
         }
@@ -314,6 +318,7 @@ pub(crate) fn tick(
         _,
         modifiers,
         sharing,
+        radio,
     ) in &mut ordered
     {
         if !operating(sources, &sharing.0.owner)
@@ -330,7 +335,17 @@ pub(crate) fn tick(
                 feed.ship != uuid.0
                     && feed.faction == faction.0
                     && crate::comms::server::signal_comms_in_range(
-                        &signals, feed.pose, pose, feed.range, range.0,
+                        &signals,
+                        crate::comms::server::SignalEndpoint {
+                            point: feed.pose,
+                            range: feed.range,
+                            receiver: feed.radio.as_ref().map(|owner| (feed.ship.as_str(), owner)),
+                        },
+                        crate::comms::server::SignalEndpoint {
+                            point: pose,
+                            range: range.0,
+                            receiver: radio.map(|radio| (uuid.0.as_str(), &radio.0.system)),
+                        },
                     )
             })
             .flat_map(|feed| feed.samples.iter())

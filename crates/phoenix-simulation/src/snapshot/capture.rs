@@ -1102,16 +1102,13 @@ pub(super) fn capture_intent_narration(entity: EntityRef<'_>) -> Option<IntentNa
     Some(IntentNarrationState { last, generation })
 }
 
-pub(super) fn capture_recent_combat(
-    entity: EntityRef<'_>,
-    captured_at: f32,
-) -> Option<RecentCombatActivityState> {
+pub(super) fn capture_recent_combat(entity: EntityRef<'_>) -> Option<RecentCombatActivityState> {
     let activity = entity.get::<crate::ship::combat_activity::RecentCombatActivity>()?;
     let (damage, hostile_fire, weapon_fired, prev_hull) = activity.continuation();
     Some(RecentCombatActivityState {
-        last_damage_taken_age_secs: damage.map(|timestamp| captured_at - timestamp),
-        last_hostile_fire_taken_age_secs: hostile_fire.map(|timestamp| captured_at - timestamp),
-        last_weapon_fired_age_secs: weapon_fired.map(|timestamp| captured_at - timestamp),
+        last_damage_taken_secs: damage,
+        last_hostile_fire_taken_secs: hostile_fire,
+        last_weapon_fired_secs: weapon_fired,
         prev_hull,
     })
 }
@@ -1284,7 +1281,6 @@ pub(crate) fn capture_entity_state(world: &World, uuid: &str) -> Option<EntitySt
 
 /// Fixed capture inputs and the registration gates of the former optional queries.
 pub(super) struct EntityCaptureContext<'w> {
-    pub(super) captured_at: f32,
     pub(super) captured_tick: u64,
     pub(super) motion_plan: Option<&'w crate::ship::helm_planner::HelmMotionPlan>,
     pub(super) ai_fidelity: bool,
@@ -1297,7 +1293,6 @@ pub(super) struct EntityCaptureContext<'w> {
 impl<'w> EntityCaptureContext<'w> {
     pub(super) fn new(world: &'w World) -> Self {
         Self {
-            captured_at: fixed_elapsed_secs(world).unwrap_or_default(),
             captured_tick: world.get_resource::<SimTick>().map_or(0, |tick| tick.0),
             motion_plan: world.get_resource(),
             ai_fidelity: world
@@ -1406,10 +1401,7 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                         .flatten(),
                     sensors_threat: capture_sensors_threat(entity),
                     intent_narration: capture_intent_narration(entity),
-                    recent_combat: capture_recent_combat(
-                        entity,
-                        crate::ai::lod_clock::from_world(world) as f32,
-                    ),
+                    recent_combat: capture_recent_combat(entity),
                     frequency_hint: capture_frequency_hints(entity),
                     phaser_frequency: capture_ship_phaser_frequencies(entity),
                     tactical_frequency_hint: capture_tactical_frequency_hints(entity),

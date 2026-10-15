@@ -575,15 +575,16 @@ pub struct IntentSnapshotState {
     pub manoeuvre: Option<String>,
 }
 
-/// Per-ship combat-memory timestamps projected as ages on the logical tick clock.
+/// Canonical logical combat timestamps; ages cannot retain old f32 event bits.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RecentCombatActivityState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_damage_taken_age_secs: Option<f32>,
+    pub last_damage_taken_secs: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_hostile_fire_taken_age_secs: Option<f32>,
+    pub last_hostile_fire_taken_secs: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_weapon_fired_age_secs: Option<f32>,
+    pub last_weapon_fired_secs: Option<f32>,
     #[serde(default)]
     pub prev_hull: f32,
 }

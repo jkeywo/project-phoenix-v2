@@ -821,28 +821,28 @@ fn assert_selected_continuation_memories_match(
                 for (name, actual, expected) in [
                     (
                         "damage",
-                        actual.last_damage_taken_age_secs,
-                        expected.last_damage_taken_age_secs,
+                        actual.last_damage_taken_secs,
+                        expected.last_damage_taken_secs,
                     ),
                     (
                         "hostile fire",
-                        actual.last_hostile_fire_taken_age_secs,
-                        expected.last_hostile_fire_taken_age_secs,
+                        actual.last_hostile_fire_taken_secs,
+                        expected.last_hostile_fire_taken_secs,
                     ),
                     (
                         "weapon fire",
-                        actual.last_weapon_fired_age_secs,
-                        expected.last_weapon_fired_age_secs,
+                        actual.last_weapon_fired_secs,
+                        expected.last_weapon_fired_secs,
                     ),
                 ] {
                     match (actual, expected) {
                         (None, None) => {}
-                        (Some(actual), Some(expected)) => assert!(
-                            (actual - expected).abs() <= 1.0e-5,
-                            "{context}: {uuid} {name} age {actual} != {expected}"
+                        (Some(actual), Some(expected)) => assert_eq!(
+                            actual, expected,
+                            "{context}: {uuid} {name} canonical timestamp"
                         ),
                         _ => panic!(
-                            "{context}: {uuid} {name} age presence {actual:?} != {expected:?}"
+                            "{context}: {uuid} {name} timestamp presence {actual:?} != {expected:?}"
                         ),
                     }
                 }
@@ -1682,9 +1682,9 @@ fn continuation_memories_replace_bootstrap_even_when_the_capture_is_default() {
         generation: 73,
     });
     seeded_row.recent_combat = Some(RecentCombatActivityState {
-        last_damage_taken_age_secs: Some(0.25),
-        last_hostile_fire_taken_age_secs: Some(0.5),
-        last_weapon_fired_age_secs: Some(0.75),
+        last_damage_taken_secs: Some(0.0),
+        last_hostile_fire_taken_secs: Some(0.0),
+        last_weapon_fired_secs: Some(0.0),
         prev_hull: 17.0,
     });
     seeded_row.frequency_hint = Some(FrequencyHintContinuationState {

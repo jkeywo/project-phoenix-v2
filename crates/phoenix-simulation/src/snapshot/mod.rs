@@ -321,6 +321,7 @@ pub use schema::WindowSlot;
 pub use schema::WorldEventRecord;
 
 mod capture;
+mod combat_clock;
 pub use capture::capture;
 pub(crate) use capture::capture_entity_state;
 use capture::fixed_elapsed_secs;

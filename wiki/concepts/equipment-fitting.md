@@ -39,7 +39,8 @@ Snapshot fitting preflight resolves candidate fitted definitions before restorin
 energy and other machinery. It checks complete-roster equipment identity, work,
 parts, receiving-space and physical claims before applying state. Snapshot 51,
 rules 0.23 and protocol 13 carry fitting/recovery and sensing state through existing
-save and transport mechanisms.
+save and transport mechanisms. Historical combat timestamps use the shared
+logical tick clock and retain their canonical bits rather than lossy host ages.
 
 Workshop edits the closed slot/library/locker/assembly declarations through
 accepted-source history, reference validation, materialisation, Preview and

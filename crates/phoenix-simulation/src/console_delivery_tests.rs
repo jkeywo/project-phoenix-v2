@@ -1471,3 +1471,77 @@ fn explicit_combat_binding_selects_its_measured_record_among_independent_tactica
         "two unbound publishers are ambiguous"
     );
 }
+
+#[test]
+fn outgoing_navigation_uses_its_exact_picture_and_preserves_only_public_chart_anchors() {
+    let mut app = fixture();
+    let handle = observe(&mut app, "tactical-radar", 0, 1.0);
+    let projection = capture(&mut app).references;
+    let mut board = SystemBlackboard::Navigation(crate::core::messages::NavigationBlackboard {
+        navigation_waypoint: Some(crate::core::messages::WaypointSnapshot {
+            x: 12.0,
+            z: 34.0,
+            source_uuid: Some("hidden".into()),
+        }),
+        ..Default::default()
+    });
+    projection.navigation(&SystemId("navigation".into()), &mut board, |_| false);
+    let SystemBlackboard::Navigation(value) = &board else {
+        unreachable!()
+    };
+    assert_eq!(
+        value
+            .navigation_waypoint
+            .as_ref()
+            .unwrap()
+            .source_uuid
+            .as_deref(),
+        Some(handle.as_str())
+    );
+    assert!(!serde_json::to_string(&board).unwrap().contains("hidden"));
+    let SystemBlackboard::Navigation(value) = &mut board else {
+        unreachable!()
+    };
+    value.navigation_waypoint.as_mut().unwrap().source_uuid = Some("charted-public".into());
+    projection.navigation(&SystemId("navigation".into()), &mut board, |id| {
+        id == "charted-public"
+    });
+    let SystemBlackboard::Navigation(value) = &mut board else {
+        unreachable!()
+    };
+    assert_eq!(
+        value
+            .navigation_waypoint
+            .as_ref()
+            .unwrap()
+            .source_uuid
+            .as_deref(),
+        Some("charted-public")
+    );
+    value.navigation_waypoint.as_mut().unwrap().source_uuid = Some("unseen-private".into());
+    projection.navigation(&SystemId("navigation".into()), &mut board, |_| false);
+    let SystemBlackboard::Navigation(value) = &board else {
+        unreachable!()
+    };
+    assert_eq!(
+        value.navigation_waypoint.as_ref().unwrap().source_uuid,
+        None
+    );
+    assert_eq!(value.navigation_waypoint.as_ref().unwrap().x, 12.0);
+}
+
+#[test]
+fn legacy_navigation_projection_preserves_its_anchor() {
+    let projection = ReferenceProjection::default();
+    let mut board = SystemBlackboard::Navigation(crate::core::messages::NavigationBlackboard {
+        navigation_waypoint: Some(crate::core::messages::WaypointSnapshot {
+            x: 1.0,
+            z: 2.0,
+            source_uuid: Some("legacy-anchor".into()),
+        }),
+        ..Default::default()
+    });
+    let original = board.clone();
+    projection.navigation(&SystemId("navigation".into()), &mut board, |_| false);
+    assert_eq!(board, original);
+}

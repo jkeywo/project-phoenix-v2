@@ -365,7 +365,9 @@ fn ordinary_ai_orders_two_contacts_once_and_keeps_highest_request_per_contact() 
         .unwrap()
         .key
         .clone();
-    app.init_resource::<crate::lobby::Sessions>();
+    app.insert_resource(crate::lobby::Sessions(
+        crate::lobby::session::SessionManager::new(),
+    ));
     let mut world_config = crate::world::config::WorldConfig::default();
     world_config.routes.push(crate::civilian::RouteConfig {
         id: "public-route".into(),
@@ -499,87 +501,7 @@ fn ordinary_ai_orders_two_contacts_once_and_keeps_highest_request_per_contact() 
 }
 
 #[test]
-fn outgoing_navigation_uses_its_exact_picture_and_preserves_only_public_chart_anchors() {
-    let (mut app, observer, _) = rig();
-    let handle = observe(&mut app, observer, true);
-    let world = app.world();
-    let projection = crate::console_delivery_references::ReferenceProjection::capture(
-        world.get::<crate::ship_plugin::ShipConfigComponent>(observer),
-        world.get::<crate::server_app::ShipSystemBlackboards>(observer),
-        None,
-        world.get::<BroadProfile>(observer),
-        world.get::<BroadTracks>(observer),
-        world.get::<SensingControls>(observer),
-        None,
-        &Default::default(),
-    );
-    let mut board = SystemBlackboard::Navigation(NavigationBlackboard {
-        navigation_waypoint: Some(WaypointSnapshot {
-            x: 12.0,
-            z: 34.0,
-            source_uuid: Some(TARGET.into()),
-        }),
-        ..Default::default()
-    });
-    projection.navigation(&SystemId("navigation".into()), &mut board, |_| false);
-    let SystemBlackboard::Navigation(value) = &board else {
-        unreachable!()
-    };
-    assert_eq!(
-        value
-            .navigation_waypoint
-            .as_ref()
-            .unwrap()
-            .source_uuid
-            .as_deref(),
-        Some(handle.as_str())
-    );
-    assert!(!serde_json::to_string(&board).unwrap().contains(TARGET));
-    let SystemBlackboard::Navigation(value) = &mut board else {
-        unreachable!()
-    };
-    value.navigation_waypoint.as_mut().unwrap().source_uuid = Some("charted-public".into());
-    projection.navigation(&SystemId("navigation".into()), &mut board, |id| {
-        id == "charted-public"
-    });
-    let SystemBlackboard::Navigation(value) = &mut board else {
-        unreachable!()
-    };
-    assert_eq!(
-        value
-            .navigation_waypoint
-            .as_ref()
-            .unwrap()
-            .source_uuid
-            .as_deref(),
-        Some("charted-public")
-    );
-    value.navigation_waypoint.as_mut().unwrap().source_uuid = Some("unseen-private".into());
-    projection.navigation(&SystemId("navigation".into()), &mut board, |_| false);
-    let SystemBlackboard::Navigation(value) = &board else {
-        unreachable!()
-    };
-    assert_eq!(
-        value.navigation_waypoint.as_ref().unwrap().source_uuid,
-        None
-    );
-    assert_eq!(value.navigation_waypoint.as_ref().unwrap().x, 12.0);
-}
-
-#[test]
-fn legacy_navigation_projection_and_exact_opaque_handle_keep_their_meaning() {
-    let projection = crate::console_delivery_references::ReferenceProjection::default();
-    let mut board = SystemBlackboard::Navigation(NavigationBlackboard {
-        navigation_waypoint: Some(WaypointSnapshot {
-            x: 1.0,
-            z: 2.0,
-            source_uuid: Some("legacy-anchor".into()),
-        }),
-        ..Default::default()
-    });
-    let original = board.clone();
-    projection.navigation(&SystemId("navigation".into()), &mut board, |_| false);
-    assert_eq!(board, original);
+fn exact_opaque_handle_keeps_its_meaning_when_another_name_collides() {
     let mut picture = super::super::knowledge::Picture::default();
     for (key, name) in [("opaque-one", "public"), ("opaque-two", "opaque-one")] {
         picture.contacts.insert(

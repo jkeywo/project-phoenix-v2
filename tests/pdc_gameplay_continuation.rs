@@ -41,7 +41,7 @@ fn id(value: &str) -> SystemId {
 /// never consumed by simulation or serialized as gameplay state. Observe before
 /// terminal guided settlement, so an expired/detonated round is not mislabelled
 /// as PDC interception. The ordinary publisher/broadcaster stays untouched.
-#[derive(Resource, Default, Debug)]
+#[derive(Resource, Default)]
 struct Trace {
     launcher: String,
     launched: BTreeSet<String>,
@@ -57,6 +57,31 @@ struct Trace {
     initial_energy: f32,
     before_payload_hp: Option<f64>,
     payload_damaged_own_hull: bool,
+}
+
+impl std::fmt::Debug for Trace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Trace")
+            .field("launcher", &self.launcher)
+            .field("launched", &self.launched)
+            .field("bolts", &self.bolts)
+            .field("qualified", &self.qualified)
+            .field("interceptions", &self.interceptions)
+            .field("hits", &self.hits)
+            .field("ai_fire", &self.ai_fire)
+            .field("ai_automatic", &self.ai_automatic)
+            .field(
+                "automatic_with_ship_primary",
+                &self.automatic_with_ship_primary,
+            )
+            .field("observed_payment_ticks", &self.paid.len())
+            .field("paid_work", &self.paid.values().sum::<f64>())
+            .field("initial_rounds", &self.initial_rounds)
+            .field("initial_energy", &self.initial_energy)
+            .field("before_payload_hp", &self.before_payload_hp)
+            .field("payload_damaged_own_hull", &self.payload_damaged_own_hull)
+            .finish()
+    }
 }
 #[allow(clippy::type_complexity)]
 fn observe_pdc(

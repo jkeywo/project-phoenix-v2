@@ -1210,6 +1210,12 @@ pub(super) fn validate_physical_repair_claims(
 /// tick for an inverse: nothing here simulates the interval, so the value is
 /// simply the reading every age-relative continuation is measured against.
 pub(crate) fn apply_entity_state(world: &mut World, entity: Entity, row: &EntityState, tick: u64) {
+    if row.weapon_flight_carrier {
+        bevy::log::error!(
+            "refused single-row restore: physical flight carriers require full-roster restore"
+        );
+        return;
+    }
     if !super::flight_carriers::unique_single_row(world, entity, row) {
         bevy::log::error!("refused single-row restore: guided flight is already owned elsewhere");
         return;
@@ -1242,6 +1248,11 @@ pub(super) fn apply_entity_state_with(
     _restored_at: f32,
     restored_alert_tick: bevy::ecs::change_detection::Tick,
 ) {
+    if row.weapon_flight_carrier {
+        // Remaining banks are captured physical state, not an immutable hull
+        // recipe. Replace their shape under the bulk-restore rehome guard.
+        crate::console::weapons::flight_carrier::seed_banks(world, entity, &row.carrier_bolt_banks);
+    }
     super::fitting::apply(world, entity, row);
     let emp_clock = crate::ship::emp::clock(world, tick).ok();
     let mut entity_mut = world.entity_mut(entity);

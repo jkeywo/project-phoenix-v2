@@ -478,7 +478,7 @@ fn bolt_carrier_recipe_json_continuation_and_forged_work_are_closed() {
                 bad.entities[0].weapons.as_mut().unwrap().blasters[0].pending_volley = 1;
             }
             3 => {
-                bad.entities[0].carrier_bolt_banks[0] = "guessed-bank".into();
+                bad.entities[0].carrier_bolt_banks[0].clear();
             }
             4 => {
                 let mut duplicate = bad.entities[0].clone();
@@ -643,4 +643,75 @@ fn sequential_equipment_replacements_before_flush_cannot_rehome_copies_twice() {
             .iter()
             .all(|bank| bank.in_flight.is_empty()));
     }
+}
+
+#[test]
+fn restoring_existing_carrier_replaces_its_actual_remaining_bank_shape() {
+    use crate::console::weapons::blaster::BlasterSystemResource;
+    use bevy::ecs::system::RunSystemOnce;
+    let mut app = host();
+    let source = app
+        .world_mut()
+        .spawn((EntityUuid("source".into()), launched(), emitted_bolts()))
+        .id();
+    app.world_mut().despawn(source);
+    app.world_mut().flush();
+    let carrier = carriers(app.world_mut())[0];
+    let full = crate::snapshot::capture(app.world());
+    let full_digest = crate::sim_digest::world_digest(app.world());
+    assert_eq!(
+        full.entities[0].carrier_bolt_banks,
+        vec!["port", "starboard"]
+    );
+    for _ in 0..2 {
+        // Actual collision consumes one bank at a time, then the real carrier
+        // settlement drops that now-empty bank from its physical recipe.
+        let id = app.world().get::<BlasterSystemResource>(carrier).unwrap().0[0].in_flight[0]
+            .id
+            .clone();
+        app.world_mut()
+            .get_mut::<BlasterSystemResource>(carrier)
+            .unwrap()
+            .0[0]
+            .consume_hit(&id)
+            .unwrap();
+        app.world_mut().run_system_once(settle_carriers).unwrap();
+        app.world_mut().flush();
+    }
+    let guided_only = crate::snapshot::capture(app.world());
+    let guided_digest = crate::sim_digest::world_digest(app.world());
+    assert!(guided_only.entities[0].carrier_bolt_banks.is_empty());
+    assert_eq!(
+        guided_only.entities[0]
+            .weapons
+            .as_ref()
+            .unwrap()
+            .torpedoes_in_flight
+            .len(),
+        1
+    );
+    let encoded = serde_json::to_vec(&full).unwrap();
+    let decoded = serde_json::from_slice(&encoded).unwrap();
+    let report = crate::snapshot::restore(app.world_mut(), &decoded);
+    assert!(report.is_complete(), "{report:?}");
+    app.world_mut().flush();
+    assert_eq!(carriers(app.world_mut()), vec![carrier]);
+    assert_eq!(crate::snapshot::capture(app.world()), full);
+    assert_eq!(crate::sim_digest::world_digest(app.world()), full_digest);
+    // The inverse shape change must also discard the receiver's old bolts,
+    // without rehoming them into an extra carrier during roster application.
+    let report = crate::snapshot::restore(app.world_mut(), &guided_only);
+    assert!(report.is_complete(), "{report:?}");
+    app.world_mut().flush();
+    assert!(app.world().get::<BlasterSystemResource>(carrier).is_none());
+    assert_eq!(carriers(app.world_mut()), vec![carrier]);
+    assert_eq!(crate::snapshot::capture(app.world()), guided_only);
+    assert_eq!(crate::sim_digest::world_digest(app.world()), guided_digest);
+    crate::snapshot::apply_entity_state(app.world_mut(), carrier, &full.entities[0], full.tick);
+    app.world_mut().flush();
+    assert_eq!(
+        crate::snapshot::capture(app.world()),
+        guided_only,
+        "single-row inverse cannot replace a physical carrier outside bulk restore"
+    );
 }

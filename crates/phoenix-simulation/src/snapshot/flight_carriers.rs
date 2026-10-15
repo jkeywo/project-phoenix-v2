@@ -78,15 +78,8 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
                 .blasters
                 .iter()
                 .all(|bank| !bank.in_flight.is_empty());
-        let live_banks: Vec<_> = live
-            .and_then(|entity| {
-                world.get::<crate::console::weapons::blaster::BlasterSystemResource>(entity)
-            })
-            .map(|owner| owner.0.iter().map(|bank| bank.config.id.clone()).collect())
-            .unwrap_or_default();
         if row != &expected
             || !valid_banks
-            || (live.is_some() && live_banks != row.carrier_bolt_banks)
             || (weapons.torpedoes_in_flight.is_empty() && weapons.blasters.is_empty())
         {
             return Err((

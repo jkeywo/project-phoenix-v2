@@ -158,7 +158,9 @@ pub(crate) fn flight_bank(id: String) -> BlasterSystem {
 }
 
 pub(crate) fn seed_banks(world: &mut World, entity: Entity, ids: &[String]) {
-    if !ids.is_empty() {
+    if ids.is_empty() {
+        world.entity_mut(entity).remove::<BlasterSystemResource>();
+    } else {
         world.entity_mut(entity).insert(BlasterSystemResource(
             ids.iter().cloned().map(flight_bank).collect(),
         ));

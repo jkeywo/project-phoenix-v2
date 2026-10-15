@@ -2,13 +2,22 @@ import { t, wireText } from '../strings.js';
 import { compareFittingPlan, composeFittingPlans, defaultFittingPlan, fittingPlanStorageKey, stationFittingPlan, validateFittingPlan } from '../fitting-plans.js';
 import { FITTING_ACTION_IDS } from '../stations/fitting-actions.js';
 
-export function mountFittingPlans(doc) {
+export function mountFittingPlans(doc, { prelaunch = false } = {}) {
   const node = doc.createElement('details'), heading = doc.createElement('summary'); heading.textContent = t('fitting.plan.title'); node.append(heading);
   node.className = 'fitting-plan-controls'; const el = tag => doc.createElement(tag);
   const label = (control, key) => { const label = el('label'); label.textContent = t('fitting.plan.' + key); label.append(control); return label; };
   const button = (key, action) => { const button = el('button'); button.type = 'button'; button.textContent = t('fitting.plan.' + key); button.dataset.planAction = key; button.addEventListener('click', () => { try { action(); } catch (error) { status.textContent = t(error.message); } }); return button; };
   const scope = el('select'), name = el('input'), favourites = el('select'), transfer = el('textarea'), comparison = el('div'), status = el('p'); status.setAttribute('role', 'status');
-  let context = null, identity = null, plan = null, rows = [], station = null, choices = new Map(), saved = [];
+  let context = null, identity = null, plan = null, rows = [], station = null, choices = new Map(), saved = [], lastDraft = null;
+  const draftKey = () => fittingPlanStorageKey(context) + '/draft';
+  function rememberPlan() {
+    try { lastDraft = JSON.stringify(plan); doc.defaultView.sessionStorage.setItem(draftKey(), lastDraft); } catch { status.textContent = t('fitting.plan.storage-unavailable'); }
+  }
+  function restoreDraft() {
+    try { const raw = doc.defaultView.sessionStorage.getItem(draftKey()); if (!raw || raw === lastDraft) return;
+      const stored = JSON.parse(raw); validateFittingPlan(stored, context); if (stored.scope !== '*') return; plan = stored; lastDraft = raw;
+    } catch { status.textContent = t('fitting.plan.invalid-choice'); }
+  }
   const selected = () => scope.value === '*' ? structuredClone(plan) : stationFittingPlan(plan, context, scope.value);
   function readSaved() {
     saved = [];
@@ -35,7 +44,7 @@ export function mountFittingPlans(doc) {
         const root = el('div'), title = el('p'), select = el('select'), facts = el('p');
         root.append(title, label(select, 'equipment'), facts); comparison.append(root); line = { root, title, select, facts }; choices.set(entry.slot, line);
         select.addEventListener('change', () => { const slot = context.slots.find(slot => slot.slot === entry.slot); plan.sections[slot.home_station].choices[slot.slot] = select.value;
-          if (scope.value !== '*' || slot.home_station === station) plan.sections[slot.home_station].explicit = true; paintComparison(); });
+          if (scope.value !== '*' || slot.home_station === station) plan.sections[slot.home_station].explicit = true; rememberPlan(); paintComparison(); });
         select.addEventListener('keydown', event => { if (!['Tab', 'Escape'].includes(event.key)) event.stopPropagation(); });
       }
       line.title.textContent = `${wireText(entry.home_station)} · ${wireText(entry.slot)}`;
@@ -53,10 +62,10 @@ export function mountFittingPlans(doc) {
   const save = button('save', () => { if (!name.value.trim()) throw new Error('fitting.plan.name-required');
     const record = { name: name.value.trim(), plan: selected() }; saved = saved.filter(row => row.name !== record.name); saved.push(record);
     doc.defaultView.localStorage.setItem(fittingPlanStorageKey(context), JSON.stringify({ version: 1, favourites: saved })); paintSaved(); status.textContent = t('fitting.plan.saved'); });
-  const load = button('load', () => { const record = saved[Number(favourites.value)]; if (!record) return; plan = composeFittingPlans(plan, record.plan, context); paintComparison(); status.textContent = t('fitting.plan.loaded'); });
+  const load = button('load', () => { const record = saved[Number(favourites.value)]; if (!record) return; plan = composeFittingPlans(plan, record.plan, context); rememberPlan(); paintComparison(); status.textContent = t('fitting.plan.loaded'); });
   const exportPlan = button('export', () => { transfer.value = JSON.stringify(selected(), null, 2); status.textContent = t('fitting.plan.exported'); });
   const importPlan = button('import', () => { let imported; try { imported = JSON.parse(transfer.value); } catch { throw new Error('fitting.plan.invalid-choice'); }
-    plan = composeFittingPlans(plan, imported, context); paintComparison(); status.textContent = t('fitting.plan.loaded'); });
+    plan = composeFittingPlans(plan, imported, context); rememberPlan(); paintComparison(); status.textContent = t('fitting.plan.loaded'); });
   const queue = button('queue', () => {
     let sent = 0; for (const entry of compareFittingPlan(plan, context, rows)) if (entry.home_station === station && entry.requestable && entry.installed !== entry.choice) {
       const result = doc.defaultView.activateSemanticAction?.(FITTING_ACTION_IDS.request, { context: 'fitting', source: 'control',
@@ -66,15 +75,17 @@ export function mountFittingPlans(doc) {
   });
   scope.addEventListener('change', paintComparison);
   node.append(el('p'), label(scope, 'scope'), label(name, 'name'), save, label(favourites, 'favourites'), load, label(transfer, 'transfer'), exportPlan, importPlan, comparison, queue, status);
-  node.querySelector('p').textContent = t('fitting.plan.hint');
+  node.querySelector('p').textContent = t(prelaunch ? 'fitting.plan.prelaunch-hint' : 'fitting.plan.hint');
+  queue.hidden = prelaunch;
   return { node, update(nextRows = [], nextStation = null) {
     const nextContext = nextRows.find(row => row.fitting_planner)?.fitting_planner; rows = nextRows; station = nextStation;
     if (!nextContext) { node.hidden = true; return; }
     const nextIdentity = JSON.stringify([nextContext.hull_path, nextContext.content_id]);
     if (identity !== nextIdentity) {
       try { plan = defaultFittingPlan(nextContext); } catch { node.hidden = true; return; }
-      identity = nextIdentity; context = nextContext; readSaved(); paintSaved(); choices.clear(); comparison.replaceChildren();
+      identity = nextIdentity; context = nextContext; lastDraft = null; readSaved(); paintSaved(); choices.clear(); comparison.replaceChildren();
     } else context = nextContext;
+    restoreDraft();
     const scopes = ['*', ...(context.slots.some(slot => slot.home_station === station) ? [station] : [])];
     if (scope.dataset.options !== JSON.stringify(scopes)) { scope.dataset.options = JSON.stringify(scopes); scope.replaceChildren(); for (const id of scopes) { const option = el('option'); option.value = id; option.textContent = id === '*' ? t('fitting.plan.whole-ship') : wireText(id); scope.append(option); } }
     node.hidden = false; paintComparison();

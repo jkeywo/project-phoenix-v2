@@ -6,7 +6,7 @@ const catalog = () => ({ hull_path: 'assets/entities/cruiser.toml', content_id: 
   { slot: 'beam-slot', system: 'actual-beam', home_station: 'tactical', default_equipment: 'beam', compatible_equipment: ['beam', 'beam-efficient'] },
   { slot: 'reactor-slot', system: 'power-reactor', home_station: 'engineering', default_equipment: 'reactor', compatible_equipment: ['reactor', 'reactor-efficient'] },
 ] });
-afterEach(() => { document.body.replaceChildren(); window.localStorage.clear(); delete window.activateSemanticAction; });
+afterEach(() => { document.body.replaceChildren(); window.localStorage.clear(); window.sessionStorage.clear(); delete window.activateSemanticAction; });
 describe('personal fitting plans', () => {
   it('keys by the actual hull definition and preserves explicit Station sections on whole import', () => {
     const context = catalog(), defaults = defaultFittingPlan(context), mine = stationFittingPlan(defaults, context, 'tactical');

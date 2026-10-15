@@ -64,6 +64,7 @@
  * controls inside the detail panel.
  */
 import { renderStationHelp } from './help-panel.js';
+import { renderLobbyFittingPlanner } from './lobby-fitting-planner.js';
 
 export const STATION_ROW_ATTR = 'data-station';
 export const CONSOLE_CHIP_ATTR = 'data-console';
@@ -94,6 +95,7 @@ function label(pair, t) {
  */
 export function renderClientLobby(doc, vm, t, handlers) {
   const on = handlers || {};
+  renderLobbyFittingPlanner(doc, vm.fittingPlanner);
   renderGmPresence(doc, vm, t);
   renderRoster(doc, vm, t, on);
   renderClaimedStationHelp(doc, vm);

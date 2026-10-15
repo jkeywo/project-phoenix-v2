@@ -313,6 +313,8 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
 
   return {
     hasStation,
+    fittingPlanner: s.phase === 'Lobby' && opts.fittingPlanner
+      ? { context: opts.fittingPlanner, station: myStation?.id || null } : null,
     showRoster: !hasStation && !assignedStation,
     showStationHelp: hasStation,
     helpActions: Array.isArray(opts.helpActions) ? opts.helpActions : [],

@@ -1297,6 +1297,9 @@
     #lobby-side { display: contents; }
 
     /* Station list */
+    #lobby-fitting-planner { max-height: 40vh; overflow: auto; padding: var(--space-2); }
+    #lobby-fitting-planner label { display: grid; gap: var(--space-1); margin-block: var(--space-2); }
+    #lobby-fitting-planner :is(button, select, input, textarea) { min-height: var(--control-hit-min); max-width: 100%; }
     #station-list { flex: 1; overflow-y: auto; display: flex;
       flex-direction: column; gap: var(--space-3); }
     #claimed-station-help { flex: 1; min-height: 0; min-width: 0; overflow-y: auto;
@@ -2078,6 +2081,8 @@
               <div class="detail-ratings"></div>
             </div>
           </div>
+
+          <section id="lobby-fitting-planner" hidden></section>
 
           <!-- Footer -->
           <div id="lobby-footer">
@@ -3514,6 +3519,7 @@
         consoleLabelFor: consoleLabel,
         ratingLabelFor: (r) => wireText('station.rating.' + r.toLowerCase() + '.name', r.toUpperCase()),
         stationRatings: window.simState ? window.simState.stationRatings : null,
+        fittingPlanner: window.lobbyState?.shipConfig?.fitting_planner || null,
         // Anonymous accessibility eligibility per row (issue #1103 AC1).
         eligibilityFor: stationEligibility,
         // Which label the release controls wear. The latch itself stays here:

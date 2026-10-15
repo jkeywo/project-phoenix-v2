@@ -99,6 +99,8 @@ pub struct EntityConfig {
     pub recoverable: Option<phoenix_model::recovery::RecoverableSourceConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port_service: Option<phoenix_model::ports::PortServiceConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fitting: Option<phoenix_model::fitting::FittingConfig>,
     pub damage: Option<phoenix_model::damage::DamageConfig>,
     pub sensors_console: Option<SensorsConsoleConfig>,
     pub navigation_console: Option<NavigationConsoleConfig>,
@@ -862,6 +864,8 @@ impl EntityConfig {
         crate::resources::recovery_profile::validate_recoverable_source(&config)
             .map_err(SerdeError::custom)?;
         crate::resources::ports_profile::validate_entity_port(&config)
+            .map_err(SerdeError::custom)?;
+        crate::resources::fitting::CompiledFitting::compile(&config)
             .map_err(SerdeError::custom)?;
         crate::resources::logistics_profile::compile_entity_logistics(&config)
             .map_err(SerdeError::custom)?;

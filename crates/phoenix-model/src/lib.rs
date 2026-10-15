@@ -18,6 +18,7 @@ pub mod system_status;
 pub mod observation;
 
 pub mod damage;
+pub mod fitting;
 pub mod energy;
 pub mod interior;
 pub mod job;

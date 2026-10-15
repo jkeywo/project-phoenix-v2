@@ -1,0 +1,414 @@
+use super::*;
+use phoenix_model::damage::ComponentCondition;
+
+fn fixture() -> (EntityConfig, CompiledFitting, FittingState) {
+    let config =
+        crate::test_fixtures::load_entity_config("assets/entities/alliance_cruiser.toml").unwrap();
+    let profile = CompiledFitting::compile(&config).unwrap().unwrap();
+    let state = FittingState::from_profile(&profile).unwrap();
+    (config, profile, state)
+}
+fn healthy() -> ComponentState {
+    ComponentState {
+        condition: ComponentCondition::Healthy,
+        dose: 0.0,
+        last_source: None,
+    }
+}
+fn swap(
+    profile: &CompiledFitting,
+    state: &mut FittingState,
+    slot: &str,
+    spare: &str,
+    job: u64,
+) -> ComponentState {
+    state.stored_to_work(profile, spare, job, slot).unwrap();
+    let old = state
+        .remove_installed(profile, slot, job, healthy())
+        .unwrap();
+    let condition = state.install_from_work(profile, slot, spare, job).unwrap();
+    let locker = if slot == "fore-beam" {
+        "weapons-equipment"
+    } else {
+        "engineering-equipment"
+    };
+    state.return_to_locker(profile, &old, job, locker).unwrap();
+    condition
+}
+
+#[test]
+fn actual_cruiser_defaults_are_equivalent_and_inheritor_has_no_mismatched_slots() {
+    let (config, profile, state) = fixture();
+    assert_eq!(profile.effective_config(&state).unwrap(), config);
+    assert!(profile.unavailable_systems(&state).unwrap().is_empty());
+    let child =
+        crate::test_fixtures::load_entity_config("assets/entities/dynasty_player_cruiser.toml")
+            .unwrap();
+    assert!(CompiledFitting::compile(&child).unwrap().is_none());
+    assert!(!child
+        .weapons_console
+        .as_ref()
+        .unwrap()
+        .phaser_banks
+        .is_empty());
+    let source = toml::to_string(&config.to_toml_value().unwrap()).unwrap();
+    let reparsed = EntityConfig::from_toml(&source).unwrap();
+    assert_eq!(reparsed.fitting, config.fitting);
+}
+
+#[test]
+fn real_sidegrade_changes_only_supported_strategy_and_work_cost_not_the_fixed_graph() {
+    let (config, profile, mut state) = fixture();
+    state
+        .request(&profile, "fore-beam", "cruiser-beam-pulse")
+        .unwrap();
+    assert_eq!(
+        profile.effective_config(&state).unwrap(),
+        config,
+        "intent alone grants no hardware"
+    );
+    swap(&profile, &mut state, "fore-beam", "fore-beam-spare", 7);
+    let effective = profile.effective_config(&state).unwrap();
+    let old = &config.weapons_console.as_ref().unwrap().phaser_banks[0];
+    let new = &effective.weapons_console.as_ref().unwrap().phaser_banks[0];
+    assert_eq!(
+        (
+            new.beam_damage_per_sec,
+            new.beam_duration_secs,
+            new.cooldown_secs
+        ),
+        (40.0, 4.0, 8.0)
+    );
+    assert_eq!(
+        (
+            &new.id,
+            new.facing_deg,
+            new.fire_arc_deg,
+            &new.marker,
+            &new.ai
+        ),
+        (
+            &old.id,
+            old.facing_deg,
+            old.fire_arc_deg,
+            &old.marker,
+            &old.ai
+        )
+    );
+    assert_eq!(effective.ship_config, config.ship_config);
+    assert_eq!(effective.interior, config.interior);
+    assert_eq!(effective.damage, config.damage);
+    let old_consumer = config
+        .energy
+        .as_ref()
+        .unwrap()
+        .consumers
+        .iter()
+        .find(|c| c.system.0 == "phaser-fore")
+        .unwrap();
+    let new_consumer = effective
+        .energy
+        .as_ref()
+        .unwrap()
+        .consumers
+        .iter()
+        .find(|c| c.system.0 == "phaser-fore")
+        .unwrap();
+    assert_eq!(new_consumer.continuous_cost_per_sec, 1.5);
+    assert_eq!(
+        (
+            &new_consumer.reserve,
+            new_consumer.initial_energy,
+            new_consumer.initial_heat,
+            &new_consumer.coolant
+        ),
+        (
+            &old_consumer.reserve,
+            old_consumer.initial_energy,
+            old_consumer.initial_heat,
+            &old_consumer.coolant
+        )
+    );
+}
+
+#[test]
+fn condition_moves_once_and_healthy_replacement_does_not_inherit_removed_faults() {
+    let (_, profile, mut state) = fixture();
+    let damaged = ComponentState {
+        condition: ComponentCondition::Damaged,
+        dose: 3.25,
+        last_source: Some("actual-hit".into()),
+    };
+    state
+        .stored_to_work(&profile, "fore-beam-spare", 8, "fore-beam")
+        .unwrap();
+    let old = state
+        .remove_installed(&profile, "fore-beam", 8, damaged.clone())
+        .unwrap();
+    assert!(state.installed("fore-beam").is_none());
+    assert_eq!(state.assemblies[&old].condition, Some(damaged.clone()));
+    let saved = serde_json::to_string(&state).unwrap();
+    let mut resumed: FittingState = serde_json::from_str(&saved).unwrap();
+    resumed.validate(&profile).unwrap();
+    assert_eq!(
+        state
+            .install_from_work(&profile, "fore-beam", "fore-beam-spare", 8)
+            .unwrap(),
+        healthy()
+    );
+    assert_eq!(
+        resumed
+            .install_from_work(&profile, "fore-beam", "fore-beam-spare", 8)
+            .unwrap(),
+        healthy()
+    );
+    assert_eq!(state, resumed);
+    assert_eq!(state.assemblies["fore-beam-spare"].condition, None);
+    state
+        .return_to_locker(&profile, &old, 8, "weapons-equipment")
+        .unwrap();
+    state
+        .stored_to_work(&profile, &old, 9, "fore-beam")
+        .unwrap();
+    state
+        .remove_installed(&profile, "fore-beam", 9, healthy())
+        .unwrap();
+    assert_eq!(
+        state
+            .install_from_work(&profile, "fore-beam", &old, 9)
+            .unwrap(),
+        damaged,
+        "reinstall cannot cleanse damage/dose/source"
+    );
+}
+
+#[test]
+fn vacancies_are_explicit_unavailable_and_reactor_refit_preserves_all_buffers_and_initials() {
+    let (config, profile, mut state) = fixture();
+    let old = state
+        .remove_installed(&profile, "fore-beam", 10, healthy())
+        .unwrap();
+    let vacant = profile.effective_config(&state).unwrap();
+    assert!(vacant
+        .weapons_console
+        .as_ref()
+        .unwrap()
+        .phaser_banks
+        .iter()
+        .all(|b| b.id != "fore"));
+    assert_eq!(vacant.ship_config, config.ship_config);
+    assert!(profile
+        .unavailable_systems(&state)
+        .unwrap()
+        .contains(&SystemId("phaser-fore".into())));
+    state
+        .install_from_work(&profile, "fore-beam", &old, 10)
+        .unwrap();
+    swap(&profile, &mut state, "reactor", "reactor-spare", 11);
+    let changed = profile.effective_config(&state).unwrap();
+    let before = &config.energy.as_ref().unwrap().reactor;
+    let after = &changed.energy.as_ref().unwrap().reactor;
+    assert_eq!(after.sustainable_output_per_sec, 28.53);
+    assert_eq!(after.ramp_per_sec, 11.8875);
+    assert_eq!(
+        (
+            after.reserve.capacity,
+            after.initial_energy,
+            after.initial_heat,
+            &after.coolant
+        ),
+        (
+            before.reserve.capacity,
+            before.initial_energy,
+            before.initial_heat,
+            &before.coolant
+        )
+    );
+    state
+        .remove_installed(&profile, "reactor", 12, healthy())
+        .unwrap();
+    assert!(profile
+        .unavailable_systems(&state)
+        .unwrap()
+        .contains(&SystemId("power-reactor".into())));
+    assert_eq!(
+        profile
+            .effective_config(&state)
+            .unwrap()
+            .energy
+            .as_ref()
+            .unwrap()
+            .reactor,
+        *before,
+        "vacancy is an explicit runtime availability gate, not zeroed operator intent/config"
+    );
+}
+
+#[test]
+fn work_identity_space_and_local_access_refuse_transactionally_without_losing_items() {
+    let (_, profile, mut state) = fixture();
+    let before = state.clone();
+    assert!(state
+        .stored_to_work(&profile, "reactor-spare", 1, "fore-beam")
+        .is_err());
+    assert_eq!(state, before);
+    state
+        .stored_to_work(&profile, "fore-beam-spare", 4, "fore-beam")
+        .unwrap();
+    let committed = state.clone();
+    assert!(state
+        .stored_to_work(&profile, "fore-beam-spare", 5, "fore-beam")
+        .is_err());
+    assert!(state
+        .return_to_locker(&profile, "fore-beam-spare", 5, "weapons-equipment")
+        .is_err());
+    assert!(state
+        .return_to_locker(&profile, "fore-beam-spare", 4, "engineering-equipment")
+        .is_err());
+    assert_eq!(state, committed);
+    state
+        .return_to_locker(&profile, "fore-beam-spare", 4, "weapons-equipment")
+        .unwrap();
+    assert_eq!(
+        state, before,
+        "cancel before removal returns the same actual assembly without refund/mint"
+    );
+    let mut full = profile.clone();
+    full.config
+        .lockers
+        .iter_mut()
+        .find(|l| l.id == "weapons-equipment")
+        .unwrap()
+        .space = 1;
+    let old = state
+        .remove_installed(&full, "fore-beam", 6, healthy())
+        .unwrap();
+    let removed = state.clone();
+    assert!(state
+        .return_to_locker(&full, &old, 6, "weapons-equipment")
+        .is_err());
+    assert_eq!(
+        state, removed,
+        "full return leaves old hardware real and in work"
+    );
+    assert_eq!(state.assemblies.len(), 4);
+}
+
+#[test]
+fn continuation_rejects_duplicate_installs_competing_condition_and_orphan_keys() {
+    let (_, profile, state) = fixture();
+    for mode in 0..10 {
+        let mut bad = state.clone();
+        match mode {
+            0 => {
+                bad.assemblies
+                    .get_mut("fore-beam-installed")
+                    .unwrap()
+                    .condition = Some(healthy());
+            }
+            1 => {
+                bad.assemblies.get_mut("fore-beam-spare").unwrap().condition = None;
+            }
+            2 => {
+                bad.assemblies.get_mut("fore-beam-spare").unwrap().location =
+                    EquipmentLocation::Installed {
+                        slot: "fore-beam".into(),
+                    };
+                bad.assemblies.get_mut("fore-beam-spare").unwrap().condition = None;
+            }
+            3 => {
+                bad.assemblies
+                    .get_mut("fore-beam-spare")
+                    .unwrap()
+                    .condition
+                    .as_mut()
+                    .unwrap()
+                    .dose = f64::NAN;
+            }
+            4 => {
+                bad.desired
+                    .insert("unknown".into(), "cruiser-beam-standard".into());
+            }
+            5 => {
+                bad.assemblies.get_mut("fore-beam-spare").unwrap().id = "other-key".into();
+            }
+            6 => {
+                bad.assemblies.get_mut("fore-beam-spare").unwrap().location =
+                    EquipmentLocation::InWork {
+                        job: 0,
+                        compartment: "weapons".into(),
+                    };
+            }
+            7 => {
+                bad.assemblies
+                    .get_mut("fore-beam-spare")
+                    .unwrap()
+                    .condition
+                    .as_mut()
+                    .unwrap()
+                    .dose = 20.0;
+            }
+            8 => {
+                bad.assemblies
+                    .get_mut("fore-beam-spare")
+                    .unwrap()
+                    .condition
+                    .as_mut()
+                    .unwrap()
+                    .dose = 1.0;
+            }
+            _ => {
+                let condition = bad
+                    .assemblies
+                    .get_mut("fore-beam-spare")
+                    .unwrap()
+                    .condition
+                    .as_mut()
+                    .unwrap();
+                condition.condition = ComponentCondition::Patched { factor: 0.123456 };
+                condition.last_source = Some("real-source".into());
+            }
+        }
+        assert!(bad.validate(&profile).is_err(), "tamper mode {mode}");
+    }
+    let mut globally_named = state;
+    let item = globally_named.assemblies.remove("fore-beam-spare").unwrap();
+    let id = "eq-11111111-1111-4111-8111-111111111111-fore-beam-spare".to_string();
+    globally_named
+        .assemblies
+        .insert(id.clone(), EquipmentAssembly { id, ..item });
+    globally_named.validate(&profile).unwrap();
+}
+
+#[test]
+fn authored_closed_types_and_fixed_graph_refusals_are_not_runtime_migration_fallbacks() {
+    let (config, _, _) = fixture();
+    for mode in 0..11 {
+        let mut bad = config.clone();
+        let profile = bad.fitting.as_mut().unwrap();
+        match mode {
+            0 => profile.slots.push(profile.slots[0].clone()),
+            1 => profile.slots[0].system = SystemId("tractor".into()),
+            2 => profile.slots[0].operation_component = "intake".into(),
+            3 => profile.equipment[0].work.manual_work_fraction = 0.0,
+            4 => profile.equipment[0].work.requirements[0].service = "absent-service".into(),
+            5 => profile.equipment[0].storage_space = 0,
+            6 => {
+                if let EquipmentHardware::Beam(h) = &mut profile.equipment[1].hardware {
+                    h.auto_arc_deg = 300.0;
+                }
+            }
+            7 => profile.equipment[2].work.class = RefitClass::Field,
+            8 => profile.assemblies.retain(|a| a.id != "fore-beam-installed"),
+            9 => profile.slots[0].default_equipment = "cruiser-beam-pulse".into(),
+            _ => profile.assemblies.push(profile.assemblies[0].clone()),
+        }
+        assert!(
+            CompiledFitting::compile(&bad).is_err(),
+            "authored mode {mode}"
+        );
+    }
+    let mut json = serde_json::to_value(config.fitting.unwrap()).unwrap();
+    json["equipment"][0]["hardware"]["unrestricted_extension"] = true.into();
+    assert!(serde_json::from_value::<FittingConfig>(json).is_err());
+}

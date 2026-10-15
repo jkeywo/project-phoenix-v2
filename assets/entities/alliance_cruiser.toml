@@ -141,7 +141,7 @@ faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 # Resolution happens at authoring time. The runtime never sees a fragment — it
 # sees one resolved document, and PRD #774's "every AI-capable fine system
 # declares a policy" is satisfied by that document, not by this file.
-includes = ["fragments/jobs/repair_workflow.toml","fragments/ai/dock_state_tree.toml","fragments/ai/fleet_baseline.toml","fragments/ai/captain_alliance.toml","fragments/ai/movement_broadside_orbit.toml","fragments/energy/alliance_cruiser.toml","fragments/damage/common.toml"]
+includes = ["fragments/jobs/repair_workflow.toml","fragments/ai/dock_state_tree.toml","fragments/ai/fleet_baseline.toml","fragments/ai/captain_alliance.toml","fragments/ai/movement_broadside_orbit.toml","fragments/energy/alliance_cruiser.toml","fragments/damage/common.toml","fragments/fitting/alliance_cruiser.toml"]
 
 [mesh]
 model = "assets/models/alliance_cruiser_recreated.glb"
@@ -5664,6 +5664,10 @@ kind = "PowerBattery"
 [[console.feed]]
 source = "power-reactor"
 kind = "PowerReactor"
+
+[[console.feed]]
+source = "phaser-fore"
+kind = "PhaserBank"
 
 [[console.feed]]
 source = "repair"

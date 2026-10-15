@@ -1254,7 +1254,7 @@ action = { value = { source = "literal", value = false } }
 
 #[test]
 fn logistics_and_production_profiles_replace_without_inheriting_obsolete_bindings() {
-    for key in ["logistics", "production", "recovery", "recoverable"] {
+    for key in ["logistics", "production", "recovery", "recoverable", "fitting"] {
         let base: toml::Value =
             toml::from_str(&format!("[{key}]\nold_binding='obsolete'\nshared=1\n")).unwrap();
         let child: toml::Value = toml::from_str(&format!("[{key}]\nshared=2\n")).unwrap();

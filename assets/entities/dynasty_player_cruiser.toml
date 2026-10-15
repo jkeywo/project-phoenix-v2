@@ -6740,3 +6740,11 @@ system = "resource-recovery"
 range = 8
 units_per_sec = 2
 resources = [ "torpedoes", "coolant", "machinery_parts", "structural_parts", "alloy", "ore", "scrap" ]
+
+# The first fitting adapters are Alliance-only. Keep the Dynasty's existing
+# complete equipment; do not inherit a mismatched Alliance reactor library.
+[fitting]
+slot = []
+equipment = []
+locker = []
+assembly = []

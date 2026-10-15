@@ -313,6 +313,17 @@ describe('materialise-override (the deliberate edit-an-inherited-field decision)
 
 
 describe('System-local component and channel identities', () => {
+  it('replaces fitting definitions and their provenance as one profile, including explicit no-slot inheritors', () => {
+    const base = { fitting: { slot: [{ id: 'beam' }], equipment: [{ id: 'standard' }], locker: [{ id: 'weapons' }], assembly: [{ id: 'installed' }] } };
+    const child = { fitting: { slot: [], equipment: [], locker: [], assembly: [] } };
+    expect(mergeComposeFragments(base, child).fitting).toEqual(child.fitting);
+    const resolved = resolve('assets/entities/child.toml', {
+      'assets/entities/base.toml': '[fitting]\nslot=[{id="beam"}]\nequipment=[{id="old"}]\n',
+      'assets/entities/child.toml': 'includes=["base.toml"]\n[fitting]\nslot=[]\nequipment=[]\nlocker=[]\nassembly=[]\n',
+    });
+    expect(resolved.value.fitting).toEqual(child.fitting);
+    expect(fieldOrigin(resolved.provenance, 'fitting.equipment').source).toBe('assets/entities/child.toml');
+  });
   it('merges within each parent and preserves siblings while applying tombstones', () => {
     const base = { system: [
       { id: 'dock-a', component: [{ id: 'power', kind: 'power_input' }, { id: 'mate', config: { range: 5, approach_speed: 2 } }], channel: [{ name: 'enabled', kind: 'boolean' }] },

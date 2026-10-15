@@ -274,6 +274,12 @@ pub(super) fn plan(mut acc: u64, value: &phoenix_sim_world::world::planning::Pla
             }
         }
     }
+    if !value.temporal_reconsiderations.is_empty() {
+        acc = fold_serde(
+            fold_str(acc, "temporal-reconsiderations"),
+            &value.temporal_reconsiderations,
+        );
+    }
     acc = fold_u64(acc, value.released.len() as u64);
     for (node, tick) in &value.released {
         acc = fold_str(acc, node);

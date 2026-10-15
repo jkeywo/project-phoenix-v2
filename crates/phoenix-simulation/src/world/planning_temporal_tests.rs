@@ -389,3 +389,50 @@ fn authored_temporal_world_uses_imported_estimates_and_read_only_workload_projec
         teams
     );
 }
+
+#[test]
+fn real_admitted_crew_arrival_reconsiders_only_the_unreleased_refusal() {
+    let (mut app, actor) = temporal_fixture();
+    app.world_mut()
+        .get_mut::<crate::ship_plugin::ActiveStationRatings>(actor)
+        .unwrap()
+        .0
+        .insert(StationId("engineering".into()), "Std".into());
+    with_sources(&mut app, actor);
+    let original = app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .plan_choice
+        .clone()
+        .unwrap();
+    assert!(original.effective_temporal().unwrap().refused());
+    assert!(original.released.is_empty());
+    app.world_mut()
+        .entity_mut(actor)
+        .insert(AdmittedCommands(vec![AdmittedCommand {
+            target: SystemId(crate::ship::system_registry::ASSIGN_STATION_RATING_SYSTEM_ID.into()),
+            payload: SystemControlPayload::AssignStationRating {
+                station: StationId("engineering".into()),
+                rating: "Std".into(),
+                occupied: Some(true),
+            },
+            response_token: None,
+            feedback_correlation: None,
+        }]));
+    app.world_mut()
+        .run_system_once(crate::lobby::crew_replication::apply_assigned_station_rating)
+        .unwrap();
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+    with_sources(&mut app, actor);
+    let runtime = app.world().resource::<WorldContentRuntime>();
+    let revised = runtime.plan_choice.as_ref().unwrap();
+    assert_eq!(revised.temporal, original.temporal);
+    assert_eq!(revised.methods, original.methods);
+    assert_eq!(revised.temporal_reconsiderations.len(), 1);
+    assert!(!revised.effective_temporal().unwrap().refused());
+    assert_eq!(
+        revised.effective_temporal().unwrap().deadline_tick,
+        original.temporal.as_ref().unwrap().deadline_tick
+    );
+    assert_eq!(revised.released.len(), 1);
+}

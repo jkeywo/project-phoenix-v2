@@ -288,7 +288,14 @@ export function buildScenarioStatePanel(payload, opts = {}) {
       field('method', `${node}: ${method.task?.library_path}::${method.task?.task} / ${method.method}`);
     }
     for (const reason of Array.isArray(choice?.refused_methods) ? choice.refused_methods : []) field('refused', reason);
-    const temporal = choice?.temporal;
+    const revisions = Array.isArray(choice?.temporal_reconsiderations) ? choice.temporal_reconsiderations : [];
+    if (revisions.length) {
+      field('original_schedule', choice?.temporal?.outcome?.state);
+      for (const revision of revisions) {
+        field('reconsideration', `${revision.tick}: ${revision.cause?.kind} / ${(revision.cause?.owners || []).join(', ')} / ${revision.decision?.outcome?.state}`);
+      }
+    }
+    const temporal = revisions.at(-1)?.decision || choice?.temporal;
     if (temporal && typeof temporal === 'object') {
       const outcome = temporal.outcome;
       field('schedule', outcome?.state);

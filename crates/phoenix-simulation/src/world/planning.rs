@@ -116,6 +116,16 @@ pub(crate) fn advance_with_forecast(
     if graph.leaves.values().any(|row| !supports(&row.request)) {
         return Ok(());
     }
+    if choice
+        .effective_temporal()
+        .is_some_and(|decision| decision.refused())
+    {
+        if let Some(forecast) = forecast {
+            let input = forecast.project(&graph);
+            validate_forecast_input(&input, &forecast.config.0)?;
+            compiled.reconsider_schedule(&mut choice, input, tick)?;
+        }
+    }
     let mut instances = runtime.situations.clone();
     compiled.release(&mut choice, &mut instances, actor, tick)?;
     // Definition identity and released bindings commit with the choice, never

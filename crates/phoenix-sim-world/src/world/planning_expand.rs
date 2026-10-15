@@ -146,6 +146,7 @@ impl CompiledPlanning {
                 methods,
                 refused_methods: refused_methods.clone(),
                 temporal: None,
+                temporal_reconsiderations: Vec::new(),
             },
             graph,
             refused_methods,

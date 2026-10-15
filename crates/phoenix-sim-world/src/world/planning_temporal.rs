@@ -178,6 +178,36 @@ impl TemporalCommitment {
         matches!(self.outcome, TemporalOutcome::Refused { .. })
     }
 }
+pub const MAX_RECONSIDERATIONS: usize = 8;
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ReconsiderationCause {
+    CrewControlChanged { owners: Vec<SystemId> },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TemporalReconsideration {
+    pub tick: u64,
+    pub cause: ReconsiderationCause,
+    pub decision: TemporalCommitment,
+}
+impl PlanChoice {
+    pub fn effective_temporal(&self) -> Option<&TemporalCommitment> {
+        self.temporal_reconsiderations
+            .last()
+            .map(|revision| &revision.decision)
+            .or(self.temporal.as_ref())
+    }
+}
+fn changed_owners(before: &ForecastInput, after: &ForecastInput) -> Vec<SystemId> {
+    before
+        .owners
+        .iter()
+        .filter_map(|(owner, value)| {
+            (after.owners.get(owner) != Some(value)).then_some(owner.clone())
+        })
+        .collect()
+}
 /// Derived minute-area summary. Exact overload checks use phase boundaries.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkloadBucket {
@@ -342,6 +372,17 @@ impl CompiledPlanning {
         input: ForecastInput,
     ) -> Result<TemporalCommitment, String> {
         let (profile_index, deadline_tick) = self.original_input(graph, chosen_tick, &input)?;
+        self.schedule_with_bounds(graph, chosen_tick, input, profile_index, deadline_tick)
+    }
+    fn schedule_with_bounds(
+        &self,
+        graph: &Decomposition,
+        start_tick: u64,
+        input: ForecastInput,
+        profile_index: u8,
+        deadline_tick: u64,
+    ) -> Result<TemporalCommitment, String> {
+        self.original_input(graph, start_tick, &input)?;
         if input
             .owners
             .values()
@@ -375,7 +416,7 @@ impl CompiledPlanning {
             let forecast = &graph.forecasts[node];
             forecast.validate()?;
             let duration = ticks(forecast.max_secs + forecast.recovery_secs, input.tick_nanos)?;
-            let mut earliest = chosen_tick;
+            let mut earliest = start_tick;
             for edge in graph.dependencies.iter().filter(|edge| &edge.to == node) {
                 earliest = earliest.max(nodes[&edge.from].end_tick);
             }
@@ -477,6 +518,82 @@ impl CompiledPlanning {
             }),
         }
     }
+    fn reconsidered_decision(
+        &self,
+        graph: &Decomposition,
+        original: &TemporalCommitment,
+        tick: u64,
+        input: ForecastInput,
+    ) -> Result<TemporalCommitment, String> {
+        self.original_input(graph, tick, &input)?;
+        if input.tick_nanos != original.input.tick_nanos {
+            return Err("reconsideration cannot replace the original simulation timestep".into());
+        }
+        match self.schedule_with_bounds(
+            graph,
+            tick,
+            input.clone(),
+            original.profile_index,
+            original.deadline_tick,
+        ) {
+            Ok(value) => Ok(value),
+            Err(reason) => Ok(TemporalCommitment {
+                input,
+                profile_index: original.profile_index,
+                deadline_tick: original.deadline_tick,
+                outcome: TemporalOutcome::Refused {
+                    reason: reason
+                        .chars()
+                        .filter(|ch| !ch.is_control())
+                        .take(super::MAX_EXPLANATION_CHARS)
+                        .collect(),
+                },
+            }),
+        }
+    }
+    /// A real changed input may recover only unreleased refused work. Original
+    /// methods/deadline/profile never change and no physical command runs here.
+    pub fn reconsider_schedule(
+        &self,
+        choice: &mut PlanChoice,
+        input: ForecastInput,
+        tick: u64,
+    ) -> Result<bool, String> {
+        let graph = self.derive(choice)?;
+        self.validate_schedule(choice, &graph)?;
+        let Some(original) = choice.temporal.as_ref() else {
+            return Ok(false);
+        };
+        let previous = choice
+            .effective_temporal()
+            .expect("original temporal exists");
+        if !previous.refused()
+            || !choice.released.is_empty()
+            || choice.temporal_reconsiderations.len() >= MAX_RECONSIDERATIONS
+        {
+            return Ok(false);
+        }
+        let last_tick = choice
+            .temporal_reconsiderations
+            .last()
+            .map_or(choice.chosen_tick, |row| row.tick);
+        if tick <= last_tick {
+            return Ok(false);
+        }
+        let owners = changed_owners(&previous.input, &input);
+        if owners.is_empty() {
+            return Ok(false);
+        }
+        let decision = self.reconsidered_decision(&graph, original, tick, input)?;
+        choice
+            .temporal_reconsiderations
+            .push(TemporalReconsideration {
+                tick,
+                cause: ReconsiderationCause::CrewControlChanged { owners },
+                decision,
+            });
+        Ok(true)
+    }
     pub fn record_schedule_decision(
         &self,
         choice: &mut PlanChoice,
@@ -508,14 +625,45 @@ impl CompiledPlanning {
         graph: &Decomposition,
     ) -> Result<(), String> {
         match (&self.config.temporal, &choice.temporal) {
-            (None, None) => Ok(()),
-            (Some(_), Some(saved)) => {
-                if &self.schedule_decision(graph, choice.chosen_tick, saved.input.clone())? != saved
-                    || (saved.refused() && !choice.released.is_empty())
+            (None, None) if choice.temporal_reconsiderations.is_empty() => Ok(()),
+            (Some(_), Some(original)) => {
+                if &self.schedule_decision(graph, choice.chosen_tick, original.input.clone())?
+                    != original
+                    || choice.temporal_reconsiderations.len() > MAX_RECONSIDERATIONS
                 {
                     return Err(
-                        "saved temporal commitment disagrees with original inputs/source".into(),
+                        "saved original temporal decision disagrees with source/bounds".into(),
                     );
+                }
+                let mut previous = original;
+                let mut previous_tick = choice.chosen_tick;
+                for revision in &choice.temporal_reconsiderations {
+                    let owners = changed_owners(&previous.input, &revision.decision.input);
+                    let ReconsiderationCause::CrewControlChanged { owners: declared } =
+                        &revision.cause;
+                    if !previous.refused()
+                        || revision.tick <= previous_tick
+                        || owners.is_empty()
+                        || &owners != declared
+                        || &self.reconsidered_decision(
+                            graph,
+                            original,
+                            revision.tick,
+                            revision.decision.input.clone(),
+                        )? != &revision.decision
+                    {
+                        return Err(
+                            "saved temporal reconsideration lacks its exact cause/clock/decision"
+                                .into(),
+                        );
+                    }
+                    previous = &revision.decision;
+                    previous_tick = revision.tick;
+                }
+                if (previous.refused() && !choice.released.is_empty())
+                    || choice.released.values().any(|tick| *tick < previous_tick)
+                {
+                    return Err("released work precedes its effective temporal commitment".into());
                 }
                 Ok(())
             }
@@ -525,7 +673,7 @@ impl CompiledPlanning {
     pub fn workload(&self, choice: &PlanChoice) -> Result<Vec<WorkloadBucket>, String> {
         let graph = self.derive(choice)?;
         self.validate_schedule(choice, &graph)?;
-        let Some(saved) = &choice.temporal else {
+        let Some(saved) = choice.effective_temporal() else {
             return Ok(Vec::new());
         };
         let Some(nodes) = saved.nodes() else {

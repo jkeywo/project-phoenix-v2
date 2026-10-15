@@ -92,3 +92,13 @@ This first imported maintenance consumer supports one base actor or authored
 launch slot and disjoint finite leaves. Dynamic opportunities, multi-actor
 planning and automatic plan repair remain separate work; source checks do not
 establish whole-host or full increment completion.
+
+
+A refused temporal decision with no released leaves can append at most eight
+explicit actual crew/control-change decisions on the same PlanChoice. The new
+schedule begins at its dated cause while preserving the original method graph,
+difficulty profile and absolute deadline. Unchanged inputs do not retry; a
+committed decision freezes this first recovery path. Preflight recomputes every
+record, including exact changed owners and clocks; release uses the effective
+commitment. Original and revised decisions remain separately visible. This is
+refusal recovery, not unfinished-job replanning or a capability-loss solution.

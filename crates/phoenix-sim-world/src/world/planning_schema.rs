@@ -239,4 +239,6 @@ pub struct PlanChoice {
     pub refused_methods: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temporal: Option<super::temporal::TemporalCommitment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub temporal_reconsiderations: Vec<super::temporal::TemporalReconsideration>,
 }

@@ -402,3 +402,139 @@ fn reusable_unused_missing_forecast_is_allowed_but_selected_missing_forecast_ref
         .unwrap_err()
         .contains("forecast"));
 }
+
+#[test]
+fn changed_actual_input_recovers_refusal_without_new_method_profile_or_deadline() {
+    let (compiled, selected) = timed(false, 24);
+    let mut choice = selected.choice;
+    let mut unavailable = inputs(false);
+    for owner in unavailable.owners.values_mut() {
+        *owner = OwnerInput::Unavailable {
+            reason: UnavailableReason::Unoccupied,
+        };
+    }
+    compiled
+        .record_schedule_decision(&mut choice, unavailable.clone())
+        .unwrap();
+    let original = choice.temporal.clone();
+    let methods = choice.methods.clone();
+    assert!(!compiled
+        .reconsider_schedule(&mut choice, unavailable, 101)
+        .unwrap());
+    assert!(choice.temporal_reconsiderations.is_empty());
+    let mut actual = inputs(false);
+    for owner in actual.owners.values_mut() {
+        *owner = OwnerInput::Ai {};
+    }
+    assert!(compiled
+        .reconsider_schedule(&mut choice, actual.clone(), 110)
+        .unwrap());
+    assert_eq!(choice.temporal, original);
+    assert_eq!(choice.methods, methods);
+    let effective = choice.effective_temporal().unwrap();
+    assert!(!effective.refused());
+    assert_eq!(
+        effective.profile_index,
+        original.as_ref().unwrap().profile_index
+    );
+    assert_eq!(
+        effective.deadline_tick,
+        original.as_ref().unwrap().deadline_tick
+    );
+    assert!(effective
+        .nodes()
+        .unwrap()
+        .values()
+        .all(|interval| interval.start_tick >= 110));
+    let mut history = SituationInstances::default();
+    compiled
+        .release(&mut choice, &mut history, "actual-crew", 110)
+        .unwrap();
+    assert!(!choice.released.is_empty());
+    let accepted = choice.clone();
+    assert!(!compiled
+        .reconsider_schedule(&mut choice, inputs(true), 111)
+        .unwrap());
+    assert_eq!(choice, accepted);
+    let decoded: PlanChoice =
+        serde_json::from_slice(&serde_json::to_vec(&choice).unwrap()).unwrap();
+    for now in 110..470 {
+        compiled.validate_history(&decoded, &history, now).unwrap();
+    }
+    for fault in 0..6 {
+        let mut candidate = decoded.clone();
+        let revision = &mut candidate.temporal_reconsiderations[0];
+        match fault {
+            0 => revision.tick = 99,
+            1 => revision.decision.deadline_tick += 1,
+            2 => revision.decision.profile_index += 1,
+            3 => {
+                let ReconsiderationCause::CrewControlChanged { owners } = &mut revision.cause;
+                owners.clear();
+            }
+            4 => revision.decision.input = original.as_ref().unwrap().input.clone(),
+            _ => {
+                candidate.released.values_mut().for_each(|tick| *tick = 109);
+            }
+        }
+        assert!(
+            compiled
+                .validate_history(&candidate, &history, 470)
+                .is_err(),
+            "fault{fault}"
+        );
+        assert_eq!(choice, accepted);
+    }
+}
+#[test]
+fn refusal_reconsideration_is_bounded_and_cannot_extend_an_expired_deadline() {
+    let (compiled, selected) = timed(false, 24);
+    let mut choice = selected.choice;
+    let mut input = inputs(false);
+    for value in input.owners.values_mut() {
+        *value = OwnerInput::Unavailable {
+            reason: UnavailableReason::Unoccupied,
+        };
+    }
+    compiled
+        .record_schedule_decision(&mut choice, input.clone())
+        .unwrap();
+    let deadline = choice.temporal.as_ref().unwrap().deadline_tick;
+    for i in 0..MAX_RECONSIDERATIONS {
+        for value in input.owners.values_mut() {
+            *value = OwnerInput::Unavailable {
+                reason: if i % 2 == 0 {
+                    UnavailableReason::Offline
+                } else {
+                    UnavailableReason::Unoccupied
+                },
+            };
+        }
+        assert!(compiled
+            .reconsider_schedule(&mut choice, input.clone(), 101 + i as u64)
+            .unwrap());
+    }
+    let before = choice.clone();
+    for value in input.owners.values_mut() {
+        *value = OwnerInput::Ai {};
+    }
+    assert!(!compiled
+        .reconsider_schedule(&mut choice, input.clone(), 200)
+        .unwrap());
+    assert_eq!(choice, before);
+    let mut late = compiled
+        .choose("actual-crew", 100, |_| Ok(()))
+        .unwrap()
+        .choice;
+    compiled
+        .record_schedule_decision(&mut late, before.temporal.as_ref().unwrap().input.clone())
+        .unwrap();
+    assert!(compiled
+        .reconsider_schedule(&mut late, input, deadline + 1)
+        .unwrap());
+    assert!(late.effective_temporal().unwrap().refused());
+    assert_eq!(late.effective_temporal().unwrap().deadline_tick, deadline);
+    compiled
+        .validate_history(&late, &SituationInstances::default(), deadline + 1)
+        .unwrap();
+}

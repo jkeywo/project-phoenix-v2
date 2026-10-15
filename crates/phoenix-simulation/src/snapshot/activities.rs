@@ -153,6 +153,13 @@ fn planning_frontier(
                     .ok_or("historical forecast has no accepted owning ship recipe")?;
                 crate::world::planning::validate_forecast_input(&temporal.input, ship)?;
             }
+            for revision in &choice.temporal_reconsiderations {
+                let ship = recipe
+                    .ship_config
+                    .as_ref()
+                    .ok_or("reconsidered forecast has no owning ship recipe")?;
+                crate::world::planning::validate_forecast_input(&revision.decision.input, ship)?;
+            }
             for definition in graph.definitions.values() {
                 if definitions.iter().any(|row| row.id == definition.id) {
                     return Err("duplicate plan Scenario identity".into());

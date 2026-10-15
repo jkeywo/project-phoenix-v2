@@ -30,7 +30,13 @@ impl Decomposition {
         instances: &SituationInstances,
         now: u64,
     ) -> Result<(), String> {
-        if choice.chosen_tick > now || choice.released.len() > MAX_LEAVES {
+        if choice.chosen_tick > now
+            || choice.released.len() > MAX_LEAVES
+            || choice
+                .temporal_reconsiderations
+                .iter()
+                .any(|row| row.tick > now)
+        {
             return Err("invalid plan choice/release clock or bound".into());
         }
         let mut expected = BTreeSet::new();
@@ -38,7 +44,7 @@ impl Decomposition {
             if !self.leaves.contains_key(node) || *tick < choice.chosen_tick || *tick > now {
                 return Err("invalid released HTN node/tick".into());
             }
-            if choice.temporal.as_ref().is_some_and(|saved| {
+            if choice.effective_temporal().is_some_and(|saved| {
                 saved
                     .nodes()
                     .and_then(|nodes| nodes.get(node))
@@ -118,7 +124,7 @@ impl CompiledPlanning {
             if next_choice.released.contains_key(node) || !graph.ready(node, &next_instances) {
                 continue;
             }
-            if next_choice.temporal.as_ref().is_some_and(|saved| {
+            if next_choice.effective_temporal().is_some_and(|saved| {
                 saved
                     .nodes()
                     .is_none_or(|nodes| now < nodes[node].start_tick)

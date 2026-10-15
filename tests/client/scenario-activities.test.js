@@ -75,3 +75,17 @@ describe('retained temporal decisions',()=>{
     expect(container.querySelector('.ss-plan-interval,.ss-plan-overdue')).toBeNull();
   });
 });
+
+it('shows the dated reconsideration while retaining the original refused decision',()=>{
+  const container=document.createElement('div');
+  const temporal={profile_index:0,deadline_tick:300,input:{owners:{repair:{source:'unavailable',reason:'unoccupied'}}},outcome:{state:'refused',reason:'unavailable'}};
+  const decision={...temporal,input:{owners:{repair:{source:'ai'}}},outcome:{state:'committed',nodes:{repair:{start_tick:30,end_tick:90}}}};
+  const planning={source:{task:'maintenance'},choice:{chosen_tick:10,temporal,temporal_reconsiderations:[{tick:30,cause:{kind:'crew_control_changed',owners:['repair']},decision}]}};
+  renderScenarioStatePanel(container,JSON.stringify({flags:[],triggers:[],planning,situations:[]}));
+  expect(container.querySelector('.ss-plan-original_schedule').textContent).toContain('refused');
+  expect(container.querySelector('.ss-plan-reconsideration').textContent).toContain('30: crew_control_changed / repair / committed');
+  expect(container.querySelector('.ss-plan-schedule').textContent).toContain('committed');
+  expect(container.querySelector('.ss-plan-deadline').textContent).toContain('300');
+  expect(container.querySelector('.ss-plan-interval').textContent).toContain('30 → 90');
+  expect(container.querySelector('button,input,select')).toBeNull();
+});

@@ -1,0 +1,36 @@
+entities:
+  - decision: redesign-deployables-ordinary-entity-lifecycle
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Deployables Use Ordinary Actual Entities and Systems
+      summary: "Increment 19 adopts finite probes/turrets/decoys, carried combat/utility craft, mines, supply/work drones and optional energy/shield support through common actual entity/System/job/resource/damage rules. Direct human piloting, per-family simulations and a universal construction interface are excluded."
+      rationale:
+        - "Selected G061 and S013/S017/S019/S061/S083–84/S086/S092–94/S100–101; detailed scope/evidence lives in docs/gameplay-redesign/implementation/increment-19.md. Static work may follow 15 initial integration/targeted checks after 19/20 custody adoption. Remote/carried craft join 16/18, deception 17, passengers 20; full completion requires verified 16/17/18 exits. Preparation starts no runtime."
+        - "[ai] First actual battery-only engineless probe performs physical deploy, dated sensor acquisition and recovery, then a finite-round stationary turret reuses the same lifecycle. Actual entity/config/spawn, energy/damage, jobs/navigation, portable condition and Stock owners remain authoritative. 15 emitted-shot carriers are not craft storage or an operable deployable."
+  - decision: redesign-deployables-one-identity-and-shared-custody
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Carried and Deployed State Preserve One Physical Asset
+      summary: "One stable actual craft/deployable retains equipment, reserves, condition and lifecycle across carried/launching/deployed/recovering/lost states. Initial storage retains its ordinary entity/continuation owner with explicit nonspatial inactive capability; bay occupancy derives from location, without a parallel mutable blueprint/count."
+      rationale:
+        - "[ai] Stage actual source/access/readiness/exclusive job/compatible receiving space before the next executable step. Paid work/refusal/recall follows actual job/cursor/flight without teleport, duplicate ID, refill, healed replacement or retroactive refund. Portable EMP/resistance ages against causal time even while stored; emitted rounds retain their actual flight owner."
+        - "[ai] Shared 19/20 custody assigns craft/deployment/motion/capacity to 19 and actual people/team identity/condition/location to 20. Passenger views derive from one custody record; existing navigation owns crossings. A delivered team and its shuttle retain distinct exclusive commitments, with later extraction requiring actual transport/travel/capacity. 16 receipts are not physical handoffs."
+  - decision: redesign-deployables-link-loss-and-special-consumers
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Onboard Work and Dated Evidence Survive Link Loss Honestly
+      summary: "Craft retain ordinary individual System AI and accepted onboard work after link loss. 16 validity/supersession and returned receipts constrain new instructions. 14 sensor owners retain original dated gap history; parent operators receive only legitimately delivered data, not hidden remote progress/pose or another catch-up store."
+      rationale:
+        - "Mines use actual local trigger/sensing/identification and physical payload, not hidden faction truth or friendly blast immunity. Indiscriminate variants remain possible. 17 decoys are actual short-lived engineless battery/spoofer ships, distinct from apparent report geometry."
+        - "S092 standing deliveries use actual cargo, reserve goals, viable jobs and destination capacity without all-future reservations or gifts. S093 work craft repair/deploy carried equipment, not general new-entity fabrication. S094 permits real compatible energy/shield assistance only; component repair remains teams/work craft. 20 supplies actual rescue/Medical/participant continuation and pods retain equipment-backed signalling plus pickup."
+  - decision: redesign-deployables-authoring-and-continuation
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Deployment and Sorties Are Authorable and Conserved Through Restore
+      summary: "Accepted Workshop ordinary profiles/bays/tools/triggers/goals/feeds use existing history/includes/Preview/Test. Full-candidate parent/craft/personnel identity, phase/location, exclusive job/space, profile/order/clock validation precedes writes. Canonical physical and information owners are captured once; foundation commits are not verified craft/passenger exits."
+      rationale:
+        - "[ai] Human/ordinary AI paid deploy/flight/return/transfer/link-gap checkpoints require at least 360 fresh JSON complete capture/digest comparisons and different-LocalShip peers, plus missing-parent/blocked-space/tampered no-write cases. No reset of resources/condition/identity, no phantom remote knowledge. Shipped content, physical browser/native/Workshop, performance/combat/sortie and 2/4/6/8-human workload acceptance remain separate."

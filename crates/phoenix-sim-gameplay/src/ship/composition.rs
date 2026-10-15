@@ -64,6 +64,13 @@ pub enum SystemComponentConfig {
     PowerInput {
         id: String,
     },
+    SignalProtection {
+        id: String,
+        enabled_channel: String,
+        priorities_channel: String,
+        power_input: String,
+        config: crate::electronic::protection::SignalProtectionConfig,
+    },
     JammingEmitter {
         id: String,
         enabled_channel: String,
@@ -97,6 +104,7 @@ impl SystemComponentConfig {
             | Self::CraftBay { id, .. }
             | Self::IlluminationEmitter { id, .. }
             | Self::JammingEmitter { id, .. }
+            | Self::SignalProtection { id, .. }
             | Self::PowerInput { id }
             | Self::Turret { id, .. }
             | Self::AccessBoundary { id, .. } => id,
@@ -283,6 +291,82 @@ pub fn illumination_composition(
         _ => None,
     })
 }
+pub struct ProtectionComposition<'a> {
+    pub enabled_channel: &'a str,
+    pub priorities_channel: &'a str,
+    pub config: &'a crate::electronic::protection::SignalProtectionConfig,
+}
+pub fn protection_composition(
+    components: &[SystemComponentConfig],
+) -> Option<ProtectionComposition<'_>> {
+    components.iter().find_map(|component| match component {
+        SystemComponentConfig::SignalProtection {
+            enabled_channel,
+            priorities_channel,
+            config,
+            ..
+        } => Some(ProtectionComposition {
+            enabled_channel,
+            priorities_channel,
+            config,
+        }),
+        _ => None,
+    })
+}
+fn validate_protection(system: &super::config::SystemInstanceConfig) -> Result<(), String> {
+    let ([SystemComponentConfig::PowerInput { id: input }, SystemComponentConfig::SignalProtection {
+        id,
+        enabled_channel,
+        priorities_channel,
+        power_input,
+        config,
+    }]
+    | [SystemComponentConfig::SignalProtection {
+        id,
+        enabled_channel,
+        priorities_channel,
+        power_input,
+        config,
+    }, SystemComponentConfig::PowerInput { id: input }]) = system.components.as_slice()
+    else {
+        return Err(
+            "signal protection requires exactly one supported component and actual power_input"
+                .into(),
+        );
+    };
+    config.validate()?;
+    if !valid_id(id)
+        || !valid_id(input)
+        || id == input
+        || power_input != input
+        || system.power_group.is_none()
+        || system.channels.len() != 2
+        || enabled_channel == priorities_channel
+        || system
+            .channels
+            .iter()
+            .any(|channel| !valid_id(&channel.name))
+        || !system.channels.iter().any(|channel| {
+            &channel.name == enabled_channel && channel.kind == CommandChannelKind::Boolean
+        })
+        || !system.channels.iter().any(|channel| {
+            &channel.name == priorities_channel
+                && channel.kind == CommandChannelKind::SystemPriority
+        })
+    {
+        return Err("signal protection requires exact enabled/priorities channels and a bound actual power input".into());
+    }
+    if let Some(CommandChannelValue::SystemPriority(priorities)) = system
+        .channels
+        .iter()
+        .find(|channel| &channel.name == priorities_channel)
+        .and_then(|channel| channel.initial.as_ref())
+    {
+        config.validate_priorities(priorities)?;
+    }
+    Ok(())
+}
+
 pub struct JammingComposition<'a> {
     pub component_id: &'a str,
     pub enabled_channel: &'a str,
@@ -482,6 +566,9 @@ pub fn validate_composition(system: &super::config::SystemInstanceConfig) -> Res
             return Err("Craft Bay requires one actual bounded owner, distinct craft_bay/power_input, a power group and no unused channels".into());
         }
         return Ok(());
+    }
+    if system.kind == super::system_registry::SIGNAL_PROTECTION_KIND {
+        return validate_protection(system);
     }
     if system.kind == super::system_registry::JAMMING_KIND {
         return validate_jamming(system);

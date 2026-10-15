@@ -91,6 +91,7 @@ pub fn requires_energy_profile(kind: &str) -> bool {
             | DOCK_KIND
             | ILLUMINATION_KIND
             | JAMMING_KIND
+            | SIGNAL_PROTECTION_KIND
             | TRANSIT_DRIVE_KIND
             | CRAFT_BAY_KIND
             | UMBILICAL_KIND
@@ -282,6 +283,7 @@ impl EnergyConfigSection {
                     system.kind.as_str(),
                     crate::ship::system_registry::ILLUMINATION_KIND
                         | crate::ship::system_registry::JAMMING_KIND
+                        | crate::ship::system_registry::SIGNAL_PROTECTION_KIND
                 )
             }) && consumer.continuous_cost_per_sec <= 0.0
             {

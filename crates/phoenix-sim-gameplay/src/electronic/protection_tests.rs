@@ -110,3 +110,86 @@ fn malformed_profile_or_priority_never_becomes_an_allocation() {
     )
     .is_err());
 }
+
+#[test]
+fn composed_protection_uses_only_exact_channels_input_and_real_receiver_equipment() {
+    use crate::ship::composition::*;
+    let entity =
+        crate::test_fixtures::load_entity_config("assets/entities/jamming_cruiser.toml").unwrap();
+    let mut system = entity
+        .ship_config
+        .as_ref()
+        .unwrap()
+        .systems
+        .iter()
+        .find(|system| system.kind == crate::ship::system_registry::JAMMING_KIND)
+        .unwrap()
+        .clone();
+    system.kind = crate::ship::system_registry::SIGNAL_PROTECTION_KIND.into();
+    let config = profile();
+    // The fixture has an actual passive owner but uses a distinct ID. This
+    // component case intentionally selects only actual Comms/Broad/Focused.
+    let mut config = config;
+    config.systems.remove(&id("passive"));
+    system.channels = vec![
+        CommandChannelConfig {
+            name: "enabled".into(),
+            kind: CommandChannelKind::Boolean,
+            initial: Some(CommandChannelValue::Boolean(true)),
+        },
+        CommandChannelConfig {
+            name: "priorities".into(),
+            kind: CommandChannelKind::SystemPriority,
+            initial: Some(CommandChannelValue::SystemPriority(vec![
+                id("comms"),
+                id("sensors"),
+            ])),
+        },
+    ];
+    system.components = vec![
+        SystemComponentConfig::PowerInput { id: "power".into() },
+        SystemComponentConfig::SignalProtection {
+            id: "protection".into(),
+            enabled_channel: "enabled".into(),
+            priorities_channel: "priorities".into(),
+            power_input: "power".into(),
+            config,
+        },
+    ];
+    validate_composition(&system).unwrap();
+    validate_equipment(&entity, &system).unwrap();
+    let decoded: crate::ship::config::SystemInstanceConfig =
+        toml::from_str(&toml::to_string(&system).unwrap()).unwrap();
+    assert_eq!(decoded, system);
+    for fault in 0..6 {
+        let mut bad = system.clone();
+        match fault {
+            0 => {
+                bad.channels[1].initial =
+                    Some(CommandChannelValue::SystemPriority(vec![id("phaser-fore")]))
+            }
+            1 => bad.channels[1].kind = CommandChannelKind::EntityTarget,
+            2 => bad.components.pop().map(|_| ()).unwrap(),
+            3 => bad.power_group = None,
+            4 => {
+                if let SystemComponentConfig::SignalProtection { config, .. } =
+                    &mut bad.components[1]
+                {
+                    config.systems.insert(id("unknown"), 1);
+                }
+            }
+            _ => {
+                if let SystemComponentConfig::SignalProtection { config, .. } =
+                    &mut bad.components[1]
+                {
+                    config.systems.insert(id("phaser-fore"), 1);
+                }
+            }
+        }
+        assert!(validate_equipment(&entity, &bad).is_err(), "fault{fault}");
+    }
+    assert_eq!(
+        bindings("enabled").channels,
+        ["enabled".to_owned()].into_iter().collect()
+    );
+}

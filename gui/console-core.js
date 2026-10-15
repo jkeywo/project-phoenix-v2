@@ -1,4 +1,5 @@
 import {registerIdentityActions} from './stations/identity-actions.js';
+import {registerConcealmentActions} from './stations/concealment-actions.js';
 import { registerProtectionActions } from './stations/protection-actions.js';
 import { registerBayActions } from './stations/bay-actions.js';
 import { registerJammingActions } from './stations/jamming-actions.js';
@@ -453,6 +454,7 @@ export function initConsole({
   registerGuidanceActions(_semanticActions, { getState: () => _latestState, sendAction });
   registerProtectionActions(_semanticActions, { getState: () => _latestState, sendAction });
   registerIdentityActions(_semanticActions,{getState:()=>_latestState,sendAction});
+  registerConcealmentActions(_semanticActions,{getState:()=>_latestState,sendAction});
   registerJammingActions(_semanticActions, { getState: () => _latestState, sendAction });
   registerBayActions(_semanticActions, { getState: () => _latestState, sendAction });
   registerIlluminationActions(_semanticActions, { getState: () => _latestState, sendAction });

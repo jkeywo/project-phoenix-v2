@@ -111,6 +111,7 @@ pub(super) fn install(
     crate::resources::equipment_recovery_server::install(config, cmds);
     crate::science::passive::install(config, cmds);
     crate::science::identity::install(config, cmds);
+    crate::science::concealment::install(config, cmds);
     crate::science::protection::install(config, cmds);
     crate::science::broad::install(config, cmds);
     crate::comms::radio::install(config, cmds);

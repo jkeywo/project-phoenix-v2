@@ -1,4 +1,5 @@
 import {mountIdentityControls} from './identity-controls.js';
+import {mountConcealmentControls} from './concealment-controls.js';
 import { mountProtectionControls } from './protection-controls.js';
 import { mountBayControls } from './bay-controls.js';
 import { mountJammingControls } from './jamming-controls.js';
@@ -50,8 +51,8 @@ export function mountSystemStatus(document) {
       let entry = detailRows.get(row.system_id);
       if (!entry) {
         const node = document.createElement('section'), heading = document.createElement('h3'), facts = document.createElement('div');
-        const fitting = mountFittingControls(document), recovery = mountEquipmentRecoveryControls(document), guidance = mountGuidanceControls(document), illumination = mountIlluminationControls(document), jamming = mountJammingControls(document), protection = mountProtectionControls(document), identity = mountIdentityControls(document), bay = mountBayControls(document); node.append(heading, facts, fitting.node, recovery.node, guidance.node, illumination.node, jamming.node, protection.node, identity.node, bay.node); detail.append(node);
-        entry = { node, heading, facts, fitting, recovery, guidance, illumination, jamming, protection, identity, bay, signature: null }; detailRows.set(row.system_id, entry);
+        const fitting = mountFittingControls(document), recovery = mountEquipmentRecoveryControls(document), guidance = mountGuidanceControls(document), illumination = mountIlluminationControls(document), jamming = mountJammingControls(document), protection = mountProtectionControls(document), identity = mountIdentityControls(document), concealment = mountConcealmentControls(document), bay = mountBayControls(document); node.append(heading, facts, fitting.node, recovery.node, guidance.node, illumination.node, jamming.node, protection.node, identity.node, concealment.node, bay.node); detail.append(node);
+        entry = { node, heading, facts, fitting, recovery, guidance, illumination, jamming, protection, identity, concealment, bay, signature: null }; detailRows.set(row.system_id, entry);
       }
       const label = statusLabel(row); if (entry.heading.textContent !== label) entry.heading.textContent = label;
       const signature = JSON.stringify([row.reasons, row.physical]);
@@ -77,9 +78,10 @@ export function mountSystemStatus(document) {
       entry.jamming.update(row.system_id, row.jamming, row.delegated || selected === delegatedSelection);
       entry.protection.update(row.system_id, row.signal_protection, row.delegated || selected === delegatedSelection);
       entry.identity.update(row.system_id,row.identity,row.delegated||selected===delegatedSelection);
+      entry.concealment.update(row.system_id,row.concealment,row.delegated||selected===delegatedSelection);
       entry.bay.update(row.system_id, row.bay, row.delegated || selected === delegatedSelection);
     }
-    for (const [id, entry] of detailRows) if (!seen.has(id)) { entry.fitting.dispose(); entry.recovery.dispose(); entry.guidance.dispose(); entry.illumination.dispose(); entry.jamming.dispose(); entry.protection.dispose(); entry.identity.dispose(); entry.bay.dispose(); entry.node.remove(); detailRows.delete(id); }
+    for (const [id, entry] of detailRows) if (!seen.has(id)) { entry.fitting.dispose(); entry.recovery.dispose(); entry.guidance.dispose(); entry.illumination.dispose(); entry.jamming.dispose(); entry.protection.dispose(); entry.identity.dispose(); entry.concealment.dispose(); entry.bay.dispose(); entry.node.remove(); detailRows.delete(id); }
   }
 
   function open(id) { selected = id; paintDetails(); if (selected === null) return; dialog.hidden = false; trap.activate(); }
@@ -119,6 +121,6 @@ export function mountSystemStatus(document) {
       root.hidden = !rows.length;
       if (selected !== null) paintDetails();
     },
-    dispose() { close(); plans.dispose(); for (const entry of detailRows.values()) { entry.fitting.dispose(); entry.recovery.dispose(); entry.guidance.dispose(); entry.illumination.dispose(); entry.jamming.dispose(); entry.protection.dispose(); entry.identity.dispose(); entry.bay.dispose(); } detailRows.clear(); root.remove(); dialog.remove(); },
+    dispose() { close(); plans.dispose(); for (const entry of detailRows.values()) { entry.fitting.dispose(); entry.recovery.dispose(); entry.guidance.dispose(); entry.illumination.dispose(); entry.jamming.dispose(); entry.protection.dispose(); entry.identity.dispose(); entry.concealment.dispose(); entry.bay.dispose(); } detailRows.clear(); root.remove(); dialog.remove(); },
   };
 }

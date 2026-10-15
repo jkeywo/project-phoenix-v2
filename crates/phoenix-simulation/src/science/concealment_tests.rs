@@ -3,14 +3,15 @@ use bevy::ecs::system::RunSystemOnce;
 fn id() -> SystemId {
     SystemId("concealment".into())
 }
-fn fixture() -> (World, Entity) {
+pub(crate) fn config() -> crate::entities::config::EntityConfig {
+    crate::entities::include_resolve::load_entity_config("assets/entities/concealment_cruiser.toml")
+        .unwrap()
+}
+pub(crate) fn fixture() -> (World, Entity) {
     let mut world = World::new();
     world.insert_resource(crate::sim_tick::SimTick(100));
     world.insert_resource(Time::<Fixed>::from_hz(60.0));
-    let config = crate::entities::include_resolve::load_entity_config(
-        "assets/entities/concealment_cruiser.toml",
-    )
-    .unwrap();
+    let config = config();
     let entity = crate::entities::spawner::spawn_entity(
         &mut world.commands(),
         &config,
@@ -18,10 +19,6 @@ fn fixture() -> (World, Entity) {
         "concealment-source".into(),
         None,
     );
-    world.flush();
-    // This leaf proof remains runnable before the integrator's normal-spawn
-    // hook lands; it installs exactly the accepted hardware on the real actor.
-    install(&config, &mut world.commands().entity(entity));
     world.flush();
     (world, entity)
 }
@@ -34,7 +31,7 @@ fn reserve(world: &World, entity: Entity) -> f32 {
         .consumers[&id()]
         .energy
 }
-fn enable(world: &mut World, entity: Entity, value: bool) {
+pub(crate) fn enable(world: &mut World, entity: Entity, value: bool) {
     world
         .get_mut::<ShipConcealmentEmitters>(entity)
         .unwrap()

@@ -390,6 +390,7 @@ mod transit;
 
 mod guided_source;
 mod identity;
+mod concealment;
 mod illumination;
 mod jamming;
 mod protection;

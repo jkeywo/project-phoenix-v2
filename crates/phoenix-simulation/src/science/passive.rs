@@ -138,7 +138,7 @@ pub(crate) fn register(app: &mut App) {
     app.add_systems(
         FixedUpdate,
         tick.in_set(crate::sim_sets::SimSet::Modifiers)
-            .after(super::server::tick_scans),
+            .after(super::broad::tick),
     );
     app.add_systems(
         FixedUpdate,

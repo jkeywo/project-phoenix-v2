@@ -119,7 +119,7 @@ pub(crate) fn register(app: &mut App) {
     app.add_systems(
         FixedUpdate,
         tick.in_set(crate::sim_sets::SimSet::Modifiers)
-            .after(crate::ship::energy_runtime::tick_power_system),
+            .after(crate::sim_sets::FixedStep::TickScans),
     );
 }
 

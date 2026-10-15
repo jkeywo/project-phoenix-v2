@@ -17,6 +17,7 @@ describe('ACTION_MAP', () => {
       'charge_blaster_start',
       'clear_comms',
       'clear_navigation_waypoint',
+      'concealment_enabled',
       'dispatch_external_repair',
       'dispatch_repair_team',
       'dispatch_security_team',

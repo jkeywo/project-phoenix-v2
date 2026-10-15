@@ -1665,6 +1665,17 @@ pub(super) fn apply_entity_state_with(
             crate::science::identity::IdentityEmissions,
         )>();
     }
+    if let Some(saved) = &row.concealment_emitters {
+        entity_mut.insert((
+            saved.clone(),
+            crate::science::concealment::ConcealmentFields::default(),
+        ));
+    } else {
+        entity_mut.remove::<(
+            crate::science::concealment::ShipConcealmentEmitters,
+            crate::science::concealment::ConcealmentFields,
+        )>();
+    }
     if let Some(saved) = &row.signal_protection {
         entity_mut.insert((
             saved.clone(),

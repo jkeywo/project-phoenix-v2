@@ -549,3 +549,26 @@ strings checked 6,290 entries with zero errors/warnings. Workshop built and
 layer dependency checks passed. Craft's independent bounded source review
 passed after correcting the exact component profile type; no Cargo/native
 execution was performed in the worker lane.
+
+### Integrated concealment plumbing — source checkpoint
+
+The host integration now joins the reviewed finite equipment to ordinary spawn,
+per-System tree/admitted control, own permitted equipment details and shared
+Console status controls. Three singleton schedule owners settle Input intent
+and paid Physics work after energy integration and before radio; focused scans
+precede Broad measurements, which precede Passive samples. The earlier complete
+fixed-interval work receipt fix remains in force.
+
+Snapshot rows capture enabled intent. Accepted-recipe validation covers both
+live and absent/Disabled actor candidates before writes; restore clears paid
+fields, and the deterministic fold includes intent only. Actual normal-spawn
+fixtures and JSON/no-write owner tests accompany the joins. Compatibility is
+protocol 31, snapshot 75 and rules 0.56.
+
+Independent central source review passed after adding the new action to the
+existing exact action inventory. Focused JavaScript verification passed 137 tests
+across four files (controls, actual shared status, action routing and Workshop).
+The initial run had 126 passes and one missing-inventory expectation; its log is
+retained. Strict strings checked 6,341 entries without findings and layer rules
+passed. These are source/client results: native owner and full-host sensing,
+continuation, balance, multiplayer/device and human acceptance remain open.

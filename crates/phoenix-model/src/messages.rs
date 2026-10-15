@@ -44,7 +44,8 @@ use uuid::Uuid;
 /// Revision 28 carries explicit formation coordination through ordinary Comms.
 /// Revision 29 carries paid identity-emitter controls and permitted status.
 /// Revision 30 carries permitted authored World routes in Navigation.
-pub const PROTOCOL_VERSION: u32 = 30;
+/// Revision 31 carries own physical concealment controls and current equipment status.
+pub const PROTOCOL_VERSION: u32 = 31;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).
@@ -2216,6 +2217,9 @@ pub enum SystemControlPayload {
     /// Independent mounted Science emitter; target is a permitted Console handle.
     /// Retained intent of one actual onboard finite signal protector.
     /// Retained intent of an actual paid identity transmitter.
+    SetConcealmentEnabled {
+        enabled: bool,
+    },
     SetIdentityEmitterEnabled {
         enabled: bool,
     },

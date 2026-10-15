@@ -540,6 +540,7 @@ pub(super) fn validate_entity_resources(
     super::jamming::validate_entity(world, entity, row)?;
     super::protection::validate_entity(world, entity, row)?;
     super::identity::validate_entity(world, entity, row)?;
+    super::concealment::validate_entity(world, entity, row)?;
     match (
         world.get::<crate::console::navigation::sharing::NavigationSharingProfile>(entity),
         &row.navigation_sharing,

@@ -62,5 +62,6 @@ pub mod jamming_ui;
 pub mod transit;
 pub mod weapon_targets_view;
 
+pub mod concealment_ui;
 pub mod identity_ui;
 pub mod protection_ui;

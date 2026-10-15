@@ -459,7 +459,8 @@ use super::*;
 /// `72` retains actual identity-emitter intent, never prepaid physical emissions.
 /// `73` requires the single retained personnel roster, including removed origins.
 /// `74` retains original Transit scopes and the latest successful World arrival.
-pub const SNAPSHOT_FORMAT: u32 = 74;
+/// `75` retains enabled intent for accepted fitted concealment equipment.
+pub const SNAPSHOT_FORMAT: u32 = 75;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -609,7 +610,9 @@ pub const SNAPSHOT_FORMAT: u32 = 74;
 /// retaining original drive receipts and the current accepted arrival context.
 /// "0.55" preserves actual paid machinery work across the complete fixed
 /// interval so later observations include both Input and Physics operation.
-pub const SIMULATION_RULES: &str = "0.55";
+/// "0.56" measures paid concealment and actual operating signatures through
+/// ordinary Broad, Focused and Passive acquisition, without changing physical truth.
+pub const SIMULATION_RULES: &str = "0.56";
 
 /// The authored data, computed rather than remembered.
 ///

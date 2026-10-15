@@ -269,12 +269,17 @@ pub(crate) fn register(app: &mut App) {
         FixedUpdate,
         (
             control::operate_ai
+                .in_set(FixedStep::OperateConcealmentAi)
                 .in_set(SimSet::Input)
                 .before(control::handle_commands)
                 .before(FixedStep::OperateSignalProtectionAi)
                 .run_if(crate::ai::cadence::ai_tick_ready),
-            control::handle_commands.in_set(SimSet::Input).before(tick),
-            tick.in_set(SimSet::Physics)
+            control::handle_commands
+                .in_set(FixedStep::HandleConcealmentCommands)
+                .in_set(SimSet::Input)
+                .before(tick),
+            tick.in_set(FixedStep::TickConcealment)
+                .in_set(SimSet::Physics)
                 .after(FixedStep::TickPowerSystem)
                 .before(FixedStep::TickCommsRadio),
         ),

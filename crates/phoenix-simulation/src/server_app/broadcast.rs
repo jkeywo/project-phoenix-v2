@@ -991,6 +991,7 @@ fn build_system_status(
         row.jamming = crate::comms::jamming::project(world, entity, owner);
         row.signal_protection = crate::science::protection::project(world, entity, owner);
         row.identity = crate::science::identity::project(world, entity, owner);
+        row.concealment = crate::science::concealment::project(world, entity, owner);
         row.bay = crate::entities::craft::project(world, entity, owner);
     }
     let owners = config

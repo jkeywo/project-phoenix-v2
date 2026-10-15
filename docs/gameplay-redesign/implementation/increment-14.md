@@ -1,10 +1,11 @@
 # Increment 14: sensing and environmental interaction
 
 Adopted implementation contract prepared against main `ee2edf3e`. This is
-preparation only: no runtime 14 work or playable exit is claimed. Runtime follows
-increment 13's initial integrated checkpoint and the integrator's explicit
-advancement. Earlier pinned validation remains required under the authorised
-pipeline. Do not advance the migration ledger from this document alone.
+the selected scope, not a claim of a playable exit. Source implementation began
+after increment 13's integrated checkpoint and targeted physical-work and
+continuation checks. Late increment 13 facility/recovery validation continues on
+its pinned worktree under the authorised pipeline. The migration ledger records
+that advancement; outstanding validation remains required.
 
 ## Outcome and complete selected scope
 

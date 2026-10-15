@@ -2,7 +2,7 @@
   "schema_version": 1,
   "title": "Incremental implementation of the gameplay redesign",
   "approved_date": "2026-10-13",
-  "current_increment": 13,
+  "current_increment": 14,
   "constraints": {
     "serial": true,
     "reference_hull": "assets/entities/alliance_cruiser.toml",
@@ -230,12 +230,16 @@
     {
       "id": 14,
       "title": "Sensing and environmental interaction",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         13
       ],
       "completion": "Independent scanners, passive/history/uncertainty/correlation and shared radars use upgraded regions, signal attenuation and terrain occlusion.",
-      "evidence": []
+      "evidence": [
+        "docs/gameplay-redesign/implementation/increment-14.md",
+        "pasm/spec/design/sensing-and-environment.yaml",
+        "pasm/spec/design/fields-epistemics.yaml"
+      ]
     },
     {
       "id": 15,
@@ -2839,6 +2843,14 @@
       "user_instruction": "Continue increments 7-18 through completion, committing after each; after the initial commit, agents may validate and fix on isolated worktrees while main continues.",
       "pending_acceptance": "Initial source implementation is committed; pinned late validation/fixes and final integrated, browser/native, balance and human workload acceptance remain required. Advancement does not claim a verified exit.",
       "evidence": "docs/acceptance/1562-logistics-production.md"
+    },
+    {
+      "from_increment": 13,
+      "to_increment": 14,
+      "date": "2026-10-15",
+      "user_instruction": "Continue increments 7-18 through completion, committing after each; after the initial commit, agents may validate and fix on isolated worktrees while main continues.",
+      "pending_acceptance": "Initial source implementation and targeted field-fitting continuation evidence are committed. Late facility/refit/recovery validation runs on a pinned increment 13 worktree. Full integrated, browser/native, balance and human workload acceptance remain required; this is pipeline advancement, not a verified exit.",
+      "evidence": "docs/acceptance/1562-equipment-fitting.md"
     }
   ],
   "validation_workflow": {

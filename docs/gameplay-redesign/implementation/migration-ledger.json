@@ -316,14 +316,15 @@
     {
       "id": 20,
       "title": "Broader personnel operations",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         14,
         19
       ],
       "completion": "Duty Officers, medical/security/boarding/away/transfer work reuses team/jobs and supports rescue, abandonment and capture participation.",
       "evidence": [
-        "docs/gameplay-redesign/implementation/increment-20.md"
+        "docs/gameplay-redesign/implementation/increment-20.md",
+        "docs/acceptance/1562-personnel.md"
       ]
     },
     {

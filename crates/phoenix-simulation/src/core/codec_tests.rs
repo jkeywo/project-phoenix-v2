@@ -6710,7 +6710,7 @@ fn catalogue_additions_preserve_v3_json_locks_hulls_and_utf8_wire_roundtrips() {
     }
     // The legacy v3 catalogue remains readable under the v5 join pin;
     // explicit Console identity changed the wire vocabulary, not this JSON shape.
-    assert_eq!(PROTOCOL_VERSION, 15);
+    assert_eq!(PROTOCOL_VERSION, 16);
 }
 
 /// The removal inverse's ingress (issue #1444).

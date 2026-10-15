@@ -439,7 +439,8 @@ use super::*;
 /// `55` retains original burst launch identity, dated guidance provenance and
 /// source-owned issued/heard order knowledge separately from physical flight.
 // 56 adds canonical per-axis Helm intent and dated recipient-scoped radio facts.
-pub const SNAPSHOT_FORMAT: u32 = 56;
+// 57 adds finite officer custody joined to the candidate's actual Repair teams.
+pub const SNAPSHOT_FORMAT: u32 = 57;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -537,7 +538,9 @@ pub const SNAPSHOT_FORMAT: u32 = 56;
 /// guidance received after movement steers on the following advance.
 /// "0.28" retains paid per-axis direct/assisted intent and makes authored radio
 /// listening/emission physical work, with original sent/received facts.
-pub const SIMULATION_RULES: &str = "0.28";
+/// "0.29" applies finite co-located officer posting and internal Repair expertise
+/// through the sole existing team/job navigation and work owners.
+pub const SIMULATION_RULES: &str = "0.29";
 
 /// The authored data, computed rather than remembered.
 ///

@@ -4,7 +4,15 @@ Contract preparation, 15 October 2026, under the main `bc5cfbc6`
 [parallel-work contract](parallel-work.md). Local personnel work may follow 15's
 initial integration and targeted checks; full completion depends on 14 and 19's
 verified exits. External operations join 19's actual craft/deployment contract.
-This preparation changes no runtime, ledger status or acceptance result.
+The initial local slice is integrated as `7c45dd28` (source checkpoint
+`320e8f0e`). It adds finite officer custody and home-only posting to the existing
+Repair teams, an optional provisional expertise hull, existing-screen controls
+and accepted Workshop roster editing. It keeps the actual team navigation and
+work owners. Independent source reviews and 159 targeted client tests passed
+in the worker; integrated native and 360-step execution are pending.
+Compatibility advances to protocol 16, snapshot 57 and simulation rules 0.29.
+Medical, security, boarding, away/transport/capture joins and the full playable
+exit remain open. See [acceptance evidence](../../acceptance/1562-personnel.md).
 
 ## Outcome and scope
 

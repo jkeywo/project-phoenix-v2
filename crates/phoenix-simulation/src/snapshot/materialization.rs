@@ -64,6 +64,11 @@ pub(super) fn preflight_missing_entities(
     // Existing attackers can retain samples of targets that are materialized by
     // this restore. Validate all attacks only after every target shape exists.
     for row in &snapshot.entities {
+        if row.production.as_ref().is_some_and(|state| state.last_tick > snapshot.tick
+            || state.active.as_ref().is_some_and(|batch| batch.born_tick > snapshot.tick)) {
+            report.gaps.push(RestoreGap::ResourceStateInvalid {uuid:row.uuid.clone(),
+                reason:"saved production work is newer than the captured simulation tick".into()});
+        }
         if row.logistics.as_ref().is_some_and(|state| {
             state.last_tick > snapshot.tick
                 || state

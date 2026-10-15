@@ -47,6 +47,8 @@ describe('accepted located logistics authoring', () => {
     p => { p.handling[0].max_active = 65536; }, p => { p.handling.push(p.handling[0]); },
     p => { p.store[0].teleport = true; }, p => { p.handling[0].max_batch = 1.5; },
     p => { p.handling[0].max_batch = 1000000000; p.handling[0].units_per_sec = 1e-45; },
+    p => { p.store[0].priority = 65536; }, p => { p.store[1].priority = -1; },
+    p => { p.handling[0].reorder_fraction = -0.01; }, p => { p.handling[0].reorder_fraction = 1.01; },
   ])('refuses unsupported, dangling or impossible authored candidate %#', mutate => {
     const { value } = logisticsFixture(); mutate(value.logistics);
     expect(() => validateLogistics(value.logistics, value)).toThrow();
@@ -60,12 +62,13 @@ describe('accepted located logistics authoring', () => {
     await expect(pending).rejects.toThrow(/stale/); expect(draft.read(path)).toContain('# concurrent');
   });
   it('fits actual handling, reserve, faults, compartment, finite hold and explicit feeds atomically', () => {
-    const { value, schema } = damageFixture(); schema.console_instance_publication_kinds.logistics = 'Logistics'; delete value.logistics;
-    value.system = value.system.filter(row => row.id !== 'logistics'); delete value.interior.placements.logistics;
+    const { value, schema } = damageFixture(); schema.console_instance_publication_kinds.logistics = 'Logistics'; delete value.logistics; delete value.production;
+    value.system = value.system.filter(row => !['logistics', 'fabrication'].includes(row.id)); delete value.interior.placements.logistics; delete value.interior.placements.fabrication;
+    for (const console of value.console) console.feed = console.feed?.filter(row => row.source !== 'fabrication' && row.kind !== 'Stock');
     for (const station of value.station) for (const rating of station.rating || []) for (const key of ['automated_systems', 'detailed_systems'])
-      if (rating[key]) rating[key] = rating[key].filter(id => id !== 'logistics');
+      if (rating[key]) rating[key] = rating[key].filter(id => !['logistics', 'fabrication'].includes(id));
     delete value.station.find(row => row.id === 'engineering').rating[1].detailed_systems;
-    value.energy.consumer = value.energy.consumer.filter(row => row.system !== 'logistics');
+    value.energy.consumer = value.energy.consumer.filter(row => !['logistics', 'fabrication'].includes(row.system));
     const draft = make(stringify(value)), before = draft.read(path);
     const after = prepareLogisticsOperation(draft, deps, { path, type: 'logistics-create', system: 'new-handling',
       console: 'engineering', group: 'energy-logistics', compartment: 'engineering', capacity: 'new-hold', amount: 0, ceiling: 6 }, schema).changes[0].after;

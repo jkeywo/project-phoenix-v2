@@ -1909,21 +1909,21 @@ manual_overview = "You keep the ship alive. Allocate reactor power between helm,
 [[station.rating]]
 name = "Std"
 automated_systems = []
-detailed_systems = ["power-reactor","power-battery","repair","tractor","umbilical","weapons-access","logistics"]
+detailed_systems = ["power-reactor", "power-battery", "repair", "tractor", "umbilical", "weapons-access", "logistics", "fabrication"]
 
 [[station.rating]]
 name = "Guided"
-automated_systems = ["logistics"]
+automated_systems = ["logistics", "fabrication"]
 detailed_systems = ["power-reactor","power-battery","tractor","umbilical","weapons-access"]
 
 [[station.rating]]
 name = "Simplified"
-automated_systems = ["repair","logistics"]
+automated_systems = ["repair", "logistics", "fabrication"]
 detailed_systems = ["power-reactor","power-battery","tractor","umbilical","weapons-access"]
 
 [[station.rating]]
 name = "Maintenance"
-automated_systems = ["repair","power-reactor","power-battery","logistics"]
+automated_systems = ["repair", "power-reactor", "power-battery", "logistics", "fabrication"]
 detailed_systems = ["tractor","umbilical","weapons-access"]
 
 
@@ -5401,7 +5401,7 @@ max_penalty = 0.8
 # `tests/smoke/operations-dock-umbilical.spec.js` does.
 [umbilical]
 capacity = "reserve_fuel"
-allowed_resources = ["coolant","structural_parts","machinery_parts"]
+allowed_resources = ["coolant","structural_parts","machinery_parts","alloy"]
 rate = 20.0
 direction = "deliver"
 min_power_level = 2
@@ -5565,6 +5565,10 @@ kind = "TorpedoTube"
 source = "viewscreen"
 kind = "Viewscreen"
 
+
+[[console.feed]]
+source = "stock/torpedo-magazine"
+kind = "Stock"
 [[console]]
 id = "science"
 name = "Science"
@@ -5685,6 +5689,22 @@ kind = "Logistics"
 source = "torpedo-magazine"
 kind = "TorpedoMagazine"
 
+
+[[console.feed]]
+source = "stock/torpedo-magazine"
+kind = "Stock"
+
+[[console.feed]]
+source = "stock/repair"
+kind = "Stock"
+
+[[console.feed]]
+source = "stock/power-reactor"
+kind = "Stock"
+
+[[console.feed]]
+source = "fabrication"
+kind = "Production"
 [[console]]
 id = "comms"
 name = "station.comms.name"
@@ -5910,6 +5930,7 @@ shield-arc-port = "weapons"
 shield-arc-aft = "weapons"
 shield-arc-starboard = "weapons"
 weapons-access = "engineering"
+fabrication = "support"
 # [ai] Increment 10 mechanical access gate; ordinary System authority and AI.
 [[system]]
 id = "weapons-access"
@@ -5961,8 +5982,8 @@ laser = 1
 
 [[infrastructure.capacity]]
 id = "structural_parts"
-amount = 59
-ceiling = 59
+amount = 8
+ceiling = 8
 label = "damage.resource.structural_parts"
 [resource_services.structural_parts]
 kind = "capacity"
@@ -5970,8 +5991,8 @@ id = "structural_parts"
 
 [[infrastructure.capacity]]
 id = "machinery_parts"
-amount = 114
-ceiling = 114
+amount = 12
+ceiling = 12
 label = "damage.resource.machinery_parts"
 [resource_services.machinery_parts]
 kind = "capacity"
@@ -6050,10 +6071,11 @@ label = "logistics.hold-ammunition.label"
 [[logistics.store]]
 id = "hold-ammunition"
 resource = "torpedoes"
-compartment = "engineering"
+compartment = "support"
 role = "main"
 target = 4
 reserve = 0
+priority = 2
 
 [logistics.store.endpoint]
 kind = "capacity"
@@ -6064,20 +6086,131 @@ id = "magazine"
 resource = "torpedoes"
 compartment = "weapons"
 role = "local"
-system = "torpedo-magazine"
-source = "hold-ammunition"
 target = 6
 reserve = 0
+priority = 2
+system = "torpedo-magazine"
+source = "hold-ammunition"
 
 [logistics.store.endpoint]
 kind = "torpedo_magazine"
 
-[[logistics.storage]]
+[[logistics.store]]
+id = "hold-machinery-parts"
+resource = "machinery_parts"
+compartment = "support"
+role = "main"
+target = 102
+reserve = 20
+priority = 1
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "hold-machinery-parts"
+
+[[logistics.store]]
+id = "repair-machinery"
+resource = "machinery_parts"
 compartment = "engineering"
-space = 6
+role = "local"
+target = 12
+reserve = 0
+priority = 1
+system = "repair"
+source = "hold-machinery-parts"
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "machinery_parts"
+
+[[logistics.store]]
+id = "hold-structural-parts"
+resource = "structural_parts"
+compartment = "support"
+role = "main"
+target = 51
+reserve = 8
+priority = 1
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "hold-structural-parts"
+
+[[logistics.store]]
+id = "repair-structural"
+resource = "structural_parts"
+compartment = "engineering"
+role = "local"
+target = 8
+reserve = 0
+priority = 1
+system = "repair"
+source = "hold-structural-parts"
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "structural_parts"
+
+[[logistics.store]]
+id = "hold-coolant"
+resource = "coolant"
+compartment = "support"
+role = "main"
+target = 624
+reserve = 0
+priority = 0
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "hold-coolant"
+
+[[logistics.store]]
+id = "coolant-reservoir"
+resource = "coolant"
+compartment = "engineering"
+role = "local"
+target = 156
+reserve = 0
+priority = 0
+system = "power-reactor"
+source = "hold-coolant"
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "coolant"
+
+[[logistics.store]]
+id = "hold-alloy"
+resource = "alloy"
+compartment = "support"
+role = "main"
+target = 12
+reserve = 0
+priority = 3
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "alloy"
+
+[[logistics.storage]]
+compartment = "support"
+space = 807
 
 [logistics.storage.unit_space]
 torpedoes = 1
+machinery_parts = 1
+structural_parts = 1
+coolant = 1
+alloy = 1
+
+[[logistics.storage]]
+compartment = "engineering"
+space = 176
+
+[logistics.storage.unit_space]
+machinery_parts = 1
+structural_parts = 1
+coolant = 1
 
 [[logistics.storage]]
 compartment = "weapons"
@@ -6088,6 +6221,131 @@ torpedoes = 1
 
 [[logistics.handling]]
 system = "logistics"
-max_active = 1
-max_batch = 2
-units_per_sec = 1
+max_active = 2
+max_batch = 100
+units_per_sec = 50
+reorder_fraction = 0.5
+
+# Increment 12.2: finite hold/local splits preserve each hull's original totals.
+[[infrastructure.capacity]]
+id = "hold-machinery-parts"
+amount = 102
+ceiling = 102
+label = "damage.resource.machinery_parts"
+
+[[infrastructure.capacity]]
+id = "hold-structural-parts"
+amount = 51
+ceiling = 51
+label = "damage.resource.structural_parts"
+
+[[infrastructure.capacity]]
+id = "hold-coolant"
+amount = 624
+ceiling = 624
+label = "energy.coolant"
+
+# Increment12.3: finite fabrication is optional (initial target zero).
+[[system]]
+id = "fabrication"
+kind = "fabrication"
+console = "engineering"
+power_group = "energy-fabrication"
+
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[system.config.ai]
+root = "production"
+
+[[system.config.ai.tree]]
+id = "production"
+initial = "manufacture"
+
+[[system.config.ai.tree.state]]
+id = "manufacture"
+
+[[system.config.ai.tree.state.task]]
+id = "start-needed"
+
+[[system.config.ai.tree.state.task.when]]
+equals = true
+
+[system.config.ai.tree.state.task.when.value]
+source = "fact"
+name = "enabled"
+
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "start"
+
+[system.config.ai.tree.state.task.action.value]
+source = "fact"
+name = "production_available"
+
+[[infrastructure.capacity]]
+id = "alloy"
+amount = 12
+ceiling = 24
+label = "production.alloy"
+
+[resource_services.alloy]
+kind = "capacity"
+id = "alloy"
+
+[production]
+system = "fabrication"
+initial_recipe = "torpedoes"
+initial_target = 0
+
+[[production.recipe]]
+id = "torpedoes"
+work_secs = 10
+
+[[production.recipe.inputs]]
+store = "hold-machinery-parts"
+amount = 1
+
+[[production.recipe.inputs]]
+store = "hold-alloy"
+amount = 2
+
+[[production.recipe.outputs]]
+store = "hold-ammunition"
+amount = 1

@@ -670,3 +670,14 @@ label = "damage.resource.machinery_parts"
 [resource_services.machinery_parts]
 kind = "capacity"
 id = "machinery_parts"
+
+# Increment12.3: finite alloy replenishment through the ordinary service.
+[[infrastructure.capacity]]
+id = "alloy"
+amount = 10000
+ceiling = 10000
+label = "production.alloy"
+
+[resource_services.alloy]
+kind = "capacity"
+id = "alloy"

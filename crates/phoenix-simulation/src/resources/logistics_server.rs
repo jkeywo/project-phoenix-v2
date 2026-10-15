@@ -31,16 +31,28 @@ pub(crate) fn register(app: &mut App) {
                 Payload::SetLogisticsEnabled,
                 Payload::SetStockTarget,
                 Payload::SetStockReserve,
+                Payload::SetStockPriority,
                 Payload::DispatchDelivery,
                 Payload::ReturnDelivery,
             ],
         ),
     );
-    app.register_admitted_consumer(
-        ConsumerMatcher::kind(crate::ship::system_registry::TORPEDO_MAGAZINE_KIND).with_feedback(
-            FeedbackAddress::DeclaredKindOrCanonical("torpedo-magazine"),
+    for kind in crate::ship::system_registry::SystemKindRegistry::with_core_systems()
+        .expect("built-in registry")
+        .kinds()
+        .filter(|kind| *kind != crate::ship::system_registry::LOGISTICS_KIND)
+    {
+        app.register_admitted_consumer(ConsumerMatcher::kind(kind).with_feedback(
+            FeedbackAddress::DeclaredKindOnly,
             &[Payload::SetStockTarget],
-        ),
+        ));
+    }
+    app.add_systems(
+        FixedUpdate,
+        refresh_replenishment
+            .in_set(crate::sim_sets::SimSet::Input)
+            .after(crate::sim_sets::FixedStep::ApplyConsoleViews)
+            .before(operate_ai),
     );
     app.add_systems(
         FixedUpdate,
@@ -58,7 +70,8 @@ pub(crate) fn register(app: &mut App) {
     );
     app.add_systems(
         FixedUpdate,
-        publish
+        (publish_local_stocks, publish)
+            .chain()
             .in_set(crate::sim_sets::SimSet::Publish)
             .after(crate::console::weapons::blackboard::publish_torpedo_magazine_blackboard),
     );
@@ -133,6 +146,18 @@ fn transact(
 ) -> Result<(i64, Vec<FlagChange>), String> {
     let mut stocks = endpoint_view(profile, inventory.as_deref(), torpedoes.as_deref())?;
     let moved = apply_stock_action(profile, action, &mut stocks)?;
+    let flags = replace_endpoints(profile, stocks, inventory, torpedoes)?;
+    Ok((moved, flags))
+}
+
+/// Commit a validated temporary projection for delivery or finite fabrication.
+pub(crate) fn replace_endpoints(
+    profile: &CompiledLogistics,
+    stocks: BTreeMap<ResourceEndpoint, EndpointStock>,
+    inventory: Option<&mut InfrastructureCondition>,
+    torpedoes: Option<&mut TorpedoSystemResource>,
+) -> Result<Vec<FlagChange>, String> {
+    profile.validate_stocks(&stocks)?;
     let mut next_inventory = inventory.as_deref().map(|owner| owner.0.clone());
     let mut next_torpedoes = torpedoes.as_deref().map(|owner| owner.0.clone());
     let mut flags = Vec::new();
@@ -160,7 +185,7 @@ fn transact(
     if let (Some(owner), Some(next)) = (torpedoes, next_torpedoes) {
         owner.0 = next;
     }
-    Ok((moved, flags))
+    Ok(flags)
 }
 
 /// Execute a maintained/local order against the current real deficit. Both
@@ -231,7 +256,43 @@ pub fn receiving_room(
     profile.0.receiving_headroom(stocks, &store.id)
 }
 
-fn operate_ai(
+fn refresh_replenishment(
+    mut ships: Query<(
+        &CompiledShipLogistics,
+        &mut ShipLogistics,
+        &ShipConfigComponent,
+        &crate::server_app::ShipSystemBlackboards,
+    )>,
+) {
+    for (profile, mut state, config, boards) in &mut ships {
+        let permitted = config.0.observations_for_system(&state.0.owner, &boards.0);
+        let Some(SystemBlackboard::Logistics(board)) = permitted.get(&state.0.owner) else {
+            continue;
+        };
+        let observations = board
+            .stores
+            .iter()
+            .filter(|store| store.role == "local")
+            .filter_map(|store| {
+                Some(crate::resources::logistics::ReplenishmentObservation {
+                    store: store.id.clone(),
+                    occupied: store
+                        .level
+                        .checked_add(store.incoming)?
+                        .checked_add(store.held)?,
+                    target: store.target,
+                    priority: store.priority,
+                    replenishing: state.0.replenishing.contains(&store.id),
+                })
+            })
+            .collect::<Vec<_>>();
+        if let Err(error) = state.0.refresh_replenishment(&profile.0, &observations) {
+            warn!(%error, "Invalid permitted stock demand");
+        }
+    }
+}
+
+pub(crate) fn operate_ai(
     tick: Res<crate::sim_tick::SimTick>,
     sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<(
@@ -297,7 +358,7 @@ fn operate_ai(
 }
 
 #[allow(clippy::type_complexity)]
-fn tick(
+pub(crate) fn tick(
     tick: Res<crate::sim_tick::SimTick>,
     time: Res<Time>,
     mut runtime: Option<ResMut<crate::world::server::WorldContentRuntime>>,
@@ -422,6 +483,9 @@ fn tick(
                         next.set_target(&profile.0, store, *amount)
                     })
                 }
+                Control::SetStockPriority { store, priority } if target == &next.owner => {
+                    next.set_priority(&profile.0, store, *priority)
+                }
                 Control::SetStockReserve { store, amount } if target == &next.owner => {
                     profile.0.store(store).and_then(|binding| {
                         if binding.role != StoreRole::Main {
@@ -516,20 +580,24 @@ fn tick(
 }
 
 #[allow(clippy::type_complexity)]
-fn publish(
+pub(crate) fn publish(
     mut ships: Query<(
         &CompiledShipLogistics,
         &ShipLogistics,
         &ShipConfigComponent,
         Option<&InfrastructureCondition>,
+        Option<&TorpedoSystemResource>,
         &mut crate::server_app::ShipSystemBlackboards,
     )>,
 ) {
-    for (profile, state, config, inventory, mut boards) in &mut ships {
+    for (profile, state, config, inventory, torpedoes, mut boards) in &mut ships {
+        let Ok(physical_stores) = endpoint_view(&profile.0, inventory, torpedoes) else {
+            continue;
+        };
         let permitted = config.0.observations_for_system(&state.0.owner, &boards.0);
         let mut stores = Vec::new();
         for binding in &profile.0.config().stores {
-            let (level, available, incoming, held, target) =
+            let (level, available, incoming, held, target, headroom, bay_free_space) =
                 match (&binding.role, &binding.endpoint) {
                     (StoreRole::Main, ResourceEndpoint::Capacity { id }) => {
                         let Some(stock) = inventory.and_then(|owner| owner.0.capacity_stock(id))
@@ -542,23 +610,33 @@ fn publish(
                             stock.incoming_total(),
                             0,
                             state.0.goals[&binding.id],
+                            profile
+                                .0
+                                .receiving_headroom(&physical_stores, &binding.id)
+                                .unwrap_or(0),
+                            observed_bay_space(&profile.0, &physical_stores, &binding.compartment),
                         )
                     }
-                    (StoreRole::Local, ResourceEndpoint::TorpedoMagazine {}) => {
-                        let Some(SystemBlackboard::TorpedoMagazine(board)) =
-                            binding.system.as_ref().and_then(|id| permitted.get(id))
+                    (StoreRole::Local, _) => {
+                        let publication = stock_publication(
+                            binding.system.as_ref().expect("compiled local owner"),
+                        );
+                        let Some(SystemBlackboard::Stock(board)) = permitted.get(&publication)
                         else {
                             continue;
                         };
-                        let Some(target) = board.stock_target else {
+                        let Some(local) = board.stores.iter().find(|local| local.id == binding.id)
+                        else {
                             continue;
                         };
                         (
-                            board.stock_level,
-                            i64::from(board.torpedoes_remaining),
-                            board.stock_incoming,
-                            board.stock_held,
-                            target,
+                            local.level,
+                            local.available,
+                            local.incoming,
+                            local.held,
+                            local.target,
+                            local.headroom,
+                            local.bay_free_space,
                         )
                     }
                     _ => continue,
@@ -577,42 +655,54 @@ fn publish(
                 available,
                 held,
                 ceiling: profile.0.endpoints()[&binding.endpoint].ceiling,
+                headroom,
+                bay_free_space,
                 incoming,
                 target,
                 reserve: state.0.floors[&binding.id],
+                priority: state.0.priorities[&binding.id],
                 compartment: binding.compartment.clone(),
             });
         }
         let next_delivery = if state.0.enabled
             && state.0.batches.len() < usize::from(profile.0.handling().max_active)
         {
-            stores
+            let observations = stores
                 .iter()
                 .filter(|s| s.role == "local")
-                .find_map(|local| {
-                    let binding = profile.0.store(&local.id).ok()?;
-                    let source = stores
-                        .iter()
-                        .find(|source| Some(&source.id) == binding.source.as_ref())?;
-                    let deficit = local
-                        .target
-                        .saturating_sub(
-                            local
-                                .level
-                                .saturating_add(local.incoming)
-                                .saturating_add(local.held),
-                        )
-                        .max(0);
-                    let amount = deficit
-                        .min(source.available)
-                        .min(source.level.saturating_sub(source.reserve).max(0))
-                        .min(profile.0.handling().max_batch);
-                    (amount > 0).then(|| DeliveryRequest {
-                        source: source.id.clone(),
-                        destination: local.id.clone(),
-                        amount,
+                .filter_map(|s| {
+                    Some(crate::resources::logistics::ReplenishmentObservation {
+                        store: s.id.clone(),
+                        occupied: s.level.checked_add(s.incoming)?.checked_add(s.held)?,
+                        target: s.target,
+                        priority: s.priority,
+                        replenishing: state.0.replenishing.contains(&s.id),
                     })
                 })
+                .collect::<Vec<_>>();
+            crate::resources::logistics::ordered_replenishment_candidates(
+                &observations,
+                profile.0.handling(),
+            )
+            .unwrap_or_default()
+            .iter()
+            .find_map(|candidate| {
+                let local = stores.iter().find(|store| store.id == candidate.store)?;
+                let binding = profile.0.store(&local.id).ok()?;
+                let source = stores
+                    .iter()
+                    .find(|source| Some(&source.id) == binding.source.as_ref())?;
+                let amount = (candidate.target - candidate.occupied)
+                    .min(source.available)
+                    .min(local.headroom)
+                    .min(source.level.saturating_sub(source.reserve).max(0))
+                    .min(profile.0.handling().max_batch);
+                (amount > 0).then(|| DeliveryRequest {
+                    source: source.id.clone(),
+                    destination: local.id.clone(),
+                    amount,
+                })
+            })
         } else {
             None
         };
@@ -674,6 +764,81 @@ fn publish(
     }
 }
 
+/// Each local owner publishes only its real readings. Inventory consumes explicit feeds.
+#[allow(clippy::type_complexity)]
+fn publish_local_stocks(
+    mut ships: Query<(
+        &CompiledShipLogistics,
+        &ShipLogistics,
+        Option<&InfrastructureCondition>,
+        Option<&TorpedoSystemResource>,
+        &mut crate::server_app::ShipSystemBlackboards,
+    )>,
+) {
+    for (profile, state, inventory, torpedoes, mut boards) in &mut ships {
+        let Ok(stocks) = endpoint_view(&profile.0, inventory, torpedoes) else {
+            continue;
+        };
+        let mut owners = BTreeMap::<crate::core::messages::SystemId, Vec<LocalStockView>>::new();
+        for binding in &profile.0.config().stores {
+            let Some(owner) = &binding.system else {
+                continue;
+            };
+            if binding.role != StoreRole::Local {
+                continue;
+            }
+            let value = &stocks[&binding.endpoint];
+            owners
+                .entry(owner.clone())
+                .or_default()
+                .push(LocalStockView {
+                    id: binding.id.clone(),
+                    resource: binding.resource.clone(),
+                    level: value.stock.level,
+                    available: value.stock.available(),
+                    ceiling: value.stock.ceiling,
+                    headroom: profile
+                        .0
+                        .receiving_headroom(&stocks, &binding.id)
+                        .unwrap_or(0),
+                    bay_free_space: observed_bay_space(&profile.0, &stocks, &binding.compartment),
+                    incoming: value.stock.incoming_total(),
+                    held: value.held,
+                    target: state.0.goals[&binding.id],
+                    compartment: binding.compartment.clone(),
+                });
+        }
+        for (owner, stores) in owners {
+            boards.0.insert(
+                stock_publication(&owner),
+                SystemBlackboard::Stock(SystemStockBlackboard {
+                    system: owner,
+                    stores,
+                }),
+            );
+        }
+    }
+}
+
+fn observed_bay_space(
+    profile: &CompiledLogistics,
+    stocks: &BTreeMap<ResourceEndpoint, EndpointStock>,
+    compartment: &str,
+) -> i64 {
+    profile
+        .config()
+        .storage
+        .iter()
+        .find(|bay| bay.compartment == compartment)
+        .and_then(|bay| {
+            profile
+                .occupied_space(stocks, compartment)
+                .ok()
+                .map(|used| bay.space.saturating_sub(used).max(0))
+        })
+        .unwrap_or(0)
+}
+
 fn blocked_key(reason: crate::resources::logistics::DeliveryBlock) -> &'static str {
     use crate::resources::logistics::DeliveryBlock;
     match reason {
@@ -686,4 +851,4 @@ fn blocked_key(reason: crate::resources::logistics::DeliveryBlock) -> &'static s
 
 #[cfg(test)]
 #[path = "logistics_server_tests.rs"]
-mod tests;
+pub(crate) mod tests;

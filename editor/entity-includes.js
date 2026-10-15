@@ -122,7 +122,7 @@ function joinPath(prefix, key) {
 
 // ── Merge (MergePolicy::ComposeFragments) ────────────────────────────────────
 
-const atomicResourceEndpoint = path => path === 'logistics' || path === 'damage' || path === 'interior' || path === 'energy' || path.startsWith('resource_services.') || path === 'umbilical.link' || path === 'umbilical.link.provider' || /^weapon(?:\[.*?\])?\.(?:delivery|impact)$/.test(path);
+const atomicResourceEndpoint = path => path === 'production' || path === 'logistics' || path === 'damage' || path === 'interior' || path === 'energy' || path.startsWith('resource_services.') || path === 'umbilical.link' || path === 'umbilical.link.provider' || /^weapon(?:\[.*?\])?\.(?:delivery|impact)$/.test(path);
 
 function mergeAt(path, template, override) {
   if (atomicResourceEndpoint(path) && isPlainObject(override)) return deepClone(override);

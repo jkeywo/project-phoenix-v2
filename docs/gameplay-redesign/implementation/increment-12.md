@@ -360,3 +360,40 @@ ordinary authored tree decision. Both use the permitted candidate and the same
 physical executor; current actual targets, incoming/held stock and protected floors
 are rechecked before committing. Manual dispatch also respects the current local
 target; raise that target first when requesting additional reserve.
+
+
+## Local stores and fabrication integration checkpoint
+
+The next slices add generic typed `stock/<SystemId>` publications. Local owners
+retain target authority; Inventory owns reserves/priorities and reads explicit
+feeds. Reports include endpoint receiving room and actual shared bay free space,
+so a blocked high-priority destination cannot monopolise recommendations or
+require a planner to read foreign inventories. Strict validation rejects dead
+feeds and additional fitted handlers/fabricators without a runtime owner.
+
+Reorder policy triggers a latched refill cycle. Once low stock triggers supply,
+subsequent bounded batches continue toward the desired level, including after a
+finite-source shortage, disablement or save/resume. It does not reserve absent
+supply. Lower priorities run after higher feasible demand; ratio and identity
+provide deterministic ties.
+
+Cruiser machinery/structural/coolant starting totals remain 114/59/780, with
+102/51/624 in the hold and 12/8/156 local. Dynasty machinery totals 111 with
+99 hold plus 12 local; structural and coolant splits are the same. Existing
+consumer service identities remain local. Main-hold port replenishment is still
+the explicit 12.5 integration task.
+
+Fabrication adds an optional fitted System and finite alloy stock (12 initially,
+ceiling 24) on these two hulls; Support storage increases by 24. A provisional
+10-second recipe consumes one main machinery part and two alloy for one round
+of ammunition. Initial production target zero keeps it optional and preserves
+the six starting rounds. Axiom has finite alloy stock. The replacing Skyway
+Control capacity profile still needs its matching retained alloy row.
+
+The pure owner run at `c3caaf3c` passes 41 cases, including exact 100+56 refill to
+a 156 target, finite shortage continuation and retained/closed refill state.
+Workshop/Console production source passed independent review and targeted JS
+checks. Renderer-free integrated compilation passed after the new family mapping
+was completed. Additional native local-store/fabrication cases, recipe-scoped
+observation planning, final schema pins and whole-host continuation are pending;
+this checkpoint is not the complete increment 12 exit.

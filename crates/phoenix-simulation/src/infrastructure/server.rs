@@ -62,6 +62,7 @@ impl Plugin for InfrastructurePlugin {
         // in the census by full type path (`EffectQueue<ConditionAdjustment>` vs
         // `EffectQueue<CapacityAdjustment>`).
         crate::resources::logistics_server::register(app);
+        crate::resources::production_server::register(app);
         app.init_resource::<EffectQueue<crate::resources::server::ResourceTransfer>>()
             .declare_state::<EffectQueue<crate::resources::server::ResourceTransfer>>(
                 StateClass::ClearedAtFold,

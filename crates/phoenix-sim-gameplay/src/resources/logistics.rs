@@ -9,6 +9,9 @@ pub use transactions::*;
 #[path = "logistics_state.rs"]
 mod execution;
 pub use execution::*;
+#[path = "logistics_policy.rs"]
+mod policy;
+pub use policy::*;
 
 pub const LOGISTICS_KIND: &str = "logistics";
 #[derive(Clone, Debug)]
@@ -44,6 +47,8 @@ impl CompiledLogistics {
             || !handling.units_per_sec.is_finite()
             || handling.units_per_sec <= 0.0
             || !(handling.max_batch as f32 / handling.units_per_sec).is_finite()
+            || !handling.reorder_fraction.is_finite()
+            || !(0.0..=1.0).contains(&handling.reorder_fraction)
             || ship
                 .system(&handling.system)
                 .is_none_or(|s| s.kind != LOGISTICS_KIND)

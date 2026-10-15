@@ -459,6 +459,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("internal-repair", fold_internal_repair_namespace),
     ("interior-access", fold_access_namespace),
     ("logistics", fold_logistics_namespace),
+    ("production", fold_production_namespace),
     ("physical-damage", fold_physical_damage_namespace),
     ("disablement-observation", fold_disablement_namespace),
 ];
@@ -2521,6 +2522,11 @@ fn fold_internal_repair_namespace(world: &World, acc: u64) -> u64 {
 }
 
 /// Canonical stock/claims in the retained owner; labels and bindings are content.
+fn fold_production_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(world, acc, "production",
+        |owner: &crate::resources::production_server::ShipProduction| Some(owner.0.clone()),
+        |acc, state| fold_serde(acc, &state))
+}
 fn fold_logistics_namespace(world: &World, acc: u64) -> u64 {
     fold_optional_namespace(
         world,

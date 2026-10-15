@@ -55,6 +55,8 @@ pub struct ManagedStoreConfig {
     pub source: Option<String>,
     pub target: i64,
     pub reserve: i64,
+    #[serde(default)]
+    pub priority: u16,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -70,4 +72,9 @@ pub struct HandlingConfig {
     pub max_active: u16,
     pub max_batch: i64,
     pub units_per_sec: f32,
+    #[serde(default = "full_reorder_fraction")]
+    pub reorder_fraction: f32,
+}
+fn full_reorder_fraction() -> f32 {
+    1.0
 }

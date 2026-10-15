@@ -697,6 +697,19 @@ describe('console-core semantic action runtime', () => {
     disposeRuntime(runtime);
   });
 
+  it('retains a direct Navigation chart before layout when common Stock capability is installed', () => {
+    document.body.innerHTML = '<ph-navigation-map id="direct"></ph-navigation-map>';
+    const map = document.getElementById('direct');
+    map.navigationPlacement = vi.fn(() => ({ x: 12, z: 34 })); map.getClientRects = () => [];
+    const sent = []; window.__sendAction = json => sent.push(JSON.parse(json));
+    const runtime = initConsole({ name: 'navigation', render: () => {}, navigationActions: { supportsChart: false, supportsCivilianOrders: false } });
+    window.__updateConsole('navigation', JSON.stringify(withConsoleFamilyProjection({ navigation_auto: false, waypoint: null, blips: [] })));
+    window.activateSemanticAction(NAVIGATION_WAYPOINT_PLACE_ACTION_ID, { context: 'navigation', source: 'control' });
+    expect(map.navigationPlacement).toHaveBeenCalledOnce();
+    expect(sent).toEqual([expect.objectContaining({ action: 'set_navigation_waypoint', x: 12, z: 34 })]);
+    disposeRuntime(runtime);
+  });
+
   it('routes the real parent Comms gamepad context into its Navigation-capable owning iframe', () => {
     document.body.innerHTML = '<ph-navigation-map id="inline"></ph-navigation-map>';
     const map = document.getElementById('inline');

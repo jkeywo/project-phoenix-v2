@@ -62,7 +62,9 @@ pub fn emit_ai_command(
     if authorize_command(
         CommandClaimant::Ai,
         CommandTargetPolicy {
-            control: sources.0.policy_for(&effective),
+            control: crate::command_admission::policy::command_policy(
+                config, &sources.0, &effective, &payload,
+            ),
             summary: false,
             debug_route: false,
         },

@@ -22,6 +22,7 @@ export class PhLogisticsControls extends HTMLElement {
       node.addEventListener('click', () => activateEngineeringAction(null, LOGISTICS_ACTION_IDS[action], typeof detail === 'function' ? detail() : detail)); return node; };
     const style = el('style', ':host{display:block;margin-top:1em}fieldset{margin:.5em 0;min-width:0}label{display:flex;gap:.5em;align-items:center;flex-wrap:wrap}input{min-width:4em;width:6em}button{min-height:44px;margin:.2em}p{overflow-wrap:anywhere}'); root.append(style, el('h2', t('logistics.title')));
     const toggle = button(state.enabled ? 'pause' : 'enable', 'enabled', { enabled: !state.enabled }); root.append(toggle);
+    root.append(el('p', t('logistics.maintain-hint')));
     for (const store of state.stores || []) {
       const group = el('fieldset'); group.append(el('legend', wireText(store.id)));
       group.append(el('p', t('logistics.stock-summary', { level: store.level, available: store.available ?? store.level, held: store.held ?? 0, ceiling: store.ceiling, incoming: store.incoming,
@@ -33,6 +34,9 @@ export class PhLogisticsControls extends HTMLElement {
         input.value = store[name]; input.dataset.key = store.id + '-' + name; input.disabled = !!state.logistics_auto;
         label.append(input, button('apply', name, () => ({ store: store.id, amount: input.valueAsNumber }))); group.append(label);
       }
+      const priorityLabel = el('label', t('logistics.priority')), priority = el('input'); priority.type = 'number'; priority.min = '0'; priority.max = '65535'; priority.step = '1';
+      priority.value = store.priority ?? 0; priority.dataset.key = store.id + '-priority'; priority.disabled = !!state.logistics_auto;
+      priorityLabel.append(priority, button('apply', 'priority', () => ({ store: store.id, priority: priority.valueAsNumber }))); group.append(priorityLabel);
       root.append(group);
     }
     const dispatch = el('fieldset'); dispatch.append(el('legend', t('logistics.manual')));

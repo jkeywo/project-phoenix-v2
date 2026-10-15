@@ -5273,3 +5273,62 @@ logistics.blocked.return_capacity,Logistics delivery blockage,Return storage is 
 logistics.blocked.receiving,Logistics delivery blockage,Receiving storage is unavailable; cargo is retained.,Empfangslager nicht verfügbar; Fracht bleibt erhalten.,Receiving storage is unavailable; cargo is retained.,machine
 logistics.blocked.disabled,Logistics delivery blockage,Handling is paused; committed cargo is retained.,Transport pausiert; übernommene Fracht bleibt erhalten.,Handling is paused; committed cargo is retained.,machine
 logistics.handling-limits,Logistics handling limits,Maximum {batch} per batch; {active} concurrent batches.,Maximal {batch} pro Lieferung; {active} gleichzeitige Lieferungen.,Maximum {batch} per batch; {active} concurrent batches.,machine
+workshop.logistics.priority,Logistics authoring,Delivery priority (lower first),Lieferpriorität (niedrigere zuerst),Delivery priority (lower first),machine
+workshop.logistics.reorder-fraction,Logistics authoring,Reorder threshold (fraction of target),Nachbestellschwelle (Anteil des Sollbestands),Reorder threshold (fraction of target),machine
+logistics.priority,Logistics controls,Delivery priority,Lieferpriorität,Delivery priority,machine
+logistics.action.priority,Logistics controls,Set delivery priority,Lieferpriorität setzen,Set delivery priority,machine
+logistics.maintain-hint,Logistics controls,Maintain desired local stocks automatically while enabled.,Bei Aktivierung die gewünschten lokalen Bestände automatisch halten.,Maintain desired local stocks automatically while enabled.,machine
+logistics.local-stores,Logistics controls,Local stocks,Lokale Vorräte,Local stocks,machine
+logistics.local-goal-summary,Logistics controls,Desired stock: {target},Gewünschter Bestand: {target},Desired stock: {target},machine
+production.alloy,Production,Alloy,Legierung,Alloy,machine
+energy.group.fabrication.label,Production,Fabrication,Fertigung,Fabrication,machine
+production.title,Production,Fabrication,Fertigung,Fabrication,machine
+production.recipe,Production,Recipe,Rezept,Recipe,machine
+production.target,Production,Desired primary output stock,Gewünschter Bestand des Hauptprodukts,Desired primary output stock,machine
+production.select-recipe,Production,Select recipe and target,Rezept und Sollbestand wählen,Select recipe and target,machine
+production.set-target,Production,Set desired stock,Gewünschten Bestand setzen,Set desired stock,machine
+production.recipe-change-hint,Production,Changing the recipe discards any material already consumed by the active batch.,Ein Rezeptwechsel verwirft das bereits verbrauchte Material des laufenden Durchgangs.,Changing the recipe discards any material already consumed by the active batch.,machine
+production.recipe-summary,Production,{inputs} → {outputs}; {seconds}s per batch,{inputs} → {outputs}; {seconds}s je Durchgang,{inputs} → {outputs}; {seconds}s per batch,machine
+production.progress,Production,{recipe}: {progress}%,{recipe}: {progress}%,{recipe}: {progress}%,machine
+production.idle,Production,No active batch,Kein laufender Durchgang,No active batch,machine
+production.none,Production,No recipe,Kein Rezept,No recipe,machine
+production.pause,Production,Pause production,Fertigung pausieren,Pause production,machine
+production.enable,Production,Maintain output stock,Produktbestand halten,Maintain output stock,machine
+production.action.enabled,Production,Enable or pause production,Fertigung aktivieren oder pausieren,Enable or pause production,machine
+production.action.target,Production,Set production stock target,Sollbestand der Fertigung setzen,Set production stock target,machine
+production.action.recipe,Production,Select production recipe,Fertigungsrezept wählen,Select production recipe,machine
+workshop.production.title,Workshop production,Fabrication recipes,Fertigungsrezepte,Fabrication recipes,machine
+workshop.production.hint,Workshop production,Recipes consume and produce real managed stores in the fabrication compartment. The first output is the stock target.,Rezepte verbrauchen und erzeugen echte verwaltete Vorräte im Fertigungsabteil. Der erste Ausgang bestimmt den Sollbestand.,Recipes consume and produce real managed stores in the fabrication compartment. The first output is the stock target.,machine
+workshop.production.none,Workshop production,No recipe,Kein Rezept,No recipe,machine
+workshop.production.template,Workshop production,Entity template,Entitätsvorlage,Entity template,machine
+workshop.production.materialise,Workshop production,Materialise inherited definitions,Geerbte Definitionen lokal übernehmen,Materialise inherited definitions,machine
+workshop.production.system,Workshop production,Fabrication System ID,System-ID der Fertigung,Fabrication System ID,machine
+workshop.production.console,Workshop production,Controlling Console,Steuerkonsole,Controlling Console,machine
+workshop.production.group,Workshop production,Energy allocation group,Energiezuteilungsgruppe,Energy allocation group,machine
+workshop.production.room,Workshop production,Fabrication compartment,Fertigungsabteil,Fabrication compartment,machine
+workshop.production.create,Workshop production,Fit fabrication with this recipe,Fertigung mit diesem Rezept einbauen,Fit fabrication with this recipe,machine
+workshop.production.recipes,Workshop production,Existing recipe,Vorhandenes Rezept,Existing recipe,machine
+workshop.production.new-recipe,Workshop production,New recipe,Neues Rezept,New recipe,machine
+workshop.production.recipe-id,Workshop production,Recipe ID,Rezept-ID,Recipe ID,machine
+workshop.production.work-secs,Workshop production,Work seconds per batch,Arbeitssekunden je Durchgang,Work seconds per batch,machine
+workshop.production.inputs,Workshop production,Consumed inputs,Verbrauchte Eingangsstoffe,Consumed inputs,machine
+workshop.production.outputs,Workshop production,Produced outputs,Erzeugte Produkte,Produced outputs,machine
+workshop.production.store,Workshop production,Managed store,Verwalteter Vorrat,Managed store,machine
+workshop.production.amount,Workshop production,Quantity per batch,Menge je Durchgang,Quantity per batch,machine
+workshop.production.remove-row,Workshop production,Remove row,Zeile entfernen,Remove row,machine
+workshop.production.add-input,Workshop production,Add input,Eingang hinzufügen,Add input,machine
+workshop.production.add-output,Workshop production,Add output,Ausgang hinzufügen,Add output,machine
+workshop.production.primary-hint,Workshop production,Outputs are ordered: the first output determines the desired stock target.,Die Ausgänge sind geordnet: Der erste Ausgang bestimmt den gewünschten Sollbestand.,Outputs are ordered: the first output determines the desired stock target.,machine
+workshop.production.save-recipe,Workshop production,Save recipe,Rezept speichern,Save recipe,machine
+workshop.production.remove-recipe,Workshop production,Remove recipe and clear its initial selection,Rezept entfernen und seine Startauswahl löschen,Remove recipe and clear its initial selection,machine
+workshop.production.initial-recipe,Workshop production,Initially selected recipe,Anfangs gewähltes Rezept,Initially selected recipe,machine
+workshop.production.initial-target,Workshop production,Initial desired output stock,Anfänglicher Sollbestand des Produkts,Initial desired output stock,machine
+workshop.production.save-initial,Workshop production,Save initial orders,Startaufträge speichern,Save initial orders,machine
+workshop.production.refused,Workshop production,Production edit refused: {reason},Fertigungsänderung abgelehnt: {reason},Production edit refused: {reason},machine
+production.blocked.disabled,Production,Production is paused or unavailable.,Fertigung ist pausiert oder nicht verfügbar.,Production is paused or unavailable.,machine
+production.blocked.target,Production,Desired stock reached or no production goal.,Sollbestand erreicht oder kein Fertigungsziel.,Desired stock reached or no production goal.,machine
+production.blocked.inputs,Production,Waiting for available input materials.,Warten auf verfügbare Eingangsstoffe.,Waiting for available input materials.,machine
+production.blocked.output_capacity,Production,Waiting for receiving capacity.,Warten auf freie Aufnahmekapazität.,Waiting for receiving capacity.,machine
+production.blocked.work,Production,Waiting for powered fabrication work.,Warten auf mit Energie versorgte Fertigung.,Waiting for powered fabrication work.,machine
+workshop.production.earlier,Workshop production,Move output earlier,Ausgang nach vorn verschieben,Move output earlier,machine
+workshop.production.later,Workshop production,Move output later,Ausgang nach hinten verschieben,Move output later,machine

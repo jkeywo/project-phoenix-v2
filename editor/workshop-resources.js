@@ -1,3 +1,5 @@
+import { guardManagedStockBounds } from './workshop-stock-bindings.js';
+import { guardProductionReferences } from './workshop-production.js';
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
 import { acceptWorkshopChanges } from './workshop-acceptance.js';
@@ -94,6 +96,7 @@ export function prepareResourceOperation(draft, dependencies, operation) {
   if (operation.type === 'capacity-set') {
     if (!named(operation.id) || !integer(operation.amount) || !integer(operation.ceiling) || operation.amount > operation.ceiling)
       throw new Error('Capacity requires a name and whole quantities between zero and its limit.');
+    guardManagedStockBounds(inspection.resolved.value, { kind: 'capacity', id: operation.id }, operation.amount, operation.ceiling);
     const prefix = `infrastructure.capacity[id=${operation.id}]`;
     requireMaterialise(inspection, prefix, operation.materialise);
     let record = table(after, 'infrastructure.capacity', operation.id);
@@ -107,6 +110,7 @@ export function prepareResourceOperation(draft, dependencies, operation) {
     for (const [key, value] of Object.entries(fields)) after = scalar(after, table(after, 'infrastructure.capacity', operation.id), key, value);
   } else if (operation.type === 'magazine-set') {
     if (!inspection.magazine || !integer(operation.count) || operation.count > 4294967295) throw new Error('Magazine quantity must fit an existing torpedo magazine.');
+    guardManagedStockBounds(inspection.resolved.value, { kind: 'torpedo_magazine' }, operation.initial_count ?? inspection.magazine.initial_count ?? operation.count, operation.count);
     requireMaterialise(inspection, 'torpedoes.count', operation.materialise);
     if (!table(after, 'torpedoes')) {
       if (parse(after).torpedoes) throw new Error('Expand inline torpedoes into TOML tables before editing.');
@@ -132,6 +136,10 @@ export function prepareResourceOperation(draft, dependencies, operation) {
   // Pure preparation never lands an invalid draft. The authoritative runtime
   // validation below checks endpoint references, System admission and content.
   parse(after);
+  if (inspection.resolved.value.production) {
+    const candidate = { paths: () => draft.paths(), isBinary: path => draft.isBinary(path), read: path => path === operation.path ? after : draft.read(path) };
+    guardProductionReferences(inspection.resolved.value, inspectResources(candidate, dependencies, operation.path).resolved.value);
+  }
   return { changes: [{ path: operation.path, before, after }] };
 }
 

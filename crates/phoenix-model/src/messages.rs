@@ -28,7 +28,7 @@ use uuid::Uuid;
 /// (AGENTS.md rule 11), exactly like `manifest::SUPPORTED_PACK_FORMAT`.
 /// Revision 7 separates incoming energy flow from explicit weapons restraint;
 /// an older client's level-zero control would otherwise suggest hold fire.
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 10;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).
@@ -1970,12 +1970,20 @@ pub enum RepairTarget {
 )]
 #[serde(tag = "type", content = "data")]
 pub enum SystemControlPayload {
+    SetProductionEnabled { enabled: bool },
+    SetProductionTarget { amount: i64 },
+    SelectProductionRecipe { recipe: Option<String>, target: i64 },
+    StartProduction {},
     SetLogisticsEnabled {
         enabled: bool,
     },
     SetStockTarget {
         store: String,
         amount: i64,
+    },
+    SetStockPriority {
+        store: String,
+        priority: u16,
     },
     SetStockReserve {
         store: String,
@@ -4516,6 +4524,8 @@ pub struct WeaponsBlackboard {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", content = "data")]
 pub enum SystemBlackboard {
+    Production(crate::production_ui::ProductionBlackboard),
+    Stock(crate::logistics_ui::SystemStockBlackboard),
     Logistics(crate::logistics_ui::LogisticsBlackboard),
     Helm(HelmBlackboard),
     Weapons(WeaponsBlackboard),

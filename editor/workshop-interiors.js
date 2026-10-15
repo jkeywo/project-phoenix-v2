@@ -1,3 +1,5 @@
+import { guardProductionReferences } from './workshop-production.js';
+import { guardLogisticsLayout } from './workshop-stock-bindings.js';
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
 import { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
@@ -93,6 +95,8 @@ export function prepareInteriorOperation(draft, dependencies, operation) {
   const teamCount = operation.teamCount ?? inspection.teamCount;
   if (!Number.isSafeInteger(teamCount) || teamCount < 0) throw new Error('Choose a non-negative whole repair team count.');
   validateInterior(interior, inspection.systems, teamCount);
+  guardLogisticsLayout(inspection.resolved.value, interior);
+  guardProductionReferences(inspection.resolved.value, { ...inspection.resolved.value, interior });
   let after = replaceInteriorSource(before, interior);
   if (teamCount !== inspection.teamCount) {
     if (!inspection.resolved.value.repair) throw new Error('Configure the Repair capability before changing its team count.');

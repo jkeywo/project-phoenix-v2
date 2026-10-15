@@ -46,6 +46,8 @@ pub struct LogisticsState {
     pub last_tick: u64,
     pub goals: BTreeMap<String, i64>,
     pub floors: BTreeMap<String, i64>,
+    pub priorities: BTreeMap<String, u16>,
+    pub replenishing: BTreeSet<String>,
     pub batches: BTreeMap<JobId, DeliveryBatch>,
     pub blocked: BTreeMap<JobId, DeliveryBlock>,
     pub last_outcome: Option<DeliveryOutcome>,
@@ -83,6 +85,13 @@ impl LogisticsState {
                 .iter()
                 .map(|s| (s.id.clone(), s.reserve))
                 .collect(),
+            priorities: profile
+                .config
+                .stores
+                .iter()
+                .map(|s| (s.id.clone(), s.priority))
+                .collect(),
+            replenishing: BTreeSet::new(),
             batches: BTreeMap::new(),
             blocked: BTreeMap::new(),
             last_outcome: None,
@@ -109,6 +118,41 @@ impl LogisticsState {
     ) -> Result<(), String> {
         self.check_amount(profile, store, value)?;
         self.floors.insert(store.into(), value);
+        Ok(())
+    }
+    pub fn set_priority(
+        &mut self,
+        profile: &CompiledLogistics,
+        store: &str,
+        priority: u16,
+    ) -> Result<(), String> {
+        profile.store(store)?;
+        self.priorities.insert(store.into(), priority);
+        Ok(())
+    }
+    /// Refresh only supplied, permitted destination observations. This is
+    /// standing-demand continuation, not a stock cache, claim or controller.
+    pub fn refresh_replenishment(
+        &mut self,
+        profile: &CompiledLogistics,
+        observations: &[ReplenishmentObservation],
+    ) -> Result<(), String> {
+        let mut permitted = observations.to_vec();
+        for observation in &mut permitted {
+            if profile.store(&observation.store)?.role != StoreRole::Local {
+                return Err("refill observations must name actual local stores".into());
+            }
+            observation.replenishing = self.replenishing.contains(&observation.store);
+        }
+        let eligible = ordered_replenishment_candidates(&permitted, profile.handling())?;
+        let mut next = self.replenishing.clone();
+        for observation in &permitted {
+            if observation.occupied >= observation.target {
+                next.remove(&observation.store);
+            }
+        }
+        next.extend(eligible.into_iter().map(|candidate| candidate.store));
+        self.replenishing = next;
         Ok(())
     }
     fn check_amount(
@@ -381,6 +425,17 @@ impl LogisticsState {
         profile: &CompiledLogistics,
         stocks: &BTreeMap<ResourceEndpoint, EndpointStock>,
     ) -> Result<(), String> {
+        self.validate_with_incoming(profile, stocks, &BTreeMap::new())
+    }
+
+    /// Additional claims must come from another fully validated actual owner,
+    /// never from a namespace filter or from the inventory being checked.
+    pub fn validate_with_incoming(
+        &self,
+        profile: &CompiledLogistics,
+        stocks: &BTreeMap<ResourceEndpoint, EndpointStock>,
+        other: &BTreeMap<ResourceEndpoint, BTreeMap<String, i64>>,
+    ) -> Result<(), String> {
         profile.validate_stocks(stocks)?;
         let keys: BTreeSet<_> = profile.config.stores.iter().map(|s| s.id.clone()).collect();
         if self.owner != profile.handling().system
@@ -388,6 +443,12 @@ impl LogisticsState {
             || self.batches.len() > usize::from(profile.handling().max_active)
             || self.goals.keys().cloned().collect::<BTreeSet<_>>() != keys
             || self.floors.keys().cloned().collect::<BTreeSet<_>>() != keys
+            || self.priorities.keys().cloned().collect::<BTreeSet<_>>() != keys
+            || self.replenishing.iter().any(|id| {
+                profile
+                    .store(id)
+                    .map_or(true, |store| store.role != StoreRole::Local)
+            })
         {
             return Err(
                 "logistics continuation identity or goal set differs from authored profile".into(),
@@ -396,7 +457,20 @@ impl LogisticsState {
         for (store, value) in self.goals.iter().chain(&self.floors) {
             self.check_amount(profile, store, *value)?;
         }
-        let mut expected: BTreeMap<ResourceEndpoint, BTreeMap<String, i64>> = BTreeMap::new();
+        let mut expected = other.clone();
+        for (endpoint, claims) in &expected {
+            if !profile
+                .config
+                .stores
+                .iter()
+                .any(|s| &s.endpoint == endpoint)
+                || claims.iter().any(|(id, q)| id.is_empty() || *q <= 0)
+            {
+                return Err(
+                    "additional incoming owner names an unknown endpoint or malformed claim".into(),
+                );
+            }
+        }
         for (id, batch) in &self.batches {
             let from = profile.store(&batch.source)?;
             let original = profile.store(&batch.original_destination)?;
@@ -438,14 +512,16 @@ impl LogisticsState {
             } else if batch.stage != DeliveryStage::Travelling {
                 return Err("loading/unloading cannot happen while crossing".into());
             }
-            expected
+            if expected
                 .entry(to.endpoint.clone())
                 .or_default()
-                .insert(self.claim(*id), batch.amount);
+                .insert(self.claim(*id), batch.amount)
+                .is_some()
+            {
+                return Err("incoming claim is owned by more than one job".into());
+            }
         }
-        // In 12.1 Logistics is the sole producer of persistent incoming claims.
-        // Production (12.3) must add its real owner to combined claim preflight
-        // before another namespace is admitted; silently ignoring it is unsafe.
+        // The complete owner-derived union is exact, including every namespace.
         for store in &profile.config.stores {
             if stocks[&store.endpoint].stock.incoming
                 != expected.remove(&store.endpoint).unwrap_or_default()

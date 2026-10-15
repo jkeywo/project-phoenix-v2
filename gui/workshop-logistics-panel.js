@@ -16,8 +16,10 @@ export function mountWorkshopLogistics({ root, provider, runtime, draft: getDraf
   const node = el('section', 'panel'), template = el('select', 'template'), materialise = input('materialise', 'checkbox'), status = el('p', 'status', null, { role: 'status' });
   const stores = el('select', 'stores'), storeId = input('store-id'), resource = input('resource'), room = el('select', 'compartment'), role = el('select', 'role');
   const endpoint = el('select', 'endpoint'), owner = el('select', 'system'), source = el('select', 'source'), target = input('target', 'number'), reserve = input('reserve', 'number');
+  const priority = input('priority', 'number'); priority.max = '65535';
   const bays = el('select', 'storage'), bayRoom = el('select', 'storage-compartment'), space = input('space', 'number'), costs = el('div', 'unit-space');
   const handling = el('select', 'handling-system'), slots = input('max-active', 'number'), batch = input('max-batch', 'number'), rate = input('units-per-sec', 'number'); rate.step = 'any';
+  const reorder = input('reorder-fraction', 'number'); reorder.max = '1'; reorder.step = 'any';
   const fitId = input('fit-id'), fitConsole = el('select', 'fit-console'), fitGroup = el('select', 'fit-group'), fitRoom = el('select', 'fit-room');
   const fitCapacity = input('fit-capacity'), fitAmount = input('fit-amount', 'number'), fitCeiling = input('fit-ceiling', 'number');
   fitId.value = 'logistics'; fitCapacity.value = 'hold-ammunition'; fitAmount.value = 0; fitCeiling.value = 6;
@@ -39,7 +41,7 @@ export function mountWorkshopLogistics({ root, provider, runtime, draft: getDraf
     storeId.value = value?.id || ''; resource.value = value?.resource || 'torpedoes'; role.value = value?.role || 'main';
     room.value = value?.compartment || inspection?.compartments[0]?.id || '';
     endpoint.value = value?.endpoint.kind === 'torpedo_magazine' ? 'torpedo_magazine' : 'capacity:' + (value?.endpoint.id || inspection?.capacities[0]?.id || '');
-    owner.value = value?.system || ''; source.value = value?.source || ''; target.value = value?.target ?? 0; reserve.value = value?.reserve ?? 0; controls();
+    owner.value = value?.system || ''; source.value = value?.source || ''; target.value = value?.target ?? 0; reserve.value = value?.reserve ?? 0; priority.value = value?.priority ?? 0; controls();
   }
   function addCost(resourceValue = '', amount = 1) {
     const id = serial++, row = el('div'), resource = input('space-resource-' + id), cost = input('space-cost-' + id, 'number');
@@ -62,6 +64,7 @@ export function mountWorkshopLogistics({ root, provider, runtime, draft: getDraf
     fill(fitGroup, (inspection?.resolved.value.energy?.group || []).map(row => row.id)); fill(fitRoom, rooms);
     const handler = value?.handling[0]; handling.value = handler?.system || handling.value;
     slots.value = handler?.max_active ?? 1; batch.value = handler?.max_batch ?? 1; rate.value = handler?.units_per_sec ?? 1;
+    reorder.value = handler?.reorder_fraction ?? 1;
     paintStore(); paintBay(); controls();
   }
   async function apply(logistics, extra = {}) {
@@ -74,7 +77,7 @@ export function mountWorkshopLogistics({ root, provider, runtime, draft: getDraf
   const saveStore = button('save-store', 'save-store', () => void mutate(value => {
     const row = { id: storeId.value, resource: resource.value, compartment: room.value, role: role.value,
       endpoint: endpoint.value === 'torpedo_magazine' ? { kind: 'torpedo_magazine' } : { kind: 'capacity', id: endpoint.value.slice(9) },
-      target: target.valueAsNumber, reserve: reserve.valueAsNumber,
+      target: target.valueAsNumber, reserve: reserve.valueAsNumber, priority: priority.valueAsNumber,
       ...(role.value === 'local' ? { system: owner.value, source: source.value } : {}) };
     const old = stores.value; value.store = value.store.filter(other => other.id !== old && other.id !== row.id); value.store.push(row);
     for (const local of value.store) if (local.source === old && old !== row.id) local.source = row.id;
@@ -92,7 +95,7 @@ export function mountWorkshopLogistics({ root, provider, runtime, draft: getDraf
     value.storage.push({ compartment: bayRoom.value, space: space.valueAsNumber, unit_space });
   }));
   const saveHandling = button('save-handling', 'save-handling', () => void mutate(value => {
-    value.handling = [{ system: handling.value, max_active: slots.valueAsNumber, max_batch: batch.valueAsNumber, units_per_sec: rate.valueAsNumber }];
+    value.handling = [{ system: handling.value, max_active: slots.valueAsNumber, max_batch: batch.valueAsNumber, units_per_sec: rate.valueAsNumber, reorder_fraction: reorder.valueAsNumber }];
   }));
   const create = button('create', 'create', () => {
     if (busy() || loading || !inspection) return;
@@ -104,11 +107,11 @@ export function mountWorkshopLogistics({ root, provider, runtime, draft: getDraf
       label(fitCapacity, 'capacity-id'), label(fitAmount, 'initial-hold'), label(fitCeiling, 'hold-ceiling'), create),
     fieldset('stores', label(stores, 'existing'), button('new-store', 'new', () => { stores.value = ''; paintStore(null); }),
       label(storeId, 'id'), label(endpoint, 'endpoint'), label(resource, 'resource'), label(room, 'compartment'), label(role, 'role'),
-      label(owner, 'system'), label(source, 'source'), label(target, 'target'), label(reserve, 'reserve'), saveStore, removeStore),
+      label(owner, 'system'), label(source, 'source'), label(target, 'target'), label(reserve, 'reserve'), label(priority, 'priority'), saveStore, removeStore),
     fieldset('storage-title', label(bays, 'existing'), button('new-storage', 'new', () => { bays.value = ''; paintBay(null); }),
       label(bayRoom, 'compartment'), label(space, 'space'), costs, button('add-cost', 'add-cost', () => addCost()), saveBay,
       button('remove-storage', 'remove', () => void mutate(value => { value.storage = value.storage.filter(row => row.compartment !== bays.value); }))),
-    fieldset('handling', label(handling, 'system'), label(slots, 'max-active'), label(batch, 'max-batch'), label(rate, 'units-per-sec'), saveHandling));
+    fieldset('handling', label(handling, 'system'), label(slots, 'max-active'), label(batch, 'max-batch'), label(rate, 'units-per-sec'), label(reorder, 'reorder-fraction'), saveHandling));
   option(role, 'main', t('workshop.logistics.main')); option(role, 'local', t('workshop.logistics.local'));
   if (attach) root.append(node);
   function inspect(force = false) {

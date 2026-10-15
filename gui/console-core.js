@@ -1,3 +1,5 @@
+import { mountLocalStockControls } from './components/local-stock-controls.js';
+import { registerLogisticsActions } from './stations/logistics-actions.js';
 import { mountSystemStatus } from './components/ph-system-status.js';
 import { createConsoleViewSession } from './console-working-view.js';
 /**
@@ -134,6 +136,7 @@ export function initConsole({
   var _actionContext = String(name || '').toLowerCase();
   var _actionContexts = new Set([
     _actionContext,
+    'stock',
     ...(Array.isArray(actionFamilies) ? actionFamilies : [])
       .map((value) => String(value || '').toLowerCase())
       .filter(Boolean),
@@ -354,7 +357,8 @@ export function initConsole({
         // station context and can otherwise fire an invisible Navigation
         // control. Cruiser Comms still has an always-visible inline chart, so
         // that legitimate surface is selected by the `visible` arm above.
-        return visible || (_actionContexts.size === 1 ? maps[0] : null);
+        // Stock is a shared policy widget, not an additional chart surface.
+        return visible || ([..._actionContexts].filter(context => context !== 'stock').length === 1 ? maps[0] : null);
       },
       supportsChart: navigationActions && navigationActions.supportsChart != null
         ? navigationActions.supportsChart === true
@@ -430,6 +434,8 @@ export function initConsole({
   }
 
   let systemStatusWidget = null;
+  let localStockWidget = null;
+  registerLogisticsActions(_semanticActions, { getState: () => _latestState, sendAction });
 
   // ── Inbound: __updateConsole (ADR-0001 §2) ─────────────────────────────
   const workingView = createConsoleViewSession({
@@ -467,6 +473,9 @@ export function initConsole({
       systemStatusWidget ||= mountSystemStatus(document);
       systemStatusWidget.update(s.system_status);
     } else systemStatusWidget?.update([]);
+    if (Array.isArray(s.local_stock) && typeof document !== 'undefined' && document.body?.append) {
+      localStockWidget ||= mountLocalStockControls(document); localStockWidget.update(s.local_stock);
+    } else localStockWidget?.update([]);
     if (s.console_id) workingView.receive(s.console_view, s.console_host?.host || null);
     _updateGmTakeover(s);
     _updateTutorialOverlay(s);
@@ -760,6 +769,7 @@ export function initConsole({
     semanticActions: _semanticActions,
     disposeSemanticActions: function() {
       systemStatusWidget?.dispose();
+      localStockWidget?.dispose();
       if (typeof document !== 'undefined') document.removeEventListener('console-view-change', onWorkingViewChange);
       if (_semanticKeyHandler && typeof document !== 'undefined'
           && document.removeEventListener) {

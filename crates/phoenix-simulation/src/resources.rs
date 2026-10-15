@@ -3,3 +3,4 @@ pub use phoenix_sim_gameplay::resources::*;
 pub mod server;
 
 pub mod logistics_server;
+pub mod production_server;

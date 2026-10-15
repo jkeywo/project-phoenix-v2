@@ -91,6 +91,8 @@ pub struct EntityConfig {
     pub interior: Option<crate::ship::interior::InteriorConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logistics: Option<phoenix_model::logistics::LogisticsConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub production: Option<phoenix_model::production::ProductionConfig>,
     pub damage: Option<phoenix_model::damage::DamageConfig>,
     pub sensors_console: Option<SensorsConsoleConfig>,
     pub navigation_console: Option<NavigationConsoleConfig>,
@@ -847,6 +849,8 @@ impl EntityConfig {
                 .map_err(SerdeError::custom)?;
         }
 
+        crate::resources::production_profile::compile_entity_production(&config)
+            .map_err(SerdeError::custom)?;
         crate::resources::logistics_profile::compile_entity_logistics(&config)
             .map_err(SerdeError::custom)?;
 
@@ -1046,6 +1050,12 @@ impl EntityConfig {
         if let Some(ship) = &config.ship_config {
             for system in &ship.systems {
                 let authored = system.config.as_ref().and_then(|config| config.get("ai"));
+                if system.kind == crate::ship::system_registry::FABRICATION_KIND {
+                    let authored = authored.ok_or_else(|| SerdeError::custom("Fabrication requires an explicit config.ai state tree"))?;
+                    let tree: crate::ai::state_tree::AiTreeConfig = authored.clone().try_into().map_err(SerdeError::custom)?;
+                    crate::ai::state_tree::compile(&tree, &crate::resources::production_ai::bindings()).map_err(SerdeError::custom)?;
+                    continue;
+                }
                 if system.kind == crate::ship::system_registry::LOGISTICS_KIND {
                     let authored = authored.ok_or_else(|| {
                         SerdeError::custom("Logistics requires an explicit config.ai state tree")

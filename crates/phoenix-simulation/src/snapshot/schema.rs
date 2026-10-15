@@ -12,6 +12,8 @@ pub struct EntityState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logistics: Option<crate::resources::logistics::LogisticsState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub production: Option<crate::resources::production::ProductionState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub physical_damage: Option<phoenix_sim_gameplay::ship::compartment_damage::DamageState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disablement: Option<crate::ship::disablement::DisablementObservation>,

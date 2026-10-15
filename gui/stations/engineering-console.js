@@ -89,8 +89,11 @@ export function makeEngineeringRender(variant) {
 
     // ── Power ───────────────────────────────────────────────────────────
     const p = familyView(s, 'power');
+    const productionView = familyView(s, 'production'), logisticsView = familyView(s, 'logistics');
+    const production = doc.getElementById('production-panel');
+    if (production) production.state = { ...productionView, system_id: familySystemId(s, 'production') };
     const logistics = doc.getElementById('logistics-panel');
-    if (logistics) logistics.state = { ...familyView(s, 'logistics'), system_id: familySystemId(s, 'logistics') };
+    if (logistics) logistics.state = { ...logisticsView, system_id: familySystemId(s, 'logistics') };
     const powerEl = doc.getElementById(ids.power);
     if (powerEl) powerEl.state = { groups: p.consoles || [], auto: !!p.power_auto, ...(p.energy ? { energy: p.energy, system_id: p.system_id } : {}) };
     const batteryEl = doc.getElementById(ids.battery);
@@ -148,7 +151,9 @@ export function makeEngineeringRender(variant) {
     // Shields column has nothing to conjoin there.
     if (ids.autoBadge) {
       const el = doc.getElementById(ids.autoBadge);
-      const auto = (sh ? !!sh.shields_auto : true) && !!p.power_auto && !!r.repair_auto;
+      const auto = (sh ? !!sh.shields_auto : true) && !!p.power_auto && !!r.repair_auto
+        && (!familySystemId(s, 'logistics') || !!logisticsView.logistics_auto)
+        && (!familySystemId(s, 'production') || !!productionView.production_auto);
       if (el) setAutoState(null, el, auto);
     }
 

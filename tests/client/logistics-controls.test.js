@@ -62,7 +62,7 @@ describe('permitted logistics controls', () => {
     expect(control.shadowRoot.textContent).toContain('Access is blocked');
     expect(control.shadowRoot.querySelector('[data-key="manual-amount"]').max).toBe('2');
     expect([...control.shadowRoot.querySelectorAll('input,select,button')].every(node => node.disabled)).toBe(true);
-    expect(control.shadowRoot.querySelectorAll('input')).toHaveLength(3); // only two main policy controls plus manual quantity
+    expect(control.shadowRoot.querySelectorAll('input')).toHaveLength(5); // main target/floor, both queue priorities and manual quantity
   });
   it('keeps local goal separate from loading targets and hides it on unconfigured hulls', () => {
     window.activateSemanticAction = vi.fn(); const control = document.createElement('ph-stock-target'); document.body.append(control);

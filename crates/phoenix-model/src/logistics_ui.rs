@@ -25,9 +25,12 @@ pub struct LogisticsStoreView {
     pub available: i64,
     pub held: i64,
     pub ceiling: i64,
+    pub headroom: i64,
+    pub bay_free_space: i64,
     pub incoming: i64,
     pub target: i64,
     pub reserve: i64,
+    pub priority: u16,
     pub compartment: String,
 }
 
@@ -51,4 +54,30 @@ pub struct DeliveryRequest {
     pub source: String,
     pub destination: String,
     pub amount: i64,
+}
+
+/// A publication of the owning System's actual local stores, never a stock owner.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SystemStockBlackboard {
+    pub system: SystemId,
+    pub stores: Vec<LocalStockView>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalStockView {
+    pub id: String,
+    pub resource: String,
+    pub level: i64,
+    pub available: i64,
+    pub ceiling: i64,
+    pub headroom: i64,
+    pub bay_free_space: i64,
+    pub incoming: i64,
+    pub held: i64,
+    pub target: i64,
+    pub compartment: String,
+}
+pub fn stock_publication(system: &SystemId) -> SystemId {
+    SystemId(format!("stock/{}", system.0))
 }

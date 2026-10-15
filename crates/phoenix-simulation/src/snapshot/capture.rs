@@ -1452,6 +1452,7 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                     transit: entity.get::<crate::console::helm::transit::ShipTransitDrives>().cloned(),
                     illumination: entity.get::<crate::console::weapons::illumination::ShipIllumination>().cloned(),
                     jamming: entity.get::<crate::comms::jamming::ShipJamming>().cloned(),
+                    signal_protection: entity.get::<crate::science::protection::ShipSignalProtection>().cloned(),
                     weapon_targets: entity
                         .get::<crate::console::weapons::assignments::ShipWeaponTargets>()
                         .map(|state| state.0.clone()),

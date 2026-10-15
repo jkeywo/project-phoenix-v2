@@ -115,6 +115,14 @@ pub fn compile_ship_trees_with_energy(
                     binding.target_channel,
                 ),
             )
+        } else if system.kind == crate::ship::system_registry::SIGNAL_PROTECTION_KIND {
+            let binding =
+                phoenix_sim_gameplay::ship::composition::protection_composition(&system.components)
+                    .ok_or("protection state tree requires actual composition")?;
+            compile(
+                &definition,
+                &phoenix_sim_gameplay::electronic::protection::bindings(binding.enabled_channel),
+            )
         } else if system.kind == crate::ship::system_registry::JAMMING_KIND {
             let binding =
                 phoenix_sim_gameplay::ship::composition::jamming_composition(&system.components)

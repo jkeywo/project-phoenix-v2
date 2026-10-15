@@ -6180,3 +6180,5 @@ workshop.planning.library,Workshop imported domain authoring,Imported library,,,
 workshop.planning.materialize,Workshop imported domain authoring,Include an editable copy of the inherited library in this pack,,,
 workshop.planning.source,Workshop imported domain authoring,Library source (TOML),,,
 workshop.planning.save,Workshop imported domain authoring,Validate and save planning,,,
+
+entity.protection_cruiser.name,Entity name,Alliance Protection Cruiser,,,

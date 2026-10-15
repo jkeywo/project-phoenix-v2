@@ -387,6 +387,7 @@ mod transit;
 mod guided_source;
 mod illumination;
 mod jamming;
+mod protection;
 #[cfg(test)]
 mod sustained_beam_tests;
 mod weapon_targets;

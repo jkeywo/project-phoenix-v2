@@ -46,3 +46,51 @@ entities:
       status: declared
       paths: [crates/phoenix-simulation/src/comms/jamming.rs]
       symbols: [JammingEmissions]
+
+  - component: science-signal-protection
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Finite Science Signal Protection
+      summary: "One actual composed System allocates whole capacity costs in retained authored/user order. Its ordinary paid work supplies current suppression only to explicitly eligible own receivers, independently of hidden exposure."
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns: [ship-signal-protection-intent, signal-protection-paid-grants]
+      writes: [ship-signal-protection-intent, signal-protection-paid-grants]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-sim-gameplay/src/electronic/protection.rs, crates/phoenix-simulation/src/science/protection.rs, crates/phoenix-simulation/src/snapshot/protection.rs]
+      symbols: [ShipSignalProtection, ProtectionGrants]
+  - state: ship-signal-protection-intent
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Retained Protection Generic Channels
+      summary: "Exact actual protector enabled and ordered system_priority channels are the sole intent owner. Authored initial values only instantiate this store; restore preserves saved choices."
+    architecture:
+      classification: authoritative
+      owner: science-signal-protection
+      writers: [science-signal-protection]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/science/protection.rs]
+      symbols: [ShipSignalProtection]
+  - state: signal-protection-paid-grants
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Current Paid Receiver Protection
+      summary: "Derived current Input paid suppression and whole-cost receiver allocation. Unprocessed/unfunded or restored intent contributes nothing; no victim/exposure census, saved work credit or second allocation authority."
+    architecture:
+      classification: derived
+      owner: science-signal-protection
+      writers: [science-signal-protection]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/science/protection.rs]
+      symbols: [ProtectionGrants]

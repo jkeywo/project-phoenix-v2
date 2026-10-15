@@ -204,6 +204,7 @@ pub enum FixedStep {
     OperateJammingAi,
     HandleJammingCommands,
     TickJamming,
+    TickSignalProtection,
     RefreshJammedCommsRange,
     OperateIlluminationAi,
     HandleIlluminationCommands,

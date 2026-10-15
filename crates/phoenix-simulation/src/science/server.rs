@@ -208,6 +208,7 @@ impl Plugin for SciencePlugin {
         );
         super::focused_ai::register(app);
         super::passive::register(app);
+        super::protection::register(app);
         super::broad::register(app);
         super::sharing::register(app);
         super::references::register(app);

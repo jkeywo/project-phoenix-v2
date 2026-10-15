@@ -106,6 +106,7 @@ pub(super) fn install(
     crate::resources::fitting_server::install(config, uuid, cmds);
     crate::resources::equipment_recovery_server::install(config, cmds);
     crate::science::passive::install(config, cmds);
+    crate::science::protection::install(config, cmds);
     crate::science::broad::install(config, cmds);
     crate::comms::radio::install(config, cmds);
     crate::comms::jamming::install(config, cmds);

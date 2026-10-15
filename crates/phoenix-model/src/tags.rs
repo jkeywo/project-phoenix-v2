@@ -44,6 +44,8 @@ pub enum EntityTag {
     GmRemovable,
     /// Explicit public chart geometry, independent of instrument detection.
     Charted,
+    /// Authored recoverable cargo, distinct from its display geometry.
+    Cargo,
 }
 
 impl EntityTag {
@@ -69,6 +71,7 @@ impl EntityTag {
             "objective_marker" => Some(EntityTag::ObjectiveMarker),
             "gm_removable" => Some(EntityTag::GmRemovable),
             "charted" => Some(EntityTag::Charted),
+            "cargo" => Some(EntityTag::Cargo),
             _ => None,
         }
     }
@@ -91,6 +94,7 @@ impl EntityTag {
             EntityTag::ObjectiveMarker => "objective_marker",
             EntityTag::GmRemovable => "gm_removable",
             EntityTag::Charted => "charted",
+            EntityTag::Cargo => "cargo",
         }
     }
 }

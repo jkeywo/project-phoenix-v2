@@ -110,6 +110,15 @@ fn received(app: &App, actor: Entity) -> usize {
 #[test]
 fn two_real_paid_instruments_refine_only_their_independent_measured_constraints() {
     let (mut app, sender, receiver) = rig_with_precision(Some(3.0));
+    // These real positions yield intersecting error-2/error-3 measurement
+    // discs whose lens is narrower than either input. Merely receiving two
+    // compatible measurements need not provide any extra precision.
+    let mut targets = app.world_mut().query::<(&EntityUuid, &mut Transform)>();
+    for (id, mut transform) in targets.iter_mut(app.world_mut()) {
+        if id.0 == "measured-target" {
+            transform.translation = Vec3::new(4.8, 0.0, 4.8);
+        }
+    }
     order(&mut app, sender, true, true);
     app.world_mut()
         .get_mut::<ShipPowerSystem>(receiver)

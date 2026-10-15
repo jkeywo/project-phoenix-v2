@@ -114,13 +114,22 @@ fn recipient_comms_app() -> App {
         crate::console::comms::server::publish_comms_blackboard,
     );
     for (index, slot, faction) in [(1, "lead", alliance), (2, "wing", pirate)] {
+        let ship = crate::ship::components::load_ship_config_from_disk();
+        // Match ordinary ship bootstrap: absent crew has explicit Backfill
+        // ratings and one empty participation owner, never inferred Humans.
+        let (sources, ratings) = crate::ship::rating::seed_boot_ratings(&ship.0, |_| {
+            crate::ship::rating::BACKFILL_RATING.to_string()
+        });
         app.world_mut().spawn((
             crate::server_app::Ship,
             EntityUuid(slot.into()),
             crate::ship_slots::AuthoredShipSlotId(slot.into()),
             crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot(index)),
             crate::entities::spawner::FactionComponent(faction),
-            crate::ship::components::load_ship_config_from_disk(),
+            ship,
+            crate::ship_plugin::ShipSystemControlSources(sources),
+            crate::ship_plugin::ActiveStationRatings(ratings),
+            crate::lobby::crew_replication::ShipCrewPresence::default(),
             crate::console::weapons::assignments::ShipWeaponTargets::default(),
             crate::server_app::ShipSystemBlackboards::default(),
         ));
@@ -505,6 +514,13 @@ fn addressed_comms_resolves_changed_instance_membership_after_snapshot_restore()
         snapshot.entities.len(),
         2,
         "both receiving ships are captured"
+    );
+    assert!(
+        snapshot.entities.iter().all(|row| row
+            .mesh_crew
+            .as_ref()
+            .is_some_and(|crew| crew.occupied.is_empty())),
+        "ordinary vacant ships retain explicit crew owners"
     );
     let mut restored = recipient_comms_app();
     let report = crate::snapshot::restore(restored.world_mut(), &snapshot);

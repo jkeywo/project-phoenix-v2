@@ -18,7 +18,7 @@ fn author_inspection_preserves_exact_job_and_pending_vs_acknowledged_frontiers()
     };
     let fact = ActivityFact {
         instance: "supply".into(),
-        scope: job.clone(),
+        scope: job.clone().into(),
         tick: 14,
         outcome: ActivityOutcome::Delivery {
             source: "main".into(),
@@ -42,7 +42,7 @@ fn author_inspection_preserves_exact_job_and_pending_vs_acknowledged_frontiers()
                 amount: 2,
             },
             armed_tick: 2,
-            accepted: Some(job),
+            accepted: Some(job.into()),
             accepted_tick: Some(6),
             achieved: None,
             settled: None,

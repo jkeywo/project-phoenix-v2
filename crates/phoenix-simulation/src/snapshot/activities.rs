@@ -323,6 +323,9 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
         // cannot invent a terminal settlement. Present actors must still carry
         // their exact active job; absent actors use immutable provenance below.
         if let (Some(scope), Some(row)) = (instance.accepted.as_ref().filter(|_| !terminal), row) {
+            let physical_job = scope
+                .physical_job()
+                .ok_or("physical activity has a nonphysical accepted identity")?;
             match &instance.request {
                 ActivityRequest::Repair { team, .. } => {
                     let job = row
@@ -332,7 +335,7 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
                         .and_then(|jobs| jobs.teams.get(*team as usize))
                         .and_then(Option::as_ref)
                         .ok_or("unsettled activity lost its accepted Repair job")?;
-                    if job.id != scope.job || job.owner != scope.owner || job.outcome.is_some() {
+                    if job.id != physical_job || job.owner != scope.owner || job.outcome.is_some() {
                         return Err("unsettled activity disagrees with saved Repair job".into());
                     }
                     for fact in instance
@@ -345,7 +348,7 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
                                 .repair
                                 .as_ref()
                                 .and_then(|repair| repair.jobs.as_ref())
-                                .and_then(|jobs| jobs.physical_work.get(&scope.job.0));
+                                .and_then(|jobs| jobs.physical_work.get(&physical_job.0));
                             if let Some(physical) = physical {
                                 if stage >= physical.stage {
                                     return Err(
@@ -377,7 +380,7 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
                     let batch = row
                         .logistics
                         .as_ref()
-                        .and_then(|logistics| logistics.batches.get(&scope.job))
+                        .and_then(|logistics| logistics.batches.get(&physical_job))
                         .ok_or("unsettled activity lost its accepted delivery batch")?;
                     if &batch.source != source
                         || &batch.original_destination != destination

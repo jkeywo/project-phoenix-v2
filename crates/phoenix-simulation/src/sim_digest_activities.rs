@@ -40,10 +40,21 @@ fn condition(mut acc: u64, value: &ComponentCondition) -> u64 {
         }
     }
 }
-fn scope(mut acc: u64, value: &ActivityJob) -> u64 {
+fn scope(mut acc: u64, value: &ActivityExecution) -> u64 {
     acc = fold_str(acc, &value.actor);
     acc = fold_str(acc, &value.owner.0);
-    fold_u64(acc, value.job.0)
+    match &value.identity {
+        ActivityExecutionIdentity::Physical { job } => fold_u64(fold_u64(acc, 0), job.0),
+        ActivityExecutionIdentity::Communication {
+            origin_id,
+            recipient,
+            emitted_tick,
+        } => {
+            acc = fold_str(fold_u64(acc, 1), origin_id);
+            acc = fold_str(acc, recipient);
+            fold_u64(acc, *emitted_tick)
+        }
+    }
 }
 fn request_target(mut acc: u64, value: &phoenix_model::messages::RepairTarget) -> u64 {
     use phoenix_model::messages::RepairTarget;

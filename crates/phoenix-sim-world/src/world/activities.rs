@@ -308,7 +308,7 @@ pub struct SituationInstance {
     pub definition: String,
     pub request: ActivityRequest,
     pub armed_tick: u64,
-    pub accepted: Option<ActivityJob>,
+    pub accepted: Option<ActivityExecution>,
     pub accepted_tick: Option<u64>,
     pub achieved: Option<ActivityFact>,
     pub settled: Option<ActivityFact>,
@@ -383,6 +383,7 @@ impl SituationInstances {
             owner: owner.clone(),
             job,
         };
+        let scope: ActivityExecution = scope.into();
         let candidates: Vec<_> = self
             .instances
             .iter()
@@ -440,16 +441,17 @@ impl SituationInstances {
     }
     /// Select only a bound, still-reserved evidence slot. Pending events are
     /// checked by the adapter before enqueueing; no later physical polling.
-    pub fn fact(
+    pub fn fact<S: Clone + Into<ActivityExecution>>(
         &self,
-        scope: &ActivityJob,
+        scope: &S,
         tick: u64,
         outcome: ActivityOutcome,
     ) -> Option<ActivityFact> {
+        let scope: ActivityExecution = scope.clone().into();
         let (id, instance) = self
             .instances
             .iter()
-            .find(|(_, instance)| instance.accepted.as_ref() == Some(scope))?;
+            .find(|(_, instance)| instance.accepted.as_ref() == Some(&scope))?;
         if !instance.request.matches(&outcome) {
             return None;
         }
@@ -588,7 +590,8 @@ impl SituationInstances {
             if let Some(scope) = &instance.accepted {
                 if scope.actor != instance.request.actor()
                     || &scope.owner != instance.request.owner()
-                    || scope.job.0 == 0
+                    || scope.validate(now).is_err()
+                    || scope.physical_job().is_none()
                     || !scopes.insert(scope)
                 {
                     return Err("invalid/duplicate activity job binding".into());

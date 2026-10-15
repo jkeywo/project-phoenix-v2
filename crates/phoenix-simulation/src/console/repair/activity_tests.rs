@@ -189,7 +189,7 @@ fn ai_group_work_binds_accepted_job_but_only_the_named_component_credits_the_sit
             .as_ref()
             .unwrap()
             .id,
-        accepted.job
+        accepted.physical_job().unwrap()
     );
     let mut other_completed = false;
     let mut goal_completed = false;

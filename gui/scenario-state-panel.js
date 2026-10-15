@@ -340,7 +340,7 @@ export function buildScenarioStatePanel(payload, opts = {}) {
       row.appendChild(el(doc, 'strong', 'ss-situation-id', String(id)));
       const fields = [
         ['definition', state.definition], ['request', JSON.stringify(state.request)],
-        ['armed', state.armed_tick], ['job', state.accepted?.job],
+        ['armed', state.armed_tick], ['job', state.accepted?.identity?.kind === 'physical' ? state.accepted.identity.job : null],
         ['accepted', state.accepted_tick], ['achieved', state.achieved?.tick],
         ['settled', state.settled?.tick], ['outcome', state.settled ? JSON.stringify(state.settled.outcome) : null],
         ['state', state.state],

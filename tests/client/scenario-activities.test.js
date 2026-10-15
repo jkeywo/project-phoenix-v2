@@ -6,7 +6,7 @@ describe('actual bound activity author inspection', () => {
   it('keeps pending, achieved, settled and refused activation distinct without inferring success', () => {
     const container = document.createElement('div');
     const lifecycle = {definition:'restore', request:{kind:'repair',actor:'ship',owner:'repair',team:0},
-      armed_tick:2, accepted:{actor:'actual-ship',owner:'repair',job:7},accepted_tick:6,
+      armed_tick:2, accepted:{actor:'actual-ship',owner:'repair',identity:{kind:'physical',job:7}},accepted_tick:6,
       achieved:{tick:14},settled:null,state:'return',activations:{work:'applied'}};
     const payload = {flags:[],triggers:[],situations:[{id:'<bound-job>',lifecycle,pending:[{tick:16,outcome:{kind:'repair_settled'}}]}]};
     renderScenarioStatePanel(container,JSON.stringify(payload));

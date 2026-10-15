@@ -22,6 +22,67 @@ pub struct ActivityJob {
     pub job: JobId,
 }
 
+/// One accepted execution reference. Machinery and radio retain their own
+/// actual runtime state; the mission stores only this scoped identity.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActivityExecution {
+    pub actor: String,
+    pub owner: SystemId,
+    pub identity: ActivityExecutionIdentity,
+}
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ActivityExecutionIdentity {
+    Physical {
+        job: JobId,
+    },
+    Communication {
+        origin_id: String,
+        recipient: String,
+        emitted_tick: u64,
+    },
+}
+impl From<ActivityJob> for ActivityExecution {
+    fn from(value: ActivityJob) -> Self {
+        Self {
+            actor: value.actor,
+            owner: value.owner,
+            identity: ActivityExecutionIdentity::Physical { job: value.job },
+        }
+    }
+}
+impl ActivityExecution {
+    pub fn physical_job(&self) -> Option<JobId> {
+        match self.identity {
+            ActivityExecutionIdentity::Physical { job } => Some(job),
+            _ => None,
+        }
+    }
+    pub fn validate(&self, now: u64) -> Result<(), String> {
+        let identity = |value: &str| {
+            !value.trim().is_empty() && value.len() <= 256 && !value.chars().any(char::is_control)
+        };
+        if !identity(&self.actor) || !identity(&self.owner.0) {
+            return Err("invalid activity execution owner".into());
+        }
+        match &self.identity {
+            ActivityExecutionIdentity::Physical { job } if job.0 > 0 => Ok(()),
+            ActivityExecutionIdentity::Communication {
+                origin_id,
+                recipient,
+                emitted_tick,
+            } if identity(origin_id)
+                && identity(recipient)
+                && recipient != &self.actor
+                && *emitted_tick <= now =>
+            {
+                Ok(())
+            }
+            _ => Err("invalid activity execution identity/clock".into()),
+        }
+    }
+}
 /// Result of the actual committed remedy, distinct from assignment return.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -69,7 +130,7 @@ pub enum ActivityEvidenceKey {
 #[serde(deny_unknown_fields)]
 pub struct ActivityFact {
     pub instance: String,
-    pub scope: ActivityJob,
+    pub scope: ActivityExecution,
     pub tick: u64,
     pub outcome: ActivityOutcome,
 }
@@ -87,10 +148,13 @@ impl ActivityFact {
         if self.instance.trim().is_empty()
             || self.scope.actor.trim().is_empty()
             || self.scope.owner.0.trim().is_empty()
-            || self.scope.job.0 == 0
             || self.tick > now
         {
             return Err("invalid activity evidence identity/tick".into());
+        }
+        self.scope.validate(now)?;
+        if self.scope.physical_job().is_none() {
+            return Err("physical outcome has a nonphysical execution identity".into());
         }
         match &self.outcome {
             ActivityOutcome::RepairAchieved {

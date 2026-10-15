@@ -104,7 +104,7 @@ fn imported_delivery_instruction_uses_permitted_demand_and_real_accepted_batch_o
         .unwrap()
         .0
         .batches
-        .contains_key(&accepted.job));
+        .contains_key(&accepted.physical_job().unwrap()));
     assert!(app
         .world()
         .resource::<crate::world::server::WorldContentRuntime>()

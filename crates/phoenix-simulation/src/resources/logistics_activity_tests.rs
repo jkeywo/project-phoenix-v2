@@ -92,7 +92,7 @@ fn admitted_delivery_binds_its_committed_id_and_retains_only_actual_receive_once
         .unwrap()
         .0
         .batches
-        .contains_key(&scope.job));
+        .contains_key(&scope.physical_job().unwrap()));
     for _ in 0..300 {
         app.update();
         if app

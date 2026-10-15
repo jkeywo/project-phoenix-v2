@@ -1,0 +1,13 @@
+# [ai] Increment15 actual discrete EMP bolt example. The existing port bank
+# retains its finite local reserve, physical impact/armour path and controller.
+# Only its launch-frozen optional payload changes; no new equipment or AI.
+includes = ["alliance_destroyer.toml"]
+name = "entity.emp_destroyer.name"
+
+[[weapon]]
+id = "blaster-port"
+[weapon.impact]
+damage_type = "physical"
+penetration = 25
+[weapon.impact.emp]
+duration_secs = 6

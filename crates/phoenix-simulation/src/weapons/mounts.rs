@@ -19,6 +19,9 @@ pub struct ShipMounts(pub BTreeMap<SystemId, TurretState>);
 pub struct MountsPlugin;
 impl Plugin for MountsPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::ship::emp::ComponentEffectsPlugin>() {
+            app.add_plugins(crate::ship::emp::ComponentEffectsPlugin);
+        }
         register(app);
     }
 }

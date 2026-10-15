@@ -990,6 +990,7 @@ fn remove_hardware(
         // A vacant slot has no replaceable hardware fault. The explicit fitting
         // vacancy gates actuation; fixed intake/cooling and structure stay real.
         *condition = phoenix_model::damage::ComponentState {
+            emp: None,
             condition: phoenix_model::damage::ComponentCondition::Healthy,
             dose: 0.0,
             last_source: None,

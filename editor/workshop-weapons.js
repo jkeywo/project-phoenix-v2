@@ -2,7 +2,7 @@ import { guardFittingReferences } from './workshop-fitting.js';
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
 import { acceptWorkshopChanges } from './workshop-acceptance.js';
-import { defaultImpact, DAMAGE_TYPES } from './workshop-damage-model.js';
+import { defaultImpact, DAMAGE_TYPES, validateEmpPayload } from './workshop-damage-model.js';
 import { prepareShipOperation } from './workshop-ship-authoring.js';
 
 const clone = value => structuredClone(value);
@@ -63,6 +63,7 @@ export function prepareWeaponOperation(draft, dependencies, operation) {
   if (!weapon?.id?.trim() || !families[weapon.delivery?.kind]) throw new Error('Choose a weapon id and supported delivery.');
   if (!DAMAGE_TYPES.includes(weapon.impact?.damage_type) || !Number.isFinite(weapon.impact.penetration) || weapon.impact.penetration < 0)
     throw new Error('Choose a supported damage type and finite non-negative penetration.');
+  validateEmpPayload(weapon.impact.emp);
   if (selected && weapon.id !== selected.weapon.id) throw new Error('Create another weapon to use a different id.');
   if (!selected && inspection.weapons.some(row => row.weapon.id === weapon.id)) throw new Error('Weapon id already exists.');
   if (selected && weapon.delivery.kind !== selected.weapon.delivery.kind) throw new Error('Create another weapon to use a different delivery.');

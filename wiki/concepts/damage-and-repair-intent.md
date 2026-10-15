@@ -2,8 +2,8 @@
 title: Damage and Repair Information
 type: concept
 tags: [damage, repair, engineering, station, information]
-sources: [crates/phoenix-sim-gameplay/src/ship/compartment_damage.rs, crates/phoenix-sim-gameplay/src/ship/physical_damage.rs, crates/phoenix-sim-gameplay/src/jobs/repair_physical.rs, crates/phoenix-simulation/src/core/broadcast/reconnect.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/modifiers/coordination.rs, crates/phoenix-sim-gameplay/src/modifiers/cache.rs, crates/phoenix-sim-gameplay/src/ship/control_source.rs, crates/phoenix-simulation/src/gm/actions/action.rs, crates/phoenix-simulation/src/gm/observation/projection.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/sim_digest.rs, gui/gm-system-panel.js, pasm/spec/architecture/engineering-damage.yaml, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, gui/console-state.js, gui/components/ph-repair-teams.js]
-updated: 2026-10-14
+sources: [crates/phoenix-model/src/emp.rs, crates/phoenix-simulation/src/ship/emp.rs, crates/phoenix-simulation/src/snapshot/emp.rs, crates/phoenix-simulation/src/server_app/system_status.rs, crates/phoenix-sim-gameplay/src/ship/compartment_damage.rs, crates/phoenix-sim-gameplay/src/ship/physical_damage.rs, crates/phoenix-sim-gameplay/src/jobs/repair_physical.rs, crates/phoenix-simulation/src/core/broadcast/reconnect.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/modifiers/coordination.rs, crates/phoenix-sim-gameplay/src/modifiers/cache.rs, crates/phoenix-sim-gameplay/src/ship/control_source.rs, crates/phoenix-simulation/src/gm/actions/action.rs, crates/phoenix-simulation/src/gm/observation/projection.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/sim_digest.rs, gui/gm-system-panel.js, pasm/spec/architecture/engineering-damage.yaml, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, gui/console-state.js, gui/components/ph-repair-teams.js]
+updated: 2026-10-15
 ---
 
 # Damage and Repair Information
@@ -14,6 +14,17 @@ position. Planar damage traces cross the selected weighted deck; actual material
 penetration and deposited payload determine structural loss and condition dose.
 Legacy System HP remains a separate owner for unequipped props and fixtures.
 Exact detail is projected by Console.
+
+Optional EMP follows the same frozen physical impact and positive compartment
+deposits. `phoenix-model/src/emp.rs` defines the separate temporary failure and
+resistance receipt on the actual `ComponentState`; it does not change physical
+condition, dose or repair remedies. `ship/emp.rs` supplies the derived fixed-clock
+context before operation. The receipt carries absolute tick expiries, so the
+existing fitting and intact-recovery transfers preserve it while stowed hardware
+continues to age. `snapshot/emp.rs` checks installed and portable receipts against
+the complete candidate header before writes. `server_app/system_status.rs`
+reports temporary EMP separately from physical destruction.
+
 `HullVisibility` is the single policy used by both live Repair publication and
 reconnect resync:
 

@@ -367,6 +367,7 @@ use materialization::restore_entities;
 pub(crate) use materialization::spawn_from_origin;
 pub use materialization::LayerReconcileStatus;
 
+mod emp;
 #[cfg(test)]
 mod mission_clock_tests;
 mod mounts;

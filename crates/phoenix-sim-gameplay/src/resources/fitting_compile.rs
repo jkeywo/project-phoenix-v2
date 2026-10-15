@@ -250,6 +250,13 @@ impl CompiledFitting {
                 "authored assembly IDs must fit 88 bytes before the ship UUID prefix".into(),
             );
         }
+        if config.assemblies.iter().any(|item| {
+            item.condition
+                .as_ref()
+                .is_some_and(|condition| condition.emp.is_some())
+        }) {
+            return Err("authored initial equipment cannot invent a causal EMP receipt".into());
+        }
         let state = FittingState::from_profile(&profile)?;
         for slot in &config.slots {
             if state

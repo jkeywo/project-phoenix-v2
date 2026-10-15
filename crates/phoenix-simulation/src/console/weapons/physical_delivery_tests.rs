@@ -172,6 +172,7 @@ fn blaster_uses_actual_projectile_azimuth_for_shield_facing() {
         .in_flight
         .push(crate::weapons::blaster::BlasterProjectile {
             impact: phoenix_model::damage::DamageProfile {
+                emp: None,
                 damage_type: phoenix_model::damage::DamageType::Physical,
                 penetration: 0.0,
             },

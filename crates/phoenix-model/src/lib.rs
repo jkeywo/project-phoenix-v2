@@ -40,6 +40,7 @@ pub mod sensing_sharing;
 pub mod sensing_tracks;
 pub mod shield_enquiry;
 
+pub mod emp;
 pub mod logistics_ui;
 pub mod turret;
 pub mod umbilical;

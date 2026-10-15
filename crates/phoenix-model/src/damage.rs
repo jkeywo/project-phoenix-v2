@@ -16,6 +16,8 @@ pub enum DamageType {
 pub struct DamageProfile {
     pub damage_type: DamageType,
     pub penetration: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emp: Option<crate::emp::EmpPayload>,
 }
 
 // Rust fixture/derive convenience only. Authored equipment fields stay required
@@ -25,11 +27,15 @@ impl Default for DamageProfile {
         Self {
             damage_type: DamageType::Physical,
             penetration: 0.0,
+            emp: None,
         }
     }
 }
 impl DamageProfile {
     pub fn validate(&self) -> Result<(), String> {
+        if let Some(emp) = &self.emp {
+            emp.validate()?;
+        }
         if self.penetration.is_finite() && self.penetration >= 0.0 {
             Ok(())
         } else {
@@ -109,6 +115,8 @@ pub struct RemedyConfig {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DamageConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emp: Option<crate::emp::EmpResistanceConfig>,
     pub materials: BTreeMap<String, MaterialConfig>,
     pub remedies: BTreeMap<String, RemedyConfig>,
 }
@@ -132,6 +140,8 @@ pub enum ComponentCondition {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ComponentState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emp: Option<crate::emp::ComponentEmpState>,
     pub condition: ComponentCondition,
     /// Fractional deposited dose below the next fault threshold. Persisted,
     /// never a per-hit probability or a second equipment HP pool.

@@ -17,6 +17,17 @@ function fixture(text = source, schema = {}) {
 }
 const control = id => document.getElementById('workshop-weapon-' + id);
 describe('Workshop configurable weapon form', () => {
+  it('uses explicit finite EMP controls and preserves the payload on other edits', async () => {
+    const { current, panel } = fixture(); await settle();
+    control('emp-enabled').checked = true; control('emp-enabled').dispatchEvent(new Event('change'));
+    control('emp-duration').value = '6'; control('save').click(); await settle();
+    expect(parse(current.read(path)).weapon[0].impact.emp).toEqual({ duration_secs: 6 });
+    control('range').value = '60'; control('save').click(); await settle();
+    expect(parse(current.read(path)).weapon[0].impact.emp.duration_secs).toBe(6);
+    control('emp-enabled').checked = false; control('emp-enabled').dispatchEvent(new Event('change')); control('save').click(); await settle();
+    expect(parse(current.read(path)).weapon[0].impact.emp).toBeUndefined();
+    current.undo(); panel.refresh(); expect(control('emp-enabled').checked).toBe(true); panel.dispose();
+  });
   it('edits a real source through labelled controls and shared history', async () => {
     const { current, runtime, changed, panel } = fixture(); await settle();
     for (const input of panel.node.querySelectorAll('input,select')) expect(panel.node.querySelector(`label[for="${input.id}"]`)).not.toBeNull();

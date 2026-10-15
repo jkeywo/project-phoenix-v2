@@ -18,6 +18,15 @@ function fixture({ empty = false } = {}) {
   return { source, draft, runtime, panel };
 }
 describe('Workshop physical equipment form', () => {
+  it('authors and preserves an optional payload when changing unrelated sidegrade work', async () => {
+    const { panel, draft } = fixture(); await settle(); change('definitions', 'efficient');
+    control('emp-enabled').checked = true; control('emp-enabled').dispatchEvent(new Event('change')); control('emp-duration').value = '7';
+    click('save-definition'); await settle();
+    expect(parse(draft.read(path)).fitting.equipment.find(row => row.id === 'efficient').hardware.impact.emp).toEqual({ duration_secs: 7 });
+    control('work-secs').value = '13'; click('save-definition'); await settle();
+    expect(parse(draft.read(path)).fitting.equipment.find(row => row.id === 'efficient').hardware.impact.emp).toEqual({ duration_secs: 7 });
+    panel.dispose();
+  });
   it('creates the first slot, equivalent default and one installed assembly atomically', async () => {
     const { panel, draft, runtime, source } = fixture({ empty: true }); await settle();
     for (const input of panel.node.querySelectorAll('input,select')) expect(panel.node.querySelector(`label[for="${input.id}"]`)).not.toBeNull();

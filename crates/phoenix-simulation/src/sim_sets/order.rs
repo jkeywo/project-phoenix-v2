@@ -29,6 +29,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
     sequence(
         &mut order,
         &[
+            TickComponentEffects,
             ReadSystemText,
             AiTorpedoLoad,
             TickFrequencyHintHighFidelity,

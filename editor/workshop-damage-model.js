@@ -1,6 +1,21 @@
 /** Closed authored damage vocabulary; the runtime remains the validator/owner. */
 export const DAMAGE_TYPES = Object.freeze(['physical', 'laser']);
 export const DAMAGE_BINDINGS = Object.freeze(['operation', 'intake', 'cooling']);
+export const defaultEmpResistance = () => ({ resistance_per_stack: 0.5, max_stacks: 8, decay_secs: 20, bindings: ['operation'] });
+export function validateEmpPayload(value) {
+  if (value === undefined || value === null) return;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => key !== 'duration_secs')
+    || typeof value.duration_secs !== 'number' || !Number.isFinite(Math.fround(value.duration_secs)) || Math.fround(value.duration_secs) <= 0) throw new Error('EMP requires a finite positive duration.');
+}
+export function validateEmpResistance(value) {
+  if (value === undefined || value === null) return;
+  const positive = number => typeof number === 'number' && Number.isFinite(Math.fround(number)) && Math.fround(number) > 0;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 4
+    || Object.keys(value).some(key => !['resistance_per_stack', 'max_stacks', 'decay_secs', 'bindings'].includes(key))
+    || !positive(value.resistance_per_stack) || !positive(value.decay_secs) || !Number.isInteger(value.max_stacks) || value.max_stacks < 1 || value.max_stacks > 65535
+    || !Array.isArray(value.bindings) || !value.bindings.length || new Set(value.bindings).size !== value.bindings.length || value.bindings.some(binding => !DAMAGE_BINDINGS.includes(binding)))
+    throw new Error('Choose finite positive EMP resistance/decay, bounded stacks and distinct actual component bindings.');
+}
 export const defaultImpact = kind => ({ damage_type: kind === 'beam' ? 'laser' : 'physical', penetration: kind === 'beam' ? 20 : kind === 'guided' ? 40 : 25 });
 export const defaultDamage = () => ({ materials: {
   light: { resistance: { physical: 0.2, laser: 0.15 }, residual_fraction: 0.1 },
@@ -27,6 +42,7 @@ const unit = value => Number.isFinite(value) && value >= 0 && value <= 1;
 const positive = value => Number.isFinite(value) && value > 0;
 const identity = value => typeof value === 'string' && /^[a-z0-9-]+$/.test(value);
 export function validateDamage(damage, systems, value) {
+  validateEmpResistance(damage?.emp);
   if (!damage?.materials || !damage?.remedies) throw new Error('Configure damage materials and repair remedies.');
   for (const [id, material] of Object.entries(damage.materials)) {
     if (!identity(id) || !unit(material.residual_fraction) || DAMAGE_TYPES.some(type => !Number.isFinite(material.resistance?.[type]) || material.resistance[type] < 0))

@@ -4,7 +4,7 @@ import { runWorkshopMutation } from './workshop-edit-session.js';
 
 /** Closed equipment records edit the existing exact-source Workshop document. */
 export function mountWorkshopFitting({ root, provider, runtime, draft: getDraft, busy, setBusy, changed = () => {}, attach = true }) {
-  const doc = root.ownerDocument, text = key => t('workshop.fitting.' + key);
+  const doc = root.ownerDocument, text = key => t(key.startsWith('workshop.') ? key : 'workshop.fitting.' + key);
   const el = (tag, key) => { const node = doc.createElement(tag); if (key) node.textContent = text(key); return node; };
   let serial = 0;
   const input = (key, type = 'text') => { const node = el('input'); node.id = 'workshop-fitting-' + key + '-' + serial++; node.type = type;
@@ -54,7 +54,9 @@ export function mountWorkshopFitting({ root, provider, runtime, draft: getDraft,
       if (key === 'kind') { hardware.dataset.kind = amount; continue; }
       if (key === 'impact') {
         const type = select('damage-type'), penetration = input('penetration', 'number'); fill(type, ['laser', 'physical'], amount.damage_type); penetration.value = amount.penetration;
-        hardware.append(label(type, 'damage_type'), label(penetration, 'penetration')); hardwareInputs.set('impact', { type, penetration });
+        const emp = input('emp-enabled', 'checkbox'), duration = input('emp-duration', 'number'); emp.checked = !!amount.emp; duration.value = amount.emp?.duration_secs ?? 6; duration.disabled = !emp.checked;
+        emp.addEventListener('change', () => { duration.disabled = !emp.checked; });
+        hardware.append(label(type, 'damage_type'), label(penetration, 'penetration'), label(emp, 'workshop.damage.emp_payload'), label(duration, 'workshop.damage.emp_duration')); hardwareInputs.set('impact', { type, penetration, emp, duration });
       } else { const control = input(key, 'number'); control.value = amount; hardwareInputs.set(key, control); hardware.append(label(control, key)); }
     }
     requirements.replaceChildren(el('legend', 'requirements')); requirementRows = []; for (const part of record.work.requirements || []) addRequirement(part);
@@ -100,7 +102,8 @@ export function mountWorkshopFitting({ root, provider, runtime, draft: getDraft,
   });
   const removeSlot = button('remove-slot', () => { const next = profile(); next.slot = next.slot.filter(row => row.id !== slots.value); next.assembly = next.assembly.filter(item => item.location.kind !== 'installed' || item.location.slot !== slots.value); void apply(next); });
   const saveDefinition = button('save-definition', () => { const next = profile(), values = { kind: hardware.dataset.kind };
-    for (const [key, control] of hardwareInputs) values[key] = key === 'impact' ? { damage_type: control.type.value, penetration: control.penetration.valueAsNumber } : control.valueAsNumber;
+    for (const [key, control] of hardwareInputs) values[key] = key === 'impact' ? { damage_type: control.type.value, penetration: control.penetration.valueAsNumber,
+      ...(control.emp.checked ? { emp: { duration_secs: control.duration.valueAsNumber } } : {}) } : control.valueAsNumber;
     const row = { id: definitionId.value, interface: definitionInterface.value, size: definitionSize.valueAsNumber, storage_space: storage.valueAsNumber,
       work: { class: workClass.value, work_secs: workSecs.valueAsNumber, manual_work_fraction: manual.valueAsNumber,
         requirements: requirementRows.map(part => ({ resource: part.resource.value, service: part.service.value, amount: part.amount.valueAsNumber })) }, hardware: values };

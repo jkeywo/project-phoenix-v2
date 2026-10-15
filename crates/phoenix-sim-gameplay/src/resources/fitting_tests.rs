@@ -10,10 +10,68 @@ fn fixture() -> (EntityConfig, CompiledFitting, FittingState) {
 }
 fn healthy() -> ComponentState {
     ComponentState {
+        emp: None,
         condition: ComponentCondition::Healthy,
         dose: 0.0,
         last_source: None,
     }
+}
+
+#[test]
+fn emp_follows_the_actual_removed_assembly_and_expires_in_storage_without_cleansing() {
+    let (config, profile, mut state) = fixture();
+    let policy = config.damage.as_ref().unwrap().emp.as_ref().unwrap();
+    let mut affected = healthy();
+    affected.emp = Some(
+        phoenix_model::emp::ComponentEmpState::apply(
+            None,
+            policy,
+            phoenix_model::emp::EmpPayload { duration_secs: 6.0 },
+            phoenix_model::emp::EmpClock {
+                tick: 10,
+                period_nanos: 1_000_000_000,
+            },
+        )
+        .unwrap(),
+    );
+    state
+        .stored_to_work(&profile, "fore-beam-spare", 8, "fore-beam")
+        .unwrap();
+    let old = state
+        .remove_installed(&profile, "fore-beam", 8, affected.clone())
+        .unwrap();
+    let replacement = state
+        .install_from_work(&profile, "fore-beam", "fore-beam-spare", 8)
+        .unwrap();
+    assert_eq!(
+        replacement,
+        healthy(),
+        "healthy replacement cannot inherit another assembly's EMP"
+    );
+    state
+        .return_to_locker(&profile, &old, 8, "weapons-equipment")
+        .unwrap();
+    let saved: FittingState = serde_json::from_slice(&serde_json::to_vec(&state).unwrap()).unwrap();
+    assert_eq!(saved.assemblies[&old].condition, Some(affected.clone()));
+    assert_eq!(affected.emp.as_ref().unwrap().factor_at(15), 0.0);
+    assert_eq!(
+        affected.emp.as_ref().unwrap().factor_at(16),
+        1.0,
+        "stowed effect expires without inventory ticking or repair"
+    );
+    state
+        .stored_to_work(&profile, &old, 9, "fore-beam")
+        .unwrap();
+    state
+        .remove_installed(&profile, "fore-beam", 9, replacement)
+        .unwrap();
+    assert_eq!(
+        state
+            .install_from_work(&profile, "fore-beam", &old, 9)
+            .unwrap(),
+        affected
+    );
+    state.validate(&profile).unwrap();
 }
 
 #[test]
@@ -23,6 +81,7 @@ fn actual_team_fetches_support_spare_to_weapons_without_duplicate_or_early_insta
     let (config, profile, mut state) = fixture();
     let item = "fore-beam-spare";
     let condition = ComponentState {
+        emp: None,
         condition: ComponentCondition::Damaged,
         dose: 0.5,
         last_source: Some("retained-salvage-damage".into()),
@@ -280,6 +339,7 @@ fn real_sidegrade_changes_only_supported_strategy_and_work_cost_not_the_fixed_gr
 fn condition_moves_once_and_healthy_replacement_does_not_inherit_removed_faults() {
     let (_, profile, mut state) = fixture();
     let damaged = ComponentState {
+        emp: None,
         condition: ComponentCondition::Damaged,
         dose: 3.25,
         last_source: Some("actual-hit".into()),
@@ -325,6 +385,34 @@ fn condition_moves_once_and_healthy_replacement_does_not_inherit_removed_faults(
         damaged,
         "reinstall cannot cleanse damage/dose/source"
     );
+}
+
+#[test]
+fn authored_initial_equipment_cannot_invent_a_runtime_emp_clock() {
+    let (mut config, _, _) = fixture();
+    let policy = config.damage.as_ref().unwrap().emp.as_ref().unwrap();
+    let effect = phoenix_model::emp::ComponentEmpState::apply(
+        None,
+        policy,
+        phoenix_model::emp::EmpPayload { duration_secs: 6.0 },
+        phoenix_model::emp::EmpClock {
+            tick: 20,
+            period_nanos: 1_000_000_000,
+        },
+    )
+    .unwrap();
+    config
+        .fitting
+        .as_mut()
+        .unwrap()
+        .assemblies
+        .iter_mut()
+        .find_map(|item| item.condition.as_mut())
+        .unwrap()
+        .emp = Some(effect);
+    assert!(CompiledFitting::compile(&config)
+        .unwrap_err()
+        .contains("causal EMP"));
 }
 
 #[test]

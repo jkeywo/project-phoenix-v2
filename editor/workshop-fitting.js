@@ -2,6 +2,7 @@ import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
 import { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
 import { acceptWorkshopChanges } from './workshop-acceptance.js';
+import { validateEmpPayload } from './workshop-damage-model.js';
 
 const closed = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every(key => keys.includes(key));
 const named = value => typeof value === 'string' && /^[a-z0-9-]{1,128}$/.test(value);
@@ -35,7 +36,8 @@ export function inspectFitting(draft, dependencies, path) {
 }
 const compatible = (slot, equipment) => equipment.hardware.kind === slot.family && equipment.interface === slot.interface && equipment.size <= slot.size;
 const sameHardware = (left, right) => Object.keys(left).length === Object.keys(right).length && Object.keys(left).every(key => typeof left[key] === 'number'
-  ? Math.fround(left[key]) === Math.fround(right[key]) : key === 'impact' ? left.impact?.damage_type === right.impact?.damage_type && Math.fround(left.impact?.penetration) === Math.fround(right.impact?.penetration) : left[key] === right[key]);
+  ? Math.fround(left[key]) === Math.fround(right[key]) : key === 'impact' ? left.impact?.damage_type === right.impact?.damage_type && Math.fround(left.impact?.penetration) === Math.fround(right.impact?.penetration)
+    && !!left.impact?.emp === !!right.impact?.emp && (!left.impact?.emp || Math.fround(left.impact.emp.duration_secs) === Math.fround(right.impact.emp.duration_secs)) : left[key] === right[key]);
 
 export function validateFitting(profile, value) {
   if (!closed(profile, ['slot', 'equipment', 'locker', 'assembly'])) throw new Error('Fitting supports only slots, equipment, lockers and actual assemblies.');
@@ -73,8 +75,9 @@ export function validateFitting(profile, value) {
       if (!closed(hardware, ['kind', 'beam_range', 'auto_arc_deg', 'beam_damage_per_sec', 'beam_duration_secs', 'cooldown_secs', 'cycle_jitter', 'shield_pierce', 'impact', 'continuous_cost_per_sec'])
         || !['beam_range', 'auto_arc_deg', 'beam_damage_per_sec', 'beam_duration_secs'].every(key => positive(hardware[key]))
         || !['cooldown_secs', 'continuous_cost_per_sec'].every(key => finite(hardware[key])) || !finite(hardware.cycle_jitter) || Math.fround(hardware.cycle_jitter) >= 1
-        || !finite(hardware.shield_pierce) || hardware.shield_pierce > 1 || !closed(hardware.impact, ['damage_type', 'penetration'])
+        || !finite(hardware.shield_pierce) || hardware.shield_pierce > 1 || !closed(hardware.impact, ['damage_type', 'penetration', 'emp'])
         || !['physical', 'laser'].includes(hardware.impact.damage_type) || !finite(hardware.impact.penetration)) throw new Error('Beam hardware requires supported finite range, work, cycle and impact values.');
+      validateEmpPayload(hardware.impact.emp);
     } else if (hardware?.kind === 'reactor') {
       if (!closed(hardware, ['kind', 'sustainable_output_per_sec', 'max_output_per_sec', 'ramp_per_sec', 'charge_heat_per_unit', 'discharge_heat_per_unit'])
         || work.class !== 'facility' || !['sustainable_output_per_sec', 'max_output_per_sec', 'ramp_per_sec'].every(key => positive(hardware[key]))

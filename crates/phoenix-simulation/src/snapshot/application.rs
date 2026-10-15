@@ -1239,6 +1239,7 @@ pub(super) fn apply_entity_state_with(
     restored_alert_tick: bevy::ecs::change_detection::Tick,
 ) {
     super::fitting::apply(world, entity, row);
+    let emp_clock = crate::ship::emp::clock(world, tick).ok();
     let mut entity_mut = world.entity_mut(entity);
     if let Some(saved) = &row.equipment_recovery {
         entity_mut.insert(saved.clone());
@@ -1272,6 +1273,7 @@ pub(super) fn apply_entity_state_with(
         row.physical_damage.as_ref(),
     ) {
         damage.state = stored.clone();
+        damage.emp_clock = damage.definition.config.emp.as_ref().and(emp_clock);
     }
     if let (Some(mut frontier), Some(stored)) = (
         entity_mut.get_mut::<crate::ship::disablement::DisablementObservation>(),

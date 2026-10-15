@@ -43,6 +43,7 @@ fn rig() -> (World, Entity, Entity) {
         .unwrap()
         .get_mut("operation")
         .unwrap() = ComponentState {
+        emp: None,
         condition: ComponentCondition::Damaged,
         dose: 0.5,
         last_source: Some("real-damage".into()),

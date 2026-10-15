@@ -22,6 +22,7 @@ pub enum StatusReasonCode {
     IntakeCut,
     NoDockMarkers,
     EquipmentRemoved,
+    Emp,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

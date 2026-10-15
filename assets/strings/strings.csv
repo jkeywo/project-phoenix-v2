@@ -5845,3 +5845,13 @@ workshop.shield.cycle_period,Shield enquiry and equipment,Seconds per configurat
 workshop.shield.frequency_save,Shield enquiry and equipment,Save frequency equipment,Frequenzausruestung speichern,Save frequency equipment,machine
 entity.harrow_resonant_cruiser.name,Shield enquiry and equipment,Harrow Resonant Cruiser,Harrow Resonanzkreuzer,Harrow Resonant Cruiser,machine
 entity.harrow_standard_shields_cruiser.name,Shield equipment comparison,Harrow Standard-Shield Cruiser,Harrow Standard-Schildkreuzer,Harrow Standard-Shield Cruiser,machine
+system.status.reason.emp,Shared System status UI,Temporary EMP failure,Vorübergehender EMP-Ausfall,Temporary EMP failure,machine
+workshop.damage.emp_payload,EMP payload authoring,EMP payload,EMP-Nutzlast,EMP payload,machine
+workshop.damage.emp_duration,EMP payload authoring,EMP duration (seconds),EMP-Dauer (Sekunden),EMP duration (seconds),machine
+workshop.damage.emp_receiver,EMP receiver authoring,EMP resistance,EMP-Widerstand,EMP resistance,machine
+workshop.damage.emp_enabled,EMP receiver authoring,Supports EMP component effects,Unterstützt EMP-Komponenteneffekte,Supports EMP component effects,machine
+workshop.damage.emp_resistance,EMP receiver authoring,Resistance per stack,Widerstand je Stapel,Resistance per stack,machine
+workshop.damage.emp_stacks,EMP receiver authoring,Maximum resistance stacks,Maximale Widerstandsstapel,Maximum resistance stacks,machine
+workshop.damage.emp_decay,EMP receiver authoring,Resistance decay interval (seconds),Abklingintervall des Widerstands (Sekunden),Resistance decay interval (seconds),machine
+workshop.damage.save_emp,EMP receiver authoring,Save EMP resistance,EMP-Widerstand speichern,Save EMP resistance,machine
+entity.emp_destroyer.name,Optional authored EMP bolt hull,EMP Destroyer,EMP-Zerstörer,EMP Destroyer,machine

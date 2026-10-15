@@ -8,6 +8,8 @@ use phoenix_model::damage::{DamageBinding, DamageHit, DamageOutcome};
 #[derive(Component, Clone, Debug)]
 #[require(super::disablement::DisablementObservation)]
 pub struct ShipDamage {
+    /// Derived from the existing fixed-step clock; never a second saved timer.
+    pub emp_clock: Option<phoenix_model::emp::EmpClock>,
     pub definition: DamageDefinition,
     pub state: DamageState,
 }
@@ -31,14 +33,19 @@ impl ShipDamage {
                 .ok_or("damage requires installed Systems")?,
         )?;
         let state = DamageState::new(&definition);
-        Ok(Some(Self { definition, state }))
+        Ok(Some(Self {
+            definition,
+            state,
+            emp_clock: None,
+        }))
     }
 
     pub fn structural_fraction(&self) -> f32 {
         self.state.structural_fraction(&self.definition)
     }
     pub fn factor(&self, system: &SystemId, binding: DamageBinding) -> f32 {
-        self.state.effect_factor(&self.definition, system, binding)
+        self.state
+            .effect_factor_at(&self.definition, system, binding, self.emp_clock)
     }
     pub fn operational(&self, system: &SystemId) -> bool {
         !self.state.catastrophic && self.factor(system, DamageBinding::Operation) > 0.0
@@ -221,7 +228,11 @@ impl ShipDamage {
         if room.disabled {
             return DamageTier::Disabled;
         }
-        if self.factor(system, DamageBinding::Operation) == 0.0 {
+        if self
+            .state
+            .physical_factor(&self.definition, system, DamageBinding::Operation)
+            == 0.0
+        {
             return DamageTier::Destroyed;
         }
         let structural_loss = self
@@ -259,7 +270,8 @@ impl ShipDamage {
         rng: &mut vellum_rng::Pcg32,
     ) -> Result<DamageOutcome, String> {
         hit.incoming = local_hit_direction(yaw, hit.incoming);
-        self.state.apply_hit(&self.definition, &hit, rng)
+        self.state
+            .apply_hit_at(&self.definition, &hit, rng, self.emp_clock)
     }
 }
 

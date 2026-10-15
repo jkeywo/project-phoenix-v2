@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import fs from 'node:fs';
 import { parse } from 'smol-toml';
 import { WorkshopDocument } from '../workshop-document.js';
 import { createStoreZip } from '../mod-pack-export.js';
@@ -11,6 +12,25 @@ const source = `# root note\n[[weapon]]\nid="beam-a"\nstrategy_id="a"\n[weapon.i
 function draft(text = source) { return new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: '[pack]\nformat=1\nid="mine"\nname="Mine"\nversion="1"\n' }, { path, text }])); }
 function operation(current, fields, deps = dependencies) { return prepareWeaponOperation(current, deps, { path, ...fields }).changes[0].after; }
 function edited(current, deps = dependencies) { const value = inspectWeapons(current, deps, path).weapons[0].weapon; value.mount.range = 50; return value; }
+
+it('adds and removes inherited EMP through complete impact replacement and actual authored bolt data', () => {
+  const inherited = source.replace('[weapon.mount]', '[weapon.impact.emp]\nduration_secs=6\n[weapon.mount]');
+  const deps = { base_files: { [base]: inherited }, packs: [] }, current = draft('includes=["base.toml"]\n# child\n');
+  const selected = inspectWeapons(current, deps, path).weapons[0].weapon;
+  expect(selected.impact.emp.duration_secs).toBe(6); delete selected.impact.emp;
+  expect(() => operation(current, { section: 'weapon', originalId: 'beam-a', weapon: selected }, deps)).toThrow(/materialise/);
+  const after = operation(current, { section: 'weapon', originalId: 'beam-a', weapon: selected, materialise: true }, deps);
+  const resolved = resolveTemplate(path, { [path]: after, [base]: inherited }, parse).resolved.value;
+  expect(resolved.weapon[0].impact).toEqual({ damage_type: 'laser', penetration: 20 });
+  expect(resolved.weapon[0].mount).toEqual(parse(inherited).weapon[0].mount);
+  const read = file => fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+  const actual = resolveTemplate('assets/entities/emp_destroyer.toml', { read }, parse).resolved.value;
+  const baseline = resolveTemplate('assets/entities/alliance_destroyer.toml', { read }, parse).resolved.value;
+  const bank = actual.weapon.find(row => row.id === 'blaster-port'), original = baseline.weapon.find(row => row.id === bank.id);
+  expect(bank.impact.emp).toEqual({ duration_secs: 6 });
+  const copy = structuredClone(bank); delete copy.impact.emp; expect(copy).toEqual(original);
+  expect(actual.energy).toEqual(baseline.energy); expect(actual.damage.emp).toEqual({ resistance_per_stack: 0.5, max_stacks: 8, decay_secs: 20, bindings: ['operation'] });
+});
 describe('Workshop configurable weapon source editing', () => {
   it.each(['\n', '\r\n'])('edits one complete weapon and preserves unrelated source %j', nl => {
     const before = source.replace(/\n/g, nl), current = draft(before);

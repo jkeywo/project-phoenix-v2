@@ -38,6 +38,12 @@ impl RestoreReport {
 /// what tell a host which world that is.
 pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
     let mut report = RestoreReport::default();
+    if let Err((uuid, reason)) = super::emp::validate_roster(world, snapshot) {
+        report
+            .gaps
+            .push(RestoreGap::ResourceStateInvalid { uuid, reason });
+        return report;
+    }
     if let Err((uuid, reason)) = super::mounts::validate_roster(world, snapshot) {
         report
             .gaps

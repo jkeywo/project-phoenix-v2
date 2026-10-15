@@ -358,7 +358,14 @@ pub fn is_atomic_resource_endpoint(path: &str) -> bool {
 /// Delivery alternatives carry complete typed parameter sets. Replacing the
 /// tagged strategy must not leave fields from the previous alternative.
 pub fn is_atomic_weapon_delivery(path: &str) -> bool {
-    path == "weapon.delivery"
+    matches!(
+        path,
+        "weapon.delivery"
+            | "weapon.impact"
+            | "weapons_console.phaser_banks.impact"
+            | "weapons_console.blaster_banks.impact"
+            | "torpedoes.tubes.impact"
+    )
 }
 
 /// A complete hardware profile replaces inherited provider variants and groups.
@@ -370,7 +377,15 @@ pub fn is_atomic_energy_profile(path: &str) -> bool {
 pub fn is_atomic_logistics_profile(path: &str) -> bool {
     matches!(
         path,
-        "logistics" | "production" | "recovery" | "recoverable" | "port_service" | "fitting" | "field" | "signal_material" | "sensing"
+        "logistics"
+            | "production"
+            | "recovery"
+            | "recoverable"
+            | "port_service"
+            | "fitting"
+            | "field"
+            | "signal_material"
+            | "sensing"
     )
 }
 

@@ -43,6 +43,9 @@ pub struct ShipPlugin;
 
 impl Plugin for ShipPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::ship::emp::ComponentEffectsPlugin>() {
+            app.add_plugins(crate::ship::emp::ComponentEffectsPlugin);
+        }
         // Admitted-command consumers (issues #833, #745) for the per-axis Helm
         // wire targets are declared by the host-helm-control-router's own
         // dispatch module, so the router's dependency on the command-admission

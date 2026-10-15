@@ -11,6 +11,16 @@ import { prepareShipOperation } from '../workshop-ship-authoring.js';
 const path = 'assets/entities/test.toml', base = 'assets/entities/base.toml', deps = { base_files: {}, packs: [] };
 const make = text => new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: '[pack]\nformat=1\nid="test"\nname="Test"\nversion="1"\n' }, { path, text }]));
 describe('closed physical fitting authoring', () => {
+  it('keeps optional payloads in exact defaults and validates sidegrade duration', () => {
+    const { value, profile } = fittingFixture();
+    profile.equipment[1].hardware.impact.emp = { duration_secs: 6 };
+    expect(() => validateFitting(profile, value)).not.toThrow();
+    profile.equipment[0].hardware.impact.emp = { duration_secs: 6 };
+    expect(() => validateFitting(profile, value)).toThrow(/reproduce/);
+    delete profile.equipment[0].hardware.impact.emp;
+    profile.equipment[1].hardware.impact.emp.duration_secs = 0;
+    expect(() => validateFitting(profile, value)).toThrow(/EMP/);
+  });
   it('accepts both actual Cruiser beam and canonical reactor defaults', () => {
     const { value } = damageFixture();
     expect(value.fitting.slot.map(slot => slot.family)).toEqual(['beam', 'reactor']);

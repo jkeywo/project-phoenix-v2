@@ -14,15 +14,56 @@ const GHOST: &str = "assets/entities/ghost.toml";
 
 /// A complete hull with a ship configuration: the one kind of template a
 /// Test may select and a world may offer.
-const HULL_SOURCE: &str = "class='lancer'\nname='Test hull'\n\
-[[station]]\nid='captain'\nname='Captain'\ndescription='Test station'\nrank='captain'\n\
-[[system]]\nid='red-alert'\nkind='red_alert'\nconsole='captain-display'\n[[console]]\nid='captain-display'\nhome_station='captain'\nscreen='gui/cruiser/captain.html'\n";
+const HULL_SOURCE: &str = r#"class = 'lancer'
+name = 'Test hull'
+[[station]]
+id = 'captain'
+name = 'Captain'
+description = 'Test station'
+rank = 'captain'
+[[system]]
+id = 'red-alert'
+kind = 'red_alert'
+console = 'captain-display'
+[[console]]
+id = 'captain-display'
+home_station = 'captain'
+screen = 'gui/cruiser/captain.html'
+[interior.placements]
+red-alert = 'bridge'
+[[interior.deck]]
+id = 'main'
+label = 'Main deck'
+damage_weight = 1.0
+[[interior.compartment]]
+id = 'bridge'
+deck = 'main'
+label = 'Bridge'
+x = 0.0
+z = 0.0
+width = 4.0
+depth = 4.0
+material = 'bulkhead'
+max_hp = 10.0
+recovery_fraction = 0.5
+structural_remedy = 'structural'
+[damage.materials.bulkhead]
+resistance = { physical = 0.0, laser = 0.0 }
+residual_fraction = 0.0
+[damage.remedies.structural]
+work_secs = 1.0
+manual_work_fraction = 1.0
+structural_hp = 10.0
+outcome = { kind = 'structural' }
+"#;
 
 #[test]
 fn catalogue_choice_hull_is_runtime_accepted_control_only_equipment() {
-    let hull: crate::entities::config::EntityConfig = toml::from_str(HULL_SOURCE)
+    let hull = crate::entities::config::EntityConfig::from_toml(HULL_SOURCE)
         .expect("catalogue hull must satisfy the actual accepted equipment schema");
     assert!(hull.class.is_some());
+    assert!(hull.interior.is_some());
+    assert!(hull.damage.is_some());
     let ship = hull.ship_config.expect("actual ship configuration");
     assert_eq!(ship.systems.len(), 1);
     assert_eq!(

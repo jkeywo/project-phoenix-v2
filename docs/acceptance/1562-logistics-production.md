@@ -211,3 +211,55 @@ This is the authorised initial-commit checkpoint. Recovery's exact whole-host
 continuation/clock correction remains in isolated validation; final integrated
 gates, browser/native human journeys, balance, workload and performance remain
 open. Advancing to increment 13 does not mark increment 12's verified exit passed.
+
+## Late recovery continuation and live fleet handoff
+
+The verified late fixes are integrated in `cd06eef2`, `7d9dd6d0` and `857caef6`.
+Their tested isolated revisions remain distinct from the integrated main tree.
+At `e9ab636b`, all **three mission-age owner cases passed** (5m14s build,
+0.00s reported execution). Exact `Duration` arithmetic now preserves mission age
+across a differently aged bootstrap; restore refuses a missing clock owner before
+writes. The full supported Duration range is retained without a narrowing
+nanosecond cast. Log SHA256:
+`c282485bb58db363fdb141b34d59b84df285c37403034c0a4fe68d5c7e3665bd`.
+
+At `c6a24696`, the crew-replication owner passed **four cases** (3m03s build,
+0.00s reported execution):
+
+```text
+cargo test -p phoenix-simulation --lib --no-default-features -- lobby::crew_replication::tests --test-threads=1
+```
+
+Console placement in active FleetLockstep now uses admitted, replicated live
+Station ratings for crew availability, with the immutable launch roster only as
+an absent-entry fallback. Different peer-local Sessions cannot change this view.
+The actual applier-to-resolver journey covers initially empty crew, claim/Ready,
+Backfill release and reacquisition. Log `increment12-fleet-crew-owner.log`, SHA256
+`17e2bba2dd5b507c4512fe014c5bf2fcd480aedf759ea377436c67b1dd4f5400`.
+
+The same frozen revision passed **all three Recovery whole-host cases**, with no
+failed, ignored or filtered cases (1m49s build, 11.04s execution):
+
+```text
+cargo test -p project-phoenix --no-default-features --features headless --test recovery_continuation -- --test-threads=1 --nocapture
+```
+
+These exercise ordinary Identify/Station/Ready/Control journeys; exact complete
+JSON and world-digest continuation for 360 subsequent steps with positive paid
+work; seven malformed candidates rejected without writes plus a valid control;
+and 720 steps on two actual fleet peers with different LocalShips, both doing
+paid work against one finite twelve-unit source. Log
+`increment12-recovery-fleet-fixed.log`, SHA256
+`42328a7faab785729931de84e5143cf1c12cb16e1504347b88d78ec9b38f0daa`.
+Logs, executable hashes and copied source dependency records are retained in
+`.phoenix/worktrees/increment-12-recovery-validation/.phoenix/`, separately for
+each run before another shared-target build. Owner libraries were refreshed on
+source-tree switches.
+
+Earlier failures remain recorded: omitted Ready initially prevented admission;
+the next run passed the two single-host cases but exposed placement reading the
+frozen launch roster after a real fleet crew change. Neither authority checks,
+the exact comparison nor finite-source accounting were relaxed. Independent
+read review passed for both production fixes. This closes those targeted late
+checks; final integrated gates, browser/native human acceptance, balance,
+workload and performance are still separate outstanding evidence.

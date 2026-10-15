@@ -452,7 +452,7 @@ impl Plugin for WeaponsPlugin {
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .before(ProjectileLifecycle),
                     super::pdc::advance_carrier_bolts
-                        .in_set(crate::sim_sets::FixedStep::TickBlasterSystem)
+                        .in_set(crate::sim_sets::FixedStep::AdvanceCarrierBoltFlights)
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .before(ProjectileLifecycle),
                 ),

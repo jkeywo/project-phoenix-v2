@@ -139,6 +139,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             TickMounts,
             HandleFireBlaster,
             TickBlasterSystem,
+            AdvanceCarrierBoltFlights,
             AdvanceTorpedoFlights,
             HandleDispatchRepairTeam,
             HandleRecallRepairTeam,

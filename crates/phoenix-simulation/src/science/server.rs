@@ -198,6 +198,9 @@ pub struct SciencePlugin;
 
 impl Plugin for SciencePlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::weapons::mounts::MountsPlugin>() {
+            app.add_plugins(crate::weapons::mounts::MountsPlugin);
+        }
         use crate::authoritative::{DeclareState, StateClass};
         app.declare_state::<super::enquiry::EnquirySubject>(
             StateClass::Derived,

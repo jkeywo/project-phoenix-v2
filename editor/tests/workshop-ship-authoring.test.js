@@ -3,6 +3,7 @@ import { parse } from 'smol-toml';
 import { createStoreZip } from '../mod-pack-export.js';
 import { WorkshopDocument } from '../workshop-document.js';
 import { applyShipOperation, inspectShipAuthoring, prepareShipOperation } from '../workshop-ship-authoring.js';
+import { initialTurret } from '../workshop-system-composition.js';
 
 const manifest = '[pack]\nformat=1\nid="mine"\nversion="1"\nname="Mine"\n[pack.requires]\ncontent_id="phoenix-base"\ncontent_epoch=1\n';
 const source = `# ship comments stay
@@ -166,6 +167,31 @@ describe('Workshop playable ship exact-source transactions', () => {
 });
 
 function operationPath() { return 'assets/entities/ship.toml'; }
+
+it('materialises an inherited finite turret as one validated undoable System override', async () => {
+  const inheritedSource = source.replace('kind = "helm_thrust"', 'kind = "phaser_bank"\npower_group = "bank"');
+  const child = 'tags=["ship"]\nincludes=["base.toml"]\n# child remains\n';
+  const draft = new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: manifest }, { path: operationPath(), text: child }]));
+  const dependencies = { base_files: { 'assets/entities/base.toml': inheritedSource }, packs: [] };
+  const runtime = { shipSchema: async () => ({ ...schema, system_kinds: [...schema.system_kinds, 'phaser_bank'] }), validate: vi.fn(async () => ({ accepted: true })) };
+  const operation = op({ type: 'system-composition-set', id: 'drive', components: initialTurret(), channels: [] });
+  await expect(applyShipOperation({ draft, dependencies, runtime, operation })).rejects.toThrow(/Materialise/);
+  expect(draft.read(operationPath())).toBe(child);
+  await applyShipOperation({ draft, dependencies, runtime, operation: { ...operation, materialise: true } });
+  const accepted = draft.read(operationPath());
+  const actual = inspectShipAuthoring(draft, dependencies, operationPath()).systems.find(row => row.id === 'drive');
+  expect(actual).toMatchObject({ console: 'flight-screen', power_group: 'bank', unknown_system: true, component: initialTurret() });
+  expect(accepted).toContain('# child remains');
+  expect(dependencies.base_files['assets/entities/base.toml']).toBe(inheritedSource);
+  expect(draft.snapshot().history.undo).toHaveLength(1);
+  draft.undo(); expect(draft.read(operationPath())).toBe(child); draft.redo(); expect(draft.read(operationPath())).toBe(accepted);
+  const invalid = initialTurret(); invalid[1].config.traverse_deg_per_sec = 0;
+  await expect(applyShipOperation({ draft, dependencies, runtime, operation: { ...operation, components: invalid, materialise: true } })).rejects.toThrow(/finite turret/);
+  expect(draft.read(operationPath())).toBe(accepted);
+  runtime.validate.mockResolvedValueOnce({ accepted: false, findings: [{ message: 'unsupported actual hardware' }] });
+  await expect(applyShipOperation({ draft, dependencies, runtime, operation: { ...operation, components: [], materialise: true } })).rejects.toThrow();
+  expect(draft.read(operationPath())).toBe(accepted);
+});
 
 
 it('creates and updates a complete composition through one accepted history entry', async () => {

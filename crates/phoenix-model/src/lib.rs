@@ -40,4 +40,5 @@ pub mod sensing_tracks;
 pub mod navigation_sharing;
 
 pub mod logistics_ui;
+pub mod turret;
 pub mod umbilical;

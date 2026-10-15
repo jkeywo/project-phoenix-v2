@@ -92,6 +92,7 @@ pub(super) fn install(
     crate::resources::equipment_recovery_server::install(config, cmds);
     crate::science::passive::install(config, cmds);
     crate::science::broad::install(config, cmds);
+    crate::weapons::mounts::install(config, cmds);
     crate::console::navigation::sharing::install(config, cmds);
     crate::console::navigation::knowledge::install(config, cmds);
     insert_shield_tuning(config, cmds);

@@ -1564,6 +1564,9 @@ pub(super) fn apply_entity_state_with(
     if let Some(field) = &row.region_field {
         entity_mut.insert(field.clone());
     }
+    if let Some(saved) = &row.mounts {
+        entity_mut.insert(saved.clone());
+    }
     if let Some(saved) = &row.broad {
         entity_mut.insert(crate::science::broad::BroadTracks(saved.clone()));
     }

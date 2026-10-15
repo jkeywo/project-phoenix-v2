@@ -8,6 +8,9 @@ use super::*;
 /// Keyed by the uuid string, never by an ECS handle — see the module docs.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EntityState {
+    /// Physical bearings only; target/enabled intent belongs to each System.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mounts: Option<crate::weapons::mounts::ShipMounts>,
     /// Navigation's deliberate received fixed-point history and source dating.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub navigation_sharing:

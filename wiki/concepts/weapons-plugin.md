@@ -2,8 +2,8 @@
 title: WeaponsPlugin
 type: concept
 tags: [weapons, tactical, phaser, torpedo, blaster, targeting, ai]
-sources: [crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-sim-gameplay/src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/weapons/, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml, crates/phoenix-sim-gameplay/src/console/weapons/beam.rs, crates/phoenix-sim-gameplay/src/ship/damage.rs]
-updated: 2026-10-14
+sources: [crates/phoenix-model/src/turret.rs, crates/phoenix-sim-gameplay/src/weapons/turret.rs, crates/phoenix-simulation/src/weapons/mounts.rs, crates/phoenix-simulation/src/snapshot/mounts.rs, crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-sim-gameplay/src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/weapons/, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml, crates/phoenix-sim-gameplay/src/console/weapons/beam.rs, crates/phoenix-sim-gameplay/src/ship/damage.rs]
+updated: 2026-10-15
 ---
 
 # WeaponsPlugin
@@ -37,6 +37,17 @@ common barrel planning. The beam, bolt and guided adapters consume those
 mechanisms without changing their cycle state, impact-facing policies or
 admitted command vocabulary. `entities/config/weapon_definition.rs` compiles
 the common authored form into the same strategy parameters at content load.
+
+`phoenix-model/src/turret.rs` describes the bounded `Turret` System component.
+Gameplay `weapons/turret.rs` owns finite sector traversal and actual bearing;
+Simulation `weapons/mounts.rs` stages its local energy and one per-System state
+map. The mount borrows the owning capability's existing target and availability.
+It keeps no target, enable latch or AI runtime of its own. Missing intent returns
+toward the authored home through paid motion. The passive producer rotates its
+existing field of view using the same bearing, without narrowing reception to a
+weapon's aim tolerance. `snapshot/mounts.rs` preflights the complete candidate
+owner set and continuation frontier before any restore write. Workshop's existing
+System-component form edits these fields through the normal accepted transaction.
 
 ## Command symmetry
 

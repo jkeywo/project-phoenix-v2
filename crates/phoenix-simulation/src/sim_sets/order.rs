@@ -130,6 +130,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             ApplyPendingScenarioLoads,
             ApplyWorldLayerChanges,
             SimulateLowLodShips,
+            TickMounts,
             HandleFireBlaster,
             TickBlasterSystem,
             TickTorpedoLifecycle,

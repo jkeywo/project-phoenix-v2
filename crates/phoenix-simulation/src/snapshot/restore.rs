@@ -38,6 +38,12 @@ impl RestoreReport {
 /// what tell a host which world that is.
 pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
     let mut report = RestoreReport::default();
+    if let Err((uuid, reason)) = super::mounts::validate_roster(world, snapshot) {
+        report
+            .gaps
+            .push(RestoreGap::ResourceStateInvalid { uuid, reason });
+        return report;
+    }
     if snapshot.scenario.as_ref().is_some_and(|scenario| {
         scenario.pending_events.iter().any(|event| {
             event.kind == 12 && super::application::world_event_from_record(event).is_none()

@@ -470,6 +470,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("spatial-fields", fold_spatial_fields_namespace),
     ("recorded-scans", fold_recorded_scans_namespace),
     ("passive-samples", fold_passive_samples_namespace),
+    ("system-mounts", fold_mounts_namespace),
     ("broad-tracks", fold_broad_tracks_namespace),
     ("navigation-sharing", fold_navigation_sharing_namespace),
     ("navigation-request", fold_navigation_request_namespace),
@@ -2604,6 +2605,23 @@ fn fold_recorded_scans_namespace(world: &World, acc: u64) -> u64 {
                 {
                     work.progress = f32::from_bits(canon_f32(work.progress));
                     work.work_secs = f32::from_bits(canon_f32(work.work_secs));
+                }
+            }
+            Some(state)
+        },
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+fn fold_mounts_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "system-mounts",
+        |owner: &crate::weapons::mounts::ShipMounts| {
+            let mut state = owner.clone();
+            for mount in state.0.values_mut() {
+                if mount.offset_deg == 0.0 {
+                    mount.offset_deg = 0.0;
                 }
             }
             Some(state)

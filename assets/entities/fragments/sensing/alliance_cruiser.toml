@@ -65,9 +65,10 @@ sample_interval_secs = 0.5
 min_signal_strength = 0.01
 bearing_error_rad = 0.15
 
+# Increment15 directional dish: finite traversal; broad radar remains independent.
 [sensing.passive.mount]
 facing_deg = 0
-arc_deg = 360
+arc_deg = 120
 range = 100
 
 [[system]]
@@ -75,6 +76,18 @@ id = "passive-receiver"
 kind = "passive_receiver"
 console = "science"
 power_group = "energy-passive-receiver"
+[[system.component]]
+kind = "power_input"
+id = "turret-power"
+[[system.component]]
+kind = "turret"
+id = "turret"
+power_input = "turret-power"
+[system.component.config]
+facing_deg = 0
+traverse_arc_deg = 360
+traverse_deg_per_sec = 90
+aim_tolerance_deg = 2
 
 [system.config.ai]
 root = "passive"

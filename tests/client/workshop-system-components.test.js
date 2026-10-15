@@ -36,11 +36,34 @@ describe('staged component composition controls', () => {
     expect(operation.channels[0]).toEqual({ name: 'engage', kind: 'boolean' });
     el('reset').click(); expect(editor.value().components).toEqual(system.component);
   });
-  it('does not enable unsupported or inherited System editing', () => {
+  it('requires explicit inherited materialisation and keeps unsupported kinds disabled', () => {
     document.body.innerHTML = '<main></main>'; const editor = mountSystemComponents({ root: document.querySelector('main'), apply: vi.fn() });
-    editor.refresh({ ...system, local: false }, schema, false); expect(document.querySelector('fieldset').disabled).toBe(true);
+    editor.refresh({ ...system, local: false }, schema, false); expect(el('apply').disabled).toBe(true);
+    expect(el('materialise').disabled).toBe(false);
+    el('materialise').checked = true; el('materialise').dispatchEvent(new Event('change'));
+    expect(el('apply').disabled).toBe(false);
     editor.refresh({ ...system, kind: 'sensors' }, schema, false); expect(document.querySelector('fieldset').disabled).toBe(true);
   });
+});
+
+it('edits one finite turret using its System intent without inventing channels', () => {
+  document.body.innerHTML = '<main></main>'; const apply = vi.fn();
+  const editor = mountSystemComponents({ root: document.querySelector('main'), apply });
+  const turretSchema = { component_fields: { ...schema.component_fields, turret: [
+    { name: 'power_input', kind: 'power_input_component' },
+    ...['facing_deg', 'traverse_arc_deg', 'traverse_deg_per_sec', 'aim_tolerance_deg'].map(name => ({ name: 'config.' + name, kind: 'number' })),
+  ] } };
+  editor.refresh({ id: 'beam', kind: 'phaser_bank', local: true, power_group: 'bank' }, turretSchema, false);
+  expect([...el('kind').options].map(option => option.value)).toEqual(['power_input', 'turret']);
+  expect(editor.value().channels).toEqual([]);
+  el('list').value = '1'; el('list').dispatchEvent(new Event('change'));
+  const speed = el('field-config-traverse_deg_per_sec'); speed.focus(); change(speed, '17.5');
+  editor.refresh({ id: 'beam', kind: 'phaser_bank', local: true, power_group: 'bank' }, turretSchema, false);
+  expect(document.activeElement).toBe(speed); expect(speed.value).toBe('17.5');
+  el('apply').click(); const operation = apply.mock.calls[0][0]();
+  expect(operation).toMatchObject({ type: 'system-composition-set', id: 'beam', components: [
+    { id: 'turret-power', kind: 'power_input' }, { kind: 'turret', power_input: 'turret-power', config: { traverse_deg_per_sec: 17.5 } },
+  ], channels: [] });
 });
 
 it('stages the first Dock System without pretending it is already an editable owner', () => {

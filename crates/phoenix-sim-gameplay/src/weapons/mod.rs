@@ -6,3 +6,4 @@ pub mod pattern;
 pub mod phaser;
 pub mod shield;
 pub mod torpedo;
+pub mod turret;

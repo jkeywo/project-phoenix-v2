@@ -61,6 +61,7 @@ pub struct AiTickLabel;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
 pub enum FixedStep {
+    TickMounts,
     LodAiShips,
     UnregisterOnDespawn,
     RegisterAiTokensOnSpawn,

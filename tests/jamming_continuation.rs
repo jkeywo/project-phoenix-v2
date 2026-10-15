@@ -25,7 +25,7 @@ fn owner() -> SystemId {
 struct PaidInputWitness {
     actor: Option<Entity>,
     tick: Option<u64>,
-    amount: f32,
+    amount: f64,
 }
 fn observe_paid_input(
     tick: Res<project_phoenix::sim_tick::SimTick>,

@@ -54,7 +54,7 @@ fn slot_binding(
         &crate::entities::loader::WasmTemplateLoader,
     )
     .map_err(|error| format!("cannot resolve activity launch row: {error}"))?;
-    let hull = crate::world::dispatch::TemplateLoader::load_template(
+    let hull = crate::entities::loader::TemplateLoader::load_template(
         &crate::entities::loader::WasmTemplateLoader,
         &frozen.hull,
     )
@@ -203,7 +203,7 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
                             } else if !matches!(
                                 &job.activity,
                                 crate::jobs::repair::RepairActivity::Internal {
-                                    phase: crate::modifiers::repair_teams::TeamSlot::Returning { .. },
+                                    phase: crate::core::messages::TeamSlot::Returning { .. },
                                     ..
                                 }
                             ) {

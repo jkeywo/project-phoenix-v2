@@ -442,7 +442,8 @@ use super::*;
 // 57 adds finite officer custody joined to the candidate's actual Repair teams.
 // 58 includes emitter command channels and frozen receiver illumination opt-in.
 // 59 retains typed Comms requests, actual-ship response ownership and partial reading.
-pub const SNAPSHOT_FORMAT: u32 = 59;
+// 60 retains real activity outcomes/situations and explicit bootstrap slot provenance.
+pub const SNAPSHOT_FORMAT: u32 = 60;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -554,7 +555,9 @@ pub const SNAPSHOT_FORMAT: u32 = 59;
 /// mode; shipped trees use priorities without changing physical resource tuning.
 /// "0.35" delivers typed status requests through the existing physical radio,
 /// same-inbox reading/decisions and paid sustained returned outcomes.
-pub const SIMULATION_RULES: &str = "0.35";
+/// "0.36" binds actual Repair and delivery job facts to World situations and
+/// stages their existing script consequences once at the retained event frontier.
+pub const SIMULATION_RULES: &str = "0.36";
 
 /// The authored data, computed rather than remembered.
 ///

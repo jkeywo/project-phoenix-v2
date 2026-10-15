@@ -346,19 +346,20 @@
     {
       "id": 22,
       "title": "Authored mission planning, scheduling and execution",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         21
       ],
       "completion": "Reusable activity contracts, partial-order HTN domains and crew-aware temporal scheduling execute through independent situations, Scenario trees and ordinary jobs. Authored missions support sequential or concurrent work, committed deadlines, plan repair and Workshop inspection.",
       "evidence": [
-        "docs/gameplay-redesign/implementation/increment-22.md"
+        "docs/gameplay-redesign/implementation/increment-22.md",
+        "docs/acceptance/1562-activity-foundation.md"
       ],
       "subincrements": [
         {
           "id": "22A",
           "title": "Activity contracts and situation execution",
-          "status": "pending"
+          "status": "in_progress"
         },
         {
           "id": "22B",

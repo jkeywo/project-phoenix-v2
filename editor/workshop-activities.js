@@ -56,7 +56,10 @@ function supports(request, profile) {
   if(visit?.type==='Work') return same(visit.data,target);
   const group = system => { const console=(profile.console || []).find(row=>row.id===system.console); return console?.home_station ? {type:'Station',data:console.home_station}
     : system.console ? {type:'Console',data:system.console} : {type:'Core'}; };
-  const selected=systems.find(row=>visit?.type==='System' ? row.id===visit.data : same(group(row),visit));
+  // DamageDefinition keeps every installed System (including an empty
+  // component map), and the ordinary visit resolver walks its BTreeMap keys.
+  const ordered=[...systems].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0);
+  const selected=ordered.find(row=>visit?.type==='System' ? row.id===visit.data : same(group(row),visit));
   const room=target.kind==='compartment'?target.compartment:placements[target.system];
   return !!selected && !!room && placements[selected.id]===room;
 }

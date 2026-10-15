@@ -52,6 +52,18 @@ describe('accepted physical situation source',()=>{
     world.entity[0].overrides={repair:{repair_team_count:1}};
     rows[0].request.actor='ship';rows[0].request.team=1;expect(()=>validateActivities(defs(),rows,inspectActivities(documentFor(stringify(world)),dependencies,path).actors)).toThrow();
   });
+  it('matches ordinary sorted visit rooms even when the first System has no damage components',()=>{
+    const value=profile(),engine=value.system.find(row=>row.id==='engine');engine.id='z-engine';
+    value.system=[engine,{id:'a-router',kind:'command',console:'engineering'},...value.system.filter(row=>row!==engine)];
+    value.interior.compartment.push({id:'support'});value.interior.placements={'a-router':'support','z-engine':'engineering',repair:'engineering',handling:'engineering'};
+    const rows=situations();rows[0].request.request={type:'Station',data:'engineering'};
+    rows[0].request.target={kind:'component',system:'z-engine',component:'operation'};
+    const actors=[{id:'ship',profiles:[value]}];
+    expect(()=>validateActivities(defs(),rows,actors)).toThrow();
+    rows[0].request.target={kind:'compartment',compartment:'support'};rows[0].request.goal='structure';
+    expect(()=>validateActivities(defs(),rows,actors)).not.toThrow();
+    value.system.reverse();expect(()=>validateActivities(defs(),rows,actors)).not.toThrow();
+  });
   it('does not rewrite misleading script headers or accept a stale async candidate',async()=>{
     const draft=documentFor(source()),dependencies=deps();let finish;const runtime={validate:()=>new Promise(resolve=>{finish=resolve;})};
     const changed=situations();changed[0].id='changed';

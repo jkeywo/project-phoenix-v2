@@ -55,6 +55,41 @@ impl GenericCommsRequest {
     }
 }
 
+/// Immutable correlation for one real own-ship optional work offer. This is not
+/// a permission, plan/job identity or physical command.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpportunityRef {
+    pub source: String,
+    pub ordinal: u16,
+    pub actor: String,
+}
+impl OpportunityRef {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.source.is_empty()
+            || self.source.len() > 128
+            || !self
+                .source
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+            || !(1..=8).contains(&self.ordinal)
+            || !identity(&self.actor)
+        {
+            return Err("invalid immutable opportunity source, ordinal or actor");
+        }
+        Ok(())
+    }
+    pub fn instance_id(&self) -> String {
+        format!("opportunity/{}/{}", self.source, self.ordinal)
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpportunityDecision {
+    Accept,
+    Decline,
+}
+
 /// A released own task whose recipient is ALREADY in this Console's permitted
 /// contact view. This is a request choice, not a new contact or actuator grant.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -589,3 +624,43 @@ pub(crate) fn validate_lineage(
 #[cfg(test)]
 #[path = "comms_request_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod opportunity_tests {
+    use super::*;
+    #[test]
+    fn opportunity_reference_is_closed_and_never_resolves_by_source_alone() {
+        let reference = OpportunityRef {
+            source: "maintenance".into(),
+            ordinal: 1,
+            actor: "own-ship".into(),
+        };
+        reference.validate().unwrap();
+        assert_eq!(reference.instance_id(), "opportunity/maintenance/1");
+        assert_ne!(
+            reference.instance_id(),
+            OpportunityRef {
+                ordinal: 2,
+                ..reference.clone()
+            }
+            .instance_id()
+        );
+        for source in ["", "a/b", "x\n", &"a".repeat(129)] {
+            assert!(OpportunityRef {
+                source: source.into(),
+                ..reference.clone()
+            }
+            .validate()
+            .is_err());
+        }
+        for ordinal in [0, 9, u16::MAX] {
+            assert!(OpportunityRef {
+                ordinal,
+                ..reference.clone()
+            }
+            .validate()
+            .is_err());
+        }
+        assert!(serde_json::from_value::<OpportunityRef>(serde_json::json!({"source":"maintenance","ordinal":1,"actor":"own-ship","job":"forged"})).is_err());
+    }
+}

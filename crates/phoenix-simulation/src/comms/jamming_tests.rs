@@ -460,12 +460,31 @@ fn actual_radio_loses_friendly_and_other_faction_links_without_changing_local_em
         for enabled in [false, true] {
             let (mut world, source, _, contact) = fixture_with_faction(Some(faction));
             world.insert_world_id_mint(crate::world_id::WorldIdMint::default());
+            // A distinct ordinary sender is on the authored jammer range edge:
+            // zero exposure here isolates the receiving radio's degradation.
+            let config = crate::entities::include_resolve::load_entity_config(
+                "assets/entities/alliance_cruiser.toml",
+            )
+            .unwrap();
+            let sender = crate::entities::spawner::spawn_entity(
+                &mut world.commands(),
+                &config,
+                Vec3::new(0.0, 0.0, -200.0),
+                "actual-sender".into(),
+                None,
+            );
+            world.flush();
             if enabled {
                 prepare(&mut world, source, &contact);
             }
             world.run_system_once(tick).unwrap();
+            assert_eq!(factor(&mut world, Vec3::new(0.0, 0.0, -200.0)), 1.0);
+            assert_eq!(
+                factor(&mut world, Vec3::new(0.0, 0.0, -100.0)) < 1.0,
+                enabled
+            );
             let send = |world: &mut World| {
-                world.get_mut::<AdmittedCommands>(source).unwrap().0 = vec![AdmittedCommand {
+                world.get_mut::<AdmittedCommands>(sender).unwrap().0 = vec![AdmittedCommand {
                     target: id("comms"),
                     payload: Control::SendCommsText {
                         channel: "public".into(),
@@ -478,7 +497,7 @@ fn actual_radio_loses_friendly_and_other_faction_links_without_changing_local_em
                 world
                     .run_system_once(super::super::radio::tick_radio)
                     .unwrap();
-                world.get_mut::<AdmittedCommands>(source).unwrap().0.clear();
+                world.get_mut::<AdmittedCommands>(sender).unwrap().0.clear();
             };
             let messages = |world: &World, recipient: &str| {
                 world
@@ -490,7 +509,7 @@ fn actual_radio_loses_friendly_and_other_faction_links_without_changing_local_em
                     .collect::<Vec<_>>()
             };
             send(&mut world);
-            let sent = messages(&world, "jam-source");
+            let sent = messages(&world, "actual-sender");
             assert_eq!(sent.len(), 1);
             assert_eq!(
                 messages(&world, "actual-receiver").len(),
@@ -500,7 +519,7 @@ fn actual_radio_loses_friendly_and_other_faction_links_without_changing_local_em
             local.push((
                 sent,
                 world
-                    .get::<ShipPowerSystem>(source)
+                    .get::<ShipPowerSystem>(sender)
                     .unwrap()
                     .0
                     .network()

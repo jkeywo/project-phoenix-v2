@@ -130,7 +130,10 @@ fn independent_useful_geometry_refines_position_but_a_relay_copy_does_not() {
             .all(|row| row.identity.as_ref().unwrap().name == "measured label")
     );
     assert_eq!(receiver, originals, "fusion has no canonical mutation");
-    let copy = export_samples("relay", &receiver, &p, 1, 1.0).unwrap();
+    let mut relay = BroadTrackState::new(&p);
+    let receiver_originals = export_samples("receiver", &receiver, &p, 1, 1.0).unwrap();
+    receive_samples("relay", &mut relay, &p, 1, 1.0, &receiver_originals).unwrap();
+    let copy = export_samples("relay", &relay, &p, 1, 1.0).unwrap();
     receive_samples("receiver", &mut receiver, &p, 1, 1.0, &copy).unwrap();
     assert_eq!(
         projection("receiver", &receiver, &p, 1, 1.0).unwrap(),

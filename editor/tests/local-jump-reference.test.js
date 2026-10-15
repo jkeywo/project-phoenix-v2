@@ -23,4 +23,11 @@ it('resolves the optional actual drive onto finite existing Power/Stock owners w
   expect(reference.interior.placements['local-jump']).toBe('engineering');
   expect(reference.logistics.handling).toEqual(base.logistics.handling);
   expect(base.system.some(row=>row.id==='local-jump')).toBe(false);
+  for (const owner of [drive.id, reference.logistics.handling[0].system]) {
+    const consoleId=reference.system.find(row=>row.id===owner).console;
+    const console=reference.console.find(row=>row.id===consoleId),original=base.console.find(row=>row.id===consoleId);
+    expect(console.feed).toContainEqual({source:'stock/local-jump',kind:'Stock'});
+    expect(console.feed.filter(row=>row.source!=='stock/local-jump')).toEqual(original.feed);
+    expect({...console,feed:original.feed}).toEqual(original);
+  }
 });

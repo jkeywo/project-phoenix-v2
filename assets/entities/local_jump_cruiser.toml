@@ -1664,3 +1664,146 @@ max_active = 2
 max_batch = 100
 units_per_sec = 50
 reorder_fraction = 0.5
+
+# Explicit local Stock observations for the drive and physical Logistics owner.
+[[console]]
+id = "helm"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "command"
+kind = "Command"
+
+[[console.feed]]
+source = "dock"
+kind = "Dock"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "helm-engine-port"
+kind = "HelmEngine"
+
+[[console.feed]]
+source = "helm-engine-starboard"
+kind = "HelmEngine"
+
+[[console.feed]]
+source = "helm-lateral-thrust"
+kind = "HelmLateralThrust"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "sensors"
+kind = "Sensors"
+
+[[console.feed]]
+source = "tactical"
+kind = "Weapons"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "tractor"
+kind = "Tractor"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console.feed]]
+source = "stock/local-jump"
+kind = "Stock"
+
+[[console]]
+id = "engineering"
+
+[[console.feed]]
+source = "command"
+kind = "Command"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "power"
+kind = "Power"
+
+[[console.feed]]
+source = "power-battery"
+kind = "PowerBattery"
+
+[[console.feed]]
+source = "power-reactor"
+kind = "PowerReactor"
+
+[[console.feed]]
+source = "phaser-fore"
+kind = "PhaserBank"
+
+[[console.feed]]
+source = "repair"
+kind = "Repair"
+
+[[console.feed]]
+source = "tractor"
+kind = "Tractor"
+
+[[console.feed]]
+source = "umbilical"
+kind = "Umbilical"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console.feed]]
+source = "logistics"
+kind = "Logistics"
+
+[[console.feed]]
+source = "torpedo-magazine"
+kind = "TorpedoMagazine"
+
+[[console.feed]]
+source = "stock/torpedo-magazine"
+kind = "Stock"
+
+[[console.feed]]
+source = "stock/repair"
+kind = "Stock"
+
+[[console.feed]]
+source = "stock/power-reactor"
+kind = "Stock"
+
+[[console.feed]]
+source = "fabrication"
+kind = "Production"
+
+[[console.feed]]
+source = "resource-recovery"
+kind = "Recovery"
+
+[[console.feed]]
+source = "sensor-radar"
+kind = "SensorRadar"
+
+[[console.feed]]
+source = "stock/local-jump"
+kind = "Stock"

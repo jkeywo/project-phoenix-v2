@@ -404,6 +404,7 @@ pub fn tick_repair_teams(
             With<crate::server_app::Ship>,
         >,
         Query<(&crate::entities::spawner::EntityUuid, &ShipRepairTeams)>,
+        Query<&crate::resources::equipment_recovery_server::ShipEquipmentRecovery>,
     )>,
     // Balance telemetry. `Option<ResMut<Messages<_>>>` so bare-`App` fixtures
     // that never registered the message still pass parameter validation.
@@ -439,6 +440,17 @@ pub fn tick_repair_teams(
                         .insert(target.clone());
                 }
             }
+        }
+    }
+    for recovery in inputs.p2().iter() {
+        if let Some(job) = recovery.job.as_ref().filter(|job| job.outcome.is_none()) {
+            foreign_claims
+                .entry(job.activity.target_uuid.clone())
+                .or_default()
+                .insert(phoenix_model::damage::RepairWorkTarget::Component {
+                    system: job.activity.source_system.clone(),
+                    component: job.activity.source_component.clone(),
+                });
         }
     }
     let mut ship_q = inputs.p0();

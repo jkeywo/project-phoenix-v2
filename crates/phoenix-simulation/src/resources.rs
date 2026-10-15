@@ -3,7 +3,8 @@ pub use phoenix_sim_gameplay::resources::*;
 pub mod ports_server;
 pub mod server;
 
+pub mod equipment_recovery_server;
+pub mod fitting_server;
 pub mod logistics_server;
 pub mod production_server;
 pub mod recovery_server;
-pub mod fitting_server;

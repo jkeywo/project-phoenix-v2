@@ -17,6 +17,8 @@ use crate::ship::power::ShipPowerSystem;
 pub struct CompiledShipFitting(pub CompiledFitting);
 #[derive(Component, Clone, Debug)]
 pub struct CompiledRefitFacility(pub phoenix_model::fitting::FittingFacilityConfig);
+#[derive(Component, Clone, Debug)]
+pub struct FittingPlannerCatalog(pub phoenix_model::system_status::FittingPlannerContext);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -65,6 +67,41 @@ pub(crate) fn install(
         cmds.insert(CompiledRefitFacility(facility.clone()));
     }
     if let Some(profile) = CompiledFitting::compile(config).expect("validated fitting") {
+        let catalog = phoenix_model::system_status::FittingPlannerContext {
+            hull_path: String::new(),
+            content_id: format!(
+                "{:016x}",
+                vellum_digest::fnv1a(
+                    &serde_json::to_vec(config).expect("accepted hull serializes")
+                )
+            ),
+            slots: profile
+                .config()
+                .slots
+                .iter()
+                .map(|slot| phoenix_model::system_status::FittingPlannerSlot {
+                    slot: slot.id.clone(),
+                    system: slot.system.clone(),
+                    home_station: config
+                        .ship_config
+                        .as_ref()
+                        .and_then(|ship| {
+                            ship.system(&slot.system)
+                                .and_then(|system| ship.system_home_station(system))
+                        })
+                        .map(|station| station.0.clone())
+                        .unwrap_or_default(),
+                    default_equipment: slot.default_equipment.clone(),
+                    compatible_equipment: profile
+                        .config()
+                        .equipment
+                        .iter()
+                        .filter(|equipment| profile.compatible(&slot.id, &equipment.id).is_ok())
+                        .map(|equipment| equipment.id.clone())
+                        .collect(),
+                })
+                .collect(),
+        };
         let mut equipment = FittingState::from_profile(&profile).expect("validated assemblies");
         equipment.assemblies = equipment
             .assemblies
@@ -76,6 +113,7 @@ pub(crate) fn install(
             .collect();
         cmds.insert((
             CompiledShipFitting(profile),
+            FittingPlannerCatalog(catalog),
             ShipFitting {
                 equipment,
                 requested: BTreeSet::new(),
@@ -98,6 +136,10 @@ pub(crate) fn register(app: &mut App) {
     )
     .declare_state::<ShipFitting>(StateClass::Folded, "equipment-fitting-and-refitting");
     app.declare_state::<CompiledRefitFacility>(
+        StateClass::Derived,
+        "equipment-fitting-and-refitting",
+    );
+    app.declare_state::<FittingPlannerCatalog>(
         StateClass::Derived,
         "equipment-fitting-and-refitting",
     );
@@ -322,6 +364,15 @@ fn dispatch(
         .clone();
     profile.compatible(slot, &definition)?;
     let room = profile.compartment(slot)?.to_owned();
+    if world.get::<EntityUuid>(entity).is_none_or(|uuid| {
+        crate::resources::equipment_recovery_server::source_claimed(
+            world,
+            &uuid.0,
+            &profile.slot(slot).expect("compiled slot").system,
+        )
+    }) {
+        return Err("the actual equipment is committed to recovery".into());
+    }
     if foreign_repair_claim(world, entity, &profile.slot(slot)?.system) {
         return Err("another ship's repair team owns this physical task".into());
     }
@@ -350,7 +401,13 @@ fn dispatch(
     state
         .equipment
         .stored_to_work(&profile, &item, job.0, slot)?;
-    let locker = receiving_locker(&profile, &state, &room, old.as_deref())?;
+    let locker = receiving_locker(
+        &profile,
+        &state,
+        &room,
+        old.as_deref(),
+        world.get::<crate::resources::equipment_recovery_server::ShipEquipmentRecovery>(entity),
+    )?;
     state.work.insert(
         slot.to_owned(),
         RefitWork {
@@ -376,6 +433,7 @@ fn receiving_locker(
     state: &ShipFitting,
     room: &str,
     old: Option<&str>,
+    recovery: Option<&crate::resources::equipment_recovery_server::ShipEquipmentRecovery>,
 ) -> Result<String, String> {
     let required = old
         .map(|id| {
@@ -404,7 +462,15 @@ fn receiving_locker(
                     .map_or(u64::MAX, |definition| definition.storage_space as u64)
             })
             .fold(0, u64::saturating_add);
-        if used.saturating_add(claimed).saturating_add(required as u64) <= locker.space as u64 {
+        let incoming = recovery.map_or(0, |owner| {
+            crate::resources::equipment_recovery_server::reserved_space(owner, &locker.id, profile)
+        });
+        if used
+            .saturating_add(claimed)
+            .saturating_add(required as u64)
+            .saturating_add(incoming)
+            <= locker.space as u64
+        {
             return Ok(locker.id.clone());
         }
     }
@@ -560,6 +626,7 @@ fn advance(world: &mut World, entity: Entity, now: u64, dt: f32) {
         .map(|(access, layout)| access.blocked_connections(layout))
         .unwrap_or_default();
     teams.0.tick_refits(dt, &blocked);
+    let mut flags = Vec::new();
     let slots: Vec<_> = state.work.keys().cloned().collect();
     for slot in slots {
         let mut work = state.work[&slot].clone();
@@ -689,17 +756,18 @@ fn advance(world: &mut World, entity: Entity, now: u64, dt: f32) {
                             let staged =
                                 stage_capability(&profile, &candidate, next_power.as_mut());
                             if let Ok(effective) = staged {
-                                if work.stage != RefitStage::Removing
-                                    || inventory
-                                        .0
-                                        .repair_parts(
-                                            Parts::Consume,
-                                            &work.claim(),
-                                            &requirements,
-                                            &services.0,
-                                        )
-                                        .is_ok()
-                                {
+                                let payment = if work.stage == RefitStage::Removing {
+                                    inventory.0.repair_parts(
+                                        Parts::Consume,
+                                        &work.claim(),
+                                        &requirements,
+                                        &services.0,
+                                    )
+                                } else {
+                                    Ok(Vec::new())
+                                };
+                                if let Ok(changes) = payment {
+                                    flags.extend(changes);
                                     state.equipment = candidate;
                                     damage = next_damage;
                                     power = next_power;
@@ -734,6 +802,13 @@ fn advance(world: &mut World, entity: Entity, now: u64, dt: f32) {
         .insert((state, teams, inventory, damage));
     if let Some(power) = power {
         world.entity_mut(entity).insert(power);
+    }
+    let uuid = world.get::<EntityUuid>(entity).map(|uuid| uuid.0.clone());
+    if let (Some(uuid), Some(mut runtime)) = (
+        uuid,
+        world.get_resource_mut::<crate::world::server::WorldContentRuntime>(),
+    ) {
+        crate::infrastructure::server::mirror_flags(&mut runtime, &flags, &uuid, &None);
     }
 }
 

@@ -3179,7 +3179,10 @@ fn system_blackboard_umbilical_round_trips_with_explicit_port_intent() {
     // Protocol 11 makes the standing port intent explicit; optional fields
     // still default and this minimum current payload decodes whole.
     assert_eq!(
-        serde_json::from_str::<SystemBlackboard>(r#"{"kind":"Umbilical","data":{"port_maintenance":false}}"#).unwrap(),
+        serde_json::from_str::<SystemBlackboard>(
+            r#"{"kind":"Umbilical","data":{"port_maintenance":false}}"#
+        )
+        .unwrap(),
         SystemBlackboard::Umbilical(UmbilicalBlackboard::default())
     );
     assert!(serde_json::from_str::<SystemBlackboard>(r#"{"kind":"Umbilical","data":{}}"#).is_err());
@@ -6635,7 +6638,7 @@ fn catalogue_additions_preserve_v3_json_locks_hulls_and_utf8_wire_roundtrips() {
     }
     // The legacy v3 catalogue remains readable under the v5 join pin;
     // explicit Console identity changed the wire vocabulary, not this JSON shape.
-    assert_eq!(PROTOCOL_VERSION, 11);
+    assert_eq!(PROTOCOL_VERSION, 12);
 }
 
 /// The removal inverse's ingress (issue #1444).

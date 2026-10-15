@@ -12,6 +12,9 @@ pub struct EntityState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fitting: Option<crate::resources::fitting_server::ShipFitting>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equipment_recovery:
+        Option<crate::resources::equipment_recovery_server::ShipEquipmentRecovery>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logistics: Option<crate::resources::logistics::LogisticsState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub production: Option<crate::resources::production::ProductionState>,

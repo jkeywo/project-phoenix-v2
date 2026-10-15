@@ -1220,6 +1220,9 @@ pub(super) fn apply_entity_state_with(
 ) {
     super::fitting::apply(world, entity, row);
     let mut entity_mut = world.entity_mut(entity);
+    if let Some(saved) = &row.equipment_recovery {
+        entity_mut.insert(saved.clone());
+    }
     if let (Some(mut provider), Some(state)) = (
         entity_mut.get_mut::<crate::resources::ports_server::PortProviderState>(),
         row.port_provider.as_ref(),

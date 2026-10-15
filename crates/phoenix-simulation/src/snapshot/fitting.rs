@@ -1,5 +1,6 @@
 //! Fit-first continuation preflight. No machinery runs or live state changes here.
 use super::*;
+use crate::core::messages::SystemId;
 use crate::resources::fitting::{CompiledFitting, EquipmentLocation};
 use crate::resources::fitting_server::{CompiledShipFitting, RefitStage, ShipFitting};
 use std::collections::{BTreeMap, BTreeSet};
@@ -16,7 +17,61 @@ pub(super) fn validate_entity(
             fitted_power(&profile.0, saved, row).map(|_| ())
         }
         _ => Err("saved equipment owner disagrees with accepted fitting capability".into()),
+    }?;
+    match (
+        world.get::<crate::resources::recovery_server::CompiledShipRecovery>(entity),
+        &row.equipment_recovery,
+    ) {
+        (None, None) => Ok(()),
+        (Some(tool), Some(state)) => crate::resources::equipment_recovery_server::validate_state(
+            state,
+            &tool.0,
+            world
+                .get::<CompiledShipFitting>(entity)
+                .map(|profile| &profile.0),
+            u64::MAX,
+        ),
+        _ => Err("equipment recovery continuation disagrees with its actual fitted tool".into()),
     }
+}
+
+fn definitions(
+    world: &World,
+    row: &EntityState,
+) -> Result<
+    (
+        Option<CompiledFitting>,
+        Option<crate::resources::recovery::RecoveryToolConfig>,
+    ),
+    String,
+> {
+    if let Some(entity) = world
+        .try_query::<(Entity, &EntityUuid)>()
+        .and_then(|mut query| {
+            query
+                .iter(world)
+                .find_map(|(entity, uuid)| (uuid.0 == row.uuid).then_some(entity))
+        })
+    {
+        return Ok((
+            world
+                .get::<CompiledShipFitting>(entity)
+                .map(|profile| profile.0.clone()),
+            world
+                .get::<crate::resources::recovery_server::CompiledShipRecovery>(entity)
+                .map(|tool| tool.0.clone()),
+        ));
+    }
+    let Some(origin) = &row.spawn else {
+        return Ok((None, None));
+    };
+    let config = origin
+        .resolve(
+            &crate::entities::loader::WasmTemplateLoader,
+            &mut Vec::new(),
+        )
+        .ok_or("cannot resolve saved equipment entity")?;
+    Ok((CompiledFitting::compile(&config)?, config.recovery.clone()))
 }
 
 pub(super) fn validate_roster(
@@ -24,37 +79,34 @@ pub(super) fn validate_roster(
     snapshot: &PhoenixSnapshot,
 ) -> Result<(), (String, String)> {
     let mut all_items = BTreeSet::new();
+    let mut profiles = BTreeMap::new();
     for row in &snapshot.entities {
         let result = (|| {
-            let live = world
-                .try_query::<(Entity, &EntityUuid)>()
-                .and_then(|mut query| {
-                    query
-                        .iter(world)
-                        .find_map(|(entity, uuid)| (uuid.0 == row.uuid).then_some(entity))
-                });
-            let profile = if let Some(entity) = live {
-                world
-                    .get::<CompiledShipFitting>(entity)
-                    .map(|profile| profile.0.clone())
-            } else if let Some(origin) = &row.spawn {
-                let config = origin
-                    .resolve(
-                        &crate::entities::loader::WasmTemplateLoader,
-                        &mut Vec::new(),
+            let (profile, tool) = definitions(world, row)?;
+            match (&tool, &row.equipment_recovery) {
+                (None, None) => {}
+                (Some(tool), Some(state)) => {
+                    crate::resources::equipment_recovery_server::validate_state(
+                        state,
+                        tool,
+                        profile.as_ref(),
+                        snapshot.tick,
+                    )?
+                }
+                _ => {
+                    return Err(
+                        "equipment recovery continuation disagrees with its actual fitted tool"
+                            .into(),
                     )
-                    .ok_or("cannot resolve saved fitting entity")?;
-                CompiledFitting::compile(&config)?
-            } else {
-                None
-            };
-            match (profile, &row.fitting) {
-                (None, None) => Ok(()),
+                }
+            }
+            match (&profile, &row.fitting) {
+                (None, None) => Ok::<(), String>(()),
                 (Some(profile), Some(saved)) => {
-                    validate_state(&profile, saved, row, snapshot.tick)?;
+                    validate_state(profile, saved, row, snapshot.tick)?;
                     // This compiles the complete candidate definition, including
                     // absent entities, before ANY other continuation validation.
-                    let _ = fitted_power(&profile, saved, row)?;
+                    let _ = fitted_power(profile, saved, row)?;
                     for item in saved.equipment.assemblies.keys() {
                         if !all_items.insert(item.clone()) {
                             return Err(
@@ -67,9 +119,174 @@ pub(super) fn validate_roster(
                 _ => {
                     Err("saved equipment owner disagrees with the accepted fitting profile".into())
                 }
+            }?;
+            if let Some(profile) = profile {
+                profiles.insert(row.uuid.clone(), profile);
             }
+            Ok(())
         })();
         result.map_err(|reason| (row.uuid.clone(), reason))?;
+    }
+    validate_shared_claims(snapshot, &profiles)
+}
+
+fn validate_shared_claims(
+    snapshot: &PhoenixSnapshot,
+    profiles: &BTreeMap<String, CompiledFitting>,
+) -> Result<(), (String, String)> {
+    let rows: BTreeMap<_, _> = snapshot
+        .entities
+        .iter()
+        .map(|row| (row.uuid.as_str(), row))
+        .collect();
+    let mut claims: BTreeMap<(String, SystemId, String), (String, SystemId, u64)> = BTreeMap::new();
+    let mut add = |uuid: &str,
+                   system: &SystemId,
+                   component: &str,
+                   owner: &str,
+                   controller: &SystemId,
+                   id: u64|
+     -> Result<(), (String, String)> {
+        let key = (uuid.to_owned(), system.clone(), component.to_owned());
+        if claims.iter().any(|((entity, target, part), claim)| {
+            entity == uuid
+                && target == system
+                && (part == component || part == "*" || component == "*")
+                && claim != &(owner.to_owned(), controller.clone(), id)
+        }) {
+            return Err((
+                owner.to_owned(),
+                "multiple jobs own the same physical equipment task".into(),
+            ));
+        }
+        claims.insert(key, (owner.to_owned(), controller.clone(), id));
+        Ok(())
+    };
+    for row in &snapshot.entities {
+        if let Some(jobs) = row.repair.as_ref().and_then(|repair| repair.jobs.as_ref()) {
+            for job in jobs
+                .teams
+                .iter()
+                .flatten()
+                .filter(|job| job.outcome.is_none())
+            {
+                let target = match &job.activity {
+                    crate::jobs::repair::RepairActivity::Internal { .. } => jobs
+                        .physical_work
+                        .get(&job.id.0)
+                        .and_then(|work| work.target.as_ref())
+                        .map(|target| (row.uuid.as_str(), target)),
+                    crate::jobs::repair::RepairActivity::External { target } => jobs
+                        .external_physical_work
+                        .get(&job.id.0)
+                        .and_then(|work| work.target.as_ref())
+                        .map(|work| (target.as_str(), work)),
+                    crate::jobs::repair::RepairActivity::Refit { target, phase, .. } => {
+                        if !matches!(phase, crate::core::messages::TeamSlot::Returning { .. }) {
+                            add(&row.uuid, target, "*", &row.uuid, &job.owner, job.id.0)?;
+                        }
+                        None
+                    }
+                };
+                if let Some((
+                    uuid,
+                    phoenix_model::damage::RepairWorkTarget::Component { system, component },
+                )) = target
+                {
+                    add(uuid, system, component, &row.uuid, &job.owner, job.id.0)?;
+                }
+            }
+        }
+        let Some(job) = row
+            .equipment_recovery
+            .as_ref()
+            .and_then(|owner| owner.job.as_ref())
+            .filter(|job| job.outcome.is_none())
+        else {
+            continue;
+        };
+        let work = &job.activity;
+        add(
+            &work.target_uuid,
+            &work.source_system,
+            &work.source_component,
+            &row.uuid,
+            &job.owner,
+            job.id.0,
+        )?;
+        if let Some(source) = rows.get(work.target_uuid.as_str()) {
+            let source_profile = profiles.get(&work.target_uuid).ok_or_else(|| {
+                (
+                    row.uuid.clone(),
+                    "equipment source lost its supported profile".into(),
+                )
+            })?;
+            let slot = source_profile
+                .slot(&work.source_slot)
+                .map_err(|reason| (row.uuid.clone(), reason))?;
+            let item = source
+                .fitting
+                .as_ref()
+                .and_then(|state| state.equipment.installed(&work.source_slot));
+            let matches = item
+                .is_some_and(|item| item.id == work.assembly && item.definition == work.definition)
+                && slot.system == work.source_system
+                && slot.operation_component == work.source_component;
+            if !matches && !(job.paused && work.waiting == "source_unavailable") {
+                return Err((
+                    row.uuid.clone(),
+                    "equipment work no longer names the actual source assembly".into(),
+                ));
+            }
+        } else if !(job.paused && work.waiting == "source_unavailable") {
+            return Err((
+                row.uuid.clone(),
+                "active equipment work source is absent".into(),
+            ));
+        }
+    }
+    for row in &snapshot.entities {
+        let Some(profile) = profiles.get(&row.uuid) else {
+            continue;
+        };
+        let Some(state) = &row.fitting else { continue };
+        for locker in &profile.config().lockers {
+            let mut used = 0_u64;
+            for item in state.equipment.assemblies.values().filter(|item|matches!(&item.location,EquipmentLocation::Stored{locker:id} if id==&locker.id)) {
+                used=used.saturating_add(profile.equipment(&item.definition).map_err(|reason|(row.uuid.clone(),reason))?.storage_space as u64);
+            }
+            for work in state
+                .work
+                .values()
+                .filter(|work| work.locker == locker.id && work.stage != RefitStage::Installing)
+            {
+                if let Some(old) = work
+                    .removed_item
+                    .as_ref()
+                    .and_then(|id| state.equipment.assemblies.get(id))
+                {
+                    used = used.saturating_add(
+                        profile
+                            .equipment(&old.definition)
+                            .map_err(|reason| (row.uuid.clone(), reason))?
+                            .storage_space as u64,
+                    );
+                }
+            }
+            if let Some(owner) = &row.equipment_recovery {
+                used = used.saturating_add(
+                    crate::resources::equipment_recovery_server::reserved_space(
+                        owner, &locker.id, profile,
+                    ),
+                );
+            }
+            if used > locker.space as u64 {
+                return Err((
+                    row.uuid.clone(),
+                    "equipment jobs overbook actual finite receiving space".into(),
+                ));
+            }
+        }
     }
     Ok(())
 }

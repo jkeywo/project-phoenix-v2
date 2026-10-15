@@ -1422,6 +1422,9 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                     fitting: entity
                         .get::<crate::resources::fitting_server::ShipFitting>()
                         .cloned(),
+                    equipment_recovery: entity
+                        .get::<crate::resources::equipment_recovery_server::ShipEquipmentRecovery>()
+                        .cloned(),
                     recovery: entity
                         .get::<crate::resources::recovery_server::ShipRecovery>()
                         .map(|owner| {

@@ -39,7 +39,12 @@ pub(crate) fn register(app: &mut App) {
     )
     .register_admitted_consumer(ConsumerMatcher::kind(RECOVERY_KIND).with_feedback(
         FeedbackAddress::DeclaredKindOnly,
-        &[Payload::SetRecoveryEnabled, Payload::SetRecoverySelection],
+        &[
+            Payload::SetRecoveryEnabled,
+            Payload::SetRecoverySelection,
+            Payload::RecoverEquipment,
+            Payload::CancelEquipmentRecovery,
+        ],
     ));
     app.add_systems(
         FixedUpdate,
@@ -92,7 +97,7 @@ pub(crate) fn install_source(
 }
 
 /// A feed confers information only. Co-hosted Consoles never pool contacts.
-fn known_contacts(
+pub(crate) fn known_contacts(
     config: &crate::ship::config::ShipConfig,
     owner: &SystemId,
     boards: &std::collections::HashMap<SystemId, SystemBlackboard>,
@@ -154,6 +159,7 @@ fn operate_ai(
         Option<&EntityUuid>,
         &ShipSystemControlSources,
         &ShipRecovery,
+        Option<&crate::resources::equipment_recovery_server::ShipEquipmentRecovery>,
         &ShipConfigComponent,
         &crate::server_app::ShipSystemBlackboards,
         &crate::ai::state_tree_runtime::ShipAiTreePrograms,
@@ -162,7 +168,9 @@ fn operate_ai(
     )>,
 ) {
     use phoenix_sim_gameplay::ai::host::{decide_tree, TreeHostOutcome};
-    for (uuid, sources, state, config, boards, programs, mut runtimes, mut admitted) in &mut ships {
+    for (uuid, sources, state, equipment, config, boards, programs, mut runtimes, mut admitted) in
+        &mut ships
+    {
         if !crate::ai::host::ai_operates(&sources.0, &state.0.owner) {
             continue;
         }
@@ -173,9 +181,14 @@ fn operate_ai(
         let Some(runtime) = runtimes.0.get_mut(&state.0.owner) else {
             continue;
         };
+        let equipment_active =
+            equipment.is_some_and(crate::resources::equipment_recovery_server::active);
         let facts = BTreeMap::from([
             ("enabled".into(), board.enabled),
-            ("recovery_available".into(), board.next_recovery.is_some()),
+            (
+                "recovery_available".into(),
+                board.next_recovery.is_some() || equipment_active,
+            ),
         ]);
         let channels = BTreeMap::from([("recover".into(), false)]);
         let Ok(TreeHostOutcome::Evaluated(result)) = decide_tree(
@@ -189,6 +202,21 @@ fn operate_ai(
         ) else {
             continue;
         };
+        if equipment_active {
+            let enabled = result.intents.get("recover") == Some(&true);
+            if state.0.enabled != enabled {
+                crate::command_admission::ai_emit::emit_ai_command(
+                    uuid,
+                    state.0.owner.clone(),
+                    Control::SetRecoveryEnabled { enabled },
+                    sources,
+                    &sessions,
+                    Some(config),
+                    &mut admitted,
+                );
+            }
+            continue;
+        }
         let choice = board
             .next_recovery
             .as_ref()
@@ -362,7 +390,7 @@ fn selection_limit(
 }
 
 #[allow(clippy::type_complexity)]
-fn tick(
+pub(crate) fn tick(
     time: Res<Time<Fixed>>,
     tick: Res<crate::sim_tick::SimTick>,
     source_query: SourceQuery,
@@ -383,7 +411,10 @@ fn tick(
         &crate::server_app::ShipSystemBlackboards,
         &AdmittedCommands,
         Option<&crate::ship::compartment_damage::ShipDamage>,
-        Option<&mut crate::ship::power::ShipPowerSystem>,
+        (
+            Option<&mut crate::ship::power::ShipPowerSystem>,
+            Option<&crate::resources::equipment_recovery_server::ShipEquipmentRecovery>,
+        ),
     )>,
 ) {
     let sources = sources(&source_query);
@@ -405,7 +436,7 @@ fn tick(
             boards,
             admitted,
             damage,
-            mut power,
+            (mut power, equipment),
         )) = ships.iter_mut().find(|(uuid, ..)| uuid.0 == id)
         else {
             continue;
@@ -522,7 +553,16 @@ fn tick(
             Ok(deficit.min(logistics.0.receiving_headroom(&stocks, &destination.id)?))
         })()
         .unwrap_or(0);
-        let limit = observed_limit.min(actual_limit);
+        let equipment_active = equipment
+            .is_some_and(crate::resources::equipment_recovery_server::active)
+            || admitted
+                .for_target(&system.0)
+                .any(|command| matches!(command.payload, Control::RecoverEquipment { .. }));
+        let limit = if equipment_active {
+            0
+        } else {
+            observed_limit.min(actual_limit)
+        };
         let mut next_power = power.as_deref().cloned();
         let result = next.advance(
             &profile.0,

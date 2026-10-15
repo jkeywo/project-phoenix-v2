@@ -66,7 +66,8 @@ pub(crate) fn register(app: &mut App) {
         FixedUpdate,
         tick.in_set(crate::sim_sets::SimSet::Modifiers)
             .after(crate::infrastructure::server::tick_infrastructure_condition)
-            .after(crate::resources::recovery_server::tick),
+            .after(crate::resources::recovery_server::tick)
+            .before(crate::resources::server::tick_resource_transfers),
     );
 }
 

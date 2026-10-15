@@ -604,6 +604,10 @@ pub fn apply_external_repair(
             Option<&InfrastructureCondition>,
         )>,
         Query<(&EntityUuid, &ShipRepairTeams)>,
+        Query<(
+            &EntityUuid,
+            &crate::resources::equipment_recovery_server::ShipEquipmentRecovery,
+        )>,
     )>,
 ) {
     use crate::jobs::repair::RepairStockAction;
@@ -741,6 +745,20 @@ pub fn apply_external_repair(
                         .insert((source.0.clone(), *id));
                 }
             }
+        }
+    }
+    for (actor, recovery) in set.p3().iter() {
+        if let Some(job) = recovery.job.as_ref().filter(|job| job.outcome.is_none()) {
+            claims
+                .entry((
+                    job.activity.target_uuid.clone(),
+                    RepairWorkTarget::Component {
+                        system: job.activity.source_system.clone(),
+                        component: job.activity.source_component.clone(),
+                    },
+                ))
+                .or_default()
+                .insert((actor.0.clone(), job.id.0));
         }
     }
     let mut adjustments = Vec::new();

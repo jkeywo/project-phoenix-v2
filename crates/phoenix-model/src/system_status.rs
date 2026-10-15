@@ -40,6 +40,25 @@ pub struct SystemStatus {
     pub delegated: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fitting: Vec<FittingSlotView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fitting_planner: Option<FittingPlannerContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equipment_recovery: Option<crate::equipment_recovery_ui::EquipmentRecoveryView>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FittingPlannerContext {
+    pub hull_path: String,
+    pub content_id: String,
+    pub slots: Vec<FittingPlannerSlot>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FittingPlannerSlot {
+    pub slot: String,
+    pub system: crate::messages::SystemId,
+    pub home_station: String,
+    pub default_equipment: String,
+    pub compatible_equipment: Vec<String>,
 }
 
 /// Permitted fitting facts only: no private component dose or AI memory.
@@ -98,6 +117,8 @@ impl SystemStatus {
                 .collect(),
             delegated,
             fitting: Vec::new(),
+            fitting_planner: None,
+            equipment_recovery: None,
         };
         if offline && !matches!(damage, Some(DamageTier::Disabled | DamageTier::Destroyed)) {
             status.unavailable(StatusReasonCode::Offline, None);

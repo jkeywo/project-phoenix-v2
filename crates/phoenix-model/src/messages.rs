@@ -30,7 +30,7 @@ use uuid::Uuid;
 /// an older client's level-zero control would otherwise suggest hold fire.
 /// Revision 11 carries typed local stores, recovery selections and visit-bound
 /// port service/order projections; earlier clients cannot operate those views.
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 12;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).
@@ -1160,6 +1160,10 @@ pub struct TutorialOverlayWire {
 /// know about every field.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ShipClientConfig {
+    /// Accepted hull definitions for optional pre-launch personal plans. This
+    /// conveys no inventory, machinery state or command authority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fitting_planner: Option<crate::system_status::FittingPlannerContext>,
     /// Detection range for the helm radar widget, in world units. Sourced
     /// from `[helm_console.radar] range` in the ship TOML.
     #[serde(default = "default_helm_radar_range")]
@@ -1435,6 +1439,7 @@ fn default_hostile_arc_color() -> [f32; 4] {
 impl Default for ShipClientConfig {
     fn default() -> Self {
         Self {
+            fitting_planner: None,
             helm_radar_range: default_helm_radar_range(),
             repair_team_count: default_repair_team_count(),
             repair_travel_secs: default_repair_travel_secs(),

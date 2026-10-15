@@ -464,6 +464,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("recovery", fold_recovery_namespace),
     ("ports", fold_ports_namespace),
     ("fitting", fold_fitting_namespace),
+    ("equipment-recovery", fold_equipment_recovery_namespace),
     ("physical-damage", fold_physical_damage_namespace),
     ("disablement-observation", fold_disablement_namespace),
 ];
@@ -2535,6 +2536,21 @@ fn fold_fitting_namespace(world: &World, acc: u64) -> u64 {
             let mut state = owner.clone();
             for work in state.work.values_mut() {
                 work.progress = f32::from_bits(canon_f32(work.progress));
+            }
+            Some(state)
+        },
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+fn fold_equipment_recovery_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "equipment-recovery",
+        |owner: &crate::resources::equipment_recovery_server::ShipEquipmentRecovery| {
+            let mut state = owner.clone();
+            if let Some(job) = &mut state.job {
+                job.activity.progress = f32::from_bits(canon_f32(job.activity.progress));
             }
             Some(state)
         },

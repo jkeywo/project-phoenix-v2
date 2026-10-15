@@ -909,6 +909,7 @@ fn build_system_status(
     std::collections::BTreeMap<SystemId, phoenix_model::identity::ConsoleId>,
 ) {
     let mut query = world.query_filtered::<(
+        Entity,
         &crate::ship::components::ShipConfigComponent,
         &crate::ship_plugin::ShipSystemControlSources,
         Option<&crate::entities::spawner::EntitySystemHull>,
@@ -920,8 +921,11 @@ fn build_system_status(
         Option<&crate::resources::fitting_server::CompiledShipFitting>,
         Option<&crate::resources::fitting_server::ShipFitting>,
         Option<&crate::console::repair::server::ShipRepairTeams>,
+        Option<&crate::resources::fitting_server::FittingPlannerCatalog>,
+        Option<&crate::entities::spawner::EntityTemplatePath>,
     ), With<LocalShip>>();
     let Some((
+        entity,
         config,
         sources,
         hull,
@@ -933,6 +937,8 @@ fn build_system_status(
         fitting_profile,
         fitting_state,
         teams,
+        planner,
+        hull_path,
     )) = query.iter(world).next()
     else {
         return Default::default();
@@ -956,6 +962,28 @@ fn build_system_status(
             teams,
             &mut status,
         );
+    }
+    if let Some((planner, path)) = planner.zip(hull_path) {
+        let mut context = planner.0.clone();
+        context.hull_path = path.0.clone();
+        for status in status
+            .values_mut()
+            .filter(|status| !status.fitting.is_empty())
+        {
+            status.fitting_planner = Some(context.clone());
+        }
+    }
+    if let Some(mut view) = crate::resources::equipment_recovery_server::project(world, entity) {
+        if let Some(owner) =
+            world.get::<crate::resources::equipment_recovery_server::ShipEquipmentRecovery>(entity)
+        {
+            let permitted = sources.0.policy_for(&owner.owner).accept_human_input;
+            view.can_start &= permitted;
+            view.can_cancel &= permitted;
+            if let Some(status) = status.get_mut(&owner.owner) {
+                status.equipment_recovery = Some(view);
+            }
+        }
     }
     let owners = config
         .0

@@ -2,7 +2,8 @@
 use crate::messages::SystemId;
 use serde::{Deserialize, Serialize};
 
-/// Ship-scoped assignment identity. A redirect keeps its committed team's job.
+/// Assignment identity scoped to its ship and owning System. A redirect keeps
+/// its committed team's job; unrelated System owners have independent mints.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct JobId(pub u64);
 

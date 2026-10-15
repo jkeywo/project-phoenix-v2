@@ -46,3 +46,5 @@ pub mod compartment_damage;
 pub mod physical_damage;
 
 pub mod disablement;
+
+pub mod transit;

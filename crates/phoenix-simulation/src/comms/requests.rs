@@ -48,6 +48,9 @@ pub(crate) fn response_facts(
 ) -> crate::world::flags::AiFacts {
     use crate::entities::ai_flag_hosts as fid;
     let mut facts = crate::world::flags::AiFacts::new();
+    if is_request(message) {
+        facts.set_fact(fid::REQUEST_REPORT_STATUS, 1.0);
+    }
     facts.set_fact(fid::RESPONSE_COUNT, 2.0);
     facts.set_fact(fid::AVAILABLE_RESPONSE_COUNT, 2.0);
     facts.set_fact(fid::IMPORTANT_RESPONSE_COUNT, 0.0);

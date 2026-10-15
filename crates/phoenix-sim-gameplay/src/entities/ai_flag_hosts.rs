@@ -558,6 +558,7 @@ pub const IS_READ: FactId = FactId("is_read");
 pub const IS_ORPHANED: FactId = FactId("is_orphaned");
 pub const SENDER_IN_RANGE: FactId = FactId("sender_in_range");
 pub const COMMS_AVAILABLE: FactId = FactId("comms_available");
+pub const REQUEST_REPORT_STATUS: FactId = FactId("request_report_status");
 pub const POWER_RATING: FactId = FactId("power_rating");
 pub const CONTACT_COUNT: FactId = FactId("contact_count");
 // Weapon banks / tubes
@@ -683,6 +684,7 @@ pub const FACT_CATALOGUE: &[FactId] = &[
     IS_READ,
     IS_ORPHANED,
     SENDER_IN_RANGE,
+    REQUEST_REPORT_STATUS,
     COMMS_AVAILABLE,
     POWER_RATING,
     CONTACT_COUNT,
@@ -977,6 +979,13 @@ const COMMS_RESPONSE_FACTS: &[FactDescriptor] = &[
         "1.0 while the ship is at red alert",
         "false — reads as not-alert",
         "console::comms::server::seed_comms_response_facts",
+    ),
+    ship(
+        REQUEST_REPORT_STATUS,
+        "comms",
+        "1.0 for a permitted heard typed ReportStatus request",
+        "absent for ordinary plot/text messages",
+        "comms::requests::response_facts",
     ),
     ship(
         COMMS_AVAILABLE,

@@ -298,6 +298,17 @@ fn existing_response_controller_reads_partial_work_pauses_for_human_then_emits_n
         .resource::<CommsRuntime>()
         .pending_ai_responses
         .contains_key(&key));
+    let read = messages(&app, "receiver")[0].clone();
+    let known = crate::comms::requests::response_facts(&read, true, None);
+    assert_eq!(
+        known.get(crate::entities::ai_flag_hosts::REQUEST_REPORT_STATUS.name()),
+        Some(1.0)
+    );
+    assert_eq!(
+        known.get(crate::entities::ai_flag_hosts::SENDER_IN_RANGE.name()),
+        None,
+        "ordinary authored request response cannot borrow reverse-link viability"
+    );
     let commands = &app.world().get::<AdmittedCommands>(receiver).unwrap().0;
     assert_eq!(
         commands.len(),
@@ -448,6 +459,14 @@ fn request_facts_withhold_unbound_alert_survival_and_remote_range_instead_of_see
     let facts = crate::comms::requests::response_facts(&message, true, Some(4.0));
     assert_eq!(facts.get("response_count"), Some(2.0));
     assert_eq!(facts.get("comms_available"), Some(1.0));
+    assert_eq!(facts.get("request_report_status"), Some(1.0));
+    let mut plain = message.clone();
+    plain.transmission.as_mut().unwrap().content = CommsRadioContent::Text;
+    assert_eq!(
+        crate::comms::requests::response_facts(&plain, true, Some(4.0))
+            .get("request_report_status"),
+        None
+    );
     for name in ["red_alert", "is_orphaned", "sender_in_range"] {
         assert_eq!(facts.get(name), None, "{name}");
     }

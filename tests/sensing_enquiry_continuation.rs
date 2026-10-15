@@ -390,8 +390,28 @@ fn human_intrusive_question_resumes_under_ordinary_ai_and_its_real_receiver_driv
         live.update();
         resumed.update();
     }
+    let held_contacts: Vec<_> = {
+        let config = &live.world().get::<ShipConfigComponent>(observer).unwrap().0;
+        let boards = live.world().get::<ShipSystemBlackboards>(observer).unwrap();
+        let view = config.observations_for_system(&id("sensors"), &boards.0);
+        boards
+            .0
+            .keys()
+            .filter_map(|key| view.get(key))
+            .filter_map(project_phoenix::science::contact_routing::observations)
+            .flatten()
+            .map(|track| {
+                (
+                    &track.contact_id,
+                    track.predicted,
+                    track.selectable,
+                    &track.identity,
+                )
+            })
+            .collect()
+    };
     assert!(ordinary_ai_asked_after_completion,
-        "ordinary bound AI still admits the pending default request once the human's work completes");
+        "ordinary bound AI still admits the pending default request once the human's work completes; matching during work={same_request_during_work}; held={held_contacts:?}");
     assert!(
         same_request_during_work,
         "an actually observed matching mission request must exercise the bound AI handoff"

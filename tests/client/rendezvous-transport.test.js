@@ -79,6 +79,7 @@ function makeWorld({ queued = false } = {}) {
     const role = url.endsWith('/v1/host') ? ROLE_HOST : ROLE_CLIENT;
     const ws = {
       readyState: 1,
+      bufferedAmount: 0,
       onopen: null, onmessage: null, onerror: null, onclose: null,
       send(text) { dispatch(registry.receive(id, JSON.parse(text))); },
       close() {
@@ -99,7 +100,7 @@ function makeWorld({ queued = false } = {}) {
     return ws;
   }
 
-  return { registry, socket };
+  return { registry, socket, sockets };
 }
 
 /**
@@ -127,6 +128,7 @@ function makePeerFactory({ configurePeer = () => {} } = {}) {
       init: init || {},
       origin,
       sent: [],
+      bufferedAmount: 0,
       readyState: 'connecting',
       onopen: null, onmessage: null, onclose: null, onerror: null,
       _remote: null,
@@ -912,6 +914,40 @@ describe('one host, several crew clients', () => {
 });
 
 describe('the lossy snapshot channel', () => {
+  it('opt-in bounded sends never fall back while ordinary commands keep working', async () => {
+    const world = makeWorld();
+    const {host, code, factories, announced, inbound} = await hostOn(world);
+    const received = [];
+    const joiner = createRendezvousJoiner({
+      base: 'https://rendezvous.test', data: DATA, code: code.suffix,
+      factories, onData: msg => received.push(msg),
+      getIdent: () => ({token: 'bounded', name: 'Bounded'}),
+    });
+    try {
+      await settle();
+      const bounds = {maxBytes: 20480, maxBufferedBytes: 8192};
+      const up = channelsNamed(factories, 'snapshot', 'offer').at(-1);
+      const down = channelsNamed(factories, 'snapshot', 'answer').at(-1);
+      expect(joiner.sendSnapshotOnly('{"type":"up"}', bounds)).toBe(true);
+      expect(announced[0].sendSnapshotOnly('{"type":"down"}', bounds)).toBe(true);
+      await settle();
+      expect(inbound.some(msg => msg.type === 'up')).toBe(true);
+      expect(received.some(msg => msg.type === 'down')).toBe(true);
+      up.bufferedAmount = down.bufferedAmount = 8193;
+      expect(joiner.sendSnapshotOnly('{"type":"late"}', bounds)).toBe(false);
+      expect(announced[0].sendSnapshotOnly('{"type":"late"}', bounds)).toBe(false);
+      up.readyState = down.readyState = 'closed';
+      expect(joiner.sendSnapshotOnly('{"type":"absent"}', bounds)).toBe(false);
+      expect(announced[0].sendSnapshotOnly('{"type":"absent"}', bounds)).toBe(false);
+      joiner.send('Command', {value: 1});
+      announced[0].send('{"type":"Feedback"}');
+      await settle();
+      expect(inbound.some(msg => msg.type === 'Command')).toBe(true);
+      expect(received.some(msg => msg.type === 'Feedback')).toBe(true);
+      expect(inbound.some(msg => ['late', 'absent'].includes(msg.type))).toBe(false);
+      expect(received.some(msg => ['late', 'absent'].includes(msg.type))).toBe(false);
+    } finally {joiner.close(); host.close();}
+  });
   const joinWith = async (factories, code, opts = {}) => {
     const joiner = createRendezvousJoiner({
       base: 'https://rendezvous.test',
@@ -1744,6 +1780,35 @@ function watchHostFrames(world) {
 }
 
 describe('the WebSocket game relay', () => {
+  it('carries bounded Snapshot-only packets on the existing fallback pair', async () => {
+    const world = makeWorld();
+    const {host, code, announced, inbound} = await hostOn(world);
+    const received = [];
+    const joiner = createRendezvousJoiner({
+      base: 'https://rendezvous.test', data: DATA, code: code.suffix,
+      factories: unlinkableFactories(world),
+      levers: transportLeversFromLocation('?transport=ws-relay'),
+      getIdent: () => ({token: 'ephemeral-relay', name: 'Relay'}),
+      onData: msg => received.push(msg),
+    });
+    try {
+      await settle();
+      const bounds = {maxBytes: 20480, maxBufferedBytes: 32768};
+      expect(joiner.sendSnapshotOnly('{"type":"up"}', bounds)).toBe(true);
+      expect(announced[0].sendSnapshotOnly('{"type":"down"}', bounds)).toBe(true);
+      expect(joiner.sendSnapshotOnly('x'.repeat(20481), bounds)).toBe(false);
+      joiner.send('Command', {value: 1});
+      await settle();
+      expect(inbound.some(msg => msg.type === 'up')).toBe(true);
+      expect(inbound.some(msg => msg.type === 'Command')).toBe(true);
+      expect(received.some(msg => msg.type === 'down')).toBe(true);
+      // Real physical sockets can become unwritable before their close event
+      // reaches the still-open relay pair. Neither direction reports success.
+      for (const socket of world.sockets.values()) socket.readyState = 3;
+      expect(joiner.sendSnapshotOnly('{"type":"stale"}', bounds)).toBe(false);
+      expect(announced[0].sendSnapshotOnly('{"type":"stale"}', bounds)).toBe(false);
+    } finally {joiner.close(); host.close();}
+  });
   it('gets a joiner all the way in when no direct link is possible', async () => {
     const world = makeWorld();
     const { code, inbound, announced } = await hostOn(world);

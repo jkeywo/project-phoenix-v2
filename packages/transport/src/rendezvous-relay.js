@@ -120,6 +120,8 @@ export function createRelayChannelPair({
   send,
   to = null,
   bufferedAmount = () => 0,
+  writable = () => true,
+  measureFrame = body => relayPayloadBytes(JSON.stringify(body)),
   onDegraded = () => {},
   onFailure = () => {},
   onLog = () => {},
@@ -148,13 +150,19 @@ export function createRelayChannelPair({
   function makeChannel(label, cls) {
     const channel = {
       label,
+      // Same actual physical backlog used by ordinary relay shedding. Optional
+      // drop-only callers must never substitute a fabricated empty buffer.
+      get bufferedAmount() { return writable() ? bufferedAmount() : Infinity; },
+      sendByteLength(payload) {
+        return measureFrame({type: 'relay', class: cls, payload, ...(to ? {to} : {})});
+      },
       readyState: 'connecting',
       onopen: null,
       onmessage: null,
       onclose: null,
       onerror: null,
       send(payload) {
-        if (channel.readyState !== 'open') return;
+        if (channel.readyState !== 'open' || !writable()) return false;
         const text = typeof payload === 'string' ? payload : String(payload);
         // Measured by the SAME function the service measures with, so a
         // refusal here can never disagree with the ceiling there.
@@ -163,10 +171,10 @@ export function createRelayChannelPair({
             // The lossy class losing a frame is the lossy class working.
             dropped += 1;
             onDegraded({ dropped, reason: 'too-large' });
-            return;
+            return false;
           }
           failLink('relay-too-large', relayPayloadBytes(text));
-          return;
+          return false;
         }
         if (cls === RELAY_SNAPSHOT_LABEL && bufferedAmount() > bounds.maxSendBufferBytes) {
           // The lossy class staying lossy. Queuing this behind an existing
@@ -174,9 +182,9 @@ export function createRelayChannelPair({
           // exists to avoid, and the next tick supersedes it anyway.
           dropped += 1;
           onDegraded({ dropped, reason: 'send-buffer' });
-          return;
+          return false;
         }
-        send({ type: 'relay', class: cls, payload: text, ...(to ? { to } : {}) });
+        return send({ type: 'relay', class: cls, payload: text, ...(to ? { to } : {}) }) !== false;
       },
       close() {
         if (channel.readyState === 'closed') return;

@@ -1,4 +1,5 @@
 import { RELIABLE_CHANNEL as SHARED_RELIABLE, SNAPSHOT_CHANNEL as SHARED_SNAPSHOT } from './rendezvous-protocol.js';
+import { sendSnapshotOnly } from './snapshot-only.js';
 /**
  * gui/rendezvous-transport.js — the Phoenix crew transport (issues #1111, #1112).
  *
@@ -364,6 +365,10 @@ function connectionAdapter(peerId, channel, pc, hooks = {}) {
     snapshotChannel: null,
     get open() { return channel.readyState === 'open'; },
     get readyState() { return channel.readyState; },
+    /** Explicit ephemeral send; unlike send(..., 'snapshot'), never falls back. */
+    sendSnapshotOnly(encoded, bounds) {
+      return adapter.open && sendSnapshotOnly(adapter.snapshotChannel, encoded, bounds);
+    },
     /**
      * One reliable-channel send, and it may not throw.
      *
@@ -755,10 +760,13 @@ export function createRendezvousHost(opts) {
 
     const pair = createRelayChannelPair({
       send: (body) => {
-        if (socket && socket.readyState === 1) socket.send(frame(body.type, body));
+        if (!socket || socket.readyState !== 1) return false;
+        socket.send(frame(body.type, body)); return true;
       },
       to: id,
-      bufferedAmount: () => (socket && socket.bufferedAmount) || 0,
+      writable: () => socket?.readyState === 1,
+      bufferedAmount: () => socket?.bufferedAmount ?? Infinity,
+      measureFrame: body => new TextEncoder().encode(frame(body.type, body)).byteLength,
       limits: relayLimitsFromFrame(limits),
       onDegraded: ({ dropped }) => onPeerShedding(id, dropped, 'local'),
       onFailure: ({ reason }) => {
@@ -1475,9 +1483,12 @@ export function createRendezvousJoiner(opts) {
     if (gen !== generation) return;
     relay = createRelayChannelPair({
       send: (body) => {
-        if (socket && socket.readyState === 1) socket.send(frame(body.type, body));
+        if (!socket || socket.readyState !== 1) return false;
+        socket.send(frame(body.type, body)); return true;
       },
-      bufferedAmount: () => (socket && socket.bufferedAmount) || 0,
+      writable: () => socket?.readyState === 1,
+      bufferedAmount: () => socket?.bufferedAmount ?? Infinity,
+      measureFrame: body => new TextEncoder().encode(frame(body.type, body)).byteLength,
       limits: relayLimitsFromFrame(readyFrame && readyFrame.limits),
       onDegraded: ({ dropped }) => onDiag({ event: 'relay-degraded', dropped, from: 'client' }),
       onLog,
@@ -1785,6 +1796,10 @@ export function createRendezvousJoiner(opts) {
     get suffix() { return parsed.suffix; },
     get full() { return parsed.full; },
     get connected() { return linked(); },
+    /** Opaque Snapshot-only work is discarded before any Reliable fallback. */
+    sendSnapshotOnly(encoded, bounds) {
+      return linked() && sendSnapshotOnly(snapshot, encoded, bounds);
+    },
     /**
      * Send one ClientMessage. `deliveryClass === 'snapshot'` prefers the lossy
      * channel and falls back to the reliable one when it is not up — the same

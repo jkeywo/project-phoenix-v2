@@ -97,6 +97,11 @@ name = "Std"
 automated_systems = []
 detailed_systems = ["sensors","sensor-radar","passive-receiver","shields-system","shield-arc-fore","shield-arc-port","shield-arc-aft","shield-arc-starboard","signal-protection"]
 
+[[station.rating]]
+name = "Guard"
+automated_systems = ["passive-receiver","shields-system","shield-arc-fore","shield-arc-port","shield-arc-aft","shield-arc-starboard","signal-protection"]
+detailed_systems = ["sensors","sensor-radar"]
+
 [energy.reactor]
 sustainable_output_per_sec = 31.7
 max_output_per_sec = 47.55

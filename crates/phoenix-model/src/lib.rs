@@ -24,6 +24,7 @@ pub mod job;
 pub mod logistics;
 pub mod production;
 pub mod production_ui;
+pub mod recovery;
 
 pub mod logistics_ui;
 pub mod umbilical;

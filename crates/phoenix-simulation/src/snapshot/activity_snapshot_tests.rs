@@ -265,8 +265,9 @@ fn malformed_whole_candidate_refuses_before_any_clock_entity_or_evidence_write()
                     .as_mut()
                     .unwrap()
                     .scope
-                    .job
-                    .0 += 1
+                    .identity = phoenix_model::activity::ActivityExecutionIdentity::Physical {
+                    job: phoenix_model::job::JobId(999),
+                }
             }
             3 => {
                 scenario
@@ -288,8 +289,9 @@ fn malformed_whole_candidate_refuses_before_any_clock_entity_or_evidence_write()
                     .accepted
                     .as_mut()
                     .unwrap()
-                    .job
-                    .0 += 1
+                    .identity = phoenix_model::activity::ActivityExecutionIdentity::Physical {
+                    job: phoenix_model::job::JobId(999),
+                }
             }
             5 => {
                 scenario

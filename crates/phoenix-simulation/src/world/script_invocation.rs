@@ -52,8 +52,12 @@ impl WorldScriptRuntime {
         extra.insert("situation".into(), activation.instance.clone().into());
         extra.insert("actor".into(), instance.request.actor().to_owned().into());
         extra.insert("system".into(), instance.request.owner().0.clone().into());
-        if let Some(job) = &instance.accepted {
-            extra.insert("job".into(), job.job.0.to_string().into());
+        if let Some(job) = instance
+            .accepted
+            .as_ref()
+            .and_then(|execution| execution.physical_job())
+        {
+            extra.insert("job".into(), job.0.to_string().into());
         }
         self.host
             .try_call_scoped_budgeted(

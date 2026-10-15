@@ -203,7 +203,8 @@ fn rejected_request_has_no_binding_and_actual_return_does_not_credit_receive() {
         .accepted
         .as_ref()
         .unwrap()
-        .job;
+        .physical_job()
+        .unwrap();
     // Recall this physical batch and withdraw its standing local demand, so
     // ordinary Human machinery does not correctly schedule a replacement.
     send(

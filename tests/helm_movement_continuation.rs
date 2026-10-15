@@ -263,19 +263,41 @@ fn joined_direct_force_coast_and_turn_resume_before_ordinary_ai_assisted_handoff
         Control::SetThrust { value: 0.0 },
     );
     let coasting = pose(&live, entity);
-    steps(&mut live, 20);
-    close(velocity(coasting), velocity(pose(&live, entity)));
-    assert_ne!(
-        [coasting.x, coasting.z],
-        [pose(&live, entity).x, pose(&live, entity).z]
-    );
-    assert_eq!(
+    let coast_reserve = live
+        .world()
+        .get::<ShipPowerSystem>(entity)
+        .unwrap()
+        .0
+        .network()
+        .consumers[&id("helm-thrust")]
+        .energy;
+    for _ in 0..20 {
+        steps(&mut live, 1);
+        // The grant fraction retains the last requested actuator work. Neutral
+        // force does not request work, so prove actual expenditure each tick.
+        assert_eq!(
+            live.world()
+                .get::<ShipPowerSystem>(entity)
+                .unwrap()
+                .0
+                .emitted_work(&id("helm-thrust")),
+            0.0
+        );
+    }
+    assert!(
         live.world()
             .get::<ShipPowerSystem>(entity)
             .unwrap()
             .0
-            .last_work_fraction(&id("helm-thrust")),
-        Some(0.0)
+            .network()
+            .consumers[&id("helm-thrust")]
+            .energy
+            >= coast_reserve
+    );
+    close(velocity(coasting), velocity(pose(&live, entity)));
+    assert_ne!(
+        [coasting.x, coasting.z],
+        [pose(&live, entity).x, pose(&live, entity).z]
     );
     control(
         &mut live,

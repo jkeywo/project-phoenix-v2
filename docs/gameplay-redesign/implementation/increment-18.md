@@ -6,6 +6,15 @@ movement work after 15's initial integrated implementation and targeted checks.
 Full completion depends on 14/15's verified exits; remote formation request delivery
 joins 16's integrated channel consumer. Preparation starts no runtime or acceptance.
 
+Initial foundation integrated on main at `45a17f28` and `940a973c`: closed
+owner-bound Helm requests, finite intent validation and the shared physics
+calculation's assisted/direct interpretation. The existing physics entry point
+retains its assisted behaviour, and Cruiser opts into explicit axis bindings.
+Actual admission/application, paid integration, retained views, GUI/AI and
+Workshop/continuation joins are still being implemented in the movement lane.
+This foundation has independent source review; native execution and the playable
+exit are pending. An authored binding alone does not establish working controls.
+
 ## Outcome and selected scope
 
 Give Helm useful control of speed, heading, relative motion and travel while actual

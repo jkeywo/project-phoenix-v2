@@ -288,7 +288,7 @@
     {
       "id": 18,
       "title": "Movement and transit extensions",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         14,
         15

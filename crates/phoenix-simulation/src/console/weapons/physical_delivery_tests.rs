@@ -88,6 +88,30 @@ fn continuous_beam_retains_hit_sample_until_effective_target_changes() {
             effective_target_z: 0.0,
             zero_damage: false,
         });
+    app.world_mut()
+        .entity_mut(target)
+        .insert(crate::ship::shields::ShipShields(
+            crate::weapons::shield::ShieldSystem::new(&crate::weapons::shield::ShieldConfig {
+                max_hp: 100,
+                num_facings: 4,
+                ..Default::default()
+            }),
+            0.5,
+        ));
+    app.world_mut().resource_mut::<BeamContext>().0[0].shield_pierce = 0.0;
+    let rng_before_shield = app.world().resource::<crate::sim_rng::SimRng>().state();
+    app.update();
+    let shield_only = slot(&app, shooter, &bank);
+    assert_eq!(shield_only.impact_sample_target, None);
+    assert_eq!(shield_only.impact_sample, None);
+    assert_eq!(
+        app.world().resource::<crate::sim_rng::SimRng>().state(),
+        rng_before_shield,
+        "shield-only contact must not choose a physical deck/profile"
+    );
+    app.world_mut()
+        .entity_mut(target)
+        .remove::<crate::ship::shields::ShipShields>();
     let before = app
         .world()
         .get::<ShipDamage>(target)

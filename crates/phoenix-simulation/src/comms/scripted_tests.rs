@@ -5,6 +5,9 @@ use crate::console::comms::server::handle_comms_channel2;
 use crate::world::server::WorldScriptRuntime;
 use crate::world_id::InstallWorldIdMint;
 
+#[path = "scripted_opportunity_tests.rs"]
+mod opportunity_tests;
+
 /// The virtual path an inline `[script] setup = …` block compiles under.
 /// Shared with the `console::comms::server` tests that seat a scripted
 /// dialogue, so both name the same unit.

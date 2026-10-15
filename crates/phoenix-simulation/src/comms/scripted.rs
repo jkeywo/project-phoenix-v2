@@ -159,7 +159,7 @@ pub(crate) fn open_scripted_comms_threads(
     // Taken whole up front: a request this pass produces (a root fn that itself
     // calls `open_comms`) lands on the now-empty queue and is drained NEXT tick,
     // never re-entrantly within this loop.
-    let requests = std::mem::take(&mut sr.pending_comms_opens);
+    let mut requests = std::mem::take(&mut sr.pending_comms_opens).into_iter();
 
     // The clock a dialogue fn's OWN deferred work is stamped against — the same
     // shape `tick_script_callbacks` builds.
@@ -203,7 +203,12 @@ pub(crate) fn open_scripted_comms_threads(
     // field split every script call site uses.
     let runtime = &mut *runtime;
 
-    for req in requests {
+    while let Some(req) = requests.next() {
+        // Only the actual own immutable offer gets source-failure handling or
+        // budget deferral; arbitrary script opens retain their existing rules.
+        if req.opportunity.is_some() && !own_opportunity_open(runtime, &req, now_tick) {
+            continue;
+        }
         let source_line = sr
             .function_lines
             .get(&req.script_path)
@@ -323,6 +328,12 @@ pub(crate) fn open_scripted_comms_threads(
             );
             !compatible || matches.next().is_some()
         }) {
+            refuse_internal_offer(
+                runtime,
+                &req,
+                now_tick,
+                crate::world::opportunities::OpportunitySourceFailure::Refused,
+            );
             continue;
         }
         // Sender identity, by the rule the deleted `inject_comms_templates` used:
@@ -360,28 +371,6 @@ pub(crate) fn open_scripted_comms_threads(
             })
             .unwrap_or(channel_name);
 
-        if let Some(reference) = &req.opportunity {
-            if reference.validate().is_err()
-                || req.from != "_self"
-                || req.sender_uuid.is_some()
-                || req.recipients.is_some()
-                || req.origin_layer.is_some()
-                || recipients.len() != 1
-                || recipients[0]
-                    .as_ref()
-                    .is_none_or(|recipient| recipient.0 != reference.actor)
-                || crate::world::opportunities::validate_offered_opportunity(
-                    runtime,
-                    reference,
-                    &reference.actor,
-                    script_clock.tick,
-                )
-                .is_err()
-            {
-                continue;
-            }
-        }
-
         let context = ScriptCallContext {
             log_ctx: "open_scripted_comms_threads",
             clock: script_clock,
@@ -395,15 +384,27 @@ pub(crate) fn open_scripted_comms_threads(
         {
             Ok(pair) => Ok(pair),
             Err(DialogueInvocationError::BudgetUnavailable) => {
-                // Keep the drained tail dropped; retrying would defer refused work.
+                // An actual offered envelope has not been attempted. Preserve
+                // it and later bound offers; unrelated legacy opens still drop.
+                if req.opportunity.is_some() {
+                    sr.pending_comms_opens.push(req);
+                }
+                sr.pending_comms_opens
+                    .extend(requests.filter(|request| request.opportunity.is_some()));
                 bevy::log::warn!(
                     target: crate::logging::LogCat::World.target(),
                     "open_scripted_comms_threads: the tick's script budget is spent; \
-                     dropping the remaining comms opens"
+                     retaining immutable offers; dropping other remaining opens"
                 );
                 break;
             }
             Err(DialogueInvocationError::MissingUnit) => {
+                refuse_internal_offer(
+                    runtime,
+                    &req,
+                    now_tick,
+                    crate::world::opportunities::OpportunitySourceFailure::MissingUnit,
+                );
                 bevy::log::warn!(
                     "open_scripted_comms_threads: root fn '{}' names a missing unit '{}'",
                     req.root_fn,
@@ -419,6 +420,15 @@ pub(crate) fn open_scripted_comms_threads(
         let (effects, node, malformed) = match entered {
             Ok((effects, node)) => (effects, node, false),
             Err(EnterError::Shape { effects, message }) => {
+                if req.opportunity.is_some() {
+                    refuse_internal_offer(
+                        runtime,
+                        &req,
+                        now_tick,
+                        crate::world::opportunities::OpportunitySourceFailure::Shape,
+                    );
+                    continue;
+                }
                 // The call SUCCEEDED and drained its buffers; only the returned
                 // value is malformed. Its effects are applied below before the
                 // request is abandoned — see `EnterError::Shape`.
@@ -430,6 +440,17 @@ pub(crate) fn open_scripted_comms_threads(
                 (*effects, None, true)
             }
             Err(err @ (EnterError::Unresolved | EnterError::Refused)) => {
+                refuse_internal_offer(
+                    runtime,
+                    &req,
+                    now_tick,
+                    match &err {
+                        EnterError::Unresolved => {
+                            crate::world::opportunities::OpportunitySourceFailure::Unresolved
+                        }
+                        _ => crate::world::opportunities::OpportunitySourceFailure::Refused,
+                    },
+                );
                 bevy::log::warn!(
                     "open_scripted_comms_threads: root fn '{}' in '{}' {err}; \
                      no message injected",
@@ -447,7 +468,43 @@ pub(crate) fn open_scripted_comms_threads(
             .is_some_and(|node| node.opportunity_decision.is_some())
         {
             bevy::log::warn!("scripted Comms root cannot decide an opportunity");
+            refuse_internal_offer(
+                runtime,
+                &req,
+                now_tick,
+                crate::world::opportunities::OpportunitySourceFailure::Refused,
+            );
             continue;
+        }
+
+        if req.opportunity.is_some() && node.is_none() {
+            refuse_internal_offer(
+                runtime,
+                &req,
+                now_tick,
+                crate::world::opportunities::OpportunitySourceFailure::NoNode,
+            );
+            continue;
+        }
+        if req.opportunity.is_some() {
+            let offered = node.as_ref().expect("bound offer has a node");
+            let failure = if offered.responses.is_empty() {
+                Some(crate::world::opportunities::OpportunitySourceFailure::Shape)
+            } else if !offered.responses.iter().any(|response| {
+                sr.asts.get(&req.script_path).is_some_and(|ast| {
+                    ast.iter_functions().any(|function| {
+                        function.name == response.on_pick && function.params.len() == 1
+                    })
+                })
+            }) {
+                Some(crate::world::opportunities::OpportunitySourceFailure::Unresolved)
+            } else {
+                None
+            };
+            if let Some(cause) = failure {
+                refuse_internal_offer(runtime, &req, now_tick, cause);
+                continue;
+            }
         }
 
         // Effects first, message second: a root fn that both sets a flag and
@@ -566,6 +623,51 @@ pub(crate) fn open_scripted_comms_threads(
                 },
             );
         }
+    }
+}
+
+fn own_opportunity_open(
+    runtime: &WorldContentRuntime,
+    request: &crate::comms::content::OpenCommsRequest,
+    now: u64,
+) -> bool {
+    request.opportunity.as_ref().is_some_and(|reference| {
+        request.from == "_self"
+            && request.sender_uuid.is_none()
+            && request.recipients.is_none()
+            && request.origin_layer.is_none()
+            && request.thread_id.as_deref() == Some(reference.instance_id().as_str())
+            && request
+                .recipient_ship
+                .as_ref()
+                .is_some_and(|recipient| recipient.0 == reference.actor)
+            && crate::world::opportunities::validate_offered_opportunity(
+                runtime,
+                reference,
+                &reference.actor,
+                now,
+            )
+            .is_ok()
+    })
+}
+fn refuse_internal_offer(
+    runtime: &mut WorldContentRuntime,
+    request: &crate::comms::content::OpenCommsRequest,
+    now: u64,
+    cause: crate::world::opportunities::OpportunitySourceFailure,
+) {
+    if !own_opportunity_open(runtime, request, now) {
+        return;
+    }
+    let reference = request.opportunity.as_ref().expect("validated own offer");
+    if let Err(error) = crate::world::opportunities::refuse_opportunity_source(
+        runtime,
+        reference,
+        &reference.actor,
+        now,
+        cause,
+    ) {
+        bevy::log::warn!(%error,"Internal maintenance offer failure could not settle its exact source");
     }
 }
 

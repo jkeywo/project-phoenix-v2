@@ -81,3 +81,23 @@ These are unexecuted source tests. The precondition is not evidence of discovery
 or physical plan execution. Integration waits for the real World opportunity
 producer and accepted-source/history closure; actual fresh JSON360 and native
 proof remains with that coherent join and the root Cargo owner.
+## Offer presentation lifecycle follow-up
+
+The existing root drain now retains actual bound offers across shared script
+budget deferral, preserving the exact original envelope. Unrelated legacy opens
+retain their previous drop policy. A validated own offer that finally lacks its
+recipient, unit, function, callable choice or valid returned node records the
+World owner's closed SourceUnavailable outcome at the actual tick. It invents
+no user decision, Promise or job, and discards bound failed-root effects.
+
+Bound on_pick returns without a closed Accept/Decline decision refuse before
+effects or selected-response mutation. The original offer stays answerable.
+Source owner tests cover eight actual root failure shapes, original-envelope
+budget deferral followed by one successful entry, and correction of a refused
+decision-free callback followed by ordinary accepted response. These typed
+Offered fixtures prove the existing Comms owner, not source discovery or physical
+work. The full-host World opportunity consumer owns those separate proofs.
+
+Planner's independent source re-review passed. Owned Rust was formatted and
+diff-checked; Cargo/native execution remains with the integration owner. This
+follow-up depends on the exact closed World helper/state in 0a38cda2.

@@ -88,6 +88,48 @@ fn setup(callback: &str) -> (App, String, OpportunityRef) {
 }
 const CLEAN: &str = r#"fn choose(ctx) {#{message:"Decision requested",opportunity_decision:"accept",responses:[]}}"#;
 #[test]
+fn missing_decision_or_node_refuses_without_effects_or_selection_and_keeps_offer_answerable() {
+    for callback in [
+        r#"fn choose(ctx){ctx.flags.forbidden=1;}"#,
+        r#"fn choose(ctx){ctx.flags.forbidden=1;#{message:"Still no decision",responses:[]}}"#,
+        r#"fn choose(ctx){ctx.flags.forbidden=1;42}"#,
+    ] {
+        let (mut app, message, _) = setup(callback);
+        let before = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .opportunities
+            .clone();
+        let out = respond(&mut app, &message, 0);
+        assert!(find_rejection(&out).is_some());
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(runtime.opportunities, before);
+        assert!(runtime.commitments.is_empty());
+        assert_eq!(runtime.flags.counter("forbidden"), 0);
+        assert_eq!(
+            app.world()
+                .resource::<CommsInboxRes>()
+                .0
+                .messages()
+                .iter()
+                .find(|row| row.id == message)
+                .unwrap()
+                .selected_response,
+            None
+        );
+        app.insert_resource(crate::comms::scripted::tests::compile_fixture(CLEAN));
+        let out = respond(&mut app, &message, 0);
+        assert!(find_rejection(&out).is_none());
+        assert!(matches!(
+            app.world().resource::<WorldContentRuntime>().opportunities[0].state,
+            OpportunityState::Pending {
+                decision: OpportunityDecision::Accept,
+                tick: 100
+            }
+        ));
+    }
+}
+#[test]
 fn bound_internal_reply_requests_pending_then_duplicate_is_refused_without_ledger() {
     let (mut app, message, _) = setup(CLEAN);
     let out = respond(&mut app, &message, 0);

@@ -875,6 +875,19 @@ pub(crate) fn handle_respond_to_message(
             }
         };
 
+        // A bound offer remains answerable until a real response requests its
+        // closed decision. Shape/no-node/decision-free results commit no effects.
+        if sd.opportunity.is_some()
+            && (malformed.is_some()
+                || follow_up
+                    .as_ref()
+                    .and_then(|node| node.opportunity_decision)
+                    .is_none())
+        {
+            reject(&mut aux.outbox, cmd, message_id, *response_index);
+            continue;
+        }
+
         // Only an actual admitted reply on this exact immutable own offer
         // may request a decision. No Promise, child or machinery is created here.
         if let Some(decision) = follow_up

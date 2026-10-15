@@ -3,6 +3,14 @@
 includes = [ "alliance_cruiser.toml" ]
 name = "entity.illumination_cruiser.name"
 
+# The existing System admission/presentation projection must name this real
+# energy group as well as the physical energy.group below.
+[power_groups.energy-science-illumination]
+label = "station.science.name"
+default_level = 2
+min_level = 0
+max_level = 4
+
 [[system]]
 id = "science-illumination"
 kind = "illumination"

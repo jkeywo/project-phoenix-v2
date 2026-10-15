@@ -73,7 +73,12 @@ pub(crate) fn contacts(
     };
     let permitted = config.observations_for_system(&owner, &boards.0);
     let mut contacts = BTreeMap::new();
-    for board in permitted.values() {
+    let mut sources: Vec<_> = boards.0.keys().collect();
+    sources.sort();
+    for source in sources {
+        let Some(board) = permitted.get(source) else {
+            continue;
+        };
         let tracks = match board {
             SystemBlackboard::Helm(board) => board.tracks.as_deref(),
             SystemBlackboard::TacticalRadar(board) => board.tracks.as_deref(),

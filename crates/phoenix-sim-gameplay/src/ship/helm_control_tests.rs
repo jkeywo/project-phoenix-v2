@@ -212,6 +212,31 @@ fn extreme_finite_force_and_assisted_servo_keep_bounded_velocity() {
 }
 
 #[test]
+fn direct_steering_alone_does_not_rotate_existing_world_momentum_for_free() {
+    let cfg = ShipPhysicsConfig {
+        max_speed: 10.0,
+        acceleration: 0.0,
+        deceleration: 0.0,
+        lateral_acceleration: 0.0,
+        max_yaw_rate: std::f32::consts::FRAC_PI_2,
+        low_speed_turn_boost: 0.0,
+        ..Default::default()
+    };
+    let result = crate::ship::physics::compute_physics_with_axis_modes(
+        actual(),
+        input(1.0, 1.0),
+        1.0,
+        &cfg,
+        LongitudinalDriveMode::VelocityFraction,
+        false,
+        true,
+    );
+    assert!(result.x.abs() < 1e-5);
+    assert!((result.z + 10.0).abs() < 1e-5);
+    assert!((result.lateral_speed + 10.0).abs() < 1e-5);
+}
+
+#[test]
 fn exact_owner_and_dated_intent_json_continuation_refuses_malformed_candidates() {
     let p = profile();
     let mut state = HelmControlState::new(&p);

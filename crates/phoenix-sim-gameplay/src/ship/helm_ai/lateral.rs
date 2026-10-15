@@ -120,6 +120,7 @@ pub fn ai_helm_lateral_thrust(
             Option<&FineSystemAiPolicies>,
             Option<&crate::entities::spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
+            Option<&crate::ship::helm_control::CompiledHelmControl>,
             &mut crate::core::messages::AdmittedCommands,
         ),
         With<crate::ai::server::AiHighFidelity>,
@@ -132,9 +133,13 @@ pub fn ai_helm_lateral_thrust(
         fine_policies,
         entity_uuid,
         ship_config,
+        movement,
         mut admitted,
     ) in ships.iter_mut()
     {
+        let owner = movement
+            .and_then(|profile| profile.0.lateral.clone())
+            .unwrap_or_else(LateralAxis::system_id);
         // Lateral always needs its frame entry — the dodge zeroing and the
         // has-objective gate both read it — so no frame entry stands down (and
         // the docking override too, matching the pre-#1208 order).
@@ -165,18 +170,33 @@ pub fn ai_helm_lateral_thrust(
         // The scenario flag chain, anchored at the layer that spawned this ship
         // (issue #891 stage 2).
         let flag_chain = ai_env.flag_chain(entity);
-        if let Some(payload) = run_helm_axis::<LateralAxis>(
+        if let Some(payload) = run_helm_axis_for::<LateralAxis>(
+            owner.clone(),
             sources,
-            fine_policies.and_then(|p| p.0.get(&LateralAxis::system_id())),
+            fine_policies.and_then(|p| p.0.get(&owner)),
             None,
             0.0,
             &flag_chain,
             &cx,
             &mut io,
         ) {
+            // The same ordinary axis controller requests its speed/rate
+            // interpretation before emitting the normalized demand.
+            if movement.is_some() {
+                ai_env.emitter().emit(
+                    entity_uuid,
+                    owner.clone(),
+                    SystemControlPayload::SetHelmMode {
+                        mode: phoenix_model::helm_control::HelmControlMode::Assisted,
+                    },
+                    sources,
+                    ship_config,
+                    &mut admitted,
+                );
+            }
             ai_env.emitter().emit(
                 entity_uuid,
-                LateralAxis::system_id(),
+                owner.clone(),
                 payload,
                 sources,
                 ship_config,

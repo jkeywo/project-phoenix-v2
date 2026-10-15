@@ -5,6 +5,10 @@ pub use phoenix_model::helm_control::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// Immutable authored axis bindings, derived at accepted entity installation.
+#[derive(bevy::prelude::Component, Clone, Debug)]
+pub struct CompiledHelmControl(pub HelmControlConfig);
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "axis",
@@ -18,7 +22,7 @@ pub enum AxisIntent {
     Lateral(LateralIntent),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(bevy::prelude::Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HelmControlState {
     pub axes: BTreeMap<SystemId, AxisIntent>,
@@ -28,6 +32,7 @@ pub struct HelmControlState {
 pub struct ResolvedHelmControl {
     pub thrust: f32,
     pub steering: f32,
+    pub steering_direct: bool,
     pub drive: LongitudinalDriveMode,
     pub lateral: Option<(f32, bool)>,
 }
@@ -113,6 +118,35 @@ pub fn validate_profile(
 }
 
 impl HelmControlState {
+    /// Compatibility stick display, derived from retained requests. Absolute
+    /// servos have their own display and do not pretend to be a held stick.
+    pub fn stick_display(&self, profile: &HelmControlConfig) -> [f32; 3] {
+        let thrust = match self.axes.get(&profile.thrust) {
+            Some(AxisIntent::Thrust(ThrustIntent::Direct { force })) => *force,
+            Some(AxisIntent::Thrust(ThrustIntent::Assisted {
+                demand: SpeedDemand::Fraction { value },
+            })) => *value,
+            _ => 0.0,
+        };
+        let steering = match self.axes.get(&profile.steering) {
+            Some(AxisIntent::Steering(SteeringIntent::Direct { rate })) => *rate,
+            Some(AxisIntent::Steering(SteeringIntent::Assisted {
+                demand: SteeringDemand::Rate { value },
+            })) => *value,
+            _ => 0.0,
+        };
+        let lateral = profile
+            .lateral
+            .as_ref()
+            .and_then(|owner| self.axes.get(owner));
+        let lateral = match lateral {
+            Some(AxisIntent::Lateral(LateralIntent::Direct { force })) => *force,
+            Some(AxisIntent::Lateral(LateralIntent::Assisted { value })) => *value,
+            _ => 0.0,
+        };
+        [thrust, steering, lateral]
+    }
+
     pub fn new(profile: &HelmControlConfig) -> Self {
         let mut axes: BTreeMap<_, _> = [
             (
@@ -424,6 +458,10 @@ impl HelmControlState {
         Some(ResolvedHelmControl {
             thrust,
             steering,
+            steering_direct: matches!(
+                self.axes.get(&profile.steering),
+                Some(AxisIntent::Steering(SteeringIntent::Direct { .. }))
+            ),
             drive,
             lateral,
         })

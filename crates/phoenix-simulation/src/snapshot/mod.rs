@@ -370,6 +370,7 @@ pub(crate) use materialization::spawn_from_origin;
 pub use materialization::LayerReconcileStatus;
 
 mod emp;
+mod helm_movement;
 #[cfg(test)]
 mod mission_clock_tests;
 mod mounts;

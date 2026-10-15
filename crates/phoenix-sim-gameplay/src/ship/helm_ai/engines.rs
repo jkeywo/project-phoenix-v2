@@ -117,6 +117,7 @@ pub fn ai_helm_thrust(
             Option<&crate::ship_plugin::ShipPhysicsConfigResource>,
             Option<&crate::entities::spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
+            Option<&crate::ship::helm_control::CompiledHelmControl>,
             Option<&BoostConfigResource>,
             Option<&ImpulseConfigResource>,
             Option<&FineSystemAiPolicies>,
@@ -133,6 +134,7 @@ pub fn ai_helm_thrust(
         physics_cfg,
         entity_uuid,
         ship_config,
+        movement,
         boost_cfg,
         impulse_cfg,
         fine_policies,
@@ -140,6 +142,8 @@ pub fn ai_helm_thrust(
         mut admitted,
     ) in ships.iter_mut()
     {
+        let owner =
+            movement.map_or_else(EnginesAxis::system_id, |profile| profile.0.thrust.clone());
         // No plan entry (no AI helm axis / no frame) means nothing to actuate:
         // the throttle decode below reads the plan's decoded velocity.
         let Some(sp) = plan.ships.get(&entity) else {
@@ -167,18 +171,33 @@ pub fn ai_helm_thrust(
         // The scenario flag chain, anchored at the layer that spawned this ship
         // (issue #891 stage 2).
         let flag_chain = ai_env.flag_chain(entity);
-        if let Some(payload) = run_helm_axis::<EnginesAxis>(
+        if let Some(payload) = run_helm_axis_for::<EnginesAxis>(
+            owner.clone(),
             sources,
-            fine_policies.and_then(|p| p.0.get(&EnginesAxis::system_id())),
+            fine_policies.and_then(|p| p.0.get(&owner)),
             engines_state.map(|s| &s.0),
             clock.0,
             &flag_chain,
             &cx,
             &mut io,
         ) {
+            // The same ordinary axis controller requests its speed/rate
+            // interpretation before emitting the normalized demand.
+            if movement.is_some() {
+                ai_env.emitter().emit(
+                    entity_uuid,
+                    owner.clone(),
+                    SystemControlPayload::SetHelmMode {
+                        mode: phoenix_model::helm_control::HelmControlMode::Assisted,
+                    },
+                    sources,
+                    ship_config,
+                    &mut admitted,
+                );
+            }
             ai_env.emitter().emit(
                 entity_uuid,
-                EnginesAxis::system_id(),
+                owner.clone(),
                 payload,
                 sources,
                 ship_config,

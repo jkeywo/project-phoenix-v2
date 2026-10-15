@@ -74,6 +74,7 @@ fn rig() -> (World, Entity, crate::core::messages::SystemId, uuid::Uuid) {
     boards.0.insert(
         owner.clone(),
         SystemBlackboard::Helm(HelmBlackboard {
+            movement: None,
             tracks: Some(observed.clone()),
             ..Default::default()
         }),
@@ -216,6 +217,7 @@ fn predicted_and_missing_helm_scope_never_reacquire_the_real_actor() {
         .insert(
             owner.clone(),
             crate::core::messages::SystemBlackboard::Helm(HelmBlackboard {
+                movement: None,
                 tracks: Some(held),
                 ..Default::default()
             }),

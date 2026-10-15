@@ -28,6 +28,25 @@ pub fn command_policy(
     target: &crate::core::messages::SystemId,
     payload: &SystemControlPayload,
 ) -> crate::ship::control_source::ControlTickPolicy {
+    use crate::ship::system_registry::{HELM_STEERING_KIND, HELM_THRUST_KIND, LATERAL_THRUST_KIND};
+    let movement_kind = match payload {
+        SystemControlPayload::SetHelmMode { .. } => {
+            Some(&[HELM_THRUST_KIND, HELM_STEERING_KIND, LATERAL_THRUST_KIND][..])
+        }
+        SystemControlPayload::SetDesiredSpeed { .. }
+        | SystemControlPayload::SetMatchSpeed { .. } => Some(&[HELM_THRUST_KIND][..]),
+        SystemControlPayload::SetDesiredHeading { .. } => Some(&[HELM_STEERING_KIND][..]),
+        _ => None,
+    };
+    if movement_kind.is_some_and(|kinds| {
+        config
+            .system(target)
+            .is_none_or(|system| !kinds.contains(&system.kind.as_str()))
+    }) {
+        return crate::ship::control_source::control_tick_policy(
+            crate::ship::control_source::ControlSource::Offline,
+        );
+    }
     if matches!(payload, SystemControlPayload::StartPortOrder { .. }) {
         // Manual trade approval is a human decision. Ordinary AI may execute
         // the resulting order, but cannot originate or enlarge its authority.

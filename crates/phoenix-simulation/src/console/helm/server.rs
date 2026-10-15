@@ -20,7 +20,24 @@ pub struct HelmPlugin;
 
 impl Plugin for HelmPlugin {
     fn build(&self, app: &mut App) {
+        use crate::authoritative::{DeclareState, StateClass};
+        app.declare_state::<phoenix_sim_gameplay::ship::helm_control::HelmControlState>(
+            StateClass::Folded,
+            "helm-movement-intent-state",
+        )
+        .declare_state::<phoenix_sim_gameplay::ship::helm_control::CompiledHelmControl>(
+            StateClass::Derived,
+            "helm-movement-profile",
+        );
         app.add_message::<DeliveredCoordination>()
+            .add_systems(
+                FixedUpdate,
+                super::control::apply
+                    .in_set(crate::sim_sets::FixedStep::ApplyHelmMovementControls)
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .after(crate::ship_plugin::process_helm_inputs)
+                    .before(crate::ship_plugin::integrate_ship_physics),
+            )
             .add_systems(
                 FixedUpdate,
                 receive_helm_coordination
@@ -156,6 +173,7 @@ pub(crate) fn publish_helm_blackboard(
     // but a courier policy can react to a hostile whose arcs the human is never
     // shown. Deliberate for now; it is a #877 design question, not a defect.
     tick: Option<Res<crate::sim_tick::SimTick>>,
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     fixed: Option<Res<Time<Fixed>>>,
     world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
@@ -187,6 +205,11 @@ pub(crate) fn publish_helm_blackboard(
                     Option<&crate::entities::spawner::EntityUuid>,
                 ),
             ),
+            (
+                Option<&phoenix_sim_gameplay::ship::helm_control::CompiledHelmControl>,
+                Option<&phoenix_sim_gameplay::ship::helm_control::HelmControlState>,
+                Option<&ShipConfigComponent>,
+            ),
         ),
         With<crate::server_app::Ship>,
     >,
@@ -213,6 +236,7 @@ pub(crate) fn publish_helm_blackboard(
         faction,
         red_alert,
         (thrust_input, lateral_input, (broad_profile, broad_state, uuid)),
+        (movement_profile, movement_state, ship_config),
     ) in ship_q.iter_mut()
     {
         // Per-entity component path. Each fallback mirrors the pre-#824
@@ -312,7 +336,80 @@ pub(crate) fn publish_helm_blackboard(
             Vec::new()
         };
 
+        let movement = (|| {
+            use phoenix_model::helm_control::{HelmAxisView, HelmMovementView, SpeedDemand};
+            use phoenix_sim_gameplay::ship::helm_control::AxisIntent;
+            let profile = &movement_profile?.0;
+            let state = movement_state?;
+            let AxisIntent::Thrust(thrust) = state.axes.get(&profile.thrust)? else {
+                return None;
+            };
+            let AxisIntent::Steering(steering) = state.axes.get(&profile.steering)? else {
+                return None;
+            };
+            let available = |owner: &SystemId| {
+                sources.is_some_and(|sources| {
+                    sources.0.entries().any(|(id, _)| id == owner)
+                        && !sources.0.is_offline(owner)
+                        && sources.0.source_for(owner)
+                            != crate::ship::control_source::ControlSource::Offline
+                }) && power.is_some_and(|power| {
+                    power
+                        .0
+                        .network()
+                        .consumers
+                        .get(owner)
+                        .is_some_and(|consumer| consumer.energy > 0.0)
+                }) && damage.is_some_and(|damage| damage.operational(owner))
+            };
+            let lateral = profile.lateral.as_ref().and_then(|owner| {
+                let AxisIntent::Lateral(intent) = state.axes.get(owner)? else {
+                    return None;
+                };
+                Some(HelmAxisView {
+                    system: owner.clone(),
+                    intent: *intent,
+                    available: available(owner),
+                })
+            });
+            let match_observation_available = match thrust {
+                phoenix_model::helm_control::ThrustIntent::Assisted {
+                    demand: SpeedDemand::Match { contact, .. },
+                } => match (ship_config, broad_state, uuid, tick.as_deref()) {
+                    (Some(config), Some(tracks), Some(uuid), Some(tick)) => {
+                        super::control::observed_speed(
+                            &config.0,
+                            &bbs,
+                            tracks,
+                            &profile.thrust,
+                            contact,
+                            &uuid.0,
+                            runtime.as_deref(),
+                            tick.0,
+                        )
+                        .is_some()
+                    }
+                    _ => false,
+                },
+                _ => false,
+            };
+            Some(HelmMovementView {
+                thrust: HelmAxisView {
+                    system: profile.thrust.clone(),
+                    intent: thrust.clone(),
+                    available: available(&profile.thrust),
+                },
+                steering: HelmAxisView {
+                    system: profile.steering.clone(),
+                    intent: *steering,
+                    available: available(&profile.steering),
+                },
+                lateral,
+                match_observation_available,
+            })
+        })();
         let bb = HelmBlackboard {
+            movement,
             approaches: Vec::new(),
             // The motion aggregate owns no instrument's measured geometry.
             // Presence prevents the client from restoring legacy world truth.

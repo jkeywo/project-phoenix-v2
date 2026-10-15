@@ -22,6 +22,26 @@ pub struct HelmControlConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HelmAxisView<I> {
+    pub system: SystemId,
+    pub intent: I,
+    pub available: bool,
+}
+
+/// Ownship retained intent and derived availability, not another controller.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HelmMovementView {
+    pub thrust: HelmAxisView<ThrustIntent>,
+    pub steering: HelmAxisView<SteeringIntent>,
+    pub lateral: Option<HelmAxisView<LateralIntent>>,
+    /// Whether the same original contact currently supplies a permitted dated
+    /// velocity. The retained intent's observed_tick still reports its age.
+    pub match_observation_available: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SpeedDemand {
     /// Equivalent interpretation of the existing normalized throttle command.

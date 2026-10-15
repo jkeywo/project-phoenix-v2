@@ -79,6 +79,7 @@ fn active_overlay_uses_requesting_console_and_only_explicit_cross_feeds() {
     boards.0.insert(
         helm.clone(),
         SystemBlackboard::Helm(HelmBlackboard {
+            movement: None,
             tracks: Some(vec![track("helm-observation")]),
             ..Default::default()
         }),

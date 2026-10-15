@@ -1,4 +1,35 @@
 entities:
+  - state: helm-movement-intent-state
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Retained Per-Axis Helm Movement Intent
+      summary: "One actual System-keyed map retains thrust, steering and optional lateral requests independently. Modes and dated Match demands survive LOD removal of derived actuator sticks. Actual pose, velocity, resources and observations remain at their existing owners."
+    architecture:
+      classification: authoritative
+      owner: host-helm-control-router
+      writers: [host-helm-control-router]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-sim-gameplay/src/ship/helm_control.rs, crates/phoenix-simulation/src/console/helm/control.rs, crates/phoenix-simulation/src/snapshot/helm_movement.rs]
+      symbols: [HelmControlState]
+      tests: [crates/phoenix-sim-gameplay/src/ship/helm_control_tests.rs, crates/phoenix-simulation/src/console/helm/control_tests.rs, crates/phoenix-simulation/src/snapshot/helm_movement_tests.rs]
+  - state: helm-movement-profile
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Actual Helm Axis Bindings
+      summary: "Immutable accepted control bindings derive from the authored actual thrust, steering and optional lateral Systems. No second actuator, controller, speed or observation state is created."
+    architecture:
+      classification: derived
+      owner: host-helm-control-router
+      writers: [host-helm-control-router]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-sim-gameplay/src/ship/helm_control.rs, crates/phoenix-simulation/src/entities/ship_spawn.rs]
+      symbols: [CompiledHelmControl]
   - decision: redesign-movement-single-physical-executor
     core:
       status: accepted

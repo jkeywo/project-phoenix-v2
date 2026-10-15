@@ -150,6 +150,7 @@ pub fn ai_helm_steering(
             Option<&crate::ship_plugin::ShipPhysicsConfigResource>,
             Option<&crate::entities::spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
+            Option<&crate::ship::helm_control::CompiledHelmControl>,
             Option<&BoostConfigResource>,
             Option<&ImpulseConfigResource>,
             Option<&FineSystemAiPolicies>,
@@ -167,6 +168,7 @@ pub fn ai_helm_steering(
         physics_cfg,
         entity_uuid,
         ship_config,
+        movement,
         boost_cfg,
         impulse_cfg,
         fine_policies,
@@ -175,6 +177,9 @@ pub fn ai_helm_steering(
         mut admitted,
     ) in ships.iter_mut()
     {
+        let owner = movement.map_or_else(SteeringAxis::system_id, |profile| {
+            profile.0.steering.clone()
+        });
         // Base steering comes from the plan's decoded facing; arc-bearing is a
         // facing override this axis owns, resolved against the frame's merged
         // view. Both are required to actuate, so no plan/frame entry stands down.
@@ -198,7 +203,7 @@ pub fn ai_helm_steering(
         // Resolve this axis's authored policy out of the ship's one keyed
         // `FineSystemAiPolicies` map (issue #1209); `Option<&AiPolicy>` is `Copy`,
         // so the same reference feeds both the io scratch and the driver below.
-        let steering_policy = fine_policies.and_then(|p| p.0.get(&SteeringAxis::system_id()));
+        let steering_policy = fine_policies.and_then(|p| p.0.get(&owner));
         let mut io = HelmAxisIo {
             policy: steering_policy,
             state: steering_state.map(|s| &s.0),
@@ -207,7 +212,8 @@ pub fn ai_helm_steering(
         // The scenario flag chain, anchored at the layer that spawned this ship
         // (issue #891 stage 2).
         let flag_chain = ai_env.flag_chain(entity);
-        if let Some(payload) = run_helm_axis::<SteeringAxis>(
+        if let Some(payload) = run_helm_axis_for::<SteeringAxis>(
+            owner.clone(),
             sources,
             steering_policy,
             steering_state.map(|s| &s.0),
@@ -216,9 +222,23 @@ pub fn ai_helm_steering(
             &cx,
             &mut io,
         ) {
+            // The same ordinary axis controller requests its speed/rate
+            // interpretation before emitting the normalized demand.
+            if movement.is_some() {
+                ai_env.emitter().emit(
+                    entity_uuid,
+                    owner.clone(),
+                    SystemControlPayload::SetHelmMode {
+                        mode: phoenix_model::helm_control::HelmControlMode::Assisted,
+                    },
+                    sources,
+                    ship_config,
+                    &mut admitted,
+                );
+            }
             ai_env.emitter().emit(
                 entity_uuid,
-                SteeringAxis::system_id(),
+                owner.clone(),
                 payload,
                 sources,
                 ship_config,

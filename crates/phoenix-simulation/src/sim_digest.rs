@@ -471,6 +471,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("recorded-scans", fold_recorded_scans_namespace),
     ("passive-samples", fold_passive_samples_namespace),
     ("system-mounts", fold_mounts_namespace),
+    ("helm-movement-intent", fold_helm_movement_namespace),
     ("weapon-target-assignments", fold_weapon_targets_namespace),
     (
         "guided-source-order-knowledge",
@@ -2706,6 +2707,15 @@ fn fold_guided_source_namespace(world: &World, acc: u64) -> u64 {
         |owner: &crate::console::weapons::guidance_link::ShipGuidanceKnowledge| {
             Some(owner.0.clone())
         },
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+fn fold_helm_movement_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "helm-movement-intent",
+        |state: &phoenix_sim_gameplay::ship::helm_control::HelmControlState| Some(state.clone()),
         |acc, state| fold_serde(acc, &state),
     )
 }

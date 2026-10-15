@@ -6492,6 +6492,7 @@ fn helm_ai_radar_range_prefers_the_npc_blackboard_entry() {
     bbs.0.insert(
         crate::ship::system_registry::helm_station_key(),
         crate::core::messages::SystemBlackboard::Helm(crate::core::messages::HelmBlackboard {
+            movement: None,
             radar_range: 400.0,
             ..Default::default()
         }),

@@ -30,12 +30,26 @@ use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
 pub fn register_helm_dispatch(app: &mut bevy::prelude::App) {
     use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
 
-    app.register_admitted_consumer(ConsumerMatcher::kind(
-        crate::ship::system_registry::HELM_THRUST_KIND,
-    ))
-    .register_admitted_consumer(ConsumerMatcher::kind(
-        crate::ship::system_registry::HELM_STEERING_KIND,
-    ))
+    app.register_admitted_consumer(
+        ConsumerMatcher::kind(crate::ship::system_registry::HELM_THRUST_KIND).with_feedback(
+            crate::command_admission::FeedbackAddress::DeclaredKindOrCanonical(
+                crate::ship::system_registry::HELM_THRUST_SYSTEM_ID,
+            ),
+            &[
+                Payload::SetHelmMode,
+                Payload::SetDesiredSpeed,
+                Payload::SetMatchSpeed,
+            ],
+        ),
+    )
+    .register_admitted_consumer(
+        ConsumerMatcher::kind(crate::ship::system_registry::HELM_STEERING_KIND).with_feedback(
+            crate::command_admission::FeedbackAddress::DeclaredKindOrCanonical(
+                crate::ship::system_registry::HELM_STEERING_SYSTEM_ID,
+            ),
+            &[Payload::SetHelmMode, Payload::SetDesiredHeading],
+        ),
+    )
     .register_admitted_consumer(
         ConsumerMatcher::kind(crate::ship::system_registry::HELM_IMPULSE_KIND).with_feedback(
             crate::command_admission::FeedbackAddress::DeclaredKindOrCanonical(
@@ -44,9 +58,14 @@ pub fn register_helm_dispatch(app: &mut bevy::prelude::App) {
             &[Payload::StartImpulseCharge, Payload::CancelImpulse],
         ),
     )
-    .register_admitted_consumer(ConsumerMatcher::kind(
-        crate::ship::system_registry::LATERAL_THRUST_KIND,
-    ))
+    .register_admitted_consumer(
+        ConsumerMatcher::kind(crate::ship::system_registry::LATERAL_THRUST_KIND).with_feedback(
+            crate::command_admission::FeedbackAddress::DeclaredKindOrCanonical(
+                crate::ship::system_registry::LATERAL_THRUST_SYSTEM_ID,
+            ),
+            &[Payload::SetHelmMode],
+        ),
+    )
     .register_admitted_consumer(ConsumerMatcher::kind(
         crate::ship::system_registry::VERTICAL_THRUST_KIND,
     ))

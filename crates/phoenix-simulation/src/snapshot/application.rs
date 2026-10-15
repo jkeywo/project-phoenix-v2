@@ -1210,6 +1210,10 @@ pub(super) fn validate_physical_repair_claims(
 /// tick for an inverse: nothing here simulates the interval, so the value is
 /// simply the reading every age-relative continuation is measured against.
 pub(crate) fn apply_entity_state(world: &mut World, entity: Entity, row: &EntityState, tick: u64) {
+    if let Err(reason) = super::helm_movement::validate_live(world, entity, row, tick) {
+        bevy::log::error!("refused movement restore for {}: {}", row.uuid, reason);
+        return;
+    }
     if row.weapon_flight_carrier {
         bevy::log::error!(
             "refused single-row restore: physical flight carriers require full-roster restore"
@@ -1596,6 +1600,11 @@ pub(super) fn apply_entity_state_with(
             .insert(crate::console::weapons::guidance_link::ShipGuidanceKnowledge(saved.clone()));
     } else {
         entity_mut.remove::<crate::console::weapons::guidance_link::ShipGuidanceKnowledge>();
+    }
+    if let Some(saved) = &row.helm_movement {
+        entity_mut.insert(saved.clone());
+    } else {
+        entity_mut.remove::<phoenix_sim_gameplay::ship::helm_control::HelmControlState>();
     }
     if let Some(saved) = &row.weapon_targets {
         entity_mut.insert(crate::console::weapons::assignments::ShipWeaponTargets(

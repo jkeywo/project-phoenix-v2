@@ -8,6 +8,9 @@ use super::*;
 /// Keyed by the uuid string, never by an ECS handle — see the module docs.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EntityState {
+    /// Retained movement requests survive LOD removal of actuator latches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub helm_movement: Option<phoenix_sim_gameplay::ship::helm_control::HelmControlState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weapon_targets: Option<phoenix_sim_gameplay::weapons::assignments::WeaponTargetAssignments>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

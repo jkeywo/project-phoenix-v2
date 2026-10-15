@@ -186,6 +186,18 @@ pub fn compute_physics_with_controls(
     drive: LongitudinalDriveMode,
     lateral_direct: bool,
 ) -> ShipPhysicsResult {
+    compute_physics_with_axis_modes(state, input, dt, config, drive, lateral_direct, false)
+}
+
+pub fn compute_physics_with_axis_modes(
+    state: ShipPhysicsState,
+    input: ShipPhysicsInput,
+    dt: f32,
+    config: &ShipPhysicsConfig,
+    drive: LongitudinalDriveMode,
+    lateral_direct: bool,
+    steering_direct: bool,
+) -> ShipPhysicsResult {
     // Clamp inputs
     let thrust = input.thrust.clamp(-1.0, 1.0);
     let steering = input.steering.clamp(-1.0, 1.0);
@@ -314,7 +326,7 @@ pub fn compute_physics_with_controls(
         )
     };
 
-    if drive == LongitudinalDriveMode::Force || lateral_direct {
+    if drive == LongitudinalDriveMode::Force || lateral_direct || steering_direct {
         // The existing velocity owner stores body-frame components. Turning the
         // body must change that basis, not rotate inertial world momentum for
         // free. Forces above were applied along the original physical axes.

@@ -171,6 +171,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             AiHelmBoost,
             AiHelmSteering,
             ProcessHelmInputs,
+            ApplyHelmMovementControls,
             IntegrateShipPhysics,
             PublishJoystickToEngines,
             SyncShipPosition,

@@ -676,6 +676,32 @@ pub fn build_pass_surface(
             .0
             .policy_for(&crate::ship::system_registry::helm_steering_system_id())
             .operate_ai;
+    build_pass_surface_with_authority(
+        engines_policy,
+        steering_policy,
+        steering_state,
+        travel_axes_ai,
+        facts,
+        now,
+        artillery_lead_speed,
+        flags,
+    )
+}
+
+pub fn build_pass_surface_with_authority(
+    engines_policy: &crate::ai::policy::AiPolicy,
+    steering_policy: &crate::ai::policy::AiPolicy,
+    steering_state: &crate::ai::policy::AiPolicyRuntimeState,
+    travel_axes_ai: bool,
+    facts: &crate::world::flags::AiFacts,
+    now: f64,
+    // The lead speed the artillery hold predicts with, read host-side off this
+    // hull's own armament (issue #792). Not an authored param, so it is handed
+    // in rather than looked up here — see [`HelmPassSurface::artillery_lead_speed`].
+    artillery_lead_speed: f32,
+    // The scenario world-flag chain (issue #891 stage 2).
+    flags: &[&crate::world::flags::FlagStore],
+) -> HelmPassSurface {
     let authored = steering_policy.machine().is_some() && engines_policy.machine().is_some();
     // The two steering-response scalars every pure planner arm takes. Required
     // unconditionally, because no leg can be flown without them.

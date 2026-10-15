@@ -33,6 +33,7 @@ pub(crate) fn ai_helm_steering(
             Option<&crate::ship_plugin::ShipPhysicsConfigResource>,
             Option<&crate::entities::spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
+            Option<&phoenix_sim_gameplay::ship::helm_control::CompiledHelmControl>,
             // Availability of the two optional drives — see `ai_helm_thrust`.
             Option<&BoostConfigResource>,
             Option<&ImpulseConfigResource>,

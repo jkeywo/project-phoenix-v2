@@ -848,6 +848,7 @@ fn reconnect_registry_routes_in_owner_order_without_mutating_shared_caches() {
     }
 
     let current_blackboard = SystemBlackboard::Helm(HelmBlackboard {
+        movement: None,
         boost_battery: 1.0,
         boost_enabled: true,
         ..Default::default()
@@ -859,6 +860,7 @@ fn reconnect_registry_routes_in_owner_order_without_mutating_shared_caches() {
         .insert(SystemId("helm-radar".into()), current_blackboard.clone());
 
     let cached_blackboard = SystemBlackboard::Helm(HelmBlackboard {
+        movement: None,
         yaw: 7.0,
         ..Default::default()
     });
@@ -5759,6 +5761,7 @@ fn midgame_reconnect_resets_blackboard_cache() {
 
     let helm_id = SystemId("helm".into());
     let helm_bb = SystemBlackboard::Helm(HelmBlackboard {
+        movement: None,
         approaches: Vec::new(),
         yaw: 1.0,
         forward_speed: 50.0,

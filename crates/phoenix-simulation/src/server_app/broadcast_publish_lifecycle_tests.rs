@@ -13,6 +13,7 @@ use crate::ship_plugin::ShipConfigComponent;
 
 fn helm_blackboard() -> SystemBlackboard {
     SystemBlackboard::Helm(HelmBlackboard {
+        movement: None,
         boost_battery: 1.0,
         boost_enabled: true,
         ..Default::default()

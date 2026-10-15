@@ -952,6 +952,7 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                 updates: vec![(
                     SystemId("helm".into()),
                     SystemBlackboard::Helm(HelmBlackboard {
+                        movement: None,
                         approaches: Vec::new(),
                         tracks: None,
                         yaw: 0.785,
@@ -5263,6 +5264,7 @@ fn hud_state_json_omits_absent_computer_message() {
 #[test]
 fn system_blackboard_helm_serde_fields() {
     let bb = SystemBlackboard::Helm(HelmBlackboard {
+        movement: None,
         approaches: Vec::new(),
         tracks: None,
         yaw: 1.5,
@@ -5295,6 +5297,7 @@ fn system_blackboard_helm_serde_fields() {
 fn system_blackboard_helm_hostile_weapon_arcs_round_trip() {
     use crate::core::messages::{HostileWeaponArc, HostileWeaponArcContact};
     let bb = SystemBlackboard::Helm(HelmBlackboard {
+        movement: None,
         hostile_weapon_arcs: vec![HostileWeaponArcContact {
             uuid: "1f6b4c8e-0000-4000-8000-000000000001".into(),
             x: 120.0,

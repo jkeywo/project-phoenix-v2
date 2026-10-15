@@ -457,9 +457,30 @@ fn insert_ai_policies(config: &EntityConfig, cmds: &mut EntityCommands) {
             crate::ai::policy::AiPolicy,
         > = std::collections::BTreeMap::new();
         for (block, system_id) in [
-            (hc.engines_ai.as_ref(), sr::helm_thrust_system_id()),
-            (hc.steering_ai.as_ref(), sr::helm_steering_system_id()),
-            (hc.lateral_ai.as_ref(), sr::lateral_thrust_system_id()),
+            (
+                hc.engines_ai.as_ref(),
+                config
+                    .helm_control
+                    .as_ref()
+                    .map_or_else(sr::helm_thrust_system_id, |profile| profile.thrust.clone()),
+            ),
+            (
+                hc.steering_ai.as_ref(),
+                config
+                    .helm_control
+                    .as_ref()
+                    .map_or_else(sr::helm_steering_system_id, |profile| {
+                        profile.steering.clone()
+                    }),
+            ),
+            (
+                hc.lateral_ai.as_ref(),
+                config
+                    .helm_control
+                    .as_ref()
+                    .and_then(|profile| profile.lateral.clone())
+                    .unwrap_or_else(sr::lateral_thrust_system_id),
+            ),
             (hc.vertical_ai.as_ref(), sr::vertical_thrust_system_id()),
             (hc.impulse_ai.as_ref(), sr::helm_impulse_system_id()),
             (hc.boost_ai.as_ref(), sr::helm_boost_system_id()),
@@ -718,6 +739,12 @@ fn install_blasters(config: &EntityConfig, cmds: &mut EntityCommands) {
 }
 
 fn install_helm(config: &EntityConfig, is_ship: bool, cmds: &mut EntityCommands) {
+    if let Some(profile) = &config.helm_control {
+        cmds.insert((
+            phoenix_sim_gameplay::ship::helm_control::CompiledHelmControl(profile.clone()),
+            phoenix_sim_gameplay::ship::helm_control::HelmControlState::new(profile),
+        ));
+    }
     // HelmConsole - attach a HelmConsoleSection so the AI tick can read movement params.
     // Also insert the four drive-config Components (PR 4 — PRD #597) so NPC ships
     // participate in the per-entity config model alongside the player ship.

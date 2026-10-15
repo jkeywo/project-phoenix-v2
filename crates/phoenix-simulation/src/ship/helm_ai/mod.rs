@@ -434,6 +434,7 @@ pub(crate) fn ai_policy_state_tick(
             // The SHIP field of the orbit-direction composite key.
             Option<&crate::entities::spawner::EntityUuid>,
             Option<&crate::ship::power::ShipPowerSystem>,
+            Option<&phoenix_sim_gameplay::ship::helm_control::CompiledHelmControl>,
             HelmPolicyRuntime,
         ),
         With<crate::ai::server::AiHighFidelity>,

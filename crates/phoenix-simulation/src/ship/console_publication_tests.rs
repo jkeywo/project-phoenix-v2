@@ -80,6 +80,7 @@ fn scoped_updates_are_complete_on_change_and_revoke_then_rebase() {
         .insert(
             SystemId("b".into()),
             SystemBlackboard::Helm(HelmBlackboard {
+                movement: None,
                 x: 42.0,
                 ..Default::default()
             }),

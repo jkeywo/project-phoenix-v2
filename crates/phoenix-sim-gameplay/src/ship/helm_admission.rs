@@ -19,7 +19,7 @@ use crate::ship::helm::{
 /// `BlocksImpulse`. Per-entity generalisation of the LocalShip-only helper
 /// in `impulse_boost_systems` (issue #824): the check is a property of the
 /// ship's position, not of who commanded the charge.
-fn entity_inside_blocks_impulse(
+pub fn entity_inside_blocks_impulse(
     entity: Entity,
     membership: &Option<Res<RegionMembership>>,
     region_query: &Query<&crate::entities::spawner::RegionEffectsSection>,
@@ -133,6 +133,7 @@ pub fn process_helm_inputs(
         Option<&crate::ship::components::ShipConfigComponent>,
         Option<&ShipSystemControlSources>,
         Has<LocalShip>,
+        Option<&crate::ship::helm_control::CompiledHelmControl>,
     )>,
     mut outbound: Option<
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
@@ -154,6 +155,7 @@ pub fn process_helm_inputs(
         ship_config,
         sources,
         is_local,
+        movement,
     ) in ships.iter_mut()
     {
         let mut last_input = if is_local { last_input } else { None };
@@ -270,12 +272,26 @@ pub fn process_helm_inputs(
 
         for cmd in admitted.0.iter() {
             match (&cmd.target.0, &cmd.payload) {
+                (
+                    _,
+                    SystemControlPayload::SetHelmMode { .. }
+                    | SystemControlPayload::SetDesiredSpeed { .. }
+                    | SystemControlPayload::SetDesiredHeading { .. }
+                    | SystemControlPayload::SetMatchSpeed { .. },
+                ) if movement.is_none() => {
+                    crate::command_admission::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        ActionFeedbackOutcome::Refused,
+                    );
+                }
                 (t, SystemControlPayload::SetThrust { value })
-                    if target_is_owner(
-                        t,
-                        thrust_system_id,
-                        crate::ship::system_registry::HELM_THRUST_SYSTEM_ID,
-                    ) =>
+                    if movement.is_none()
+                        && target_is_owner(
+                            t,
+                            thrust_system_id,
+                            crate::ship::system_registry::HELM_THRUST_SYSTEM_ID,
+                        ) =>
                 {
                     if let Some(ti) = thrust_in.as_deref_mut() {
                         ti.0 = *value;
@@ -285,11 +301,12 @@ pub fn process_helm_inputs(
                     }
                 }
                 (t, SystemControlPayload::SetSteering { value })
-                    if target_is_owner(
-                        t,
-                        steering_system_id,
-                        crate::ship::system_registry::HELM_STEERING_SYSTEM_ID,
-                    ) =>
+                    if movement.is_none()
+                        && target_is_owner(
+                            t,
+                            steering_system_id,
+                            crate::ship::system_registry::HELM_STEERING_SYSTEM_ID,
+                        ) =>
                 {
                     if let Some(si) = steering_in.as_deref_mut() {
                         si.0 = *value;
@@ -299,11 +316,12 @@ pub fn process_helm_inputs(
                     }
                 }
                 (t, SystemControlPayload::LateralThrustInput { lateral })
-                    if target_is_owner(
-                        t,
-                        lateral_system_id,
-                        crate::ship::system_registry::LATERAL_THRUST_SYSTEM_ID,
-                    ) =>
+                    if movement.is_none_or(|profile| profile.0.lateral.is_none())
+                        && target_is_owner(
+                            t,
+                            lateral_system_id,
+                            crate::ship::system_registry::LATERAL_THRUST_SYSTEM_ID,
+                        ) =>
                 {
                     if let Some(la) = lateral_in.as_deref_mut() {
                         la.0 = *lateral;

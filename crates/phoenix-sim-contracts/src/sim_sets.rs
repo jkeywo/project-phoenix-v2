@@ -214,6 +214,7 @@ pub enum FixedStep {
     AiHelmBoost,
     AiHelmSteering,
     ProcessHelmInputs,
+    ApplyHelmMovementControls,
     TickImpulse,
     TickBoost,
     IntegrateShipPhysics,

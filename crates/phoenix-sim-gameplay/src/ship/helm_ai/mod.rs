@@ -441,8 +441,19 @@ pub fn helm_axis_outcome<'p, H: HelmAxisHost>(
     now: f64,
     flags: &[&crate::world::flags::FlagStore],
 ) -> crate::ai::host::HostOutcome<'p> {
+    helm_axis_outcome_for::<H>(H::system_id(), sources, policy, state, facts, now, flags)
+}
+
+pub fn helm_axis_outcome_for<'p, H: HelmAxisHost>(
+    system: crate::core::messages::SystemId,
+    sources: &ShipSystemControlSources,
+    policy: Option<&'p crate::ai::policy::AiPolicy>,
+    state: Option<&crate::ai::policy::AiPolicyRuntimeState>,
+    facts: &crate::world::flags::AiFacts,
+    now: f64,
+    flags: &[&crate::world::flags::FlagStore],
+) -> crate::ai::host::HostOutcome<'p> {
     use crate::ai::host::{decide, HostState, HostTick};
-    let system = H::system_id();
     if H::STATEFUL {
         match (policy.and_then(|p| p.machine()), state) {
             // A stateful policy WITH its runtime-state component: resolve inside
@@ -529,8 +540,21 @@ pub fn run_helm_axis<H: HelmAxisHost>(
     cx: &HelmAxisCtx,
     io: &mut HelmAxisIo,
 ) -> Option<crate::core::messages::SystemControlPayload> {
+    run_helm_axis_for::<H>(H::system_id(), sources, policy, state, now, flags, cx, io)
+}
+
+pub fn run_helm_axis_for<H: HelmAxisHost>(
+    system: crate::core::messages::SystemId,
+    sources: &ShipSystemControlSources,
+    policy: Option<&crate::ai::policy::AiPolicy>,
+    state: Option<&crate::ai::policy::AiPolicyRuntimeState>,
+    now: f64,
+    flags: &[&crate::world::flags::FlagStore],
+    cx: &HelmAxisCtx,
+    io: &mut HelmAxisIo,
+) -> Option<crate::core::messages::SystemControlPayload> {
     let facts = H::seed(cx);
-    let outcome = helm_axis_outcome::<H>(sources, policy, state, &facts, now, flags);
+    let outcome = helm_axis_outcome_for::<H>(system, sources, policy, state, &facts, now, flags);
     // Gate — the ONE place a human/offline axis suppresses the AI.
     if matches!(outcome, crate::ai::host::HostOutcome::NotAiOperated) {
         return None;
@@ -582,6 +606,7 @@ pub fn ai_policy_state_tick(
             Option<&crate::console::weapons::PhaserCombatConfigResource>,
             Option<&crate::entities::spawner::EntityUuid>,
             Option<&crate::ship::power::ShipPowerSystem>,
+            Option<&crate::ship::helm_control::CompiledHelmControl>,
             HelmPolicyRuntime,
         ),
         With<crate::ai::server::AiHighFidelity>,
@@ -624,6 +649,7 @@ pub fn ai_policy_state_tick(
         phaser_cfg,
         entity_uuid,
         power,
+        movement,
         mut runtime,
     ) in ships.iter_mut()
     {
@@ -635,12 +661,16 @@ pub fn ai_policy_state_tick(
         // omits either block at load, so a ship missing one takes no helm AI
         // action rather than being handed a policy nobody wrote. Both are read
         // out of the ship's one keyed `FineSystemAiPolicies` map (issue #1209).
-        let engines_policy = fine_policies.and_then(|p| {
-            p.0.get(&crate::ship::system_registry::helm_thrust_system_id())
-        });
-        let steering_policy = fine_policies.and_then(|p| {
-            p.0.get(&crate::ship::system_registry::helm_steering_system_id())
-        });
+        let engines_owner = movement.map_or_else(
+            crate::ship::system_registry::helm_thrust_system_id,
+            |profile| profile.0.thrust.clone(),
+        );
+        let steering_owner = movement.map_or_else(
+            crate::ship::system_registry::helm_steering_system_id,
+            |profile| profile.0.steering.clone(),
+        );
+        let engines_policy = fine_policies.and_then(|p| p.0.get(&engines_owner));
+        let steering_policy = fine_policies.and_then(|p| p.0.get(&steering_owner));
         let (Some(engines_policy), Some(steering_policy)) = (engines_policy, steering_policy)
         else {
             continue;
@@ -722,10 +752,7 @@ pub fn ai_policy_state_tick(
         tick_policy_machine(
             engines_policy,
             &mut runtime.engines.0,
-            sources
-                .0
-                .policy_for(&crate::ship::system_registry::helm_thrust_system_id())
-                .operate_ai,
+            sources.0.policy_for(&engines_owner).operate_ai,
             &facts,
             travel_target,
             now,
@@ -760,10 +787,7 @@ pub fn ai_policy_state_tick(
         let steering_entered = tick_policy_machine(
             steering_policy,
             &mut runtime.steering.0,
-            sources
-                .0
-                .policy_for(&crate::ship::system_registry::helm_steering_system_id())
-                .operate_ai,
+            sources.0.policy_for(&steering_owner).operate_ai,
             &facts,
             travel_target,
             now,
@@ -895,11 +919,12 @@ pub fn ai_policy_state_tick(
         }
 
         // ── Publish the derived fly-through pass surface (issues #883, #788) ──
-        let surface = build_pass_surface(
+        let surface = build_pass_surface_with_authority(
             engines_policy,
             steering_policy,
             &runtime.steering.0,
-            sources,
+            sources.0.policy_for(&engines_owner).operate_ai
+                && sources.0.policy_for(&steering_owner).operate_ai,
             &facts,
             now,
             // The artillery lead speed (issue #792): a reading of this hull's own

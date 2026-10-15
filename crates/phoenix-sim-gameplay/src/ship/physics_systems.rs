@@ -12,9 +12,19 @@ use crate::ship::helm::{
     VerticalThrustInput,
 };
 use crate::ship::physics::{
-    compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState,
+    compute_physics, compute_physics_with_axis_modes, ShipPhysicsConfig, ShipPhysicsInput,
+    ShipPhysicsState,
 };
 use crate::ship::state::ShipPhysics;
+
+fn movement_axis_online(
+    sources: &ShipSystemControlSources,
+    owner: &crate::core::messages::SystemId,
+) -> bool {
+    sources.0.entries().any(|(id, _)| id == owner)
+        && !sources.0.is_offline(owner)
+        && sources.0.source_for(owner) != crate::ship::control_source::ControlSource::Offline
+}
 
 pub fn sync_ship_position(mut ship_query: Query<(&ShipPhysics, &mut Transform)>) {
     for (physics, mut transform) in ship_query.iter_mut() {
@@ -166,6 +176,10 @@ pub fn integrate_ship_physics(
             &LateralThrustInput,
             &VerticalThrustInput,
             (Option<&ShipImpulse>, Option<&ShipBoost>),
+            (
+                Option<&crate::ship::helm_control::CompiledHelmControl>,
+                Option<&crate::ship::helm_control::HelmControlState>,
+            ),
         ),
         With<crate::ai::server::AiHighFidelity>,
     >,
@@ -209,6 +223,7 @@ pub fn integrate_ship_physics(
         lateral_in,
         vertical_in,
         (impulse, boost),
+        (movement_profile, movement_state),
     ) in ships.iter_mut()
     {
         // Debug-only single-writer tripwire (issue #699). The guard arrives
@@ -252,6 +267,11 @@ pub fn integrate_ship_physics(
 
         let physical = physical_q.get(_entity).ok();
         let mut power = power_q.get_mut(_entity).ok();
+        // Configured hulls have exactly one retained intent map. Missing state
+        // must never fall back to compatibility stick latches.
+        if movement_profile.is_some() != movement_state.is_some() {
+            continue;
+        }
         let impulse_requested = impulse.is_some_and(|i| i.0.is_active())
             && !sources
                 .0
@@ -282,6 +302,70 @@ pub fn integrate_ship_physics(
             });
         let impulse_active = impulse_requested && impulse_fraction > 0.0;
 
+        let mut movement_config = None;
+        let mut movement_resolved = None;
+        if !impulse_active {
+            if let (Some(profile), Some(intent)) = (movement_profile, movement_state) {
+                let mut config = physics_cfg_comp
+                    .map(|c| c.0)
+                    .or_else(|| physics_cfg_res.as_deref().map(|c| c.0))
+                    .unwrap_or_else(ShipPhysicsConfig::new);
+                config.max_speed *= modifiers.get(&ModifierSlot::MaxSpeed);
+                config.max_reverse_speed *= modifiers.get(&ModifierSlot::MaxSpeed);
+                config.max_yaw_rate *= modifiers.get(&ModifierSlot::MaxYawRate);
+                let Some(request) = intent.resolve(&profile.0, state, dt, &config) else {
+                    continue;
+                };
+                let boost_cfg = boost_cfg_comp.cloned().unwrap_or_default();
+                if boost_cfg.enabled && boost.is_some_and(|boost| boost.0.is_active()) {
+                    let mut potential = config;
+                    potential.max_speed *= boost_cfg.multiplier;
+                    potential.max_reverse_speed *= boost_cfg.multiplier;
+                    potential.acceleration *= boost_cfg.multiplier;
+                    potential.max_yaw_rate *= boost_cfg.steering_multiplier;
+                    let request = intent
+                        .resolve(&profile.0, state, dt, &potential)
+                        .unwrap_or(request);
+                    let activity = if movement_axis_online(sources, &profile.0.thrust) {
+                        request.thrust.abs()
+                    } else {
+                        0.0
+                    } + if movement_axis_online(sources, &profile.0.steering) {
+                        request.steering.abs()
+                    } else {
+                        0.0
+                    };
+                    let fraction = if activity > 0.0 {
+                        crate::ship::energy_work::continuous_for_kind(
+                            power.as_deref_mut().map(|power| &mut power.0),
+                            crate::ship::system_registry::HELM_BOOST_KIND,
+                            dt,
+                            activity,
+                        )
+                    } else {
+                        0.0
+                    };
+                    let fraction = fraction
+                        * power.as_deref().map_or(0.0, |power| {
+                            crate::ship::physical_damage::operation_for_kind(
+                                physical,
+                                power.0.ship_config(),
+                                crate::ship::system_registry::HELM_BOOST_KIND,
+                            )
+                        });
+                    let multiplier = 1.0 + (boost_cfg.multiplier - 1.0) * fraction;
+                    config.max_speed *= multiplier;
+                    config.max_reverse_speed *= multiplier;
+                    config.acceleration *= multiplier;
+                    config.max_yaw_rate *= 1.0 + (boost_cfg.steering_multiplier - 1.0) * fraction;
+                }
+                let Some(request) = intent.resolve(&profile.0, state, dt, &config) else {
+                    continue;
+                };
+                movement_config = Some(config);
+                movement_resolved = Some(request);
+            }
+        }
         let input = if impulse_active {
             // Autopilot: full forward thrust, steering scaled by authored multiplier.
             let impulse_cfg_for_steering = impulse_cfg.cloned().unwrap_or_default();
@@ -292,6 +376,13 @@ pub fn integrate_ship_physics(
                 // Impulse autopilot levels out: no vertical manoeuvring while
                 // the drive is engaged (issue #744), mirroring lateral.
                 vertical: 0.0,
+            }
+        } else if let Some(request) = movement_resolved {
+            ShipPhysicsInput {
+                thrust: request.thrust,
+                steering: request.steering,
+                lateral: request.lateral.map_or(lateral_in.0, |(value, _)| value),
+                vertical: vertical_in.0,
             }
         } else {
             ShipPhysicsInput {
@@ -357,15 +448,32 @@ pub fn integrate_ship_physics(
         // capability check; `process_helm_inputs` separately CLEARS the latch
         // while the axis is offline so the stale fraction cannot survive a
         // repair — see the note there.
-        let thrust_offline = sources
-            .0
-            .is_offline(&crate::ship::system_registry::helm_thrust_system_id());
-        let steering_offline = sources
-            .0
-            .is_offline(&crate::ship::system_registry::helm_steering_system_id());
-        let lateral_offline = sources
-            .0
-            .is_offline(&crate::ship::system_registry::lateral_thrust_system_id());
+        let thrust_offline = movement_profile.map_or_else(
+            || {
+                sources
+                    .0
+                    .is_offline(&crate::ship::system_registry::helm_thrust_system_id())
+            },
+            |profile| !movement_axis_online(sources, &profile.0.thrust),
+        );
+        let steering_offline = movement_profile.map_or_else(
+            || {
+                sources
+                    .0
+                    .is_offline(&crate::ship::system_registry::helm_steering_system_id())
+            },
+            |profile| !movement_axis_online(sources, &profile.0.steering),
+        );
+        let lateral_offline = movement_profile
+            .and_then(|profile| profile.0.lateral.as_ref())
+            .map_or_else(
+                || {
+                    sources
+                        .0
+                        .is_offline(&crate::ship::system_registry::lateral_thrust_system_id())
+                },
+                |owner| !movement_axis_online(sources, owner),
+            );
         let vertical_offline = sources
             .0
             .is_offline(&crate::ship::system_registry::vertical_thrust_system_id());
@@ -409,12 +517,27 @@ pub fn integrate_ship_physics(
             ),
         ] {
             if *axis != 0.0 {
-                *axis *= crate::ship::energy_work::continuous_for_kind(
-                    power.as_deref_mut().map(|p| &mut p.0),
-                    kind,
-                    dt,
-                    axis.abs().min(1.0),
-                );
+                let owner = movement_profile.and_then(|profile| match kind {
+                    crate::ship::system_registry::HELM_THRUST_KIND => Some(&profile.0.thrust),
+                    crate::ship::system_registry::HELM_STEERING_KIND => Some(&profile.0.steering),
+                    crate::ship::system_registry::LATERAL_THRUST_KIND => profile.0.lateral.as_ref(),
+                    _ => None,
+                });
+                *axis *= if let Some(owner) = owner {
+                    power.as_deref_mut().map_or(0.0, |power| {
+                        power
+                            .0
+                            .work_continuous(owner, dt, axis.abs().min(1.0))
+                            .map_or(0.0, |grant| grant.fraction)
+                    })
+                } else {
+                    crate::ship::energy_work::continuous_for_kind(
+                        power.as_deref_mut().map(|p| &mut p.0),
+                        kind,
+                        dt,
+                        axis.abs().min(1.0),
+                    )
+                };
             }
         }
 
@@ -437,11 +560,23 @@ pub fn integrate_ship_physics(
                     crate::ship::system_registry::VERTICAL_THRUST_KIND,
                 ),
             ] {
-                *axis *= crate::ship::physical_damage::operation_for_kind(
-                    physical,
-                    power.0.ship_config(),
-                    kind,
-                );
+                let owner = movement_profile.and_then(|profile| match kind {
+                    crate::ship::system_registry::HELM_THRUST_KIND => Some(&profile.0.thrust),
+                    crate::ship::system_registry::HELM_STEERING_KIND => Some(&profile.0.steering),
+                    crate::ship::system_registry::LATERAL_THRUST_KIND => profile.0.lateral.as_ref(),
+                    _ => None,
+                });
+                *axis *= if let Some(owner) = owner {
+                    physical.map_or(0.0, |physical| {
+                        physical.factor(owner, phoenix_model::damage::DamageBinding::Operation)
+                    })
+                } else {
+                    crate::ship::physical_damage::operation_for_kind(
+                        physical,
+                        power.0.ship_config(),
+                        kind,
+                    )
+                };
             }
         }
         if let Some(physical) = physical {
@@ -500,7 +635,7 @@ pub fn integrate_ship_physics(
         // Only applies when the ship's TOML enabled the feature.
         let boost_cfg = boost_cfg_comp.cloned().unwrap_or_default();
         let boost_active = boost.map(|b| b.0.is_active()).unwrap_or(false);
-        if boost_cfg.enabled && boost_active {
+        if movement_config.is_none() && boost_cfg.enabled && boost_active {
             let activity = scaled_input.thrust.abs() + scaled_input.steering.abs();
             let fraction = if activity > 0.0 {
                 crate::ship::energy_work::continuous_for_kind(
@@ -527,7 +662,19 @@ pub fn integrate_ship_physics(
             config.max_yaw_rate *= 1.0 + (boost_cfg.steering_multiplier - 1.0) * fraction;
         }
 
-        let result = compute_physics(state, scaled_input, dt, &config);
+        let result = if let (Some(config), Some(request)) = (movement_config, movement_resolved) {
+            compute_physics_with_axis_modes(
+                state,
+                scaled_input,
+                dt,
+                &config,
+                request.drive,
+                request.lateral.is_some_and(|(_, direct)| direct),
+                request.steering_direct,
+            )
+        } else {
+            compute_physics(state, scaled_input, dt, &config)
+        };
 
         physics.x = result.x;
         physics.y = result.y;

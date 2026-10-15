@@ -28,6 +28,7 @@ pub(crate) fn ai_helm_lateral_thrust(
             Option<&FineSystemAiPolicies>,
             Option<&crate::entities::spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
+            Option<&phoenix_sim_gameplay::ship::helm_control::CompiledHelmControl>,
             &mut crate::core::messages::AdmittedCommands,
         ),
         With<crate::ai::server::AiHighFidelity>,

@@ -35,6 +35,7 @@ fn actual_helm_estimates_only_explicitly_permitted_tracks_and_rebuilds_after_fee
     boards.0.insert(
         owner.clone(),
         SystemBlackboard::Helm(HelmBlackboard {
+            movement: None,
             tracks: Some(Vec::new()),
             ..Default::default()
         }),

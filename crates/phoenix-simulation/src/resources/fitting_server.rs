@@ -186,9 +186,13 @@ pub(crate) fn register(app: &mut App) {
     );
     app.add_systems(
         FixedUpdate,
-        tick.in_set(crate::sim_sets::SimSet::Physics)
+        // Commit hardware only after this interval's beams have expired. The
+        // damage phase follows Physics, so fitting must not add a backwards
+        // dependency from a Physics system to the beam lifetime owner.
+        tick.in_set(crate::sim_sets::SimSet::Modifiers)
             .after(crate::console::repair::server::tick_repair_teams)
-            .after(crate::console::weapons::beam::tick_beams_tick_lifetimes),
+            .after(crate::console::weapons::beam::tick_beams_tick_lifetimes)
+            .before(crate::infrastructure::server::tick_infrastructure_condition),
     );
 }
 

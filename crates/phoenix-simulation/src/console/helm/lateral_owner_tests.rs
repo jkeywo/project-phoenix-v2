@@ -78,7 +78,7 @@ fn renamed_lateral_publication_uses_actual_owner_condition_source_and_exact_type
             source: owner.clone(),
             kind: ConsoleObservationKind::HelmLateralThrust,
         });
-    crate::ship::console_ownership::validate_consoles(&config).unwrap();
+    phoenix_sim_gameplay::ship::console_ownership::validate_consoles(&config).unwrap();
     assert!(config
         .observations_for_system(&recipient, boards)
         .get(&owner)

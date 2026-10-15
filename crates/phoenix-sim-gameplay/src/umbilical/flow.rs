@@ -34,6 +34,28 @@
 
 use serde::{Deserialize, Serialize};
 
+/// One individual Umbilical controller's observed port-maintenance decision.
+/// Transfer parameters and all physical work remain with their existing owners.
+#[derive(Clone, Copy, Debug)]
+pub struct PortMaintenanceFacts {
+    pub explicit_transfer: bool,
+    pub running: bool,
+    pub maintaining: bool,
+    pub eligible_free_port: bool,
+}
+
+/// Explicit work takes precedence over opportunistic collection. A running
+/// unclaimed human flow is otherwise left alone when its System is delegated.
+pub fn port_maintenance_change(facts: PortMaintenanceFacts) -> Option<bool> {
+    if facts.explicit_transfer {
+        facts.maintaining.then_some(false)
+    } else if facts.eligible_free_port && !facts.running && !facts.maintaining {
+        Some(true)
+    } else {
+        None
+    }
+}
+
 /// The authored transfer-umbilical terms for a hull's `[umbilical]` table (issue
 /// #1160).
 ///

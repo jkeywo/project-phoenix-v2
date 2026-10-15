@@ -131,3 +131,12 @@ Workshop's existing port form preserves the actual producer binding and offers
 an explicit legacy passive choice. Omitted bindings retain the legacy path;
 this facility foundation does not establish physical workforce, shipments or
 the complete outside-actor network.
+
+The individual Umbilical AI gives an explicit permitted Transfer directive
+priority over opportunistic Main-store collection. It disables maintenance through
+the same admitted command before starting the retained resource/direction/store.
+An idle free-allied visit still enables replenishment, including equipment whose
+default direction is Deliver. Delegating an already running unclaimed human flow
+preserves its mode; ordinary standing-operation ownership still controls withdrawal.
+The pure decision is in Gameplay `umbilical/flow.rs`; the existing Simulation
+Umbilical host emits and applies it without another inventory or controller.

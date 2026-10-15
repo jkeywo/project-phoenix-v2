@@ -651,22 +651,6 @@ pub fn operate_umbilical_ai(
                 SystemBlackboard::Umbilical(view) => view.port.as_ref(),
                 _ => None,
             });
-        if port.is_some_and(|port| {
-            port.policy == phoenix_model::ports::PortServicePolicy::FreeAlliedReplenishment
-                && port.eligible
-                && !port.stores.is_empty()
-        }) && !umbilical.port_maintenance
-        {
-            emit_ai_command(
-                uuid,
-                umbilical_system_id(),
-                SystemControlPayload::SetPortMaintenance { enabled: true },
-                sources,
-                &sessions,
-                config,
-                &mut admitted,
-            );
-        }
         let transfer_active = match config.and_then(|config| {
             config
                 .0
@@ -682,6 +666,29 @@ pub fn operate_umbilical_ai(
             _ => false,
         };
 
+        let maintenance = crate::umbilical::flow::port_maintenance_change(
+            crate::umbilical::flow::PortMaintenanceFacts {
+                explicit_transfer: transfer_active,
+                running: umbilical.running,
+                maintaining: umbilical.port_maintenance,
+                eligible_free_port: port.is_some_and(|port| {
+                    port.policy == phoenix_model::ports::PortServicePolicy::FreeAlliedReplenishment
+                        && port.eligible
+                        && !port.stores.is_empty()
+                }),
+            },
+        );
+        if let Some(enabled) = maintenance {
+            emit_ai_command(
+                uuid,
+                umbilical_system_id(),
+                SystemControlPayload::SetPortMaintenance { enabled },
+                sources,
+                &sessions,
+                config,
+                &mut admitted,
+            );
+        }
         let decision = crate::ai::standing_operation::decide(OperationFacts {
             order_present: transfer_active,
             ready: dock.docked_partner().is_some(),

@@ -305,3 +305,68 @@ fn the_carry_never_hoards_a_whole_unit_the_clamp_discarded() {
         }
     );
 }
+
+#[test]
+fn explicit_transfer_precedes_idle_replenishment_and_preserves_active_human_work() {
+    for maintaining in [false, true] {
+        for running in [false, true] {
+            for eligible_free_port in [false, true] {
+                let expected = maintaining.then_some(false);
+                assert_eq!(
+                    port_maintenance_change(PortMaintenanceFacts {
+                        explicit_transfer: true,
+                        running,
+                        maintaining,
+                        eligible_free_port,
+                    }),
+                    expected,
+                    "explicit work must retain selected direction/resource"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        port_maintenance_change(PortMaintenanceFacts {
+            explicit_transfer: false,
+            running: false,
+            maintaining: false,
+            eligible_free_port: true,
+        }),
+        Some(true),
+        "idle delegated visits still replenish Main stores"
+    );
+    for maintaining in [false, true] {
+        for eligible_free_port in [false, true] {
+            assert_eq!(
+                port_maintenance_change(PortMaintenanceFacts {
+                    explicit_transfer: false,
+                    running: true,
+                    maintaining,
+                    eligible_free_port,
+                }),
+                None,
+                "delegation must preserve an already active human flow"
+            );
+        }
+    }
+    assert_eq!(
+        port_maintenance_change(PortMaintenanceFacts {
+            explicit_transfer: false,
+            running: false,
+            maintaining: false,
+            eligible_free_port: false,
+        }),
+        None,
+        "unknown or ineligible ports confer no new maintenance intent"
+    );
+    assert_eq!(
+        port_maintenance_change(PortMaintenanceFacts {
+            explicit_transfer: false,
+            running: false,
+            maintaining: true,
+            eligible_free_port: true,
+        }),
+        None,
+        "retained maintenance needs no repeated command"
+    );
+}

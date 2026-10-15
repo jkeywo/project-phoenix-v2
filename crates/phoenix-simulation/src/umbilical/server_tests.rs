@@ -761,3 +761,161 @@ fn damaged_umbilical_reduces_actual_flow_after_paying_the_same_work() {
         "fault loss changes output, not funded work cost"
     );
 }
+
+/// Controller/admission/applier owner fixture, not a physical host journey.
+fn port_ai_owner(explicit: bool, running: bool, maintaining: bool) -> (App, Entity) {
+    use crate::core::messages::{
+        AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
+        ViewscreenBlackboard,
+    };
+    let mut app = App::new();
+    app.insert_resource(crate::lobby::Sessions(
+        crate::lobby::session::SessionManager::new(),
+    ));
+    app.add_systems(
+        Update,
+        (operate_umbilical_ai, handle_umbilical_commands).chain(),
+    );
+    let hull = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    let scope = crate::ship_plugin::ShipConfigComponent(hull.ship_config.unwrap());
+    let mut sources = crate::ship_plugin::ShipSystemControlSources::default();
+    sources.0.set(
+        umbilical_system_id(),
+        crate::ship::control_source::ControlSource::Ai,
+    );
+    let mut flow = umbilical();
+    flow.running = running;
+    flow.port_maintenance = maintaining;
+    let mut boards = crate::server_app::ShipSystemBlackboards::default();
+    boards.0.insert(
+        crate::ship::system_registry::viewscreen_system_id(),
+        SystemBlackboard::Viewscreen(ViewscreenBlackboard {
+            scored_objectives: if explicit {
+                vec![ScoredObjective {
+                    id: "transfer".into(),
+                    score: 1.0,
+                    directive: AiDirective::Transfer {
+                        target: PARTNER.into(),
+                    },
+                    source: ObjectiveSource::Mission,
+                    relevance: vec![SystemAffinity::Engineering],
+                    snapshot: ObjectiveSnapshot {
+                        id: "transfer".into(),
+                        text: String::new(),
+                        text_params: Default::default(),
+                        mandatory: false,
+                        status: ObjectiveStatus::Active,
+                        targets: vec![],
+                        source: ObjectiveSource::Mission,
+                        progress: None,
+                        unassigned: false,
+                    },
+                }]
+            } else {
+                vec![]
+            },
+            ..Default::default()
+        }),
+    );
+    boards.0.insert(
+        umbilical_system_id(),
+        SystemBlackboard::Umbilical(UmbilicalBlackboard {
+            port: Some(phoenix_model::ports_ui::PortServiceView {
+                partner_uuid: PARTNER.into(),
+                visit: 1,
+                policy: phoenix_model::ports::PortServicePolicy::FreeAlliedReplenishment,
+                eligible: true,
+                offers: vec![],
+                order: None,
+                stores: vec![phoenix_model::logistics_ui::LogisticsStoreView {
+                    id: "hold".into(),
+                    resource: "reserve_fuel".into(),
+                    role: "main".into(),
+                    system: None,
+                    level: 0,
+                    available: 0,
+                    held: 0,
+                    ceiling: 10,
+                    headroom: 10,
+                    bay_free_space: 10,
+                    incoming: 0,
+                    target: 10,
+                    reserve: 0,
+                    priority: 0,
+                    compartment: "support".into(),
+                }],
+            }),
+            ..Default::default()
+        }),
+    );
+    let operator = app
+        .world_mut()
+        .spawn((
+            EntityUuid(OPERATOR.into()),
+            scope,
+            sources,
+            flow,
+            dock(Some(PARTNER)),
+            boards,
+            crate::core::messages::AdmittedCommands::default(),
+        ))
+        .id();
+    (app, operator)
+}
+
+#[test]
+fn ordinary_umbilical_ai_applies_explicit_transfer_before_opportunistic_collection() {
+    let (mut app, operator) = port_ai_owner(true, false, true);
+    app.update();
+    let admitted = app
+        .world()
+        .get::<crate::core::messages::AdmittedCommands>(operator)
+        .unwrap();
+    let payloads: Vec<_> = admitted
+        .for_target(UMBILICAL_SYSTEM_ID)
+        .map(|command| &command.payload)
+        .collect();
+    assert_eq!(
+        payloads,
+        vec![
+            &SystemControlPayload::SetPortMaintenance { enabled: false },
+            &SystemControlPayload::StartTransfer
+        ]
+    );
+    let flow = app.world().get::<TransferUmbilical>(operator).unwrap();
+    assert!(!flow.port_maintenance);
+    assert!(flow.running);
+    assert_eq!(flow.selected_direction, UmbilicalDirection::Deliver);
+    assert_eq!(flow.selected_resource, "reserve_fuel");
+    assert!(app.world().get::<UmbilicalAiRunning>(operator).is_some());
+}
+
+#[test]
+fn ordinary_idle_umbilical_ai_retains_default_deliver_resupply_but_preserves_running_human_flow() {
+    let (mut idle, operator) = port_ai_owner(false, false, false);
+    idle.update();
+    let flow = idle.world().get::<TransferUmbilical>(operator).unwrap();
+    assert!(
+        flow.port_maintenance,
+        "idle default-Deliver equipment still collects Main targets"
+    );
+    assert_eq!(flow.selected_direction, UmbilicalDirection::Deliver);
+    let (mut active, operator) = port_ai_owner(false, true, false);
+    active.update();
+    let flow = active.world().get::<TransferUmbilical>(operator).unwrap();
+    assert!(!flow.port_maintenance);
+    assert!(
+        flow.running,
+        "delegation does not stop a flow the AI did not claim"
+    );
+    assert!(active
+        .world()
+        .get::<crate::core::messages::AdmittedCommands>(operator)
+        .unwrap()
+        .0
+        .is_empty());
+    assert!(active.world().get::<UmbilicalAiRunning>(operator).is_none());
+}

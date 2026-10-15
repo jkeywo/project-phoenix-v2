@@ -401,26 +401,30 @@ impl Plugin for WeaponsPlugin {
                     handle_unload_tube
                         .in_set(crate::sim_sets::FixedStep::HandleUnloadTube)
                         .in_set(crate::sim_sets::SimSet::Physics),
-                    // Torpedo tick split into two phases (issue #724),
-                    // connected by the one-tick `TorpedoTargetSnapshot`
-                    // resource: the builder writes it, the lifecycle reads
-                    // it. Instance-based `.chain()` rather than type-set
+                    // Physics builds the collision roster, pays for launches
+                    // and advances actual flights. Damage settles surviving
+                    // payloads after PDC interception. Instance-based `.chain()`
+                    // rather than type-set
                     // `.after(...)` for the same reason as the beam-tick
                     // chain above: the weapons test harness registers a
                     // second instance of each phase.
                     (
                         build_torpedo_target_snapshot
                             .in_set(crate::sim_sets::FixedStep::BuildTorpedoTargetSnapshot),
-                        tick_torpedo_lifecycle
-                            .in_set(crate::sim_sets::FixedStep::TickTorpedoLifecycle)
+                        super::advance_torpedo_flights
+                            .in_set(crate::sim_sets::FixedStep::AdvanceTorpedoFlights)
                             .in_set(ProjectileLifecycle),
                     )
                         .chain()
                         .in_set(crate::sim_sets::SimSet::Physics),
+                    tick_torpedo_lifecycle
+                        .in_set(crate::sim_sets::FixedStep::TickTorpedoLifecycle)
+                        .in_set(crate::sim_sets::SimSet::Damage)
+                        .after(crate::sim_sets::FixedStep::HandleBlasterHits),
                     // Magazine consumer runs in Physics — reads channel-2 claims
                     // that handle_load_tube emitted this tick (both now in
                     // Physics, issue #846). Ordered after handle_load_tube and
-                    // build_torpedo_target_snapshot / tick_torpedo_lifecycle so
+                    // build_torpedo_target_snapshot / advance_torpedo_flights so
                     // its own state mutations are seen.
                     handle_torpedo_magazine_inter_system
                         .in_set(crate::sim_sets::FixedStep::HandleTorpedoMagazineInterSystem)

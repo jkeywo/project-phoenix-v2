@@ -176,6 +176,7 @@ pub enum FixedStep {
     SimulateLowLodShips,
     HandleFireBlaster,
     TickBlasterSystem,
+    AdvanceTorpedoFlights,
     TickTorpedoLifecycle,
     HandleDispatchRepairTeam,
     HandleRecallRepairTeam,

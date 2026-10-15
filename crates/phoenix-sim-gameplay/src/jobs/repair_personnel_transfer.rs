@@ -118,11 +118,12 @@ impl RepairTeams {
         }
         // Refuse missing physical state before minting or replacing a Job.
         self.state.navigation.as_ref()?.get(team)?;
+        let owner = self.state.owner.clone();
         if !self.state.assign(
             team,
             RepairActivity::PersonnelTransfer {
                 phase: TeamSlot::Travelling {
-                    system_id: Some(self.state.owner.clone()),
+                    system_id: Some(owner),
                     display_name: None,
                     elapsed: 0.0,
                     priority: None,

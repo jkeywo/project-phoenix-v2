@@ -555,7 +555,7 @@ impl SystemKindRegistry {
         registry.register_commandable(JAMMING_KIND, ConsoleFamily::Comms)?;
         registry.register_commandable(SIGNAL_PROTECTION_KIND, ConsoleFamily::Sensors)?;
         registry.register_commandable(IDENTITY_EMITTER_KIND, ConsoleFamily::Comms)?;
-        registry.register_commandable(CONCEALMENT_KIND, ConsoleFamily::Science)?;
+        registry.register_commandable(CONCEALMENT_KIND, ConsoleFamily::Sensors)?;
         registry.register_commandable(TRANSIT_DRIVE_KIND, ConsoleFamily::Helm)?;
         registry.register_commandable(CRAFT_BAY_KIND, ConsoleFamily::Tactical)?;
         registry.register_commandable(ACCESS_GATE_KIND, ConsoleFamily::Access)?;

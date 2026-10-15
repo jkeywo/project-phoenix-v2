@@ -42,10 +42,12 @@ pub(crate) fn register(app: &mut App) {
         .kinds()
         .filter(|kind| *kind != crate::ship::system_registry::LOGISTICS_KIND)
     {
-        app.register_admitted_consumer(ConsumerMatcher::kind(kind).with_feedback(
-            FeedbackAddress::DeclaredKindOnly,
-            &[Payload::SetStockTarget],
-        ));
+        app.register_admitted_consumer(
+            ConsumerMatcher::kind_payload(kind, Payload::SetStockTarget).with_feedback(
+                FeedbackAddress::DeclaredKindOnly,
+                &[Payload::SetStockTarget],
+            ),
+        );
     }
     app.add_systems(
         FixedUpdate,

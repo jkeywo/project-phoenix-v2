@@ -423,3 +423,72 @@ fn conflicting_consumer_feedback_is_a_build_error() {
             .with_feedback(FeedbackAddress::MatcherSpelling, &[Payload::Dock]),
     );
 }
+
+#[test]
+fn shared_stock_feedback_composes_with_equipment_without_hiding_ambiguity() {
+    use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
+    let mut registry = AdmittedConsumerRegistry::default();
+    let config = ship_config(vec![system("factory", "fabrication")]);
+    registry.register(ConsumerMatcher::kind("fabrication").with_feedback(
+        FeedbackAddress::DeclaredKindOnly,
+        &[Payload::StartProduction],
+    ));
+    let stock = ConsumerMatcher::kind_payload("fabrication", Payload::SetStockTarget)
+        .with_feedback(
+            FeedbackAddress::DeclaredKindOnly,
+            &[Payload::SetStockTarget],
+        );
+    registry.register(stock.clone());
+    registry.register(stock);
+    let target = SystemId("factory".into());
+    let goal = SystemControlPayload::SetStockTarget {
+        store: "local".into(),
+        amount: 4,
+    };
+    assert_eq!(
+        registry.feedback_support(&target, &goal, &config),
+        FeedbackSupport::Supported
+    );
+    assert_eq!(
+        registry.feedback_support(&target, &SystemControlPayload::StartProduction {}, &config),
+        FeedbackSupport::Supported
+    );
+    assert_eq!(
+        registry.feedback_support(&target, &SystemControlPayload::Dock, &config),
+        FeedbackSupport::Unsupported
+    );
+    registry.register(
+        ConsumerMatcher::exact("fabrication", "factory")
+            .with_feedback(FeedbackAddress::MatcherSpelling, &[Payload::SetStockTarget]),
+    );
+    assert_eq!(
+        registry.feedback_support(&target, &goal, &config),
+        FeedbackSupport::Ambiguous
+    );
+}
+
+#[test]
+fn a_shared_stock_handler_does_not_claim_missing_machinery() {
+    use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
+    let mut registry = AdmittedConsumerRegistry::default();
+    let factory = system("factory", "fabrication");
+    registry.register(
+        ConsumerMatcher::kind_payload("fabrication", Payload::SetStockTarget).with_feedback(
+            FeedbackAddress::DeclaredKindOnly,
+            &[Payload::SetStockTarget],
+        ),
+    );
+    assert!(!registry.is_system_routed(&factory));
+    assert!(!registry.claims_kind("fabrication"));
+    assert!(registry.is_command_routed(
+        &factory,
+        &SystemControlPayload::SetStockTarget {
+            store: "local".into(),
+            amount: 4
+        }
+    ));
+    assert!(!registry.is_command_routed(&factory, &SystemControlPayload::StartProduction {}));
+    registry.register(ConsumerMatcher::kind("fabrication"));
+    assert!(registry.is_system_routed(&factory));
+    assert!(registry.claims_kind("fabrication"));
+}

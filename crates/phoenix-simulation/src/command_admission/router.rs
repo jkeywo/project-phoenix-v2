@@ -50,6 +50,11 @@ pub enum ConsumerMatcher {
     /// Every authored instance of a System kind, e.g. Dock, whose runtime
     /// component carries and reads its authored System id.
     Kind(String),
+    /// A shared capability consumer handles one payload across fitted kinds.
+    KindPayload {
+        kind: String,
+        payload: SystemControlPayloadDiscriminants,
+    },
     /// One canonical declared System id.
     Exact { kind: String, id: String },
     /// A generated declared-System id family.
@@ -62,6 +67,16 @@ impl ConsumerMatcher {
     /// Match every authored instance carrying `kind` in ship topology.
     pub fn kind(kind: impl Into<String>) -> Self {
         Self::Kind(kind.into())
+    }
+
+    pub fn kind_payload(
+        kind: impl Into<String>,
+        payload: SystemControlPayloadDiscriminants,
+    ) -> Self {
+        Self::KindPayload {
+            kind: kind.into(),
+            payload,
+        }
     }
 
     /// Match one canonical id belonging to `kind`.
@@ -91,6 +106,12 @@ impl ConsumerMatcher {
         address: FeedbackAddress,
         payloads: &'static [SystemControlPayloadDiscriminants],
     ) -> ConsumerRegistration {
+        if let Self::KindPayload { payload, .. } = &self {
+            assert!(
+                payloads.len() == 1 && payloads.contains(payload),
+                "payload consumer must declare its exact terminal-feedback payload"
+            );
+        }
         assert!(
             matches!(
                 (&self, address),
@@ -100,10 +121,11 @@ impl ConsumerMatcher {
                 ) | (
                     Self::Kind(_),
                     FeedbackAddress::DeclaredKindOrCanonical(_) | FeedbackAddress::DeclaredKindOnly
-                ) | (
-                    Self::Prefix { .. },
-                    FeedbackAddress::LowercasePrefixSpelling
-                )
+                ) | (Self::KindPayload { .. }, FeedbackAddress::DeclaredKindOnly)
+                    | (
+                        Self::Prefix { .. },
+                        FeedbackAddress::LowercasePrefixSpelling
+                    )
             ),
             "feedback address mode must match the consumer address domain"
         );
@@ -116,13 +138,16 @@ impl ConsumerMatcher {
     fn matches_target(&self, target: &str) -> bool {
         match self {
             Self::UndeclaredExact(id) => target == id,
-            Self::Kind(_) | Self::Exact { .. } | Self::Prefix { .. } => false,
+            Self::Kind(_) | Self::KindPayload { .. } | Self::Exact { .. } | Self::Prefix { .. } => {
+                false
+            }
         }
     }
 
     fn matches_system(&self, system: &crate::ship::config::SystemInstanceConfig) -> bool {
         match self {
             Self::Kind(kind) => system.kind == *kind,
+            Self::KindPayload { .. } => false,
             Self::Exact { kind, id } => system.kind == *kind && system.id.0 == *id,
             Self::Prefix { kind, prefix } => {
                 system.kind == *kind && system.id.0.starts_with(prefix)
@@ -136,7 +161,7 @@ impl ConsumerMatcher {
             Self::Kind(kind) | Self::Exact { kind, .. } | Self::Prefix { kind, .. } => {
                 kind == candidate
             }
-            Self::UndeclaredExact(_) => false,
+            Self::KindPayload { .. } | Self::UndeclaredExact(_) => false,
         }
     }
 }
@@ -212,6 +237,18 @@ impl ConsumerRegistration {
             ) => target.0 == *id,
             (ConsumerMatcher::Prefix { prefix, .. }, FeedbackAddress::MatcherSpelling) => {
                 target.0.starts_with(prefix)
+            }
+            (
+                ConsumerMatcher::KindPayload {
+                    kind,
+                    payload: expected,
+                },
+                FeedbackAddress::DeclaredKindOnly,
+            ) => {
+                *expected == SystemControlPayloadDiscriminants::from(payload)
+                    && config
+                        .and_then(|config| config.system(target))
+                        .is_some_and(|system| system.kind == *kind)
             }
             (ConsumerMatcher::Kind(kind), FeedbackAddress::DeclaredKindOnly) => config
                 .and_then(|config| config.system(target))
@@ -336,6 +373,24 @@ impl AdmittedConsumerRegistry {
             .any(|entry| entry.matcher.matches_system(system))
     }
 
+    /// A shared payload handler proves only that command, never machinery coverage.
+    pub fn is_command_routed(
+        &self,
+        system: &crate::ship::config::SystemInstanceConfig,
+        payload: &SystemControlPayload,
+    ) -> bool {
+        self.registrations.iter().any(|entry| match &entry.matcher {
+            ConsumerMatcher::KindPayload {
+                kind,
+                payload: expected,
+            } => {
+                system.kind == *kind
+                    && *expected == SystemControlPayloadDiscriminants::from(payload)
+            }
+            matcher => matcher.matches_system(system),
+        })
+    }
+
     /// Does production declare any consumer address domain for this System kind?
     pub fn claims_kind(&self, kind: &str) -> bool {
         self.registrations
@@ -399,7 +454,7 @@ pub fn unrouted_command_targets<'a>(
             .and_then(|config| config.systems.iter().find(|system| system.id.0 == target))
             .map_or_else(
                 || registry.is_routed(target),
-                |system| registry.is_system_routed(system),
+                |system| registry.is_command_routed(system, &cmd.payload),
             );
         if !routed && !out.contains(&target) {
             out.push(target);

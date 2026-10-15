@@ -439,6 +439,28 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         units_per_sec,
         reorder_fraction
     );
+    exhaustive_struct!(
+        production_schema,
+        phoenix_model::production::ProductionConfig,
+        system,
+        recipes,
+        initial_recipe,
+        initial_target
+    );
+    exhaustive_struct!(
+        production_recipe_schema,
+        phoenix_model::production::ProductionRecipeConfig,
+        id,
+        inputs,
+        outputs,
+        work_secs
+    );
+    exhaustive_struct!(
+        production_amount_schema,
+        phoenix_model::production::ProductionAmount,
+        store,
+        amount
+    );
     // Physical definitions are authored structure, never generic Live setters.
     // The descriptor walk classifies their leaves RecreateRequired. Explicit
     // nested patterns also catch optional future leaves absent from today's hulls.
@@ -1389,11 +1411,11 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     println!("reviewed schema counts={counts:?}; fingerprint={fingerprint}");
     assert_eq!(
         counts,
-        [55, 71, 934, 51, 56],
+        [55, 71, 950, 51, 56],
         "update the reviewed inventory ratchet"
     );
     assert_eq!(
-        fingerprint, 10_004_267_929_305_317_709,
+        fingerprint, 8_520_873_128_864_333_453,
         "update the reviewed inventory fingerprint"
     );
 }

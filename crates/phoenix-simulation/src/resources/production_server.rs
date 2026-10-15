@@ -66,45 +66,6 @@ pub(crate) fn install(
     }
 }
 
-/// Reconstruct a temporary planning projection strictly from the permitted report.
-/// Claim names are synthetic because only their reported totals are known; this
-/// projection is never committed or used as execution stock.
-fn observed_inputs(
-    profile: &CompiledProduction,
-    board: &phoenix_model::logistics_ui::LogisticsBlackboard,
-) -> Option<(EndpointMap, BTreeMap<String, i64>)> {
-    let mut stocks = EndpointMap::new();
-    let mut floors = BTreeMap::new();
-    for store in &profile.logistics().config().stores {
-        let observed = board.stores.iter().find(|row| row.id == store.id)?;
-        if observed.level < 0
-            || observed.available < 0
-            || observed.available > observed.level
-            || observed.incoming < 0
-            || observed.held < 0
-        {
-            return None;
-        }
-        let mut stock = crate::resources::Stock::new(observed.level, observed.ceiling).ok()?;
-        if observed.available < observed.level {
-            stock
-                .reserved
-                .insert("observed".into(), observed.level - observed.available);
-        }
-        if observed.incoming > 0 {
-            stock.incoming.insert("observed".into(), observed.incoming);
-        }
-        stocks.insert(
-            store.endpoint.clone(),
-            crate::resources::logistics::EndpointStock {
-                stock,
-                held: observed.held,
-            },
-        );
-        floors.insert(store.id.clone(), observed.reserve);
-    }
-    Some((stocks, floors))
-}
 fn permitted_available(
     profile: &CompiledProduction,
     state: &ProductionState,
@@ -118,11 +79,23 @@ fn permitted_available(
     else {
         return false;
     };
-    let Some((stocks, floors)) = observed_inputs(profile, board) else {
-        return false;
-    };
+    let reports = board
+        .stores
+        .iter()
+        .map(|store| ProductionStockObservation {
+            store: store.id.clone(),
+            level: store.level,
+            available: store.available,
+            incoming: store.incoming,
+            held: store.held,
+            reserve: store.reserve,
+            headroom: store.headroom,
+            ceiling: store.ceiling,
+            bay_free_space: store.bay_free_space,
+        })
+        .collect::<Vec<_>>();
     state
-        .start_available(profile, tick, &floors, &stocks)
+        .start_available_from_report(profile, tick, &reports)
         .unwrap_or(false)
 }
 

@@ -524,3 +524,16 @@ Simulation adapter and hidden-state tests are authored but unrun by this worker;
 root owns compilation, schema/version joins and all native checks. The full-host
 Human/ordinary AI, malformed no-write, loss and fresh JSON360 tracer follows in a
 separate donor. This source slice is not an increment19/20 playable exit.
+
+
+The separate `tests/personnel_craft_continuation.rs` proof now covers four
+actual-host journeys: joined Human pickup/Bay exclusion/finite occupancy/launch/
+recovery/unload, explicit intent completed by ordinary AFK Backfill, trusted World
+body removal with normal destruction events and correct off-ship survival, and
+retargeted same-Job physical cancellation/return. Eight malformed whole candidates
+must leave complete capture and digest unchanged. Fresh JSON continuations compare
+every step and final state across 360 updates while boarding, deployed, unloading,
+returning and after loss. The AI case reproduces the real AFK holder on the fresh
+host before restore and checks ordinary AI policy on both hosts throughout.
+Independent source review passed; native execution is pending at the integrator.
+This quiet one-host proof does not claim network/device or full20 acceptance.

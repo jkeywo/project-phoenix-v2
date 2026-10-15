@@ -6,6 +6,17 @@ fn host() -> App {
     host_with_registration(false)
 }
 
+fn assert_same_digest(left: &World, right: &World) {
+    let expected = crate::sim_digest::digest_stages(left);
+    assert_eq!(
+        crate::sim_digest::world_digest(left),
+        crate::sim_digest::world_digest(right),
+        "first divergent scope: {:?}; left stages: {expected:?}; right stages: {:?}",
+        crate::sim_digest::first_divergent_scope(right, &expected),
+        crate::sim_digest::digest_stages(right),
+    );
+}
+
 fn host_with_registration(reverse: bool) -> App {
     let mut app = App::new();
     if reverse {
@@ -215,11 +226,7 @@ fn carrier_json_restore_discards_bootstrap_flights_and_continues_same_vector_exa
             crate::snapshot::capture(resumed.world()),
             "step{step}"
         );
-        assert_eq!(
-            crate::sim_digest::world_digest(original.world()),
-            crate::sim_digest::world_digest(resumed.world()),
-            "step{step}"
-        );
+        assert_same_digest(original.world(), resumed.world());
         for (app, entity) in [(&mut original, left), (&mut resumed, right)] {
             app.world_mut()
                 .get_mut::<TorpedoSystemResource>(entity)
@@ -526,11 +533,7 @@ fn bolt_carrier_recipe_json_continuation_and_forged_work_are_closed() {
             crate::snapshot::capture(resumed.world()),
             "step{step}"
         );
-        assert_eq!(
-            crate::sim_digest::world_digest(original.world()),
-            crate::sim_digest::world_digest(resumed.world()),
-            "step{step}"
-        );
+        assert_same_digest(original.world(), resumed.world());
         for (app, entity) in [(&mut original, left), (&mut resumed, right)] {
             for bank in &mut app
                 .world_mut()
@@ -583,10 +586,7 @@ fn forged_carrier_identity_is_refused_before_roster_or_clock_writes() {
     assert!(report.is_complete(), "{report:?}");
     fresh.world_mut().flush();
     assert_eq!(crate::snapshot::capture(fresh.world()), before);
-    assert_eq!(
-        crate::sim_digest::world_digest(fresh.world()),
-        before_digest
-    );
+    assert_same_digest(app.world(), fresh.world());
 }
 
 #[test]

@@ -125,7 +125,10 @@ pub(crate) fn copy_message(
             && metadata.received_tick.is_some()
         {
             message.responses = [
-                phoenix_model::comms_request::REPORT_RESPONSE,
+                match metadata.content {
+                    CommsRadioContent::Request { request } => request.positive_response(),
+                    _ => unreachable!("received request"),
+                },
                 phoenix_model::comms_request::DECLINE_RESPONSE,
             ]
             .into_iter()
@@ -241,7 +244,7 @@ pub(crate) fn tick_radio(
                 } => (
                     channel,
                     audience,
-                    phoenix_model::comms_request::REPORT_STATUS_BODY,
+                    request.body(),
                     phoenix_model::comms_request::CommsRadioContent::Request { request: *request },
                     planned_request.as_deref(),
                 ),
@@ -291,10 +294,40 @@ pub(crate) fn tick_radio(
                 _ if planned_context.is_none()=>Ok(None),
                 _=>Err("planned request is not present in this Console's current permitted publication".into()),
             };
+            let formation = matches!(&content, phoenix_model::comms_request::CommsRadioContent::Request { request } if request.is_formation());
+            let formation_sequence = if formation {
+                inbox
+                    .0
+                    .iter()
+                    .filter(|message| message.sender_uuid == source.uuid)
+                    .filter_map(|message| {
+                        message
+                            .transmission
+                            .as_ref()
+                            .filter(|wire| wire.received_tick.is_none())?
+                            .formation_sequence
+                    })
+                    .max()
+                    .unwrap_or(0)
+                    .checked_add(1)
+            } else {
+                None
+            };
+            let request_valid = match &content {
+                phoenix_model::comms_request::CommsRadioContent::Request { request } => {
+                    request.validate().is_ok()
+                        && (!formation
+                            || formation_sequence.is_some()
+                                && matches!(audience, CommsAudience::Contact { .. }))
+                }
+                _ => true,
+            };
             let context_valid = prepared.is_ok();
             let prepared = prepared.ok().flatten();
-            let sustained = prepared.is_some();
-            let applied = context_known
+            let sustained = prepared.is_some()
+                || formation && matches!(audience, CommsAudience::Contact { .. });
+            let applied = request_valid
+                && context_known
                 && context_valid
                 && profile.is_some()
                 && source.listening > 0.0
@@ -329,6 +362,7 @@ pub(crate) fn tick_radio(
                 )
             };
             let metadata = CommsTransmission {
+                formation_sequence,
                 sustained,
                 origin_id: new_id(),
                 channel: channel.clone(),

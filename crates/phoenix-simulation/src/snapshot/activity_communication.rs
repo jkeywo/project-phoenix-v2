@@ -184,6 +184,12 @@ pub(super) fn validate_emissions(snapshot: &PhoenixSnapshot) -> Result<(), Strin
         let CommsAudience::Contact { target_uuid } = &wire.audience else {
             return Err("sustained Request must retain one exact recipient".into());
         };
+        // Durable Formation has its own ordinary source sequence/history, not
+        // a fabricated World ReportStatus execution. Model validates that full
+        // immutable lineage before this World-specific candidate check.
+        if request.is_formation() {
+            continue;
+        }
         let rows = &snapshot
             .scenario
             .as_ref()

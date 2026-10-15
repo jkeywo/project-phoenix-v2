@@ -61,6 +61,7 @@ fn message(id: &str, sender: &str, recipient: &str, wire: serde_json::Value) -> 
 }
 fn actual_reference() -> CommsRequestReference {
     CommsRequestReference {
+        formation_sequence: None,
         origin_id: "request-origin".into(),
         source_ship: "actual-ship".into(),
         recipient_ship: "actual-port".into(),

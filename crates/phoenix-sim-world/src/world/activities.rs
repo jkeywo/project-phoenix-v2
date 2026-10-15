@@ -61,9 +61,13 @@ impl ActivityRequest {
         }
         match self {
             Self::Communication {
-                recipient, channel, ..
+                recipient,
+                channel,
+                request,
+                ..
             } => {
-                if recipient.trim().is_empty()
+                if *request != phoenix_model::comms_request::GenericCommsRequest::ReportStatus
+                    || recipient.trim().is_empty()
                     || recipient.len() > 256
                     || recipient.chars().any(char::is_control)
                     || recipient.starts_with("slot:")

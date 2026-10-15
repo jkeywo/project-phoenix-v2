@@ -630,3 +630,132 @@ fn clearing_an_inbox_id_cannot_cancel_a_distinct_planned_reading_with_the_same_t
         Some(&record)
     );
 }
+
+#[test]
+fn actual_paid_formation_acceptance_has_no_status_report_and_late_older_cannot_replace_it() {
+    let (mut app, source, receiver) = fixture(10.0);
+    let mut command = app
+        .world_mut()
+        .get_mut::<AdmittedCommands>(source)
+        .unwrap()
+        .0
+        .pop()
+        .unwrap();
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(receiver)
+        .unwrap()
+        .0
+        .push(crate::core::messages::AdmittedCommand {
+            target: SystemId("comms".into()),
+            payload: SystemControlPayload::SendCommsText {
+                channel: "public".into(),
+                audience: CommsAudience::All,
+                body: "Actual public introduction".into(),
+            },
+            response_token: None,
+            feedback_correlation: None,
+        });
+    app.world_mut().run_system_once(tick_radio).unwrap();
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(receiver)
+        .unwrap()
+        .0
+        .clear();
+    command.payload = SystemControlPayload::SendCommsRequest {
+        channel: "public".into(),
+        audience: CommsAudience::Contact {
+            target_uuid: "receiver".into(),
+        },
+        request: GenericCommsRequest::FormUp { slot: [-40, 80] },
+        planned_request: None,
+    };
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(source)
+        .unwrap()
+        .0
+        .push(command);
+    app.world_mut().run_system_once(tick_radio).unwrap();
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 11;
+    app.world_mut().run_system_once(tick_radio).unwrap();
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(source)
+        .unwrap()
+        .0
+        .clear();
+    app.world_mut()
+        .run_system_once(publish_comms_blackboard)
+        .unwrap();
+    let heard = messages(&app, "receiver")
+        .into_iter()
+        .filter(|message| is_request(message))
+        .collect::<Vec<_>>();
+    assert_eq!(heard.len(), 2);
+    assert_eq!(
+        heard[0].transmission.as_ref().unwrap().formation_sequence,
+        Some(1)
+    );
+    assert_eq!(
+        heard[1].transmission.as_ref().unwrap().formation_sequence,
+        Some(2)
+    );
+    assert!(decide(&mut app, receiver, &heard[1].id, 0));
+    assert!(
+        !decide(&mut app, receiver, &heard[0].id, 0),
+        "late old coordination cannot overwrite an accepted newer source sequence"
+    );
+    let current = messages(&app, "receiver");
+    let accepted = current
+        .iter()
+        .find(|message| message.id == heard[1].id)
+        .unwrap();
+    let facts = &accepted.request_progress.as_ref().unwrap().facts;
+    assert_eq!(
+        facts.decision.as_ref().unwrap().choice,
+        CommsRequestDecision::Accept
+    );
+    assert!(
+        facts.report.is_none(),
+        "Comms acceptance is not Navigation/Helm readiness"
+    );
+    app.world_mut()
+        .run_system_once(publish_comms_blackboard)
+        .unwrap();
+    let mut config = app
+        .world()
+        .get::<ShipConfigComponent>(receiver)
+        .unwrap()
+        .clone();
+    let boards = app
+        .world()
+        .get::<crate::server_app::ShipSystemBlackboards>(receiver)
+        .unwrap();
+    let reader = SystemId("navigation".into());
+    assert!(
+        crate::comms::formation::accepted(&config, boards, &reader, "receiver").is_empty(),
+        "sharing a Station does not grant Navigation another Console's coordination"
+    );
+    let console = config.0.console_for_system(&reader).unwrap().id.clone();
+    config
+        .0
+        .consoles
+        .iter_mut()
+        .find(|row| row.id == console)
+        .unwrap()
+        .feeds
+        .push(phoenix_model::console::ConsoleFeed {
+            source: SystemId("comms".into()),
+            kind: phoenix_model::console::ConsoleObservationKind::Comms,
+        });
+    let suggestions = crate::comms::formation::accepted(&config, boards, &reader, "receiver");
+    assert_eq!(suggestions.len(), 1);
+    assert_eq!(suggestions[0].sequence, 2);
+    assert_eq!(suggestions[0].source_ship, "source");
+    assert_eq!(suggestions[0].slot, [-40, 80]);
+    assert!(crate::comms::formation::accepted(&config, boards, &reader, "foreign").is_empty());
+    app.world_mut().run_system_once(tick_radio).unwrap();
+    let all = app.world().resource::<CommsInboxRes>().0.messages();
+    phoenix_model::comms_channel::validate_transmissions(&all, 11).unwrap();
+    assert!(all.iter().any(|message|matches!(&message.transmission.as_ref().map(|wire|&wire.content),
+        Some(CommsRadioContent::Outcome{outcome}) if outcome.request.formation_sequence==Some(2)
+            && outcome.facts.decision.as_ref().is_some_and(|decision|decision.choice==CommsRequestDecision::Accept))));
+}

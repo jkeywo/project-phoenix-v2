@@ -123,3 +123,40 @@ describe('actual own planned request choices',()=>{
     el.state={...state,contacts:[]};expect(el.shadowRoot.getElementById('planned-controls').hidden).toBe(true);
   });
 });
+
+
+describe('ordered Formation coordination surface',()=>{
+  it('uses the same request action with a closed finite slot and known recipient',()=>{
+    const packets=[];
+    const view={channels:[{id:'public'}],contacts:[{uuid:'peer'}],messages:[],comms_auto:false};
+    const registry=createCommsActionRegistry({getState:()=>view,actionFeedback:new ActionFeedbackLifecycle(),sendAction:(action,data)=>dispatchConsoleAction({action,...data},(type,data)=>packets.push({type,data}),()=>{})});
+    const detail={channel:'public',audience:{kind:'contact',target_uuid:'peer'},request:{form_up:{slot:[-40,80]}}};
+    expect(registry.activate(COMMS_SEND_REQUEST_ACTION_ID,{context:'comms',source:'control',detail}).handled).toBe(true);
+    expect(packets[0].data.payload).toEqual({type:'SendCommsRequest',data:detail});
+    for(const invalid of [{...detail,request:{form_up:{slot:[0,NaN]}}},{...detail,request:{form_up:{slot:[0,1000001]}}},
+      {...detail,request:{form_up:{slot:[0,1],leader:'private'}}},{...detail,audience:{kind:'all'}},
+      {...detail,audience:{kind:'contact',target_uuid:'hidden'}}])
+      expect(registry.activate(COMMS_SEND_REQUEST_ACTION_ID,{context:'comms',source:'control',detail:invalid}).handled).toBe(false);
+    expect(packets).toHaveLength(1);
+  });
+  it('distinguishes coordination acceptance and shows the actual typed slot',()=>{
+    const message=received();message.transmission.content.request={form_up:{slot:[-40,80]}};
+    message.request_progress.facts={read_tick:14,decision:{choice:'accept',tick:15},report:null};
+    const text=requestStatus(message);
+    expect(text).toContain(t('comms.request.accepted_at',{tick:15}));
+    expect(text).toContain(t('comms.request.formation_slot',{x:-40,z:80}));
+    expect(text).not.toContain(t('comms.request.available_at',{tick:15}));
+  });
+  it('has explicit Contact-only Formation controls without clearing the text draft',()=>{
+    document.body.innerHTML='<ph-comms-text-composer></ph-comms-text-composer>';
+    const el=document.body.firstElementChild;window.activateSemanticAction=vi.fn();
+    el.state={channels:[{id:'public'}],contacts:[{uuid:'peer',name:'Peer'}],messages:[],comms_auto:false};
+    const root=el.shadowRoot;root.querySelector('#body').value='Unsent draft';
+    expect(root.querySelector('#formation-controls').disabled).toBe(true);
+    root.querySelector('#audience').value='contact:peer';root.querySelector('#audience').dispatchEvent(new Event('change'));
+    root.querySelector('#slot-x').value='-70';root.querySelector('#slot-z').value='20';
+    root.querySelector('#form-up').click();
+    expect(window.activateSemanticAction).toHaveBeenCalledWith(COMMS_SEND_REQUEST_ACTION_ID,{source:'control',detail:{channel:'public',audience:{kind:'contact',target_uuid:'peer'},request:{form_up:{slot:[-70,20]}}}});
+    expect(root.querySelector('#body').value).toBe('Unsent draft');
+  });
+});

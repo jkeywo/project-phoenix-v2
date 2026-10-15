@@ -11,7 +11,7 @@ import { defineStationAction, createCorrelatedActionSender, keyboard, gamepad } 
 
 import { ACTION_FEEDBACK_STATE } from '../action-feedback.js';
 import { isLatestLiveCriticalMessage } from '../comms-state.js';
-import { visibleCommsMessages, structuredComms } from '../comms-requests.js';
+import { visibleCommsMessages, structuredComms, normalizeCommsRequest } from '../comms-requests.js';
 import { familyView } from '../console-payload.js';
 import { createSemanticActionRegistry } from '../semantic-action-registry.js';
 
@@ -147,10 +147,11 @@ export function registerCommsActions(registry, options = {}) {
   registry.register(COMMS_ACTIONS.find(entry => entry.id === COMMS_SEND_REQUEST_ACTION_ID), ({actionId, correlation, inputMs, detail} = {}) => {
     const view = commsActionView(getState());
     const draft = detail ?? getRadioDraft();
-    if (!view || view.comms_auto || !sendAction || !draft || draft.request !== 'report_status'
+    const request = normalizeCommsRequest(draft?.request);
+    if (!view || view.comms_auto || !sendAction || !draft || !request
       || !(view.channels || []).some(channel => channel.id === draft.channel)) return false;
     const audience = draft.audience;
-    if (!audience || !['all', 'fleet', 'contact'].includes(audience.kind)) return false;
+    if (!audience || !['all', 'fleet', 'contact'].includes(audience.kind) || (typeof request === 'object' && audience.kind !== 'contact')) return false;
     if (audience.kind === 'contact' && !(view.contacts || []).some(contact => contactId(contact) === audience.target_uuid)
       && !(view.messages || []).some(message => message.sender_uuid === audience.target_uuid && message.transmission?.received_tick != null)) return false;
     if (draft.planned_request !== undefined) {
@@ -161,7 +162,7 @@ export function registerCommsActions(registry, options = {}) {
           && row.recipient_uuid === audience.target_uuid && row.channel === draft.channel && row.request === draft.request)) return false;
     }
     return send(actionId, correlation, inputMs, 'send_comms_request', {
-      channel:draft.channel, audience:audience.kind === 'contact' ? {kind:'contact',target_uuid:audience.target_uuid} : {kind:audience.kind}, request:'report_status',
+      channel:draft.channel, audience:audience.kind === 'contact' ? {kind:'contact',target_uuid:audience.target_uuid} : {kind:audience.kind}, request,
       ...(draft.planned_request !== undefined ? {planned_request:draft.planned_request} : {}),
     });
   });

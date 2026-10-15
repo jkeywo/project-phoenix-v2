@@ -143,7 +143,8 @@ impl CommsInbox {
     /// pending-follow-up timer to retire the `...` placeholder on expiry.
     pub fn remove(&mut self, message_id: &str) {
         let before = self.records.len();
-        self.records.retain(|r| r.message.id != message_id);
+        self.records
+            .retain(|r| r.message.id != message_id || r.message.request_progress.is_some());
         if self.records.len() != before {
             self.dirty = true;
         }

@@ -19,6 +19,7 @@
 pub mod ai_choice;
 pub mod component;
 pub mod content;
+pub mod formation;
 pub mod jamming;
 pub(crate) mod planned;
 pub mod radio;

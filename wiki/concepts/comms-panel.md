@@ -2,7 +2,7 @@
 title: Comms Panel
 type: concept
 tags: [comms, client, inbox, hails, priority, localisation, input, feedback]
-sources: [crates/phoenix-simulation/src/comms/planned.rs, crates/phoenix-simulation/src/comms/request_delivery.rs, crates/phoenix-simulation/src/comms/radio_route.rs, assets/entities/relay_cruiser.toml, crates/phoenix-model/src/comms_request.rs, crates/phoenix-simulation/src/comms/requests.rs, crates/phoenix-simulation/src/comms/request_returns.rs, crates/phoenix-simulation/src/snapshot/comms_requests.rs, gui/comms-requests.js, gui/components/ph-comms-text-composer.js, editor/workshop-comms-radio.js, gui/workshop-comms-radio-panel.js, gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/world/server/mod.rs, tests/publisher_ordering.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm/operations/comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
+sources: [crates/phoenix-simulation/src/comms/formation.rs, crates/phoenix-simulation/src/comms/planned.rs, crates/phoenix-simulation/src/comms/request_delivery.rs, crates/phoenix-simulation/src/comms/radio_route.rs, assets/entities/relay_cruiser.toml, crates/phoenix-model/src/comms_request.rs, crates/phoenix-simulation/src/comms/requests.rs, crates/phoenix-simulation/src/comms/request_returns.rs, crates/phoenix-simulation/src/snapshot/comms_requests.rs, gui/comms-requests.js, gui/components/ph-comms-text-composer.js, editor/workshop-comms-radio.js, gui/workshop-comms-radio-panel.js, gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/world/server/mod.rs, tests/publisher_ordering.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm/operations/comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
 updated: 2026-10-15
 ---
 
@@ -105,6 +105,32 @@ tick, and a stable recipient-copy id prevents duplicate reception. There is no
 separate retry queue or repeated emission charge. Ordinary text and manually
 sent status requests retain one-shot delivery. Actual returned reports remain
 distinct from permission to act.
+
+## Formation coordination
+
+`GenericCommsRequest::FormUp` carries only a bounded integer World-x/z slot.
+Its Contact recipient receives the same actual radio request and ordinary
+reading/response controls. The positive reply records `Accept` coordination;
+it creates no status report and makes no Navigation/Helm readiness claim.
+The composer exposes its slot in a separate Contact-only detail section and
+keeps the text draft. Request rendering distinguishes acceptance from reporting.
+
+The actual emission derives an increasing Formation sequence from retained own
+sent request history, which is the only sequence owner. Copies and returned
+references preserve it. Clear and the plot-placeholder removal seam retain
+structured history. Old delayed requests cannot be accepted after a newer
+same-source request has been accepted locally. Complete candidate validation
+checks source sequence continuity, immutable copies and nondecreasing accepted
+sequence clocks per recipient. Contact FormUp delivery uses the same paid
+retained inbox service; planned ReportStatus separately retains its World binding.
+
+`comms/formation.rs::accepted` gives a receiving System only the latest genuinely
+heard, locally accepted suggestion per source through its explicitly bound Comms
+publication. It retains original sender/callsign/sequence/clocks as coordination
+provenance. That source identity is not evidence for private Broad association.
+Navigation and Helm require their separate current knowledge and authority;
+this helper executes no machinery. The World planning Communication primitive
+remains ReportStatus-only.
 
 ## Priority
 

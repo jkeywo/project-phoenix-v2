@@ -1,3 +1,4 @@
+import {normalizeCommsRequest} from './comms-requests.js';
 /**
  * gui/action-map.js — Table-driven dispatch for `console_action` postMessages.
  *
@@ -941,11 +942,12 @@ export const ACTION_MAP = Object.freeze({
 
   /** Closed generic request and explicit read through the same actual owner. */
   send_comms_request: (a, send) => {
-    if (a.request !== 'report_status') return;
+    const request = normalizeCommsRequest(a.request);
+    if (!request) return;
     const correlated = typeof a.correlation === 'string' && a.correlation;
     send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
       ...(correlated ? {correlation:a.correlation} : {}), target:'comms',
-      payload:{type:'SendCommsRequest',data:{channel:a.channel,audience:a.audience,request:a.request,...(a.planned_request ? {planned_request:a.planned_request} : {})}},
+      payload:{type:'SendCommsRequest',data:{channel:a.channel,audience:a.audience,request,...(a.planned_request ? {planned_request:a.planned_request} : {})}},
     });
   },
   mark_comms_read: (a, send) => {

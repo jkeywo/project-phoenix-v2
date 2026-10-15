@@ -83,6 +83,7 @@ pub(super) fn settle(
         }
         let outcome = CommsRequestOutcome {
             request: CommsRequestReference {
+                formation_sequence: wire.formation_sequence,
                 origin_id: wire.origin_id.clone(),
                 source_ship: request.sender_uuid.clone(),
                 recipient_ship: source.uuid.clone(),
@@ -93,6 +94,7 @@ pub(super) fn settle(
             facts: progress.facts.clone(),
         };
         let metadata = CommsTransmission {
+            formation_sequence: None,
             sustained: false,
             origin_id: new_id(),
             channel: wire.channel.clone(),

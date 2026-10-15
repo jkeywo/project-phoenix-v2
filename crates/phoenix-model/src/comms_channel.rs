@@ -54,6 +54,8 @@ pub enum CommsAudience {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CommsTransmission {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formation_sequence: Option<u64>,
     /// Only an actually accepted planned Contact request supports retained delivery.
     #[serde(default, skip_serializing_if = "is_false")]
     pub sustained: bool,
@@ -71,6 +73,20 @@ pub struct CommsTransmission {
 
 impl CommsTransmission {
     pub fn validate(&self, now: u64) -> Result<(), &'static str> {
+        match &self.content {
+            crate::comms_request::CommsRadioContent::Request { request } => {
+                request.validate_sequence(self.formation_sequence)?
+            }
+            _ if self.formation_sequence.is_some() => {
+                return Err("formation sequence requires its actual request")
+            }
+            _ => {}
+        }
+        if matches!(&self.content, crate::comms_request::CommsRadioContent::Request { request } if request.is_formation())
+            && (!self.sustained || !matches!(self.audience, CommsAudience::Contact { .. }))
+        {
+            return Err("first formation request requires one explicit Contact recipient");
+        }
         if self.sustained
             && (!matches!(
                 self.content,
@@ -202,6 +218,7 @@ pub fn validate_transmissions(
             &transmission.audience,
             transmission.emitted_tick,
             transmission.sustained,
+            transmission.formation_sequence,
             &transmission.content,
         );
         if originals
@@ -211,7 +228,8 @@ pub fn validate_transmissions(
             return Err("radio copies disagree with their original emission");
         }
     }
-    crate::comms_request::validate_lineage(messages)
+    crate::comms_request::validate_lineage(messages)?;
+    validate_formation_order(messages)
 }
 
 #[cfg(test)]
@@ -220,4 +238,77 @@ mod tests;
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+/// Derived from the same retained actual source records, never a second counter.
+fn validate_formation_order(
+    messages: &[crate::messages::CommsMessage],
+) -> Result<(), &'static str> {
+    let mut owners =
+        std::collections::BTreeMap::<&str, std::collections::BTreeMap<u64, (u64, &str)>>::new();
+    for message in messages {
+        let Some(wire) = message
+            .transmission
+            .as_ref()
+            .filter(|wire| wire.received_tick.is_none())
+        else {
+            continue;
+        };
+        let Some(sequence) = wire.formation_sequence else {
+            continue;
+        };
+        let rows = owners.entry(&message.sender_uuid).or_default();
+        if rows
+            .insert(sequence, (wire.emitted_tick, &wire.origin_id))
+            .is_some()
+        {
+            return Err("one source cannot reuse a formation sequence");
+        }
+    }
+    let mut accepted =
+        std::collections::BTreeMap::<(&str, &str), std::collections::BTreeMap<u64, u64>>::new();
+    for message in messages {
+        let Some(wire) = message
+            .transmission
+            .as_ref()
+            .filter(|wire| wire.received_tick.is_some())
+        else {
+            continue;
+        };
+        let (Some(sequence), Some(recipient), Some(decision)) = (
+            wire.formation_sequence,
+            message.recipient_ship.as_ref(),
+            message
+                .request_progress
+                .as_ref()
+                .and_then(|progress| progress.facts.decision.as_ref()),
+        ) else {
+            continue;
+        };
+        if decision.choice == crate::comms_request::CommsRequestDecision::Accept {
+            accepted
+                .entry((&message.sender_uuid, &recipient.0))
+                .or_default()
+                .insert(sequence, decision.tick);
+        }
+    }
+    for rows in accepted.values() {
+        let mut previous_tick = 0;
+        for tick in rows.values() {
+            if *tick < previous_tick {
+                return Err("an older formation sequence was accepted after a newer one");
+            }
+            previous_tick = *tick;
+        }
+    }
+    for rows in owners.values() {
+        let mut previous_tick = 0;
+        for (index, (sequence, (tick, _))) in rows.iter().enumerate() {
+            if *sequence != index as u64 + 1 || *tick < previous_tick {
+                return Err("formation source history has a missing or reordered sequence");
+            }
+            previous_tick = *tick;
+        }
+    }
+    Ok(())
 }

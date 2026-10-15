@@ -48,8 +48,17 @@ pub(crate) fn response_facts(
 ) -> crate::world::flags::AiFacts {
     use crate::entities::ai_flag_hosts as fid;
     let mut facts = crate::world::flags::AiFacts::new();
-    if is_request(message) {
-        facts.set_fact(fid::REQUEST_REPORT_STATUS, 1.0);
+    if let Some(CommsRadioContent::Request { request }) =
+        message.transmission.as_ref().map(|wire| &wire.content)
+    {
+        facts.set_fact(
+            if request.is_formation() {
+                fid::REQUEST_FORM_UP
+            } else {
+                fid::REQUEST_REPORT_STATUS
+            },
+            1.0,
+        );
     }
     facts.set_fact(fid::RESPONSE_COUNT, 2.0);
     facts.set_fact(fid::AVAILABLE_RESPONSE_COUNT, 2.0);
@@ -153,7 +162,30 @@ pub(crate) fn respond(
     else {
         return false;
     };
+    let wire = message.transmission.as_ref().expect("actual heard request");
+    let CommsRadioContent::Request { request } = wire.content else {
+        return false;
+    };
+    if index == 0
+        && request.is_formation()
+        && inbox.0.iter().any(|newer| {
+            newer.sender_uuid == message.sender_uuid
+                && newer.recipient_ship == message.recipient_ship
+                && newer
+                    .request_progress
+                    .as_ref()
+                    .and_then(|progress| progress.facts.decision.as_ref())
+                    .is_some_and(|decision| decision.choice == CommsRequestDecision::Accept)
+                && newer.transmission.as_ref().is_some_and(|newer| {
+                    newer.received_tick.is_some()
+                        && newer.formation_sequence > wire.formation_sequence
+                })
+        })
+    {
+        return false;
+    }
     let choice = match index {
+        0 if request.is_formation() => CommsRequestDecision::Accept,
         0 => CommsRequestDecision::Report,
         1 => CommsRequestDecision::Decline,
         _ => return false,

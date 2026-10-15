@@ -2,6 +2,7 @@ use super::*;
 
 fn reference() -> CommsRequestReference {
     CommsRequestReference {
+        formation_sequence: None,
         origin_id: "request-one".into(),
         source_ship: "requester".into(),
         recipient_ship: "reporter".into(),
@@ -156,6 +157,7 @@ fn copy(
 fn lineage() -> Vec<crate::messages::CommsMessage> {
     use crate::comms_channel::{CommsAudience, CommsTransmission};
     let sent = CommsTransmission {
+        formation_sequence: None,
         sustained: false,
         origin_id: "request-one".into(),
         channel: "public".into(),
@@ -192,6 +194,7 @@ fn lineage() -> Vec<crate::messages::CommsMessage> {
     receiver.is_read = true;
     receiver.selected_response = Some(0);
     let reply = CommsTransmission {
+        formation_sequence: None,
         sustained: false,
         origin_id: "return-one".into(),
         channel: "public".into(),
@@ -368,4 +371,146 @@ fn planned_choices_keep_generated_instance_identity_and_cannot_supply_future_or_
         }
         assert!(bad.validate(12).is_err());
     }
+}
+
+#[test]
+fn formation_accept_is_coordination_only_and_retains_a_closed_source_sequence() {
+    assert!(serde_json::from_value::<GenericCommsRequest>(
+        serde_json::json!({"form_up":{"slot":[0,1],"leader":"private"}})
+    )
+    .is_err());
+    let request = GenericCommsRequest::FormUp { slot: [-40, 80] };
+    assert!(request.validate_sequence(Some(1)).is_ok());
+    assert!(request.validate_sequence(None).is_err());
+    assert!(request.validate_sequence(Some(0)).is_err());
+    assert!(GenericCommsRequest::ReportStatus
+        .validate_sequence(Some(1))
+        .is_err());
+    assert!(GenericCommsRequest::FormUp {
+        slot: [i32::MIN, 0]
+    }
+    .validate()
+    .is_err());
+    assert_eq!(
+        serde_json::to_value(GenericCommsRequest::ReportStatus).unwrap(),
+        "report_status"
+    );
+    let mut reference = reference();
+    reference.request = request;
+    reference.formation_sequence = Some(1);
+    let mut progress = CommsRequestProgress::default();
+    progress
+        .decide(12, 20, CommsRequestDecision::Accept, None)
+        .unwrap();
+    assert_eq!(progress.facts.stage(), CommsRequestStage::Decision);
+    assert!(progress.facts.report.is_none());
+    let mut outcome = CommsRequestOutcome {
+        request: reference,
+        facts: progress.facts,
+    };
+    outcome.validate(20).unwrap();
+    outcome.request.request = GenericCommsRequest::ReportStatus;
+    outcome.request.formation_sequence = None;
+    assert!(
+        outcome.validate(20).is_err(),
+        "Accept cannot masquerade as a status report"
+    );
+}
+
+#[test]
+fn formation_source_history_refuses_duplicate_gap_reordered_or_copy_changed_sequences() {
+    use crate::comms_channel::validate_transmissions;
+    let make = |sequence: u64, tick: u64| {
+        let mut row = lineage().remove(0);
+        row.id = format!("sent-{sequence}");
+        row.body = FORM_UP_BODY.into();
+        let wire = row.transmission.as_mut().unwrap();
+        wire.origin_id = format!("origin-{sequence}");
+        wire.emitted_tick = tick;
+        wire.formation_sequence = Some(sequence);
+        wire.sustained = true;
+        wire.content = CommsRadioContent::Request {
+            request: GenericCommsRequest::FormUp { slot: [40, 0] },
+        };
+        row
+    };
+    let first = make(1, 10);
+    let second = make(2, 11);
+    validate_transmissions(&[first.clone(), second.clone()], 12).unwrap();
+    let mut unscoped = first.clone();
+    unscoped.transmission.as_mut().unwrap().audience = crate::comms_channel::CommsAudience::All;
+    assert!(validate_transmissions(&[unscoped], 12).is_err());
+
+    for rows in [
+        vec![second.clone()],
+        vec![first.clone(), make(1, 11)],
+        vec![make(1, 11), make(2, 10)],
+    ] {
+        assert!(validate_transmissions(&rows, 12).is_err());
+    }
+    let mut heard = first.clone();
+    heard.id = "heard".into();
+    heard.recipient_ship = Some(crate::wire::ShipKey("reporter".into()));
+    heard.is_read = false;
+    heard.responses = [ACCEPT_RESPONSE, DECLINE_RESPONSE]
+        .into_iter()
+        .map(|text| crate::messages::CommsResponseView {
+            text: text.into(),
+            important: false,
+            available: true,
+        })
+        .collect();
+    heard.transmission.as_mut().unwrap().received_tick = Some(12);
+    validate_transmissions(&[first.clone(), heard.clone()], 12).unwrap();
+    let mut second_heard = heard.clone();
+    second_heard.id = "heard-second".into();
+    second_heard.transmission.as_mut().unwrap().origin_id = "origin-2".into();
+    second_heard.transmission.as_mut().unwrap().emitted_tick = 11;
+    second_heard
+        .transmission
+        .as_mut()
+        .unwrap()
+        .formation_sequence = Some(2);
+    for message in [&mut heard, &mut second_heard] {
+        message.is_read = true;
+        message.selected_response = Some(0);
+    }
+    heard
+        .request_progress
+        .as_mut()
+        .unwrap()
+        .decide(12, 15, CommsRequestDecision::Accept, None)
+        .unwrap();
+    second_heard
+        .request_progress
+        .as_mut()
+        .unwrap()
+        .decide(12, 14, CommsRequestDecision::Accept, None)
+        .unwrap();
+    assert!(
+        validate_transmissions(
+            &[
+                first.clone(),
+                second.clone(),
+                heard.clone(),
+                second_heard.clone()
+            ],
+            15
+        )
+        .is_err(),
+        "a candidate cannot accept an older sequence after a newer coordination decision"
+    );
+    heard
+        .request_progress
+        .as_mut()
+        .unwrap()
+        .facts
+        .decision
+        .as_mut()
+        .unwrap()
+        .tick = 14;
+    heard.request_progress.as_mut().unwrap().facts.read_tick = Some(14);
+    validate_transmissions(&[first.clone(), second, heard.clone(), second_heard], 15).unwrap();
+    heard.transmission.as_mut().unwrap().formation_sequence = Some(2);
+    assert!(validate_transmissions(&[first, heard], 15).is_err());
 }

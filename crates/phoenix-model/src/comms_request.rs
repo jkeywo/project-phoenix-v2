@@ -5,9 +5,54 @@ use crate::{comms_channel::identity, identity::SystemId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum GenericCommsRequest {
     ReportStatus,
+    FormUp { slot: [i32; 2] },
+}
+/// Technical finite slot bound, exactly representable by the motion owner's f32.
+pub const MAX_FORMATION_SLOT: i32 = 1_000_000;
+impl GenericCommsRequest {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if matches!(self, Self::FormUp { slot } if slot.iter().any(|axis| !(-MAX_FORMATION_SLOT..=MAX_FORMATION_SLOT).contains(axis)))
+        {
+            return Err("formation slot exceeds supported finite World coordinates");
+        }
+        Ok(())
+    }
+    pub fn is_formation(&self) -> bool {
+        matches!(self, Self::FormUp { .. })
+    }
+    pub fn body(&self) -> &'static str {
+        match self {
+            Self::ReportStatus => REPORT_STATUS_BODY,
+            Self::FormUp { .. } => FORM_UP_BODY,
+        }
+    }
+    pub fn positive_response(&self) -> &'static str {
+        match self {
+            Self::ReportStatus => REPORT_RESPONSE,
+            Self::FormUp { .. } => ACCEPT_RESPONSE,
+        }
+    }
+    pub fn validate_sequence(&self, sequence: Option<u64>) -> Result<(), &'static str> {
+        self.validate()?;
+        match (self.is_formation(), sequence) {
+            (true, Some(1..)) | (false, None) => Ok(()),
+            _ => Err("formation sequence disagrees with its closed request kind"),
+        }
+    }
+    fn validate_facts(&self, facts: &CommsRequestFacts) -> Result<(), &'static str> {
+        if let Some(decision) = &facts.decision {
+            match (self, decision.choice) {
+                (_, CommsRequestDecision::Decline)
+                | (Self::ReportStatus, CommsRequestDecision::Report)
+                | (Self::FormUp { .. }, CommsRequestDecision::Accept) => {}
+                _ => return Err("request decision does not belong to this closed action"),
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A released own task whose recipient is ALREADY in this Console's permitted
@@ -23,6 +68,7 @@ pub struct PlannedCommsRequest {
 }
 impl PlannedCommsRequest {
     pub fn validate(&self, now: u64) -> Result<(), &'static str> {
+        self.request.validate()?;
         if self.id.trim().is_empty()
             || self.id.len() > 2048
             || self.id.chars().any(char::is_control)
@@ -41,6 +87,8 @@ impl PlannedCommsRequest {
 pub enum CommsRequestDecision {
     Report,
     Decline,
+    /// Coordination only; no claim about Navigation or Helm execution.
+    Accept,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,7 +155,7 @@ impl CommsRequestFacts {
                 return Err("request decision must follow reading on the original clock");
             }
             match (decision.choice, &self.report) {
-                (CommsRequestDecision::Decline, None) => {}
+                (CommsRequestDecision::Decline | CommsRequestDecision::Accept, None) => {}
                 (CommsRequestDecision::Report, Some(report))
                     if identity(&report.system.0) && report.observed_tick == decision.tick => {}
                 _ => return Err("Report Status decision and actual local report disagree"),
@@ -187,6 +235,8 @@ impl CommsRequestReading {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CommsRequestReference {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formation_sequence: Option<u64>,
     pub origin_id: String,
     pub source_ship: String,
     pub recipient_ship: String,
@@ -197,6 +247,7 @@ pub struct CommsRequestReference {
 
 impl CommsRequestReference {
     pub fn validate(&self, now: u64) -> Result<(), &'static str> {
+        self.request.validate_sequence(self.formation_sequence)?;
         if !identity(&self.origin_id)
             || !identity(&self.source_ship)
             || !identity(&self.recipient_ship)
@@ -220,7 +271,8 @@ pub struct CommsRequestOutcome {
 impl CommsRequestOutcome {
     pub fn validate(&self, now: u64) -> Result<(), &'static str> {
         self.request.validate(now)?;
-        self.facts.validate(self.request.heard_tick, now)
+        self.facts.validate(self.request.heard_tick, now)?;
+        self.request.request.validate_facts(&self.facts)
     }
 }
 
@@ -245,6 +297,8 @@ impl CommsRadioContent {
 }
 
 pub const REPORT_STATUS_BODY: &str = "comms.request.report_status";
+pub const FORM_UP_BODY: &str = "comms.request.form_up";
+pub const ACCEPT_RESPONSE: &str = "comms.request.accept_coordination";
 pub const OUTCOME_BODY: &str = "comms.request.returned_outcome";
 pub const REPORT_RESPONSE: &str = "comms.request.report";
 pub const DECLINE_RESPONSE: &str = "comms.request.decline";
@@ -343,22 +397,25 @@ pub(crate) fn validate_copy(
             {
                 return Err("request dismissal requires an eligible local inbox copy");
             }
-            if let Request { .. } = &transmission.content {
+            if let Request { request } = &transmission.content {
                 progress.validate(transmission.received_tick, now)?;
-                if message.body != REPORT_STATUS_BODY {
+                request.validate_facts(&progress.facts)?;
+                if message.body != request.body() {
                     return Err("request body is not its closed definition");
                 }
                 if transmission.received_tick.is_some() {
                     let expected = match progress.facts.decision.as_ref().map(|value| value.choice)
                     {
-                        Some(CommsRequestDecision::Report) => Some(0),
+                        Some(CommsRequestDecision::Report | CommsRequestDecision::Accept) => {
+                            Some(0)
+                        }
                         Some(CommsRequestDecision::Decline) => Some(1),
                         None => None,
                     };
                     if message.is_read != progress.facts.read_tick.is_some()
                         || message.selected_response != expected
                         || message.responses.len() != 2
-                        || message.responses[0].text != REPORT_RESPONSE
+                        || message.responses[0].text != request.positive_response()
                         || message.responses[1].text != DECLINE_RESPONSE
                         || message
                             .responses
@@ -472,6 +529,7 @@ pub(crate) fn validate_lineage(
                         && request.transmission.as_ref().is_some_and(|original| {
                             original.origin_id == reference.origin_id
                                 && original.emitted_tick == reference.emitted_tick
+                                && original.formation_sequence == reference.formation_sequence
                                 && original.received_tick == Some(reference.heard_tick)
                                 && original.content
                                     == (Request {

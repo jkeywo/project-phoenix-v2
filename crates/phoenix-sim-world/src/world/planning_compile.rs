@@ -353,8 +353,16 @@ impl CompiledPlanning {
                         forecast,
                         ..
                     } => {
-                        if let RequestTemplate::Communication { channel, .. } = request {
-                            if !phoenix_model::comms_channel::channel_id(channel) {
+                        if let RequestTemplate::Communication {
+                            channel,
+                            request: kind,
+                            ..
+                        } = request
+                        {
+                            if *kind
+                                != phoenix_model::comms_request::GenericCommsRequest::ReportStatus
+                                || !phoenix_model::comms_channel::channel_id(channel)
+                            {
                                 return Err(
                                     "communication primitive requires a supported authored channel"
                                         .into(),

@@ -36,6 +36,7 @@ fn channels_require_actual_finite_reach_paid_work_and_held_keys() {
 #[test]
 fn reception_keeps_the_original_emission_and_cannot_claim_a_future_receipt() {
     let sent = CommsTransmission {
+        formation_sequence: None,
         sustained: false,
         origin_id: "emission".into(),
         channel: "public".into(),
@@ -85,6 +86,7 @@ fn copied_text_keeps_one_original_and_cannot_forge_sent_or_received_ownership() 
     sent.is_read = true;
     sent.recipient_ship = Some(ShipKey("source".into()));
     sent.transmission = Some(CommsTransmission {
+        formation_sequence: None,
         sustained: false,
         origin_id: "one-emission".into(),
         channel: "public".into(),
@@ -122,6 +124,7 @@ fn copied_text_keeps_one_original_and_cannot_forge_sent_or_received_ownership() 
 #[test]
 fn sustained_delivery_cannot_be_attached_to_unscoped_text_or_group_traffic() {
     let mut wire = CommsTransmission {
+        formation_sequence: None,
         sustained: true,
         origin_id: "actual-emission".into(),
         channel: "public".into(),

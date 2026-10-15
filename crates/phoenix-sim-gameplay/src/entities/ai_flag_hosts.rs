@@ -559,6 +559,7 @@ pub const IS_ORPHANED: FactId = FactId("is_orphaned");
 pub const SENDER_IN_RANGE: FactId = FactId("sender_in_range");
 pub const COMMS_AVAILABLE: FactId = FactId("comms_available");
 pub const REQUEST_REPORT_STATUS: FactId = FactId("request_report_status");
+pub const REQUEST_FORM_UP: FactId = FactId("request_form_up");
 pub const POWER_RATING: FactId = FactId("power_rating");
 pub const CONTACT_COUNT: FactId = FactId("contact_count");
 // Weapon banks / tubes
@@ -685,6 +686,7 @@ pub const FACT_CATALOGUE: &[FactId] = &[
     IS_ORPHANED,
     SENDER_IN_RANGE,
     REQUEST_REPORT_STATUS,
+    REQUEST_FORM_UP,
     COMMS_AVAILABLE,
     POWER_RATING,
     CONTACT_COUNT,
@@ -986,6 +988,13 @@ const COMMS_RESPONSE_FACTS: &[FactDescriptor] = &[
         "1.0 for the current permitted typed ReportStatus request (received or planned)",
         "absent for ordinary plot/text messages",
         "comms::requests::response_facts / comms::planned::decision",
+    ),
+    ship(
+        REQUEST_FORM_UP,
+        "comms",
+        "1.0 for the currently permitted genuinely heard typed FormUp suggestion",
+        "absent for ReportStatus, ordinary plot/text and hidden requests",
+        "comms::requests::response_facts",
     ),
     ship(
         COMMS_AVAILABLE,

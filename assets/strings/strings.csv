@@ -6298,3 +6298,8 @@ workshop.personnel.care_amount,Local finite personnel treatment,[Medication per 
 workshop.personnel.add_requirement,Local finite personnel treatment,[Add medication requirement],,,
 personnel.treatment_status,Actual local treatment progress,[Treatment team {team}: {phase} ({progress}%)],,,
 personnel.waiting_medication,Actual medication shortage,[Waiting for medical supplies],,,
+comms.request.form_up,Formation coordination,Request formation,,,
+comms.request.accept_coordination,Formation coordination,Accept coordination,,,
+comms.request.accepted_at,Formation coordination,Coordination accepted at tick {tick},,,
+comms.request.formation_slot_title,Formation coordination,Formation slot in World coordinates,,,
+comms.request.formation_slot,Formation coordination,Formation offset X {x} / Z {z},,,

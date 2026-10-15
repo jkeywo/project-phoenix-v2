@@ -289,6 +289,14 @@ when = "fact(request_report_status) > 0 and fact(is_read) > 0 and fact(comms_ava
 verb = "respond_to_message"
 response_index = 0
 
+# Coordination acceptance does not engage Navigation or Helm assistance.
+[[comms_console.ai.rule]]
+priority = 10
+channel = "comms_respond"
+when = "fact(request_form_up) > 0 and fact(is_read) > 0 and fact(comms_available) > 0"
+verb = "respond_to_message"
+response_index = 0
+
 # THE FALLBACK, and only the fallback, since #1343. Answering by INDEX is the
 # right thing for a hail acknowledgement and the wrong thing for a decision:
 # the option a person reaches for while they think goes first, so a rule that

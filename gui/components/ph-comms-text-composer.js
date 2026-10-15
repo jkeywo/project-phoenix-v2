@@ -14,6 +14,11 @@ export class PhCommsTextComposer extends PhElement {
       <textarea id="body" aria-label="${t('comms.radio.body')}" maxlength="4096"></textarea>
       <button id="send" type="button">${t('comms.send_text')}</button>
       <button id="request" type="button">${t('comms.request.report_status')}</button></fieldset>
+      <details><summary>${t('comms.request.form_up')}</summary>
+      <fieldset id="formation-controls"><legend>${t('comms.request.formation_slot_title')}</legend>
+      <label>X<input id="slot-x" type="number" step="1" min="-1000000" max="1000000" value="-40"></label>
+      <label>Z<input id="slot-z" type="number" step="1" min="-1000000" max="1000000" value="0"></label>
+      <button id="form-up" type="button">${t('comms.request.form_up')}</button></fieldset></details>
       <fieldset id="planned-controls" hidden><legend>${t('comms.request.planned_title')}</legend>
       <label>${t('comms.request.planned_choice')}<select id="planned"></select></label>
       <button id="send-planned" type="button">${t('comms.request.report_status')}</button></fieldset>
@@ -27,6 +32,15 @@ export class PhCommsTextComposer extends PhElement {
       if (!this.controls.disabled) window.activateSemanticAction?.(COMMS_SEND_REQUEST_ACTION_ID,
         {source:'control', detail:{...this.draft(), request:'report_status'}});
     });
+    this.$('form-up').addEventListener('click', () => {
+      if (this.$('formation-controls').disabled) return;
+      const draft = this.draft();
+      window.activateSemanticAction?.(COMMS_SEND_REQUEST_ACTION_ID, {source:'control',detail:{
+        channel:draft.channel,audience:draft.audience,
+        request:{form_up:{slot:[this.$('slot-x').valueAsNumber,this.$('slot-z').valueAsNumber]}},
+      }});
+    });
+    this.audience.addEventListener('change', () => this.render(this.state));
     this.$('send-planned').addEventListener('click', () => {
       if (this.$('planned-controls').disabled) return;
       const row = (this.state?.planned_requests || []).find(row => row.id === this.$('planned').value);
@@ -75,6 +89,7 @@ export class PhCommsTextComposer extends PhElement {
         .map(contact => [`contact:${contact.uuid || contact.id}`, contact.name || contact.uuid || contact.id]),
     ]);
     this.controls.disabled = state.comms_auto || !state.channels?.length;
+    this.$('formation-controls').disabled = this.controls.disabled || !this.audience.value.startsWith('contact:');
     const planned = (state.planned_requests || []).filter(row => row.request === 'report_status'
       && (state.channels || []).some(channel => channel.id === row.channel)
       && (state.contacts || []).some(contact => (contact.uuid || contact.id) === row.recipient_uuid));

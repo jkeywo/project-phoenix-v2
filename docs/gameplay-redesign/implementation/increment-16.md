@@ -505,3 +505,20 @@ The increment 22 CommunicationReportStatus primitive and template remain
 ReportStatus-only when this enum grows. A Formation planner operator requires
 its own real Navigation consumer and evidence contract. This adopted contract
 claims no implementation, native/browser evidence or increment exit.
+
+### Formation coordination source handoff
+
+The Comms half now has the closed FormUp/Accept vocabulary, immutable derived
+source sequence, paid durable Contact transmission, ordinary receiving policy/
+reading/reply/return, exact finite Human controls and the explicit-feed read-only
+Navigation suggestion seam. Independent source review closed malformed accepted
+sequence chronology and authoritative Contact-only scope. World ReportStatus
+remains closed. This source does not implement Navigation/Helm formation motion
+or claim a complete Formation consumer, native acceptance or increment exit.
+
+Focused client checks cover exact finite packets, unknown recipient/payload
+refusal, Contact-only controls and coordination-only status. Model/owner tests
+cover sequence gaps/duplicates/reordering, immutable copies, actual reverse-radio
+contact acquisition, delayed-old acceptance refusal and explicit-feed isolation;
+those Rust tests remain root-owned execution work. Complete fresh-host Formation
+continuation joins the actual Navigation/Helm consumer next.

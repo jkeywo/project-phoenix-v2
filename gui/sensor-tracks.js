@@ -5,6 +5,18 @@ const pair = value => Array.isArray(value) && value.length === 2 && value.every(
 const stages = new Set(['return', 'identified', 'classified', 'assessed']);
 const protection = (value, tick) => value && Number.isInteger(value.incoming_sector) && value.incoming_sector >= 0 && value.incoming_sector < 360 && typeof value.blocked === 'boolean'
   ? { incoming_sector: value.incoming_sector, blocked: value.blocked, sample_tick: Number.isSafeInteger(tick) && tick >= 0 ? tick : null } : null;
+const elevation = (value, tick) => value && Number.isFinite(value.height)
+  && Number.isFinite(value.error) && value.error >= 0
+  && (value.velocity == null || Number.isFinite(value.velocity))
+  ? { height: value.height, error: value.error, velocity: value.velocity ?? null,
+      sample_tick: Number.isSafeInteger(tick) && tick >= 0 ? tick : null } : null;
+export function observedElevationText(value) {
+  const held = elevation(value, value?.sample_tick);
+  if (!held) return null;
+  return t('sensing.track.elevation.value', { height: held.height, error: held.error })
+    + (held.sample_tick == null ? '' : ' \u00b7 ' + t('sensing.track.elevation.sample', { tick: held.sample_tick }));
+}
+
 export function observedShieldCoverText(value) {
   const held = protection(value, value?.sample_tick);
   if (!held) return null;
@@ -32,6 +44,7 @@ export function projectSensorTracks(tracks, { x = 0, z = 0, yaw = 0, range = 0, 
     const row = { id: track.contact_id, name, stage: track.stage, predicted: track.predicted === true,
       received: samples.some(sample => Number.isSafeInteger(sample.received_tick)), source_count: independent.size,
       source_details: samples.map(sample => t('sensing.sharing.origin',{source:wireText(sample.origin.source),instrument:wireText(sample.origin.system),tick:sample.observed_tick})),
+      elevation: elevation(track.elevation, track.observed_tick),
       error: track.position_error, age, selectable: track.selectable === true && track.predicted === false && visible };
     rows.push(row);
     if (visible) blips.push({
@@ -56,6 +69,7 @@ export function projectSensorTracks(tracks, { x = 0, z = 0, yaw = 0, range = 0, 
     target_speed: velocity ? Math.hypot(...velocity) : null,
     target_heading: velocity && Math.hypot(...velocity) > 0 ? (Math.atan2(velocity[0], -velocity[1]) * 180 / Math.PI + 360) % 360 : null,
     target_protection: protection(track?.assessment?.protection, track?.assessment_tick),
+    target_elevation: row?.elevation ?? null,
     target_alert: track?.assessment?.alert ?? null,
     target_weapons: null, target_restrained: track?.assessment?.weapons_restrained ?? null,
     target_disabled: track?.assessment?.disabled ?? null,

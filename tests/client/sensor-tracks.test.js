@@ -152,3 +152,25 @@ describe('permitted broad track radar', () => {
     expect(buildHelmConsoleState(state, ['helm']).blips).toEqual([]);
   });
 });
+
+it('exposes only the delivered dated altitude while planar range and speed remain unchanged', () => {
+  const data = raw([sample({ elevation: { height: 17, error: .25, velocity: -2 }, velocity: [3,4] })]);
+  const view = buildSensorsConsoleState(data, ['focus','broad']);
+  expect(view.target_elevation).toEqual({ height: 17, error: .25, velocity: -2, sample_tick: 10 });
+  expect(view.target_track.elevation).toEqual(view.target_elevation);
+  expect(view.target_range).toBeCloseTo(Math.hypot(10,20));
+  expect(view.target_speed).toBe(5);
+  const tactical = {...data, blackboardKinds:{...data.blackboardKinds,broad:'TacticalRadar'}};
+  expect(buildWeaponsConsoleState(tactical,['broad']).target_elevation).toEqual(view.target_elevation);
+  document.body.innerHTML = '<ph-sensor-panel></ph-sensor-panel>';
+  const panel = document.querySelector('ph-sensor-panel'); panel.state = view;
+  expect(panel.shadowRoot.getElementById('scan-data').textContent).toContain(t('sensing.track.elevation.value',{height:17,error:.25}));
+  expect(panel.shadowRoot.getElementById('scan-data').textContent).toContain(t('sensing.track.elevation.sample',{tick:10}));
+  for (const elevation of [undefined, {height:NaN,error:1}, {height:4,error:-1}, {height:4,error:1,velocity:Infinity}]) {
+    const unknown = buildSensorsConsoleState(raw([sample({ elevation })]), ['focus','broad']);
+    expect(unknown.target_elevation).toBeNull();
+    expect(unknown.target_track.elevation).toBeNull();
+    panel.state = unknown;
+    expect(panel.shadowRoot.getElementById('scan-data').textContent).not.toContain(t('sensing.track.elevation.title'));
+  }
+});

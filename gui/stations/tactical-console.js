@@ -237,6 +237,7 @@ function renderTargetCard(id, w, doc) {
     target_range: w.target_range != null ? w.target_range : null,
     target_hull_pct: w.target_hull_pct != null ? w.target_hull_pct : null,
     target_protection: w.target_protection || null,
+    target_elevation: w.target_elevation || null,
     target_shields: w.target_shields || [],
     target_shield_freq: w.target_shield_freq != null ? w.target_shield_freq : null,
   };

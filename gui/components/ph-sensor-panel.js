@@ -5,7 +5,7 @@
 import '../strings-boot.js';
 import './ph-sensor-references.js';
 import { t } from '../strings.js';
-import { sensorTrackText, observedShieldCoverText } from '../sensor-tracks.js';
+import { sensorTrackText, observedShieldCoverText, observedElevationText } from '../sensor-tracks.js';
 import { SENSORS_TARGET_ACTION_ID } from '../stations/sensors-actions.js';
 import { observationDetails } from '../observation-details.js';
 import { renderSensorReport } from '../sensor-report.js';
@@ -198,6 +198,8 @@ export class PhSensorPanel extends PhElement {
       for (const fact of s.target_track.fact_ages || []) scanRows.push({ k: t(`sensing.track.age.${fact.kind}`),
         v: fact.ticks === null ? t('observation.unknown') : t('observation.ticks', { ticks: fact.ticks }) });
     }
+    const altitude = observedElevationText(s.target_elevation);
+    if (altitude) scanRows.push({ k: t('sensing.track.elevation.title'), v: altitude });
     const cover = observedShieldCoverText(s.target_protection);
     if (cover) scanRows.push({ k: t('sensing.track.protection.title'), v: cover });
     if (s.target_disabled != null) scanRows.push({ k: t('sensing.track.disabled'), v: t(s.target_disabled ? 'sensing.track.yes' : 'sensing.track.no') });

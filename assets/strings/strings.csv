@@ -5881,3 +5881,6 @@ workshop.weapon.targets.hint,Weapon target policy,An explicit empty selection ho
 entity.pdc_cruiser.name,Optional PDC hull,PDC trial Cruiser,PDC-Testkreuzer,PDC trial Cruiser,machine
 weapons.assignments.automatic,Read-only weapon automatic fallback,Automatic fallback: {target},Automatisches Ersatzziel: {target},Automatic fallback: {target},machine
 weapons.assignments.no_automatic,No retained automatic weapon fallback,None,Keines,None,machine
+sensing.track.elevation.title,Paid measured target altitude,Observed altitude,Beobachtete Hoehe,Observed altitude,machine
+sensing.track.elevation.value,Original acquired altitude and uncertainty,{height} ± {error} AU,{height} ± {error} AU,{height} ± {error} AU,machine
+sensing.track.elevation.sample,Original altitude sample time,Sample tick {tick},Messung Tick {tick},Sample tick {tick},machine

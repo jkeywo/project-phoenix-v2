@@ -188,6 +188,7 @@ fn observe(app: &mut App, owner: &str, tick: u64, paid: f32) -> String {
         .unwrap();
     let state = states.0.get_mut(&owner).unwrap();
     let samples = [BroadMeasurement {
+        elevation: None,
         observation: None,
         source: "hidden".into(),
         selectable: true,
@@ -1047,6 +1048,8 @@ fn visual_events_keep_only_source_labelled_own_launches_without_hidden_targets()
         source_uuid: "own".into(),
         projectile_id: "own-bolt".into(),
         x: 1.0,
+        y: 0.0,
+        pitch: 0.0,
         z: 2.0,
         heading: 0.3,
         visual_scale: 1.0,
@@ -1545,3 +1548,5 @@ fn legacy_navigation_projection_preserves_its_anchor() {
     projection.navigation(&SystemId("navigation".into()), &mut board, |_| false);
     assert_eq!(board, original);
 }
+#[path = "console_delivery_weapon_targets_tests.rs"]
+mod weapon_assignment_views;

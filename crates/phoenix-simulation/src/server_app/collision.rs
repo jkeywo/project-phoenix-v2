@@ -419,6 +419,7 @@ pub(crate) fn handle_collisions(
                     let hit = phoenix_model::damage::DamageHit {
                         incoming,
                         profile: phoenix_model::damage::DamageProfile {
+                            emp: None,
                             damage_type: phoenix_model::damage::DamageType::Physical,
                             penetration: 0.0,
                         },

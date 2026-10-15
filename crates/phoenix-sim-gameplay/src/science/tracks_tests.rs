@@ -1,4 +1,181 @@
 use super::*;
+
+#[test]
+fn distant_elevation_rounding_stays_inside_the_published_error() {
+    let mut p = profile();
+    p.position_error = 0.8;
+    let mut state = BroadTrackState::new(&p);
+    let mut value = sample("actor", 20.0);
+    let actual_height = 10_000_005.0_f32;
+    assert_eq!(
+        measured_position([actual_height, 0.0], p.position_error)[0],
+        10_000_006.0
+    );
+    value.elevation = Some(ObservedElevation {
+        height: actual_height,
+        error: p.position_error,
+        velocity: None,
+    });
+    state.advance(&p, 0, 0.5, 1.0, &[value]).unwrap();
+    let observed = state.projection(&p, 0, 0.5).unwrap()[0].elevation.unwrap();
+    assert_eq!(observed.height, actual_height);
+    assert_eq!(observed.error, p.position_error);
+    assert!(
+        (f64::from(observed.height) - f64::from(actual_height)).abs() <= f64::from(observed.error)
+    );
+    assert_eq!(observed.velocity, None);
+    let restored: BroadTrackState =
+        serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+    assert_eq!(restored, state);
+    restored.validate(&p, 0, 0.5).unwrap();
+}
+
+#[test]
+fn elevation_is_one_dated_paid_measurement_with_sample_derived_vertical_motion() {
+    let p = profile();
+    let mut state = BroadTrackState::new(&p);
+    let elevated = |height| {
+        let mut value = sample("actor", 20.0);
+        value.elevation = Some(ObservedElevation {
+            height,
+            error: p.position_error,
+            velocity: None,
+        });
+        value
+    };
+    state.advance(&p, 0, 0.5, 1.0, &[elevated(3.2)]).unwrap();
+    let id = state.current["actor"].clone();
+    let first = state.tracks[&id].elevation.unwrap();
+    assert_ne!(first.height, 3.2);
+    assert!((first.height - 3.2).abs() <= first.error);
+    assert_eq!(first.error, 1.0);
+    assert_eq!(first.velocity, None);
+    let mut impossible_first = state.clone();
+    impossible_first
+        .tracks
+        .get_mut(&id)
+        .unwrap()
+        .elevation
+        .as_mut()
+        .unwrap()
+        .velocity = Some(1.0);
+    assert!(impossible_first.validate(&p, 0, 0.5).is_err());
+    let before = state.clone();
+    state.advance(&p, 0, 0.5, 1.0, &[elevated(900.0)]).unwrap();
+    assert_eq!(state, before, "same tick cannot add a sample or motion");
+    state.advance(&p, 1, 0.5, 0.0, &[elevated(900.0)]).unwrap();
+    assert_eq!(state.tracks[&id], before.tracks[&id]);
+    let retained = state.projection(&p, 1, 0.5).unwrap();
+    assert_eq!(retained[0].elevation, before.tracks[&id].elevation);
+    assert_eq!(retained[0].observed_tick, 0);
+    assert!(retained[0].predicted);
+    let mut restored: BroadTrackState =
+        serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+    for value in [&mut state, &mut restored] {
+        value.advance(&p, 2, 0.5, 1.0, &[elevated(5.2)]).unwrap();
+    }
+    assert_eq!(state, restored);
+    let next = state.tracks[&id].elevation.unwrap();
+    assert_eq!(next.velocity, Some(next.height - first.height));
+    assert_eq!(state.tracks[&id].observed_tick, 2);
+    let held = state.tracks[&id].elevation;
+    state.advance(&p, 3, 0.5, 0.0, &[elevated(-900.0)]).unwrap();
+    assert_eq!(state.projection(&p, 4, 0.5).unwrap()[0].elevation, held);
+}
+
+#[test]
+fn missing_or_reported_height_cannot_become_zero_or_a_physical_velocity_baseline() {
+    let p = profile();
+    let mut state = BroadTrackState::new(&p);
+    let mut physical = sample("private-report-actor", 123.0);
+    physical.position = [123.0, 456.0];
+    physical.elevation = Some(ObservedElevation {
+        height: 3.0,
+        error: 1.0,
+        velocity: None,
+    });
+    state.advance(&p, 0, 0.5, 1.0, &[physical.clone()]).unwrap();
+    state.advance(&p, 4, 0.5, 1.0, &[reported(&p, 2)]).unwrap();
+    assert!(state.tracks.values().all(|track| track.elevation.is_none()));
+    assert!(state
+        .projection(&p, 4, 0.5)
+        .unwrap()
+        .iter()
+        .all(|track| track.elevation.is_none()));
+    physical.elevation.as_mut().unwrap().height = 100.0;
+    state.advance(&p, 5, 0.5, 1.0, &[physical.clone()]).unwrap();
+    let id = state.current[&physical.source].clone();
+    assert_eq!(state.tracks[&id].elevation.unwrap().velocity, None);
+    physical.elevation = None;
+    state.advance(&p, 6, 0.5, 1.0, &[physical]).unwrap();
+    assert_eq!(state.tracks[&id].elevation, None);
+}
+
+#[test]
+fn malformed_elevation_and_report_height_are_refused_before_state_changes() {
+    let p = profile();
+    let mut state = BroadTrackState::new(&p);
+    for elevation in [
+        ObservedElevation {
+            height: f32::NAN,
+            error: 1.0,
+            velocity: None,
+        },
+        ObservedElevation {
+            height: 1.0,
+            error: -1.0,
+            velocity: None,
+        },
+        ObservedElevation {
+            height: 1.0,
+            error: 1.0,
+            velocity: Some(1000.0),
+        },
+        ObservedElevation {
+            height: 1.0,
+            error: 2.0,
+            velocity: None,
+        },
+    ] {
+        let before = state.clone();
+        let mut value = sample("actor", 20.0);
+        value.elevation = Some(elevation);
+        assert!(state.advance(&p, 0, 0.5, 1.0, &[value]).is_err());
+        assert_eq!(state, before);
+    }
+    let mut value = reported(&p, 0);
+    value.elevation = Some(ObservedElevation {
+        height: 1.0,
+        error: 1.0,
+        velocity: None,
+    });
+    assert!(state.advance(&p, 2, 0.5, 1.0, &[value]).is_err());
+    state.advance(&p, 2, 0.5, 1.0, &[reported(&p, 0)]).unwrap();
+    let mut malformed = state.clone();
+    malformed.tracks.values_mut().next().unwrap().elevation = Some(ObservedElevation {
+        height: 1.0,
+        error: 1.0,
+        velocity: None,
+    });
+    assert!(malformed.validate(&p, 2, 0.5).is_err());
+    let mut value = sample("actor", 900.0);
+    value.elevation = Some(ObservedElevation {
+        height: 1.0,
+        error: 1.0,
+        velocity: None,
+    });
+    state.advance(&p, 3, 0.5, 1.0, &[value]).unwrap();
+    let id = state.current["actor"].clone();
+    state
+        .tracks
+        .get_mut(&id)
+        .unwrap()
+        .elevation
+        .as_mut()
+        .unwrap()
+        .velocity = Some(f32::INFINITY);
+    assert!(state.validate(&p, 3, 0.5).is_err());
+}
 #[test]
 fn synthetic_evidence_shares_tracks_but_never_becomes_an_actor_route_or_public_decoy_flag() {
     let p = profile();
@@ -56,6 +233,7 @@ fn synthetic_sample_cannot_claim_actor_permission_and_private_route_shape_is_val
 fn reported(profile: &BroadConfig, observed: u64) -> BroadMeasurement {
     use phoenix_model::observation::*;
     BroadMeasurement {
+        elevation: None,
         source: "private-report-actor".into(),
         observation: Some(
             ObservationMetadata::at(
@@ -138,6 +316,7 @@ fn report_future_metadata_and_hidden_facts_refuse_transactionally() {
             2 => sample.identity.as_mut().unwrap().faction = Some("private-faction".into()),
             _ => {
                 sample.assessment = Some(TrackAssessment {
+                    protection: None,
                     alert: Some(true),
                     weapons_restrained: None,
                     disabled: None,
@@ -213,14 +392,12 @@ fn later_duplicate_observed_identity_retracts_automatic_reference_correlation() 
     );
     let duplicate = sample("second-private-source", 100.0);
     state.advance(&p, 2, 0.5, 1.0, &[first, duplicate]).unwrap();
-    assert!(
-        state.tracks[&first_id]
-            .identity
-            .as_ref()
-            .unwrap()
-            .references
-            .is_empty()
-    );
+    assert!(state.tracks[&first_id]
+        .identity
+        .as_ref()
+        .unwrap()
+        .references
+        .is_empty());
 }
 #[test]
 fn independent_instruments_cannot_alias_contact_ids_or_refresh_each_others_work() {
@@ -272,6 +449,7 @@ fn profile() -> BroadConfig {
 }
 fn sample(source: &str, x: f32) -> BroadMeasurement {
     BroadMeasurement {
+        elevation: None,
         observation: None,
         selectable: true,
         source: source.into(),
@@ -284,6 +462,7 @@ fn sample(source: &str, x: f32) -> BroadMeasurement {
         }),
         classification: Some("ship".into()),
         assessment: Some(TrackAssessment {
+            protection: None,
             alert: Some(true),
             weapons_restrained: Some(false),
             disabled: Some(false),
@@ -339,11 +518,10 @@ fn partial_paid_work_is_independent_of_contact_count_and_duplicate_ticks() {
         one.tracks["12:survey-array:contact-1"].supported_secs,
         many.tracks["12:survey-array:contact-1"].supported_secs
     );
-    assert!(
-        many.tracks
-            .values()
-            .all(|track| track.supported_secs == 1.0)
-    );
+    assert!(many
+        .tracks
+        .values()
+        .all(|track| track.supported_secs == 1.0));
     let before = many.clone();
     many.advance(&p, 3, 0.5, 1.0, &[sample("a", 900.0)])
         .unwrap();
@@ -415,12 +593,10 @@ fn confused_crossing_returns_do_not_preserve_private_ground_truth_associations()
     );
     let published = state.projection(&p, 1, 0.5).unwrap();
     assert_eq!(published.iter().filter(|track| !track.predicted).count(), 2);
-    assert!(
-        published
-            .iter()
-            .filter(|track| !track.predicted)
-            .all(|track| track.identity.is_none())
-    );
+    assert!(published
+        .iter()
+        .filter(|track| !track.predicted)
+        .all(|track| track.identity.is_none()));
 }
 #[test]
 fn zero_supply_retains_findings_then_bounded_retention_removes_only_stale_tracks() {
@@ -481,10 +657,9 @@ fn continuation_matches_quality_motion_and_identity_after_json_and_refuses_tampe
     bad.current.insert("a".into(), "missing-contact".into());
     assert!(bad.validate(&p, 10, 0.5).is_err());
     let before = live.clone();
-    assert!(
-        live.advance(&p, 10, 0.5, 1.0, &[sample("a", 0.0), sample("a", 1.0)])
-            .is_err()
-    );
+    assert!(live
+        .advance(&p, 10, 0.5, 1.0, &[sample("a", 0.0), sample("a", 1.0)])
+        .is_err());
     assert_eq!(live, before);
     assert!(live.advance(&p, 10, 0.5, f32::NAN, &[]).is_err());
     assert_eq!(live, before);

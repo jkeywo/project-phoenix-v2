@@ -209,7 +209,7 @@ export class PhScanReadout extends PhElement {
     const reading = history.get(picker.value) || scan.reading || null;
     const focused = scan.focused;
     const aimSelect = this.$('aim');
-    const aims = (scan.aims?.length ? scan.aims : [{ aim:'general',intrusive:false }]).filter(row=>['general','environment','resources','anomaly'].includes(row.aim));
+    const aims = (scan.aims?.length ? scan.aims : [{ aim:'general',intrusive:false }]).filter(row=>['general','environment','resources','anomaly','shields'].includes(row.aim));
     const oldAim = this._aimInstrument === scan.system_id ? aimSelect.value : scan.default_aim;
     this._aimInstrument = scan.system_id;
     for (const option of [...aimSelect.options]) if (!aims.some(row => row.aim===option.value)) option.remove();
@@ -328,6 +328,14 @@ export class PhScanReadout extends PhElement {
       for (const entry of reading.capacities || []) {
         const [label, amount] = entry;
         rows.appendChild(this.#row(t(label), String(amount), false));
+      }
+      const finding = reading.aim === 'shields' && reading.shield_finding;
+      if (finding && [finding.frequency,finding.frequency_step,finding.mismatch_loss].every(Number.isFinite)
+        && finding.frequency >= 0 && finding.frequency <= 1 && finding.frequency_step > 0 && finding.frequency_step <= 1
+        && finding.mismatch_loss >= 0 && finding.mismatch_loss <= 1) {
+        rows.append(this.#row(t('component.scan.shields.frequency'),String(finding.frequency),false,`±${finding.frequency_step/2}`));
+        rows.append(this.#row(t('component.scan.shields.response'),String(Math.round(finding.mismatch_loss*100))+'%',false));
+        rows.append(this.#row(t('component.scan.shields.configuration'),String(finding.configuration),false));
       }
       for (const quantity of reading.quantities || []) {
         if (!quantity || !['field_exposure','capacity','effect_signature'].includes(quantity.kind)) continue;

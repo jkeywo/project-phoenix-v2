@@ -550,6 +550,7 @@ pub(crate) fn project_ship_client_config(
     // the Tactical UI can render fire arcs, colour fire buttons, and
     // size the per-bank cooldown bar.
     if let Some(wc) = &ship_config.weapons_console {
+        next.weapon_groups = wc.groups.clone();
         next.phaser_banks = wc
             .phaser_banks
             .iter()

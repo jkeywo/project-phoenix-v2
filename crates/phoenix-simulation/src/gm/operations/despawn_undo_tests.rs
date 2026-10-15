@@ -197,3 +197,36 @@ fn refuses_a_restore_whose_template_no_longer_resolves() {
         Err(GmActionRefusalReason::InverseUnsupported)
     );
 }
+
+#[test]
+fn body_inverse_refuses_captured_launched_rounds_before_spawn_or_template_reads() {
+    for guided in [true, false] {
+        let mut capture = capture("launched-shot", "removed-source", true);
+        let mut weapons = crate::snapshot::WeaponState::default();
+        if guided {
+            weapons
+                .torpedoes_in_flight
+                .push(crate::snapshot::TorpedoInFlight::default());
+        } else {
+            weapons.blasters.push(crate::snapshot::BlasterRuntime {
+                in_flight: vec![crate::snapshot::BlasterBolt::default()],
+                ..Default::default()
+            });
+        }
+        capture.state.as_mut().unwrap().weapons = Some(weapons);
+        let before = capture.clone();
+        assert_eq!(
+            restore_precheck(
+                &capture,
+                &Default::default(),
+                &Default::default(),
+                &Default::default(),
+                &Default::default(),
+                &Default::default(),
+                |_| panic!("unsupported physical inverse must refuse before template/spawn work")
+            ),
+            Err(GmActionRefusalReason::InverseUnsupported)
+        );
+        assert_eq!(capture, before);
+    }
+}

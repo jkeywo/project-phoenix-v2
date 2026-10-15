@@ -145,6 +145,7 @@ pub(crate) fn tick(
         Option<&ShipRedAlert>,
         Option<&crate::ship::disablement::DisablementObservation>,
         Option<&crate::entities::spawner::EntityTarget>,
+        Option<&crate::ship::shields::ShipShields>,
     )>,
     mut observers: Query<(
         &EntityUuid,
@@ -259,6 +260,13 @@ pub(crate) fn tick(
                             );
                             if support > 0.0 {
                                 measurements.push(BroadMeasurement {
+                                    elevation: Some(
+                                        phoenix_model::sensing_tracks::ObservedElevation {
+                                            height: position.y,
+                                            error: profile.position_error,
+                                            velocity: None,
+                                        },
+                                    ),
                                     source: projectile.uuid.clone(),
                                     observation: None,
                                     selectable: false,
@@ -284,6 +292,7 @@ pub(crate) fn tick(
                         alert,
                         disabled,
                         target,
+                        shields,
                     ) in &scene
                     {
                         let Some(id) = id
@@ -374,6 +383,11 @@ pub(crate) fn tick(
                             .or_else(|| name.map(|name| name.0.as_str()))
                             .filter(|name| !name.is_empty());
                         measurements.push(BroadMeasurement {
+                            elevation: Some(phoenix_model::sensing_tracks::ObservedElevation {
+                                height: position.y,
+                                error: profile.position_error,
+                                velocity: None,
+                            }),
                             source: id.to_owned(),
                             observation: None,
                             selectable: target.is_some_and(|target| {
@@ -417,6 +431,13 @@ pub(crate) fn tick(
                             }),
                             classification: Some(classification.into()),
                             assessment: Some(TrackAssessment {
+                                protection: Some(phoenix_model::sensing_tracks::ObservedShieldCover {
+                                    incoming_sector: phoenix_sim_gameplay::science::tracks::shield_observation_sector(
+                                        [origin.x, origin.z], [position.x, position.z]),
+                                    blocked: shields.is_some_and(|shields| shields.0.hp_facing_attacker(
+                                        origin.x, origin.z, position.x, position.z,
+                                        physics.map_or(0.0, |physics| physics.yaw)) > 0),
+                                }),
                                 alert: alert.map(|alert| alert.0),
                                 disabled: disabled.map(|disabled| disabled.disabled),
                                 weapons_restrained: power.and_then(|power| {
@@ -540,6 +561,7 @@ fn ghost_measurement(
             )
         });
     Some(BroadMeasurement {
+        elevation: None,
         source,
         observation: Some(observation),
         selectable: false,
@@ -564,6 +586,7 @@ fn reported_measurement(
     use phoenix_model::observation::*;
     let sample = state.presented.as_ref()?;
     Some(BroadMeasurement {
+        elevation: None,
         source: source.to_owned(),
         observation: Some(ObservationMetadata::at(
             sample.observed_tick,

@@ -644,6 +644,9 @@ damage_type = "laser"
 penetration = 20
 
 [torpedoes]
+# Frozen finite guidance equipment; physical collision does not grant tracking.
+seeker = { range = 300.0, fire_arc_deg = 180.0, minimum_transmission = 0.1 }
+receiver = { range = 300.0, minimum_transmission = 0.1, maximum_sample_age_secs = 2.0 }
 # Initial stock is split with the real hold; capacity still includes tube occupancy.
 count = 6
 initial_count = 2
@@ -2464,6 +2467,19 @@ id = "phaser-fore"
 kind = "phaser_bank"
 console = "tactical"
 power_group = "energy-phaser-fore"
+# One physical turret borrows this bank's ordinary target/operability.
+[[system.component]]
+kind = "power_input"
+id = "turret-power"
+[[system.component]]
+kind = "turret"
+id = "turret"
+power_input = "turret-power"
+[system.component.config]
+facing_deg = 0
+traverse_arc_deg = 270
+traverse_deg_per_sec = 45
+aim_tolerance_deg = 2
 [[system.damage_component]]
 id = "operation"
 binding = "operation"
@@ -5653,6 +5669,17 @@ kind = "Viewscreen"
 [[console.feed]]
 source = "stock/torpedo-magazine"
 kind = "Stock"
+# Acquired findings are an explicit information feed; no scanner control is granted.
+[[console.feed]]
+source = "scan/7:sensors"
+kind = "Scan"
+# Explicit measured Science picture permits correlation with the original acquired handle.
+# This shares observations, not scanner/radar control or co-hosted Console knowledge.
+[[console.feed]]
+source = "sensor-radar"
+kind = "SensorRadar"
+
+
 [[console]]
 id = "science"
 name = "Science"
@@ -6598,6 +6625,26 @@ range = 8
 units_per_sec = 2
 resources = [ "torpedoes", "coolant", "machinery_parts", "structural_parts", "alloy", "ore", "scrap" ]
 
+# Prepared assignments change each member's base intent; an individual override
+# remains until that bank explicitly rejoins. No live group membership editing.
+[[weapons_console.group]]
+id = "main-beams"
+label = "weapon.group.main_beams"
+members = ["phaser-fore", "phaser-aft"]
+
+[[weapons_console.group]]
+id = "missiles"
+label = "weapon.group.missiles"
+members = ["torpedo-tube-fore-port", "torpedo-tube-fore-starboard", "torpedo-tube-aft"]
+
+# [ai] Provisional ordinary shielding: a useful, modest optional enquiry benefit.
+[shields_console.frequency_response]
+mismatch_loss = 0.1
+
+[[enquiry_observation.property]]
+property = { kind = "shield_frequency" }
+normal = true
+step = 0.01
 # Ordinary ships expose an explicit selectable Target capability to paid radar.
 # Faction relations, observed identity and existing command admission still decide use.
 [target]

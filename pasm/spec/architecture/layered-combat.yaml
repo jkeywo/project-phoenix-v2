@@ -1,0 +1,65 @@
+entities:
+  - state: weapon-target-assignments
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Retained Per-System Weapon Intent
+      summary: "One ship-local assignment map retains authored group base orders and individual overrides, including explicit Hold. Lost contacts do not erase intent. Actual controls still resolve through the owning Console and current permitted observations; the wire view withholds inaccessible references."
+    architecture:
+      classification: authoritative
+      owner: tactical-weapons-controls
+      writers: [tactical-weapons-controls]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-model/src/weapon_targets.rs, crates/phoenix-sim-gameplay/src/weapons/assignments.rs, crates/phoenix-simulation/src/console/weapons/assignments.rs, crates/phoenix-simulation/src/snapshot/weapon_targets.rs, crates/phoenix-simulation/src/sim_digest.rs]
+      symbols: [ShipWeaponTargets, WeaponTargetAssignments, WeaponTargetAssignment]
+      tests: [crates/phoenix-sim-gameplay/src/weapons/assignments_tests.rs, crates/phoenix-simulation/src/console/weapons/assignments_tests.rs, crates/phoenix-simulation/src/snapshot/weapon_targets_tests.rs]
+  - state: finite-system-turrets
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Physical System Turret Bearing
+      summary: "ShipMounts stores one bounded bearing and processed-tick frontier per composed System. MountProfiles is immutable accepted composition rederived at spawn or restore. Permitted target observations, actual availability and paid local work bound motion; there is no saved duplicate target or controller."
+    architecture:
+      classification: authoritative
+      owner: shared-weapon-mount-and-delivery
+      writers: [shared-weapon-mount-and-delivery]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-model/src/turret.rs, crates/phoenix-sim-gameplay/src/weapons/turret.rs, crates/phoenix-simulation/src/weapons/mounts.rs, crates/phoenix-simulation/src/snapshot/mounts.rs]
+      symbols: [MountProfiles, ShipMounts, TurretState]
+      tests: [crates/phoenix-sim-gameplay/src/weapons/turret_tests.rs, crates/phoenix-simulation/src/weapons/mounts_tests.rs, crates/phoenix-simulation/src/snapshot/mounts_tests.rs]
+  - state: shield-probing-policy
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Accepted Shield Enquiry Equipment
+      summary: "ShieldProbeProfile is immutable equipment defining the actual frequency response and optional cycle. It is rederived from accepted current equipment, without exposing protected parameters to another Console. Acquired readings remain in the existing paid enquiry history."
+    architecture:
+      classification: derived
+      owner: shield-arc-system
+      writers: [shield-arc-system]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-model/src/shield_enquiry.rs, crates/phoenix-simulation/src/ship/shield_enquiry.rs, crates/phoenix-simulation/src/science/shield_enquiry.rs]
+      symbols: [ShieldProbeProfile, ShieldFinding]
+      tests: [crates/phoenix-simulation/src/science/shield_enquiry_tests.rs, crates/phoenix-simulation/src/snapshot/shield_enquiry_tests.rs]
+  - state: shield-configuration-cycle
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Causal Shield Configuration Cycle Anchor
+      summary: "ShieldCycleAnchor retains only the causal start of an equipped shield cycle. The current frequency is the existing ShieldSystem value and is sampled from equipment and the shared logical clock. Exact high-tick phase survives restore without a second frequency store or a future timer disclosure."
+    architecture:
+      classification: authoritative
+      owner: shield-arc-system
+      writers: [shield-arc-system]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/ship/shield_enquiry.rs, crates/phoenix-simulation/src/snapshot/shield_enquiry.rs, crates/phoenix-simulation/src/sim_digest.rs]
+      symbols: [ShieldCycleAnchor]
+      tests: [crates/phoenix-model/src/shield_enquiry_tests.rs, crates/phoenix-simulation/src/snapshot/shield_enquiry_tests.rs]

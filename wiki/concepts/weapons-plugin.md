@@ -2,11 +2,26 @@
 title: WeaponsPlugin
 type: concept
 tags: [weapons, tactical, phaser, torpedo, blaster, targeting, ai]
-sources: [crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-sim-gameplay/src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/weapons/, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml, crates/phoenix-sim-gameplay/src/console/weapons/beam.rs, crates/phoenix-sim-gameplay/src/ship/damage.rs]
-updated: 2026-10-14
+sources: [crates/phoenix-simulation/src/console/weapons/guided_advance.rs, crates/phoenix-simulation/src/console/weapons/flight_carrier.rs, crates/phoenix-simulation/src/snapshot/flight_carriers.rs, crates/phoenix-sim-gameplay/src/weapons/pdc.rs, crates/phoenix-simulation/src/console/weapons/pdc.rs, assets/entities/pdc_cruiser.toml, crates/phoenix-simulation/src/console/weapons/assignments.rs, crates/phoenix-simulation/src/console/weapons/readiness.rs, crates/phoenix-simulation/src/console/weapons/round_work.rs, crates/phoenix-simulation/src/snapshot/weapon_targets.rs, crates/phoenix-model/src/weapon_operation.rs, crates/phoenix-sim-gameplay/src/weapons/operation.rs, crates/phoenix-model/src/turret.rs, crates/phoenix-sim-gameplay/src/weapons/turret.rs, crates/phoenix-simulation/src/weapons/mounts.rs, crates/phoenix-simulation/src/snapshot/mounts.rs, crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-sim-gameplay/src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/weapons/, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml, crates/phoenix-sim-gameplay/src/console/weapons/beam.rs, crates/phoenix-sim-gameplay/src/ship/damage.rs]
+updated: 2026-10-15
 ---
 
 # WeaponsPlugin
+
+`console/weapons/assignments.rs` retains per-System group and individual intent.
+Its `WeaponAimInputs` resolves a current permitted measured point for the actual
+weapon Console; lost feeds preserve orders while withholding aim. Explicit Hold
+does not borrow the primary target. `snapshot/weapon_targets.rs` validates saved
+owners, prepared group membership and reference shapes before restore writes.
+`console/weapons/readiness.rs` applies the same intent, measured geometry, target
+filters and actual turret bearing to core, fine and reconnect projections.
+
+`console/weapons/round_work.rs` resolves a managed Local store to its real Capacity
+endpoint and stages finite rounds with Power per emitted barrel. Other stock
+claims and queued physical debits remain unavailable. Missing named barrel
+markers preserve their indices and cannot substitute the ship centre.
+Beam impact uses the physical ray result, including friendly blockers; a missed
+measured ray spends its work without damaging the actor named by the contact.
 
 Gameplay `ActiveBeam::complete_bank` ends an ordinary phaser cycle and applies its recorded pending cooldown. Exceptional relight uses the existing end path. Shared damage selection retains authored system order and the original RNG draw count.
 
@@ -37,6 +52,43 @@ common barrel planning. The beam, bolt and guided adapters consume those
 mechanisms without changing their cycle state, impact-facing policies or
 admitted command vocabulary. `entities/config/weapon_definition.rs` compiles
 the common authored form into the same strategy parameters at content load.
+
+The closed weapon configuration now supports `BeamOperation::Fixed` (default)
+and `Sustained`, carried by portable beam hardware and the existing active beam
+slot. The pure `beam_work_seconds` helper bounds fixed work by remaining duration
+and sustained work by the real tick. Sustained configuration rejects fixed-cycle
+jitter. Simulation launch/stop and continuation joins remain the integrator's
+pending executor work at this source checkpoint.
+
+Optional bolt `rounds` references the bank's actual same-room Local Capacity
+store. Gameplay `weapons/operation.rs` reserves rounds before the caller stages
+Power, then consumes or releases that exact claim. `tick_with_work` calls admission
+with each actual barrel index, skipping unavailable or refused listed barrels;
+a due attempted step advances even if none fires. Missing origins do not borrow
+another barrel. `recoil_delta` returns the opposite world XZ impulse. These
+helpers keep quantities in the existing Stock owner.
+
+`WeaponDefinition.targets` compiles to each supported bank/tube and portable
+beam hardware as `Option<Vec<EntityTag>>`. The pure `target_allowed` helper
+keeps caller-provided ordinary-domain eligibility for None, rejects every target
+for an explicit empty list, and otherwise matches only held observed tags.
+Unknown classification does not become a Ship or Missile fact. The authored
+`targets=false` override clears an inherited filter while the runtime still
+stores None; Workshop's Legacy policy writes that tombstone. These are selection
+rules, and cannot make friendly or civilian physical collateral immune.
+
+
+
+`phoenix-model/src/turret.rs` describes the bounded `Turret` System component.
+Gameplay `weapons/turret.rs` owns finite sector traversal and actual bearing;
+Simulation `weapons/mounts.rs` stages its local energy and one per-System state
+map. The mount borrows the owning capability's existing target and availability.
+It keeps no target, enable latch or AI runtime of its own. Missing intent returns
+toward the authored home through paid motion. The passive producer rotates its
+existing field of view using the same bearing, without narrowing reception to a
+weapon's aim tolerance. `snapshot/mounts.rs` preflights the complete candidate
+owner set and continuation frontier before any restore write. Workshop's existing
+System-component form edits these fields through the normal accepted transaction.
 
 ## Command symmetry
 
@@ -97,3 +149,43 @@ compares the complete projection.
 - [Radar Projection](./radar-projection.md)
 - [Broadcaster Seam](./broadcaster-seam.md)
 - [Information-Parity Audit](./information-parity-audit.md)
+
+Sustained beam operation is frozen on the existing active bank slot at launch. Its finite duration value stays unchanged while ordinary paid work continues; unavailable control/equipment, shutdown or failed funding ends it through the same cooldown and BeamEnded lifecycle as an explicit Stop. Snapshots require the live slot's operation and preserve fractional damage and its bought cooldown; presentation continues to render the restored live bank directly.
+
+The optional `pdc_cruiser` uses the existing finite Broadside battery, paid local
+rounds and ordinary per-bank control. Its explicit Missile filter and radar
+selection policy require an acquired current classified contact, including its
+dated elevation; the fixed full-coverage mount does not claim finite pitch
+traversal. All current Turret mechanics constrain azimuth only; a permitted
+vertical lead has no separately configured pitch actuator. Full XYZ range still
+gates emission and readiness. Straight bolts keep XYZ, pitch, physical payload, speed and visual
+scale on the emitted record. The same emission loop has planar and measured XYZ
+adapters; `advance_flight_only` needs no surviving launcher configuration.
+
+Physical bolt contact merges the earliest actual Rapier Collider shape cast
+with swept guided-round spheres, without faction immunity or a selected-target
+exception. Interception debits the actual guided vector's durability and removes
+a destroyed round without its detonation payload. Interval-local previous bolt
+position is consumed once during Damage and omitted from settled snapshots and
+digests. Restore starts with no pending segment; the next Physics step derives
+it from persisted current XYZ. Detached flight carriers use the same vectors.
+
+Guided interception compares only the common live time of the two actual flight
+segments. Previous position and live interval seconds are paired Damage scratch;
+new emissions have no travelled interval and cannot retrospectively intercept a
+round that passed their muzzle earlier in the step. The first interception check
+follows their next positive Physics advance. Static physical bodies can still
+block the zero-length muzzle point. Both scratch fields clear after Damage and
+are reconstructed, rather than persisted, at the supported settled boundary.
+
+`console/weapons/guided_advance.rs` owns paid loading, delayed launches and guided
+movement in Physics. The existing torpedo lifecycle settles surviving proximity
+payloads and expiry in Damage, after physical PDC interception. Helm policy sees
+launch/advance in the same Physics step and terminal removals on its next tick.
+
+`console/weapons/flight_carrier.rs` moves already emitted guided and straight
+rounds into one nonspatial flight-only owner when equipment or its ship disappears.
+It retains no launcher controls, charging, ammunition, power or AI. Component
+replacement hooks prevent copied live rounds from being rehomed twice.
+`snapshot/flight_carriers.rs` validates and restores this closed dynamic recipe;
+the ordinary shot vectors remain the sole flight state.

@@ -4,6 +4,7 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { observedShieldCoverText, observedElevationText } from '../sensor-tracks.js';
 import { PhElement, phDefine } from './ph-element.js';
 
 /**
@@ -126,6 +127,10 @@ export class PhTargetLockCard extends PhElement {
     if (s.target_class) scanRows.push({ k: t('component.sensor_panel.class'), v: s.target_class });
     if (s.target_hull_pct != null) scanRows.push({ k: t('component.sensor_panel.hull'), v: Math.round(s.target_hull_pct) + '%' });
 
+    const altitude = observedElevationText(s.target_elevation);
+    if (altitude) scanRows.push({ k: t('sensing.track.elevation.title'), v: altitude });
+    const cover = observedShieldCoverText(s.target_protection);
+    if (cover) scanRows.push({ k: t('sensing.track.protection.title'), v: cover });
     const shields = s.target_shields || [];
     if (shields.length > 0) {
       const summary = shields.map((f) => {

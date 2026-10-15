@@ -739,6 +739,7 @@ pub(super) fn weapon_state(
                             slot.remaining_secs,
                             slot.damage_accumulator,
                             slot.pending_cooldown_secs,
+                            slot.operation,
                         )
                     })
                     .collect()
@@ -781,7 +782,9 @@ pub(super) fn weapon_state(
                 s.in_flight
                     .iter()
                     .map(|t| TorpedoInFlight {
-                        impact: t.impact,
+                        last_guidance: t.last_guidance.clone(),
+                        profile: t.profile,
+                        durability_remaining: t.durability_remaining,
                         strike_damage_bonus: t.strike_damage_bonus,
                         uuid: t.uuid.clone(),
                         position: [t.x, t.y, t.z],
@@ -791,7 +794,6 @@ pub(super) fn weapon_state(
                         target_uuid: t.target_uuid.clone(),
                         source_uuid: t.source_uuid.clone(),
                         tube_id: t.tube_id.clone(),
-                        shield_pierce: t.shield_pierce,
                     })
                     .collect()
             })
@@ -801,7 +803,8 @@ pub(super) fn weapon_state(
                 s.burst_states
                     .iter()
                     .map(|b| BurstState {
-                        impact: b.impact,
+                        profile: b.profile,
+                        burst_interval_secs: b.burst_interval_secs,
                         tube_id: b.tube_id.clone(),
                         pending: b.pending,
                         timer: b.timer,
@@ -869,6 +872,9 @@ pub(super) fn weapon_state(
                                     impact: p.impact,
                                     id: p.id.clone(),
                                     x: p.x,
+                                    y: p.y,
+                                    pitch: p.pitch,
+                                    visual_scale: p.visual_scale,
                                     z: p.z,
                                     heading: p.heading,
                                     speed: p.speed,
@@ -1383,12 +1389,17 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                 } else {
                     Default::default()
                 };
-                let (weapons, repair, blackboards, patrol_cursors) = if context.machines {
+                let (weapons, repair, blackboards, patrol_cursors) = if context.machines || entity.contains::<crate::console::weapons::flight_carrier::WeaponFlightCarrier>() {
                     capture_weapons_and_repair(entity)
                 } else {
                     Default::default()
                 };
                 EntityState {
+                    weapon_flight_carrier: entity.contains::<crate::console::weapons::flight_carrier::WeaponFlightCarrier>(),
+                    carrier_bolt_banks: if entity.contains::<crate::console::weapons::flight_carrier::WeaponFlightCarrier>() {
+                        entity.get::<crate::console::weapons::blaster::BlasterSystemResource>()
+                            .map(|owner| owner.0.iter().map(|bank| bank.config.id.clone()).collect()).unwrap_or_default()
+                    } else {Vec::new()},
                     mesh_crew: capture_mesh_crew(entity),
                     npc_doctrine: entity
                         .get::<crate::gm::operations::npc::NpcDoctrineState>()
@@ -1425,9 +1436,14 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                         .then(|| capture_arc_requests(entity))
                         .flatten(),
                     power: capture_power(entity),
+                    mounts: entity.get::<crate::weapons::mounts::ShipMounts>().cloned(),
+                    weapon_targets: entity
+                        .get::<crate::console::weapons::assignments::ShipWeaponTargets>()
+                        .map(|state| state.0.clone()),
                     port_provider: entity
                         .get::<crate::resources::ports_server::PortProviderState>()
                         .map(|owner| owner.0.clone()),
+                    shield_frequency: super::shield_enquiry::capture(entity),
                     region_field: entity
                         .get::<crate::regions::field::RegionFieldState>()
                         .cloned(),

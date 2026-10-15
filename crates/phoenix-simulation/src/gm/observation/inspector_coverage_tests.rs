@@ -514,6 +514,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         damage_schema,
         phoenix_model::damage::DamageConfig,
+        emp,
         materials,
         remedies
     );
@@ -554,6 +555,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         impact_schema,
         phoenix_model::damage::DamageProfile,
+        emp,
         damage_type,
         penetration
     );
@@ -618,6 +620,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         private_component_state_schema,
         phoenix_model::damage::ComponentState,
+        emp,
         condition,
         dose,
         last_source
@@ -859,6 +862,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         weapons_console_schema,
         crate::entities::config::WeaponsConsoleConfig,
+        groups,
         torpedo_arc_color,
         power_multipliers,
         phaser_banks,
@@ -871,6 +875,8 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         phaser_bank_schema,
         crate::entities::config::PhaserBankConfig,
+        targets,
+        operation,
         impact,
         id,
         facing_deg,
@@ -889,6 +895,8 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         blaster_bank_schema,
         crate::entities::config::BlasterBankConfig,
+        targets,
+        rounds,
         impact,
         id,
         facing_deg,
@@ -913,6 +921,9 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         torpedoes_schema,
         crate::entities::config::TorpedoesConfig,
+        durability,
+        seeker,
+        receiver,
         count,
         initial_count,
         damage_hull,
@@ -931,6 +942,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         torpedo_tube_schema,
         crate::entities::config::TorpedoTubeConfig,
+        targets,
         impact,
         id,
         facing_deg,
@@ -994,6 +1006,8 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         shields_console_schema,
         crate::entities::config::ShieldsConsoleConfig,
+        frequency_response,
+        frequency_cycle,
         power_multipliers,
         focus_bonus_max_hp,
         focus_bonus_regen,
@@ -1006,6 +1020,17 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         frequency,
         ai,
         ai_policy,
+    );
+    exhaustive_struct!(
+        shield_frequency_response_schema,
+        phoenix_model::shield_enquiry::ShieldFrequencyResponse,
+        mismatch_loss
+    );
+    exhaustive_struct!(
+        shield_frequency_cycle_schema,
+        phoenix_model::shield_enquiry::ShieldFrequencyCycle,
+        frequencies,
+        period_secs
     );
     exhaustive_struct!(
         shields_base_schema,

@@ -1,3 +1,4 @@
+import { weaponTargetsPayload } from './weapon-targets.js';
 import { scanPublicationOwner } from './scan-source.js';
 import { buildReferenceControls } from './sensor-references.js';
 import { observationTickFor } from './observation-details.js';
@@ -878,6 +879,7 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
   return {
     ...targetFacts,
     radar_sharing: radarSharingPayload(state, systemIds, 'TacticalRadar'),
+    weapon_targets: weaponTargetsPayload(state, systemIds, bb.assignments || {}, blips),
     target_uuid:   targetUuid,
     target_name:   resolvedTargetName,
     banks,

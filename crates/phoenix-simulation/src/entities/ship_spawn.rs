@@ -92,6 +92,8 @@ pub(super) fn install(
     crate::resources::equipment_recovery_server::install(config, cmds);
     crate::science::passive::install(config, cmds);
     crate::science::broad::install(config, cmds);
+    crate::weapons::mounts::install(config, cmds);
+    crate::console::weapons::assignments::install(config, cmds);
     crate::console::navigation::sharing::install(config, cmds);
     crate::console::navigation::knowledge::install(config, cmds);
     insert_shield_tuning(config, cmds);
@@ -824,6 +826,7 @@ fn install_shields(config: &EntityConfig, cmds: &mut EntityCommands) {
             unfocused_damage_multiplier: sc.focus_unfocused_damage_multiplier,
         };
         cmds.insert(shields);
+        crate::ship::shield_enquiry::install(freq, sc, cmds);
     } else if !config.shield_arcs.is_empty() {
         // Ships that declare `[[shield_arc]]` blocks without a
         // `[shields_console]` block (some legacy paths). Still build the

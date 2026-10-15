@@ -8,6 +8,20 @@ use super::*;
 /// Keyed by the uuid string, never by an ECS handle — see the module docs.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EntityState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weapon_targets: Option<phoenix_sim_gameplay::weapons::assignments::WeaponTargetAssignments>,
+    /// Nonspatial owner of already-launched rounds after launcher removal.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub weapon_flight_carrier: bool,
+    /// Ordered bank IDs recreate emitted bolts without a ship recipe.
+    /// Derived from actual flight-only banks; no separate runtime ID list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub carrier_bolt_banks: Vec<String>,
+    /// Physical bearings only; target/enabled intent belongs to each System.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mounts: Option<crate::weapons::mounts::ShipMounts>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shield_frequency: Option<super::shield_enquiry::ShieldFrequencyState>,
     /// Navigation's deliberate received fixed-point history and source dating.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub navigation_sharing:
@@ -758,6 +772,8 @@ pub struct CoordinationEnqueueState {
 /// firing pattern are all authored, the fresh world rebuilt them, and a save
 /// that disagreed about them is a save the content-version gate refuses. Only
 /// the load state, the counts and the last-fired markers travel.
+/// Already committed guided rounds also carry their frozen physical profiles:
+/// these are launch facts, not values re-read from a later launcher or refit.
 ///
 /// # Written as scalars
 ///
@@ -772,7 +788,7 @@ pub struct WeaponState {
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub beam_strike_bonuses: std::collections::BTreeMap<String, f32>,
     /// Every live phaser beam as `(bank, target uuid, remaining_secs,
-    /// damage_accumulator, pending_cooldown_secs)`, in the bank order
+    /// damage_accumulator, pending_cooldown_secs, operation)`, in the bank order
     /// `ActiveBeam` already keeps.
     ///
     /// `damage_accumulator` is in the tuple deliberately. It is the fractional
@@ -792,8 +808,17 @@ pub struct WeaponState {
     /// restored mid-burn continues the cycle it was in rather than redrawing,
     /// and it is why this mechanism did not need a new snapshot seam at all: the
     /// state rides on a component the payload already captured.
+    /// `operation` is frozen at light time. It is required for each active slot
+    /// so a resumed sustained burn cannot silently become a timed fixed cycle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub beams: Vec<(String, String, f32, f32, f32)>,
+    pub beams: Vec<(
+        String,
+        String,
+        f32,
+        f32,
+        f32,
+        phoenix_model::weapon_operation::BeamOperation,
+    )>,
     /// `(bank, remaining_secs)` for every bank still cooling, in bank order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub phaser_cooldowns: Vec<(String, f32)>,
@@ -868,8 +893,11 @@ pub struct TubeState {
 
 /// One torpedo mid-flight.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TorpedoInFlight {
-    pub impact: phoenix_model::damage::DamageProfile,
+    pub last_guidance: Option<phoenix_model::guided_guidance::GuidanceObservation>,
+    pub profile: phoenix_model::guided_round::GuidedRoundProfile,
+    pub durability_remaining: f32,
     #[serde(default)]
     pub strike_damage_bonus: f32,
     pub uuid: String,
@@ -882,16 +910,14 @@ pub struct TorpedoInFlight {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_uuid: Option<String>,
     pub tube_id: String,
-    /// The firing tube's `shield_pierce` as it stood at launch. Carried by the
-    /// round rather than re-resolved at detonation, so it has to be stored with
-    /// it.
-    pub shield_pierce: f32,
 }
 
 /// One tube's pending burst.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BurstState {
-    pub impact: phoenix_model::damage::DamageProfile,
+    pub profile: phoenix_model::guided_round::GuidedRoundProfile,
+    pub burst_interval_secs: f32,
     pub tube_id: String,
     pub pending: u32,
     pub timer: f32,
@@ -961,7 +987,10 @@ pub struct BlasterBolt {
     pub impact: phoenix_model::damage::DamageProfile,
     pub id: String,
     pub x: f32,
+    pub y: f32,
     pub z: f32,
+    pub pitch: f32,
+    pub visual_scale: f32,
     pub heading: f32,
     pub speed: f32,
     pub lifespan_remaining: f32,
@@ -2072,4 +2101,8 @@ pub enum MeshControlSource {
     Ai,
     Offline,
     Simplified,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }

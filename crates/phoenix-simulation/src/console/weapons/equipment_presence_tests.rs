@@ -325,6 +325,9 @@ fn resource_only_lifecycle_preserves_unfunded_loading_without_ship_entities() {
         .resource_mut::<Time>()
         .advance_by(std::time::Duration::from_secs_f32(0.25));
     app.world_mut()
+        .run_system_once(crate::console::weapons::advance_torpedo_flights)
+        .unwrap();
+    app.world_mut()
         .run_system_once(tick_torpedo_lifecycle)
         .unwrap();
     assert_eq!(
@@ -333,6 +336,9 @@ fn resource_only_lifecycle_preserves_unfunded_loading_without_ship_entities() {
         "an unarmed Ship prevents the compatibility magazine from ticking"
     );
     app.world_mut().despawn(player);
+    app.world_mut()
+        .run_system_once(crate::console::weapons::advance_torpedo_flights)
+        .unwrap();
     app.world_mut()
         .run_system_once(tick_torpedo_lifecycle)
         .unwrap();

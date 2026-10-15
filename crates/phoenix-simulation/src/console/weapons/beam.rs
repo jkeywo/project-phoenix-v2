@@ -376,7 +376,7 @@ pub(crate) fn handle_fire_phaser(
             &ShipPhysics,
             &crate::server_app::ShipSystemBlackboards,
             &mut ActiveBeam,
-            &PhaserCooldown,
+            &mut PhaserCooldown,
             &AdmittedCommands,
             Option<&PhaserCombatConfigResource>,
             // The cold-power gate's two inputs (issue #1396): the hull, which
@@ -399,6 +399,7 @@ pub(crate) fn handle_fire_phaser(
         '_,
         { crate::sim_rng::SimStream::BeamCycleJitter as usize },
     >,
+    aims: super::assignments::WeaponAimInputs,
     mut outbound: Option<
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
@@ -427,9 +428,9 @@ pub(crate) fn handle_fire_phaser(
             _uuid,
             control_sources,
             physics,
-            blackboards,
+            _blackboards,
             mut beam,
-            cooldown,
+            mut cooldown,
             admitted,
             combat_config_opt,
             ship_config_opt,
@@ -441,9 +442,12 @@ pub(crate) fn handle_fire_phaser(
             continue;
         };
         for cmd in admitted.0.iter() {
-            let SystemControlPayload::FirePhaser = &cmd.payload else {
+            if !matches!(
+                &cmd.payload,
+                SystemControlPayload::FirePhaser | SystemControlPayload::StopPhaser
+            ) {
                 continue;
-            };
+            }
             if fitting_profile
                 .zip(fitting_state)
                 .is_some_and(|(profile, state)| {
@@ -488,6 +492,28 @@ pub(crate) fn handle_fire_phaser(
             };
 
             // Verify the bank is registered and operable.
+            if matches!(cmd.payload, SystemControlPayload::StopPhaser) {
+                let target = beam
+                    .live_banks()
+                    .find(|(bank, _)| *bank == &bank_id)
+                    .map(|(_, slot)| slot.target_uuid.clone());
+                if let Some(target_uuid) = target {
+                    let rest = combat_config
+                        .0
+                        .bank_by_id(&bank_id)
+                        .map_or(PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS, |bank| {
+                            bank.cooldown_secs
+                        });
+                    beam.complete_bank(&bank_id, &mut cooldown, rest);
+                    commands.trigger(BeamEndedEvent {
+                        bank: bank_id,
+                        target_uuid,
+                        source_entity: ship_entity,
+                    });
+                }
+                super::finish_action_feedback(cmd, &mut outbound, WeaponActionResult::Applied);
+                continue;
+            }
             let bank_system_id = crate::ship::system_registry::phaser_bank_system_id(&bank_id)
                 .filter(|id| system_is_registered(control_sources, id));
             let policy = match &bank_system_id {
@@ -546,13 +572,8 @@ pub(crate) fn handle_fire_phaser(
                 continue;
             }
 
-            // Target: the combat lock from the ship's viewscreen blackboard.
-            let Some(target_uuid) = (match blackboards
-                .0
-                .get(&crate::ship::system_registry::viewscreen_system_id())
-            {
-                Some(SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
-                _ => None,
+            let Some(aim) = aims.resolve(ship_entity, &cmd.target, |route| {
+                live_entity_xz(route, &asteroid_q, &entity_q).map(|(x, z)| [x, z])
             }) else {
                 super::finish_action_feedback(
                     cmd,
@@ -561,16 +582,18 @@ pub(crate) fn handle_fire_phaser(
                 );
                 continue;
             };
-            let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
+            let target_uuid = aim.route.clone();
+            let [tx, tz] = aim.position;
+
+            let bank_cfg = combat_config.0.bank_by_id(&bank_id);
+            if !aim.allows(bank_cfg.and_then(|bank| bank.targets.as_deref())) {
                 super::finish_action_feedback(
                     cmd,
                     &mut outbound,
                     WeaponActionResult::Refused(WeaponActionRefusal::MissingTarget),
                 );
                 continue;
-            };
-
-            let bank_cfg = combat_config.0.bank_by_id(&bank_id);
+            }
             let bank_in_arc = if combat_config.0.banks.is_empty() {
                 crate::radar::is_fire_ready_with_range(
                     tx,
@@ -591,22 +614,18 @@ pub(crate) fn handle_fire_phaser(
                         } else {
                             PhaserCombatConfig::DEFAULT_PHASER_RANGE
                         };
-                        let (rx, ry) = crate::weapons::mount::ship_local(
-                            tx,
-                            tz,
-                            physics.x,
-                            physics.z,
-                            physics.yaw,
+                        let geometry = aims.geometry(
+                            ship_entity,
+                            &cmd.target,
+                            &crate::weapons::mount::MountConfig {
+                                facing_deg: bank_cfg.facing_deg,
+                                fire_arc_deg: bank_cfg.fire_arc_deg,
+                                range: effective_bank_range,
+                            },
+                            &aim,
+                            physics,
                         );
-                        let range_ok = (tx - physics.x).powi(2) + (tz - physics.z).powi(2)
-                            <= effective_bank_range * effective_bank_range;
-                        range_ok
-                            && crate::weapons::mount::in_arc(
-                                rx,
-                                ry,
-                                bank_cfg.facing_deg,
-                                bank_cfg.fire_arc_deg,
-                            )
+                        geometry.in_range && geometry.in_arc
                     })
                     .unwrap_or(false)
             };
@@ -703,6 +722,8 @@ pub(crate) fn handle_fire_phaser(
                 .as_deref_mut()
                 .map_or(1.0, |p| p.0.fire_strike_weapon(&cmd.target.0));
             if let Some(slot) = beam.bank_slot_mut(&bank_id) {
+                // Freeze the selected equipment operation at actual light time.
+                slot.operation = bank_cfg.map_or(Default::default(), |bank| bank.operation);
                 slot.strike_damage_bonus = multiplier - 1.0;
             }
             super::finish_action_feedback(cmd, &mut outbound, WeaponActionResult::Applied);
@@ -796,6 +817,7 @@ pub(crate) fn ai_phaser_auto_fire(
     // destructured back to `asteroid_q` / `entity_q` at entry so the body is
     // unchanged and the access set identical.
     geometry: DirectFireGeometry,
+    aims: super::assignments::WeaponAimInputs,
 ) {
     use crate::entities::config::PhaserCombatConfig;
 
@@ -895,33 +917,6 @@ pub(crate) fn ai_phaser_auto_fire(
         // equivalent per-bank check lives in the bank scan below, alongside the
         // cooldown one it belongs with.
 
-        // Target selection: the **Combat Lock** from this ship's frozen
-        // viewscreen blackboard (issue #829, spec §1/§3). One-tick lag accepted
-        // for firing. The tactical radar owns the live selection; auto-fire
-        // reads the aggregated viewscreen fact.
-        let Some(target_uuid) = ship_config_opt.and_then(|config| {
-            config
-                .0
-                .systems
-                .iter()
-                .filter(|system| system.kind == "phaser_bank" || system.kind == "phaser_control")
-                .find_map(|system| {
-                    match config
-                        .0
-                        .observations_for_system(&system.id, &blackboards.0)
-                        .get(&crate::ship::system_registry::viewscreen_system_id())
-                    {
-                        Some(SystemBlackboard::Viewscreen(board)) => board.combat_lock.clone(),
-                        _ => None,
-                    }
-                })
-        }) else {
-            continue;
-        };
-        let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
-            continue;
-        };
-
         let Some(combat_config) = combat_config_opt else {
             continue;
         };
@@ -933,6 +928,32 @@ pub(crate) fn ai_phaser_auto_fire(
         // offline (damaged/destroyed) — auto-fire uses the same operate_ai
         // predicate as manual fire.
         let bank_ids: Vec<String> = if combat_config.0.banks.is_empty() {
+            // Retain the implicit legacy bank's original primary-target path.
+            // Authored banks below each resolve their own assignment and view.
+            let Some(target_uuid) = ship_config_opt.and_then(|config| {
+                config
+                    .0
+                    .systems
+                    .iter()
+                    .filter(|system| {
+                        system.kind == "phaser_bank" || system.kind == "phaser_control"
+                    })
+                    .find_map(|system| {
+                        match config
+                            .0
+                            .observations_for_system(&system.id, &blackboards.0)
+                            .get(&crate::ship::system_registry::viewscreen_system_id())
+                        {
+                            Some(SystemBlackboard::Viewscreen(board)) => board.combat_lock.clone(),
+                            _ => None,
+                        }
+                    })
+            }) else {
+                continue;
+            };
+            let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
+                continue;
+            };
             let ready = crate::radar::is_fire_ready_with_range(
                 tx,
                 tz,
@@ -986,11 +1007,12 @@ pub(crate) fn ai_phaser_auto_fire(
                         }
                     }
                     let bank_id = crate::ship::system_registry::phaser_bank_system_id(&b.id)?;
-                    let config = ship_config_opt?;
-                    config
-                        .0
-                        .observations_for_system(&bank_id, &blackboards.0)
-                        .get(&crate::ship::system_registry::viewscreen_system_id())?;
+                    let aim = aims.resolve(ship_entity, &bank_id, |route| {
+                        live_entity_xz(route, &asteroid_q, &entity_q).map(|(x, z)| [x, z])
+                    })?;
+                    if !aim.allows(b.targets.as_deref()) {
+                        return None;
+                    }
                     // Cooldown and "already burning" are the same per-bank question
                     // asked of two surfaces: a bank mid-beam must not be re-lit, but
                     // its sibling is free to fire (issue #790).
@@ -1003,17 +1025,19 @@ pub(crate) fn ai_phaser_auto_fire(
                     } else {
                         PhaserCombatConfig::DEFAULT_PHASER_RANGE
                     };
-                    let range_ok = (tx - physics.x).powi(2) + (tz - physics.z).powi(2)
-                        <= effective_range * effective_range;
-                    let (rx, ry) = crate::weapons::mount::ship_local(
-                        tx,
-                        tz,
-                        physics.x,
-                        physics.z,
-                        physics.yaw,
+                    let geometry = aims.geometry(
+                        ship_entity,
+                        &bank_id,
+                        &crate::weapons::mount::MountConfig {
+                            facing_deg: b.facing_deg,
+                            fire_arc_deg: b.auto_arc_deg,
+                            range: effective_range,
+                        },
+                        &aim,
+                        physics,
                     );
-                    let arc_ok =
-                        crate::weapons::mount::in_arc(rx, ry, b.facing_deg, b.auto_arc_deg);
+                    let range_ok = geometry.in_range;
+                    let arc_ok = geometry.in_arc;
                     if !(range_ok && arc_ok) {
                         return None;
                     }
@@ -1123,6 +1147,7 @@ pub(crate) struct LineOfSightInputs<'w, 's> {
 pub(crate) fn tick_beams_prepare(
     time: Res<Time>,
     mut commands: Commands,
+    aims: super::assignments::WeaponAimInputs,
     // Every ship with weapons: player + NPC. All ships now carry ActiveBeam,
     // PhaserCooldown, PhaserCombatConfigResource, and ShipModifiers as
     // per-entity components.
@@ -1162,6 +1187,11 @@ pub(crate) fn tick_beams_prepare(
     los: LineOfSightInputs,
     mut beam_context: ResMut<BeamContext>,
     physical: Query<&crate::ship::compartment_damage::ShipDamage>,
+    availability: Query<(
+        &ShipSystemControlSources,
+        Option<&crate::resources::fitting_server::CompiledShipFitting>,
+        Option<&crate::resources::fitting_server::ShipFitting>,
+    )>,
 ) {
     use crate::entities::config::PhaserCombatConfig;
 
@@ -1172,7 +1202,7 @@ pub(crate) fn tick_beams_prepare(
     } = geometry;
     let LineOfSightInputs {
         rapier_context,
-        faction_registry,
+        faction_registry: _faction_registry,
         blocker_info_q,
     } = los;
 
@@ -1215,7 +1245,7 @@ pub(crate) fn tick_beams_prepare(
             modifiers_opt,
             _weapons_target_opt,
             is_local_shooter,
-            shooter_faction_opt,
+            _shooter_faction_opt,
             shooter_phaser_freq_opt,
             mut power,
         )) = ship_q.get_mut(shooter)
@@ -1239,6 +1269,25 @@ pub(crate) fn tick_beams_prepare(
 
         // An injected/restored beam cannot grant an unequipped ship a weapon.
         let Some(combat_config) = combat_config_opt else {
+            let sustained: Vec<_> = beam
+                .live_banks()
+                .filter(|(_, slot)| {
+                    slot.operation == phoenix_model::weapon_operation::BeamOperation::Sustained
+                })
+                .map(|(bank, slot)| (bank.clone(), slot.target_uuid.clone()))
+                .collect();
+            for (bank, target_uuid) in sustained {
+                beam.complete_bank(
+                    &bank,
+                    &mut cooldown,
+                    PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS,
+                );
+                commands.trigger(BeamEndedEvent {
+                    bank,
+                    target_uuid,
+                    source_entity: shooter_entity,
+                });
+            }
             continue;
         };
 
@@ -1258,9 +1307,16 @@ pub(crate) fn tick_beams_prepare(
                 })
                 .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS);
 
-            // Use live ECS position for arc/range check — WorldResource snapshot
-            // is stale for moving targets.
-            let live_pos = live_entity_xz(&target_uuid, &asteroid_q, &entity_q);
+            let system = crate::ship::system_registry::phaser_bank_system_id(&active_bank);
+            let aim = system
+                .as_ref()
+                .and_then(|system| {
+                    aims.active(shooter_entity, system, &target_uuid, |route| {
+                        live_entity_xz(route, &asteroid_q, &entity_q).map(|(x, z)| [x, z])
+                    })
+                })
+                .filter(|aim| aim.allows(active_bank_cfg.and_then(|bank| bank.targets.as_deref())));
+            let live_pos = aim.as_ref().map(|aim| (aim.position[0], aim.position[1]));
             let (tx, tz) = match live_pos {
                 Some(p) => p,
                 None => {
@@ -1300,23 +1356,18 @@ pub(crate) fn tick_beams_prepare(
                         } else {
                             PhaserCombatConfig::DEFAULT_PHASER_RANGE
                         };
-                        let (rx, ry) = crate::weapons::mount::ship_local(
-                            tx,
-                            tz,
-                            shooter_physics.x,
-                            shooter_physics.z,
-                            shooter_physics.yaw,
+                        let geometry = aims.geometry(
+                            shooter_entity,
+                            system.as_ref().expect("resolved bank"),
+                            &crate::weapons::mount::MountConfig {
+                                facing_deg: bank_cfg.facing_deg,
+                                fire_arc_deg: bank_cfg.fire_arc_deg,
+                                range: effective_bank_range,
+                            },
+                            aim.as_ref().expect("current aim"),
+                            shooter_physics,
                         );
-                        let range_ok = (tx - shooter_physics.x).powi(2)
-                            + (tz - shooter_physics.z).powi(2)
-                            <= effective_bank_range * effective_bank_range;
-                        range_ok
-                            && crate::weapons::mount::in_arc(
-                                rx,
-                                ry,
-                                bank_cfg.facing_deg,
-                                bank_cfg.fire_arc_deg,
-                            )
+                        geometry.in_arc && geometry.in_range
                     })
                     .unwrap_or(false)
             };
@@ -1337,25 +1388,73 @@ pub(crate) fn tick_beams_prepare(
             else {
                 continue;
             };
+            let (operation, remaining) = beam
+                .live_banks()
+                .find(|(bank, _)| **bank == active_bank)
+                .map(|(_, slot)| (slot.operation, slot.remaining_secs))
+                .expect("iterated live beam");
+            let sustained = operation == phoenix_model::weapon_operation::BeamOperation::Sustained;
+            let available =
+                availability
+                    .get(shooter_entity)
+                    .is_ok_and(|(sources, profile, state)| {
+                        system_is_registered(sources, &system)
+                            && sources.0.source_for(&system)
+                                != crate::ship::control_source::ControlSource::Offline
+                            && !profile.zip(state).is_some_and(|(profile, state)| {
+                                crate::resources::fitting_server::unavailable(
+                                    profile, state, &system,
+                                )
+                            })
+                    });
             let operation_factor = physical.get(shooter_entity).ok().map_or(1.0, |damage| {
                 damage.factor(&system, phoenix_model::damage::DamageBinding::Operation)
             });
-            if operation_factor <= 0.0 {
+            if operation_factor <= 0.0 || (sustained && !available) {
+                if sustained {
+                    beam.complete_bank(&active_bank, &mut cooldown, cooldown_secs);
+                    commands.trigger(BeamEndedEvent {
+                        bank: active_bank.clone(),
+                        target_uuid,
+                        source_entity: shooter_entity,
+                    });
+                }
                 continue;
             }
             let Some(power) = power
                 .as_deref_mut()
                 .filter(|power| !power.0.weapons_restrained())
             else {
+                if sustained {
+                    beam.complete_bank(&active_bank, &mut cooldown, cooldown_secs);
+                    commands.trigger(BeamEndedEvent {
+                        bank: active_bank.clone(),
+                        target_uuid,
+                        source_entity: shooter_entity,
+                    });
+                }
                 continue;
             };
-            // Preserve the existing fixed-tick burn cadence when fully funded.
-            let work_dt = dt;
+            let work_dt = phoenix_sim_gameplay::weapons::operation::beam_work_seconds(
+                operation, remaining, dt,
+            )
+            .unwrap_or(0.0);
+            if work_dt <= 0.0 {
+                continue;
+            }
             let fraction = power
                 .0
                 .work_continuous(&system, work_dt, 1.0)
                 .map_or(0.0, |grant| grant.fraction);
             if fraction <= 0.0 {
+                if sustained {
+                    beam.complete_bank(&active_bank, &mut cooldown, cooldown_secs);
+                    commands.trigger(BeamEndedEvent {
+                        bank: active_bank.clone(),
+                        target_uuid,
+                        source_entity: shooter_entity,
+                    });
+                }
                 continue;
             }
             let funded_dt = work_dt * fraction;
@@ -1381,7 +1480,9 @@ pub(crate) fn tick_beams_prepare(
                         * modifiers.get(&ModifierSlot::PhaserDamage)
                         * (1.0 + slot.strike_damage_bonus)
                         * funded_dt;
-                    slot.remaining_secs -= funded_dt;
+                    if slot.operation == phoenix_model::weapon_operation::BeamOperation::Fixed {
+                        slot.remaining_secs = (slot.remaining_secs - funded_dt).max(0.0);
+                    }
                     let whole = slot.damage_accumulator.floor() as i32;
                     // Deduct the integer part now; the snapshot below drives damage
                     // application in phase 2.
@@ -1391,104 +1492,50 @@ pub(crate) fn tick_beams_prepare(
                 None => continue,
             };
 
-            // ── LOS raycast: check if another entity blocks the beam this tick ──
-            //
-            // When Rapier physics is not loaded (tests without RapierPhysicsPlugin),
-            // `rapier_context` is None — skip LOS and apply damage to the original
-            // target as before.
+            // A measured aim is a ray, not a guaranteed hit on its private route.
+            // Only bare legacy fixtures without physics retain direct delivery.
+            let measured_aim = aim.as_ref().is_some_and(|aim| aim.measured);
+            let miss = (target_uuid.clone(), tx, tz, true);
+            let legacy = (target_uuid.clone(), tx, tz, false);
             let (effective_target_uuid, effective_target_x, effective_target_z, zero_damage) =
                 if let Some(ref ctx_param) = rapier_context {
                     if let Ok(ctx) = ctx_param.single() {
-                        let ray_origin = Vec3::new(shooter_physics.x, 0.0, shooter_physics.z);
-                        let to_target =
-                            Vec3::new(tx - shooter_physics.x, 0.0, tz - shooter_physics.z);
-                        let dist_to_target = to_target.length();
-                        if dist_to_target > f32::EPSILON {
-                            let ray_dir = to_target / dist_to_target;
+                        let origin = Vec3::new(shooter_physics.x, 0.0, shooter_physics.z);
+                        let delta = Vec3::new(tx - shooter_physics.x, 0.0, tz - shooter_physics.z);
+                        let distance = delta.length();
+                        if distance > f32::EPSILON {
+                            let direction = delta / distance;
                             let filter = bevy_rapier3d::prelude::QueryFilter::new()
                                 .exclude_rigid_body(shooter_entity);
-                            if let Some((hit_entity, toi)) =
-                                ctx.cast_ray(ray_origin, ray_dir, dist_to_target, true, filter)
+                            if let Some((hit, distance)) =
+                                ctx.cast_ray(origin, direction, distance, true, filter)
                             {
-                                // Classify the blocking entity.
-                                if let Ok((
-                                    _,
-                                    blocker_ent_uuid,
-                                    blocker_ast_uuid,
-                                    blocker_faction,
-                                )) = blocker_info_q.get(hit_entity)
-                                {
-                                    let blocker_uuid_str: Option<&str> = blocker_ent_uuid
-                                        .map(|u| u.0.as_str())
-                                        .or_else(|| blocker_ast_uuid.map(|u| u.0.as_str()));
-
-                                    // Only reroute when blocker is a *different* entity from
-                                    // the original target (the ray hits the target itself at
-                                    // toi == dist_to_target).
-                                    let blocker_is_target = blocker_uuid_str
-                                        .map(|u| u == target_uuid.as_str())
-                                        .unwrap_or(false);
-
-                                    if !blocker_is_target && toi < dist_to_target {
-                                        // Determine friendliness.
-                                        let is_friendly = match (
-                                            shooter_faction_opt.map(|f| f.0),
-                                            blocker_faction.map(|f| f.0),
-                                            &faction_registry,
-                                        ) {
-                                            (Some(sf), Some(bf), Some(reg)) => {
-                                                !crate::ai::faction::is_enemy(
-                                                    Some(sf),
-                                                    Some(bf),
-                                                    reg,
-                                                )
-                                            }
-                                            // No faction data → treat as non-friendly (takes damage).
-                                            _ => false,
-                                        };
-
-                                        if is_friendly {
-                                            // Friendly ship blocks; nobody takes damage this tick.
-                                            (target_uuid.clone(), tx, tz, true)
-                                        } else {
-                                            // Enemy/neutral/asteroid blocks; blocker takes damage.
-                                            let blocker_uuid =
-                                                blocker_uuid_str.unwrap_or("").to_string();
-                                            if blocker_uuid.is_empty() {
-                                                // Blocker has no UUID — fall through to original target.
-                                                (target_uuid.clone(), tx, tz, false)
-                                            } else {
-                                                // Use the ray hit position as the blocker position
-                                                // for VFX (e.g. asteroid destruction effects).
-                                                let hit_pos = ray_origin + ray_dir * toi;
-                                                (blocker_uuid, hit_pos.x, hit_pos.z, false)
-                                            }
-                                        }
-                                    } else {
-                                        // Hit was the target itself — no blocker.
-                                        (target_uuid.clone(), tx, tz, false)
-                                    }
-                                } else {
-                                    // Hit entity not in blocker_info_q — fall through to original target.
-                                    (target_uuid.clone(), tx, tz, false)
-                                }
+                                let hit_point = origin + direction * distance;
+                                blocker_info_q
+                                    .get(hit)
+                                    .ok()
+                                    .and_then(|(_, entity, rock, _)| {
+                                        entity
+                                            .map(|id| id.0.clone())
+                                            .or_else(|| rock.map(|id| id.0.clone()))
+                                    })
+                                    .map_or(miss, |route| (route, hit_point.x, hit_point.z, false))
                             } else {
-                                // No LOS blocker found.
-                                (target_uuid.clone(), tx, tz, false)
+                                miss
                             }
                         } else {
-                            // Shooter and target at same position — no LOS check.
-                            (target_uuid.clone(), tx, tz, false)
+                            miss
                         }
+                    } else if measured_aim {
+                        miss
                     } else {
-                        // Rapier context unavailable at this tick.
-                        (target_uuid.clone(), tx, tz, false)
+                        legacy
                     }
+                } else if measured_aim {
+                    miss
                 } else {
-                    // No Rapier plugin — skip LOS.
-                    (target_uuid.clone(), tx, tz, false)
+                    legacy
                 };
-
             beam_context.0.push(ShooterState {
                 shooter_entity,
                 shooter_uuid: shooter_uuid_opt.map(|u| u.0.clone()).unwrap_or_default(),
@@ -1619,6 +1666,7 @@ pub(crate) fn tick_beams_apply_damage(
     >,
     mut beam_context: ResMut<BeamContext>,
     mut shooters: Query<(&PhaserCombatConfigResource, &mut ActiveBeam)>,
+    shield_profiles: Query<&crate::ship::shield_enquiry::ShieldProbeProfile>,
     // The write-side outputs (world, outbox, game-over latch, destruction event
     // writers, balance sink, tracked registry) bundled as one `SystemParam`
     // (issue #1185); `SimOutbox` / latch / balance / tracked stay `Option` for
@@ -1807,7 +1855,11 @@ pub(crate) fn tick_beams_apply_damage(
             let freq_mult: f32 = if let Some(ref shields) = ship_shields_comp {
                 let sf = shields.frequency();
                 let pf = state.shooter_phaser_freq;
-                (1.0 - (pf - sf).abs() * 0.5).clamp(0.25, 1.0)
+                shield_profiles
+                    .get(target_entity)
+                    .map(|profile| profile.response)
+                    .unwrap_or_default()
+                    .multiplier(pf, sf)
             } else {
                 1.0
             };
@@ -2203,7 +2255,9 @@ pub(crate) fn tick_beams_tick_lifetimes(
         let Some(slot) = beam.bank_slot_mut(&state.active_bank) else {
             continue;
         };
-        if slot.remaining_secs <= 0.0 {
+        if slot.operation == phoenix_model::weapon_operation::BeamOperation::Fixed
+            && slot.remaining_secs <= 0.0
+        {
             // The ORDINARY end of a cycle, and the one the jitter is for: the
             // burn ran its drawn length and the rest it paired with follows it
             // (issue #929).

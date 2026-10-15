@@ -104,6 +104,7 @@ fn measured_rescue_picture(world: &mut World, operator: Entity) -> String {
             0.5,
             1.0,
             &[BroadMeasurement {
+                elevation: None,
                 source: "uuid-lighter".into(),
                 selectable: true,
                 observation: None,

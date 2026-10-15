@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
 import { parse } from 'smol-toml';
-import { writeSystemComposition } from '../workshop-system-composition.js';
-import { mergeComposeFragments } from '../entity-includes.js';
+import { writeSystemComposition, initialTurret, validateTurretComposition } from '../workshop-system-composition.js';
+import { mergeComposeFragments, resolveTemplate } from '../entity-includes.js';
 
 const source = `# untouched header
 [[system]] # ownership preserved
@@ -54,4 +55,34 @@ describe('System component source transaction', () => {
   it('cannot edit a System supplied wholly by an include', () => {
     expect(() => writeSystemComposition('includes=["base.toml"]\n', 'dock', {}, parse(source).system[0])).toThrow(/containing System/);
   });
+});
+
+it('keeps the finite turret palette closed and references exactly its actual power input', () => {
+  const system = { kind: 'phaser_bank', power_group: 'bank' }, components = initialTurret();
+  expect(() => validateTurretComposition(system, components, [])).not.toThrow();
+  expect(() => validateTurretComposition(system, [], [])).not.toThrow();
+  for (const mutation of [
+    rows => rows[1].config.traverse_deg_per_sec = 0,
+    rows => rows[1].config.traverse_deg_per_sec = '20',
+    rows => rows[1].config.traverse_arc_deg = 361,
+    rows => rows[1].config.facing_deg = Infinity,
+    rows => rows[1].config.aim_tolerance_deg = 180,
+    rows => rows[1].target_channel = 'unread',
+    rows => rows[1].power_input = 'missing',
+    rows => rows.push(structuredClone(rows[1])),
+  ]) { const candidate = structuredClone(components); mutation(candidate); expect(() => validateTurretComposition(system, candidate, [])).toThrow(); }
+  expect(() => validateTurretComposition(system, components, [{ name: 'target', kind: 'entity_target' }])).toThrow();
+  expect(() => validateTurretComposition({ ...system, power_group: undefined }, components, [])).toThrow();
+});
+
+it('resolves the actual Cruiser and inherited Dynasty with one forebank and one passive mount', () => {
+  for (const hull of ['alliance_cruiser', 'dynasty_player_cruiser']) {
+    const value = resolveTemplate(`assets/entities/${hull}.toml`, { read: path => fs.existsSync(path) ? fs.readFileSync(path, 'utf8') : null }, parse).resolved.value;
+    const mounted = value.system.filter(system => system.component?.some(row => row.kind === 'turret'));
+    expect(mounted.map(row => row.id).sort()).toEqual(['passive-receiver', 'phaser-fore']);
+    for (const system of mounted) expect(() => validateTurretComposition(system, system.component, system.channel || [])).not.toThrow();
+    const receiver = value.sensing.passive.find(row => row.system === 'passive-receiver');
+    expect(receiver.mount).toEqual({ facing_deg: 0, arc_deg: 120, range: 100 });
+    expect(mounted.find(row => row.id === 'phaser-fore').component.find(row => row.kind === 'turret').config.traverse_deg_per_sec).toBe(45);
+  }
 });

@@ -30,7 +30,6 @@
 //! entirely, and target selection now lives wholly in
 //! `console::weapons::ai_target_selection`.
 
-use crate::simmath;
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
@@ -156,7 +155,7 @@ impl Plugin for ConsoleAiPlugin {
                 // it emits has to be consumed in the SAME tick, exactly as
                 // `operate_captain_ai` is ordered before
                 // `handle_set_red_alert`. That also puts `target_count` in
-                // place before `tick_torpedo_lifecycle` (Physics) runs its
+                // place before `advance_torpedo_flights` (Physics) runs its
                 // auto-load block, so a tube starts loading the tick the order
                 // is given rather than the tick after.
                 //
@@ -450,6 +449,7 @@ fn ai_power_allocation(
 ///   test asserts on.
 pub(crate) fn ai_torpedo_auto_fire(
     sessions: Res<crate::lobby::Sessions>,
+    aims: crate::console::weapons::assignments::WeaponAimInputs,
     // The read-only AI-host world context — flag chain, sessions, and origin
     // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
     // runs this host must register it (`register_ai_host_env`) or fail loudly at
@@ -583,61 +583,6 @@ pub(crate) fn ai_torpedo_auto_fire(
             continue;
         }
 
-        // Combat Lock from this ship's frozen viewscreen blackboard (issue
-        // #829, spec §1/§3). One-tick lag accepted, including for firing.
-        let Some(target_uuid) = ship_config
-            .0
-            .systems
-            .iter()
-            .filter(|system| system.kind == "torpedo_tube")
-            .find_map(|system| console_combat_lock(&ship_config.0, &system.id, blackboards))
-        else {
-            continue;
-        };
-
-        // Look up live world position + shields — the WorldResource snapshot is
-        // stale for moving targets. A target that resolves here is a real lock
-        // (`target_locked`); one that does not is a UUID naming something that
-        // no longer exists, so there is nothing to shoot at.
-        let target_state = asteroid_q
-            .iter()
-            .find_map(|(u, t)| {
-                (u.0 == target_uuid).then_some(((t.translation.x, t.translation.z), None, 0.0))
-            })
-            .or_else(|| {
-                other_ships_q.iter().find_map(|(u, t, shields, tphys)| {
-                    (u.0 == target_uuid).then_some((
-                        (t.translation.x, t.translation.z),
-                        shields,
-                        tphys.map(|p| p.yaw).unwrap_or(0.0),
-                    ))
-                })
-            });
-        let Some(((tx, tz), target_shields_comp, target_yaw)) = target_state else {
-            continue;
-        };
-
-        // HP of the ONE arc a torpedo from this ship would strike. Arcs are
-        // authored relative to the target's own facing, so the bearing is taken
-        // from the target's frame (hence `target_yaw`) and resolved by the
-        // target's own `facing_index_for_bearing` — the same resolver
-        // `apply_damage` uses (`tick_torpedo_lifecycle` feeds it the torpedo's
-        // impact bearing), so the gate and the eventual hit agree about
-        // which arc is in the way. A healthy rear arc must not veto a shot into
-        // a collapsed front arc. An offline arc reads 0 (it passes damage
-        // through to the hull, so it is not blocking), and a target with no
-        // `ShipShields` (asteroids, debris) reads 0 — torpedo-eligible.
-        let target_facing_shields: i32 = target_shields_comp
-            .map(|s| {
-                s.0.hp_facing_attacker(physics.x, physics.z, tx, tz, target_yaw)
-            })
-            .unwrap_or(0);
-
-        let dx = tx - physics.x;
-        let dz = tz - physics.z;
-        let world_bearing = simmath::atan2(dx, -dz);
-        let bearing = world_bearing - physics.yaw;
-
         // Per-entity component only (issue #738). This used to fall back to
         // the global `TorpedoSystemResource` Resource, which mirrors the
         // LOCAL ship's magazine and tube state — so an NPC with no `[torpedoes]`
@@ -647,19 +592,6 @@ pub(crate) fn ai_torpedo_auto_fire(
             continue;
         };
         let torpedo_sys: &crate::weapons::torpedo::TorpedoSystem = &torpedo_sys_comp.0;
-        let tubes: Vec<crate::console_ai::TubeSummary> = torpedo_sys
-            .tubes
-            .iter()
-            .map(|tube| crate::console_ai::TubeSummary {
-                id: tube.id.clone(),
-                loaded: tube.is_loaded(),
-                in_arc: tube.is_in_arc(bearing),
-            })
-            .collect();
-        // Reported, not a gate: `torpedoes_remaining` is the rounds left to
-        // RELOAD with — the ones in the tubes were drawn from it when their load
-        // started — so it must never veto a launch. See `auto_fire_torpedo`.
-        let magazine = torpedo_sys.torpedoes_remaining();
         // Ship-wide "every tube is at its volley capacity" (issue #791). A
         // doctrine that spends a shield gap on one full salvo needs this rather
         // than the per-tube `loaded` (which is `loaded_count > 0`), and it is a
@@ -673,28 +605,71 @@ pub(crate) fn ai_torpedo_auto_fire(
             .iter()
             .all(|tube| tube.loaded_count >= tube.volley_max);
 
-        let input = crate::console_ai::TorpedoAiInput {
-            // Reaching here means `TacticalRadarSelection` named an entity that
-            // resolved to a live world position above — a real lock.
-            target_locked: true,
-            target_facing_shields,
-            tubes,
-            magazine,
-        };
-
-        let tubes_to_fire = crate::console_ai::auto_fire_torpedo(&input);
-        for tube_id in tubes_to_fire {
-            let Some(target) = crate::ship::system_registry::torpedo_tube_system_id(&tube_id)
-            else {
+        for tube in &torpedo_sys.tubes {
+            let tube_id = &tube.id;
+            let Some(target) = crate::ship::system_registry::torpedo_tube_system_id(tube_id) else {
                 continue;
             };
-            // A neighbouring tube can be controlled by another Console. A
-            // shared Station or magazine never lends it that Console's lock.
-            if console_combat_lock(&ship_config.0, &target, blackboards).as_deref()
-                != Some(target_uuid.as_str())
-            {
+            let Some(aim) = aims.resolve(ship_entity, &target, |route| {
+                asteroid_q
+                    .iter()
+                    .find_map(|(uuid, transform)| {
+                        (uuid.0 == route)
+                            .then_some([transform.translation.x, transform.translation.z])
+                    })
+                    .or_else(|| {
+                        other_ships_q.iter().find_map(|(uuid, transform, _, _)| {
+                            (uuid.0 == route)
+                                .then_some([transform.translation.x, transform.translation.z])
+                        })
+                    })
+            }) else {
+                continue;
+            };
+            if !aim.allows(tube.targets.as_deref()) {
                 continue;
             }
+            let geometry = aims.geometry(
+                ship_entity,
+                &target,
+                &crate::weapons::mount::MountConfig {
+                    facing_deg: tube.facing_deg,
+                    fire_arc_deg: tube.fire_arc_deg,
+                    range: torpedo_sys.config.speed * torpedo_sys.config.lifespan,
+                },
+                &aim,
+                physics,
+            );
+            if !tube.is_loaded() || !geometry.in_arc || !geometry.in_range {
+                continue;
+            }
+            // A permitted position is not a shield measurement. Legacy fixtures
+            // retain their old inputs; fitted instruments never read live enemy
+            // shields to decide whether to launch.
+            let target_facing_shields = if aim.measured {
+                aims.observed_shield_cover(ship_entity, &target, &aim, [physics.x, physics.z])
+            } else {
+                Some(
+                    other_ships_q
+                        .iter()
+                        .find_map(|(uuid, _, shields, target_physics)| {
+                            (uuid.0 == aim.route).then(|| {
+                                shields
+                                    .map(|shields| {
+                                        shields.0.hp_facing_attacker(
+                                            physics.x,
+                                            physics.z,
+                                            aim.position[0],
+                                            aim.position[1],
+                                            target_physics.map_or(0.0, |physics| physics.yaw),
+                                        )
+                                    })
+                                    .unwrap_or(0)
+                            })
+                        })
+                        .unwrap_or(0),
+                )
+            };
             // Per-tube LAUNCH policy gate (issue #782): `auto_fire_torpedo`
             // already resolved this tube's host readiness (loaded, in arc, target
             // locked — NOT the magazine, whose rounds are the ones left to reload
@@ -711,7 +686,7 @@ pub(crate) fn ai_torpedo_auto_fire(
             // A tube with NO entry does not launch: since #885b stage 5d there
             // is no synthesised stand-in, and strict AI-declaration mode rejects
             // a tube that authors no inline `ai` block at load.
-            let Some(launch_policy) = tube_policies.and_then(|p| p.0.get(&tube_id)) else {
+            let Some(launch_policy) = tube_policies.and_then(|p| p.0.get(tube_id)) else {
                 continue;
             };
             let facts = crate::console::weapons::seed_torpedo_tube_launch_facts(
@@ -721,7 +696,7 @@ pub(crate) fn ai_torpedo_auto_fire(
                 true,
                 target_facing_shields,
                 tubes_full,
-                posture_for(&tube_id),
+                posture_for(tube_id),
             );
             if !crate::console::weapons::torpedo_tube_launch_policy_fires(
                 launch_policy,
@@ -735,9 +710,7 @@ pub(crate) fn ai_torpedo_auto_fire(
             crate::command_admission::ai_emit::emit_ai_command(
                 entity_uuid,
                 target,
-                crate::core::messages::SystemControlPayload::FireTorpedo {
-                    target_uuid: Some(target_uuid.clone()),
-                },
+                crate::core::messages::SystemControlPayload::FireTorpedo { target_uuid: None },
                 control_sources,
                 &sessions,
                 Some(ship_config),
@@ -934,42 +907,12 @@ pub(crate) fn ai_torpedo_load(
 
 /// High-fidelity Sensors frequency-hint emitter (issues #692, #873).
 ///
-/// Wires `console_ai::tick_frequency_hint`: waits
-/// `SensorsAiConfigResource::frequency_hint_delay_secs` after a target lock
-/// before emitting a `FrequencyHint` coordination message to Tactical,
-/// replicating a Sensors operator's reaction delay rather than the instantaneous
-/// readout `ship::sensors::tick_sensors_frequency_hint` produces.
-///
-/// # Gating — `AiHighFidelity` and nothing else
-///
-/// The only gate is the `AiHighFidelity` query filter, i.e. the hull's
-/// simulation level of detail. `tick_sensors_frequency_hint` skips exactly the
-/// ships this one serves, so the two never double-emit and every ship emits
-/// through one of them.
-///
-/// Issue #873 removed two gates that were both, underneath, the same
-/// human-vs-AI branch:
-///
-/// * `policy_for(sensors).operate_ai` — a human on Sensors silenced this
-///   emitter and diverted the fact to the immediate path instead, so the hint's
-///   timing (and, across a lag boundary, its content) depended on who was
-///   holding the console.
-/// * The `auto_hint` `ai_tuning` rule, consulted only when a *session held* the
-///   Sensors station. No shipped hull authors `auto_hint`, so in practice a
-///   human sitting down at Sensors on a high-fidelity ship silenced the ship's
-///   frequency advisory outright — a coordination fact whose existence turned
-///   on the presence of a human. A station rating may tune what a console shows
-///   its own operator; it may not decide whether the ship's authoritative state
-///   reaches the rest of the bridge.
-///
-/// `sender_origin` is resolved at the write below and used for nothing but the
-/// delivery-time routing tag (AGENTS.md rule 6).
-/// `pub(crate)` so the end-to-end AC5 fixture in `ship::coordination_systems`
-/// can register the emitter the PLAYER ship actually runs. The player hull is
-/// permanently high-fidelity (`server_app::spawn_game_start_entities` gives
-/// `LocalShip` the marker at spawn and `ai::server::lod_ai_ships` never
-/// evaluates `LocalShip`), so this — not `tick_sensors_frequency_hint` — is the
-/// emitter behind a human Sensors officer's advisory on the player ship.
+/// Publish an advisory only after a permitted paid Shields reading exists for
+/// the selected public subject. The retained finding, including its observed
+/// configuration, is the entire answer; no target machinery is queried here.
+/// Human and AI holders share this acquisition and delivery path. High-fidelity
+/// hulls retain the authored advisory delay; the low-fidelity twin deduplicates
+/// the same recorded evidence without performing a second acquisition.
 pub(crate) fn tick_frequency_hint_high_fidelity(
     contact_runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     // The AUTHORED tick period, not `Time::delta` (issue #889). This system is
@@ -995,9 +938,9 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
             With<crate::server_app::Ship>,
         ),
     >,
-    target_shields_q: Query<(
-        &crate::entities::spawner::EntityUuid,
-        &crate::ship::shields::ShipShields,
+    pictures: Query<(
+        Option<&crate::science::broad::BroadTracks>,
+        Option<&crate::science::broad::SensingControls>,
     )>,
     mut writer: MessageWriter<crate::ship_plugin::CoordinationEnqueue>,
 ) {
@@ -1006,7 +949,6 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
         .map(|wc| wc.global.ai_tick_hz)
         .unwrap_or_else(|| crate::entities::config::GlobalConfig::default().ai_tick_hz);
     let dt = if hz > 0.0 { 1.0 / hz } else { 0.0 };
-    let sensors_sid = crate::ship::system_registry::sensors_system_id();
 
     for (
         entity,
@@ -1018,11 +960,15 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
         ai_config_comp,
     ) in ships.iter_mut()
     {
+        let (tracks, controls) = pictures.get(entity).unwrap_or((None, None));
+        let Some(owner) = crate::science::broad::science_owner(controls, tracks.is_some()) else {
+            continue;
+        };
         // Frozen Combat Lock from this ship's viewscreen (issue #829, spec §3),
         // identical to how the low-fidelity twin `tick_sensors_frequency_hint`
         // and the firing paths read it — never the tactical radar's live
         // selection.
-        let locked_target = console_combat_lock(&ship_config.0, &sensors_sid, blackboards);
+        let locked_target = console_combat_lock(&ship_config.0, &owner, blackboards);
 
         let locked_target = locked_target.filter(|target| {
             observer_uuid
@@ -1038,17 +984,42 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
                 .unwrap_or_default()
                 != crate::gm::operations::contact::ContactMode::Conceal
         });
-        // Look up the target entity's shield frequency; fall back to 0.5,
-        // mirroring `tick_sensors_frequency_hint`'s own fallback.
-        let correct_frequency = locked_target
-            .as_ref()
-            .and_then(|uuid| {
-                target_shields_q
-                    .iter()
-                    .find(|(u, _)| u.0.as_str() == uuid.as_str())
-                    .map(|(_, shields)| shields.frequency())
-            })
-            .unwrap_or(0.5);
+        let public_target = locked_target.as_deref().and_then(|target| {
+            crate::science::contact_routing::alias_for_source(
+                &ship_config.0,
+                blackboards,
+                tracks,
+                &owner,
+                target,
+            )
+        });
+        let acquired = locked_target.as_deref().and_then(|target| {
+            let aliases = crate::science::contact_routing::aliases_for_source(
+                &ship_config.0,
+                blackboards,
+                tracks,
+                &owner,
+                target,
+            );
+            crate::science::shield_enquiry::latest_permitted_finding_for_subjects(
+                &ship_config.0,
+                blackboards,
+                &owner,
+                &aliases,
+            )
+        });
+        let Some((subject, finding)) = public_target.zip(acquired) else {
+            hint_state.0 = Default::default();
+            continue;
+        };
+        let correct_frequency = finding.frequency;
+        // The debounce key is held evidence, never the target's current configuration.
+        let locked_target = Some(format!(
+            "{}:{}/{}",
+            subject.len(),
+            subject,
+            finding.configuration
+        ));
 
         // Per-ship tuning only (issue #738). This used to fall back to the
         // global `SensorsAiConfigResource` Resource while iterating every ship,
@@ -1078,10 +1049,11 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
         let output = crate::console_ai::tick_frequency_hint(&mut hint_state.0, &input);
 
         if let crate::console_ai::FrequencyHintOutput::Hint { frequency } = output {
-            let sender_origin = control_sources.0.source_for(&sensors_sid);
+            let sender_origin = control_sources.0.source_for(&owner);
             let Some(address) = crate::ship::coordination::address_for_system(
                 &ship_config.0,
-                &crate::ship::system_registry::tactical_radar_system_id(),
+                &crate::science::broad::combat_owner(controls, tracks.is_some())
+                    .unwrap_or_else(crate::ship::system_registry::tactical_radar_system_id),
             ) else {
                 continue;
             };
@@ -1096,7 +1068,7 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
                 )
                 .with_body_param("frequency", frequency),
                 sender_label: crate::ship::coordination::CHATTER_SENDER_SENSORS.to_string(),
-                sender_system: sensors_sid.clone(),
+                sender_system: owner.clone(),
             });
         }
     }

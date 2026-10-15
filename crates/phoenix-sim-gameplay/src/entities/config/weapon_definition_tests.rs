@@ -253,3 +253,98 @@ fn simultaneous_bolt_volley_retains_zero_cadence() {
         0.0
     );
 }
+
+#[test]
+fn sustained_operation_is_explicit_and_finite_rounds_require_actual_local_owner() {
+    use phoenix_model::weapon_operation::BeamOperation;
+    let fixed = parse(BEAM).unwrap();
+    assert_eq!(
+        fixed.weapons_console.unwrap().phaser_banks[0].operation,
+        BeamOperation::Fixed
+    );
+    let sustained = BEAM
+        .replace(
+            r#"kind = "beam""#,
+            "kind = \"beam\"\noperation=\"sustained\"",
+        )
+        .replace("cycle_jitter = 0.33", "cycle_jitter=0");
+    assert_eq!(
+        parse(&sustained)
+            .unwrap()
+            .weapons_console
+            .unwrap()
+            .phaser_banks[0]
+            .operation,
+        BeamOperation::Sustained
+    );
+    assert!(parse(&sustained.replace("cycle_jitter=0", "cycle_jitter=0.1")).is_err());
+    let config =
+        crate::test_fixtures::load_entity_config("assets/entities/broadside_cruiser.toml").unwrap();
+    validate_round_feeds(&config).unwrap();
+    let bolt = &config.weapons_console.as_ref().unwrap().blaster_banks[0];
+    assert_eq!(bolt.rounds.as_ref().unwrap().store, "local-kinetic-rounds");
+    assert_eq!(bolt.to_runtime().rounds, bolt.rounds);
+    for bad in 0..5 {
+        let mut invalid = config.clone();
+        let store = invalid
+            .logistics
+            .as_mut()
+            .unwrap()
+            .stores
+            .iter_mut()
+            .find(|s| s.id == "local-kinetic-rounds")
+            .unwrap();
+        match bad {
+            0 => store.role = phoenix_model::logistics::StoreRole::Main,
+            1 => store.system = Some(phoenix_model::identity::SystemId("phaser-aft".into())),
+            2 => store.compartment = "support".into(),
+            3 => store.endpoint = phoenix_model::logistics::ResourceEndpoint::TorpedoMagazine {},
+            _ => {
+                invalid.weapons_console.as_mut().unwrap().blaster_banks[0]
+                    .rounds
+                    .as_mut()
+                    .unwrap()
+                    .amount = 9
+            }
+        }
+        assert!(
+            validate_round_feeds(&invalid).is_err(),
+            "invalid feed variant {bad}"
+        );
+    }
+}
+
+#[test]
+fn target_policy_compiles_all_families_and_preserves_explicit_empty() {
+    use phoenix_model::tags::EntityTag::Missile;
+    for (source, family) in [(BEAM, 0), (BOLT, 1), (GUIDED, 2)] {
+        for (authored, expected) in [
+            ("targets=[\"missile\"]", Some(vec![Missile])),
+            ("targets=[]", Some(vec![])),
+            ("targets=false", None),
+        ] {
+            let value = source.replace("[weapon.ai]", &format!("{authored}\n[weapon.ai]"));
+            let parsed = parse(&value).unwrap();
+            let actual = match family {
+                0 => parsed.weapons_console.as_ref().unwrap().phaser_banks[0]
+                    .targets
+                    .clone(),
+                1 => parsed.weapons_console.as_ref().unwrap().blaster_banks[0]
+                    .targets
+                    .clone(),
+                _ => parsed.torpedoes.as_ref().unwrap().tubes[0].targets.clone(),
+            };
+            assert_eq!(actual, expected);
+            let saved = serde_json::to_string(&parsed).unwrap();
+            let restored: EntityConfig = serde_json::from_str(&saved).unwrap();
+            assert_eq!(parsed, restored);
+        }
+        for bad in [
+            "targets=true",
+            "targets=[\"unknown-target-tag\"]",
+            "targets=[\"missile\",\"missile\"]",
+        ] {
+            assert!(parse(&source.replace("[weapon.ai]", &format!("{bad}\n[weapon.ai]"))).is_err());
+        }
+    }
+}

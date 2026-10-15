@@ -597,6 +597,8 @@ shield_pierce = 0.1
 damage_type = "laser"
 penetration = 20
 [torpedoes]
+# Frozen finite guidance equipment; physical collision does not grant tracking.
+seeker = { range = 270.0, fire_arc_deg = 180.0, minimum_transmission = 0.1 }
 count = 8
 burst_interval_secs = 0.35
 damage_hull = 34

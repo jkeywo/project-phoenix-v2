@@ -233,6 +233,8 @@ type Receivers<'w, 's> = Query<
         &'static ShipSystemControlSources,
         Option<&'static crate::ship::compartment_damage::ShipDamage>,
         Option<&'static crate::ship::state::ShipPhysics>,
+        Option<&'static crate::weapons::mounts::MountProfiles>,
+        Option<&'static crate::weapons::mounts::ShipMounts>,
     ),
 >;
 
@@ -324,6 +326,8 @@ fn tick(
             sources,
             damage,
             physics,
+            mount_profiles,
+            mount_states,
         )) = receivers.iter_mut().find(|(uuid, ..)| uuid.0 == id)
         else {
             continue;
@@ -362,6 +366,15 @@ fn tick(
             {
                 continue;
             }
+            let static_mount = phoenix_sim_gameplay::science::sensing::mount(&profile.mount);
+            let Some(mut mount) = crate::weapons::mounts::sensor_mount(
+                mount_profiles,
+                mount_states,
+                system,
+                &static_mount,
+            ) else {
+                continue;
+            };
             let paid = power
                 .0
                 .work_continuous(&profile.system, dt, 1.0)
@@ -374,7 +387,6 @@ fn tick(
             {
                 continue;
             }
-            let mut mount = phoenix_sim_gameplay::science::sensing::mount(&profile.mount);
             mount.range *= paid;
             let mut signals = Vec::new();
             for (source, position, emitted, signature) in &emissions {
@@ -453,16 +465,27 @@ pub(crate) fn publish(
         &ShipSystemControlSources,
         Option<&crate::ship::compartment_damage::ShipDamage>,
         &mut crate::server_app::ShipSystemBlackboards,
+        Option<&crate::weapons::mounts::MountProfiles>,
+        Option<&crate::weapons::mounts::ShipMounts>,
     )>,
 ) {
-    for (profile, state, power, sources, damage, mut boards) in &mut ships {
+    for (profile, state, power, sources, damage, mut boards, mount_profiles, mount_states) in
+        &mut ships
+    {
         for (system, profile) in &profile.0 {
             let Some(state) = state.0.get(system) else {
                 continue;
             };
+            let actual_mount = crate::weapons::mounts::sensor_mount(
+                mount_profiles,
+                mount_states,
+                system,
+                &phoenix_sim_gameplay::science::sensing::mount(&profile.mount),
+            );
             let board = SystemBlackboard::Passive(PassiveBlackboard {
                 enabled: state.enabled,
-                can_operate: sources.0.entries().any(|(id, _)| id == system)
+                can_operate: actual_mount.is_some()
+                    && sources.0.entries().any(|(id, _)| id == system)
                     && sources.0.source_for(system)
                         != crate::ship::control_source::ControlSource::Offline
                     && !sources.0.is_offline(&profile.system)
@@ -473,7 +496,11 @@ pub(crate) fn publish(
                         .consumers
                         .get(&profile.system)
                         .is_some_and(|energy| energy.energy > 0.0 && !energy.thermal_stopped),
-                mount: Some(profile.mount.clone()),
+                mount: actual_mount.map(|mount| phoenix_model::sensing::SensorMountConfig {
+                    facing_deg: mount.facing_deg,
+                    arc_deg: mount.fire_arc_deg,
+                    range: mount.range,
+                }),
                 last_sample_tick: state.last_sample_tick,
                 signals: state.signals.clone(),
             });

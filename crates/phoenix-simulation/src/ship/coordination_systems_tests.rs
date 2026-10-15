@@ -685,7 +685,7 @@ fn add_tactical_hint_applier(app: &mut App) {
 /// `AiHighFidelity`; the high-fidelity twin
 /// `tick_frequency_hint_high_fidelity` reads the same facts through the
 /// operator reaction-delay model), the viewscreen's frozen Combat Lock names
-/// a target, and that target carries a shield frequency to read.
+/// a target, and a qualified acquired reading holds that subject's sampled frequency.
 ///
 /// Ordered `.before(handle_coordination_enqueue)` so the emit lands on the
 /// bus the same tick it is written rather than at the mercy of intra-set
@@ -701,6 +701,7 @@ fn arm_real_sensors_frequency_emitter(app: &mut App, target_uuid: &str, frequenc
             .world_mut()
             .get_mut::<crate::server_app::ShipSystemBlackboards>(ship)
             .expect("ship carries system blackboards");
+        crate::science::shield_enquiry::fixture::acquired(&mut blackboards, target_uuid, frequency);
         blackboards.0.insert(
             crate::ship::system_registry::viewscreen_system_id(),
             crate::core::messages::SystemBlackboard::Viewscreen(
@@ -759,6 +760,7 @@ fn arm_real_high_fidelity_sensors_emitter(app: &mut App, target_uuid: &str, freq
             .world_mut()
             .get_mut::<crate::server_app::ShipSystemBlackboards>(ship)
             .expect("ship carries system blackboards");
+        crate::science::shield_enquiry::fixture::acquired(&mut blackboards, target_uuid, frequency);
         blackboards.0.insert(
             crate::ship::system_registry::viewscreen_system_id(),
             crate::core::messages::SystemBlackboard::Viewscreen(
@@ -1210,12 +1212,12 @@ fn offline_shields_threat_bearing_still_consumes_without_popup_or_ai_delivery() 
 
 /// AC5, end to end in ONE app. A human sits at Sensors; Tactical is unmanned
 /// and backfilled to AI. The ship's own Sensors emitter derives a frequency
-/// advisory from authoritative state, the bus routes it, and the AI running
+/// advisory from acquired history, the bus routes it, and the AI running
 /// the guns acts on it.
 ///
 /// Nothing is hand-written here: the chain starts at the REAL emitter
 /// `ship::sensors::tick_sensors_frequency_hint`, armed only with ship state
-/// (a viewscreen Combat Lock on a target whose shields carry 0.83), and ends
+/// (a viewscreen Combat Lock and a qualified acquired finding of 0.83), and ends
 /// at the phaser frequency. A stub `CoordinationEnqueue` would have proved
 /// the routing and reaction halves while leaving the half this issue
 /// actually changed — whether a human-held Sensors console emits at all —
@@ -1249,7 +1251,7 @@ fn human_sensors_advisory_reaches_and_moves_a_backfilled_tactical() {
     );
 
     // Tick 1: tick_sensors_frequency_hint (Input) reads the Combat Lock and
-    //         the target's shield frequency and writes CoordinationEnqueue →
+    //         the acquired finding and writes CoordinationEnqueue →
     //         handle_coordination_enqueue queues it (lag 0) →
     //         process_coordination_lag emits DeliveredCoordination → Tactical's
     //         receiver consumes it into the pending slot, because Tactical
@@ -1262,8 +1264,8 @@ fn human_sensors_advisory_reaches_and_moves_a_backfilled_tactical() {
     assert!(
         (frequency - 0.83).abs() < f32::EPSILON,
         "a backfilled Tactical must act on the human Sensors officer's advisory, and \
-         the advisory must come from the ship's own emitter reading the locked target's \
-         shields; phaser frequency is {frequency}, expected 0.83"
+         the advisory must come from the ship's own emitter reading the acquired \
+         finding; phaser frequency is {frequency}, expected 0.83"
     );
     assert_eq!(
         coordination_popups(&app),
@@ -3680,3 +3682,6 @@ fn human_repair_requests_cannot_forge_equipment_provenance_or_future_samples() {
     assert!(request.0.is_none());
     assert_eq!(*request.1, Some(10.0));
 }
+
+#[path = "coordination_frequency_tests.rs"]
+mod frequency_evidence_tests;

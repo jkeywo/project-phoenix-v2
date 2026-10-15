@@ -10,9 +10,175 @@ fn fixture() -> (EntityConfig, CompiledFitting, FittingState) {
 }
 fn healthy() -> ComponentState {
     ComponentState {
+        emp: None,
         condition: ComponentCondition::Healthy,
         dose: 0.0,
         last_source: None,
+    }
+}
+
+#[test]
+fn emp_follows_the_actual_removed_assembly_and_expires_in_storage_without_cleansing() {
+    let (config, profile, mut state) = fixture();
+    let policy = config.damage.as_ref().unwrap().emp.as_ref().unwrap();
+    let mut affected = healthy();
+    affected.emp = Some(
+        phoenix_model::emp::ComponentEmpState::apply(
+            None,
+            policy,
+            phoenix_model::emp::EmpPayload { duration_secs: 6.0 },
+            phoenix_model::emp::EmpClock {
+                tick: 10,
+                period_nanos: 1_000_000_000,
+            },
+        )
+        .unwrap(),
+    );
+    state
+        .stored_to_work(&profile, "fore-beam-spare", 8, "fore-beam")
+        .unwrap();
+    let old = state
+        .remove_installed(&profile, "fore-beam", 8, affected.clone())
+        .unwrap();
+    let replacement = state
+        .install_from_work(&profile, "fore-beam", "fore-beam-spare", 8)
+        .unwrap();
+    assert_eq!(
+        replacement,
+        healthy(),
+        "healthy replacement cannot inherit another assembly's EMP"
+    );
+    state
+        .return_to_locker(&profile, &old, 8, "weapons-equipment")
+        .unwrap();
+    let saved: FittingState = serde_json::from_slice(&serde_json::to_vec(&state).unwrap()).unwrap();
+    assert_eq!(saved.assemblies[&old].condition, Some(affected.clone()));
+    assert_eq!(affected.emp.as_ref().unwrap().factor_at(15), 0.0);
+    assert_eq!(
+        affected.emp.as_ref().unwrap().factor_at(16),
+        1.0,
+        "stowed effect expires without inventory ticking or repair"
+    );
+    state
+        .stored_to_work(&profile, &old, 9, "fore-beam")
+        .unwrap();
+    state
+        .remove_installed(&profile, "fore-beam", 9, replacement)
+        .unwrap();
+    assert_eq!(
+        state
+            .install_from_work(&profile, "fore-beam", &old, 9)
+            .unwrap(),
+        affected
+    );
+    state.validate(&profile).unwrap();
+}
+
+#[test]
+fn actual_assembly_moves_between_custom_and_unconfigured_receivers_with_its_original_receipt() {
+    use phoenix_model::emp::{ComponentEmpState, EmpClock, EmpPayload, EmpResistanceConfig};
+    for receiver in [
+        None,
+        Some(EmpResistanceConfig {
+            resistance_per_stack: 10.0,
+            max_stacks: 1,
+            decay_secs: 2.0,
+            bindings: vec![phoenix_model::damage::DamageBinding::Cooling],
+        }),
+    ] {
+        let (config, source_profile, mut source) = fixture();
+        let mut destination_config = config.clone();
+        destination_config.damage.as_mut().unwrap().emp = receiver;
+        let destination_profile = CompiledFitting::compile(&destination_config)
+            .unwrap()
+            .unwrap();
+        let mut destination = FittingState::from_profile(&destination_profile).unwrap();
+        let mut carried = healthy();
+        carried.emp = Some(
+            ComponentEmpState::apply(
+                None,
+                config.damage.as_ref().unwrap().emp.as_ref().unwrap(),
+                EmpPayload { duration_secs: 6.0 },
+                EmpClock {
+                    tick: 10,
+                    period_nanos: 1_000_000_000,
+                },
+            )
+            .unwrap(),
+        );
+        let old = source
+            .remove_installed(&source_profile, "fore-beam", 8, carried.clone())
+            .unwrap();
+        let mut item = source.assemblies.remove(&old).unwrap();
+        item.id = "salvaged-origin-beam".into();
+        item.location = EquipmentLocation::Stored {
+            locker: "weapons-equipment".into(),
+        };
+        destination.assemblies.insert(item.id.clone(), item);
+        source.validate(&source_profile).unwrap();
+        destination.validate(&destination_profile).unwrap();
+        let mut restored: FittingState =
+            serde_json::from_slice(&serde_json::to_vec(&destination).unwrap()).unwrap();
+        restored.validate(&destination_profile).unwrap();
+        restored
+            .stored_to_work(&destination_profile, "salvaged-origin-beam", 9, "fore-beam")
+            .unwrap();
+        let replacement = restored
+            .remove_installed(&destination_profile, "fore-beam", 9, healthy())
+            .unwrap();
+        assert_eq!(
+            restored
+                .install_from_work(&destination_profile, "fore-beam", "salvaged-origin-beam", 9)
+                .unwrap(),
+            carried
+        );
+        restored
+            .return_to_locker(&destination_profile, &replacement, 9, "weapons-equipment")
+            .unwrap();
+        assert!(
+            restored.assemblies["salvaged-origin-beam"]
+                .condition
+                .is_none(),
+            "installed receipt moves to the sole physical owner"
+        );
+        let mut physical =
+            crate::ship::physical_damage::ShipDamage::from_config(&destination_config)
+                .unwrap()
+                .unwrap();
+        physical.emp_clock = Some(EmpClock {
+            tick: 15,
+            period_nanos: 1_000_000_000,
+        });
+        *physical
+            .state
+            .components
+            .get_mut(&SystemId("phaser-fore".into()))
+            .unwrap()
+            .get_mut("operation")
+            .unwrap() = carried.clone();
+        physical
+            .state
+            .validate_emp_at(&physical.definition, physical.emp_clock.unwrap())
+            .unwrap();
+        assert_eq!(
+            physical.factor(
+                &SystemId("phaser-fore".into()),
+                phoenix_model::damage::DamageBinding::Operation
+            ),
+            0.0
+        );
+        physical.emp_clock.as_mut().unwrap().tick = 16;
+        assert_eq!(
+            physical.factor(
+                &SystemId("phaser-fore".into()),
+                phoenix_model::damage::DamageBinding::Operation
+            ),
+            1.0
+        );
+        assert_eq!(
+            physical.state.components[&SystemId("phaser-fore".into())]["operation"],
+            carried
+        );
     }
 }
 
@@ -23,6 +189,7 @@ fn actual_team_fetches_support_spare_to_weapons_without_duplicate_or_early_insta
     let (config, profile, mut state) = fixture();
     let item = "fore-beam-spare";
     let condition = ComponentState {
+        emp: None,
         condition: ComponentCondition::Damaged,
         dose: 0.5,
         last_source: Some("retained-salvage-damage".into()),
@@ -280,6 +447,7 @@ fn real_sidegrade_changes_only_supported_strategy_and_work_cost_not_the_fixed_gr
 fn condition_moves_once_and_healthy_replacement_does_not_inherit_removed_faults() {
     let (_, profile, mut state) = fixture();
     let damaged = ComponentState {
+        emp: None,
         condition: ComponentCondition::Damaged,
         dose: 3.25,
         last_source: Some("actual-hit".into()),
@@ -325,6 +493,34 @@ fn condition_moves_once_and_healthy_replacement_does_not_inherit_removed_faults(
         damaged,
         "reinstall cannot cleanse damage/dose/source"
     );
+}
+
+#[test]
+fn authored_initial_equipment_cannot_invent_a_runtime_emp_clock() {
+    let (mut config, _, _) = fixture();
+    let policy = config.damage.as_ref().unwrap().emp.as_ref().unwrap();
+    let effect = phoenix_model::emp::ComponentEmpState::apply(
+        None,
+        policy,
+        phoenix_model::emp::EmpPayload { duration_secs: 6.0 },
+        phoenix_model::emp::EmpClock {
+            tick: 20,
+            period_nanos: 1_000_000_000,
+        },
+    )
+    .unwrap();
+    config
+        .fitting
+        .as_mut()
+        .unwrap()
+        .assemblies
+        .iter_mut()
+        .find_map(|item| item.condition.as_mut())
+        .unwrap()
+        .emp = Some(effect);
+    assert!(CompiledFitting::compile(&config)
+        .unwrap_err()
+        .contains("causal EMP"));
 }
 
 #[test]
@@ -637,4 +833,126 @@ fn facility_has_real_owned_powered_dock_and_explicit_port_permission() {
     let inherited =
         crate::test_fixtures::load_entity_config("assets/entities/manual_trade_port.toml").unwrap();
     validate_refit_facility(&inherited).unwrap();
+}
+
+#[test]
+fn installed_beam_mode_is_the_actual_portable_definition_and_default_stays_fixed() {
+    use phoenix_model::weapon_operation::BeamOperation;
+    let (mut config, _, _) = fixture();
+    let fitting = config.fitting.as_mut().unwrap();
+    let spare = fitting
+        .assemblies
+        .iter()
+        .find(|item| item.id == "fore-beam-spare")
+        .unwrap()
+        .definition
+        .clone();
+    let item = fitting
+        .equipment
+        .iter_mut()
+        .find(|item| item.id == spare)
+        .unwrap();
+    if let EquipmentHardware::Beam(beam) = &mut item.hardware {
+        beam.targets = Some(Vec::new());
+        beam.operation = BeamOperation::Sustained;
+        beam.cycle_jitter = 0.0;
+    }
+    let profile = CompiledFitting::compile(&config).unwrap().unwrap();
+    let mut state = FittingState::from_profile(&profile).unwrap();
+    assert_eq!(
+        profile
+            .effective_config(&state)
+            .unwrap()
+            .weapons_console
+            .unwrap()
+            .phaser_banks[0]
+            .operation,
+        BeamOperation::Fixed
+    );
+    state
+        .stored_to_work(&profile, "fore-beam-spare", 44, "fore-beam")
+        .unwrap();
+    let old = state
+        .remove_installed(&profile, "fore-beam", 44, healthy())
+        .unwrap();
+    state
+        .install_from_work(&profile, "fore-beam", "fore-beam-spare", 44)
+        .unwrap();
+    state
+        .return_to_locker(&profile, &old, 44, "weapons-equipment")
+        .unwrap();
+    let saved: FittingState = serde_json::from_slice(&serde_json::to_vec(&state).unwrap()).unwrap();
+    assert_eq!(
+        profile
+            .effective_config(&saved)
+            .unwrap()
+            .weapons_console
+            .unwrap()
+            .phaser_banks[0]
+            .operation,
+        BeamOperation::Sustained
+    );
+}
+
+#[test]
+fn portable_target_filter_keeps_explicit_empty_distinct_from_default_none() {
+    let (mut config, _, _) = fixture();
+    let fitting = config.fitting.as_mut().unwrap();
+    let spare = fitting
+        .assemblies
+        .iter()
+        .find(|a| a.id == "fore-beam-spare")
+        .unwrap()
+        .definition
+        .clone();
+    let EquipmentHardware::Beam(hardware) = &mut fitting
+        .equipment
+        .iter_mut()
+        .find(|e| e.id == spare)
+        .unwrap()
+        .hardware
+    else {
+        panic!("beam")
+    };
+    hardware.targets = Some(vec![]);
+    let profile = CompiledFitting::compile(&config).unwrap().unwrap();
+    let mut state = FittingState::from_profile(&profile).unwrap();
+    assert_eq!(
+        profile
+            .effective_config(&state)
+            .unwrap()
+            .weapons_console
+            .unwrap()
+            .phaser_banks[0]
+            .targets,
+        None
+    );
+    swap(&profile, &mut state, "fore-beam", "fore-beam-spare", 77);
+    assert_eq!(
+        profile
+            .effective_config(&state)
+            .unwrap()
+            .weapons_console
+            .unwrap()
+            .phaser_banks[0]
+            .targets,
+        Some(vec![])
+    );
+    let EquipmentHardware::Beam(hardware) = &mut config
+        .fitting
+        .as_mut()
+        .unwrap()
+        .equipment
+        .iter_mut()
+        .find(|e| e.id == spare)
+        .unwrap()
+        .hardware
+    else {
+        panic!("beam")
+    };
+    hardware.targets = Some(vec![
+        phoenix_model::tags::EntityTag::Missile,
+        phoenix_model::tags::EntityTag::Missile,
+    ]);
+    assert!(CompiledFitting::compile(&config).is_err());
 }

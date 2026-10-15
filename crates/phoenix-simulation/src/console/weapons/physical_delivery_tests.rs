@@ -196,12 +196,18 @@ fn blaster_uses_actual_projectile_azimuth_for_shield_facing() {
         .in_flight
         .push(crate::weapons::blaster::BlasterProjectile {
             impact: phoenix_model::damage::DamageProfile {
+                emp: None,
                 damage_type: phoenix_model::damage::DamageType::Physical,
                 penetration: 0.0,
             },
             id: "shot".into(),
             x: 0.0,
             z: 0.0,
+            y: 0.0,
+            pitch: 0.0,
+            visual_scale: 1.0,
+            previous_position: Some([0.0, 0.0, 0.0]),
+            collision_interval_secs: None,
             heading: std::f32::consts::FRAC_PI_2,
             speed: 1.0,
             lifespan_remaining: 1.0,

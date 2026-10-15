@@ -51,6 +51,9 @@ impl DamageDefinition {
         config: &DamageConfig,
         ship: &ShipConfig,
     ) -> Result<Self, String> {
+        if let Some(emp) = &config.emp {
+            emp.validate()?;
+        }
         let mut decks = BTreeMap::new();
         for deck in &interior.decks {
             if !id(&deck.id)
@@ -275,6 +278,7 @@ impl DamageState {
                                 (
                                     id.clone(),
                                     ComponentState {
+                                        emp: None,
                                         condition: ComponentCondition::Healthy,
                                         dose: 0.0,
                                         last_source: None,
@@ -315,6 +319,12 @@ impl DamageState {
             }
             for (id, state) in states {
                 let config = &definitions[id];
+                if let Some(emp) = &state.emp {
+                    if !emp.policy.bindings.contains(&config.binding) {
+                        return Err("EMP state names an unsupported component binding".into());
+                    }
+                    emp.validate_shape()?;
+                }
                 let valid_condition = match state.condition {
                     ComponentCondition::Patched { factor } => config
                         .patch_remedy
@@ -355,6 +365,33 @@ impl DamageState {
         system: &phoenix_model::messages::SystemId,
         binding: DamageBinding,
     ) -> f32 {
+        self.effect_factor_at(definition, system, binding, None)
+    }
+    pub fn effect_factor_at(
+        &self,
+        definition: &DamageDefinition,
+        system: &phoenix_model::messages::SystemId,
+        binding: DamageBinding,
+        clock: Option<phoenix_model::emp::EmpClock>,
+    ) -> f32 {
+        self.binding_factor(definition, system, binding, true, clock)
+    }
+    pub fn physical_factor(
+        &self,
+        definition: &DamageDefinition,
+        system: &phoenix_model::messages::SystemId,
+        binding: DamageBinding,
+    ) -> f32 {
+        self.binding_factor(definition, system, binding, false, None)
+    }
+    fn binding_factor(
+        &self,
+        definition: &DamageDefinition,
+        system: &phoenix_model::messages::SystemId,
+        binding: DamageBinding,
+        include_emp: bool,
+        clock: Option<phoenix_model::emp::EmpClock>,
+    ) -> f32 {
         if self.catastrophic
             || definition
                 .interior
@@ -372,15 +409,57 @@ impl DamageState {
             .iter()
             .filter(|(id, _)| definition.components[system][*id].binding == binding)
             .fold(1.0, |factor, (id, state)| {
-                factor.min(match state.condition {
+                let physical = match state.condition {
                     ComponentCondition::Healthy => 1.0,
                     ComponentCondition::Damaged => {
                         definition.components[system][id].degraded_factor
                     }
                     ComponentCondition::Destroyed => 0.0,
                     ComponentCondition::Patched { factor } => factor,
-                })
+                };
+                let temporary = if include_emp {
+                    state.emp.as_ref().map_or(1.0, |emp| {
+                        clock.map_or(0.0, |clock| emp.factor_at(clock.tick))
+                    })
+                } else {
+                    1.0
+                };
+                factor.min(physical * temporary)
             })
+    }
+    pub fn validate_emp_at(
+        &self,
+        definition: &DamageDefinition,
+        clock: phoenix_model::emp::EmpClock,
+    ) -> Result<(), String> {
+        self.validate(definition)?;
+        clock.validate(clock.tick)?;
+        for components in self.components.values() {
+            for component in components.values() {
+                if let Some(emp) = &component.emp {
+                    emp.validate(clock)?;
+                }
+            }
+        }
+        Ok(())
+    }
+    pub fn emp_failed_components(
+        &self,
+        system: &phoenix_model::messages::SystemId,
+        clock: Option<phoenix_model::emp::EmpClock>,
+    ) -> Vec<String> {
+        self.components
+            .get(system)
+            .into_iter()
+            .flat_map(|components| components.iter())
+            .filter(|(_, state)| {
+                state
+                    .emp
+                    .as_ref()
+                    .is_some_and(|emp| clock.is_none_or(|clock| emp.factor_at(clock.tick) == 0.0))
+            })
+            .map(|(id, _)| id.clone())
+            .collect()
     }
     pub fn restore_structure(
         &mut self,
@@ -453,7 +532,40 @@ impl DamageState {
         hit: &DamageHit,
         rng: &mut Pcg32,
     ) -> Result<DamageOutcome, String> {
+        self.apply_hit_at(definition, hit, rng, None)
+    }
+    pub fn apply_hit_at(
+        &mut self,
+        definition: &DamageDefinition,
+        hit: &DamageHit,
+        rng: &mut Pcg32,
+        clock: Option<phoenix_model::emp::EmpClock>,
+    ) -> Result<DamageOutcome, String> {
         self.validate(definition)?;
+        hit.profile.validate()?;
+        // Precompute every eligible application before the first structural
+        // write or RNG sample, so an invalid/overflowing causal frontier cannot
+        // leave a half-applied impact. Only actually deposited rooms commit it.
+        let mut emp_applications = BTreeMap::new();
+        if let (Some(payload), Some(policy)) = (hit.profile.emp, &definition.config.emp) {
+            let clock = clock.ok_or("EMP impact requires the current fixed-step clock")?;
+            for (system, components) in &definition.components {
+                for (id, config) in components {
+                    if policy.bindings.contains(&config.binding) {
+                        let old = self.components[system][id].emp.as_ref();
+                        emp_applications.insert(
+                            ComponentRef {
+                                system: system.clone(),
+                                component: id.clone(),
+                            },
+                            phoenix_model::emp::ComponentEmpState::apply(
+                                old, policy, payload, clock,
+                            )?,
+                        );
+                    }
+                }
+            }
+        }
         let norm = libm::sqrt(hit.incoming.iter().map(|v| (*v as f64) * (*v as f64)).sum());
         if !hit.incoming.iter().all(|v| v.is_finite())
             || norm == 0.0
@@ -548,6 +660,16 @@ impl DamageState {
                 &hit.source,
                 &mut result.changed_components,
             );
+            for (target, emp) in &emp_applications {
+                if definition.interior.placements[&target.system] == room.id {
+                    self.components
+                        .get_mut(&target.system)
+                        .expect("compiled component owner")
+                        .get_mut(&target.component)
+                        .expect("compiled component")
+                        .emp = Some(emp.clone());
+                }
+            }
             result.deposits.push(CompartmentDeposit {
                 compartment: room.id.clone(),
                 payload: deposit,

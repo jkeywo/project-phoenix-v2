@@ -1210,6 +1210,16 @@ pub(super) fn validate_physical_repair_claims(
 /// tick for an inverse: nothing here simulates the interval, so the value is
 /// simply the reading every age-relative continuation is measured against.
 pub(crate) fn apply_entity_state(world: &mut World, entity: Entity, row: &EntityState, tick: u64) {
+    if row.weapon_flight_carrier {
+        bevy::log::error!(
+            "refused single-row restore: physical flight carriers require full-roster restore"
+        );
+        return;
+    }
+    if !super::flight_carriers::unique_single_row(world, entity, row) {
+        bevy::log::error!("refused single-row restore: guided flight is already owned elsewhere");
+        return;
+    }
     if let Err(reason) = validate_entity_repair_jobs(world, entity, row) {
         bevy::log::error!("refused repair job restore for {}: {}", row.uuid, reason);
         return;
@@ -1238,7 +1248,13 @@ pub(super) fn apply_entity_state_with(
     _restored_at: f32,
     restored_alert_tick: bevy::ecs::change_detection::Tick,
 ) {
+    if row.weapon_flight_carrier {
+        // Remaining banks are captured physical state, not an immutable hull
+        // recipe. Replace their shape under the bulk-restore rehome guard.
+        crate::console::weapons::flight_carrier::seed_banks(world, entity, &row.carrier_bolt_banks);
+    }
     super::fitting::apply(world, entity, row);
+    let emp_clock = crate::ship::emp::clock(world, tick).ok();
     let mut entity_mut = world.entity_mut(entity);
     if let Some(saved) = &row.equipment_recovery {
         entity_mut.insert(saved.clone());
@@ -1272,6 +1288,7 @@ pub(super) fn apply_entity_state_with(
         row.physical_damage.as_ref(),
     ) {
         damage.state = stored.clone();
+        damage.emp_clock = emp_clock;
     }
     if let (Some(mut frontier), Some(stored)) = (
         entity_mut.get_mut::<crate::ship::disablement::DisablementObservation>(),
@@ -1561,8 +1578,19 @@ pub(super) fn apply_entity_state_with(
             record.restore(scan);
         }
     }
+    if let Some(saved) = &row.shield_frequency {
+        super::shield_enquiry::apply(&mut entity_mut, saved);
+    }
     if let Some(field) = &row.region_field {
         entity_mut.insert(field.clone());
+    }
+    if let Some(saved) = &row.mounts {
+        entity_mut.insert(saved.clone());
+    }
+    if let Some(saved) = &row.weapon_targets {
+        entity_mut.insert(crate::console::weapons::assignments::ShipWeaponTargets(
+            saved.clone(),
+        ));
     }
     if let Some(saved) = &row.broad {
         entity_mut.insert(crate::science::broad::BroadTracks(saved.clone()));
@@ -1938,10 +1966,11 @@ pub(super) fn apply_coordination_queue(
 pub(super) fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponState) {
     if let Some(mut beam) = entity.get_mut::<ActiveBeam>() {
         beam.restore_live_banks(stored.beams.iter().map(
-            |(bank, target, remaining, accumulator, pending_cooldown)| {
+            |(bank, target, remaining, accumulator, pending_cooldown, operation)| {
                 (
                     bank.clone(),
                     ActiveBeamSlot {
+                        operation: *operation,
                         impact_sample_target: stored
                             .beam_impact_samples
                             .get(bank)
@@ -1995,7 +2024,11 @@ pub(super) fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponStat
             .torpedoes_in_flight
             .iter()
             .map(|t| Torpedo {
-                impact: t.impact,
+                previous_position: None,
+                collision_interval_secs: None,
+                last_guidance: t.last_guidance.clone(),
+                profile: t.profile,
+                durability_remaining: t.durability_remaining,
                 strike_damage_bonus: t.strike_damage_bonus,
                 uuid: t.uuid.clone(),
                 x: t.position[0],
@@ -2007,30 +2040,6 @@ pub(super) fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponStat
                 target_uuid: t.target_uuid.clone(),
                 source_uuid: t.source_uuid.clone(),
                 tube_id: t.tube_id.clone(),
-                shield_pierce: t.shield_pierce,
-            })
-            .collect();
-        system.burst_states = stored
-            .bursts
-            .iter()
-            .map(|b| TubeBurstState {
-                impact: b.impact,
-                tube_id: b.tube_id.clone(),
-                pending: b.pending,
-                timer: b.timer,
-                launch_x: b.launch[0],
-                launch_y: b.launch[1],
-                launch_z: b.launch[2],
-                launch_heading: b.launch_heading,
-                target_uuid: b.target_uuid.clone(),
-                source_uuid: b.source_uuid.clone(),
-                barrel_origins: b
-                    .barrel_origins
-                    .iter()
-                    .map(|o| (o[0], o[1], o[2]))
-                    .collect(),
-                barrel_sequence: b.barrel_sequence.clone(),
-                next_shot_index: b.next_shot_index,
             })
             .collect();
     }
@@ -2061,6 +2070,12 @@ pub(super) fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponStat
                     impact: p.impact,
                     id: p.id.clone(),
                     x: p.x,
+                    y: p.y,
+                    pitch: p.pitch,
+                    visual_scale: p.visual_scale,
+                    // Snapshot boundary is settled after Damage; no pending interval.
+                    previous_position: None,
+                    collision_interval_secs: None,
                     z: p.z,
                     heading: p.heading,
                     speed: p.speed,
@@ -2217,11 +2232,36 @@ pub(crate) fn restore_mesh_crew(world: &mut World, snapshot: &PhoenixSnapshot) {
     }
 }
 
-/// Shared by actual restore and its non-mutating preflight.
+/// Shared by actual restore and its non-mutating preflight. Committed burst
+/// rounds belong to ammunition inventory even though they have left the tube.
 pub(super) fn apply_torpedo_inventory(
     system: &mut crate::weapons::torpedo::TorpedoSystem,
     stored: &WeaponState,
 ) {
+    system.burst_states = stored
+        .bursts
+        .iter()
+        .map(|b| TubeBurstState {
+            profile: b.profile,
+            burst_interval_secs: b.burst_interval_secs,
+            tube_id: b.tube_id.clone(),
+            pending: b.pending,
+            timer: b.timer,
+            launch_x: b.launch[0],
+            launch_y: b.launch[1],
+            launch_z: b.launch[2],
+            launch_heading: b.launch_heading,
+            target_uuid: b.target_uuid.clone(),
+            source_uuid: b.source_uuid.clone(),
+            barrel_origins: b
+                .barrel_origins
+                .iter()
+                .map(|o| (o[0], o[1], o[2]))
+                .collect(),
+            barrel_sequence: b.barrel_sequence.clone(),
+            next_shot_index: b.next_shot_index,
+        })
+        .collect();
     if let Some(magazine) = &stored.magazine {
         system.magazine = magazine.clone();
     }

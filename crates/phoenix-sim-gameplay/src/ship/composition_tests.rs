@@ -64,6 +64,60 @@ fn channel_writes_are_typed_and_do_not_create_unknown_intent() {
 }
 
 #[test]
+fn mounted_weapon_and_receiver_share_one_supported_turret_and_existing_owner_intent() {
+    let mut system = dock();
+    system.components = vec![
+        SystemComponentConfig::PowerInput { id: "power".into() },
+        SystemComponentConfig::Turret {
+            id: "turret".into(),
+            power_input: "power".into(),
+            config: phoenix_model::turret::TurretConfig {
+                facing_deg: 0.0,
+                traverse_arc_deg: 270.0,
+                traverse_deg_per_sec: 30.0,
+                aim_tolerance_deg: 1.0,
+            },
+        },
+    ];
+    system.channels.clear();
+    for kind in [
+        "phaser_bank",
+        "blaster_bank",
+        "torpedo_tube",
+        "passive_receiver",
+    ] {
+        system.kind = kind.into();
+        validate_composition(&system).unwrap();
+        let decoded: SystemInstanceConfig =
+            toml::from_str(&toml::to_string(&system).unwrap()).unwrap();
+        assert_eq!(decoded, system);
+        assert_eq!(
+            turret_composition(&system.components).unwrap().power_input,
+            "power"
+        );
+    }
+    let good = system.clone();
+    system.components.push(system.components[1].clone());
+    assert!(validate_composition(&system).is_err());
+    system = good.clone();
+    system.channels.push(CommandChannelConfig {
+        name: "unused-target".into(),
+        kind: CommandChannelKind::EntityTarget,
+    });
+    assert!(validate_composition(&system).is_err());
+    system = good.clone();
+    system.components.remove(0);
+    assert!(validate_composition(&system).is_err());
+    system = good.clone();
+    system.kind = "repair".into();
+    assert!(validate_composition(&system).is_err());
+    system = good;
+    system.components.clear();
+    system.channels.clear();
+    validate_composition(&system).unwrap();
+}
+
+#[test]
 fn invalid_component_and_channel_bindings_are_rejected() {
     let original = dock();
     let mut invalid = original.clone();

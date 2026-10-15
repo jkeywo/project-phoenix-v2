@@ -189,6 +189,11 @@ pub fn receive_samples(
         if !provenance_valid(p, tick)
             || record.observed_tick != p.observed_tick
             || record.position.iter().any(|x| !x.is_finite())
+            || record.elevation.as_ref().is_some_and(|elevation| {
+                elevation.validate().is_err()
+                    || record.observation.is_some()
+                    || record.observed_tick == 0 && elevation.velocity.is_some()
+            })
             || !record.position_error.is_finite()
             || record.position_error < 0.0
             || record
@@ -277,6 +282,7 @@ pub fn receive_samples(
                 selectable: record.selectable,
                 observed_tick: record.observed_tick,
                 position: record.position,
+                elevation: record.elevation,
                 velocity: record.velocity,
                 velocity_error: p.velocity_error,
                 position_error: record.position_error,
@@ -316,6 +322,7 @@ pub fn refine_geometry(records: &mut Vec<SensorTrackSnapshot>) {
                 || removed.contains(&other.contact_id)
                 || other.contact_id == record.contact_id
                 || record.observed_tick != other.observed_tick
+                || !compatible_elevation(record, other)
             {
                 continue;
             }
@@ -350,6 +357,7 @@ pub fn refine_geometry(records: &mut Vec<SensorTrackSnapshot>) {
                     .iter()
                     .filter(|candidate| {
                         candidate.contact_id != subject.contact_id
+                            && compatible_elevation(subject, candidate)
                             && !candidate.predicted
                             && candidate.observed_tick == subject.observed_tick
                             && (f64::from(candidate.position[0]) - f64::from(subject.position[0]))
@@ -402,6 +410,16 @@ pub fn refine_geometry(records: &mut Vec<SensorTrackSnapshot>) {
         }
     }
     records.retain(|record| !removed.contains(&record.contact_id));
+}
+
+fn compatible_elevation(a: &SensorTrackSnapshot, b: &SensorTrackSnapshot) -> bool {
+    match (a.elevation, b.elevation) {
+        (Some(a), Some(b)) => {
+            (f64::from(a.height) - f64::from(b.height)).abs()
+                <= f64::from(a.error) + f64::from(b.error)
+        }
+        _ => true,
+    }
 }
 
 #[cfg(test)]

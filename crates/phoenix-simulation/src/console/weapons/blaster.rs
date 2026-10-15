@@ -14,39 +14,53 @@ use super::{
     AsteroidDestroyedVfx, ShipDestroyedVfx, WeaponActionRefusal, WeaponActionResult,
     DEFAULT_SHIP_EXPLOSION_RADIUS,
 };
-use crate::core::messages::{GamePhase, ServerMessage, SystemBlackboard, SystemControlPayload};
+use crate::core::messages::{GamePhase, ServerMessage, SystemControlPayload};
 use crate::lobby::{Sessions, Target};
 
-/// This ship's **Combat Lock** from its frozen viewscreen blackboard (issue
-/// #829): the ship-wide target every weapons firing path reads, in place of the
-/// retired `TacticalRadarSelection` component. One-tick lag at 30Hz accepted (spec §1).
-fn blaster_combat_lock(
-    blackboards: Option<&crate::server_app::ShipSystemBlackboards>,
-) -> Option<String> {
-    match blackboards?
-        .0
-        .get(&crate::ship::system_registry::viewscreen_system_id())
-    {
-        Some(SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
-        _ => None,
-    }
-}
-/// Decision input for one bank; machinery appliers retain the ordinary lock.
-fn blaster_ai_combat_lock(
-    config: Option<&crate::ship_plugin::ShipConfigComponent>,
-    system: &crate::core::messages::SystemId,
-    blackboards: Option<&crate::server_app::ShipSystemBlackboards>,
-) -> Option<String> {
-    match config?
-        .0
-        .observations_for_system(system, &blackboards?.0)
-        .get(&crate::ship::system_registry::viewscreen_system_id())
-    {
-        Some(SystemBlackboard::Viewscreen(board)) => board.combat_lock.clone(),
-        _ => None,
-    }
-}
 use crate::entities::model_rig::ModelMarkers;
+
+/// Keep an unavailable authored marker at its real barrel index. Only an
+/// implicit barrel with no marker authors the historical ship-centre origin.
+fn resolve_barrel_origins(
+    config: &crate::weapons::blaster::BlasterBankConfig,
+    markers: Option<&ModelMarkers>,
+    transform: &Transform,
+    physics: &ShipPhysics,
+) -> Vec<Option<[f32; 3]>> {
+    // Match sync_ship_position now, rather than using the previous scene pose.
+    let transform = Transform {
+        translation: Vec3::new(physics.x, physics.y, physics.z),
+        rotation: Quat::from_euler(EulerRot::YXZ, -physics.yaw, 0.0, physics.roll),
+        scale: transform.scale,
+    };
+    let centre = [physics.x, physics.y, physics.z];
+    let resolve = |name: &str| {
+        markers?
+            .resolve_world_position(&transform, name)
+            .filter(|point| point.is_finite())
+            .map(|point| point.to_array())
+    };
+    if config.barrels.is_empty() {
+        vec![match config.marker.as_deref() {
+            Some(name) => resolve(name),
+            None => centre
+                .iter()
+                .all(|value| value.is_finite())
+                .then_some(centre),
+        }]
+    } else {
+        config.barrels.iter().map(|name| resolve(name)).collect()
+    }
+}
+
+#[cfg(test)]
+#[path = "barrel_origin_tests.rs"]
+mod barrel_origin_tests;
+
+#[cfg(test)]
+#[path = "blaster_measured_launch_tests.rs"]
+mod measured_launch_tests;
+
 use crate::server_app::{AsteroidUuid, GameOverReason, SimOutbox};
 use crate::ship::state::ShipPhysics;
 use crate::ship_plugin::ShipSystemControlSources;
@@ -80,6 +94,7 @@ use crate::ship_plugin::ShipSystemControlSources;
 pub(crate) fn handle_fire_blaster(
     mut ship_q: Query<
         (
+            Entity,
             &ShipSystemControlSources,
             &ShipPhysics,
             Option<&crate::server_app::ShipSystemBlackboards>,
@@ -96,14 +111,16 @@ pub(crate) fn handle_fire_blaster(
     >,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
     entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    aims: super::assignments::WeaponAimInputs,
     mut outbound: Option<
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
 ) {
     for (
+        ship_entity,
         control_sources,
         physics,
-        blackboards_opt,
+        _blackboards_opt,
         mut blaster_res,
         admitted,
         ship_config_opt,
@@ -191,7 +208,15 @@ pub(crate) fn handle_fire_blaster(
             // combat lock — the same surface `tick_blaster_auto_fire` reads. A
             // cancel needs no target/arc.
             if is_charge_start {
-                let Some(target_uuid) = blaster_combat_lock(blackboards_opt) else {
+                let Some(bank) = blaster_res.0.iter().find(|bank| bank.config.id == bank_id) else {
+                    continue;
+                };
+                let Some(aim) = aims.resolve_allowed(
+                    ship_entity,
+                    &cmd.target,
+                    bank.config.targets.as_deref(),
+                    |route| live_entity_xz(route, &asteroid_q, &entity_q).map(|(x, z)| [x, z]),
+                ) else {
                     super::finish_action_feedback(
                         cmd,
                         &mut outbound,
@@ -199,34 +224,14 @@ pub(crate) fn handle_fire_blaster(
                     );
                     continue;
                 };
-                let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
-                    super::finish_action_feedback(
-                        cmd,
-                        &mut outbound,
-                        WeaponActionResult::Refused(WeaponActionRefusal::MissingTarget),
-                    );
-                    continue;
-                };
-                let bank_arc_ok = blaster_res
-                    .0
-                    .iter()
-                    .find(|b| b.config.id == bank_id)
-                    .map(|bank| {
-                        let (rx, ry) = crate::weapons::mount::ship_local(
-                            tx,
-                            tz,
-                            physics.x,
-                            physics.z,
-                            physics.yaw,
-                        );
-                        crate::weapons::mount::in_arc(
-                            rx,
-                            ry,
-                            bank.config.facing_deg,
-                            bank.config.fire_arc_deg,
-                        )
-                    })
-                    .unwrap_or(false);
+                let geometry = aims.geometry(
+                    ship_entity,
+                    &cmd.target,
+                    &bank.config.mount(),
+                    &aim,
+                    physics,
+                );
+                let bank_arc_ok = geometry.in_arc && geometry.in_range;
                 if !bank_arc_ok {
                     super::finish_action_feedback(
                         cmd,
@@ -322,6 +327,7 @@ pub(crate) fn tick_blaster_auto_fire(
     // destructured back to `asteroid_q` / `entity_q` at entry so the body is
     // unchanged and the access set identical.
     geometry: DirectFireGeometry,
+    aims: super::assignments::WeaponAimInputs,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
     let DirectFireGeometry {
@@ -386,24 +392,6 @@ pub(crate) fn tick_blaster_auto_fire(
             continue;
         }
 
-        // Target selection: the **Combat Lock** from this ship's frozen
-        // viewscreen blackboard (issue #829, spec §1/§3). One-tick lag accepted.
-        let Some(target_uuid) = ship_config_opt.and_then(|config| {
-            config
-                .0
-                .systems
-                .iter()
-                .filter(|system| system.kind == "blaster_bank")
-                .find_map(|system| {
-                    blaster_ai_combat_lock(Some(config), &system.id, blackboards_opt)
-                })
-        }) else {
-            continue;
-        };
-        let Some((tx, tz)) = live_entity_xz(&target_uuid, &asteroid_q, &entity_q) else {
-            continue;
-        };
-
         // Collect the banks to fire first (immutable read of `blaster_res`),
         // then emit — `emit_ai_command` borrows `admitted` mutably.
         let mut banks_to_fire: Vec<String> = Vec::new();
@@ -426,25 +414,64 @@ pub(crate) fn tick_blaster_auto_fire(
             let Some(bank_sid) = bank_sid else {
                 continue;
             };
-            if blaster_ai_combat_lock(ship_config_opt, &bank_sid, blackboards_opt).as_deref()
-                != Some(target_uuid.as_str())
+            // This is the existing bank controller, using the same admitted
+            // target intent as its human operator. No launcher allegiance or
+            // private projectile order participates in defensive selection.
+            let automatic = if bank
+                .config
+                .targets
+                .as_ref()
+                .is_some_and(|targets| targets.contains(&phoenix_model::tags::EntityTag::Missile))
+                && !aims.has_explicit_order(ship_entity, &bank_sid)
             {
+                let selected =
+                    aims.defensive_contact(ship_entity, &bank_sid, &bank.config.mount(), physics);
+                if selected != aims.automatic_contact(ship_entity, &bank_sid) {
+                    crate::command_admission::ai_emit::emit_ai_command(
+                        entity_uuid,
+                        bank_sid.clone(),
+                        crate::core::messages::SystemControlPayload::SetAutomaticWeaponTarget {
+                            uuid: selected.clone(),
+                        },
+                        control_sources,
+                        &sessions,
+                        ship_config_opt,
+                        &mut admitted,
+                    );
+                }
+                selected
+            } else {
+                None
+            };
+            let Some(aim) = aims
+                .resolve_allowed(
+                    ship_entity,
+                    &bank_sid,
+                    bank.config.targets.as_deref(),
+                    |route| live_entity_xz(route, &asteroid_q, &entity_q).map(|(x, z)| [x, z]),
+                )
+                .or_else(|| {
+                    automatic
+                        .as_deref()
+                        .and_then(|contact| {
+                            aims.resolve_reference(ship_entity, &bank_sid, contact, |_| None)
+                        })
+                        .filter(|aim| aim.allows(bank.config.targets.as_deref()))
+                })
+            else {
+                continue;
+            };
+
+            if !aim.allows(bank.config.targets.as_deref()) {
                 continue;
             }
 
             // Host readiness gates (AC2): availability/cooldown, range, arc.
             let fire_ready = bank.is_fire_ready();
-            let dx = tx - physics.x;
-            let dz = tz - physics.z;
-            let in_range = dx * dx + dz * dz <= bank.config.range * bank.config.range;
-            let (rx, ry) =
-                crate::weapons::mount::ship_local(tx, tz, physics.x, physics.z, physics.yaw);
-            let in_arc = crate::weapons::mount::in_arc(
-                rx,
-                ry,
-                bank.config.facing_deg,
-                bank.config.fire_arc_deg,
-            );
+            let geometry =
+                aims.geometry(ship_entity, &bank_sid, &bank.config.mount(), &aim, physics);
+            let in_range = geometry.in_range;
+            let in_arc = geometry.in_arc;
             if !fire_ready || !in_range || !in_arc {
                 continue;
             }
@@ -537,6 +564,14 @@ pub(crate) fn tick_blaster_auto_fire(
 /// dropping `&mut ShipPhysics` would take recoil with it.
 pub(crate) fn tick_blaster_system(
     time: Res<Time>,
+    mut aim_and_runtime: ParamSet<(
+        super::assignments::WeaponAimInputs,
+        Option<ResMut<crate::world::server::WorldContentRuntime>>,
+    )>,
+    log: Option<Res<crate::logging::LogFilterConfig>>,
+    pending_capacity: Option<
+        Res<crate::effect_queue::EffectQueue<crate::infrastructure::condition::CapacityAdjustment>>,
+    >,
     physical: Query<&crate::ship::compartment_damage::ShipDamage>,
     mut ship_qs: ParamSet<(
         // p0 — the firing pass: every ship that carries blaster banks.
@@ -555,6 +590,9 @@ pub(crate) fn tick_blaster_system(
                 // question cannot be asked of.
                 Option<&crate::ship_plugin::ShipConfigComponent>,
                 Option<&mut crate::ship::power::ShipPowerSystem>,
+                Option<&mut crate::infrastructure::InfrastructureCondition>,
+                Option<&crate::resources::logistics_server::CompiledShipLogistics>,
+                Option<&ShipSystemControlSources>,
             ),
             With<crate::server_app::Ship>,
         >,
@@ -582,6 +620,7 @@ pub(crate) fn tick_blaster_system(
     id_mint: crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Projectile as usize }>,
 ) {
     let dt = time.delta_secs();
+    let mut stock_flags = Vec::new();
     // Only the server-gated screenshake push below (issue #638) reads this;
     // under `--no-default-features` that whole arm compiles away, leaving
     // this binding unused. Cfg-gate it to match, rather than prefixing `_now`
@@ -630,10 +669,13 @@ pub(crate) fn tick_blaster_system(
             transform,
             markers_opt,
             mut physics,
-            blackboards_opt,
+            _blackboards_opt,
             mut blaster_res,
             _ship_config_opt,
             mut power_opt,
+            mut inventory_opt,
+            logistics_opt,
+            sources_opt,
         )) = ship_q.get_mut(shooter)
         else {
             continue;
@@ -642,37 +684,66 @@ pub(crate) fn tick_blaster_system(
             .map(|u| u.0.as_str())
             .unwrap_or("")
             .to_string();
-
-        // Resolve target position and velocity from the frozen Combat Lock
-        // (issue #829). Ships supply world-space velocity from ShipPhysics;
-        // asteroids/objects are stationary (velocity = 0).
-        let target_uuid = blaster_combat_lock(blackboards_opt);
-        let (target_x, target_z, target_vx, target_vz) = if let Some(ref uuid) = target_uuid {
-            let pos = live_entity_xz(uuid, &asteroid_q, &entity_q);
-            let vel = ship_velocities.get(uuid);
-            let (vx, vz) = vel.copied().unwrap_or((0.0, 0.0));
-            pos.map(|(x, z)| (x, z, vx, vz))
-                .unwrap_or((physics.x, physics.z - 100.0, 0.0, 0.0))
-        } else {
-            let fwd_x = simmath::sin(physics.yaw);
-            let fwd_z = -simmath::cos(physics.yaw);
-            (
-                physics.x + fwd_x * 100.0,
-                physics.z + fwd_z * 100.0,
-                0.0,
-                0.0,
-            )
-        };
+        let mut pending_debits = std::collections::BTreeMap::<String, i64>::new();
+        for change in pending_capacity
+            .as_deref()
+            .into_iter()
+            .flat_map(|queue| &queue.0)
+            .filter(|change| change.uuid == source_uuid && change.delta < 0)
+        {
+            let debit = pending_debits.entry(change.capacity.clone()).or_default();
+            *debit = debit.saturating_add(change.delta.saturating_neg());
+        }
 
         for bank in blaster_res.0.iter_mut() {
             let bank_id = bank.config.id.clone();
             let bank_system = crate::ship::system_registry::blaster_bank_system_id(&bank_id);
+            let aim = bank_system.as_ref().and_then(|owner| {
+                aim_and_runtime.p0().resolve_allowed(
+                    shooter,
+                    owner,
+                    bank.config.targets.as_deref(),
+                    |route| live_entity_xz(route, &asteroid_q, &entity_q).map(|(x, z)| [x, z]),
+                )
+            });
+            let launch_geometry = aim.as_ref().zip(bank_system.as_ref()).map(|(aim, owner)| {
+                aim_and_runtime
+                    .p0()
+                    .geometry(shooter, owner, &bank.config.mount(), aim, &physics)
+            });
+            let target_allowed = aim
+                .as_ref()
+                .is_some_and(|aim| aim.allows(bank.config.targets.as_deref()));
+            let target_point = aim.as_ref().and_then(|aim| aim.point_3d(physics.y));
+            let measured = aim.as_ref().is_some_and(|aim| aim.measured);
+            let velocity_3d = aim.as_ref().map_or([0.0; 3], |aim| aim.velocity_3d());
+            let online = match sources_opt {
+                Some(sources) => bank_system.as_ref().is_some_and(|owner| {
+                    system_is_registered(sources, owner) && {
+                        let policy = sources.0.policy_for(owner);
+                        policy.accept_human_input || policy.operate_ai
+                    }
+                }),
+                None => _ship_config_opt.is_none(),
+            };
+            // Unknown observed motion means direct aim, not a World velocity
+            // lookup. Legacy, unconfigured equipment retains its old lead.
+            let target_velocity = aim
+                .as_ref()
+                .and_then(|aim| {
+                    if aim.measured {
+                        aim.velocity
+                    } else {
+                        ship_velocities.get(&aim.route).map(|(x, z)| [*x, *z])
+                    }
+                })
+                .unwrap_or([0.0, 0.0]);
             let operation_factor = physical.get(shooter).ok().map_or(1.0, |damage| {
                 bank_system.as_ref().map_or(0.0, |system| {
                     damage.factor(system, phoenix_model::damage::DamageBinding::Operation)
                 })
             });
-            let charge_dt = if bank.volley.charging && operation_factor > 0.0 {
+            let charge_dt = if bank.volley.charging && online && operation_factor > 0.0 {
                 let charge_work_dt =
                     dt.min((bank.config.charge_time_secs - bank.volley.charge_elapsed).max(0.0));
                 bank_system
@@ -696,61 +767,74 @@ pub(crate) fn tick_blaster_system(
             #[cfg(feature = "server")]
             let screenshake_magnitude = bank.config.screenshake_magnitude;
 
-            // Resolve one world-space origin per authored barrel marker (issue
-            // #765). A bank with no barrels authored has one implicit barrel =
-            // the bank's single `marker`. Each name resolves via the rig, and
-            // falls back to ship centre when the bank has no marker or the
-            // sidecar doesn't declare it.
-            let barrel_names: Vec<Option<String>> = if bank.config.barrels.is_empty() {
-                vec![bank.config.marker.clone()]
-            } else {
-                bank.config.barrels.iter().cloned().map(Some).collect()
-            };
-            let barrel_origins: Vec<(f32, f32)> = barrel_names
-                .iter()
-                .map(|name| {
-                    name.as_deref()
-                        .and_then(|n| {
-                            markers_opt.and_then(|m| m.resolve_world_position(transform, n))
-                        })
-                        .map(|pos| (pos.x, pos.z))
-                        .unwrap_or((physics.x, physics.z))
-                })
-                .collect();
+            let barrel_origins =
+                resolve_barrel_origins(&bank.config, markers_opt, transform, &physics);
 
-            let events = bank.tick_with_work(
-                dt,
-                charge_dt,
-                &barrel_origins,
-                physics.yaw,
-                target_x,
-                target_z,
-                target_vx,
-                target_vz,
-                &source_uuid,
-                &mut |count| {
-                    operation_factor > 0.0
-                        && bank_system.as_ref().is_some_and(|system| {
-                            power_opt.as_deref_mut().is_some_and(|power| {
-                                !power.0.weapons_restrained()
-                                    && matches!(
-                                        power.0.try_work_discrete_count(system, count),
-                                        Ok(true)
-                                    )
-                            })
-                        })
-                },
-                // Was OS randomness, then a draw off the seeded RNG stream —
-                // both of which gave two instances different ids for the same
-                // shot, and those ids key the in-flight/hit bookkeeping. Now a
-                // tick-scoped mint (issue #907).
-                &mut || {
-                    crate::world_id::mint_live_id_with(
-                        id_mint.as_deref(),
-                        crate::world_id::IdNamespace::Projectile,
-                    )
-                },
-            );
+            let round_feed = bank.config.rounds.clone();
+            let mut admit_launch = |barrel| {
+                online
+                    && target_allowed
+                    && target_point.is_some()
+                    && launch_geometry
+                        .as_ref()
+                        .is_some_and(|geometry| geometry.in_arc && geometry.in_range)
+                    && operation_factor > 0.0
+                    && bank_system.as_ref().is_some_and(|system| {
+                        let flags = super::round_work::pay_barrel(
+                            system,
+                            round_feed.as_ref(),
+                            barrel,
+                            power_opt.as_deref_mut(),
+                            inventory_opt.as_deref_mut(),
+                            logistics_opt,
+                            &pending_debits,
+                        );
+                        if let Some(flags) = flags {
+                            stock_flags.push((source_uuid.clone(), flags));
+                            true
+                        } else {
+                            false
+                        }
+                    })
+            };
+            let mut next_uuid = || {
+                crate::world_id::mint_live_id_with(
+                    id_mint.as_deref(),
+                    crate::world_id::IdNamespace::Projectile,
+                )
+            };
+            let point = target_point.unwrap_or([physics.x, physics.y, physics.z]);
+            let events = if measured {
+                bank.tick_with_origins_3d(
+                    dt,
+                    charge_dt,
+                    &barrel_origins,
+                    physics.yaw,
+                    point,
+                    velocity_3d,
+                    &source_uuid,
+                    &mut admit_launch,
+                    &mut next_uuid,
+                )
+            } else {
+                let planar_origins: Vec<_> = barrel_origins
+                    .iter()
+                    .map(|origin| origin.map(|[x, _, z]| (x, z)))
+                    .collect();
+                bank.tick_with_origins(
+                    dt,
+                    charge_dt,
+                    &planar_origins,
+                    physics.yaw,
+                    point[0],
+                    point[2],
+                    target_velocity[0],
+                    target_velocity[1],
+                    &source_uuid,
+                    &mut admit_launch,
+                    &mut next_uuid,
+                )
+            };
             for ev in &events {
                 let multiplier = operation_factor
                     * power_opt.as_deref_mut().map_or(1.0, |p| {
@@ -767,10 +851,8 @@ pub(crate) fn tick_blaster_system(
                 // ── Recoil impulse (issue #638) ─────────────────────────────
                 // Apply an instantaneous velocity impulse to the firing ship
                 // in the direction opposite to the projectile's heading.
-                // The physics model is 1D (forward_speed along ship axis), so
-                // we project the impulse onto the ship's forward axis and
-                // accumulate it into forward_speed. The opposite-to-fire
-                // convention is: impulse_dir = heading + π.
+                // Project the world impulse onto both ship axes, so a broadside
+                // pushes laterally without inventing forward thrust.
                 if recoil_impulse > 0.0 {
                     // Ship forward direction in world space: (sin(yaw), -cos(yaw)).
                     // Projectile direction: (sin(heading), -cos(heading)).
@@ -780,10 +862,14 @@ pub(crate) fn tick_blaster_system(
                     //   = −sin(h)·sin(yaw) + cos(h)·(−cos(yaw))
                     //   = −(sin(h)·sin(yaw) + cos(h)·cos(yaw))
                     //   = −cos(h − yaw)
-                    let heading = ev.heading;
                     let yaw = physics.yaw;
-                    let projection = -simmath::cos(heading - yaw);
-                    physics.forward_speed += projection * recoil_impulse;
+                    if let Ok([vx, vz]) = crate::weapons::operation::recoil_delta(
+                        ev.heading,
+                        recoil_impulse * simmath::cos(ev.pitch),
+                    ) {
+                        physics.forward_speed += vx * simmath::sin(yaw) - vz * simmath::cos(yaw);
+                        physics.lateral_speed += vx * simmath::cos(yaw) + vz * simmath::sin(yaw);
+                    }
                 }
 
                 // ── Screenshake (issue #638) ─────────────────────────────────
@@ -818,12 +904,19 @@ pub(crate) fn tick_blaster_system(
                         source_uuid: source_uuid.clone(),
                         projectile_id: ev.projectile_id.clone(),
                         x: ev.x,
+                        y: ev.y,
+                        pitch: ev.pitch,
                         z: ev.z,
                         heading: ev.heading,
                         visual_scale,
                     },
                 ));
             }
+        }
+    }
+    if let Some(mut runtime) = aim_and_runtime.p1() {
+        for (uuid, flags) in stock_flags {
+            crate::infrastructure::server::mirror_flags(&mut runtime, &flags, &uuid, &log);
         }
     }
 }
@@ -880,16 +973,28 @@ pub(crate) fn handle_blaster_hits(
     // sorted into a stable order (issue #1052) rather than taken in archetype
     // order; `EntityUuid` is `Option` because minimal test-only ship spawns
     // omit it, exactly as the beam and collision paths allow.
-    mut blaster_res_q: Query<
-        (
-            Entity,
-            Option<&crate::entities::spawner::EntityUuid>,
-            &mut BlasterSystemResource,
-        ),
-        With<crate::server_app::Ship>,
-    >,
+    mut blaster_res_q: Query<(
+        Entity,
+        Option<&crate::entities::spawner::EntityUuid>,
+        &mut BlasterSystemResource,
+    )>,
     mut commands: Commands,
-    collider_q: Query<&crate::entities::spawner::ColliderSection>,
+    collider_q: Query<(
+        &crate::entities::spawner::ColliderSection,
+        Option<&crate::entities::spawner::EntityUuid>,
+        Option<&AsteroidUuid>,
+    )>,
+    physical_bodies: Query<(
+        Entity,
+        &bevy_rapier3d::prelude::Collider,
+        &Transform,
+        Option<&crate::entities::spawner::EntityUuid>,
+        Option<&AsteroidUuid>,
+        Option<&ShipPhysics>,
+        Has<bevy_rapier3d::prelude::Sensor>,
+        Has<bevy_rapier3d::prelude::ColliderDisabled>,
+    )>,
+    mut guided: Query<&mut super::torpedo::TorpedoSystemResource>,
     // The write-side outputs (outbox, game-over latch, world, destruction event
     // writers, balance sink, tracked registry) bundled as one `SystemParam`
     // (issue #1185). See [`BlasterHitSinks`].
@@ -939,6 +1044,46 @@ pub(crate) fn handle_blaster_hits(
             0.0,
         ));
     }
+    let mut collider_ids: std::collections::BTreeSet<_> = physical_bodies
+        .iter()
+        .filter_map(|(_, _, _, entity, asteroid, _, _, _)| {
+            entity.map(|id| &id.0).or_else(|| asteroid.map(|id| &id.0))
+        })
+        .cloned()
+        .collect();
+    // Authored physical bodies without their actual Collider are unavailable,
+    // not legacy point bodies (for example during a reduced-host transition).
+    collider_ids.extend(collider_q.iter().filter_map(|(_, entity, asteroid)| {
+        entity
+            .map(|id| id.0.clone())
+            .or_else(|| asteroid.map(|id| id.0.clone()))
+    }));
+    // Only genuinely bare legacy fixtures have point bodies. An actual shape
+    // never falls back to a planar or bounding-sphere interpretation.
+    let legacy_targets: Vec<_> = asteroid_q
+        .iter()
+        .map(|(id, pose)| (&id.0, pose.translation))
+        .chain(entity_q.iter().map(|(id, pose)| (&id.0, pose.translation)))
+        .filter(|(id, _)| !collider_ids.contains(*id))
+        .map(|(id, pose)| (id.clone(), pose.to_array()))
+        .collect();
+    let mut guided_targets: Vec<_> = guided
+        .iter()
+        .flat_map(|provider| {
+            provider.0.in_flight.iter().map(|round| {
+                (
+                    round.uuid.clone(),
+                    round
+                        .previous_position
+                        .unwrap_or([round.x, round.y, round.z]),
+                    [round.x, round.y, round.z],
+                    round.profile.detonation_radius,
+                    round.collision_interval_secs,
+                )
+            })
+        })
+        .collect();
+    guided_targets.sort_by(|a, b| a.0.cmp(&b.0));
     // Sorted by uuid before it is used (issue #1052), for the same reason the
     // torpedo path already sorts its own proximity list: `find_hits` takes the
     // FIRST target a projectile overlaps and stops, so this list's order is
@@ -988,21 +1133,159 @@ pub(crate) fn handle_blaster_hits(
             continue;
         };
         for bank in blaster_res.0.iter_mut() {
-            let hits = bank.find_hits(&targets);
-            for (proj_id, target_uuid) in hits {
-                if let Some(hit_data) = bank.consume_hit(&proj_id) {
-                    detonations.push(BlasterDetonation {
-                        bank_id: bank.config.id.clone(),
-                        projectile_id: proj_id,
-                        target_uuid,
-                        damage: hit_data.damage,
-                        incoming: hit_data.incoming,
-                        delivery: hit_data.delivery(),
-                        source_uuid: Some(hit_data.source_uuid).filter(|u| !u.is_empty()),
-                    });
+            // Physical collision order follows actual emitted vector order. A
+            // destroyed missile is removed before the next bolt is considered.
+            let projectiles = bank.in_flight.clone();
+            for projectile in projectiles {
+                let Some(start) = projectile.previous_position else {
+                    continue;
+                };
+                let end = [projectile.x, projectile.y, projectile.z];
+                #[derive(Clone)]
+                enum Contact {
+                    Body(Option<String>),
+                    Guided(String),
+                }
+                let mut contacts = Vec::new();
+                for (body, collider, transform, uuid, asteroid, physics, sensor, disabled) in
+                    &physical_bodies
+                {
+                    if sensor || disabled {
+                        continue;
+                    }
+                    let id = uuid.map(|id| &id.0).or_else(|| asteroid.map(|id| &id.0));
+                    if body == shooter || id.is_some_and(|id| id == &projectile.source_uuid) {
+                        continue;
+                    }
+                    let (position, rotation) = super::pdc::physical_pose(transform, physics);
+                    if let Some(fraction) = super::pdc::collider_fraction(
+                        start,
+                        end,
+                        projectile.collision_radius,
+                        position,
+                        rotation,
+                        collider,
+                    ) {
+                        contacts.push((
+                            fraction,
+                            id.cloned()
+                                .unwrap_or_else(|| format!("unidentified:{body:?}")),
+                            Contact::Body(id.cloned()),
+                        ));
+                    }
+                }
+                for (id, position) in &legacy_targets {
+                    if id == &projectile.source_uuid {
+                        continue;
+                    }
+                    if let Some(fraction) = crate::weapons::pdc::swept_sphere_fraction(
+                        start,
+                        end,
+                        *position,
+                        projectile.collision_radius,
+                    ) {
+                        contacts.push((fraction, id.clone(), Contact::Body(Some(id.clone()))));
+                    }
+                }
+                for (id, previous, position, radius, seconds) in &guided_targets {
+                    let Some((bolt_seconds, target_seconds)) =
+                        projectile.collision_interval_secs.zip(*seconds)
+                    else {
+                        continue;
+                    };
+                    if let Some(fraction) = crate::weapons::pdc::moving_sphere_interval_fraction(
+                        start,
+                        end,
+                        projectile.collision_radius,
+                        bolt_seconds,
+                        *previous,
+                        *position,
+                        *radius,
+                        target_seconds,
+                    ) {
+                        contacts.push((fraction, id.clone(), Contact::Guided(id.clone())));
+                    }
+                }
+                contacts.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+                let Some((_, _, contact)) = contacts.first() else {
+                    continue;
+                };
+                match contact {
+                    Contact::Guided(id) => {
+                        let mut result = None;
+                        for mut provider in &mut guided {
+                            if provider.0.in_flight.iter().any(|round| &round.uuid == id) {
+                                result = Some(if projectile.damage == 0 {
+                                    Ok(Some(
+                                        provider
+                                            .0
+                                            .in_flight
+                                            .iter()
+                                            .find(|round| &round.uuid == id)
+                                            .unwrap()
+                                            .durability_remaining,
+                                    ))
+                                } else {
+                                    provider.0.apply_interception(id, projectile.damage as f32)
+                                });
+                                break;
+                            }
+                        }
+                        // All candidates came from these same vectors. No actor
+                        // payload explodes when interception consumes its HP.
+                        match result {
+                            Some(Ok(Some(remaining))) => {
+                                bank.consume_hit(&projectile.id);
+                                outbox.push_reliable((
+                                    Target::All,
+                                    ServerMessage::BlasterHit {
+                                        bank: bank.config.id.clone(),
+                                        projectile_id: projectile.id.clone(),
+                                        target_uuid: id.clone(),
+                                    },
+                                ));
+                                if remaining == 0.0 {
+                                    guided_targets.retain(|(uuid, ..)| uuid != id);
+                                    outbox.push_reliable((
+                                        Target::All,
+                                        ServerMessage::TorpedoDestroyed { uuid: id.clone() },
+                                    ));
+                                }
+                            }
+                            Some(Err(error)) => {
+                                warn!("physical interception refused: {error}");
+                                bank.consume_hit(&projectile.id);
+                            }
+                            _ => { /* an absent physical round cannot consume a bolt */ }
+                        }
+                    }
+                    Contact::Body(id) => {
+                        if let Some(hit_data) = bank.consume_hit(&projectile.id) {
+                            if let Some(target_uuid) = id {
+                                detonations.push(BlasterDetonation {
+                                    bank_id: bank.config.id.clone(),
+                                    projectile_id: projectile.id,
+                                    target_uuid: target_uuid.clone(),
+                                    damage: hit_data.damage,
+                                    incoming: hit_data.incoming,
+                                    delivery: hit_data.delivery(),
+                                    source_uuid: Some(hit_data.source_uuid)
+                                        .filter(|u| !u.is_empty()),
+                                });
+                            }
+                            // Unidentified colliders still physically block.
+                        }
+                    }
                 }
             }
+            bank.finish_collision_interval();
         }
+    }
+
+    // Same fixed interval as the bolts. No paused/repeated Damage pass can
+    // replay a guided round's travelled segment after this settlement.
+    for mut provider in &mut guided {
+        provider.0.finish_collision_interval();
     }
 
     for det in detonations {
@@ -1190,7 +1473,7 @@ pub(crate) fn handle_blaster_hits(
                         });
                         let radius = collider_q
                             .get(entity)
-                            .map(|c| c.0.radius)
+                            .map(|(c, ..)| c.0.radius)
                             .unwrap_or(DEFAULT_SHIP_EXPLOSION_RADIUS);
                         ship_vfx_events.write(ShipDestroyedVfx {
                             x: hit_x,

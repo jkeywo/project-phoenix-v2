@@ -11,6 +11,7 @@ pub mod coordination_systems;
 pub mod damage;
 pub mod damage_sync;
 pub mod eligibility;
+pub mod emp;
 mod energy_publication;
 pub mod energy_runtime;
 pub mod helm;
@@ -29,6 +30,7 @@ pub mod power;
 pub mod rating;
 pub mod rating_systems;
 pub mod sensors;
+pub mod shield_enquiry;
 pub mod shields;
 #[cfg(test)]
 mod star_rating_tests;

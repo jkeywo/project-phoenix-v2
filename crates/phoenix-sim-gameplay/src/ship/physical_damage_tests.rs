@@ -43,6 +43,7 @@ fn fixture() -> (
     .unwrap();
     let definition = DamageDefinition::compile(&interior, &recipes, &ship).unwrap();
     let damage = ShipDamage {
+        emp_clock: None,
         state: DamageState::new(&definition),
         definition,
     };

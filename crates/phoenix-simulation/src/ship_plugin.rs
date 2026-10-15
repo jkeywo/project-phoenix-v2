@@ -43,6 +43,9 @@ pub struct ShipPlugin;
 
 impl Plugin for ShipPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::ship::emp::ComponentEffectsPlugin>() {
+            app.add_plugins(crate::ship::emp::ComponentEffectsPlugin);
+        }
         // Admitted-command consumers (issues #833, #745) for the per-axis Helm
         // wire targets are declared by the host-helm-control-router's own
         // dispatch module, so the router's dependency on the command-admission
@@ -177,16 +180,16 @@ impl Plugin for ShipPlugin {
                     //   tick is already visible. Without it the doctrine could
                     //   read "no salvo in flight" on the very tick it launched
                     //   one and let go of the target a tick early.
-                    // * `.after(tick_torpedo_lifecycle)` so a round that hit,
-                    //   missed or expired this tick is already gone. The count
-                    //   the transition guard sees is therefore the settled one
-                    //   for this tick, in both directions.
+                    // * `.after(advance_torpedo_flights)` so launched and
+                    //   advanced flights are visible in Physics. Damage settles
+                    //   interception, impact and expiry afterward; those removals
+                    //   become visible to policy on the following tick.
                     //
                     // Both are absent from the ShipPlugin-only test fixtures,
                     // where an ordering edge against an unregistered system type
                     // is simply an empty constraint.
                     .after(crate::console::weapons::handle_fire_torpedo)
-                    .after(crate::console::weapons::tick_torpedo_lifecycle)
+                    .after(crate::console::weapons::advance_torpedo_flights)
                     .before(ai_helm_thrust)
                     .before(ai_helm_steering)
                     .before(ai_helm_lateral_thrust)

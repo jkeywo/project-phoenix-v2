@@ -38,9 +38,48 @@ pub struct TrackIdentity {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrackAssessment {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protection: Option<ObservedShieldCover>,
     pub alert: Option<bool>,
     pub weapons_restrained: Option<bool>,
     pub disabled: Option<bool>,
+}
+/// The shielding actually observed along one ray, not a complete shield map.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedShieldCover {
+    /// World azimuth from the subject towards the observing instrument.
+    pub incoming_sector: u16,
+    pub blocked: bool,
+}
+impl ObservedShieldCover {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.incoming_sector >= 360 {
+            Err("invalid observed shield bearing".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+/// Height belongs to the same dated observation as planar position. Velocity
+/// is inferred from supported samples, never copied from an actor's live state.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedElevation {
+    pub height: f32,
+    pub error: f32,
+    pub velocity: Option<f32>,
+}
+impl ObservedElevation {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.height.is_finite()
+            || !self.error.is_finite()
+            || self.error < 0.0
+            || self.velocity.is_some_and(|velocity| !velocity.is_finite())
+        {
+            return Err("invalid observed elevation".into());
+        }
+        Ok(())    }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -61,6 +100,7 @@ pub struct SensorTrackSnapshot {
     pub selectable: bool,
     pub observed_tick: u64,
     pub position: [f32; 2],
+    pub elevation: Option<ObservedElevation>,
     pub velocity: Option<[f32; 2]>,
     pub position_error: f32,
     pub stage: TrackStage,

@@ -185,6 +185,22 @@ pub fn ship_schema() -> WorkshopShipSchema {
         component_fields: [
             ("power_input".into(), Vec::new()),
             (
+                "turret".into(),
+                [
+                    ("power_input", "power_input_component"),
+                    ("config.facing_deg", "number"),
+                    ("config.traverse_arc_deg", "number"),
+                    ("config.traverse_deg_per_sec", "number"),
+                    ("config.aim_tolerance_deg", "number"),
+                ]
+                .into_iter()
+                .map(|(name, kind)| WorkshopComponentField {
+                    name: name.into(),
+                    kind: kind.into(),
+                })
+                .collect(),
+            ),
+            (
                 "access_boundary".into(),
                 [
                     ("sealed_channel", "boolean_channel"),

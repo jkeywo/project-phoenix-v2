@@ -15,6 +15,33 @@ fn collect_coord(mut reader: MessageReader<CoordinationEnqueue>, mut box_: ResMu
     }
 }
 
+// This advisory-owner fixture begins AFTER acquisition. The real paid scanner
+// lifecycle, pause and historical configuration are covered in focused_tests.
+fn acquired_hint_fixture() -> crate::server_app::ShipSystemBlackboards {
+    let owner = crate::ship::system_registry::sensors_system_id();
+    let mut boards = crate::server_app::ShipSystemBlackboards::default();
+    boards.0.insert(
+        crate::science::scan_blackboard_key_for(&owner),
+        crate::core::messages::SystemBlackboard::Scan(crate::core::messages::ScanBlackboard {
+            owner: Some(owner),
+            capable: true,
+            history: vec![crate::core::messages::ScanReadingSnapshot {
+                aim: phoenix_model::focused_enquiry::FocusedAim::Shields,
+                subject_uuid: "target-1".into(),
+                taken_at_tick: 0,
+                shield_finding: phoenix_model::shield_enquiry::ShieldFinding::acquire(
+                    0.75,
+                    Default::default(),
+                    0.01,
+                ),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+    );
+    boards
+}
+
 // ── tick_frequency_hint_high_fidelity ─────────────────────────────────
 
 /// Test-only glue (issue #829): seed each ship's viewscreen combat_lock from
@@ -88,7 +115,7 @@ fn freq_hint_test_app() -> App {
             crate::server_app::Ship,
             control_sources,
             crate::ship_plugin::ShipConfigComponent(sensors_ship_config()),
-            crate::server_app::ShipSystemBlackboards::default(),
+            acquired_hint_fixture(),
             TacticalRadarSelection(Some("target-1".into())),
             ShipFrequencyHintState::default(),
             AiHighFidelity,
@@ -154,6 +181,30 @@ fn frequency_hint_propagates_after_the_authored_reaction_delay() {
 }
 
 #[test]
+fn live_enemy_frequency_without_acquired_evidence_never_supplies_a_hint() {
+    let mut app = freq_hint_test_app();
+    let source = app.world().resource::<SourceShip>().0;
+    app.world_mut()
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(source)
+        .unwrap()
+        .0
+        .clear();
+    tick_with_dt(&mut app, 10.0);
+    assert!(app.world().resource::<CoordBox>().0.is_empty());
+}
+
+#[test]
+fn changing_current_enemy_frequency_cannot_upgrade_a_retained_finding() {
+    let mut app = freq_hint_test_app();
+    let mut query = app.world_mut().query::<&mut ShipShields>();
+    for mut shields in query.iter_mut(app.world_mut()) {
+        shields.1 = 0.1;
+    }
+    tick_with_dt(&mut app, 4.0);
+    assert!(app.world().resource::<CoordBox>().0.iter().any(|message|matches!(&message.payload,CoordinationPayload::FrequencyHint{frequency} if *frequency==0.75)));
+}
+
+#[test]
 fn npc_frequency_hint_reads_its_own_tuning_not_the_global_resource() {
     // Issue #738 isolation, mirroring the shields case: the hint emitter
     // used to resolve its delay as
@@ -183,7 +234,7 @@ fn npc_frequency_hint_reads_its_own_tuning_not_the_global_resource() {
             crate::server_app::Ship,
             tuned_sources,
             crate::ship_plugin::ShipConfigComponent(sensors_ship_config()),
-            crate::server_app::ShipSystemBlackboards::default(),
+            acquired_hint_fixture(),
             TacticalRadarSelection(Some("target-1".into())),
             ShipFrequencyHintState::default(),
             AiHighFidelity,
@@ -505,6 +556,7 @@ fn torpedo_load_app(tube_source: ControlSource) -> (App, Entity) {
 
     let torpedoes = crate::weapons::torpedo::TorpedoSystem::from_configs(
         &[crate::entities::config::TorpedoTubeConfig {
+            targets: None,
             impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore_port".into(),
             facing_deg: 0.0,

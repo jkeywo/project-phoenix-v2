@@ -61,6 +61,8 @@ pub struct AiTickLabel;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
 pub enum FixedStep {
+    TickMounts,
+    TickComponentEffects,
     LodAiShips,
     UnregisterOnDespawn,
     RegisterAiTokensOnSpawn,
@@ -110,6 +112,7 @@ pub enum FixedStep {
     HandleStationRatingChange,
     HandleCoordinationEnqueue,
     AiPhaserAutoFire,
+    HandleWeaponAssignments,
     TickWeaponsArcRequest,
     HandleSetPhaserMode,
     AiStrikeBoost,
@@ -173,6 +176,7 @@ pub enum FixedStep {
     SimulateLowLodShips,
     HandleFireBlaster,
     TickBlasterSystem,
+    AdvanceTorpedoFlights,
     TickTorpedoLifecycle,
     HandleDispatchRepairTeam,
     HandleRecallRepairTeam,

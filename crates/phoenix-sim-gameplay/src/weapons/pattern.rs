@@ -111,6 +111,17 @@ pub fn validate_barrel_pattern(
         return Ok(());
     }
     for (i, step) in pattern.iter().enumerate() {
+        if step
+            .barrels
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            != step.barrels.len()
+        {
+            return Err(format!(
+                "{owner} pattern step {i} lists the same physical barrel more than once"
+            ));
+        }
         if step.barrels.is_empty() {
             return Err(format!(
                 "{owner} pattern step {i} fires no barrels (empty `barrels`)"

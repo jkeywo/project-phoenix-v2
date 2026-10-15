@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn explicit_impact_replacement_can_remove_inherited_emp_without_changing_other_weapon_settings() {
+    for path in [
+        "weapon",
+        "weapons_console.phaser_banks",
+        "weapons_console.blaster_banks",
+        "torpedoes.tubes",
+    ] {
+        let base: toml::Value = toml::from_str(&format!("[[{path}]]\nid='fore'\nmarker='fixed'\n[{path}.impact]\ndamage_type='physical'\npenetration=25\n[{path}.impact.emp]\nduration_secs=6\n")).unwrap();
+        let overlay: toml::Value = toml::from_str(&format!(
+            "[[{path}]]\nid='fore'\n[{path}.impact]\ndamage_type='physical'\npenetration=25\n"
+        ))
+        .unwrap();
+        let merged =
+            merge_entity_config_toml_with(&base, &overlay, MergePolicy::ComposeFragments).unwrap();
+        let row = path
+            .split('.')
+            .fold(&merged, |value, key| &value[key])
+            .as_array()
+            .unwrap()
+            .first()
+            .unwrap();
+        assert!(row["impact"].get("emp").is_none(), "{path}");
+        assert_eq!(row["impact"]["penetration"].as_integer(), Some(25));
+        assert_eq!(row["marker"].as_str(), Some("fixed"));
+    }
+}
+
+#[test]
 fn weapon_fragments_preserve_identity_order_and_replace_tagged_delivery() {
     let base: toml::Value = toml::from_str(
         r#"
@@ -1254,7 +1282,14 @@ action = { value = { source = "literal", value = false } }
 
 #[test]
 fn logistics_and_production_profiles_replace_without_inheriting_obsolete_bindings() {
-    for key in ["logistics", "production", "recovery", "recoverable", "fitting", "sensing"] {
+    for key in [
+        "logistics",
+        "production",
+        "recovery",
+        "recoverable",
+        "fitting",
+        "sensing",
+    ] {
         let base: toml::Value =
             toml::from_str(&format!("[{key}]\nold_binding='obsolete'\nshared=1\n")).unwrap();
         let child: toml::Value = toml::from_str(&format!("[{key}]\nshared=2\n")).unwrap();

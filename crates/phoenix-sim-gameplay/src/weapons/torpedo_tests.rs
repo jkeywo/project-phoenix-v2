@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 fn cfg(id: &str, facing_deg: f32, fire_arc_deg: f32) -> TorpedoTubeConfig {
     TorpedoTubeConfig {
+        targets: None,
         impact: phoenix_model::damage::DamageProfile::default(),
         id: id.into(),
         facing_deg,
@@ -20,6 +21,26 @@ fn cfg(id: &str, facing_deg: f32, fire_arc_deg: f32) -> TorpedoTubeConfig {
     }
 }
 
+fn guidance_config() -> TorpedoConfig {
+    TorpedoConfig {
+        seeker: Some(phoenix_model::guided_guidance::SeekerProfile {
+            range: 2000.0,
+            fire_arc_deg: 360.0,
+            minimum_transmission: 0.01,
+        }),
+        ..TorpedoConfig::default()
+    }
+}
+
+fn observation(target: &str, position: [f32; 3]) -> GuidanceObservation {
+    GuidanceObservation {
+        target_uuid: target.into(),
+        position,
+        sampled_tick: 0,
+        source: GuidanceSource::Seeker,
+    }
+}
+
 fn no_uuid() -> String {
     "test-uuid".to_string()
 }
@@ -30,7 +51,7 @@ fn default_system() -> TorpedoSystem {
         cfg("fore_starboard", 30.0, 90.0),
         cfg("aft", 180.0, 90.0),
     ];
-    TorpedoSystem::from_configs(&tubes, TorpedoConfig::default())
+    TorpedoSystem::from_configs(&tubes, guidance_config())
 }
 
 fn load_tube(sys: &mut TorpedoSystem, id: &str) {
@@ -40,7 +61,7 @@ fn load_tube(sys: &mut TorpedoSystem, id: &str) {
     // to load (auto-unload fires when loaded_count > target_count).
     sys.tube_mut(id).unwrap().target_count = 1;
     assert!(sys.start_load(id));
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets: HashMap<String, GuidanceObservation> = HashMap::new();
     sys.tick(load_time, &targets, &mut no_uuid);
 }
 
@@ -109,7 +130,7 @@ fn salvo_shortfall_counts_only_rounds_not_yet_committed() {
 fn salvo_shortfall_is_zero_for_a_full_battery_and_for_no_tubes() {
     assert_eq!(loaded_system().salvo_shortfall(), 0);
 
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.count = 0;
     let tubeless = TorpedoSystem::from_configs(&[], config);
     assert_eq!(
@@ -182,7 +203,7 @@ fn start_load_decrements_torpedo_count() {
 
 #[test]
 fn start_load_fails_when_no_torpedoes() {
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.count = 0;
     let tubes = vec![cfg("fore_port", -30.0, 90.0)];
     let mut sys = TorpedoSystem::from_configs(&tubes, config);
@@ -202,7 +223,7 @@ fn claim_magazine_round_decrements_when_available() {
 
 #[test]
 fn claim_magazine_round_returns_false_when_empty() {
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.count = 0;
     let tubes = vec![cfg("fore_port", -30.0, 90.0)];
     let mut sys = TorpedoSystem::from_configs(&tubes, config);
@@ -270,7 +291,7 @@ fn launch_leaves_tube_unloaded_until_manual_load() {
     // manual launch does NOT trigger an automatic reload on its own.
     // (Auto-management only reloads when target_count > loaded_count.)
     sys.tube_mut("fore_port").unwrap().target_count = 0;
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets: HashMap<String, GuidanceObservation> = HashMap::new();
     sys.tick(sys.config.load_time, &targets, &mut no_uuid);
     assert_eq!(
         sys.tube("fore_port").unwrap().load_state,
@@ -312,7 +333,7 @@ fn start_unload_loaded_tube_starts_timer_torpedo_returned_on_completion() {
                                               // the timer fires we expect exactly one torpedo to return to the pool
                                               // and no auto-reload to start.
     sys.tube_mut("fore_port").unwrap().target_count = 0;
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets: HashMap<String, GuidanceObservation> = HashMap::new();
     sys.tick(
         sys.tube("fore_port").unwrap().load_time,
         &targets,
@@ -369,7 +390,7 @@ fn torpedo_with_no_target_flies_straight() {
     let mut sys = loaded_system();
     sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
     let initial = sys.in_flight[0].heading;
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets: HashMap<String, GuidanceObservation> = HashMap::new();
     sys.tick(0.1, &targets, &mut no_uuid);
     assert_eq!(sys.in_flight[0].heading, initial);
 }
@@ -378,7 +399,7 @@ fn torpedo_with_no_target_flies_straight() {
 fn torpedo_moves_forward_in_straight_flight() {
     let mut sys = loaded_system();
     sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets: HashMap<String, GuidanceObservation> = HashMap::new();
     sys.tick(1.0, &targets, &mut no_uuid);
     let t = &sys.in_flight[0];
     assert!(t.x.abs() < 0.01);
@@ -399,7 +420,10 @@ fn torpedo_homes_toward_target() {
         None,
     );
     let mut targets = HashMap::new();
-    targets.insert("enemy".into(), (20.0_f32, 0.0_f32, 0.0_f32));
+    targets.insert(
+        "t1".into(),
+        observation("enemy", [20.0_f32, 0.0_f32, 0.0_f32]),
+    );
     let h0 = sys.in_flight[0].heading;
     sys.tick(0.1, &targets, &mut no_uuid);
     assert!(sys.in_flight[0].heading > h0);
@@ -407,7 +431,7 @@ fn torpedo_homes_toward_target() {
 
 #[test]
 fn torpedo_turn_rate_is_limited() {
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.turn_rate = PI / 4.0;
     let tubes = vec![cfg("fore_port", -30.0, 90.0)];
     let mut sys = TorpedoSystem::from_configs(&tubes, config);
@@ -423,7 +447,10 @@ fn torpedo_turn_rate_is_limited() {
         None,
     );
     let mut targets = HashMap::new();
-    targets.insert("enemy".into(), (20.0_f32, 0.0_f32, 0.0_f32));
+    targets.insert(
+        "t1".into(),
+        observation("enemy", [20.0_f32, 0.0_f32, 0.0_f32]),
+    );
     sys.tick(1.0, &targets, &mut no_uuid);
     assert!(sys.in_flight[0].heading <= PI / 4.0 + 0.001);
 }
@@ -441,7 +468,7 @@ fn torpedo_flies_straight_when_target_destroyed() {
         Some("enemy".into()),
         None,
     );
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets: HashMap<String, GuidanceObservation> = HashMap::new();
     let h0 = sys.in_flight[0].heading;
     sys.tick(0.5, &targets, &mut no_uuid);
     assert_eq!(sys.in_flight[0].heading, h0);
@@ -465,8 +492,14 @@ fn torpedo_target_uuid_locked_at_launch_and_never_updated() {
         None,
     );
     let mut targets = HashMap::new();
-    targets.insert("target-a".into(), (100.0_f32, 0.0_f32, 0.0_f32)); // hard right
-    targets.insert("target-b".into(), (0.0_f32, 0.0_f32, -100.0_f32)); // straight ahead
+    targets.insert(
+        "t1".into(),
+        observation("target-a", [100.0_f32, 0.0_f32, 0.0_f32]),
+    ); // hard right
+    targets.insert(
+        "different-round".into(),
+        observation("target-b", [0.0_f32, 0.0_f32, -100.0_f32]),
+    ); // straight ahead
 
     let h0 = sys.in_flight[0].heading;
     sys.tick(0.1, &targets, &mut no_uuid);
@@ -486,13 +519,13 @@ fn torpedo_target_uuid_locked_at_launch_and_never_updated() {
 
 #[test]
 fn torpedo_expires_after_lifespan() {
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.lifespan = 5.0;
     let tubes = vec![cfg("fore_port", -30.0, 90.0)];
     let mut sys = TorpedoSystem::from_configs(&tubes, config);
     load_tube(&mut sys, "fore_port");
     sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets: HashMap<String, GuidanceObservation> = HashMap::new();
     let r = sys.tick(5.1, &targets, &mut no_uuid);
     assert!(r.expired.contains(&"t1".to_string()));
     assert_eq!(sys.in_flight.len(), 0);
@@ -500,13 +533,13 @@ fn torpedo_expires_after_lifespan() {
 
 #[test]
 fn torpedo_not_expired_before_lifespan() {
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.lifespan = 5.0;
     let tubes = vec![cfg("fore_port", -30.0, 90.0)];
     let mut sys = TorpedoSystem::from_configs(&tubes, config);
     load_tube(&mut sys, "fore_port");
     sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets: HashMap<String, GuidanceObservation> = HashMap::new();
     let r = sys.tick(4.9, &targets, &mut no_uuid);
     assert!(!r.expired.contains(&"t1".to_string()));
     assert_eq!(sys.in_flight.len(), 1);
@@ -530,25 +563,25 @@ fn collision_with_unknown_uuid_returns_none() {
 
 #[test]
 fn tube_loads_after_manual_load_time() {
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.load_time = 10.0;
     let tubes = vec![cfg("fore_port", -30.0, 90.0)];
     let mut sys = TorpedoSystem::from_configs(&tubes, config);
     assert!(sys.start_load("fore_port"));
     assert!(!sys.tube("fore_port").unwrap().is_loaded());
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets: HashMap<String, GuidanceObservation> = HashMap::new();
     sys.tick(10.0, &targets, &mut no_uuid);
     assert!(sys.tube("fore_port").unwrap().is_loaded());
 }
 
 #[test]
 fn tube_not_loaded_before_manual_load_time_expires() {
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.load_time = 10.0;
     let tubes = vec![cfg("fore_port", -30.0, 90.0)];
     let mut sys = TorpedoSystem::from_configs(&tubes, config);
     assert!(sys.start_load("fore_port"));
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets: HashMap<String, GuidanceObservation> = HashMap::new();
     sys.tick(9.9, &targets, &mut no_uuid);
     assert!(!sys.tube("fore_port").unwrap().is_loaded());
 }
@@ -556,7 +589,7 @@ fn tube_not_loaded_before_manual_load_time_expires() {
 // ── proximity detonation ──────────────────────────────────────────────
 
 fn detonation_system(detonation_radius: f32) -> TorpedoSystem {
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.detonation_radius = detonation_radius;
     let tubes = vec![cfg("fore_port", -30.0, 90.0)];
     let mut sys = TorpedoSystem::from_configs(&tubes, config);
@@ -632,7 +665,11 @@ fn find_detonation_hits_handles_multiple_torpedoes_independently() {
     // Manually push a second torpedo so the test can focus on detonation
     // matching rather than tube load state.
     sys.in_flight.push(Torpedo {
-        impact: Default::default(),
+        previous_position: None,
+        collision_interval_secs: None,
+        last_guidance: None,
+        profile: sys.config.round_profile(Default::default()),
+        durability_remaining: sys.config.durability,
         strike_damage_bonus: 0.0,
         uuid: "t2".into(),
         x: 100.0,
@@ -644,7 +681,6 @@ fn find_detonation_hits_handles_multiple_torpedoes_independently() {
         target_uuid: None,
         source_uuid: None,
         tube_id: "fore_port".into(),
-        shield_pierce: 0.0,
     });
     let targets = vec![
         ("a".to_string(), 1.0, 0.0, 0.0, 0.0),     // close to t1
@@ -705,6 +741,7 @@ fn find_detonation_hits_with_no_targets_in_range_returns_empty_even_if_source_pr
 
 fn volley_cfg(id: &str, volley_max: u32) -> TorpedoTubeConfig {
     TorpedoTubeConfig {
+        targets: None,
         impact: phoenix_model::damage::DamageProfile::default(),
         id: id.into(),
         facing_deg: 0.0,
@@ -729,7 +766,7 @@ fn volley_max_defaults_to_1_on_standard_tube() {
 /// that says nothing gets "keep the tube as full as it can".
 #[test]
 fn ai_target_count_defaults_to_volley_max() {
-    let sys = TorpedoSystem::from_configs(&[volley_cfg("t1", 3)], TorpedoConfig::default());
+    let sys = TorpedoSystem::from_configs(&[volley_cfg("t1", 3)], guidance_config());
     assert_eq!(sys.tube("t1").unwrap().ai_target_count, 3);
     // The tube still starts empty — the AI has to *ask* for the load.
     assert_eq!(sys.tube("t1").unwrap().target_count, 0);
@@ -766,7 +803,7 @@ fn per_tube_ai_target_count_overrides_the_ship_wide_default_and_clamps() {
 
 #[test]
 fn set_volley_target_clamps_to_volley_max() {
-    let mut sys = TorpedoSystem::from_configs(&[volley_cfg("t1", 3)], TorpedoConfig::default());
+    let mut sys = TorpedoSystem::from_configs(&[volley_cfg("t1", 3)], guidance_config());
     assert!(sys.set_volley_target("t1", 5)); // 5 > 3, should clamp
     assert_eq!(sys.tube("t1").unwrap().target_count, 3);
 }
@@ -781,12 +818,12 @@ fn set_volley_target_returns_false_for_unknown_tube() {
 fn auto_load_toward_target_count() {
     // Set target_count=2, volley_max=2. Tick twice through load_time.
     // Should end up with loaded_count==2 and torpedoes_remaining decremented by 2.
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.count = 10;
     config.load_time = 5.0;
     let mut sys = TorpedoSystem::from_configs(&[volley_cfg("t1", 2)], config);
     sys.set_volley_target("t1", 2);
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets: HashMap<String, GuidanceObservation> = HashMap::new();
     // First tick starts loading torpedo #1.
     sys.tick(0.0, &targets, &mut no_uuid);
     assert_eq!(sys.torpedoes_remaining(), 9);
@@ -807,7 +844,7 @@ fn auto_load_toward_target_count() {
 
 #[test]
 fn fire_volley_fires_first_torpedo_immediately_rest_in_burst() {
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.count = 10;
     config.load_time = 1.0;
     config.burst_interval_secs = 0.3;
@@ -832,7 +869,7 @@ fn fire_volley_fires_first_torpedo_immediately_rest_in_burst() {
 
 #[test]
 fn burst_launches_remaining_torpedoes_at_interval() {
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.count = 10;
     config.burst_interval_secs = 0.3;
     let tubes = vec![volley_cfg("t1", 3)];
@@ -843,7 +880,7 @@ fn burst_launches_remaining_torpedoes_at_interval() {
     sys.launch("t1", "uuid-0".into(), 0.0, 0.0, 0.0, 0.0, None, None);
     assert_eq!(sys.in_flight.len(), 1);
 
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets: HashMap<String, GuidanceObservation> = HashMap::new();
     let mut uuid_counter = 1u32;
     let mut next = || {
         let s = format!("uuid-{uuid_counter}");
@@ -869,7 +906,7 @@ fn burst_launches_remaining_torpedoes_at_interval() {
 
 #[test]
 fn fire_with_partial_load_fires_what_is_loaded() {
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.count = 10;
     let tubes = vec![volley_cfg("t1", 4)];
     let mut sys = TorpedoSystem::from_configs(&tubes, config);
@@ -890,7 +927,7 @@ fn fire_with_partial_load_fires_what_is_loaded() {
 
 #[test]
 fn auto_unload_when_target_count_decremented() {
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.count = 10;
     config.load_time = 1.0;
     let tubes = vec![volley_cfg("t1", 3)];
@@ -904,7 +941,7 @@ fn auto_unload_when_target_count_decremented() {
     }
     // Drop target to 1 → should auto-unload one torpedo.
     sys.set_volley_target("t1", 1);
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets: HashMap<String, GuidanceObservation> = HashMap::new();
     // First tick starts unloading one.
     sys.tick(0.0, &targets, &mut no_uuid);
     assert!(matches!(
@@ -932,7 +969,7 @@ fn auto_unload_when_target_count_decremented() {
 fn auto_unload_when_target_set_to_zero() {
     // Regression for issue #632: setting target_count=0 must drain all
     // loaded torpedoes back to the magazine automatically.
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.count = 10;
     config.load_time = 1.0;
     let tubes = vec![volley_cfg("t1", 3)];
@@ -944,7 +981,7 @@ fn auto_unload_when_target_set_to_zero() {
         tube.loaded_count = 2;
         tube.target_count = 0; // target is already 0
     }
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets: HashMap<String, GuidanceObservation> = HashMap::new();
     // First tick should start unloading the first torpedo.
     sys.tick(0.0, &targets, &mut no_uuid);
     assert!(
@@ -996,6 +1033,7 @@ fn patterned_cfg(
     volley_max: u32,
 ) -> TorpedoTubeConfig {
     TorpedoTubeConfig {
+        targets: None,
         impact: phoenix_model::damage::DamageProfile::default(),
         id: id.into(),
         facing_deg: 0.0,
@@ -1030,7 +1068,7 @@ fn burst_next() -> impl FnMut() -> String {
 fn patterned_alternating_launches_from_barrels_in_sequence() {
     // Two barrels, two steps at increasing offsets → the volley's rounds
     // leave from barrel 0 then barrel 1.
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.count = 10;
     config.burst_interval_secs = 0.3;
     let cfg = patterned_cfg(
@@ -1059,7 +1097,7 @@ fn patterned_alternating_launches_from_barrels_in_sequence() {
     assert_eq!(sys.tube("t1").unwrap().pattern_step, 1);
 
     // Burst shot fires from barrel 1 after the burst interval.
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets: HashMap<String, GuidanceObservation> = HashMap::new();
     let mut next = burst_next();
     sys.tick(0.3, &targets, &mut next);
     assert_eq!(sys.in_flight.len(), 2);
@@ -1073,7 +1111,7 @@ fn patterned_alternating_launches_from_barrels_in_sequence() {
 fn patterned_simultaneous_launches_from_multiple_barrels() {
     // One step listing several barrels → consecutive rounds leave from each
     // listed barrel. With two loaded, both barrels are used.
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.count = 10;
     config.burst_interval_secs = 0.3;
     let cfg = patterned_cfg(
@@ -1089,7 +1127,7 @@ fn patterned_simultaneous_launches_from_multiple_barrels() {
     sys.launch_with_barrels("t1", "u0".into(), &origins, 0.0, 0.0, 0.0, 0.0, None, None);
     assert!((sys.in_flight[0].x - 10.0).abs() < 1e-4, "barrel 0 origin");
 
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets: HashMap<String, GuidanceObservation> = HashMap::new();
     let mut next = burst_next();
     sys.tick(0.3, &targets, &mut next);
     assert_eq!(sys.in_flight.len(), 2, "both barrels fire");
@@ -1102,7 +1140,7 @@ fn patterned_simultaneous_launches_from_multiple_barrels() {
 /// invents rounds — `loaded_count` is the count authority.
 #[test]
 fn patterned_simultaneous_step_with_one_loaded_fires_exactly_one() {
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.count = 10;
     let cfg = patterned_cfg(
         "t1",
@@ -1147,7 +1185,7 @@ fn patterned_simultaneous_step_with_one_loaded_fires_exactly_one() {
 /// extends the volley.
 #[test]
 fn patterned_burst_count_bounded_by_loaded_count() {
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.count = 10;
     config.burst_interval_secs = 0.3;
     // Single-step, single-barrel pattern; two rounds loaded.
@@ -1165,7 +1203,7 @@ fn patterned_burst_count_bounded_by_loaded_count() {
             ..
         }
     ));
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets: HashMap<String, GuidanceObservation> = HashMap::new();
     let mut next = burst_next();
     // Drive well past several burst intervals.
     sys.tick(0.3, &targets, &mut next);
@@ -1188,7 +1226,7 @@ fn patterned_burst_count_bounded_by_loaded_count() {
 fn legacy_launch_without_barrels_uses_ship_centre_origin() {
     // Back-compat: no barrels/pattern authored → every round leaves from the
     // passed launch origin exactly as before issue #766.
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.count = 10;
     config.burst_interval_secs = 0.3;
     let mut sys = TorpedoSystem::from_configs(&[volley_cfg("t1", 2)], config);
@@ -1198,7 +1236,7 @@ fn legacy_launch_without_barrels_uses_ship_centre_origin() {
     assert!((sys.in_flight[0].z - (-3.0)).abs() < 1e-4);
     // Legacy tube reports no pattern → no step indicator.
     assert_eq!(sys.tube("t1").unwrap().pattern_len(), 0);
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets: HashMap<String, GuidanceObservation> = HashMap::new();
     let mut next = burst_next();
     sys.tick(0.3, &targets, &mut next);
     let burst = sys.in_flight.iter().find(|t| t.uuid != "u0").unwrap();
@@ -1225,7 +1263,10 @@ fn torpedo_climbs_toward_target_above() {
     );
     // Target dead ahead (−Z) but 40 m up.
     let mut targets = HashMap::new();
-    targets.insert("enemy".into(), (0.0_f32, 40.0_f32, -40.0_f32));
+    targets.insert(
+        "t1".into(),
+        observation("enemy", [0.0_f32, 40.0_f32, -40.0_f32]),
+    );
     assert_eq!(sys.in_flight[0].y, 0.0);
     assert_eq!(sys.in_flight[0].pitch, 0.0);
     sys.tick(0.5, &targets, &mut no_uuid);
@@ -1255,7 +1296,10 @@ fn torpedo_descends_toward_target_below() {
         None,
     );
     let mut targets = HashMap::new();
-    targets.insert("enemy".into(), (0.0_f32, -40.0_f32, -40.0_f32));
+    targets.insert(
+        "t1".into(),
+        observation("enemy", [0.0_f32, -40.0_f32, -40.0_f32]),
+    );
     sys.tick(0.5, &targets, &mut no_uuid);
     assert!(sys.in_flight[0].pitch < 0.0, "pitch should tilt down");
     assert!(sys.in_flight[0].y < 0.0, "torpedo should lose altitude");
@@ -1266,7 +1310,7 @@ fn torpedo_descends_toward_target_below() {
 /// when the target sits straight overhead (desired pitch = +π/2).
 #[test]
 fn vertical_steering_is_rate_limited_by_turn_rate() {
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.turn_rate = PI / 4.0;
     let tubes = vec![cfg("fore_port", -30.0, 90.0)];
     let mut sys = TorpedoSystem::from_configs(&tubes, config);
@@ -1284,7 +1328,10 @@ fn vertical_steering_is_rate_limited_by_turn_rate() {
     // Target directly overhead → desired pitch is +π/2, far beyond one
     // second of turn budget.
     let mut targets = HashMap::new();
-    targets.insert("enemy".into(), (0.0_f32, 1000.0_f32, 0.0_f32));
+    targets.insert(
+        "t1".into(),
+        observation("enemy", [0.0_f32, 1000.0_f32, 0.0_f32]),
+    );
     sys.tick(1.0, &targets, &mut no_uuid);
     assert!(
         sys.in_flight[0].pitch <= PI / 4.0 + 1e-4,
@@ -1331,7 +1378,10 @@ fn detonation_carries_vertical_impact_point() {
     );
     // Fly a while homing at a high target so the torpedo gains altitude.
     let mut targets = HashMap::new();
-    targets.insert("enemy".into(), (0.0_f32, 100.0_f32, -60.0_f32));
+    targets.insert(
+        "t1".into(),
+        observation("enemy", [0.0_f32, 100.0_f32, -60.0_f32]),
+    );
     sys.tick(1.0, &targets, &mut no_uuid);
     sys.tick(1.0, &targets, &mut no_uuid);
     let expected_y = sys.in_flight[0].y;
@@ -1348,7 +1398,7 @@ fn detonation_carries_vertical_impact_point() {
 /// that altitude (AC4: patterned origins carry Y).
 #[test]
 fn patterned_origins_carry_barrel_y() {
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.count = 10;
     config.burst_interval_secs = 0.3;
     let cfg = patterned_cfg(
@@ -1366,7 +1416,7 @@ fn patterned_origins_carry_barrel_y() {
         (sys.in_flight[0].y - 2.0).abs() < 1e-4,
         "immediate round keeps barrel 0's Y"
     );
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets: HashMap<String, GuidanceObservation> = HashMap::new();
     let mut next = burst_next();
     sys.tick(0.3, &targets, &mut next);
     let burst = sys.in_flight.iter().find(|t| t.uuid != "u0").unwrap();
@@ -1397,7 +1447,7 @@ fn planar_collision_matches_2d_when_all_y_zero() {
 
 #[test]
 fn scarce_loading_claims_release_on_cancel_and_consume_on_completion() {
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.count = 1;
     let mut sys = TorpedoSystem::from_configs(&[cfg("a", 0.0, 90.0), cfg("b", 0.0, 90.0)], config);
     sys.tube_mut("a").unwrap().target_count = 1;
@@ -1468,7 +1518,7 @@ fn reserved_start_requires_a_real_claim_and_restore_rejects_orphan_claims() {
 
 #[test]
 fn firing_a_partial_volley_releases_its_unfinished_loading_claim() {
-    let mut config = TorpedoConfig::default();
+    let mut config = guidance_config();
     config.count = 5;
     let mut tube = cfg("a", 0.0, 90.0);
     tube.volley_max = 2;

@@ -13,6 +13,41 @@ fn assert_client_roundtrip(msg: ClientMessage) {
 }
 
 #[test]
+fn weapon_assignment_and_stop_controls_round_trip_through_the_existing_command_envelope() {
+    for payload in [
+        SystemControlPayload::SetWeaponTarget {
+            uuid: Some("radar:contact:7".into()),
+        },
+        SystemControlPayload::SetWeaponTarget { uuid: None },
+        SystemControlPayload::SetAutomaticWeaponTarget {
+            uuid: Some("radar:contact:9".into()),
+        },
+        SystemControlPayload::SetAutomaticWeaponTarget { uuid: None },
+        SystemControlPayload::SetWeaponGroupTarget {
+            group: "main-beams".into(),
+            uuid: Some("radar:contact:8".into()),
+        },
+        SystemControlPayload::SetWeaponGroupTarget {
+            group: "main-beams".into(),
+            uuid: None,
+        },
+        SystemControlPayload::FollowWeaponGroup,
+        SystemControlPayload::FollowPrimaryTarget,
+        SystemControlPayload::StopPhaser,
+    ] {
+        assert_client_roundtrip(ClientMessage::ControlSystem {
+            target: SystemId("phaser-fore".into()),
+            payload: payload.clone(),
+        });
+        assert_client_roundtrip(ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("weapon-order").unwrap(),
+            target: SystemId("phaser-fore".into()),
+            payload,
+        });
+    }
+}
+
+#[test]
 fn port_controls_round_trip_with_actual_owner_visit_and_typed_lines() {
     for payload in [
         SystemControlPayload::SetTransferStore {
@@ -551,6 +586,7 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                 target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
                 target_name: Some("Klingon Raider".into()),
                 banks: vec![PhaserBankState {
+                    firing: false,
                     id: "port".to_string(),
                     fire_ready: true,
                     on_cooldown: false,
@@ -677,6 +713,8 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                 source_uuid: "11111111-1111-1111-1111-111111111111".into(),
                 projectile_id: "proj-uuid-1".into(),
                 x: 5.0,
+                y: 0.0,
+                pitch: 0.0,
                 z: -10.0,
                 heading: 0.0,
                 visual_scale: 1.0,
@@ -2096,6 +2134,8 @@ fn blaster_fired_server_message_round_trips() {
         source_uuid: "11111111-1111-1111-1111-111111111111".into(),
         projectile_id: "proj-uuid-abc".into(),
         x: 5.0,
+        y: 0.0,
+        pitch: 0.0,
         z: -10.0,
         heading: 1.57,
         visual_scale: 1.5,
@@ -3273,6 +3313,7 @@ fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() 
     use std::collections::BTreeSet;
 
     let reading = ScanReadingSnapshot {
+        shield_finding: None,
         aim: Default::default(),
         intrusive: false,
         quantities: Vec::new(),
@@ -3384,6 +3425,7 @@ fn a_debris_reading_carries_a_projection_and_still_no_prose() {
     use std::collections::BTreeSet;
 
     let reading = ScanReadingSnapshot {
+        shield_finding: None,
         aim: Default::default(),
         intrusive: false,
         quantities: Vec::new(),
@@ -4289,6 +4331,7 @@ fn weapon_readiness_contract_round_trips_for_all_families() {
         target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
         target_name: Some("Raider".into()),
         banks: vec![PhaserBankState {
+            firing: false,
             id: "port".into(),
             fire_ready: false,
             on_cooldown: false,

@@ -29,6 +29,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
     sequence(
         &mut order,
         &[
+            TickComponentEffects,
             ReadSystemText,
             AiTorpedoLoad,
             TickFrequencyHintHighFidelity,
@@ -60,6 +61,10 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             TickNpcAutoMatchFrequency,
             ApplyTacticalFrequencyHint,
             TickBlasterAutoFire,
+            // Settle human and ordinary AI intent together before Physics.
+            // AI-emitted fallback assignments must not be cleared next tick
+            // before their consumer sees them; explicit orders still win.
+            HandleWeaponAssignments,
             OperateExternalRepairAi,
             TrackShieldDamageHistory,
             EmitShieldsCoordination,
@@ -130,9 +135,10 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             ApplyPendingScenarioLoads,
             ApplyWorldLayerChanges,
             SimulateLowLodShips,
+            TickMounts,
             HandleFireBlaster,
             TickBlasterSystem,
-            TickTorpedoLifecycle,
+            AdvanceTorpedoFlights,
             HandleDispatchRepairTeam,
             HandleRecallRepairTeam,
             HandleSetRepairPriority,
@@ -176,6 +182,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             ApplyGmDirectEffects,
             TickBeamsPrepare,
             HandleBlasterHits,
+            TickTorpedoLifecycle,
             HandleCollisions,
             DetectDamageTierCrossings,
             SyncConsoleDamageTiers,

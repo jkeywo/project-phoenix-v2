@@ -1,3 +1,4 @@
+import { WEAPON_TARGET_ACTIONS } from './stations/weapon-target-actions.js';
 import { FITTING_ACTIONS } from './stations/fitting-actions.js';
 /** Parent-realm catalogue of every semantic action retained by the private
  * operator profile. Individual surfaces filter which entries they display. */
@@ -21,6 +22,7 @@ export function createClientSemanticActionRegistry({ adapters = {}, actionFeedba
     ...CAPTAIN_ACTIONS,
     ...HELM_ACTIONS,
     ...TACTICAL_ACTIONS,
+    ...WEAPON_TARGET_ACTIONS,
     ...COMMS_ACTIONS,
     ...SENSOR_SCIENCE_ACTIONS,
     ...NAVIGATION_ACTIONS,

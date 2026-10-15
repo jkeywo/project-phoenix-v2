@@ -19,6 +19,9 @@ use crate::server_app::AsteroidUuid;
 use crate::ship::state::ShipPhysics;
 use crate::ship_plugin::ShipSystemControlSources;
 
+#[path = "readiness.rs"]
+mod readiness;
+
 // ── Resources ─────────────────────────────────────────────────────────────
 
 /// Cache of the last `WeaponsUpdate` sent to the Tactical holder.
@@ -226,6 +229,21 @@ struct WeaponsProjectionInputs<'w, 's> {
     config: Query<'w, 's, &'static PhaserCombatConfigResource, With<crate::server_app::LocalShip>>,
     controls: Query<'w, 's, &'static ShipSystemControlSources, With<crate::server_app::LocalShip>>,
     blasters: Query<'w, 's, &'static BlasterSystemResource, With<crate::server_app::LocalShip>>,
+    scopes: Query<
+        'w,
+        's,
+        (
+            Option<&'static crate::ship_plugin::ShipConfigComponent>,
+            Option<&'static crate::science::broad::BroadTracks>,
+            Option<&'static crate::science::broad::SensingControls>,
+            Option<&'static super::assignments::ShipWeaponTargets>,
+            Option<&'static crate::weapons::mounts::MountProfiles>,
+            Option<&'static crate::weapons::mounts::ShipMounts>,
+            Option<&'static crate::entities::spawner::EntityUuid>,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
+    content: Option<Res<'w, crate::world::server::WorldContentRuntime>>,
     mode: Option<Res<'w, CurrentPhaserMode>>,
     entities: Query<
         'w,
@@ -322,8 +340,21 @@ impl WeaponsProjectionInputs<'_, '_> {
         // Query live ECS Transform for the target — WorldResource is a
         // stale spawn-time snapshot and doesn't contain NPC ships that
         // spawn after the scene loads.
+        let scope = self.scopes.single().ok();
+        let context = self.boards.single().ok().map(|boards| readiness::Context {
+            config: scope.and_then(|row| row.0),
+            boards,
+            tracks: scope.and_then(|row| row.1),
+            controls: scope.and_then(|row| row.2),
+            targets: scope.and_then(|row| row.3),
+            profiles: scope.and_then(|row| row.4),
+            mounts: scope.and_then(|row| row.5),
+            observer: scope.and_then(|row| row.6),
+            runtime: self.content.as_deref(),
+        });
         let target_live_pos: Option<(f32, f32)> = match &target_uuid {
             None => None,
+            Some(_) if context.as_ref().is_some_and(|context| context.measured()) => None,
             Some(uuid) => {
                 let uuid = uuid.clone();
                 let mut pos = None;
@@ -350,6 +381,18 @@ impl WeaponsProjectionInputs<'_, '_> {
         // Look up the display name for the locked target.
         let target_name: Option<String> = match &target_uuid {
             None => None,
+            Some(uuid) if context.as_ref().is_some_and(|context| context.measured()) => scope
+                .and_then(|(config, tracks, controls, ..)| {
+                    let config = config?;
+                    let owner = crate::science::broad::combat_owner(controls, true)?;
+                    crate::science::contact_routing::identity_for_source(
+                        &config.0,
+                        self.boards.single().ok()?,
+                        tracks?,
+                        &owner,
+                        uuid,
+                    )
+                }),
             Some(uuid) => {
                 let uuid = uuid.clone();
                 let mut name = None;
@@ -385,7 +428,7 @@ impl WeaponsProjectionInputs<'_, '_> {
         // Blaster bank states, with the shared readiness contract (issue #764).
         // Computed here where ship physics + the frozen combat-lock target position
         // are already resolved, rather than re-querying in the broadcaster.
-        let blasters: Vec<BlasterBankState> = {
+        let mut blasters: Vec<BlasterBankState> = {
             let raw: Vec<crate::weapons::blaster::BlasterSystem> = {
                 let q = &self.blasters;
                 q.single().ok().map(|r| r.0.clone()).unwrap_or_default()
@@ -407,7 +450,7 @@ impl WeaponsProjectionInputs<'_, '_> {
             yaw: ship_yaw,
             ..Default::default()
         };
-        let tubes: Vec<TorpedoTubeState> = raw_tubes
+        let mut tubes: Vec<TorpedoTubeState> = raw_tubes
             .iter()
             .map(|t| {
                 let remaining = match &t.load_state {
@@ -446,7 +489,7 @@ impl WeaponsProjectionInputs<'_, '_> {
             .collect();
 
         // Reach is the authored range, unscaled (issue #955).
-        let banks: Vec<PhaserBankState> = match banks_config {
+        let mut banks: Vec<PhaserBankState> = match banks_config {
             None => Vec::new(),
             Some([]) => {
                 let effective_phaser_range =
@@ -479,6 +522,7 @@ impl WeaponsProjectionInputs<'_, '_> {
                 );
                 vec![PhaserBankState {
                     id: String::new(),
+                    firing: active_beam.is_bank_firing(""),
                     fire_ready,
                     on_cooldown,
                     cooldown_remaining: cd,
@@ -519,6 +563,7 @@ impl WeaponsProjectionInputs<'_, '_> {
                     );
                     PhaserBankState {
                         id: b.id.clone(),
+                        firing: active_beam.is_bank_firing(&b.id),
                         fire_ready,
                         on_cooldown,
                         cooldown_remaining: cd,
@@ -528,6 +573,36 @@ impl WeaponsProjectionInputs<'_, '_> {
                 .collect(),
         };
 
+        if let Some(context) = &context {
+            context.apply(
+                physics,
+                self.controls.single().ok(),
+                self.config.single().ok(),
+                self.torpedoes.single().ok(),
+                self.blasters.single().ok(),
+                &mut banks,
+                &mut tubes,
+                &mut blasters,
+                |route| {
+                    self.entities
+                        .iter()
+                        .find_map(|(id, transform)| {
+                            (id.0 == route)
+                                .then_some([transform.translation.x, transform.translation.z])
+                        })
+                        .or_else(|| {
+                            self.asteroids.iter().find_map(|(id, transform)| {
+                                (id.0 == route)
+                                    .then_some([transform.translation.x, transform.translation.z])
+                            })
+                        })
+                },
+                |route| {
+                    self.entities.iter().any(|(id, _)| id.0 == route)
+                        || self.asteroids.iter().any(|(id, _)| id.0 == route)
+                },
+            );
+        }
         LastWeaponsUpdate {
             target_uuid,
             target_name,
@@ -715,6 +790,7 @@ fn build_bank_states(
         );
         vec![PhaserBankState {
             id: String::new(),
+            firing: beam.is_bank_firing(""),
             fire_ready,
             on_cooldown,
             cooldown_remaining: cd,
@@ -755,6 +831,7 @@ fn build_bank_states(
                 );
                 PhaserBankState {
                     id: b.id.clone(),
+                    firing: beam.is_bank_firing(&b.id),
                     fire_ready,
                     on_cooldown,
                     cooldown_remaining: cd,
@@ -889,6 +966,7 @@ fn tube_readiness(
 /// `broadcast_blackboard_updates` is `With<LocalShip>`-filtered, so NPC
 /// blackboards add zero bandwidth.
 pub(crate) fn publish_weapons_core_blackboard(
+    content: Option<Res<crate::world::server::WorldContentRuntime>>,
     mut ship_q: Query<
         (
             Option<&ActiveBeam>,
@@ -902,10 +980,14 @@ pub(crate) fn publish_weapons_core_blackboard(
             Has<crate::server_app::LocalShip>,
             Option<&crate::ship::power::ShipPowerSystem>,
             Option<&crate::ship::power::PowerConfigResource>,
+            Option<&super::assignments::ShipWeaponTargets>,
             (
                 Option<&crate::ship_plugin::ShipConfigComponent>,
                 Option<&crate::science::broad::BroadTracks>,
                 Option<&crate::science::broad::SensingControls>,
+                Option<&crate::weapons::mounts::MountProfiles>,
+                Option<&crate::weapons::mounts::ShipMounts>,
+                Option<&crate::entities::spawner::EntityUuid>,
             ),
         ),
         With<crate::server_app::Ship>,
@@ -931,10 +1013,22 @@ pub(crate) fn publish_weapons_core_blackboard(
         is_local,
         power,
         power_config,
-        (config, broad_tracks, sensing_controls),
+        assignments,
+        (config, broad_tracks, sensing_controls, mounts_profile, mounts, observer),
     ) in ship_q.iter_mut()
     {
         let physics = ship_physics.copied().unwrap_or_default();
+        let context = readiness::Context {
+            config,
+            boards: &entity_bbs,
+            tracks: broad_tracks,
+            controls: sensing_controls,
+            targets: assignments,
+            profiles: mounts_profile,
+            mounts,
+            observer,
+            runtime: content.as_deref(),
+        };
         // Per-entity component path (preferred). Each fallback below mirrors the
         // pre-#697 `.single()` error arm, so a ship (or test fixture) missing a
         // component publishes exactly what it published before.
@@ -976,7 +1070,26 @@ pub(crate) fn publish_weapons_core_blackboard(
                 SystemBlackboard::Weapons(weapons) => weapons.locked_target.clone(),
                 _ => None,
             })
-            .filter(|uuid| live_entity_xz(uuid, &asteroid_q, &entity_q).is_some());
+            .filter(|uuid| {
+                if context.measured() {
+                    config
+                        .zip(broad_tracks)
+                        .and_then(|(config, tracks)| {
+                            let owner =
+                                crate::science::broad::combat_owner(sensing_controls, true)?;
+                            crate::science::contact_routing::alias_for_source(
+                                &config.0,
+                                &entity_bbs,
+                                Some(tracks),
+                                &owner,
+                                uuid,
+                            )
+                        })
+                        .is_some()
+                } else {
+                    live_entity_xz(uuid, &asteroid_q, &entity_q).is_some()
+                }
+            });
 
         // The **Combat Lock** from this ship's own frozen viewscreen blackboard
         // (spec §1/§3). Weapons is a cross-system consumer of the tactical
@@ -992,9 +1105,13 @@ pub(crate) fn publish_weapons_core_blackboard(
         // latency and nothing else.
         let target_uuid = viewscreen_combat_lock(&entity_bbs);
 
-        let target_live_pos: Option<(f32, f32)> = target_uuid
-            .as_deref()
-            .and_then(|uuid| live_entity_xz(uuid, &asteroid_q, &entity_q));
+        let target_live_pos = if context.measured() {
+            None
+        } else {
+            target_uuid
+                .as_deref()
+                .and_then(|uuid| live_entity_xz(uuid, &asteroid_q, &entity_q))
+        };
 
         // Liveness filter, for the same reason `locked_target` carries one
         // (above): the combat lock read here is last tick's, so a target killed
@@ -1003,10 +1120,10 @@ pub(crate) fn publish_weapons_core_blackboard(
         // documented `locked_target == target_uuid` agreement and drawing a
         // reticle on a despawned entity. `target_live_pos` is exactly that
         // liveness probe, so this costs no extra lookup.
-        let target_uuid = target_uuid.filter(|_| target_live_pos.is_some());
+        let target_uuid = target_uuid.filter(|_| context.measured() || target_live_pos.is_some());
 
         let target_name: Option<String> = target_uuid.as_deref().and_then(|uuid| {
-            if sensing_controls.is_some() {
+            if context.measured() {
                 let config = config?;
                 let tracks = broad_tracks?;
                 let owner = crate::science::broad::combat_owner(sensing_controls, true)?;
@@ -1023,7 +1140,7 @@ pub(crate) fn publish_weapons_core_blackboard(
                 .find_map(|(u, n)| (u.0 == uuid).then(|| n.0.clone()))
         });
 
-        let banks: Vec<PhaserBankState> = combat_config
+        let mut banks: Vec<PhaserBankState> = combat_config
             .map(|combat_config| {
                 build_bank_states(
                     combat_config,
@@ -1036,7 +1153,7 @@ pub(crate) fn publish_weapons_core_blackboard(
             })
             .unwrap_or_default();
 
-        let tubes: Vec<TorpedoTubeState> = torpedo_sys
+        let mut tubes: Vec<TorpedoTubeState> = torpedo_sys
             .map(|torpedo_sys| {
                 build_tube_states(torpedo_sys, physics, target_live_pos, control_sources)
             })
@@ -1061,7 +1178,7 @@ pub(crate) fn publish_weapons_core_blackboard(
         // Blaster bank states from this ship's own BlasterSystemResource, with
         // the shared readiness contract (issue #764) derived from this ship's
         // physics + frozen combat-lock target position + per-bank offline state.
-        let blasters: Vec<BlasterBankState> = blaster_res
+        let mut blasters: Vec<BlasterBankState> = blaster_res
             .map(|r| {
                 r.0.iter()
                     .map(|b| {
@@ -1083,7 +1200,42 @@ pub(crate) fn publish_weapons_core_blackboard(
             })
             .unwrap_or_default();
 
+        context.apply(
+            physics,
+            control_sources,
+            combat_config,
+            torpedo_sys,
+            blaster_res,
+            &mut banks,
+            &mut tubes,
+            &mut blasters,
+            |route| live_entity_xz(route, &asteroid_q, &entity_q).map(|(x, z)| [x, z]),
+            |route| {
+                entity_q.iter().any(|(id, _)| id.0 == route)
+                    || asteroid_q.iter().any(|(id, _)| id.0 == route)
+            },
+        );
+        phaser_arcs.retain_mut(|arc| {
+            crate::ship::system_registry::phaser_bank_system_id(&arc.id)
+                .and_then(|owner| context.bearing(&owner, arc.facing_deg))
+                .is_some_and(|bearing| {
+                    arc.facing_deg = bearing;
+                    true
+                })
+        });
+        torpedo_arcs.retain_mut(|arc| {
+            crate::ship::system_registry::torpedo_tube_system_id(&arc.id)
+                .and_then(|owner| context.bearing(&owner, arc.facing_deg))
+                .is_some_and(|bearing| {
+                    arc.facing_deg = bearing;
+                    true
+                })
+        });
+
         let bb = WeaponsBlackboard {
+            assignments: assignments.map(|state| state.0.0.iter().map(|(owner, intent)|
+                (owner.clone(), phoenix_model::weapon_targets_view::WeaponTargetAssignmentView::from(intent)))
+                .collect()).unwrap_or_default(),
             weapons_restrained: power.is_some_and(|power| power.0.weapons_restrained()),
             weapons_restraint_auto: control_sources.is_some_and(|sources| {
                 sources
@@ -1416,6 +1568,7 @@ pub(crate) fn publish_tactical_radar_blackboard(
 /// this for free: `entities::spawner` gives every ship with a
 /// `[behaviour]` block its own `ShipSystemControlSources`.
 pub(crate) fn publish_phaser_bank_blackboards(
+    content: Option<Res<crate::world::server::WorldContentRuntime>>,
     mut ship_q: Query<
         (
             Option<&ActiveBeam>,
@@ -1424,16 +1577,43 @@ pub(crate) fn publish_phaser_bank_blackboards(
             Option<&ShipPhysics>,
             Option<&ShipSystemControlSources>,
             &mut crate::server_app::ShipSystemBlackboards,
+            (
+                Option<&crate::ship_plugin::ShipConfigComponent>,
+                Option<&crate::science::broad::BroadTracks>,
+                Option<&crate::science::broad::SensingControls>,
+                Option<&super::assignments::ShipWeaponTargets>,
+                Option<&crate::weapons::mounts::MountProfiles>,
+                Option<&crate::weapons::mounts::ShipMounts>,
+                Option<&crate::entities::spawner::EntityUuid>,
+            ),
         ),
         With<crate::server_app::Ship>,
     >,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
     entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
-    for (beam, cooldown, combat_config, ship_physics, control_sources, mut entity_bbs) in
-        ship_q.iter_mut()
+    for (
+        beam,
+        cooldown,
+        combat_config,
+        ship_physics,
+        control_sources,
+        mut entity_bbs,
+        (config, tracks, controls, targets, profiles, mounts, observer),
+    ) in ship_q.iter_mut()
     {
         let physics = ship_physics.copied().unwrap_or_default();
+        let context = readiness::Context {
+            config,
+            boards: &entity_bbs,
+            tracks,
+            controls,
+            targets,
+            profiles,
+            mounts,
+            observer,
+            runtime: content.as_deref(),
+        };
         // Fallbacks mirror `publish_weapons_core_blackboard`: a ship (or test
         // fixture) missing a component publishes exactly what it did before.
         let default_beam;
@@ -1460,11 +1640,15 @@ pub(crate) fn publish_phaser_bank_blackboards(
         // in-arc check off the same combat lock and never read these entries.
         // One-tick lag, as above.
         let target_uuid = viewscreen_combat_lock(&entity_bbs);
-        let target_live_pos: Option<(f32, f32)> = target_uuid
-            .as_deref()
-            .and_then(|uuid| live_entity_xz(uuid, &asteroid_q, &entity_q));
+        let target_live_pos = if context.measured() {
+            None
+        } else {
+            target_uuid
+                .as_deref()
+                .and_then(|uuid| live_entity_xz(uuid, &asteroid_q, &entity_q))
+        };
 
-        let banks = build_bank_states(
+        let mut banks = build_bank_states(
             combat_config,
             cooldown,
             beam,
@@ -1473,6 +1657,21 @@ pub(crate) fn publish_phaser_bank_blackboards(
             control_sources,
         );
 
+        context.apply(
+            physics,
+            control_sources,
+            Some(combat_config),
+            None,
+            None,
+            &mut banks,
+            &mut [],
+            &mut [],
+            |route| live_entity_xz(route, &asteroid_q, &entity_q).map(|(x, z)| [x, z]),
+            |route| {
+                entity_q.iter().any(|(id, _)| id.0 == route)
+                    || asteroid_q.iter().any(|(id, _)| id.0 == route)
+            },
+        );
         for bank_state in &banks {
             let Some(bank_sysid) =
                 crate::ship::system_registry::phaser_bank_system_id(&bank_state.id)

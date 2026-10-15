@@ -1,0 +1,55 @@
+# [ai] Optional increment15 PDC demonstration; provisional tuning, not a balance claim.
+# Reuses Broadside's real finite local22 total rounds and paid reserve; no extra
+# stock, power generation, crew seat or controller. Its fixed full-coverage mount
+# has no yaw-only Turret, so an acquired elevated missile can be aimed in XYZ.
+includes = ["broadside_cruiser.toml"]
+name = "entity.pdc_cruiser.name"
+
+# Explicit selection grant. The existing paid radar must still classify and
+# publish a current Missile record before this bank's explicit filter can fire.
+[weapons_console.radar]
+selects = ["ship", "station", "asteroid", "missile"]
+
+[[weapon]]
+id = "blaster-side"
+targets = ["missile"]
+strategy_id = "side"
+barrels = [ "phasers_fore", "phasers_aft" ]
+
+[weapon.mount]
+facing_deg = 0
+fire_arc_deg = 360
+range = 35
+
+[weapon.delivery]
+kind = "bolt"
+volley_count = 0
+volley_interval_secs = 0.5
+cooldown_secs = 5
+projectile_speed = 50
+collision_radius = 0.8
+visual_scale = 0.5
+damage = 16
+shield_pierce = 0.1
+recoil_impulse = 6
+
+[weapon.delivery.rounds]
+store = "local-kinetic-rounds"
+amount = 1
+
+[weapon.ai.param]
+min_alert_to_fire = 1
+
+[[weapon.ai.rule]]
+priority = 0
+channel = "blaster_fire"
+when = "fact(red_alert) >= param(min_alert_to_fire)"
+verb = "fire_blaster"
+
+[weapon.impact]
+damage_type = "physical"
+penetration = 25
+
+[[weapon.pattern]]
+barrels = [ 0, 1 ]
+offset_secs = 0

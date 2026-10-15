@@ -26,6 +26,7 @@ fn track() -> BroadTrack {
             1.0,
             1.0,
             &[BroadMeasurement {
+                elevation: None,
                 source: "private".into(),
                 observation: None,
                 selectable: true,

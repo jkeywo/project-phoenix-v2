@@ -327,6 +327,12 @@ pub(crate) fn handle_fire_torpedo(
         With<crate::server_app::Ship>,
     >,
     physical: Query<&crate::ship::compartment_damage::ShipDamage>,
+    aims: super::assignments::WeaponAimInputs,
+    legacy_positions: Query<(
+        Option<&crate::entities::spawner::EntityUuid>,
+        Option<&AsteroidUuid>,
+        &Transform,
+    )>,
     mut outbox: ResMut<SimOutbox>,
     mut balance_events: Option<
         ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
@@ -368,7 +374,7 @@ pub(crate) fn handle_fire_torpedo(
             transform,
             markers_opt,
             admitted,
-            blackboards_opt,
+            _blackboards_opt,
             source_uuid_opt,
             torpedo_sys_comp,
             weapon_fired_comp,
@@ -564,6 +570,81 @@ pub(crate) fn handle_fire_torpedo(
                 );
                 continue;
             }
+            let Some(tube_bearing) = aims.bearing(
+                shooter,
+                &cmd.target,
+                torpedo_sys
+                    .tube(&tube_id)
+                    .expect("resolved tube")
+                    .facing_deg,
+            ) else {
+                continue;
+            };
+            // Resolve only this tube's permitted target. Explicit Hold and a
+            // lost assigned contact never fall through to a different target.
+            let legacy = |route: &str| {
+                legacy_positions
+                    .iter()
+                    .find_map(|(uuid, asteroid, transform)| {
+                        (uuid.is_some_and(|id| id.0 == route)
+                            || asteroid.is_some_and(|id| id.0 == route))
+                        .then_some([transform.translation.x, transform.translation.z])
+                    })
+            };
+            let has_intent = aims.has_target_intent(shooter, &cmd.target);
+            let aim = aims.resolve(shooter, &cmd.target, legacy).or_else(|| {
+                (!has_intent)
+                    .then(|| {
+                        target_uuid.as_deref().and_then(|contact| {
+                            aims.resolve_reference(shooter, &cmd.target, contact, legacy)
+                        })
+                    })
+                    .flatten()
+            });
+            if aim.is_none()
+                && (has_intent
+                    || target_uuid.is_some()
+                    || torpedo_sys
+                        .tube(&tube_id)
+                        .is_some_and(|tube| tube.targets.is_some()))
+            {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::MissingTarget),
+                );
+                continue;
+            }
+            if let Some(aim) = &aim {
+                let tube = torpedo_sys.tube(&tube_id).expect("resolved tube");
+                if !aim.allows(tube.targets.as_deref()) {
+                    super::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        WeaponActionResult::Refused(WeaponActionRefusal::MissingTarget),
+                    );
+                    continue;
+                }
+                let geometry = aims.geometry(
+                    shooter,
+                    &cmd.target,
+                    &crate::weapons::mount::MountConfig {
+                        facing_deg: tube.facing_deg,
+                        fire_arc_deg: tube.fire_arc_deg,
+                        range: torpedo_sys.config.speed * torpedo_sys.config.lifespan,
+                    },
+                    aim,
+                    physics,
+                );
+                if !geometry.in_arc || !geometry.in_range {
+                    super::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        WeaponActionResult::Refused(WeaponActionRefusal::MissingTarget),
+                    );
+                    continue;
+                }
+            }
             if physical.get(shooter).is_ok_and(|damage| {
                 damage.factor(&cmd.target, phoenix_model::damage::DamageBinding::Operation) <= 0.0
             }) || !power_opt
@@ -582,24 +663,9 @@ pub(crate) fn handle_fire_torpedo(
                 id_mint.as_deref(),
                 crate::world_id::IdNamespace::Projectile,
             );
-            let tube_facing_rad = torpedo_sys
-                .tube(tube_id.as_str())
-                .map(|t| t.facing_deg.to_radians())
-                .unwrap_or(0.0);
-            let launch_heading = physics.yaw + tube_facing_rad;
+            let launch_heading = physics.yaw + tube_bearing.to_radians();
             let source_uuid = source_uuid_opt.map(|u| u.0.clone());
-            // Homing target: the ship's frozen Combat Lock (issue #829),
-            // else the explicit target on the FireTorpedo payload.
-            let combat_lock = match blackboards_opt.as_ref().and_then(|bbs| {
-                bbs.0
-                    .get(&crate::ship::system_registry::viewscreen_system_id())
-            }) {
-                Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => {
-                    bb.combat_lock.clone()
-                }
-                _ => None,
-            };
-            let homing_uuid: Option<String> = combat_lock.or_else(|| target_uuid.clone());
+            let homing_uuid = aim.map(|aim| aim.route);
             // Resolve one world-XZ origin per authored barrel marker (issue
             // #766), mirroring `tick_blaster_system`. A tube with no barrels
             // authored yields an empty slice, so `launch_with_barrels` falls
@@ -857,13 +923,20 @@ pub fn handle_torpedo_magazine_inter_system(
 }
 
 /// Phase 1 of the torpedo tick (issue #724): build the one-tick
-/// [`TorpedoTargetSnapshot`] — target positions (live ECS with a
-/// `WorldResource` fallback) and the proximity detonation target list —
+/// [`TorpedoTargetSnapshot`] contains finite per-round seeker observations
+/// separately from the physical proximity detonation target list,
 /// which `tick_torpedo_lifecycle` reads later in the same tick.
 pub(crate) fn build_torpedo_target_snapshot(
     world: Res<WorldResource>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    entity_q: Query<
+        (
+            &crate::entities::spawner::EntityUuid,
+            &Transform,
+            Option<&ShipPhysics>,
+        ),
+        Without<AsteroidUuid>,
+    >,
     // Virtual entities (asteroid-field anchors, region trigger volumes) are
     // organisational/effect-only. They carry an `EntityUuid` and a non-zero
     // `radius` in the world snapshot (from `outer_radius` or region shape),
@@ -880,6 +953,11 @@ pub(crate) fn build_torpedo_target_snapshot(
         )>,
     >,
     mut snapshot: ResMut<TorpedoTargetSnapshot>,
+    owners: Query<&TorpedoSystemResource>,
+    fallback: Option<Res<TorpedoSystemResource>>,
+    paths: crate::regions::signal_path::RegionSignalQuery,
+    tick: Option<Res<crate::sim_tick::SimTick>>,
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
 ) {
     snapshot.clear();
 
@@ -903,30 +981,81 @@ pub(crate) fn build_torpedo_target_snapshot(
         .map(|e| e.uuid.as_str())
         .collect();
 
-    // Build target positions from *live* ECS transforms, falling back to the
-    // (stale) WorldResource snapshot for entities not currently in the ECS.
-    let target_positions: std::collections::HashMap<String, (f32, f32, f32)> = {
-        let mut map: std::collections::HashMap<String, (f32, f32, f32)> =
-            std::collections::HashMap::new();
-        for (u, t) in asteroid_q.iter() {
-            map.insert(
-                u.0.clone(),
-                (t.translation.x, t.translation.y, t.translation.z),
-            );
+    // The physical seeker samples live actors only. A cached WorldResource
+    // row can remain useful for physical coarse collision, never for refreshing
+    // a round's retained knowledge after the actual subject has disappeared.
+    let live_positions: std::collections::HashMap<_, _> = asteroid_q
+        .iter()
+        .map(|(id, transform)| (id.0.clone(), transform.translation))
+        .chain(
+            entity_q
+                .iter()
+                .filter(|(id, _, _)| !virtual_uuids.contains(id.0.as_str()))
+                .map(|(id, transform, physics)| {
+                    (
+                        id.0.clone(),
+                        physics.map_or(transform.translation, |pose| {
+                            Vec3::new(pose.x, pose.y, pose.z)
+                        }),
+                    )
+                }),
+        )
+        .collect();
+    let mut guidance = std::collections::HashMap::new();
+    if let Some(tick) = tick {
+        let mut sample_owner = |owner: &TorpedoSystemResource| {
+            for round in &owner.0.in_flight {
+                let (Some(profile), Some(target)) = (&round.profile.seeker, &round.target_uuid)
+                else {
+                    continue;
+                };
+                if runtime.as_ref().is_some_and(|runtime| {
+                    std::iter::once(round.uuid.as_str())
+                        .chain(round.source_uuid.as_deref())
+                        .any(|observer| {
+                            crate::gm::operations::contact::mode(
+                                &runtime.contact_overrides,
+                                observer,
+                                target,
+                            ) == crate::gm::operations::contact::ContactMode::Conceal
+                        })
+                }) {
+                    continue;
+                }
+                let Some(position) = live_positions.get(target) else {
+                    continue;
+                };
+                let origin = Vec3::new(round.x, round.y, round.z);
+                let transmission = paths.transmission(
+                    origin,
+                    *position,
+                    crate::regions::signal_path::SignalClass::Sensors,
+                );
+                if let Some(observation) =
+                    phoenix_sim_gameplay::weapons::guidance::seeker_observation(
+                        profile,
+                        origin.to_array(),
+                        round.heading,
+                        round.pitch,
+                        target,
+                        position.to_array(),
+                        transmission,
+                        tick.0,
+                    )
+                {
+                    guidance.insert(round.uuid.clone(), observation);
+                }
+            }
+        };
+        for owner in &owners {
+            sample_owner(owner);
         }
-        for (u, t) in entity_q.iter() {
-            map.insert(
-                u.0.clone(),
-                (t.translation.x, t.translation.y, t.translation.z),
-            );
+        if owners.is_empty() {
+            if let Some(owner) = fallback.as_deref() {
+                sample_owner(owner);
+            }
         }
-        // Fill remaining entries from WorldResource snapshot for completeness.
-        for e in world.0.entities.iter() {
-            map.entry(e.uuid.clone())
-                .or_insert_with(|| (e.x(), e.y(), e.z()));
-        }
-        map
-    };
+    }
 
     // Radius by UUID, indexed once up front. This used to be a
     // `world.0.entities.iter().find(|e| e.uuid == ...)` inside each of the two
@@ -963,16 +1092,14 @@ pub(crate) fn build_torpedo_target_snapshot(
                 (t.translation.x, t.translation.y, t.translation.z, radius),
             );
         }
-        for (u, t) in entity_q.iter() {
+        for (u, t, physics) in entity_q.iter() {
             if virtual_uuids.contains(u.0.as_str()) || virtual_snapshot_uuids.contains(u.0.as_str())
             {
                 continue;
             }
             let radius = radius_by_uuid.get(u.0.as_str()).copied().unwrap_or(0.0);
-            map.insert(
-                u.0.clone(),
-                (t.translation.x, t.translation.y, t.translation.z, radius),
-            );
+            let position = physics.map_or(t.translation, |pose| Vec3::new(pose.x, pose.y, pose.z));
+            map.insert(u.0.clone(), (position.x, position.y, position.z, radius));
         }
         for e in world.0.entities.iter() {
             if virtual_uuids.contains(e.uuid.as_str())
@@ -998,7 +1125,7 @@ pub(crate) fn build_torpedo_target_snapshot(
         out
     };
 
-    snapshot.target_positions = target_positions;
+    snapshot.guidance = guidance;
     snapshot.targets = targets;
 }
 
@@ -1025,9 +1152,8 @@ pub(crate) struct HitPositionQueries<'w, 's> {
     >,
 }
 
-/// Phase 2 of the torpedo tick (issue #724): per-ship torpedo tick —
-/// guidance/expiry via the [`TorpedoTargetSnapshot`] built earlier this
-/// tick, proximity detonation, shield routing, hull damage, despawn,
+/// Terminal guided settlement runs after physical PDC Damage: surviving
+/// proximity detonation and expiry, shield routing, hull damage, despawn,
 /// broadcasts and VFX events.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tick_torpedo_lifecycle(
@@ -1040,9 +1166,11 @@ pub(crate) fn tick_torpedo_lifecycle(
             Entity,
             Option<&crate::entities::spawner::EntityUuid>,
             &mut TorpedoSystemResource,
-            Option<&mut crate::ship::power::ShipPowerSystem>,
         ),
-        With<crate::server_app::Ship>,
+        Or<(
+            With<crate::server_app::Ship>,
+            With<super::flight_carrier::WeaponFlightCarrier>,
+        )>,
     >,
     (mut torpedo_sys_res, ships): (
         ResMut<TorpedoSystemResource>,
@@ -1051,7 +1179,6 @@ pub(crate) fn tick_torpedo_lifecycle(
     // Roster/tracked removal and its read-only chart visibility share one param
     // so this lifecycle stays within Bevy's parameter ceiling.
     mut removal: crate::server_app::entity_removal::EntityRemoval,
-    time: Res<Time>,
     mut outbox: ResMut<SimOutbox>,
     mut hull_query: Query<
         (
@@ -1093,27 +1220,24 @@ pub(crate) fn tick_torpedo_lifecycle(
     // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
     // registered the message still pass Bevy's parameter validation.
     mut balance_events: Option<ResMut<Messages<crate::core::balance::BalanceEvent>>>,
-    // Seeded RNG + log filter, bundled: separately they put this system one
-    // over Bevy's 16-parameter ceiling.
-    // Only torpedo lifecycle allocates identities among the damage bundle users.
-    (ambient, id_mint): (
-        crate::server_app::SimRngAndLog<'_, { crate::sim_rng::SimStream::TorpedoDamage as usize }>,
-        crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Projectile as usize }>,
-    ),
+    // Physical settlement consumes the existing damage RNG; only the earlier
+    // advancement phase can emit/mint additional rounds.
+    ambient: crate::server_app::SimRngAndLog<
+        '_,
+        { crate::sim_rng::SimStream::TorpedoDamage as usize },
+    >,
 ) {
     let sim_rng = &ambient.rng;
-    let id_mint = id_mint.as_deref();
     let log = &ambient.log;
-    let dt = time.delta_secs();
     let mut weapons_target_opt = weapons_target_q.single_mut().ok();
-    let target_positions = &snapshot.target_positions;
     let targets = &snapshot.targets;
 
-    // ── Phase 1: tick every ship's TorpedoSystem + collect detonation events ──
+    // ── Collect surviving endpoint detonation events in stable owner order ──
     //
     // Iterate all ships (`With<Ship>`) with a `TorpedoSystemResource`
-    // component — player + NPC. Each ship ticks its own tubes, expires its
-    // own torpedoes, and produces its own detonation-hit list.
+    // component — player + NPC. Physics already advanced each real vector.
+    // PDC has resolved its actual earlier crossings; only surviving endpoint
+    // payloads and terminal expiry are settled here.
     //
     // The Resource fallback runs only when NO Ship entity carries the
     // component; this preserves the legacy Resource-only test paths.
@@ -1133,16 +1257,13 @@ pub(crate) fn tick_torpedo_lifecycle(
     let mut any_ship_component = false;
 
     // Stable shooter order (issue #1052), the same mechanism
-    // `server_app::handle_collisions` has used since #896. Two things ride on
-    // it: the detonations this walk collects are applied — and draw from
-    // `SimStream::TorpedoDamage` — in collection order, and each ship's tick
-    // mints `IdNamespace::Projectile` ids from the shared `WorldIdMint`, so
-    // archetype order decided both which hit consumed which draw and which
-    // launch got which id. The proximity `targets` list this feeds is already
-    // uuid-sorted for the same class of reason.
+    // `server_app::handle_collisions` has used since #896. The detonations
+    // draw from `SimStream::TorpedoDamage` in collection order. Physics uses
+    // the same stable owner order for emission IDs; Damage does not mint.
+    // The physical proximity targets are independently UUID-sorted.
     let mut shooter_order: Vec<((String, bevy::ecs::entity::EntityIndex), Entity)> = torpedo_sys_q
         .iter()
-        .map(|(entity, uuid, _, _)| {
+        .map(|(entity, uuid, _)| {
             (
                 (
                     uuid.map(|u| u.0.clone()).unwrap_or_default(),
@@ -1155,101 +1276,10 @@ pub(crate) fn tick_torpedo_lifecycle(
     shooter_order.sort();
 
     for shooter in shooter_order.into_iter().map(|(_, entity)| entity) {
-        let Ok((_, _, mut torpedo_sys, mut power)) = torpedo_sys_q.get_mut(shooter) else {
+        let Ok((_, _, mut torpedo_sys)) = torpedo_sys_q.get_mut(shooter) else {
             continue;
         };
         any_ship_component = true;
-        let machinery = hull_query.get(shooter).ok().and_then(|row| row.5);
-        let can_work = |system: &crate::core::messages::SystemId| {
-            machinery.is_none_or(|damage| {
-                damage.factor(system, phoenix_model::damage::DamageBinding::Operation) > 0.0
-            })
-        };
-        let result = torpedo_sys.0.tick_with_work(
-            dt,
-            target_positions,
-            &mut |work| {
-                use crate::weapons::torpedo::TorpedoWork;
-                let Some(power) = power.as_deref_mut() else {
-                    return 0.0;
-                };
-                match work {
-                    TorpedoWork::Progress { tube, dt } => {
-                        crate::ship::system_registry::torpedo_tube_system_id(tube)
-                            .filter(|id| can_work(id))
-                            .and_then(|id| power.0.work_continuous(&id, dt, 1.0).ok())
-                            .map_or(0.0, |grant| grant.fraction)
-                    }
-                    TorpedoWork::Transfer => u8::from(
-                        can_work(&crate::ship::system_registry::torpedo_magazine_system_id())
-                            && matches!(
-                                power.0.try_work_discrete(
-                                    &crate::ship::system_registry::torpedo_magazine_system_id()
-                                ),
-                                Ok(true)
-                            ),
-                    ) as f32,
-                    TorpedoWork::Launch { tube } => u8::from(
-                        !power.0.weapons_restrained()
-                            && crate::ship::system_registry::torpedo_tube_system_id(tube)
-                                .is_some_and(|id| {
-                                    can_work(&id)
-                                        && matches!(power.0.try_work_discrete(&id), Ok(true))
-                                }),
-                    ) as f32,
-                }
-            },
-            &mut || {
-                crate::world_id::mint_live_id_with(
-                    id_mint,
-                    crate::world_id::IdNamespace::Projectile,
-                )
-            },
-        );
-        for expired_uuid in result.expired {
-            outbox.push_reliable((
-                Target::All,
-                ServerMessage::TorpedoDestroyed { uuid: expired_uuid },
-            ));
-        }
-        for (tube, uuid, x, y, z, heading) in result.burst_launched {
-            let operation_factor =
-                hull_query
-                    .get(shooter)
-                    .ok()
-                    .and_then(|row| row.5)
-                    .map_or(1.0, |damage| {
-                        crate::ship::system_registry::torpedo_tube_system_id(&tube).map_or(
-                            0.0,
-                            |system| {
-                                damage.factor(
-                                    &system,
-                                    phoenix_model::damage::DamageBinding::Operation,
-                                )
-                            },
-                        )
-                    });
-            let multiplier = operation_factor
-                * power.as_deref_mut().map_or(1.0, |p| {
-                    crate::ship::system_registry::torpedo_tube_system_id(&tube)
-                        .map_or(1.0, |id| p.0.fire_strike_weapon(&id.0))
-                });
-            if let Some(torpedo) = torpedo_sys.0.in_flight.iter_mut().find(|t| t.uuid == uuid) {
-                // Snapshot the same combined strike/Operation multiplier for burst rounds.
-                torpedo.strike_damage_bonus = multiplier - 1.0;
-            }
-            outbox.push_reliable((
-                Target::All,
-                ServerMessage::TorpedoLaunched {
-                    uuid,
-                    tube,
-                    x,
-                    y,
-                    z,
-                    heading,
-                },
-            ));
-        }
         let hits = torpedo_sys.0.find_detonation_hits(targets);
         for (torpedo_uuid, target_uuid) in hits {
             let Some(det) = torpedo_sys.0.handle_collision_full(&torpedo_uuid) else {
@@ -1267,39 +1297,15 @@ pub(crate) fn tick_torpedo_lifecycle(
                 tube_id: det.tube_id,
             });
         }
+        torpedo_sys.0.finish_collision_interval();
+        for uuid in torpedo_sys.0.settle_expired() {
+            outbox.push_reliable((Target::All, ServerMessage::TorpedoDestroyed { uuid }));
+        }
     }
 
     // Resource-only fallback: tests that only insert the global
     // `TorpedoSystemResource` and no Ship entity still work.
     if !any_ship_component && ships.is_empty() {
-        let result =
-            torpedo_sys_res
-                .0
-                .tick_with_work(dt, target_positions, &mut |_| 0.0, &mut || {
-                    crate::world_id::mint_live_id_with(
-                        id_mint,
-                        crate::world_id::IdNamespace::Projectile,
-                    )
-                });
-        for expired_uuid in result.expired {
-            outbox.push_reliable((
-                Target::All,
-                ServerMessage::TorpedoDestroyed { uuid: expired_uuid },
-            ));
-        }
-        for (tube, uuid, x, y, z, heading) in result.burst_launched {
-            outbox.push_reliable((
-                Target::All,
-                ServerMessage::TorpedoLaunched {
-                    uuid,
-                    tube,
-                    x,
-                    y,
-                    z,
-                    heading,
-                },
-            ));
-        }
         let hits = torpedo_sys_res.0.find_detonation_hits(targets);
         for (torpedo_uuid, target_uuid) in hits {
             let Some(det) = torpedo_sys_res.0.handle_collision_full(&torpedo_uuid) else {
@@ -1316,6 +1322,10 @@ pub(crate) fn tick_torpedo_lifecycle(
                 source_uuid: det.source_uuid,
                 tube_id: det.tube_id,
             });
+        }
+        torpedo_sys_res.0.finish_collision_interval();
+        for uuid in torpedo_sys_res.0.settle_expired() {
+            outbox.push_reliable((Target::All, ServerMessage::TorpedoDestroyed { uuid }));
         }
     }
 

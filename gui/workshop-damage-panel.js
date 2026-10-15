@@ -1,7 +1,7 @@
 import { t } from './strings.js';
 import { runWorkshopMutation } from './workshop-edit-session.js';
 import { inspectDamage, applyDamageOperation } from '../editor/workshop-damage.js';
-import { DAMAGE_TYPES, DAMAGE_BINDINGS, defaultDamageComponent } from '../editor/workshop-damage-model.js';
+import { DAMAGE_TYPES, DAMAGE_BINDINGS, defaultDamageComponent, defaultEmpResistance } from '../editor/workshop-damage-model.js';
 
 /** Supported physical definitions, edited through the existing accepted source history. */
 export function mountWorkshopDamage({ root, provider, runtime, draft: getDraft, busy, setBusy, changed = () => {}, attach = true }) {
@@ -15,6 +15,8 @@ export function mountWorkshopDamage({ root, provider, runtime, draft: getDraft, 
   const fill = (select, values, previous) => { select.replaceChildren(); for (const value of values) option(select, value); select.value = values.includes(previous) ? previous : values[0] || ''; };
   const node = el('section', 'panel'), template = el('select', 'template'), status = el('p', 'status', null, { role: 'status' });
   const materialise = input('materialise', 'checkbox'), materials = el('select', 'materials'), materialId = input('material-id');
+  const empEnabled = input('emp-enabled', 'checkbox'), empResistance = input('emp-resistance', 'number'), empStacks = input('emp-stacks', 'number'), empDecay = input('emp-decay', 'number');
+  const empBindings = Object.fromEntries(DAMAGE_BINDINGS.map(binding => [binding, input('emp-binding-' + binding, 'checkbox')]));
   const resistance = Object.fromEntries(DAMAGE_TYPES.map(type => [type, input('resistance-' + type, 'number')])), residual = input('residual', 'number');
   const remedies = el('select', 'remedies'), remedyId = input('remedy-id'), work = input('work-secs', 'number'), manual = input('manual-work-fraction', 'number'), hp = input('structural-hp', 'number');
   const outcome = el('select', 'outcome'), patchFactor = input('patch-factor', 'number'), requirements = el('div', 'requirements');
@@ -34,6 +36,7 @@ export function mountWorkshopDamage({ root, provider, runtime, draft: getDraft, 
     create.disabled ||= !!inspection?.damage;
     for (const section of node.querySelectorAll('fieldset')) section.disabled = !inspection?.damage || disposed || loading || busy();
     hp.disabled ||= outcome.value !== 'structural'; patchFactor.disabled ||= outcome.value !== 'patch';
+    for (const control of [empResistance, empStacks, empDecay, ...Object.values(empBindings)]) control.disabled ||= !empEnabled.checked;
   }
   function paintMaterial(value = material()) {
     materialId.value = materials.value; for (const [type, control] of Object.entries(resistance)) control.value = value?.resistance[type] ?? 0;
@@ -60,6 +63,9 @@ export function mountWorkshopDamage({ root, provider, runtime, draft: getDraft, 
   }
   function paintComponents() { fill(components, (selectedSystem()?.damage_component || []).map(component => component.id), components.value); paintComponent(); }
   function paint() {
+    const emp = inspection?.damage?.emp || defaultEmpResistance(); empEnabled.checked = !!inspection?.damage?.emp;
+    empResistance.value = emp.resistance_per_stack; empStacks.value = emp.max_stacks; empDecay.value = emp.decay_secs;
+    for (const [binding, control] of Object.entries(empBindings)) control.checked = emp.bindings.includes(binding);
     fill(materials, Object.keys(inspection?.damage?.materials || {}), materials.value); paintMaterial();
     fill(remedies, Object.keys(inspection?.damage?.remedies || {}), remedies.value); paintRemedy();
     fill(systems, (inspection?.systems || []).map(system => system.id), systems.value); paintComponents(); controls();
@@ -92,6 +98,17 @@ export function mountWorkshopDamage({ root, provider, runtime, draft: getDraft, 
     void apply({ type: 'damage-components', system: systems.value, components: rows });
   });
   const materialSection = el('fieldset'), remedySection = el('fieldset'), componentSection = el('fieldset');
+  const empSection = el('fieldset');
+  const saveEmp = button('save-emp', 'save_emp', () => {
+    const damage = clone(inspection.damage);
+    if (empEnabled.checked) damage.emp = { resistance_per_stack: empResistance.valueAsNumber, max_stacks: empStacks.valueAsNumber,
+      decay_secs: empDecay.valueAsNumber, bindings: Object.entries(empBindings).filter(([, control]) => control.checked).map(([binding]) => binding) };
+    else delete damage.emp;
+    void apply({ type: 'damage-profile', damage });
+  });
+  empSection.append(el('legend', null, 'emp_receiver'), label(empEnabled, 'emp_enabled'), label(empResistance, 'emp_resistance'), label(empStacks, 'emp_stacks'), label(empDecay, 'emp_decay'),
+    ...Object.entries(empBindings).map(([binding, control]) => label(control, 'binding.' + binding)), saveEmp);
+  empEnabled.addEventListener('change', controls);
   materialSection.append(el('legend', null, 'materials'), label(materials, 'material'), label(materialId, 'id'), ...Object.entries(resistance).map(([type, control]) => label(control, 'resistance.' + type)), label(residual, 'residual'),
     button('new-material', 'new', () => { materials.selectedIndex = -1; paintMaterial({ resistance: { physical: 1, laser: 1 }, residual_fraction: 0.1 }); materialId.value = ''; }), saveMaterial,
     button('remove-material', 'remove', () => { const damage = clone(inspection.damage); delete damage.materials[materials.value]; void apply({ type: 'damage-profile', damage }); }));
@@ -102,7 +119,7 @@ export function mountWorkshopDamage({ root, provider, runtime, draft: getDraft, 
     ...Object.entries(susceptibility).map(([type, control]) => label(control, 'susceptibility.' + type)), label(threshold, 'threshold'), label(degraded, 'degraded'), label(full, 'full_remedy'), label(patch, 'patch_remedy'), label(field, 'field_replaceable'),
     button('new-component', 'new', () => { components.selectedIndex = -1; paintComponent(); }), saveComponent,
     button('remove-component', 'remove', () => void apply({ type: 'damage-components', system: systems.value, components: (selectedSystem().damage_component || []).filter(row => row.id !== components.value) })));
-  node.append(el('h3', null, 'title'), el('p', null, 'hint'), label(template, 'template'), label(materialise, 'materialise'), create, status, materialSection, remedySection, componentSection);
+  node.append(el('h3', null, 'title'), el('p', null, 'hint'), label(template, 'template'), label(materialise, 'materialise'), create, status, materialSection, remedySection, componentSection, empSection);
   if (attach) root.append(node);
   function inspect(force = false) {
     const draft = getDraft(); if (!draft || !dependencies) { inspection = null; controls(); return; }

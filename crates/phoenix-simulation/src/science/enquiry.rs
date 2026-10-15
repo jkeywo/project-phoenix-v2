@@ -33,6 +33,15 @@ pub(crate) fn install(
 
 #[derive(SystemParam)]
 pub struct EnquiryScene<'w, 's> {
+    shields: Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntityUuid,
+            &'static crate::ship::shields::ShipShields,
+            Option<&'static crate::ship::shield_enquiry::ShieldProbeProfile>,
+        ),
+    >,
     subjects: Query<
         'w,
         's,
@@ -48,6 +57,24 @@ pub struct EnquiryScene<'w, 's> {
     >,
 }
 impl EnquiryScene<'_, '_> {
+    pub(crate) fn sample_shields(
+        &self,
+        subject: &str,
+        intrusive: bool,
+    ) -> Option<phoenix_model::shield_enquiry::ShieldFinding> {
+        let (_, _, permission, ..) = self.subjects.iter().find(|(id, ..)| id.0 == subject)?;
+        let row = permission.policy.property.iter().find(|row| {
+            row.property == EnquiryProperty::ShieldFrequency
+                && if intrusive { row.intrusive } else { row.normal }
+        })?;
+        let (_, shields, profile) = self.shields.iter().find(|(id, ..)| id.0 == subject)?;
+        phoenix_model::shield_enquiry::ShieldFinding::acquire(
+            shields.frequency(),
+            profile.map_or(Default::default(), |profile| profile.response),
+            row.step,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn sample(
         &self,
@@ -88,6 +115,7 @@ impl EnquiryScene<'_, '_> {
                 ))
             };
             let quantity = match &row.property {
+                EnquiryProperty::ShieldFrequency => None,
                 EnquiryProperty::FieldExposure => exposure().and_then(|value| {
                     let value = quantise_exposure(value, row.step);
                     value.is_finite().then(|| ScanQuantity {

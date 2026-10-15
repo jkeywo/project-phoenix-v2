@@ -1,4 +1,4 @@
-use super::*;
+use crate::core::messages::SystemBlackboard;
 
 #[test]
 fn cohosted_blaster_banks_do_not_share_an_unbound_lock() {
@@ -45,17 +45,28 @@ console = "right-screen"
         }),
     );
     assert_eq!(
-        blaster_ai_combat_lock(Some(&config), &left, Some(&boards)).as_deref(),
+        crate::console::weapons::assignments::effective_weapon_contact(
+            &config.0, &left, &boards, None, None, None
+        )
+        .as_deref(),
         Some("contact")
     );
     assert_eq!(
-        blaster_ai_combat_lock(Some(&config), &right, Some(&boards)),
+        crate::console::weapons::assignments::effective_weapon_contact(
+            &config.0, &right, &boards, None, None, None
+        ),
         None
     );
-    assert_eq!(blaster_ai_combat_lock(None, &left, Some(&boards)), None);
-    // The authoritative machinery applier still uses the existing lock.
+    // Unknown equipment cannot acquire a Console read view from its spelling.
     assert_eq!(
-        blaster_combat_lock(Some(&boards)).as_deref(),
-        Some("contact")
+        crate::console::weapons::assignments::effective_weapon_contact(
+            &config.0,
+            &crate::core::messages::SystemId("unknown-bank".into()),
+            &boards,
+            None,
+            None,
+            None
+        ),
+        None
     );
 }

@@ -2,7 +2,7 @@
   "schema_version": 2,
   "title": "Incremental implementation of the gameplay redesign",
   "approved_date": "2026-10-13",
-  "current_increment": 14,
+  "current_increment": 16,
   "constraints": {
     "serial": false,
     "reference_hull": "assets/entities/alliance_cruiser.toml",
@@ -244,12 +244,17 @@
     {
       "id": 15,
       "title": "Layered combat",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         14
       ],
       "completion": "Interception, longer-range missiles, broadsides, guidance, payloads and optional shield probing support multiple viable styles.",
-      "evidence": []
+      "evidence": [
+        "docs/gameplay-redesign/implementation/increment-15.md",
+        "pasm/spec/design/layered-combat.yaml",
+        "docs/acceptance/1562-layered-combat.md",
+        "docs/gameplay-redesign/implementation/combat-checkpoint.json"
+      ]
     },
     {
       "id": 16,
@@ -260,7 +265,9 @@
         15
       ],
       "completion": "Human/AI channels, generic requests, public chatter, security/interception, relays, receipts and human media use existing networking without message-capacity accounting.",
-      "evidence": []
+      "evidence": [
+        "docs/gameplay-redesign/implementation/increment-16.md"
+      ]
     },
     {
       "id": 17,
@@ -272,7 +279,9 @@
         16
       ],
       "completion": "Jamming, spoofing, protection, concealment and bounded disruption reuse mounts/signals/resources/conditions and expose known/friendly effects.",
-      "evidence": []
+      "evidence": [
+        "docs/gameplay-redesign/implementation/increment-17.md"
+      ]
     },
     {
       "id": 18,
@@ -283,7 +292,9 @@
         15
       ],
       "completion": "Direct/assisted motion, Match Speed, formation/docking and jump/transit preserve the capital/small-craft dimensional split.",
-      "evidence": []
+      "evidence": [
+        "docs/gameplay-redesign/implementation/increment-18.md"
+      ]
     },
     {
       "id": 19,
@@ -295,7 +306,9 @@
         18
       ],
       "completion": "Configured entities plus deployment/sortie/recovery work support probes, turrets, decoys, fighters, shuttles and drones with ordinary autonomous/link-loss behaviour.",
-      "evidence": []
+      "evidence": [
+        "docs/gameplay-redesign/implementation/increment-19.md"
+      ]
     },
     {
       "id": 20,
@@ -306,7 +319,9 @@
         19
       ],
       "completion": "Duty Officers, medical/security/boarding/away/transfer work reuses team/jobs and supports rescue, abandonment and capture participation.",
-      "evidence": []
+      "evidence": [
+        "docs/gameplay-redesign/implementation/increment-20.md"
+      ]
     },
     {
       "id": 21,
@@ -318,7 +333,9 @@
         20
       ],
       "completion": "Facilities, workforce and actor objectives use common equipment/damage/teams/stocks/physical delivery and causal service dependencies.",
-      "evidence": []
+      "evidence": [
+        "docs/gameplay-redesign/implementation/increment-21.md"
+      ]
     },
     {
       "id": 22,
@@ -2860,6 +2877,22 @@
       "user_instruction": "Continue increments 7-18 through completion, committing after each; after the initial commit, agents may validate and fix on isolated worktrees while main continues.",
       "pending_acceptance": "Initial source implementation and targeted field-fitting continuation evidence are committed. Late facility/refit/recovery validation runs on a pinned increment 13 worktree. Full integrated, browser/native, balance and human workload acceptance remain required; this is pipeline advancement, not a verified exit.",
       "evidence": "docs/acceptance/1562-equipment-fitting.md"
+    },
+    {
+      "from_increment": 14,
+      "to_increment": 15,
+      "date": "2026-10-15",
+      "user_instruction": "Update the plan and dependencies for parallel work, then continue through 24 using those lanes, committing each increment as before.",
+      "pending_acceptance": "Initial combat checkpoint and targeted evidence are integrated; remaining guidance/illumination and whole-host combat work continue on isolated worktrees. Full integrated, browser/native, balance/performance and human-workload exits remain open. This is pipeline entry, not verified completion.",
+      "evidence": "docs/acceptance/1562-layered-combat.md"
+    },
+    {
+      "from_increment": 15,
+      "to_increment": 16,
+      "date": "2026-10-15",
+      "user_instruction": "Update the plan and dependencies for parallel work, then continue through 24 using those lanes, committing each increment as before.",
+      "pending_acceptance": "Initial combat checkpoint and targeted evidence are integrated; remaining guidance/illumination and whole-host combat work continue on isolated worktrees. Full integrated, browser/native, balance/performance and human-workload exits remain open. This is pipeline entry, not verified completion.",
+      "evidence": "docs/acceptance/1562-layered-combat.md"
     }
   ],
   "validation_workflow": {

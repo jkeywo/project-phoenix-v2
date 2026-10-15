@@ -297,3 +297,87 @@ fn physical_intake_fault_preserves_charged_work_but_operation_loss_does_not() {
         "tool loss does not erase its battery"
     );
 }
+
+#[test]
+fn emp_shared_status_expires_without_repair_or_physical_damage_reclassification() {
+    use phoenix_model::{
+        damage::{ComponentCondition, DamageBinding},
+        emp::{ComponentEmpState, EmpClock, EmpPayload},
+    };
+    let authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    let mut physical = crate::ship::compartment_damage::ShipDamage::from_config(&authored)
+        .unwrap()
+        .unwrap();
+    let (config, power) = cruiser();
+    let id = SystemId("passive-receiver".into());
+    let component = physical.definition.components[&id]
+        .iter()
+        .find(|(_, row)| row.binding == DamageBinding::Operation)
+        .unwrap()
+        .0
+        .clone();
+    let clock = EmpClock {
+        tick: 100,
+        period_nanos: 1_000_000_000,
+    };
+    let effect = ComponentEmpState::apply(
+        None,
+        physical.definition.config.emp.as_ref().unwrap(),
+        EmpPayload { duration_secs: 3.0 },
+        clock,
+    )
+    .unwrap();
+    physical.emp_clock = Some(clock);
+    physical
+        .state
+        .components
+        .get_mut(&id)
+        .unwrap()
+        .get_mut(&component)
+        .unwrap()
+        .emp = Some(effect);
+    let sources = ControlSourceResolver::new();
+    let status = &project(
+        &config,
+        None,
+        Some(&physical),
+        &sources,
+        None,
+        Some(&power),
+        None,
+    )[&id];
+    assert_eq!(status.availability, Availability::Unavailable);
+    assert!(status
+        .reasons
+        .iter()
+        .any(|reason| reason.code == StatusReasonCode::Emp
+            && reason.component_id.as_ref() == Some(&component)));
+    assert!(!status
+        .reasons
+        .iter()
+        .any(|reason| reason.code == StatusReasonCode::Destroyed));
+    let before = physical.state.clone();
+    physical.emp_clock = Some(EmpClock { tick: 103, ..clock });
+    let status = &project(
+        &config,
+        None,
+        Some(&physical),
+        &sources,
+        None,
+        Some(&power),
+        None,
+    )[&id];
+    assert_eq!(status.availability, Availability::Normal);
+    assert!(!status
+        .reasons
+        .iter()
+        .any(|reason| reason.code == StatusReasonCode::Emp));
+    assert_eq!(physical.state, before);
+    assert_eq!(
+        physical.state.components[&id][&component].condition,
+        ComponentCondition::Healthy
+    );
+}

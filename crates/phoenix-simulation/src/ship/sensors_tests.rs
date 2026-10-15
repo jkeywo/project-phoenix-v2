@@ -351,14 +351,32 @@ fn set_local_weapons_target(app: &mut App, uuid: Option<String>) {
     }
 }
 
+fn acquire_local_hint(app: &mut App, subject: &str, frequency: f32) {
+    let ship = app
+        .world_mut()
+        .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+        .single(app.world())
+        .unwrap();
+    crate::science::shield_enquiry::fixture::acquired(
+        &mut app
+            .world_mut()
+            .get_mut::<crate::server_app::ShipSystemBlackboards>(ship)
+            .unwrap(),
+        subject,
+        frequency,
+    );
+}
+
 #[test]
 fn frequency_hint_emitted_when_target_changes() {
     let mut app = test_app();
     start_game_with_sensors_and_tactical(&mut app);
 
+    acquire_local_hint(&mut app, "asteroid-1", 0.73);
     set_local_weapons_target(&mut app, Some("asteroid-1".into()));
     tick(&mut app); // emits first hint
 
+    acquire_local_hint(&mut app, "asteroid-2", 0.73);
     set_local_weapons_target(&mut app, Some("asteroid-2".into()));
     let enqueue_count = {
         // Tick and count CoordinationEnqueue events written
@@ -423,6 +441,7 @@ fn frequency_hint_not_re_emitted_for_same_target() {
     let mut app = test_app();
     start_game_with_sensors_and_tactical(&mut app);
 
+    acquire_local_hint(&mut app, "asteroid-1", 0.73);
     set_local_weapons_target(&mut app, Some("asteroid-1".into()));
     tick(&mut app); // first emit
 
@@ -526,6 +545,7 @@ fn low_fidelity_ships_emit_here_regardless_of_who_holds_sensors() {
         }
         app.world_mut().resource_mut::<EnqueueLog>().0.clear();
 
+        acquire_local_hint(&mut app, "asteroid-1", 0.73);
         set_local_weapons_target(&mut app, Some("asteroid-1".into()));
         tick(&mut app);
 
@@ -2988,6 +3008,7 @@ fn concealed_contact_stops_low_fidelity_frequency_hints_until_normal() {
         "target",
         crate::gm::operations::contact::ContactMode::Conceal,
     );
+    acquire_local_hint(&mut app, "target", 0.73);
     set_local_weapons_target(&mut app, Some("target".into()));
     tick(&mut app);
     assert!(
@@ -3015,3 +3036,6 @@ fn concealed_contact_stops_low_fidelity_frequency_hints_until_normal() {
             .any(|row| matches!(row.payload, CoordinationPayload::FrequencyHint { .. }))
     );
 }
+
+#[path = "sensors_frequency_tests.rs"]
+mod frequency_evidence_tests;

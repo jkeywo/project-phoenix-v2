@@ -815,8 +815,11 @@ pub fn apply_external_repair(
                                 .map(|((_, target), _)| target.clone())
                                 .collect();
                             let before = damage.structural_totals().0;
-                            let crate::ship::compartment_damage::ShipDamage { definition, state } =
-                                &mut *damage;
+                            let crate::ship::compartment_damage::ShipDamage {
+                                definition,
+                                state,
+                                ..
+                            } = &mut *damage;
                             row.teams.tick_external_physical(
                                 dt,
                                 target_uuid,

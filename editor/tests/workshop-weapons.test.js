@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import fs from 'node:fs';
 import { parse } from 'smol-toml';
 import { WorkshopDocument } from '../workshop-document.js';
 import { createStoreZip } from '../mod-pack-export.js';
@@ -11,6 +12,25 @@ const source = `# root note\n[[weapon]]\nid="beam-a"\nstrategy_id="a"\n[weapon.i
 function draft(text = source) { return new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: '[pack]\nformat=1\nid="mine"\nname="Mine"\nversion="1"\n' }, { path, text }])); }
 function operation(current, fields, deps = dependencies) { return prepareWeaponOperation(current, deps, { path, ...fields }).changes[0].after; }
 function edited(current, deps = dependencies) { const value = inspectWeapons(current, deps, path).weapons[0].weapon; value.mount.range = 50; return value; }
+
+it('adds and removes inherited EMP through complete impact replacement and actual authored bolt data', () => {
+  const inherited = source.replace('[weapon.mount]', '[weapon.impact.emp]\nduration_secs=6\n[weapon.mount]');
+  const deps = { base_files: { [base]: inherited }, packs: [] }, current = draft('includes=["base.toml"]\n# child\n');
+  const selected = inspectWeapons(current, deps, path).weapons[0].weapon;
+  expect(selected.impact.emp.duration_secs).toBe(6); delete selected.impact.emp;
+  expect(() => operation(current, { section: 'weapon', originalId: 'beam-a', weapon: selected }, deps)).toThrow(/materialise/);
+  const after = operation(current, { section: 'weapon', originalId: 'beam-a', weapon: selected, materialise: true }, deps);
+  const resolved = resolveTemplate(path, { [path]: after, [base]: inherited }, parse).resolved.value;
+  expect(resolved.weapon[0].impact).toEqual({ damage_type: 'laser', penetration: 20 });
+  expect(resolved.weapon[0].mount).toEqual(parse(inherited).weapon[0].mount);
+  const read = file => fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+  const actual = resolveTemplate('assets/entities/emp_destroyer.toml', { read }, parse).resolved.value;
+  const baseline = resolveTemplate('assets/entities/alliance_destroyer.toml', { read }, parse).resolved.value;
+  const bank = actual.weapon.find(row => row.id === 'blaster-port'), original = baseline.weapon.find(row => row.id === bank.id);
+  expect(bank.impact.emp).toEqual({ duration_secs: 6 });
+  const copy = structuredClone(bank); delete copy.impact.emp; expect(copy).toEqual(original);
+  expect(actual.energy).toEqual(baseline.energy); expect(actual.damage.emp).toEqual({ resistance_per_stack: 0.5, max_stacks: 8, decay_secs: 20, bindings: ['operation'] });
+});
 describe('Workshop configurable weapon source editing', () => {
   it.each(['\n', '\r\n'])('edits one complete weapon and preserves unrelated source %j', nl => {
     const before = source.replace(/\n/g, nl), current = draft(before);
@@ -85,4 +105,47 @@ describe('Workshop configurable weapon source editing', () => {
     current.apply([{ path, before: source, after: source + '# intervening edit\n' }]); resolve({ accepted: true, findings: [] });
     await expect(pending).rejects.toThrow(/stale/); expect(current.read(path)).toBe(source + '# intervening edit\n');
   });
+});
+
+it('preserves sustained and finite-round authoring through accepted edits and inherited reload', async () => {
+  const read = file => fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+  const actual = resolveTemplate('assets/entities/broadside_cruiser.toml', {read}, parse).resolved.value;
+  const baseline = resolveTemplate('assets/entities/alliance_cruiser.toml', {read}, parse).resolved.value;
+  const before = (await import('smol-toml')).stringify(actual), current = draft(before);
+  const rows = inspectWeapons(current, dependencies, path).weapons;
+  const beam = rows.find(row => row.weapon.id === 'phaser-aft'), bolt = rows.find(row => row.weapon.id === 'blaster-side');
+  expect(beam.weapon.delivery.operation).toBe('sustained'); expect(beam.weapon.delivery.cycle_jitter).toBe(0);
+  expect(bolt.weapon.delivery.rounds).toEqual({store:'local-kinetic-rounds',amount:1});
+  expect(bolt.weapon.mount.facing_deg).toBe(90); expect(bolt.weapon.delivery.recoil_impulse).toBe(6);
+  expect(actual.energy.reactor).toEqual(baseline.energy.reactor);
+  expect(actual.logistics.storage.find(row=>row.compartment==='support').space).toBe(baseline.logistics.storage.find(row=>row.compartment==='support').space+36);
+  expect(actual.logistics.storage.find(row=>row.compartment==='weapons').space).toBe(14);
+  expect(actual.infrastructure.capacity.filter(row=>row.id.endsWith('kinetic-rounds')).reduce((sum,row)=>sum+row.amount,0)).toBe(22);
+  for(const rating of actual.station.find(row=>row.id==='tactical').rating) expect([...rating.detailed_systems,...rating.automated_systems]).toContain('blaster-side');
+  bolt.weapon.mount.range=34;
+  const runtime={dependencies:async()=>dependencies,validate:vi.fn(async()=>({accepted:true,findings:[]}))};
+  await applyWeaponOperation({draft:current,runtime,operation:{path,section:'weapon',originalId:'blaster-side',weapon:bolt.weapon}});
+  expect(inspectWeapons(new WorkshopDocument(current.archive()),dependencies,path).weapons.find(row=>row.weapon.id==='blaster-side').weapon.delivery.rounds).toEqual({store:'local-kinetic-rounds',amount:1});
+  current.undo(); expect(current.read(path)).toBe(before); current.redo();
+  for(const edit of [value=>value.delivery.rounds.store='hold-kinetic-rounds',value=>value.delivery.rounds.amount=9]) { const value=structuredClone(bolt.weapon); edit(value); expect(()=>operation(current,{section:'weapon',originalId:'blaster-side',weapon:value})).toThrow(/round|local|capacity/i); }
+  const invalid=structuredClone(beam.weapon); invalid.delivery.cycle_jitter=.1; expect(()=>operation(current,{section:'weapon',originalId:'phaser-aft',weapon:invalid})).toThrow(/jitter/);
+});
+
+it('refuses an explicitly empty or null beam operation rather than defaulting it', () => {
+  for(const mode of ['',null]) { const value=edited(draft());value.delivery.operation=mode;expect(()=>operation(draft(),{section:'weapon',originalId:'beam-a',weapon:value})).toThrow(/operation/); }
+});
+
+it('preserves closed explicit target lists and inherited legacy false across export/history', async () => {
+  const inherited=source.replace('strategy_id="a"','strategy_id="a"\ntargets=["missile"]');
+  const deps={base_files:{[base]:inherited},packs:[]},current=draft('includes=["base.toml"]\n# child\n');
+  let value=inspectWeapons(current,deps,path).weapons[0].weapon;expect(value.targets).toEqual(['missile']);value.targets=[];
+  const runtime={dependencies:async()=>deps,validate:vi.fn(async()=>({accepted:true,findings:[]}))};
+  await applyWeaponOperation({draft:current,runtime,operation:{path,section:'weapon',originalId:'beam-a',weapon:value,materialise:true}});
+  expect(inspectWeapons(current,deps,path).weapons[0].weapon.targets).toEqual([]);
+  value=inspectWeapons(current,deps,path).weapons[0].weapon;value.targets=false;
+  await applyWeaponOperation({draft:current,runtime,operation:{path,section:'weapon',originalId:'beam-a',weapon:value,materialise:true}});
+  expect(inspectWeapons(new WorkshopDocument(current.archive()),deps,path).weapons[0].weapon.targets).toBe(false);
+  current.undo();expect(inspectWeapons(current,deps,path).weapons[0].weapon.targets).toEqual([]);current.redo();
+  expect(deps.base_files[base]).toBe(inherited);
+  for(const targets of [true,null,['missile','missile'],['unknown-tag']]) {const bad=structuredClone(value);bad.targets=targets;expect(()=>operation(current,{section:'weapon',originalId:'beam-a',weapon:bad},deps)).toThrow(/target/);}
 });

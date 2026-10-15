@@ -31,6 +31,11 @@ pub enum SystemComponentConfig {
     PowerInput {
         id: String,
     },
+    Turret {
+        id: String,
+        power_input: String,
+        config: phoenix_model::turret::TurretConfig,
+    },
     AccessBoundary {
         id: String,
         sealed_channel: String,
@@ -42,6 +47,7 @@ impl SystemComponentConfig {
         match self {
             Self::DockMating { id, .. }
             | Self::PowerInput { id }
+            | Self::Turret { id, .. }
             | Self::AccessBoundary { id, .. } => id,
         }
     }
@@ -133,6 +139,52 @@ fn valid_id(id: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
+pub struct TurretComposition<'a> {
+    pub component_id: &'a str,
+    pub power_input: &'a str,
+    pub config: &'a phoenix_model::turret::TurretConfig,
+}
+pub fn turret_composition(components: &[SystemComponentConfig]) -> Option<TurretComposition<'_>> {
+    components.iter().find_map(|component| match component {
+        SystemComponentConfig::Turret {
+            id,
+            power_input,
+            config,
+        } => Some(TurretComposition {
+            component_id: id,
+            power_input,
+            config,
+        }),
+        _ => None,
+    })
+}
+
+fn validate_turret(system: &super::config::SystemInstanceConfig) -> Result<(), String> {
+    let turret = turret_composition(&system.components)
+        .ok_or("mounted System requires one turret component")?;
+    turret.config.validate()?;
+    let mut ids = BTreeSet::new();
+    if system
+        .components
+        .iter()
+        .any(|component| !valid_id(component.id()) || !ids.insert(component.id()))
+    {
+        return Err("turret System has invalid or duplicate component ids".into());
+    }
+    if system.components.len() != 2 || !system.components.iter().any(|component| matches!(component, SystemComponentConfig::PowerInput { id } if id == turret.power_input)) {
+        return Err("mounted System requires exactly one turret and its referenced power_input".into());
+    }
+    // Target and availability are borrowed from the one actual capability
+    // controller. No extra target/on-off latch or unread generic channels.
+    if !system.channels.is_empty() {
+        return Err("turret uses the owning capability's existing intent; no additional channels are supported".into());
+    }
+    if system.power_group.is_none() {
+        return Err("turret power_input requires the System power_group binding".into());
+    }
+    Ok(())
+}
+
 pub fn validate_composition(system: &super::config::SystemInstanceConfig) -> Result<(), String> {
     if system.kind == super::system_registry::ACCESS_GATE_KIND {
         let [SystemComponentConfig::AccessBoundary {
@@ -158,6 +210,16 @@ pub fn validate_composition(system: &super::config::SystemInstanceConfig) -> Res
         return Ok(());
     }
     if system.kind != super::system_registry::DOCK_KIND {
+        if matches!(
+            system.kind.as_str(),
+            super::system_registry::PHASER_BANK_KIND
+                | super::system_registry::BLASTER_BANK_KIND
+                | super::system_registry::TORPEDO_TUBE_KIND
+                | super::system_registry::PASSIVE_RECEIVER_KIND
+        ) && (!system.components.is_empty() || !system.channels.is_empty())
+        {
+            return validate_turret(system);
+        }
         if !system.components.is_empty() || !system.channels.is_empty() {
             return Err(format!(
                 "System kind '{}' does not yet support component composition",

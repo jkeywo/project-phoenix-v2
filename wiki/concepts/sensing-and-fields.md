@@ -3,6 +3,9 @@ title: Sensing and Spatial Fields
 type: concept
 tags: [science, observations, regions, simulation]
 sources:
+  - crates/phoenix-model/src/shield_enquiry.rs
+  - crates/phoenix-simulation/src/science/shield_enquiry.rs
+  - crates/phoenix-simulation/src/ship/shield_enquiry.rs
   - crates/phoenix-model/src/focused_enquiry.rs
   - crates/phoenix-model/src/sensing.rs
   - crates/phoenix-model/src/sensing_forecast.rs
@@ -85,6 +88,10 @@ paid grant and physical measurements, retains acquired findings with their sampl
 ticks and predicts lost positions using observed motion. Public contact IDs include
 their instrument owner; current actuator routing stays private and expires with
 measured support. Co-hosting instruments does not merge their knowledge.
+Physical returns also carry quantized elevation with their original sample tick
+and error bound. Vertical velocity requires two distinct paid physical samples;
+reports without measured height retain `None`. Held and relayed elevation stays
+dated evidence, and disjoint height intervals cannot fuse as one planar return.
 Generated gameplay rocks participate using their existing `AsteroidUuid`, actual
 physical pose and authored roster tags. Visibility follows the scanner's `shows`
 filter; selection separately follows the rock template's `target.tags` and the
@@ -187,6 +194,21 @@ Navigation claim. Its existing waypoint owner retains the latest successful own
 request per public contact to avoid repeated AI payment, without treating that
 receipt as foreign compliance. These receipts save and digest with that owner.
 
+Optional `shields` enquiries use the same paid, System-owned focused slot.
+Subjects explicitly permit `shield_frequency` acquisition. A typed finding in
+`ScanReading` records quantized frequency, response and the observed configuration
+signature; its history is never upgraded from current enemy state. The existing
+frequency advisories read only qualified acquired Scan publications through the
+consumer's actual Console scope. Broad assessment supplies no such finding. NPC automatic phaser matching uses
+that same acquired evidence through each AI weapon bank's Console; current
+observation loss, feed revocation or Conceal pauses its advisory delay. Target
+frequency rotation never upgrades an old finding.
+`science/shield_enquiry.rs` owns that read seam and `science/enquiry.rs` owns
+physical acquisition. Optional authored shield cycles update the existing
+`ShipShields` frequency from a saved logical anchor in `ship/shield_enquiry.rs`.
+Workshop extends its existing sensing/subject and shield forms; no new scanner
+controller, inventory or observation store is involved.
+
 The broader redesign contract and incomplete work belong in PASM and the
 implementation/acceptance records, rather than this current-owner index.
 
@@ -201,3 +223,4 @@ on the next tick.
 The Alliance base hulls declare an actual `Target` capability with ship selection
 tags. Display tags alone do not make an entity selectable: the paid radar record
 and the receiving Console's permitted feed still govern target admission.
+Shield-frequency automation correlates different radar handles only when the weapon Console explicitly receives both current selectable observations and the acquired Scan feed. The ordinary contact resolver may establish that both handles route to the same physical actuator target; acquired reading subject, time and configuration remain unchanged. The curated Tactical/Gunnery SensorRadar feed is an explicit information grant, and losing either current route withholds fresh automatic tuning while history remains visible.

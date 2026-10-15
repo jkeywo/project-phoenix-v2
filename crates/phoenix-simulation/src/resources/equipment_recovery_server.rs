@@ -393,6 +393,7 @@ fn prepare(
     source_state.equipment.validate(source_profile)?;
     destination_state.equipment.validate(destination_profile)?;
     *condition = phoenix_model::damage::ComponentState {
+        emp: None,
         condition: phoenix_model::damage::ComponentCondition::Healthy,
         dose: 0.0,
         last_source: None,

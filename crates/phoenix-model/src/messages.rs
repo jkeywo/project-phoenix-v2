@@ -30,7 +30,9 @@ use uuid::Uuid;
 /// an older client's level-zero control would otherwise suggest hold fire.
 /// Revision 11 carries typed local stores, recovery selections and visit-bound
 /// port service/order projections; earlier clients cannot operate those views.
-pub const PROTOCOL_VERSION: u32 = 13;
+/// Revision 14 carries per-bank assignment views, active-beam operation controls
+/// and acquired combat evidence; older clients cannot represent those views.
+pub const PROTOCOL_VERSION: u32 = 14;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).
@@ -363,6 +365,9 @@ pub struct WeaponEmitterArc {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PhaserBankState {
     pub id: PhaserBank,
+    /// Actual active burn; post-shot rest is represented separately by on_cooldown.
+    #[serde(default)]
+    pub firing: bool,
     /// True if this bank's locked target is within `beam_range` and inside
     /// the bank's `fire_arc_deg` (manual-fire arc).
     pub fire_ready: bool,
@@ -1160,6 +1165,8 @@ pub struct TutorialOverlayWire {
 /// know about every field.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ShipClientConfig {
+    #[serde(default)]
+    pub weapon_groups: Vec<crate::weapon_targets::WeaponGroupConfig>,
     /// Accepted hull definitions for optional pre-launch personal plans. This
     /// conveys no inventory, machinery state or command authority.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1446,6 +1453,7 @@ impl Default for ShipClientConfig {
             repair_rate_hp_per_sec: default_repair_rate_hp_per_sec(),
             impulse_charge_duration: default_impulse_charge_duration(),
             phaser_banks: Vec::new(),
+            weapon_groups: Vec::new(),
             torpedo_tubes: Vec::new(),
             blaster_banks: Vec::new(),
             phaser_beam_color: default_phaser_beam_color(),
@@ -2117,7 +2125,25 @@ pub enum SystemControlPayload {
     SetTarget {
         uuid: String,
     },
+    /// Set only the addressed weapon's individual target/hold override.
+    SetWeaponTarget {
+        uuid: Option<String>,
+    },
+    /// Set or clear only this weapon's public automatic fallback. Explicit
+    /// orders and eligible primary targets keep precedence.
+    SetAutomaticWeaponTarget {
+        uuid: Option<String>,
+    },
+    /// Update only the addressed member of an authored prepared group.
+    /// An active individual override remains in force until explicitly released.
+    SetWeaponGroupTarget {
+        group: String,
+        uuid: Option<String>,
+    },
+    FollowWeaponGroup,
+    FollowPrimaryTarget,
     FirePhaser,
+    StopPhaser,
     /// Fire the blaster bank addressed by the `ControlSystem` target SystemId
     /// (issue #631). No fields — the target encodes the bank identity.
     FireBlaster,
@@ -3474,6 +3500,10 @@ pub enum ServerMessage {
         source_uuid: String,
         projectile_id: String,
         x: f32,
+        #[serde(default)]
+        y: f32,
+        #[serde(default)]
+        pitch: f32,
         z: f32,
         heading: f32,
         /// Visual scale hint for the client renderer (issue #638).
@@ -4538,6 +4568,11 @@ pub struct ShieldOperationBlackboard {
 /// the ship blackboard (issue #560).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct WeaponsBlackboard {
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub assignments: std::collections::BTreeMap<
+        SystemId,
+        crate::weapon_targets_view::WeaponTargetAssignmentView,
+    >,
     #[serde(default)]
     pub weapons_restrained: bool,
     #[serde(default)]
@@ -5119,6 +5154,8 @@ pub struct FocusedScanSnapshot {
 /// [`crate::science::scan`] for the derivation and the argument.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct ScanReadingSnapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shield_finding: Option<crate::shield_enquiry::ShieldFinding>,
     #[serde(default)]
     pub aim: crate::focused_enquiry::FocusedAim,
     #[serde(default)]

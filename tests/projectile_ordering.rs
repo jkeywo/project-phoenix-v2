@@ -54,6 +54,7 @@ fn queue(app: &mut App, ship: Entity, target: &str, payload: SystemControlPayloa
 }
 fn tube(id: &str) -> TorpedoTubeConfig {
     TorpedoTubeConfig {
+        targets: None,
         impact: phoenix_model::damage::DamageProfile::default(),
         id: id.into(),
         facing_deg: 0.0,

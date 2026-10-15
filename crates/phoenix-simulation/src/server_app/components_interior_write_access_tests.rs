@@ -35,6 +35,11 @@ fn actual_damage_systems_expose_rng_without_spurious_mint_writes() {
     assert_writes::<crate::sim_rng::TorpedoRng, crate::world_id::ProjectileMint, _>(
         crate::console::weapons::torpedo::tick_torpedo_lifecycle,
         true,
+        false,
+    );
+    assert_writes::<crate::sim_rng::TorpedoRng, crate::world_id::ProjectileMint, _>(
+        crate::console::weapons::advance_torpedo_flights,
+        false,
         true,
     );
     assert_writes::<crate::sim_rng::BlasterRng, crate::world_id::ProjectileMint, _>(

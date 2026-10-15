@@ -499,6 +499,7 @@ fn apply_damage_zone_damage(
                                 let hit = phoenix_model::damage::DamageHit {
                                     incoming,
                                     profile: phoenix_model::damage::DamageProfile {
+                                        emp: None,
                                         damage_type: phoenix_model::damage::DamageType::Laser,
                                         penetration: 0.0,
                                     },

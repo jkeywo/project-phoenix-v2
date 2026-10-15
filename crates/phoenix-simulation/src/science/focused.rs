@@ -178,7 +178,8 @@ pub(crate) fn validate(saved: &FocusedSaveState, limit: usize, tick: u64) -> Res
 fn valid_reading_shape(reading: &ScanReading) -> bool {
     use phoenix_model::focused_enquiry::{FocusedAim, ScanQuantityKind};
     if reading.aim == FocusedAim::General {
-        return reading.quantities.is_empty()
+        return reading.shield_finding.is_none()
+            && reading.quantities.is_empty()
             && reading
                 .condition_fraction
                 .is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value))
@@ -198,17 +199,27 @@ fn valid_reading_shape(reading: &ScanReading) -> bool {
         && reading.debris.is_none()
         && reading.mass_class.is_empty()
         && reading.mass_class_label.is_empty()
-        && !reading.quantities.is_empty()
-        && reading.quantities.iter().all(|row| {
-            row.validate().is_ok()
-                && keys.insert((row.kind, &row.label))
-                && matches!(
-                    (reading.aim, row.kind),
-                    (FocusedAim::Environment, ScanQuantityKind::FieldExposure)
-                        | (FocusedAim::Resources, ScanQuantityKind::Capacity)
-                        | (FocusedAim::Anomaly, ScanQuantityKind::EffectSignature)
-                )
-        })
+        && if reading.aim == FocusedAim::Shields {
+            reading.quantities.is_empty()
+                && reading
+                    .shield_finding
+                    .as_ref()
+                    .is_some_and(|finding| finding.validate().is_ok())
+                && reading.forecast.is_none()
+        } else {
+            reading.shield_finding.is_none()
+                && !reading.quantities.is_empty()
+                && reading.quantities.iter().all(|row| {
+                    row.validate().is_ok()
+                        && keys.insert((row.kind, &row.label))
+                        && matches!(
+                            (reading.aim, row.kind),
+                            (FocusedAim::Environment, ScanQuantityKind::FieldExposure)
+                                | (FocusedAim::Resources, ScanQuantityKind::Capacity)
+                                | (FocusedAim::Anomaly, ScanQuantityKind::EffectSignature)
+                        )
+                })
+        }
 }
 
 #[cfg(test)]

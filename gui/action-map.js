@@ -65,6 +65,10 @@ function logisticsCommand(type, fields) {
 }
 
 export const ACTION_MAP = Object.freeze({
+  set_weapon_target: logisticsCommand('SetWeaponTarget', ['uuid']),
+  set_weapon_group_target: logisticsCommand('SetWeaponGroupTarget', ['group', 'uuid']),
+  follow_weapon_group: logisticsCommand('FollowWeaponGroup', []),
+  follow_primary_target: logisticsCommand('FollowPrimaryTarget', []),
   fitting_recover: logisticsCommand('RecoverEquipment', ['target_uuid', 'slot', 'destination_locker']),
   fitting_recover_cancel: logisticsCommand('CancelEquipmentRecovery', []),
   fitting_request: logisticsCommand('RequestEquipment', ['slot', 'equipment']),
@@ -109,6 +113,15 @@ export const ACTION_MAP = Object.freeze({
       ...(correlated ? { correlation: a.correlation } : {}),
       target: `phaser-${a.bank}`,
       payload: { type: 'FirePhaser' },
+    });
+  },
+  stop_phaser: (a, send) => {
+    if (!a.bank) return;
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: `phaser-${a.bank}`,
+      payload: { type: 'StopPhaser' },
     });
   },
 
@@ -418,7 +431,7 @@ export const ACTION_MAP = Object.freeze({
   scan_target: (a, send) => {
     if (!a.uuid || !a.control_system_id) return;
     const aim=a.aim ?? 'general', intrusive=a.intrusive ?? false;
-    if (!['general','environment','resources','anomaly'].includes(aim) || typeof intrusive!=='boolean') return;
+    if (!['general','environment','resources','anomaly','shields'].includes(aim) || typeof intrusive!=='boolean') return;
     const correlated = typeof a.correlation === 'string' && a.correlation;
     send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
       ...(correlated ? { correlation: a.correlation } : {}),

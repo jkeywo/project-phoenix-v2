@@ -13,6 +13,8 @@ use crate::simmath;
 
 #[path = "energy_tests.rs"]
 mod energy_tests;
+#[path = "measured_beam_tests.rs"]
+mod measured_beam_tests;
 #[path = "strike_tests.rs"]
 mod strike_tests;
 
@@ -4173,8 +4175,13 @@ fn torpedo_hit_reduces_ship_shields_on_local_ship() {
     // Directly inject a torpedo already adjacent to the player ship so it
     // detonates on the next tick. We write into both the per-entity component
     // and the resource to stay in sync.
+    let profile = torpedo_test_profile(&app, player_entity, 30.0, 0.0);
     let torpedo = Torpedo {
-        impact: Default::default(),
+        previous_position: None,
+        collision_interval_secs: None,
+        last_guidance: None,
+        profile,
+        durability_remaining: profile.durability,
         strike_damage_bonus: 0.0,
         uuid: "test-torp-1".into(),
         x: 1.0, // 1 m away from player at origin — within detonation_radius
@@ -4186,7 +4193,6 @@ fn torpedo_hit_reduces_ship_shields_on_local_ship() {
         target_uuid: Some("player-ship".into()),
         source_uuid: None, // no source → no self-detonation exclusion
         tube_id: "fore_port".into(),
-        shield_pierce: 0.0, // no pierce → all damage goes to shields first
     };
     // Write to the per-entity component (preferred by systems) and resource.
     {
@@ -4330,8 +4336,13 @@ fn torpedo_hit_from_astern_damages_the_astern_arc_not_the_fore_arc() {
     let astern_before = hp_of(&app, astern_arc);
     let fore_before = hp_of(&app, fore_arc);
 
+    let profile = torpedo_test_profile(&app, player_entity, 30.0, 0.0);
     let torpedo = Torpedo {
-        impact: Default::default(),
+        previous_position: None,
+        collision_interval_secs: None,
+        last_guidance: None,
+        profile,
+        durability_remaining: profile.durability,
         strike_damage_bonus: 0.0,
         uuid: "test-torp-astern".into(),
         x: start_x,
@@ -4343,7 +4354,6 @@ fn torpedo_hit_from_astern_damages_the_astern_arc_not_the_fore_arc() {
         target_uuid: Some("player-ship".into()),
         source_uuid: None,
         tube_id: "aft".into(),
-        shield_pierce: 0.0, // no pierce → the shield arc takes it all
     };
     {
         let mut q = app
@@ -4461,6 +4471,24 @@ fn payload_probe(
 }
 
 /// Author the two damage fields on every `TorpedoSystem` the tick could read.
+fn torpedo_test_profile(
+    app: &App,
+    ship: Entity,
+    lifespan: f32,
+    shield_pierce: f32,
+) -> phoenix_model::guided_round::GuidedRoundProfile {
+    let mut profile = app
+        .world()
+        .get::<TorpedoSystemResource>(ship)
+        .unwrap()
+        .0
+        .config
+        .round_profile(Default::default());
+    profile.lifespan = lifespan;
+    profile.shield_pierce = shield_pierce;
+    profile
+}
+
 fn set_payload(app: &mut App, ship: Entity, damage_hull: i32, damage_shields: i32) {
     if let Some(mut ts) = app
         .world_mut()
@@ -4478,8 +4506,13 @@ fn set_payload(app: &mut App, ship: Entity, damage_hull: i32, damage_shields: i3
 /// Put one round astern of the fixture ship, with the given pierce fraction.
 fn launch_astern(app: &mut App, ship: Entity, shield_pierce: f32) {
     use crate::weapons::torpedo::Torpedo;
+    let profile = torpedo_test_profile(app, ship, 30.0, shield_pierce);
     let torpedo = Torpedo {
-        impact: Default::default(),
+        previous_position: None,
+        collision_interval_secs: None,
+        last_guidance: None,
+        profile,
+        durability_remaining: profile.durability,
         strike_damage_bonus: 0.0,
         uuid: "payload-probe-round".into(),
         x: 0.0,
@@ -4491,7 +4524,6 @@ fn launch_astern(app: &mut App, ship: Entity, shield_pierce: f32) {
         target_uuid: Some("player-ship".into()),
         source_uuid: None,
         tube_id: "aft".into(),
-        shield_pierce,
     };
     if let Some(mut ts) = app
         .world_mut()
@@ -4844,6 +4876,8 @@ fn blaster_hit_emits_ship_destroyed_vfx_on_npc_kill() {
 
     let mut bank =
         crate::weapons::blaster::BlasterSystem::new(crate::weapons::blaster::BlasterBankConfig {
+            targets: None,
+            rounds: None,
             impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore".into(),
             facing_deg: 0.0,
@@ -4870,6 +4904,11 @@ fn blaster_hit_emits_ship_destroyed_vfx_on_npc_kill() {
             id: "proj-1".into(),
             x: 0.0,
             z: -20.0,
+            y: 0.0,
+            pitch: 0.0,
+            visual_scale: 1.0,
+            previous_position: Some([0.0, 0.0, -20.0]),
+            collision_interval_secs: None,
             heading: 0.0,
             speed: 40.0,
             lifespan_remaining: 5.0,
@@ -4922,6 +4961,8 @@ fn crew_spectator_blaster_kill_retains_remote_and_local_crew_once_without_ending
         }
         let mut bank = crate::weapons::blaster::BlasterSystem::new(
             crate::weapons::blaster::BlasterBankConfig {
+                targets: None,
+                rounds: None,
                 impact: phoenix_model::damage::DamageProfile::default(),
                 id: "fore".into(),
                 facing_deg: 0.0,
@@ -4951,6 +4992,11 @@ fn crew_spectator_blaster_kill_retains_remote_and_local_crew_once_without_ending
                     id: id.into(),
                     x: 100.0,
                     z: -20.0,
+                    y: 0.0,
+                    pitch: 0.0,
+                    visual_scale: 1.0,
+                    previous_position: Some([100.0, 0.0, -20.0]),
+                    collision_interval_secs: None,
                     heading: 0.0,
                     speed: 40.0,
                     lifespan_remaining: 5.0,
@@ -5039,6 +5085,8 @@ fn blaster_hit_from_an_unidentified_shooter_reports_no_attacker() {
 
     let mut bank =
         crate::weapons::blaster::BlasterSystem::new(crate::weapons::blaster::BlasterBankConfig {
+            targets: None,
+            rounds: None,
             impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore".into(),
             facing_deg: 0.0,
@@ -5065,6 +5113,11 @@ fn blaster_hit_from_an_unidentified_shooter_reports_no_attacker() {
             id: "proj-1".into(),
             x: 0.0,
             z: -20.0,
+            y: 0.0,
+            pitch: 0.0,
+            visual_scale: 1.0,
+            previous_position: Some([0.0, 0.0, -20.0]),
+            collision_interval_secs: None,
             heading: 0.0,
             speed: 40.0,
             lifespan_remaining: 5.0,
@@ -5949,9 +6002,12 @@ rank = "Ltn."
             PhaserCooldown::default(),
             ShipPhysics::default(),
             WeaponsConsoleSection(crate::entities::config::WeaponsConsoleConfig {
+                groups: Vec::new(),
                 torpedo_arc_color: vec![],
                 power_multipliers: None,
                 phaser_banks: vec![crate::entities::config::PhaserBankConfig {
+                    targets: None,
+                    operation: Default::default(),
                     impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
@@ -7479,6 +7535,7 @@ fn set_tactical_radar_range(app: &mut App, range: f32) {
         .entity_mut(entity)
         .insert(crate::entities::spawner::WeaponsConsoleSection(
             crate::entities::config::WeaponsConsoleConfig {
+                groups: Vec::new(),
                 torpedo_arc_color: vec![],
                 power_multipliers: None,
                 phaser_banks: vec![],
@@ -7657,6 +7714,7 @@ fn tactical_ai_respects_radar_range() {
             app.world_mut().entity_mut(entity).insert(
                 crate::entities::spawner::WeaponsConsoleSection(
                     crate::entities::config::WeaponsConsoleConfig {
+                        groups: Vec::new(),
                         torpedo_arc_color: vec![],
                         power_multipliers: None,
                         phaser_banks: vec![],
@@ -11099,7 +11157,11 @@ fn torpedo_in_flight_count_is_published_as_a_public_fact() {
     let mut app = test_app();
     let mut ts = TorpedoSystem::new(TorpedoConfig::default());
     ts.in_flight.push(crate::weapons::torpedo::Torpedo {
-        impact: Default::default(),
+        previous_position: None,
+        collision_interval_secs: None,
+        last_guidance: None,
+        profile: ts.config.round_profile(Default::default()),
+        durability_remaining: ts.config.durability,
         strike_damage_bonus: 0.0,
         uuid: "flying-1".into(),
         x: 0.0,
@@ -11111,7 +11173,6 @@ fn torpedo_in_flight_count_is_published_as_a_public_fact() {
         target_uuid: None,
         source_uuid: Some("shooter".into()),
         tube_id: "fore_port".into(),
-        shield_pierce: 0.0,
     });
     let ship = app
         .world_mut()
@@ -11197,6 +11258,7 @@ fn handle_fire_torpedo_patterned_launch_resolves_barrel_origin() {
 
     // Alternating two-barrel pattern on a fresh tube.
     let tube_cfg = crate::entities::config::TorpedoTubeConfig {
+        targets: None,
         impact: phoenix_model::damage::DamageProfile::default(),
         id: "fore-centre".into(),
         facing_deg: 0.0,
@@ -11805,10 +11867,18 @@ fn torpedo_kill_on_the_local_ship_latches_game_over() {
         damage_hull: 100_000,
         ..TorpedoConfig::default()
     });
+    let profile = phoenix_model::guided_round::GuidedRoundProfile {
+        shield_pierce: 1.0,
+        ..enemy_torpedoes.config.round_profile(Default::default())
+    };
     enemy_torpedoes
         .in_flight
         .push(crate::weapons::torpedo::Torpedo {
-            impact: Default::default(),
+            previous_position: None,
+            collision_interval_secs: None,
+            last_guidance: None,
+            profile,
+            durability_remaining: profile.durability,
             strike_damage_bonus: 0.0,
             uuid: "torpedo-uuid".into(),
             x: 0.0,
@@ -11820,7 +11890,6 @@ fn torpedo_kill_on_the_local_ship_latches_game_over() {
             target_uuid: Some("test-local-ship".into()),
             source_uuid: Some("enemy-uuid".into()),
             tube_id: "fore_port".into(),
-            shield_pierce: 1.0,
         });
     app.world_mut().spawn((
         crate::server_app::Ship,
@@ -13626,6 +13695,8 @@ fn setup_two_arc_ai_shooter(app: &mut App) -> (Entity, Entity, String, String) {
         .insert(BlasterSystemResource(vec![
             crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    targets: None,
+                    rounds: None,
                     impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
@@ -13757,8 +13828,7 @@ fn the_unengaged_hostile_was_engageable_all_along() {
 // `tick_frequency_hint` path already is (`tick_frequency_hint_high_fidelity`); these two
 // tests cover the newly-added gate on the NPC auto-match path.
 
-/// Spawns a target entity that `tick_npc_auto_match_frequency` can read a
-/// shield frequency from: `EntityUuid` (matched against the locked target),
+/// Spawns physical target truth independently from the acquired fixture: `EntityUuid` (matched against the locked target),
 /// `Transform` (so `ai_target_selection`'s stale-target guard treats it as
 /// alive and keeps the lock), and `ShipShields` carrying `freq`.
 fn spawn_shield_target(app: &mut App, uuid: &str, freq: f32) {
@@ -13775,6 +13845,46 @@ fn spawn_shield_target(app: &mut App, uuid: &str, freq: f32) {
 fn setup_npc_auto_match(app: &mut App, target_uuid: &str) {
     set_tactical_control_source(app, crate::ship::control_source::ControlSource::Ai);
     set_weapons_target(app, Some(target_uuid.into()));
+    let ship = local_ship_entity(app);
+    let source =
+        crate::science::scan_blackboard_key_for(&crate::ship::system_registry::sensors_system_id());
+    {
+        let mut config = app
+            .world_mut()
+            .get_mut::<crate::ship_plugin::ShipConfigComponent>(ship)
+            .unwrap();
+        // This legacy weapons-only rig now explicitly authors its scanner and feed.
+        let scanner = crate::entities::include_resolve::load_entity_config(
+            "assets/entities/alliance_cruiser.toml",
+        )
+        .unwrap()
+        .ship_config
+        .unwrap()
+        .system(&crate::ship::system_registry::sensors_system_id())
+        .unwrap()
+        .clone();
+        let mut scanner = scanner;
+        let mut scanner_console = config.0.consoles[0].clone();
+        scanner_console.id = phoenix_model::identity::ConsoleId("scan-evidence-console".into());
+        scanner_console.feeds.clear();
+        scanner.console = Some(scanner_console.id.clone());
+        config.0.consoles.push(scanner_console);
+        config.0.systems.push(scanner);
+        config.0.consoles[0]
+            .feeds
+            .push(phoenix_model::console::ConsoleFeed {
+                source,
+                kind: phoenix_model::console::ConsoleObservationKind::Scan,
+            });
+    }
+    crate::science::shield_enquiry::fixture::acquired(
+        &mut app
+            .world_mut()
+            .get_mut::<crate::server_app::ShipSystemBlackboards>(ship)
+            .unwrap(),
+        target_uuid,
+        0.8,
+    );
 }
 
 fn local_ship_entity(app: &mut App) -> Entity {
@@ -13787,7 +13897,7 @@ fn local_ship_entity(app: &mut App) -> Entity {
 
 /// Positive path: a high-fidelity NPC whose Tactical is AI-operated and
 /// which has a target locked drives its `ShipPhaserFrequency` toward the
-/// target's shield frequency once `NPC_FREQ_MATCH_DELAY` elapses.
+/// acquired frequency once `NPC_FREQ_MATCH_DELAY` elapses.
 #[test]
 fn npc_auto_match_frequency_matches_with_high_fidelity() {
     let mut app = test_app();
@@ -14182,6 +14292,7 @@ fn magazine_claim_routes_to_shooter_ship_when_multiple_ships_have_magazines() {
     );
     let npc_torpedo_sys = TorpedoSystem::from_configs(
         &[crate::entities::config::TorpedoTubeConfig {
+            targets: None,
             impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore_port".into(),
             facing_deg: -30.0,
@@ -14591,9 +14702,9 @@ fn los_enemy_blocker_redirects_damage_away_from_target() {
 }
 
 #[test]
-fn los_friendly_blocker_absorbs_beam_with_no_damage() {
+fn los_friendly_blocker_takes_physical_collateral_and_stops_the_ray() {
     // Shooter and blocker are same faction. Blocker at (0,0,-10),
-    // target at (0,0,-30). Neither blocker nor target should take damage.
+    // target at (0,0,-30). The actual blocker takes collateral; the target is covered.
     use crate::ai::faction::FactionRegistry;
     use crate::entities::config_cache::FactionRegistryResource;
 
@@ -14646,9 +14757,9 @@ fn los_friendly_blocker_absorbs_beam_with_no_damage() {
     let blocker_after = hull_hp(&app, blocker);
     let target_after = hull_hp(&app, target);
 
-    assert_eq!(
-        blocker_after, blocker_before,
-        "Friendly blocker must NOT take damage (before={blocker_before}, after={blocker_after})"
+    assert!(
+        blocker_after < blocker_before,
+        "The physical friendly blocker must take collateral (before={blocker_before}, after={blocker_after})"
     );
     assert_eq!(
         target_after, target_before,
@@ -14731,6 +14842,8 @@ fn tick_blaster_auto_fire_gate_passes_when_tactical_is_ai() {
             npc_physics,
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    targets: None,
+                    rounds: None,
                     impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 180.0, // face toward -Z (toward target)
@@ -14853,6 +14966,8 @@ fn a_target_with_no_blaster_banks_is_still_led() {
             },
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    targets: None,
+                    rounds: None,
                     impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
@@ -14948,6 +15063,8 @@ fn a_blaster_carrying_target_is_led_identically() {
     fn dummy_bank() -> BlasterSystemResource {
         BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
             crate::weapons::blaster::BlasterBankConfig {
+                targets: None,
+                rounds: None,
                 impact: phoenix_model::damage::DamageProfile::default(),
                 id: "fore".into(),
                 facing_deg: 0.0,
@@ -15074,6 +15191,8 @@ fn tick_blaster_auto_fire_skips_when_target_out_of_range() {
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    targets: None,
+                    rounds: None,
                     impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
@@ -15173,6 +15292,8 @@ fn handle_fire_blaster_reports_the_actual_charge_consumer_outcome() {
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    targets: None,
+                    rounds: None,
                     impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
@@ -15321,6 +15442,8 @@ fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    targets: None,
+                    rounds: None,
                     impact: Default::default(),
                     // Underscore-authored, the spelling the inverse dropped.
                     id: "fore_port".into(),
@@ -15504,6 +15627,8 @@ fn spawn_policy_phaser_npc_at(
 
 fn wide_bank(id: &str, facing_deg: f32) -> crate::entities::config::PhaserBankConfig {
     crate::entities::config::PhaserBankConfig {
+        targets: None,
+        operation: Default::default(),
         impact: phoenix_model::damage::DamageProfile::default(),
         id: id.into(),
         facing_deg,
@@ -16022,6 +16147,8 @@ fn restraint_is_explicit_and_independent_of_system_group_or_intake() {
 /// the shipped hold-to-fire bank and authors `power_group = "weapons"`.
 fn cold_gate_blaster_bank() -> crate::weapons::blaster::BlasterBankConfig {
     crate::weapons::blaster::BlasterBankConfig {
+        targets: None,
+        rounds: None,
         impact: phoenix_model::damage::DamageProfile::default(),
         id: "fore".into(),
         facing_deg: 0.0,
@@ -16504,6 +16631,8 @@ fn blaster_bank_idle_policy_holds_fire() {
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    targets: None,
+                    rounds: None,
                     impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
@@ -16599,6 +16728,8 @@ console = "tactical"
             ShipPhysics::default(),
             BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
                 crate::weapons::blaster::BlasterBankConfig {
+                    targets: None,
+                    rounds: None,
                     impact: phoenix_model::damage::DamageProfile::default(),
                     id: "fore".into(),
                     facing_deg: 0.0,
@@ -17512,6 +17643,8 @@ fn blaster_hit_does_zero_damage_to_local_ship_under_god_mode() {
 
     let mut bank =
         crate::weapons::blaster::BlasterSystem::new(crate::weapons::blaster::BlasterBankConfig {
+            targets: None,
+            rounds: None,
             impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore".into(),
             facing_deg: 0.0,
@@ -17542,6 +17675,11 @@ fn blaster_hit_does_zero_damage_to_local_ship_under_god_mode() {
             id: "proj-god-mode".into(),
             x: 0.0,
             z: -20.0,
+            y: 0.0,
+            pitch: 0.0,
+            visual_scale: 1.0,
+            previous_position: Some([0.0, 0.0, -20.0]),
+            collision_interval_secs: None,
             heading: 0.0,
             speed: 40.0,
             lifespan_remaining: 5.0,
@@ -17601,3 +17739,68 @@ mod equipment_presence_tests;
 
 #[path = "disablement_tests.rs"]
 mod disablement_tests;
+
+#[path = "sustained_tests.rs"]
+mod sustained_tests;
+#[test]
+fn actual_torpedo_lifecycle_expires_and_disposes_a_removed_launchers_carrier() {
+    use crate::console::weapons::flight_carrier::WeaponFlightCarrier;
+    use bevy::ecs::system::RunSystemOnce;
+    let mut app = test_app();
+    app.insert_resource(State::new(GamePhase::InProgress));
+    let mut owner = TorpedoSystem::new(TorpedoConfig {
+        load_time: 0.1,
+        lifespan: 0.2,
+        ..Default::default()
+    });
+    let tube = owner.tubes[0].id.clone();
+    assert!(owner.start_load(&tube));
+    owner.tick(
+        0.1,
+        &std::collections::HashMap::new(),
+        &mut || unreachable!(),
+    );
+    assert!(matches!(
+        owner.launch(
+            &tube,
+            "independent-flight".into(),
+            0.0,
+            5.0,
+            0.0,
+            0.0,
+            None,
+            Some("removed-launcher".into())
+        ),
+        crate::weapons::torpedo::LaunchResult::Launched { .. }
+    ));
+    let source = app
+        .world_mut()
+        .spawn((
+            crate::entities::spawner::EntityUuid("removed-launcher".into()),
+            crate::server_app::Ship,
+            TorpedoSystemResource(owner),
+        ))
+        .id();
+    app.world_mut().despawn(source);
+    app.world_mut().flush();
+    let mut query = app
+        .world_mut()
+        .query_filtered::<Entity, With<WeaponFlightCarrier>>();
+    assert_eq!(query.iter(app.world()).count(), 1);
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_secs_f32(0.5));
+    app.world_mut()
+        .run_system_once(crate::console::weapons::advance_torpedo_flights)
+        .unwrap();
+    app.world_mut()
+        .run_system_once(crate::console::weapons::torpedo::tick_torpedo_lifecycle)
+        .unwrap();
+    app.world_mut()
+        .run_system_once(crate::console::weapons::flight_carrier::settle_carriers)
+        .unwrap();
+    app.world_mut().flush();
+    assert_eq!(query.iter(app.world()).count(), 0);
+    let outgoing = app.world_mut().resource_mut::<SimOutbox>().drain();
+    assert_eq!(outgoing.iter().filter(|entry| matches!(&entry.message,ServerMessage::TorpedoDestroyed{uuid} if uuid=="independent-flight")).count(),1);
+}

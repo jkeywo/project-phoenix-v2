@@ -18,3 +18,4 @@ entities:
       rationale:
         - "[ai] Existing authored family blocks remain supported parameter syntax for their delivery strategies, with one compiled mechanism definition per equipment instance; unsupported combinations must fail validation. New generic authoring selects the same supported strategies and does not introduce a second live weapon/controller."
         - "[ai] Migration verification compares existing human and AI fire journeys, loaded-round conservation, deterministic continuation and unchanged Cruiser thresholds. Advanced sensing, electronic operations, compartment damage and resource redesign stay in their owning increments."
+        - "[ai] Increment15 current Turret mechanics constrain azimuth only. Paid observed elevation supports vertical bolt lead without inventing a pitch state; full XYZ range still gates actual emission and readiness. Finite pitch traversal remains future equipment detail, not an accepted capability claim."

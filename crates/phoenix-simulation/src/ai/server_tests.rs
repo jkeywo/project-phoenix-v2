@@ -1126,9 +1126,12 @@ fn clearing_the_attacker_emits_no_attacked_event() {
 
 fn make_weapons_console_config(beam_range: f32) -> crate::entities::config::WeaponsConsoleConfig {
     crate::entities::config::WeaponsConsoleConfig {
+        groups: Vec::new(),
         torpedo_arc_color: vec![],
         power_multipliers: None,
         phaser_banks: vec![crate::entities::config::PhaserBankConfig {
+            targets: None,
+            operation: Default::default(),
             impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore".into(),
             facing_deg: 0.0,

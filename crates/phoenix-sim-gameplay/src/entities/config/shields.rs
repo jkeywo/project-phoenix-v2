@@ -112,6 +112,11 @@ fn default_shields_ai_health_ratio_threshold() -> f32 {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ShieldsConsoleConfig {
+    #[serde(default)]
+    pub frequency_response: Option<phoenix_model::shield_enquiry::ShieldFrequencyResponse>,
+    #[serde(default)]
+    #[serde(deserialize_with = "phoenix_model::shield_enquiry::optional_cycle")]
+    pub frequency_cycle: Option<phoenix_model::shield_enquiry::ShieldFrequencyCycle>,
     /// Per-level bonus table for the `shields` power group (issue #952),
     /// indexed by level-1. Feeds `ModifierSlot::ShieldRegen`, so it decides
     /// what a reactor point spent here buys in regeneration. Absent ⇒ the
@@ -162,6 +167,8 @@ pub struct ShieldsConsoleConfig {
 impl Default for ShieldsConsoleConfig {
     fn default() -> Self {
         Self {
+            frequency_response: None,
+            frequency_cycle: None,
             power_multipliers: None,
             focus_bonus_max_hp: 50,
             focus_bonus_regen: 5.0,

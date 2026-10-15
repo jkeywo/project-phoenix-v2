@@ -39,6 +39,15 @@ pub struct RefitWorkConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BeamHardware {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::weapon_operation::deserialize_target_filter"
+    )]
+    pub targets: Option<Vec<crate::tags::EntityTag>>,
+
+    #[serde(default)]
+    pub operation: crate::weapon_operation::BeamOperation,
     pub beam_range: f32,
     pub auto_arc_deg: f32,
     pub beam_damage_per_sec: f32,

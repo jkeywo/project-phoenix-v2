@@ -470,6 +470,8 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("spatial-fields", fold_spatial_fields_namespace),
     ("recorded-scans", fold_recorded_scans_namespace),
     ("passive-samples", fold_passive_samples_namespace),
+    ("system-mounts", fold_mounts_namespace),
+    ("weapon-target-assignments", fold_weapon_targets_namespace),
     ("broad-tracks", fold_broad_tracks_namespace),
     ("navigation-sharing", fold_navigation_sharing_namespace),
     ("navigation-request", fold_navigation_request_namespace),
@@ -1777,9 +1779,28 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
     acc = fold_u64(acc, rows.len() as u64);
     for (key, entity, physics, hull, alert, power) in rows {
         acc = fold_str(acc, &key.id);
+        if world
+            .get::<crate::console::weapons::flight_carrier::WeaponFlightCarrier>(entity)
+            .is_some()
+        {
+            acc = fold_str(acc, "weapon-flight-carrier");
+            let banks: Vec<_> = world
+                .get::<crate::console::weapons::blaster::BlasterSystemResource>(entity)
+                .map(|owner| owner.0.iter().map(|bank| bank.config.id.as_str()).collect())
+                .unwrap_or_default();
+            acc = fold_serde(acc, &banks);
+        }
         acc = fold_physics(acc, physics.as_ref());
         acc = fold_hull(acc, hull.as_ref());
         if let Some(shields) = world.get::<crate::ship::shields::ShipShields>(entity) {
+            acc = fold_str(acc, "shield-frequency-configuration");
+            acc = fold_serde(
+                acc,
+                &(
+                    shields.frequency(),
+                    world.get::<crate::ship::shield_enquiry::ShieldCycleAnchor>(entity),
+                ),
+            );
             acc = fold_str(acc, "shield-energy-operations");
             acc = fold_serde(acc, &shields.0.capture_operations());
             let charge: Vec<_> = shields
@@ -1813,28 +1834,18 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
                         .map(|(id, slot)| (format!("beam:{id}"), slot.strike_damage_bonus)),
                 );
             }
-            if let Some(torpedoes) =
-                world.get::<crate::console::weapons::TorpedoSystemResource>(entity)
-            {
-                attacks.extend(
-                    torpedoes.0.in_flight.iter().map(|round| {
-                        (format!("torpedo:{}", round.uuid), round.strike_damage_bonus)
-                    }),
-                );
-            }
-            if let Some(blasters) =
-                world.get::<crate::console::weapons::BlasterSystemResource>(entity)
-            {
-                attacks.extend(blasters.0.iter().flat_map(|bank| {
-                    bank.in_flight
-                        .iter()
-                        .map(|round| (format!("blaster:{}", round.id), round.damage as f32))
-                }));
-            }
             attacks.sort_by(|a, b| a.0.cmp(&b.0));
             acc = fold_serde(acc, &attacks);
         }
         if let Some(beam) = world.get::<crate::console::weapons::beam::ActiveBeam>(entity) {
+            let operations: Vec<_> = beam
+                .live_banks()
+                .map(|(id, slot)| (id, slot.operation))
+                .collect();
+            if !operations.is_empty() {
+                acc = fold_str(acc, "beam-frozen-operation");
+                acc = fold_serde(acc, &operations);
+            }
             let samples: Vec<_> = beam
                 .live_banks()
                 .map(|(id, slot)| (id, &slot.impact_sample_target, &slot.impact_sample))
@@ -1846,46 +1857,99 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
         }
         if let Some(torpedoes) = world.get::<crate::console::weapons::TorpedoSystemResource>(entity)
         {
-            let mut profiles: Vec<_> = torpedoes
+            // Processing order controls emission IDs and physical hit order.
+            let rounds: Vec<_> = torpedoes
                 .0
                 .in_flight
                 .iter()
-                .map(|round| (&round.uuid, round.impact))
+                .map(|round| {
+                    (
+                        &round.uuid,
+                        &round.last_guidance,
+                        round.profile,
+                        round.durability_remaining,
+                        [round.x, round.y, round.z],
+                        round.heading,
+                        round.pitch,
+                        round.lifespan_remaining,
+                        &round.target_uuid,
+                        &round.source_uuid,
+                        &round.tube_id,
+                        round.strike_damage_bonus,
+                    )
+                })
                 .collect();
-            profiles.sort_by(|a, b| a.0.cmp(b.0));
-            if !profiles.is_empty() {
-                acc = fold_str(acc, "torpedo-physical-profiles");
-                acc = fold_serde(acc, &profiles);
+            if !rounds.is_empty() {
+                acc = fold_str(acc, "guided-round-flight");
+                acc = fold_serde(acc, &rounds);
             }
-            let mut bursts: Vec<_> = torpedoes
+            let bursts: Vec<_> = torpedoes
                 .0
                 .burst_states
                 .iter()
-                .map(|burst| (&burst.tube_id, burst.impact))
+                .map(|burst| {
+                    (
+                        &burst.tube_id,
+                        burst.profile,
+                        burst.burst_interval_secs,
+                        burst.pending,
+                        burst.timer,
+                        [burst.launch_x, burst.launch_y, burst.launch_z],
+                        burst.launch_heading,
+                        &burst.target_uuid,
+                        &burst.source_uuid,
+                        &burst.barrel_origins,
+                        &burst.barrel_sequence,
+                        burst.next_shot_index,
+                    )
+                })
                 .collect();
-            bursts.sort_by(|a, b| a.0.cmp(b.0));
             if !bursts.is_empty() {
-                acc = fold_str(acc, "torpedo-burst-physical-profiles");
+                acc = fold_str(acc, "guided-round-burst");
                 acc = fold_serde(acc, &bursts);
             }
         }
         if let Some(blasters) = world.get::<crate::console::weapons::BlasterSystemResource>(entity)
         {
-            let mut profiles: Vec<_> = blasters
+            // Actual vector order decides physical interception order. Interval-local
+            // previous_position is consumed by Damage before supported capture;
+            // next Physics reconstructs it from this causal current position.
+            let flights: Vec<_> = blasters
                 .0
                 .iter()
-                .flat_map(|bank| {
-                    bank.in_flight
-                        .iter()
-                        .map(|round| (round.id.clone(), round.impact))
+                .map(|bank| {
+                    (
+                        &bank.config.id,
+                        bank.in_flight
+                            .iter()
+                            .map(|round| {
+                                (
+                                    &round.id,
+                                    round.impact,
+                                    round.x,
+                                    round.y,
+                                    round.z,
+                                    round.heading,
+                                    round.pitch,
+                                    round.speed,
+                                    round.lifespan_remaining,
+                                    round.collision_radius,
+                                    round.damage,
+                                    round.shield_pierce,
+                                    round.visual_scale,
+                                    &round.source_uuid,
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                    )
                 })
                 .collect();
-            profiles.sort_by(|a, b| a.0.cmp(&b.0));
-            if !profiles.is_empty() {
-                acc = fold_str(acc, "blaster-physical-profiles");
-                acc = fold_serde(acc, &profiles);
+            if flights.iter().any(|(_, rounds)| !rounds.is_empty()) {
+                acc = fold_str(acc, "blaster-physical-flights");
+                acc = fold_serde(acc, &flights);
             }
         }
+
         acc = match alert {
             Some(active) => fold_u64(fold_u64(acc, 1), u64::from(active)),
             None => fold_u64(acc, 0),
@@ -2611,6 +2675,32 @@ fn fold_recorded_scans_namespace(world: &World, acc: u64) -> u64 {
         |acc, state| fold_serde(acc, &state),
     )
 }
+fn fold_mounts_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "system-mounts",
+        |owner: &crate::weapons::mounts::ShipMounts| {
+            let mut state = owner.clone();
+            for mount in state.0.values_mut() {
+                if mount.offset_deg == 0.0 {
+                    mount.offset_deg = 0.0;
+                }
+            }
+            Some(state)
+        },
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+fn fold_weapon_targets_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "weapon-target-assignments",
+        |owner: &crate::console::weapons::assignments::ShipWeaponTargets| Some(owner.0.clone()),
+        |acc, state| fold_serde(acc, &state),
+    )
+}
 fn fold_passive_samples_namespace(world: &World, acc: u64) -> u64 {
     fold_optional_namespace(
         world,
@@ -2644,6 +2734,11 @@ fn fold_broad_tracks_namespace(world: &World, acc: u64) -> u64 {
                 }
                 for track in state.tracks.values_mut() {
                     track.position = track.position.map(canonical);
+                    if let Some(elevation) = &mut track.elevation {
+                        elevation.height = canonical(elevation.height);
+                        elevation.error = canonical(elevation.error);
+                        elevation.velocity = elevation.velocity.map(canonical);
+                    }
                     track.velocity = track.velocity.map(|velocity| velocity.map(canonical));
                     track.position_error = canonical(track.position_error);
                     track.velocity_error = canonical(track.velocity_error);

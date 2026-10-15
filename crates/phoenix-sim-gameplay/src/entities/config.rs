@@ -482,6 +482,32 @@ impl EntityConfig {
         };
         let mut config: EntityConfig = value.try_into()?;
         config.shield_arcs = shield_arcs;
+        if config
+            .shield_arcs
+            .iter()
+            .any(|arc| !arc.frequency.is_finite() || !(0.0..=1.0).contains(&arc.frequency))
+            || config.shields_console.as_ref().is_some_and(|console| {
+                !console.frequency.is_finite() || !(0.0..=1.0).contains(&console.frequency)
+            })
+        {
+            return Err(SerdeError::custom(
+                "shield frequencies must be finite in [0,1]",
+            ));
+        }
+
+        if let Some(shields) = &config.shields_console {
+            if let Some(response) = &shields.frequency_response {
+                response.validate().map_err(SerdeError::custom)?;
+            }
+            if let Some(cycle) = &shields.frequency_cycle {
+                cycle.validate().map_err(SerdeError::custom)?;
+            }
+            if shields.frequency_cycle.is_some() && config.shield_arcs.is_empty() {
+                return Err(SerdeError::custom(
+                    "shield frequency equipment requires actual shield arcs",
+                ));
+            }
+        }
         if config.shield_arcs.is_empty()
             && config
                 .shields_console
@@ -920,6 +946,7 @@ impl EntityConfig {
             for row in &policy.property {
                 use phoenix_model::focused_enquiry::EnquiryProperty;
                 let supported = match &row.property {
+                    EnquiryProperty::ShieldFrequency => !config.shield_arcs.is_empty(),
                     EnquiryProperty::FieldExposure | EnquiryProperty::EffectSignature { .. } => {
                         config.shape.is_some()
                     }
@@ -936,6 +963,15 @@ impl EntityConfig {
                 if !supported {
                     return Err(SerdeError::custom("enquiry property must name actual local field/effect geometry or labelled infrastructure capacity"));
                 }
+            }
+        }
+        if let Some(weapons) = &config.weapons_console {
+            if !weapons.groups.is_empty() {
+                let ship = config.ship_config.as_ref().ok_or_else(|| {
+                    SerdeError::custom("prepared weapon groups require actual owned weapon Systems")
+                })?;
+                crate::weapons::assignments::validate_groups(&weapons.groups, ship)
+                    .map_err(SerdeError::custom)?;
             }
         }
         if let Some(sensing) = &config.sensing {
@@ -968,6 +1004,7 @@ impl EntityConfig {
         crate::resources::fitting::CompiledFitting::compile(&config).map_err(SerdeError::custom)?;
         crate::resources::logistics_profile::compile_entity_logistics(&config)
             .map_err(SerdeError::custom)?;
+        weapon_definition::validate_round_feeds(&config).map_err(SerdeError::custom)?;
 
         if config.interior.is_none()
             && config

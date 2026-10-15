@@ -674,11 +674,12 @@ pub(super) fn validate_physical_attacks(world: &World, row: &EntityState) -> Res
     let Some(stored) = &row.weapons else {
         return Ok(());
     };
+    super::guided_rounds::validate_weapon_state(stored)?;
     for profile in stored
         .torpedoes_in_flight
         .iter()
-        .map(|round| &round.impact)
-        .chain(stored.bursts.iter().map(|burst| &burst.impact))
+        .map(|round| &round.profile.impact)
+        .chain(stored.bursts.iter().map(|burst| &burst.profile.impact))
         .chain(
             stored
                 .blasters
@@ -694,6 +695,50 @@ pub(super) fn validate_physical_attacks(world: &World, row: &EntityState) -> Res
         .any(|round| !round.strike_damage_bonus.is_finite() || round.strike_damage_bonus < -1.0)
     {
         return Err("invalid launched torpedo damage modifier".into());
+    }
+    for bank in &stored.blasters {
+        for bolt in &bank.in_flight {
+            if ![
+                bolt.x,
+                bolt.y,
+                bolt.z,
+                bolt.heading,
+                bolt.pitch,
+                bolt.speed,
+                bolt.lifespan_remaining,
+                bolt.collision_radius,
+                bolt.visual_scale,
+                bolt.shield_pierce,
+            ]
+            .into_iter()
+            .all(f32::is_finite)
+                || bolt.pitch.abs() > std::f32::consts::FRAC_PI_2
+                || bolt.speed <= 0.0
+                || bolt.lifespan_remaining <= 0.0
+                || bolt.collision_radius < 0.0
+                || bolt.damage < 0
+                || !(0.0..=1.0).contains(&bolt.shield_pierce)
+            {
+                return Err("invalid emitted blaster flight frontier".into());
+            }
+        }
+    }
+    let mut beam_banks = std::collections::BTreeSet::new();
+    for (bank, target, remaining, accumulator, cooldown, operation) in &stored.beams {
+        if bank.is_empty()
+            || target.is_empty()
+            || !beam_banks.insert(bank)
+            || !remaining.is_finite()
+            || *remaining < 0.0
+            || (*operation == phoenix_model::weapon_operation::BeamOperation::Fixed
+                && *remaining == 0.0)
+            || !accumulator.is_finite()
+            || !(0.0..1.0).contains(accumulator)
+            || !cooldown.is_finite()
+            || *cooldown < 0.0
+        {
+            return Err("invalid active beam operation/duration/accumulator frontier".into());
+        }
     }
     for (bank, (target, sample)) in &stored.beam_impact_samples {
         if !stored.beams.iter().any(|(id, ..)| id == bank)

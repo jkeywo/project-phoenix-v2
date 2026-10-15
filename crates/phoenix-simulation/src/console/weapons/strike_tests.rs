@@ -12,7 +12,7 @@ fn reserve(app: &mut App, charge: f32, ids: &[&str]) -> Entity {
         (
             FixedStep::HandleFireBlaster,
             FixedStep::TickBlasterSystem,
-            FixedStep::TickTorpedoLifecycle,
+            FixedStep::AdvanceTorpedoFlights,
             FixedStep::HandleFirePhaser,
             FixedStep::HandleFireTorpedo,
         )

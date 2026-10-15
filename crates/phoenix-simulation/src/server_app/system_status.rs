@@ -30,6 +30,28 @@ pub(crate) fn project(
                 sources.is_offline(&system.id) || source == ControlSource::Offline,
                 source == ControlSource::Ai,
             );
+            if let Some(physical) = physical {
+                for component in physical
+                    .state
+                    .emp_failed_components(&system.id, physical.emp_clock)
+                {
+                    if physical.definition.components[&system.id][&component].binding
+                        == phoenix_model::damage::DamageBinding::Operation
+                    {
+                        status.unavailable(StatusReasonCode::Emp, Some(component));
+                    } else {
+                        if status.availability == Availability::Normal {
+                            status.availability = Availability::Degraded;
+                        }
+                        status
+                            .reasons
+                            .push(phoenix_model::system_status::StatusReason {
+                                code: StatusReasonCode::Emp,
+                                component_id: Some(component),
+                            });
+                    }
+                }
+            }
             let supply = system
                 .components
                 .iter()

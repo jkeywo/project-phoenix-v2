@@ -51,6 +51,8 @@ use std::f32::consts::PI;
 /// future TOML fields without a `deny_unknown_fields` compile error.
 #[derive(Clone, Debug)]
 pub struct BlasterBankConfig {
+    pub targets: Option<Vec<phoenix_model::tags::EntityTag>>,
+    pub rounds: Option<phoenix_model::weapon_operation::WeaponRoundFeed>,
     pub impact: phoenix_model::damage::DamageProfile,
     /// Bank identifier (matches the TOML `id` field, e.g. `"fore"`, `"aft"`).
     pub id: String,
@@ -98,6 +100,8 @@ pub struct BlasterBankConfig {
 impl Default for BlasterBankConfig {
     fn default() -> Self {
         Self {
+            targets: None,
+            rounds: None,
             impact: phoenix_model::damage::DamageProfile::default(),
             id: String::new(),
             facing_deg: 0.0,
@@ -163,8 +167,17 @@ pub struct BlasterProjectile {
     pub id: String,
     /// World X position.
     pub x: f32,
+    /// World Y position; the existing planar adapter launches at zero.
+    pub y: f32,
     /// World Z position.
     pub z: f32,
+    /// Interval-local collision segment, never another pose owner. Physics
+    /// sets it; Damage consumes it once. Settled restore starts with None.
+    pub previous_position: Option<[f32; 3]>,
+    /// Actual live travel seconds in this interval; paired transient scratch.
+    pub collision_interval_secs: Option<f32>,
+    pub pitch: f32,
+    pub visual_scale: f32,
     /// Heading in radians. Convention: atan2(dx, -dz) — ship forward is -Z.
     pub heading: f32,
     /// Travel speed (world units / second).
@@ -185,8 +198,30 @@ pub struct BlasterProjectile {
 impl BlasterProjectile {
     /// Advance position by `dt` seconds and decrement lifespan.
     pub fn tick(&mut self, dt: f32) {
-        self.x += simmath::sin(self.heading) * self.speed * dt;
-        self.z -= simmath::cos(self.heading) * self.speed * dt;
+        if !dt.is_finite() || dt <= 0.0 {
+            return;
+        }
+        let previous = [self.x, self.y, self.z];
+        let flight_dt = dt.min(self.lifespan_remaining).max(0.0);
+        let cos_pitch = simmath::cos(self.pitch);
+        let direction = [
+            simmath::sin(self.heading) * cos_pitch,
+            simmath::sin(self.pitch),
+            -simmath::cos(self.heading) * cos_pitch,
+        ];
+        let next =
+            std::array::from_fn::<_, 3, _>(|i| previous[i] + direction[i] * self.speed * flight_dt);
+        if !next.into_iter().all(f32::is_finite) {
+            // Finite world coordinates are the supported physical domain.
+            // Retire an unrepresentable path without fabricating a hit.
+            self.lifespan_remaining = 0.0;
+            self.previous_position = None;
+            self.collision_interval_secs = None;
+            return;
+        }
+        self.previous_position = Some(previous);
+        self.collision_interval_secs = Some(flight_dt);
+        [self.x, self.y, self.z] = next;
         self.lifespan_remaining = (self.lifespan_remaining - dt).max(0.0);
     }
 
@@ -378,8 +413,10 @@ impl BlasterSystem {
     }
 
     /// Paid runtime entry point. Charging advances only by funded work time;
-    /// flight and cooldown use real time. Each simultaneous step is admitted
-    /// atomically before any projectile identity or firing state is changed.
+    /// flight and cooldown use real time. Each listed physical barrel is
+    /// attempted once, in authored order, before minting its projectile ID.
+    /// Refused/unavailable barrels are skipped without another barrel taking
+    /// their place. The due step advances even when no listed barrel can fire.
     #[allow(clippy::too_many_arguments)]
     pub fn tick_with_work(
         &mut self,
@@ -395,15 +432,101 @@ impl BlasterSystem {
         admit_launch: &mut impl FnMut(usize) -> bool,
         next_uuid: &mut impl FnMut() -> String,
     ) -> Vec<LaunchEvent> {
-        // Prune expired projectiles.
-        self.in_flight.retain(|p| !p.is_expired());
+        let origins: Vec<_> = barrel_origins.iter().copied().map(Some).collect();
+        self.tick_with_origins(
+            dt,
+            charge_dt,
+            &origins,
+            shooter_yaw,
+            target_x,
+            target_z,
+            target_vx,
+            target_vz,
+            source_uuid,
+            admit_launch,
+            next_uuid,
+        )
+    }
 
-        // Tick all live projectiles.
-        for p in self.in_flight.iter_mut() {
-            p.tick(dt);
-        }
+    /// Authoritative optional-origin executor. None preserves an unavailable
+    /// physical barrel at its authored index; no other barrel substitutes.
+    #[allow(clippy::too_many_arguments)]
+    pub fn tick_with_origins(
+        &mut self,
+        dt: f32,
+        charge_dt: f32,
+        barrel_origins: &[Option<(f32, f32)>],
+        shooter_yaw: f32,
+        target_x: f32,
+        target_z: f32,
+        target_vx: f32,
+        target_vz: f32,
+        source_uuid: &str,
+        admit_launch: &mut impl FnMut(usize) -> bool,
+        next_uuid: &mut impl FnMut() -> String,
+    ) -> Vec<LaunchEvent> {
+        let origins: Vec<_> = barrel_origins
+            .iter()
+            .map(|origin| origin.map(|(x, z)| [x, 0.0, z]))
+            .collect();
+        self.tick_origins_internal(
+            dt,
+            charge_dt,
+            &origins,
+            shooter_yaw,
+            [target_x, 0.0, target_z],
+            [target_vx, 0.0, target_vz],
+            false,
+            source_uuid,
+            admit_launch,
+            next_uuid,
+        )
+    }
 
-        // ── Charge phase (issue #636) ────────────────────────────────────
+    /// The same paid emission/flight owner using permitted measured XYZ.
+    /// None origins remain unavailable, and unsolved lead cannot buy work.
+    #[allow(clippy::too_many_arguments)]
+    pub fn tick_with_origins_3d(
+        &mut self,
+        dt: f32,
+        charge_dt: f32,
+        barrel_origins: &[Option<[f32; 3]>],
+        shooter_yaw: f32,
+        target_position: [f32; 3],
+        target_velocity: [f32; 3],
+        source_uuid: &str,
+        admit_launch: &mut impl FnMut(usize) -> bool,
+        next_uuid: &mut impl FnMut() -> String,
+    ) -> Vec<LaunchEvent> {
+        self.tick_origins_internal(
+            dt,
+            charge_dt,
+            barrel_origins,
+            shooter_yaw,
+            target_position,
+            target_velocity,
+            true,
+            source_uuid,
+            admit_launch,
+            next_uuid,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn tick_origins_internal(
+        &mut self,
+        dt: f32,
+        charge_dt: f32,
+        barrel_origins: &[Option<[f32; 3]>],
+        shooter_yaw: f32,
+        target_position: [f32; 3],
+        target_velocity: [f32; 3],
+        spatial: bool,
+        source_uuid: &str,
+        admit_launch: &mut impl FnMut(usize) -> bool,
+        next_uuid: &mut impl FnMut() -> String,
+    ) -> Vec<LaunchEvent> {
+        self.advance_flight_only(dt);
+
         if self.volley.charging {
             self.volley.charge_elapsed += charge_dt;
             if self.volley.charge_elapsed >= self.config.charge_time_secs {
@@ -438,46 +561,71 @@ impl BlasterSystem {
         // coarse `dt` spanning several offsets never batches successive steps
         // into a single tick). A single step still emits one event PER barrel,
         // so a simultaneous multi-barrel step fires together on one tick.
-        let elapsed_before = self.volley.volley_elapsed;
         self.volley.volley_elapsed += dt;
         let lifespan = self.config.range / self.config.projectile_speed;
         let mut events = Vec::new();
-        let mut fired_barrels: Vec<u32> = Vec::new();
 
         if self.volley.next_step < self.volley.schedule.len()
             && self.volley.schedule[self.volley.next_step].1 <= self.volley.volley_elapsed
         {
             let barrels = self.volley.schedule[self.volley.next_step].0.clone();
-            if !admit_launch(barrels.len()) {
-                self.volley.volley_elapsed = elapsed_before;
-                return Vec::new();
-            }
+            let mut attempted = std::collections::BTreeSet::new();
+            let mut fired_barrels = Vec::new();
             for &barrel in &barrels {
-                // Origin resolves per barrel; falls back to the first supplied
-                // origin (then the world origin) so a mis-sized origin slice
-                // still fires from a plausible point rather than panicking.
-                let (origin_x, origin_z) = barrel_origins
-                    .get(barrel as usize)
-                    .copied()
-                    .or_else(|| barrel_origins.first().copied())
-                    .unwrap_or((0.0, 0.0));
+                if !attempted.insert(barrel) {
+                    continue;
+                }
+                let Some(&[origin_x, origin_y, origin_z]) =
+                    barrel_origins.get(barrel as usize).and_then(Option::as_ref)
+                else {
+                    continue;
+                };
+                if ![origin_x, origin_y, origin_z]
+                    .into_iter()
+                    .all(f32::is_finite)
+                {
+                    continue;
+                }
+                let angles = if spatial {
+                    super::pdc::lead_angles(
+                        [origin_x, origin_y, origin_z],
+                        target_position,
+                        target_velocity,
+                        self.config.projectile_speed,
+                    )
+                } else {
+                    Some([
+                        predict_intercept_heading(
+                            origin_x,
+                            origin_z,
+                            target_position[0],
+                            target_position[2],
+                            target_velocity[0],
+                            target_velocity[2],
+                            self.config.projectile_speed,
+                            shooter_yaw,
+                            self.config.facing_deg,
+                        ),
+                        0.0,
+                    ])
+                };
+                let Some([heading, pitch]) = angles else {
+                    continue;
+                };
+                if !admit_launch(barrel as usize) {
+                    continue;
+                }
                 let uuid = next_uuid();
-                let heading = predict_intercept_heading(
-                    origin_x,
-                    origin_z,
-                    target_x,
-                    target_z,
-                    target_vx,
-                    target_vz,
-                    self.config.projectile_speed,
-                    shooter_yaw,
-                    self.config.facing_deg,
-                );
                 self.in_flight.push(BlasterProjectile {
                     impact: self.config.impact,
                     id: uuid.clone(),
                     x: origin_x,
+                    y: origin_y,
                     z: origin_z,
+                    previous_position: Some([origin_x, origin_y, origin_z]),
+                    collision_interval_secs: None,
+                    pitch,
+                    visual_scale: self.config.visual_scale,
                     heading,
                     speed: self.config.projectile_speed,
                     lifespan_remaining: lifespan,
@@ -489,19 +637,18 @@ impl BlasterSystem {
                 events.push(LaunchEvent {
                     projectile_id: uuid,
                     x: origin_x,
+                    y: origin_y,
                     z: origin_z,
+                    pitch,
                     heading,
                     barrel,
                 });
+                fired_barrels.push(barrel);
             }
-            fired_barrels = barrels;
+            self.volley.active_barrels = fired_barrels;
             self.volley.next_step += 1;
             self.volley.current_step = self.volley.next_step as u32;
             self.volley.pending_volley = self.volley.pending_volley.saturating_sub(1);
-        }
-
-        if !fired_barrels.is_empty() {
-            self.volley.active_barrels = fired_barrels;
         }
 
         // Volley complete — start cooldown and clear the active-step indicator.
@@ -543,6 +690,54 @@ impl BlasterSystem {
             }
         }
         hits
+    }
+
+    /// Advances only already-emitted rounds, independently of launcher config,
+    /// power, ammo and firing capability, including on detached carriers.
+    pub fn advance_flight_only(&mut self, dt: f32) {
+        if !dt.is_finite() || dt <= 0.0 {
+            return;
+        }
+        self.in_flight.retain(|projectile| !projectile.is_expired());
+        for projectile in &mut self.in_flight {
+            projectile.tick(dt);
+        }
+    }
+
+    /// One collision interval per projectile. Physical bodies are tested in
+    /// XYZ without target intent or faction exemptions; nearest contact wins.
+    pub fn find_hits_3d(&self, targets: &[(String, [f32; 3], f32)]) -> Vec<(String, String)> {
+        self.in_flight
+            .iter()
+            .filter_map(|projectile| {
+                let start = projectile.previous_position?;
+                targets
+                    .iter()
+                    .filter(|(id, _, _)| id != &projectile.source_uuid)
+                    .filter_map(|(id, center, radius)| {
+                        super::pdc::moving_sphere_fraction(
+                            start,
+                            [projectile.x, projectile.y, projectile.z],
+                            projectile.collision_radius,
+                            *center,
+                            *center,
+                            *radius,
+                        )
+                        .map(|fraction| (fraction, id))
+                    })
+                    .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(b.1)))
+                    .map(|(_, target)| (projectile.id.clone(), target.clone()))
+            })
+            .collect()
+    }
+    /// Close Damage's interval. A paused/repeated consumer cannot replay a
+    /// travelled segment, and settled snapshot never needs this scratch.
+    pub fn finish_collision_interval(&mut self) {
+        for projectile in &mut self.in_flight {
+            projectile.previous_position = None;
+            projectile.collision_interval_secs = None;
+        }
+        self.in_flight.retain(|projectile| !projectile.is_expired());
     }
 
     /// Remove the projectile with the given id (after a hit). Returns the
@@ -623,8 +818,10 @@ impl BlasterSystem {
 pub struct LaunchEvent {
     pub projectile_id: String,
     pub x: f32,
+    pub y: f32,
     pub z: f32,
     pub heading: f32,
+    pub pitch: f32,
     /// Zero-based barrel index this bolt left from (issue #765). `0` for a
     /// single-barrel/backward-compat bank. Lets telemetry and the caller
     /// attribute the shot to a specific authored barrel marker.
@@ -871,3 +1068,7 @@ pub fn predict_intercept_heading(
 #[cfg(test)]
 #[path = "blaster_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "blaster_3d_tests.rs"]
+mod spatial_tests;

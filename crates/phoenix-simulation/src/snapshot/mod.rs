@@ -321,6 +321,8 @@ pub use schema::WindowSlot;
 pub use schema::WorldEventRecord;
 
 mod capture;
+mod flight_carriers;
+mod guided_rounds;
 mod historical_clock;
 pub use capture::capture;
 pub(crate) use capture::capture_entity_state;
@@ -367,9 +369,19 @@ use materialization::restore_entities;
 pub(crate) use materialization::spawn_from_origin;
 pub use materialization::LayerReconcileStatus;
 
+mod emp;
 #[cfg(test)]
 mod mission_clock_tests;
+mod mounts;
 #[cfg(test)]
 mod navigation_sharing_tests;
 mod sensing_publications;
+mod shield_enquiry;
 mod spatial_fields;
+
+#[cfg(test)]
+mod sustained_beam_tests;
+mod weapon_targets;
+
+#[cfg(test)]
+mod blaster_spatial_tests;

@@ -195,7 +195,7 @@ entities:
     architecture:
       kind: control-interface
       authority: authoritative
-      owns: [weapons-target-state, ship-phaser-frequency-state, tactical-frequency-hint-inbox-state]
+      owns: [weapons-target-state, ship-phaser-frequency-state, tactical-frequency-hint-inbox-state, weapon-target-assignments]
       produces: [weapons-target-state]
       runs_in: [host-browser-runtime]
     implementation:

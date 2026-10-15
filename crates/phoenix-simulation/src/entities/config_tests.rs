@@ -4770,6 +4770,7 @@ fn torpedo_in_flight_snapshots_shield_pierce_at_launch() {
     let mut cfg = TorpedoConfig::default();
     cfg.shield_pierce = 0.75;
     let tubes = vec![TorpedoTubeConfig {
+        targets: None,
         impact: phoenix_model::damage::DamageProfile::default(),
         id: "fore".into(),
         facing_deg: 0.0,
@@ -4784,10 +4785,10 @@ fn torpedo_in_flight_snapshots_shield_pierce_at_launch() {
     }];
     let mut sys = TorpedoSystem::from_configs(&tubes, cfg);
     assert!(sys.start_load("fore"));
-    let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
+    let targets = HashMap::new();
     sys.tick(sys.config.load_time, &targets, &mut || "test".into());
     sys.launch("fore", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
-    assert!((sys.in_flight[0].shield_pierce - 0.75).abs() < 1e-6);
+    assert!((sys.in_flight[0].profile.shield_pierce - 0.75).abs() < 1e-6);
 
     let det = sys.handle_collision_full("t1").unwrap();
     assert!((det.shield_pierce - 0.75).abs() < 1e-6);
@@ -5029,6 +5030,7 @@ count = 10
 fn validate_torpedo_tubes_accepts_valid_list() {
     let tubes = vec![
         TorpedoTubeConfig {
+            targets: None,
             impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore_port".into(),
             facing_deg: -30.0,
@@ -5042,6 +5044,7 @@ fn validate_torpedo_tubes_accepts_valid_list() {
             ai: None,
         },
         TorpedoTubeConfig {
+            targets: None,
             impact: phoenix_model::damage::DamageProfile::default(),
             id: "aft".into(),
             facing_deg: 180.0,
@@ -5068,6 +5071,7 @@ fn validate_torpedo_tubes_rejects_empty_list() {
 fn validate_torpedo_tubes_rejects_duplicate_ids() {
     let tubes = vec![
         TorpedoTubeConfig {
+            targets: None,
             impact: phoenix_model::damage::DamageProfile::default(),
             id: "aft".into(),
             facing_deg: 180.0,
@@ -5081,6 +5085,7 @@ fn validate_torpedo_tubes_rejects_duplicate_ids() {
             ai: None,
         },
         TorpedoTubeConfig {
+            targets: None,
             impact: phoenix_model::damage::DamageProfile::default(),
             id: "aft".into(),
             facing_deg: 0.0,
@@ -5102,6 +5107,7 @@ fn validate_torpedo_tubes_rejects_duplicate_ids() {
 #[test]
 fn validate_torpedo_tubes_rejects_fire_arc_out_of_range() {
     let tubes = vec![TorpedoTubeConfig {
+        targets: None,
         impact: phoenix_model::damage::DamageProfile::default(),
         id: "aft".into(),
         facing_deg: 180.0,
@@ -5122,6 +5128,7 @@ fn validate_torpedo_tubes_rejects_fire_arc_out_of_range() {
 
 fn torpedo_tube(id: &str) -> TorpedoTubeConfig {
     TorpedoTubeConfig {
+        targets: None,
         impact: phoenix_model::damage::DamageProfile::default(),
         id: id.into(),
         facing_deg: 0.0,

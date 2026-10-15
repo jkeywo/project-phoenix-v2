@@ -3,13 +3,22 @@ import { parse, stringify } from 'smol-toml';
 import { WorkshopDocument } from '../workshop-document.js';
 import { createStoreZip } from '../mod-pack-export.js';
 import { inspectDamage, prepareDamageOperation, applyDamageOperation } from '../workshop-damage.js';
-import { defaultDamageComponent } from '../workshop-damage-model.js';
+import { defaultDamageComponent, defaultEmpResistance, validateEmpResistance, validateEmpPayload } from '../workshop-damage-model.js';
 import { damageFixture } from './damage-fixture.js';
 import { resolveTemplate } from '../entity-includes.js';
 const path = 'assets/entities/ship.toml', base = 'assets/entities/base.toml', dependencies = { base_files: {}, packs: [] };
 function draft(source = damageFixture().source) { return new WorkshopDocument(createStoreZip([
   { path: 'scenarios.toml', text: '[pack]\nformat=1\nid="mine"\nname="Mine"\nversion="1"\n' }, { path, text: source }])); }
 const prepare = (current, operation, deps = dependencies) => prepareDamageOperation(current, deps, { path, ...operation }).changes[0].after;
+
+it('edits a closed EMP receiver profile atomically without changing materials or remedies', () => {
+  const current = draft(), original = inspectDamage(current, dependencies, path).damage;
+  const damage = { ...original, emp: defaultEmpResistance() };
+  const after = prepare(current, { type: 'damage-profile', damage });
+  expect(parse(after).damage).toEqual(damage); expect(parse(after).system).toEqual(parse(current.read(path)).system);
+  for (const invalid of [{ ...damage.emp, max_stacks: 0 }, { ...damage.emp, resistance_per_stack: '1' }, { ...damage.emp, decay_secs: Infinity }, { ...damage.emp, bindings: ['operation', 'operation'] }]) expect(() => validateEmpResistance(invalid)).toThrow();
+  for (const invalid of [{ duration_secs: 0 }, { duration_secs: Infinity }, { duration_secs: 1, factor: 0.5 }]) expect(() => validateEmpPayload(invalid)).toThrow();
+});
 
 describe('damage authoring source contracts', () => {
   it('edits material/recipe data without touching machinery, comments or layout', () => {

@@ -1150,6 +1150,7 @@ fn a_beams_drawn_cooldown_survives_capture_and_restore() {
         .restore_live_banks([(
             "fore".to_string(),
             ActiveBeamSlot {
+                operation: phoenix_model::weapon_operation::BeamOperation::Fixed,
                 strike_damage_bonus: 0.5,
                 target_uuid: "resume-probe-target".to_string(),
                 remaining_secs: DRAWN_REMAINING,

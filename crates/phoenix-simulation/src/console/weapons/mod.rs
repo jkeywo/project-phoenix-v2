@@ -6,9 +6,15 @@
 //! everything the `server` adapter exposes is re-exported so
 //! `crate::console::weapons::X` paths keep resolving.
 
+pub mod assignments;
 pub mod beam;
 pub mod blackboard;
 pub mod blaster;
+pub mod flight_carrier;
+pub(crate) mod guided_advance;
+pub(crate) mod pdc;
+mod round_work;
+pub(crate) use guided_advance::advance_torpedo_flights;
 pub mod server;
 pub mod shared;
 pub mod strike;
@@ -66,3 +72,7 @@ pub(crate) fn finish_action_feedback(
         },
     );
 }
+
+#[cfg(test)]
+#[path = "seeker_tests.rs"]
+mod seeker_tests;

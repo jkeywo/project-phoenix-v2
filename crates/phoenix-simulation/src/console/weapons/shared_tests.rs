@@ -69,20 +69,27 @@ fn beam_context_clear_empties_after_push() {
 #[test]
 fn torpedo_target_snapshot_default_is_empty() {
     let snap = TorpedoTargetSnapshot::default();
-    assert!(snap.target_positions.is_empty());
+    assert!(snap.guidance.is_empty());
     assert!(snap.targets.is_empty());
 }
 
 #[test]
 fn torpedo_target_snapshot_clear_empties_after_push() {
     let mut snap = TorpedoTargetSnapshot::default();
-    snap.target_positions
-        .insert("uuid-1".to_string(), (1.0, 2.0, 3.0));
+    snap.guidance.insert(
+        "round".to_string(),
+        phoenix_model::guided_guidance::GuidanceObservation {
+            target_uuid: "uuid-1".into(),
+            position: [1.0, 2.0, 3.0],
+            sampled_tick: 0,
+            source: phoenix_model::guided_guidance::GuidanceSource::Seeker,
+        },
+    );
     snap.targets
         .push(("uuid-1".to_string(), 1.0, 2.0, 3.0, 4.0));
-    assert_eq!(snap.target_positions.len(), 1);
+    assert_eq!(snap.guidance.len(), 1);
     assert_eq!(snap.targets.len(), 1);
     snap.clear();
-    assert!(snap.target_positions.is_empty());
+    assert!(snap.guidance.is_empty());
     assert!(snap.targets.is_empty());
 }

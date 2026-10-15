@@ -119,3 +119,12 @@ describe('PhTargetLockCard', () => {
     expect(hullRows[0].children[1].textContent).toBe('30%');
   });
 });
+
+it('renders dated delivered altitude and clears it when the observation is absent', () => {
+  const el = setup();
+  el.state = {target_uuid:'held-contact',target_elevation:{height:17,error:.25,velocity:null,sample_tick:10}};
+  expect(scanRow(el,t('sensing.track.elevation.title'))).toContain(t('sensing.track.elevation.value',{height:17,error:.25}));
+  expect(scanRow(el,t('sensing.track.elevation.title'))).toContain(t('sensing.track.elevation.sample',{tick:10}));
+  el.state = {target_uuid:'held-contact'};
+  expect(scanRow(el,t('sensing.track.elevation.title'))).toBeNull();
+});

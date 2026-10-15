@@ -35,6 +35,7 @@ fn hit(payload: f64, penetration: f32) -> DamageHit {
     DamageHit {
         incoming: [1.0, 0.0],
         profile: DamageProfile {
+            emp: None,
             damage_type: DamageType::Physical,
             penetration,
         },
@@ -49,6 +50,144 @@ fn hit(payload: f64, penetration: f32) -> DamageHit {
 }
 fn rng() -> Pcg32 {
     Pcg32::seeded(417, 0)
+}
+
+#[test]
+fn emp_uses_actual_deposits_without_faults_and_expires_without_a_remedy() {
+    let (interior, mut config, ship) = fixture();
+    config.emp = Some(phoenix_model::emp::EmpResistanceConfig {
+        resistance_per_stack: 1.0,
+        max_stacks: 4,
+        decay_secs: 20.0,
+        bindings: vec![DamageBinding::Operation],
+    });
+    let definition = DamageDefinition::compile(&interior, &config, &ship).unwrap();
+    let mut state = DamageState::new(&definition);
+    let mut incident = hit(1.0, 0.0);
+    incident.profile.emp = Some(phoenix_model::emp::EmpPayload { duration_secs: 6.0 });
+    let clock = |tick| phoenix_model::emp::EmpClock {
+        tick,
+        period_nanos: 1_000_000_000,
+    };
+    let before = state.clone();
+    assert!(state.apply_hit(&definition, &incident, &mut rng()).is_err());
+    assert_eq!(state, before);
+    let result = state
+        .apply_hit_at(&definition, &incident, &mut rng(), Some(clock(0)))
+        .unwrap();
+    assert_eq!(
+        result
+            .deposits
+            .iter()
+            .map(|row| row.compartment.as_str())
+            .collect::<Vec<_>>(),
+        vec!["front"]
+    );
+    let engine = SystemId("engine".into());
+    let scanner = SystemId("scanner".into());
+    assert_eq!(
+        state.effect_factor_at(
+            &definition,
+            &engine,
+            DamageBinding::Operation,
+            Some(clock(0))
+        ),
+        0.0
+    );
+    assert_eq!(
+        state.effect_factor_at(
+            &definition,
+            &scanner,
+            DamageBinding::Operation,
+            Some(clock(0))
+        ),
+        1.0
+    );
+    assert!(state.components[&scanner]["operation"].emp.is_none());
+    assert_eq!(condition(&state, "engine"), &ComponentCondition::Healthy);
+    let emp = state.components[&engine]["operation"].emp.clone();
+    assert!(!state
+        .remedy_component(&definition, &target("engine"), "full")
+        .unwrap());
+    assert_eq!(state.components[&engine]["operation"].emp, emp);
+    state
+        .apply_hit_at(&definition, &incident, &mut rng(), Some(clock(1)))
+        .unwrap();
+    let effect = state.components[&engine]["operation"].emp.as_ref().unwrap();
+    assert_eq!(effect.effect_until_tick, 6);
+    assert_eq!(effect.resistance_stacks, 2);
+    assert_eq!(
+        state.effect_factor_at(
+            &definition,
+            &engine,
+            DamageBinding::Operation,
+            Some(clock(6))
+        ),
+        1.0
+    );
+    assert_eq!(condition(&state, "engine"), &ComponentCondition::Healthy);
+    let before = state.clone();
+    assert!(state
+        .apply_hit_at(
+            &definition,
+            &incident,
+            &mut rng(),
+            Some(clock(u64::MAX - 1))
+        )
+        .is_err());
+    assert_eq!(
+        state, before,
+        "overflow must refuse before structure/dose/EMP writes"
+    );
+}
+
+#[test]
+fn emp_json_continuation_keeps_absolute_effects_resistance_and_physical_damage_separate() {
+    let (interior, mut config, ship) = fixture();
+    config.emp = Some(phoenix_model::emp::EmpResistanceConfig {
+        resistance_per_stack: 0.5,
+        max_stacks: 8,
+        decay_secs: 20.0,
+        bindings: vec![DamageBinding::Operation],
+    });
+    let definition = DamageDefinition::compile(&interior, &config, &ship).unwrap();
+    let mut state = DamageState::new(&definition);
+    let mut incident = hit(0.1, 0.0);
+    incident.profile.emp = Some(phoenix_model::emp::EmpPayload { duration_secs: 3.0 });
+    let clock = |tick| phoenix_model::emp::EmpClock {
+        tick,
+        period_nanos: 100_000_000,
+    };
+    state
+        .apply_hit_at(&definition, &incident, &mut rng(), Some(clock(10)))
+        .unwrap();
+    let mut resumed: DamageState =
+        serde_json::from_slice(&serde_json::to_vec(&state).unwrap()).unwrap();
+    for tick in 11..371 {
+        state.validate_emp_at(&definition, clock(tick)).unwrap();
+        resumed.validate_emp_at(&definition, clock(tick)).unwrap();
+        if tick % 31 == 0 {
+            for next in [&mut state, &mut resumed] {
+                next.apply_hit_at(&definition, &incident, &mut rng(), Some(clock(tick)))
+                    .unwrap();
+            }
+        }
+        assert_eq!(state, resumed);
+        assert_eq!(
+            state.effect_factor_at(
+                &definition,
+                &SystemId("engine".into()),
+                DamageBinding::Operation,
+                Some(clock(tick))
+            ),
+            resumed.effect_factor_at(
+                &definition,
+                &SystemId("engine".into()),
+                DamageBinding::Operation,
+                Some(clock(tick))
+            )
+        );
+    }
 }
 fn target(system: &str) -> ComponentRef {
     ComponentRef {
@@ -81,6 +220,7 @@ fn strict_model_rejects_unknown_types_fields_and_unbound_remedy_shape() {
     )
     .is_err());
     assert!(DamageProfile {
+        emp: None,
         damage_type: DamageType::Physical,
         penetration: f32::NAN
     }
@@ -89,6 +229,7 @@ fn strict_model_rejects_unknown_types_fields_and_unbound_remedy_shape() {
     assert_eq!(
         DamageProfile::default(),
         DamageProfile {
+            emp: None,
             damage_type: DamageType::Physical,
             penetration: 0.0
         }

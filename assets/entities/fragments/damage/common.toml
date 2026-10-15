@@ -1,5 +1,12 @@
 # [ai] Increment 11 initial physical coefficients and bounded repair recipes.
 # Provisional tuning; actual finite stores remain on each fitted entity.
+[damage.emp]
+# [ai] Increment15 provisional receiver policy shared by actual physical hulls.
+resistance_per_stack = 0.5
+max_stacks = 8
+decay_secs = 20
+bindings = ["operation"]
+
 [damage.materials.light]
 residual_fraction = 0.1
 

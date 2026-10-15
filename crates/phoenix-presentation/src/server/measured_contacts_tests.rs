@@ -20,6 +20,7 @@ pub(crate) fn config() -> ShipConfig {
 
 pub(crate) fn track(contact: &str) -> SensorTrackSnapshot {
     SensorTrackSnapshot {
+        elevation: None,
         references: Vec::new(),
         samples: Vec::new(),
         contact_id: contact.into(),
@@ -238,13 +239,12 @@ fn actual_radar_bridge_reconciles_measured_aliases_and_an_honestly_empty_picture
     app.world_mut()
         .run_system_once(crate::server::radar::sync_server_radar_bridge)
         .unwrap();
-    assert!(
-        app.world()
-            .get::<RadarBlipMap>(widget)
-            .unwrap()
-            .blips
-            .is_empty()
-    );
+    assert!(app
+        .world()
+        .get::<RadarBlipMap>(widget)
+        .unwrap()
+        .blips
+        .is_empty());
 
     // Loss of the accepted observing actor cannot reactivate live world data
     // or leave the previously shared measured picture mounted.

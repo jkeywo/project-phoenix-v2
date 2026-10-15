@@ -1,3 +1,4 @@
+import { mountWeaponTargetControls } from '../components/weapon-target-controls.js';
 /**
  * gui/stations/tactical-console.js — one Tactical renderer, four hulls
  * (issue #1234, T4.C2 of the console-seam programme).
@@ -91,6 +92,10 @@ export function makeTacticalRender(variant) {
     // hulls — left the inner radar blind to the lock.
     const radarEl = doc.getElementById(ids.radar);
     if (radarEl) {
+      if (!radarEl._weaponTargetControls) { radarEl._weaponTargetControls = mountWeaponTargetControls(doc); radarEl.before(radarEl._weaponTargetControls.node); }
+      radarEl._weaponTargetControls.update(w.weapon_targets || null);
+    }
+    if (radarEl) {
       if (!radarEl._sharingControls) { radarEl._sharingControls = mountRadarSharingControls(doc); radarEl.before(radarEl._sharingControls.node); }
       radarEl._sharingControls.update(w.radar_sharing || []);
     }
@@ -124,7 +129,8 @@ export function makeTacticalRender(variant) {
       const el = doc.getElementById(ids.phasers);
       if (el) {
         el.state = {
-          banks: w.banks || [],
+          banks: (w.banks || []).map(bank => ({ ...bank,
+            ...(w.weapon_targets ? { manual_control: w.weapon_targets.rows?.some(row => row.system === `phaser-${bank.id}` && row.controllable === true) === true } : {}) })),
           target_valid: !!w.target_uuid,
           mode: w.phaser_mode || 'Auto',
         };
@@ -230,6 +236,8 @@ function renderTargetCard(id, w, doc) {
     target_bearing: w.target_bearing != null ? w.target_bearing : null,
     target_range: w.target_range != null ? w.target_range : null,
     target_hull_pct: w.target_hull_pct != null ? w.target_hull_pct : null,
+    target_protection: w.target_protection || null,
+    target_elevation: w.target_elevation || null,
     target_shields: w.target_shields || [],
     target_shield_freq: w.target_shield_freq != null ? w.target_shield_freq : null,
   };

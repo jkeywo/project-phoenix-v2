@@ -808,7 +808,12 @@ impl SpawnSection for HullSpawn {
                     let state = phoenix_sim_gameplay::ship::compartment_damage::DamageState::new(
                         &definition,
                     );
-                    cmds.insert(crate::ship::compartment_damage::ShipDamage { definition, state });
+                    cmds.insert(crate::ship::compartment_damage::ShipDamage {
+                        definition,
+                        state,
+                        emp_clock: None,
+                    });
+                    crate::ship::emp::install_clock(cmds);
                 }
                 Err(error) => error!("refusing invalid physical damage owner: {error}"),
             }

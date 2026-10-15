@@ -20,6 +20,16 @@ function fixture(source = damageFixture().source, dependencies = { base_files: {
   return { draft, runtime, changed, panel, source };
 }
 describe('Workshop damage and restoration forms', () => {
+  it('accepts receiver resistance and explicit disable with undo through the existing profile transaction', async () => {
+    const { draft, panel } = fixture(); await settle();
+    control('emp-enabled').checked = true; control('emp-enabled').dispatchEvent(new Event('change'));
+    control('emp-resistance').value = '0.75'; control('emp-stacks').value = '6'; control('emp-decay').value = '30';
+    control('save-emp').click(); await settle();
+    expect(parse(draft.read(path)).damage.emp).toEqual({ resistance_per_stack: 0.75, max_stacks: 6, decay_secs: 30, bindings: ['operation'] });
+    control('emp-enabled').checked = false; control('emp-enabled').dispatchEvent(new Event('change')); control('save-emp').click(); await settle();
+    expect(parse(draft.read(path)).damage.emp).toBeUndefined();
+    draft.undo(); panel.refresh(); expect(control('emp-enabled').checked).toBe(true); panel.dispose();
+  });
   it('labels controls and applies physical material/recipe edits through accepted history', async () => {
     const { draft, runtime, panel, source } = fixture(); await settle();
     for (const input of panel.node.querySelectorAll('input,select')) expect(panel.node.querySelector(`label[for="${input.id}"]`)).not.toBeNull();

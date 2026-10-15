@@ -1,3 +1,4 @@
+import { guardWeaponGroupReferences } from './workshop-weapon-groups.js';
 import { guardSensingReferences } from './workshop-sensing.js';
 import { guardFittingReferences } from './workshop-fitting.js';
 import { guardRecoveryReferences } from './workshop-resource-recovery.js';
@@ -7,7 +8,7 @@ import { scanPublicationSource } from '../gui/scan-source.js';
 import { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
 export { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
 import { writeStateTrees, writeRepairWorkflow, rebindStateTreeChannel } from './workshop-state-trees.js';
-import { writeSystemComposition } from './workshop-system-composition.js';
+import { writeSystemComposition, validateTurretComposition } from './workshop-system-composition.js';
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
 import { acceptWorkshopChanges } from './workshop-acceptance.js';
@@ -258,8 +259,11 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
   }
   else if (operation.type === 'system-composition-set') {
     const system = inspection.systems.find(row => row.id === operation.id);
-    if (!system?.local) throw new Error('Materialise the containing System before editing its components.');
-    after = writeSystemComposition(before, operation.id, operation, system);
+    if (!system) throw new Error('Unknown System');
+    if (!system.local && !operation.materialise) throw new Error('Materialise the containing System before editing its components.');
+    validateTurretComposition(system, operation.components || [], operation.channels || []);
+    const local = system.local ? before : append(before, { system: [{ id: system.id }] });
+    after = writeSystemComposition(local, operation.id, operation, system);
     const oldChannel = system.component?.find(row => row.kind === 'dock_mating')?.enabled_channel
       || system.component?.find(row => row.kind === 'access_boundary')?.sealed_channel;
     const newChannel = operation.components?.find(row => row.kind === 'dock_mating')?.enabled_channel
@@ -444,6 +448,7 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
     || (operation.type === 'system-update' && operation.fields?.id && operation.fields.id !== operation.id))
     guardLogisticsSystemRemoval(inspection.composition.resolved.value, operation.id);
   if (effectiveValue.interior) guardLogisticsLayout(effectiveValue, effectiveValue.interior);
+  guardWeaponGroupReferences(inspection.composition.resolved.value, effectiveValue);
   guardFittingReferences(inspection.composition.resolved.value, effectiveValue);
   guardSensingReferences(inspection.composition.resolved.value, effectiveValue);
   guardProductionReferences(inspection.composition.resolved.value, effectiveValue);

@@ -96,11 +96,16 @@ pub struct WeaponsPlugin;
 
 impl Plugin for WeaponsPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::weapons::mounts::MountsPlugin>() {
+            app.add_plugins(crate::weapons::mounts::MountsPlugin);
+        }
+        super::assignments::register(app);
         use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
         // Weapons owns its delta cache and ownership-filtered reconnect
         // projection beside the live publisher in `blackboard.rs`. The generic
         // lifecycle runner receives only the registered callbacks.
         super::blackboard::register_weapons_replication_lifecycle(app);
+        super::flight_carrier::register(app);
         // The AI host spine's read-only world context (issue #1207): the phaser,
         // blaster, torpedo, doctrine and tactical-selector hosts in this plugin
         // now consume `AiHostEnv`, a bare-`Res` param, so every app that runs
@@ -142,14 +147,28 @@ impl Plugin for WeaponsPlugin {
             )
             .with_feedback(
                 crate::command_admission::FeedbackAddress::MatcherSpelling,
-                &[Payload::FireTorpedo, Payload::SetTorpedoVolleyTarget],
+                &[
+                    Payload::FireTorpedo,
+                    Payload::SetTorpedoVolleyTarget,
+                    Payload::SetWeaponTarget,
+                    Payload::SetWeaponGroupTarget,
+                    Payload::FollowWeaponGroup,
+                    Payload::FollowPrimaryTarget,
+                ],
             ),
         )
         .register_admitted_consumer(
             ConsumerMatcher::prefix(crate::ship::system_registry::PHASER_BANK_KIND, "phaser-")
                 .with_feedback(
                     crate::command_admission::FeedbackAddress::MatcherSpelling,
-                    &[Payload::FirePhaser],
+                    &[
+                        Payload::FirePhaser,
+                        Payload::StopPhaser,
+                        Payload::SetWeaponTarget,
+                        Payload::SetWeaponGroupTarget,
+                        Payload::FollowWeaponGroup,
+                        Payload::FollowPrimaryTarget,
+                    ],
                 ),
         )
         // Blaster banks converge on the admission seam (issue #781): both a
@@ -163,6 +182,11 @@ impl Plugin for WeaponsPlugin {
                         Payload::FireBlaster,
                         Payload::ChargeBlasterStart,
                         Payload::ChargeBlasterCancel,
+                        Payload::SetWeaponTarget,
+                        Payload::SetAutomaticWeaponTarget,
+                        Payload::SetWeaponGroupTarget,
+                        Payload::FollowWeaponGroup,
+                        Payload::FollowPrimaryTarget,
                     ],
                 ),
         );
@@ -377,26 +401,30 @@ impl Plugin for WeaponsPlugin {
                     handle_unload_tube
                         .in_set(crate::sim_sets::FixedStep::HandleUnloadTube)
                         .in_set(crate::sim_sets::SimSet::Physics),
-                    // Torpedo tick split into two phases (issue #724),
-                    // connected by the one-tick `TorpedoTargetSnapshot`
-                    // resource: the builder writes it, the lifecycle reads
-                    // it. Instance-based `.chain()` rather than type-set
+                    // Physics builds the collision roster, pays for launches
+                    // and advances actual flights. Damage settles surviving
+                    // payloads after PDC interception. Instance-based `.chain()`
+                    // rather than type-set
                     // `.after(...)` for the same reason as the beam-tick
                     // chain above: the weapons test harness registers a
                     // second instance of each phase.
                     (
                         build_torpedo_target_snapshot
                             .in_set(crate::sim_sets::FixedStep::BuildTorpedoTargetSnapshot),
-                        tick_torpedo_lifecycle
-                            .in_set(crate::sim_sets::FixedStep::TickTorpedoLifecycle)
+                        super::advance_torpedo_flights
+                            .in_set(crate::sim_sets::FixedStep::AdvanceTorpedoFlights)
                             .in_set(ProjectileLifecycle),
                     )
                         .chain()
                         .in_set(crate::sim_sets::SimSet::Physics),
+                    tick_torpedo_lifecycle
+                        .in_set(crate::sim_sets::FixedStep::TickTorpedoLifecycle)
+                        .in_set(crate::sim_sets::SimSet::Damage)
+                        .after(crate::sim_sets::FixedStep::HandleBlasterHits),
                     // Magazine consumer runs in Physics — reads channel-2 claims
                     // that handle_load_tube emitted this tick (both now in
                     // Physics, issue #846). Ordered after handle_load_tube and
-                    // build_torpedo_target_snapshot / tick_torpedo_lifecycle so
+                    // build_torpedo_target_snapshot / advance_torpedo_flights so
                     // its own state mutations are seen.
                     handle_torpedo_magazine_inter_system
                         .in_set(crate::sim_sets::FixedStep::HandleTorpedoMagazineInterSystem)
@@ -420,6 +448,10 @@ impl Plugin for WeaponsPlugin {
                     // recoil order. Lifecycle -> ApplyDeferred -> fire already
                     // exists in the initialized graph; do not bypass it.
                     tick_blaster_system
+                        .in_set(crate::sim_sets::FixedStep::TickBlasterSystem)
+                        .in_set(crate::sim_sets::SimSet::Physics)
+                        .before(ProjectileLifecycle),
+                    super::pdc::advance_carrier_bolts
                         .in_set(crate::sim_sets::FixedStep::TickBlasterSystem)
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .before(ProjectileLifecycle),
@@ -458,31 +490,31 @@ use super::{blaster, shared, torpedo};
 // Shared weapons utilities extracted to `shared.rs` (issue #721). Re-exported
 // so `use super::*;` in the test module keeps resolving them.
 pub(crate) use super::shared::{
-    BeamContext, DirectFireGeometry, TorpedoTargetSnapshot, any_tactical_system_operates_ai,
-    live_entity_xz,
+    any_tactical_system_operates_ai, live_entity_xz, BeamContext, DirectFireGeometry,
+    TorpedoTargetSnapshot,
 };
 
 // Blaster systems extracted to `blaster.rs` (issue #726). `BlasterSystemResource`
 // stays `pub` here for external consumers (`crates/phoenix-presentation/src/server/pfx.rs`,
 // `crates/phoenix-simulation/src/entities/spawner.rs` via the `weapons_plugin` alias); the systems are
 // re-exported so the plugin build fn and the test module keep resolving them.
-pub use super::blaster::{BlasterBankAiPolicies, BlasterSystemResource, seed_blaster_bank_facts};
 pub(crate) use super::blaster::{
     handle_blaster_hits, handle_fire_blaster, tick_blaster_auto_fire, tick_blaster_system,
 };
+pub use super::blaster::{seed_blaster_bank_facts, BlasterBankAiPolicies, BlasterSystemResource};
 
 // Beam (phaser) types and systems extracted to `beam.rs` (issue #727). The
 // public types stay re-exported here for external consumers; the systems are
 // re-exported so the plugin build fn and the test module keep resolving them.
-pub use super::beam::{
-    ActiveBeam, BEAM_DAMAGE_PER_SEC, BeamEndedEvent, BeamStartedEvent, CurrentPhaserMode,
-    LastShipAttacker, PhaserBankAiPolicies, PhaserCombatConfigResource, PhaserCooldown,
-    TacticalRadarSelection, TacticalTargetSelector, seed_phaser_bank_facts,
-};
 pub(crate) use super::beam::{
     ai_phaser_auto_fire, handle_fire_phaser, handle_set_phaser_frequency, handle_set_phaser_mode,
     handle_set_target, on_beam_ended, on_beam_started, tick_beams_apply_damage, tick_beams_prepare,
     tick_beams_tick_lifetimes,
+};
+pub use super::beam::{
+    seed_phaser_bank_facts, ActiveBeam, BeamEndedEvent, BeamStartedEvent, CurrentPhaserMode,
+    LastShipAttacker, PhaserBankAiPolicies, PhaserCombatConfigResource, PhaserCooldown,
+    TacticalRadarSelection, TacticalTargetSelector, BEAM_DAMAGE_PER_SEC,
 };
 
 // Torpedo systems extracted to `torpedo.rs` (issue #728). `TorpedoSystemResource`
@@ -491,17 +523,17 @@ pub(crate) use super::beam::{
 // `crates/phoenix-simulation/src/entities/spawner.rs`, `crates/phoenix-simulation/src/console_ai/server.rs`, and friends); the
 // other systems are re-exported so the plugin build fn and the test module
 // keep resolving them.
+pub(crate) use super::torpedo::{
+    build_torpedo_target_snapshot, handle_fire_torpedo, handle_load_tube,
+    handle_set_torpedo_volley_target, handle_unload_tube, tick_torpedo_lifecycle,
+};
 pub use super::torpedo::{
-    TorpedoMagazineAiPolicy, TorpedoSystemResource, TorpedoTubeAiPolicies,
     handle_torpedo_magazine_inter_system, seed_torpedo_conservation_facts,
     seed_torpedo_magazine_facts, seed_torpedo_tube_launch_facts, seed_torpedo_tube_load_facts,
     torpedo_conservation_declared, torpedo_conservation_policy_fires,
     torpedo_magazine_grant_policy_fires, torpedo_tube_launch_policy_fires,
-    torpedo_tube_load_policy_fires,
-};
-pub(crate) use super::torpedo::{
-    build_torpedo_target_snapshot, handle_fire_torpedo, handle_load_tube,
-    handle_set_torpedo_volley_target, handle_unload_tube, tick_torpedo_lifecycle,
+    torpedo_tube_load_policy_fires, TorpedoMagazineAiPolicy, TorpedoSystemResource,
+    TorpedoTubeAiPolicies,
 };
 
 // Blackboard publish systems, broadcaster, and cache resources extracted to
@@ -512,7 +544,7 @@ pub(crate) use super::torpedo::{
 // The publish systems are re-exported so the plugin build fn and test module
 // keep resolving them.
 pub use super::blackboard::{
-    LastWeaponsUpdate, compute_current_weapons_update, weapons_update_broadcaster,
+    compute_current_weapons_update, weapons_update_broadcaster, LastWeaponsUpdate,
 };
 pub(crate) use super::blackboard::{
     publish_phaser_bank_blackboards, publish_tactical_radar_blackboard,
@@ -2400,17 +2432,14 @@ fn ai_target_selection(
     }
 }
 
-/// NPC auto-match phaser frequency to locked target's shield frequency.
+/// NPC auto-match uses an acquired finding permitted to the actual weapon owner.
 ///
 /// Runs in `SimSet::Input`. When the ship's tactical system is AI-operated
 /// and a target is locked, waits `delay_secs` then writes the matching
 /// frequency to `ShipPhaserFrequency`.
 fn tick_npc_auto_match_frequency(
     time: Res<Time>,
-    target_shields_q: Query<(
-        &crate::entities::spawner::EntityUuid,
-        Option<&crate::ship::shields::ShipShields>,
-    )>,
+    content: Option<Res<crate::world::server::WorldContentRuntime>>,
     mut ship_q: Query<(
         Entity,
         &ShipSystemControlSources,
@@ -2418,6 +2447,10 @@ fn tick_npc_auto_match_frequency(
         &crate::server_app::ShipSystemBlackboards,
         &mut crate::ship::state::ShipPhaserFrequency,
         Has<crate::ai::server::AiHighFidelity>,
+        Option<&crate::entities::spawner::EntityUuid>,
+        Option<&crate::science::broad::BroadTracks>,
+        Option<&crate::science::broad::SensingControls>,
+        Option<&super::assignments::ShipWeaponTargets>,
     )>,
     mut states: ResMut<NpcFrequencyMatchStates>,
 ) {
@@ -2434,38 +2467,103 @@ fn tick_npc_auto_match_frequency(
     // forever — a state leak. `Has<>` + in-loop gate keeps the cleanup path
     // alive so demoted ships' state is pruned. Do not "simplify" this into a
     // query filter.
-    for (entity, control_sources, ship_config, blackboards, mut phaser_freq, has_high_fidelity) in
-        ship_q.iter_mut()
+    for (
+        entity,
+        control_sources,
+        ship_config,
+        blackboards,
+        mut phaser_freq,
+        has_high_fidelity,
+        observer,
+        tracks,
+        controls,
+        assignments,
+    ) in ship_q.iter_mut()
     {
         if !has_high_fidelity || !any_tactical_system_operates_ai(control_sources, &ship_config.0) {
             states.0.remove(&entity);
             continue;
         }
-
-        // Frozen Combat Lock from this ship's viewscreen (issue #829, spec §3).
-        let locked_target = match ship_config
-            .0
-            .observations_for_system(
-                &crate::ship::system_registry::phaser_control_system_id(),
-                &blackboards.0,
-            )
-            .get(&crate::ship::system_registry::viewscreen_system_id())
-        {
-            Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
-            _ => None,
+        // One existing frequency actuator serves this hull. Each eligible bank
+        // must obtain evidence through its own Console, never a Station union.
+        // Conflicting held findings cannot select an arbitrary bank's advice.
+        let mut acquired = None;
+        let mut conflicting = false;
+        for system in ship_config.0.systems.iter().filter(|system| {
+            system.kind == crate::ship::system_registry::PHASER_BANK_KIND
+                && control_sources.0.policy_for(&system.id).operate_ai
+        }) {
+            let Some(public) = super::assignments::effective_weapon_contact(
+                &ship_config.0,
+                &system.id,
+                blackboards,
+                tracks,
+                controls,
+                assignments,
+            ) else {
+                continue;
+            };
+            let Some(route) = crate::science::contact_routing::resolve_machinery(
+                Some(&ship_config.0),
+                Some(blackboards),
+                tracks,
+                controls,
+                &system.id,
+                &public,
+            ) else {
+                continue;
+            };
+            if content.as_ref().is_some_and(|content| {
+                observer.is_none_or(|observer| {
+                    crate::gm::operations::contact::mode(
+                        &content.contact_overrides,
+                        &observer.0,
+                        &route,
+                    ) == crate::gm::operations::contact::ContactMode::Conceal
+                })
+            }) {
+                continue;
+            }
+            // A scanner's original contact handle may differ from this bank's
+            // target handle. Both must currently be permitted by this Console;
+            // only the ordinary actuator resolver may establish equivalence.
+            let aliases = crate::science::contact_routing::aliases_for_source(
+                &ship_config.0,
+                blackboards,
+                tracks,
+                &system.id,
+                &route,
+            );
+            let Some(finding) =
+                crate::science::shield_enquiry::latest_permitted_finding_for_subjects(
+                    &ship_config.0,
+                    blackboards,
+                    &system.id,
+                    &aliases,
+                )
+            else {
+                continue;
+            };
+            let candidate = (
+                format!("{}:{}/{}", route.len(), route, finding.configuration),
+                finding.frequency,
+            );
+            if acquired
+                .as_ref()
+                .is_some_and(|previous| previous != &candidate)
+            {
+                conflicting = true;
+                break;
+            }
+            acquired = Some(candidate);
+        }
+        let Some((subject_configuration, target_frequency)) = acquired.filter(|_| !conflicting)
+        else {
+            states.0.remove(&entity);
+            continue;
         };
-        let target_frequency = locked_target
-            .as_ref()
-            .and_then(|uuid| {
-                target_shields_q
-                    .iter()
-                    .find(|(u, _)| u.0.as_str() == uuid.as_str())
-                    .and_then(|(_, shields)| shields.map(|s| s.frequency()))
-            })
-            .unwrap_or(0.5);
-
         let input = crate::console_ai::FrequencyMatchInput {
-            locked_target,
+            locked_target: Some(subject_configuration),
             target_frequency,
             dt,
             delay_secs: NPC_FREQ_MATCH_DELAY,
@@ -2777,3 +2875,7 @@ fn handle_set_weapons_restraint(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "npc_frequency_tests.rs"]
+mod npc_frequency_tests;

@@ -19,6 +19,15 @@ function fixture() {
   return { source, draft, runtime, changed, panel };
 }
 describe('Workshop shield form', () => {
+  it('authors optional response/cycling through the existing accepted history and retains an unsaved draft', async () => {
+    const {draft,panel,runtime}=fixture();await settle();
+    const frequency=control('frequencies');frequency.value='0.2, 0.8';frequency.focus();panel.refresh();
+    expect(document.activeElement).toBe(frequency);expect(frequency.value).toBe('0.2, 0.8');
+    control('mismatch-loss').value='0.6';control('cycling').checked=true;control('cycle-period').value='30';
+    control('frequency-save').click();await settle();
+    expect(parse(draft.read(path)).shields_console).toMatchObject({frequency_response:{mismatch_loss:.6},frequency_cycle:{frequencies:[.2,.8],period_secs:30}});
+    expect(runtime.validate).toHaveBeenCalledOnce();draft.undo();panel.refresh();expect(parse(draft.read(path)).shields_console?.frequency_cycle).toBeUndefined();panel.dispose();
+  });
   it('labels physical work and recovery controls and edits through ordinary history', async () => {
     const { source, draft, changed, panel } = fixture(); await settle();
     for (const input of panel.node.querySelectorAll('input,select')) expect(panel.node.querySelector(`label[for="${input.id}"]`)).not.toBeNull();

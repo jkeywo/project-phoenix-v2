@@ -29,6 +29,15 @@ pub type PhaserBankId = String;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct PhaserBankConfig {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "phoenix_model::weapon_operation::deserialize_target_filter"
+    )]
+    pub targets: Option<Vec<phoenix_model::tags::EntityTag>>,
+
+    #[serde(default)]
+    pub operation: phoenix_model::weapon_operation::BeamOperation,
     pub impact: phoenix_model::damage::DamageProfile,
     pub id: PhaserBankId,
     pub facing_deg: f32,
@@ -113,6 +122,15 @@ pub type BlasterBankId = String;
 /// fields (recoil, screenshake, visual variants).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct BlasterBankConfig {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "phoenix_model::weapon_operation::deserialize_target_filter"
+    )]
+    pub targets: Option<Vec<phoenix_model::tags::EntityTag>>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rounds: Option<phoenix_model::weapon_operation::WeaponRoundFeed>,
     pub impact: phoenix_model::damage::DamageProfile,
     pub id: BlasterBankId,
     #[serde(default)]
@@ -141,7 +159,7 @@ pub struct BlasterBankConfig {
     /// Fraction `[0.0, 1.0]` of damage that bypasses shields entirely.
     #[serde(default)]
     pub shield_pierce: f32,
-    /// Recoil impulse magnitude (reserved for a later issue).
+    /// Recoil velocity impulse magnitude opposite the actual projectile bearing.
     #[serde(default)]
     pub recoil_impulse: f32,
     /// Screenshake magnitude (reserved for a later issue).
@@ -209,6 +227,8 @@ impl BlasterBankConfig {
     /// Convert this TOML config into a runtime `crate::weapons::blaster::BlasterBankConfig`.
     pub fn to_runtime(&self) -> crate::weapons::blaster::BlasterBankConfig {
         crate::weapons::blaster::BlasterBankConfig {
+            targets: self.targets.clone(),
+            rounds: self.rounds.clone(),
             impact: self.impact,
             id: self.id.clone(),
             facing_deg: self.facing_deg,
@@ -246,6 +266,13 @@ pub type TorpedoTubeId = String;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TorpedoTubeConfig {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "phoenix_model::weapon_operation::deserialize_target_filter"
+    )]
+    pub targets: Option<Vec<phoenix_model::tags::EntityTag>>,
+
     pub impact: phoenix_model::damage::DamageProfile,
     pub id: TorpedoTubeId,
     pub facing_deg: f32,
@@ -486,6 +513,7 @@ pub fn validate_torpedo_tubes(tubes: &[TorpedoTubeConfig]) -> Result<(), String>
     }
     let mut seen = std::collections::HashSet::new();
     for t in tubes {
+        crate::weapons::operation::validate_target_filter(t.targets.as_deref())?;
         if !seen.insert(t.id.as_str()) {
             return Err(format!("duplicate torpedo tube id '{}'", t.id));
         }
@@ -512,6 +540,10 @@ pub fn validate_torpedo_tubes(tubes: &[TorpedoTubeConfig]) -> Result<(), String>
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WeaponsConsoleConfig {
+    /// Prepared groups collate individual System commands; membership grants
+    /// neither information nor machinery authority.
+    #[serde(default, rename = "group", skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<phoenix_model::weapon_targets::WeaponGroupConfig>,
     /// RGBA colour used by the client Tactical UI for torpedo fire-arc
     /// overlays. When absent, the `ShipClientConfig` default is used.
     #[serde(default)]
@@ -635,6 +667,13 @@ pub struct TorpedoesConfig {
     /// `fact(target_facing_shields) <= 0` launch gate is buying.
     #[serde(default = "default_torpedo_damage_shields")]
     pub damage_shields: i32,
+    /// Finite physical interception durability, frozen into actual launches.
+    #[serde(default = "default_torpedo_durability")]
+    pub durability: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seeker: Option<phoenix_model::guided_guidance::SeekerProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver: Option<phoenix_model::guided_guidance::GuidanceReceiverProfile>,
     #[serde(default = "default_torpedo_speed")]
     pub speed: f32,
     /// Maximum turn rate in **degrees per second** (homing).
@@ -709,6 +748,9 @@ fn default_torpedo_damage_hull() -> i32 {
 fn default_torpedo_damage_shields() -> i32 {
     5
 }
+fn default_torpedo_durability() -> f32 {
+    1.0
+}
 fn default_torpedo_speed() -> f32 {
     15.0
 }
@@ -732,6 +774,9 @@ impl Default for TorpedoesConfig {
             initial_count: None,
             damage_hull: default_torpedo_damage_hull(),
             damage_shields: default_torpedo_damage_shields(),
+            durability: default_torpedo_durability(),
+            seeker: None,
+            receiver: None,
             speed: default_torpedo_speed(),
             turn_rate_deg_per_sec: default_torpedo_turn_rate_deg_per_sec(),
             lifespan: default_torpedo_lifespan(),
@@ -748,6 +793,20 @@ impl Default for TorpedoesConfig {
 
 impl TorpedoesConfig {
     pub fn validate_initial_stock(&self) -> Result<(), String> {
+        // Reject unsupported physics at the accepted source boundary, before
+        // any actual launch can create an uncontinuable frozen profile.
+        let runtime = self.to_runtime();
+        if self.tubes.is_empty() {
+            runtime
+                .round_profile(phoenix_model::damage::DamageProfile::default())
+                .validate()?;
+        }
+        for tube in &self.tubes {
+            runtime.round_profile(tube.impact).validate()?;
+        }
+        if !self.burst_interval_secs.is_finite() || self.burst_interval_secs <= 0.0 {
+            return Err("torpedo burst cadence must be finite and positive".into());
+        }
         if self
             .initial_count
             .is_some_and(|initial| initial > self.count)
@@ -764,6 +823,9 @@ impl TorpedoesConfig {
             initial_count: self.initial_count,
             damage_hull: self.damage_hull,
             damage_shields: self.damage_shields,
+            durability: self.durability,
+            seeker: self.seeker,
+            receiver: self.receiver,
             speed: self.speed,
             turn_rate: self.turn_rate_deg_per_sec.to_radians(),
             lifespan: self.lifespan,

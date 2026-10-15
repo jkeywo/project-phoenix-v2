@@ -97,3 +97,9 @@ The human control surface is finite and authored. A civilian's optional `[civili
 - `NavigationBlackboard.civilians: Vec<CivilianTrafficSnapshot>` publishes the traffic picture and each craft's finite `order_options`, on the local ship only.
 
 `gui/action-map.js` maps the browser actions onto these authoritative commands. `buildWaypointBlip` also projects the shared waypoint onto Helm and other radar views, edge-clamping it where the consuming view requests that behaviour.
+
+A Transfer objective now uses the same permitted Navigation approach consumer as
+Dock. The existing selector resolves the Console's known target/contact, emits
+an ordinary waypoint command and issues the normal delayed Helm clearance. It
+does not learn a private facility/ship position from the objective's name. Dock
+and Umbilical retain their own independent work and authority after approach.

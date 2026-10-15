@@ -1165,11 +1165,14 @@ pub fn operate_navigation_ai(
                 // Dock (issue #1028) resolves EXACTLY as Destroy does, through
                 // the same resolver and onto the same `Anchored` waypoint: both
                 // name a live entity to close on, and the only difference is
-                // what the hull does once it arrives. Sharing the arm is what
+                // what the hull does once it arrives. Transfer uses that same
+                // permitted approach before its Dock and Umbilical work.
+                // Sharing the arm is what
                 // makes a civilian's berthing approach the same code path a
                 // warship's attack run already uses.
                 crate::core::messages::AiDirective::Destroy { target }
                 | crate::core::messages::AiDirective::Dock { target }
+                | crate::core::messages::AiDirective::Transfer { target }
                     if !target.is_empty() =>
                 {
                     let target = if picture.configured {

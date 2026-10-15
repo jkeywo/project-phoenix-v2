@@ -603,3 +603,78 @@ fn chart_permission_is_explicit_filtered_and_conceal_still_wins() {
         .request("public-planet")
         .is_none());
 }
+
+#[test]
+fn transfer_approach_uses_the_same_paid_permitted_contact_as_docking() {
+    use crate::core::messages::*;
+    let (mut app, observer, target) = rig();
+    crate::ai::host::register_ai_host_env(&mut app);
+    let objective = ScoredObjective {
+        id: "supply-port".into(),
+        score: 100.0,
+        directive: AiDirective::Transfer {
+            target: "held-public-name".into(),
+        },
+        source: ObjectiveSource::Mission,
+        relevance: vec![SystemAffinity::Helm],
+        snapshot: ObjectiveSnapshot {
+            id: "supply-port".into(),
+            text: String::new(),
+            text_params: Default::default(),
+            mandatory: false,
+            status: ObjectiveStatus::Active,
+            targets: vec![],
+            source: ObjectiveSource::Mission,
+            progress: None,
+            unassigned: false,
+        },
+    };
+    app.world_mut()
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(observer)
+        .unwrap()
+        .0
+        .insert(
+            crate::ship::system_registry::viewscreen_system_id(),
+            SystemBlackboard::Viewscreen(ViewscreenBlackboard {
+                scored_objectives: vec![objective],
+                ..Default::default()
+            }),
+        );
+    app.world_mut()
+        .run_system_once(operate_navigation_ai)
+        .unwrap();
+    assert!(
+        app.world()
+            .get::<AdmittedCommands>(observer)
+            .unwrap()
+            .0
+            .is_empty(),
+        "an authored Transfer name does not reveal an unobserved ship"
+    );
+    let handle = observe(&mut app, observer, true);
+    let measured = picture(app.world_mut(), observer)
+        .request("held-public-name")
+        .unwrap()
+        .position;
+    // Private movement without a new observation must not steer Navigation.
+    app.world_mut()
+        .get_mut::<Transform>(target)
+        .unwrap()
+        .translation = Vec3::new(9000.0, 0.0, 8000.0);
+    app.world_mut()
+        .run_system_once(operate_navigation_ai)
+        .unwrap();
+    let commands = app.world().get::<AdmittedCommands>(observer).unwrap();
+    let command = commands
+        .for_target("navigation")
+        .next()
+        .expect("actual permitted approach command");
+    assert!(
+        matches!(&command.payload, SystemControlPayload::SetNavigationWaypoint { x,z,source_uuid: Some(contact) }
+        if *x == measured[0] && *z == measured[2] && contact == &handle)
+    );
+    assert_ne!(
+        handle, TARGET,
+        "public handle remains distinct from the private route"
+    );
+}

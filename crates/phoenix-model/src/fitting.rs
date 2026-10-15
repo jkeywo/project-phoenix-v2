@@ -19,6 +19,13 @@ pub enum RefitClass {
     Facility,
 }
 
+/// Explicit provider capability; permissions remain in its canonical port policy.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FittingFacilityConfig {
+    pub system: SystemId,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RefitWorkConfig {

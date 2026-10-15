@@ -1,4 +1,4 @@
-includes = ["fragments/energy/station_axiom.toml","fragments/damage/common.toml"]
+includes = ["fragments/energy/station_axiom.toml","fragments/damage/common.toml","fragments/ai/dock_state_tree.toml"]
 
 name = "entity.station_axiom.name"
 tags = [ "station", "comms_contact", "allied" ]
@@ -361,7 +361,7 @@ id = "output"
 [system.config.ai.tree.state.task.action]
 kind = "write_number"
 channel = "reactor-output"
-value = 2.299999952316284
+value = 2.55
 
 [[system.config.ai.tree.state.task]]
 id = "reactor-cooling"
@@ -537,6 +537,17 @@ source = "number_compare"
 name = "heat-energy-phaser-defence"
 comparison = "greater_or_equal"
 value = 0.5
+
+# [ai] New finite facility machinery has its own allocation; defense settings
+# above are unchanged. This is intentional added hardware, not combat parity.
+[[system.config.ai.tree.state.task]]
+id = "flow-facilities"
+action = { kind = "write_number", channel = "flow-facilities", value = 0.25 }
+
+[[system.config.ai.tree.state.task]]
+id = "cooling-facilities"
+action = { kind = "write_number", channel = "cooling-facilities", value = 0.1 }
+
 [[system.damage_component]]
 id = "operation"
 binding = "operation"
@@ -652,6 +663,7 @@ tactical-radar = "bridge"
 phaser-defence = "engineering"
 power-reactor = "engineering"
 power-battery = "engineering"
+dock = "engineering"
 
 [[infrastructure.capacity]]
 id = "structural_parts"
@@ -728,14 +740,10 @@ unit_amount = 1
 quota = 100
 cost = []
 
-# Passive berth only; the visiting ship uses its ordinary Dock System.
-[dock]
-range = 200
-engage_distance = 400
-approach_speed = 60
-mate_tolerance = 4
-undock_clear_distance = 120
-min_power_level = 2
+# The visitor still flies its ordinary Dock journey. Provider berths now have
+# actual powered Dock equipment for major refit work; rig markers are unchanged.
+[refit_facility]
+system = "dock"
 
 # Legacy fuel transfer remains a real finite endpoint, initially empty.
 [[infrastructure.capacity]]
@@ -758,3 +766,67 @@ label = "coordination.weapon_family.torpedoes"
 [resource_services.torpedoes]
 kind = "capacity"
 id = "torpedoes"
+
+[[console]]
+id = "ai-dock"
+[[console.feed]]
+source = "dock"
+kind = "Dock"
+
+[[system]]
+id = "dock"
+kind = "dock"
+console = "ai-dock"
+power_group = "facilities"
+ai_only = true
+
+[[system.channel]]
+name = "enabled"
+kind = "boolean"
+[[system.channel]]
+name = "target"
+kind = "entity_target"
+[[system.component]]
+id = "power"
+kind = "power_input"
+[[system.component]]
+id = "mating"
+kind = "dock_mating"
+enabled_channel = "enabled"
+target_channel = "target"
+power_input = "power"
+[system.component.config]
+range = 200
+engage_distance = 400
+approach_speed = 60
+mate_tolerance = 4
+undock_clear_distance = 120
+min_power_level = 2
+
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+susceptibility = { physical = 1, laser = 1 }
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+susceptibility = { physical = 1, laser = 1 }
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+susceptibility = { physical = 1, laser = 1 }

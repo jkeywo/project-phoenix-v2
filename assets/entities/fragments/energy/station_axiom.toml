@@ -20,6 +20,14 @@ default_level = 2
 min_level = 0
 max_level = 4
 
+# [ai] Increment 13 provisional facility supply. Existing defense ceilings and
+# allocations are unchanged; the added .25 sustainable output funds this group.
+[power_groups.facilities]
+label = "energy.group.dock.label"
+default_level = 2
+min_level = 0
+max_level = 4
+
 [[infrastructure.capacity]]
 id = "coolant"
 amount = 10000
@@ -31,10 +39,10 @@ kind = "capacity"
 id = "coolant"
 
 [energy.reactor]
-sustainable_output_per_sec = 2.3
+sustainable_output_per_sec = 2.55
 max_output_per_sec = 3.45
 ramp_per_sec = 0.575
-initial_output_per_sec = 2.3
+initial_output_per_sec = 2.55
 initial_energy = 5.175
 initial_heat = 0
 max_cooling_per_sec = 5
@@ -124,4 +132,22 @@ max_cooling_per_sec = 5
 default_cooling_per_sec = 1
 priority = 1
 restore_delay_secs = 0.5
+
+[[energy.group]]
+id = "facilities"
+max_flow_per_sec = 0.5
+default_flow_per_sec = 0.25
+max_cooling_per_sec = 0.5
+default_cooling_per_sec = 0.1
+priority = 2
+restore_delay_secs = 0.5
+
+[[energy.consumer]]
+system = "dock"
+initial_energy = 7.5
+initial_heat = 0
+continuous_cost_per_sec = 0.1
+discrete_cost = 0
+reserve = { capacity = 10, max_intake_per_sec = 0.5, passive_loss_at_full_per_sec = 0.1, charge_heat_per_unit = 0.1, discharge_heat_per_unit = 0.1, passive_cooling_per_sec = 0.2, coolant_heat_per_unit = 10, trip_heat = 50, recover_heat = 30 }
+coolant = { service = "coolant" }
 

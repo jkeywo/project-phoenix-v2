@@ -412,3 +412,84 @@ fn authored_closed_types_and_fixed_graph_refusals_are_not_runtime_migration_fall
     json["equipment"][0]["hardware"]["unrestricted_extension"] = true.into();
     assert!(serde_json::from_value::<FittingConfig>(json).is_err());
 }
+
+#[test]
+fn facility_has_real_owned_powered_dock_and_explicit_port_permission() {
+    let good =
+        crate::test_fixtures::load_entity_config("assets/entities/station_axiom.toml").unwrap();
+    validate_refit_facility(&good).unwrap();
+    assert!(
+        good.dock.is_none(),
+        "active provider has one Dock tuning owner"
+    );
+    let system = good
+        .ship_config
+        .as_ref()
+        .unwrap()
+        .system(&SystemId("dock".into()))
+        .unwrap();
+    assert!(system.ai_only);
+    assert!(
+        system.config.as_ref().unwrap().get("ai").is_some(),
+        "ordinary authored Dock tree, not a second service controller"
+    );
+    assert_eq!(
+        good.ship_config.as_ref().unwrap().stations.len(),
+        0,
+        "no claimable seats added"
+    );
+    let energy = good.energy.as_ref().unwrap();
+    assert_eq!(
+        energy.reactor.sustainable_output_per_sec, 2.55,
+        "explicit new .25 facility hardware budget"
+    );
+    assert_eq!(
+        energy
+            .groups
+            .iter()
+            .find(|g| g.id.0 == "weapons")
+            .unwrap()
+            .default_flow_per_sec,
+        2.3
+    );
+    assert_eq!(
+        energy
+            .consumers
+            .iter()
+            .find(|c| c.system.0 == "phaser-defence")
+            .unwrap()
+            .continuous_cost_per_sec,
+        1.0
+    );
+    assert!(energy
+        .consumers
+        .iter()
+        .any(|c| c.system.0 == "dock" && c.continuous_cost_per_sec > 0.0));
+    for mode in 0..5 {
+        let mut bad = good.clone();
+        match mode {
+            0 => bad.refit_facility.as_mut().unwrap().system = SystemId("absent".into()),
+            1 => bad.refit_facility.as_mut().unwrap().system = SystemId("phaser-defence".into()),
+            2 => bad.port_service = None,
+            3 => bad
+                .energy
+                .as_mut()
+                .unwrap()
+                .consumers
+                .retain(|c| c.system.0 != "dock"),
+            _ => bad
+                .ship_config
+                .as_mut()
+                .unwrap()
+                .consoles
+                .retain(|c| c.id.0 != "ai-dock"),
+        }
+        assert!(
+            validate_refit_facility(&bad).is_err(),
+            "facility mode {mode}"
+        );
+    }
+    let inherited =
+        crate::test_fixtures::load_entity_config("assets/entities/manual_trade_port.toml").unwrap();
+    validate_refit_facility(&inherited).unwrap();
+}

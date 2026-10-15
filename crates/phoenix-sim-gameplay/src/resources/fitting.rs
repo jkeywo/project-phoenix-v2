@@ -8,8 +8,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 #[path = "fitting_compile.rs"]
 mod fitting_compile;
+#[path = "fitting_facility.rs"]
+mod fitting_facility;
 #[path = "fitting_state.rs"]
 mod fitting_state;
+pub use fitting_facility::validate_refit_facility;
 
 #[derive(Clone, Debug)]
 pub struct CompiledFitting {

@@ -101,6 +101,8 @@ pub struct EntityConfig {
     pub port_service: Option<phoenix_model::ports::PortServiceConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fitting: Option<phoenix_model::fitting::FittingConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refit_facility: Option<phoenix_model::fitting::FittingFacilityConfig>,
     pub damage: Option<phoenix_model::damage::DamageConfig>,
     pub sensors_console: Option<SensorsConsoleConfig>,
     pub navigation_console: Option<NavigationConsoleConfig>,

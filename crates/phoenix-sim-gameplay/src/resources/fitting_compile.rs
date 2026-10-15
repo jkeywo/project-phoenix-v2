@@ -21,6 +21,7 @@ fn positive(value: f32) -> bool {
 
 impl CompiledFitting {
     pub fn compile(base: &EntityConfig) -> Result<Option<Self>, String> {
+        super::validate_refit_facility(base)?;
         let Some(config) = &base.fitting else {
             return Ok(None);
         };

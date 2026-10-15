@@ -2,7 +2,7 @@
 title: WeaponsPlugin
 type: concept
 tags: [weapons, tactical, phaser, torpedo, blaster, targeting, ai]
-sources: [crates/phoenix-sim-gameplay/src/weapons/pdc.rs, crates/phoenix-simulation/src/console/weapons/pdc.rs, assets/entities/pdc_cruiser.toml, crates/phoenix-simulation/src/console/weapons/assignments.rs, crates/phoenix-simulation/src/console/weapons/readiness.rs, crates/phoenix-simulation/src/console/weapons/round_work.rs, crates/phoenix-simulation/src/snapshot/weapon_targets.rs, crates/phoenix-model/src/weapon_operation.rs, crates/phoenix-sim-gameplay/src/weapons/operation.rs, crates/phoenix-model/src/turret.rs, crates/phoenix-sim-gameplay/src/weapons/turret.rs, crates/phoenix-simulation/src/weapons/mounts.rs, crates/phoenix-simulation/src/snapshot/mounts.rs, crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-sim-gameplay/src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/weapons/, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml, crates/phoenix-sim-gameplay/src/console/weapons/beam.rs, crates/phoenix-sim-gameplay/src/ship/damage.rs]
+sources: [crates/phoenix-simulation/src/console/weapons/guided_advance.rs, crates/phoenix-simulation/src/console/weapons/flight_carrier.rs, crates/phoenix-simulation/src/snapshot/flight_carriers.rs, crates/phoenix-sim-gameplay/src/weapons/pdc.rs, crates/phoenix-simulation/src/console/weapons/pdc.rs, assets/entities/pdc_cruiser.toml, crates/phoenix-simulation/src/console/weapons/assignments.rs, crates/phoenix-simulation/src/console/weapons/readiness.rs, crates/phoenix-simulation/src/console/weapons/round_work.rs, crates/phoenix-simulation/src/snapshot/weapon_targets.rs, crates/phoenix-model/src/weapon_operation.rs, crates/phoenix-sim-gameplay/src/weapons/operation.rs, crates/phoenix-model/src/turret.rs, crates/phoenix-sim-gameplay/src/weapons/turret.rs, crates/phoenix-simulation/src/weapons/mounts.rs, crates/phoenix-simulation/src/snapshot/mounts.rs, crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-sim-gameplay/src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/weapons/, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml, crates/phoenix-sim-gameplay/src/console/weapons/beam.rs, crates/phoenix-sim-gameplay/src/ship/damage.rs]
 updated: 2026-10-15
 ---
 
@@ -177,3 +177,15 @@ round that passed their muzzle earlier in the step. The first interception check
 follows their next positive Physics advance. Static physical bodies can still
 block the zero-length muzzle point. Both scratch fields clear after Damage and
 are reconstructed, rather than persisted, at the supported settled boundary.
+
+`console/weapons/guided_advance.rs` owns paid loading, delayed launches and guided
+movement in Physics. The existing torpedo lifecycle settles surviving proximity
+payloads and expiry in Damage, after physical PDC interception. Helm policy sees
+launch/advance in the same Physics step and terminal removals on its next tick.
+
+`console/weapons/flight_carrier.rs` moves already emitted guided and straight
+rounds into one nonspatial flight-only owner when equipment or its ship disappears.
+It retains no launcher controls, charging, ammunition, power or AI. Component
+replacement hooks prevent copied live rounds from being rehomed twice.
+`snapshot/flight_carriers.rs` validates and restores this closed dynamic recipe;
+the ordinary shot vectors remain the sole flight state.

@@ -40,6 +40,7 @@ fn rescue_world(count: u32) -> (World, Entity, Entity) {
     let operator = world
         .spawn((
             EntityUuid("uuid-destroyer".into()),
+            funded_power(),
             transporter(),
             Transform::default(),
             admitted(SystemControlPayload::StartTransport),
@@ -679,6 +680,7 @@ fn selecting_a_contact_resets_progress_and_intent() {
     let operator = world
         .spawn((
             EntityUuid("uuid-destroyer".into()),
+            funded_power(),
             transporter(),
             Transform::default(),
             admitted(SystemControlPayload::TransportSelectContact {
@@ -693,4 +695,20 @@ fn selecting_a_contact_resets_progress_and_intent() {
     assert_eq!(t.selected_contact.as_deref(), Some("uuid-lighter"));
     assert!(!t.transporting);
     assert_eq!(t.progress, 0.0);
+}
+
+/// Real finite local reserve for the lifecycle consumer under test. No refill
+/// or alternate actuation path is installed by these bare owner fixtures.
+fn funded_power() -> crate::ship::power::ShipPowerSystem {
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_destroyer.toml",
+    )
+    .unwrap();
+    crate::ship::power::ShipPowerSystem(
+        crate::modifiers::power_system::PowerSystem::from_energy(
+            config.energy.unwrap(),
+            config.ship_config.unwrap(),
+        )
+        .unwrap(),
+    )
 }

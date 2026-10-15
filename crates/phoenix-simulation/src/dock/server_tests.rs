@@ -523,6 +523,7 @@ fn engage_world() -> (App, Entity) {
         .world_mut()
         .spawn((
             EntityUuid(OPERATOR.into()),
+            funded_power(),
             Transform::from_xyz(100.0, 0.0, 0.0),
             own_marker(),
             {
@@ -954,4 +955,20 @@ fn custom_tree_stop_with_live_order_is_not_reported_as_order_withdrawal() {
             "a live order has not been withdrawn"
         );
     }
+}
+
+/// Real finite local reserve for the lifecycle consumer under test. No refill
+/// or alternate actuation path is installed by these bare owner fixtures.
+fn funded_power() -> crate::ship::power::ShipPowerSystem {
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    crate::ship::power::ShipPowerSystem(
+        crate::modifiers::power_system::PowerSystem::from_energy(
+            config.energy.unwrap(),
+            config.ship_config.unwrap(),
+        )
+        .unwrap(),
+    )
 }

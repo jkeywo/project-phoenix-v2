@@ -85,6 +85,9 @@ fn fitted_tractor_checks_new_subject_after_input_but_preserves_an_existing_physi
 #[test]
 fn tractor_feedback_waits_for_the_authoritative_hold_verdict() {
     let mut app = App::new();
+    let mut time = Time::<()>::default();
+    time.advance_by(std::time::Duration::from_millis(100));
+    app.insert_resource(time);
     app.add_message::<PendingTractorActionFeedback>()
         .add_message::<crate::lobby::OutboundMessage>()
         .add_systems(
@@ -106,6 +109,7 @@ fn tractor_feedback_waits_for_the_authoritative_hold_verdict() {
                 SystemControlPayload::EngageTractor,
             )]),
             test_beam,
+            funded_power(),
             TacticalRadarSelection(Some("target-1".into())),
             Transform::default(),
         ))
@@ -215,8 +219,8 @@ fn an_idle_beam_saves_as_default() {
 
 // ── The activation follows the coupling, not the intent (issue #1341) ────
 
-/// A beam that needs no power, so the verdict turns on the lock and the
-/// separation alone.
+/// A permissive legacy allocation threshold; paid work still requires the
+/// actual finite reserve supplied by the lifecycle fixture.
 fn unpowered_beam() -> TractorBeam {
     let mut b = beam();
     b.config.min_power_level = 0;
@@ -229,9 +233,13 @@ fn engage_world(lock: &str) -> (bevy::prelude::World, bevy::prelude::Entity) {
     use bevy::prelude::*;
     let mut world = World::new();
     world.init_resource::<EffectQueue<TaskLifecycleRequest>>();
+    let mut time = Time::<()>::default();
+    time.advance_by(std::time::Duration::from_millis(100));
+    world.insert_resource(time);
     let operator = world
         .spawn((
             EntityUuid("uuid-tender".into()),
+            funded_power(),
             unpowered_beam(),
             TacticalRadarSelection(Some(lock.into())),
             Transform::default(),
@@ -352,4 +360,20 @@ fn an_engage_refused_before_it_couples_still_opens_and_closes_one_activation() {
             .engaged,
         "a refused engage drops the intent with the coupling"
     );
+}
+
+/// Real finite local reserve for the lifecycle consumer under test. No refill
+/// or alternate actuation path is installed by these bare owner fixtures.
+fn funded_power() -> crate::ship::power::ShipPowerSystem {
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_destroyer.toml",
+    )
+    .unwrap();
+    crate::ship::power::ShipPowerSystem(
+        crate::modifiers::power_system::PowerSystem::from_energy(
+            config.energy.unwrap(),
+            config.ship_config.unwrap(),
+        )
+        .unwrap(),
+    )
 }

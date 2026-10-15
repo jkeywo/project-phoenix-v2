@@ -216,7 +216,7 @@ fn active_intrusive_resource_question_survives_real_json_restore_and_exact_conti
     let report = crate::snapshot::restore(resumed.world_mut(), &snapshot);
     assert!(report.gaps.is_empty(), "{report:?}");
     assert_eq!(crate::snapshot::capture(resumed.world()), snapshot);
-    for _ in 0..360 {
+    for continuation_step in 0..360 {
         step(&mut app);
         step(&mut resumed);
         assert_eq!(
@@ -225,7 +225,12 @@ fn active_intrusive_resource_question_survives_real_json_restore_and_exact_conti
         );
         assert_eq!(
             crate::sim_digest::world_digest(resumed.world()),
-            crate::sim_digest::world_digest(app.world())
+            crate::sim_digest::world_digest(app.world()),
+            "step {continuation_step}; first different digest stage: {:?}",
+            crate::sim_digest::digest_stages(resumed.world())
+                .into_iter()
+                .zip(crate::sim_digest::digest_stages(app.world()))
+                .find(|(left, right)| left != right)
         );
     }
     let record =

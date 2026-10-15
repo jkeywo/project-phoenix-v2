@@ -145,7 +145,15 @@ fn frame(world: &mut World, entity: Entity) -> HelmAiShipFrame {
 
 #[test]
 fn actual_helm_frame_uses_permitted_measured_pose_and_never_fills_foreign_facts_from_truth() {
-    let (mut world, observer, _, actual) = rig();
+    let (mut world, observer, owner, actual) = rig();
+    let crate::core::messages::SystemBlackboard::Helm(issued) = &world
+        .get::<crate::server_app::ShipSystemBlackboards>(observer)
+        .unwrap()
+        .0[&owner]
+    else {
+        panic!()
+    };
+    let issued_position = issued.tracks.as_ref().unwrap()[0].position;
     let first = frame(&mut world, observer);
     assert_eq!(
         first.visible_view.entities.len(),
@@ -153,7 +161,10 @@ fn actual_helm_frame_uses_permitted_measured_pose_and_never_fills_foreign_facts_
         "Science-only return is not a Helm feed"
     );
     let target = &first.visible_view.entities[0];
-    assert_eq!(target.position, [12.0, 0.0, 34.0]);
+    assert_eq!(
+        target.position,
+        [issued_position[0], 0.0, issued_position[1]]
+    );
     assert_ne!(target.uuid, actual);
     assert_eq!(target.name, None);
     assert_eq!(target.hull_fraction, None);

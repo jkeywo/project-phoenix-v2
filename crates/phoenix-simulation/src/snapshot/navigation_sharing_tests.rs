@@ -18,6 +18,11 @@ fn fixture() -> (World, Entity, PhoenixSnapshot) {
     world.register_component::<crate::console::repair::server::RepairRequestQueue>();
     world.register_component::<crate::ship_plugin::RepairHumanAlerted>();
     world.register_component::<crate::ai::server::ObjectiveCursors>();
+    world.register_component::<ActiveBeam>();
+    world.register_component::<PhaserCooldown>();
+    world.register_component::<TorpedoSystemResource>();
+    world.register_component::<crate::console::weapons::blaster::BlasterSystemResource>();
+    world.register_component::<crate::ship::shields::ShipShields>();
     world.insert_resource(SimTick(20));
     world.insert_resource(Time::<Fixed>::default());
     let ship = config.ship_config.as_ref().unwrap().clone();
@@ -93,6 +98,14 @@ fn fixture() -> (World, Entity, PhoenixSnapshot) {
         );
     let snapshot = capture(&world);
     assert_eq!(snapshot.entities.len(), 1);
+    assert!(
+        snapshot.entities[0]
+            .repair
+            .as_ref()
+            .and_then(|repair| repair.jobs.as_ref())
+            .is_some(),
+        "the real team owner must be captured, not merely present in ECS"
+    );
     assert_eq!(
         snapshot.entities[0]
             .navigation_sharing

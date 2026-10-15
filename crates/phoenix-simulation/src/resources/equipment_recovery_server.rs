@@ -321,6 +321,9 @@ fn prepare(
     if condition.condition == phoenix_model::damage::ComponentCondition::Destroyed {
         return Err("equipment_destroyed".into());
     }
+    if definition.work.class != crate::resources::fitting::RefitClass::Field {
+        return Err("major_equipment_requires_facility".into());
+    }
     let mut source_state = source_state.clone();
     source_state.equipment.remove_installed(
         source_profile,
@@ -681,8 +684,14 @@ pub fn project(world: &World, actor: Entity) -> Option<EquipmentRecoveryView> {
                         progress: 0.0,
                         waiting: String::new(),
                     };
-                    if prepare(world, actor, &work, JobId(owner.next_id), false).is_ok() {
-                        options.push(option(&work));
+                    match prepare(world, actor, &work, JobId(owner.next_id), false) {
+                        Ok(_) => options.push(option(&work)),
+                        Err(reason) if reason == "major_equipment_requires_facility" => {
+                            let mut unavailable = option(&work);
+                            unavailable.blocked_reason = Some(reason);
+                            options.push(unavailable);
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -690,7 +699,8 @@ pub fn project(world: &World, actor: Entity) -> Option<EquipmentRecoveryView> {
     }
     let job = owner.job.as_ref();
     Some(EquipmentRecoveryView {
-        can_start: owner.next_id < u64::MAX && !options.is_empty(),
+        can_start: owner.next_id < u64::MAX
+            && options.iter().any(|option| option.blocked_reason.is_none()),
         can_cancel: active(owner),
         options,
         selected,
@@ -725,6 +735,7 @@ fn option(work: &EquipmentRecoveryWork) -> EquipmentRecoveryOption {
         slot: work.source_slot.clone(),
         equipment: work.definition.clone(),
         destination_locker: work.destination_locker.clone(),
+        blocked_reason: None,
     }
 }
 

@@ -219,6 +219,36 @@ fn cancellation_retains_paid_cost_and_source_item_and_releases_actual_space_clai
 }
 
 #[test]
+fn major_assemblies_are_reported_but_require_a_supported_facility_extraction_adapter() {
+    let (mut world, actor, source) = rig();
+    let before = equipment(&world, source).clone();
+    let paid = power(&world, actor);
+    let owner = world
+        .get::<ShipEquipmentRecovery>(actor)
+        .unwrap()
+        .owner
+        .clone();
+    let uuid = world.get::<EntityUuid>(source).unwrap().0.clone();
+    let view = project(&world, actor).unwrap();
+    assert!(view.options.iter().any(|option| option.slot == "reactor"
+        && option.blocked_reason.as_deref() == Some("major_equipment_requires_facility")));
+    assert_eq!(
+        start(
+            &mut world,
+            actor,
+            &owner,
+            &uuid,
+            "reactor",
+            "engineering-equipment"
+        )
+        .unwrap_err(),
+        "major_equipment_requires_facility"
+    );
+    assert_eq!(equipment(&world, source), &before);
+    assert_eq!(power(&world, actor), paid);
+}
+
+#[test]
 fn unknown_active_full_and_repair_claimed_sources_refuse_before_any_payment_or_item_write() {
     for mode in 0..4 {
         let (mut world, actor, source) = rig();

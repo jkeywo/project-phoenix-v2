@@ -276,15 +276,16 @@ fn boot(world: &str) -> (App, Entity) {
     app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period));
     app.init_resource::<Trace>().add_systems(
         FixedUpdate,
+        // Read actual resource writes without requesting a new Commands barrier.
         observe_pdc
-            .after(FixedStep::HandleBlasterHits)
-            .before(FixedStep::TickTorpedoLifecycle),
+            .after_ignore_deferred(FixedStep::HandleBlasterHits)
+            .before_ignore_deferred(FixedStep::TickTorpedoLifecycle),
     );
     app.add_systems(
         FixedUpdate,
         observe_terminal_damage
-            .after(FixedStep::TickTorpedoLifecycle)
-            .before(FixedStep::HandleCollisions),
+            .after_ignore_deferred(FixedStep::TickTorpedoLifecycle)
+            .before_ignore_deferred(FixedStep::HandleCollisions),
     );
     graph_diagnostics::install(&mut app);
     app.finish();

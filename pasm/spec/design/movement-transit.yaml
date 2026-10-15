@@ -180,3 +180,15 @@ entities:
       rationale:
         - "[ai] Independent review identified that another drive or a later local order can leave older Arrived receipts behind. Validate those against their own immutable original/selected scope, never the ship's later current scope. Only the latest World-arrival frontier determines current context."
         - "[ai] With no successful World-arrival stamp, context must equal actual authored origin. A completed World arrival updates context and stamp together; earlier inactive receipts remain historical. Capture, fold and no-write preflight preserve and cross-check this causal frontier."
+
+
+  - decision: formation-course-and-axis-demand-owners
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Formation Reuses the Existing Navigation Course and Helm Axis Intent
+      summary: "A Formation variant in the existing NavigationWaypoint retains the actual accepted Comms reference, earned public leader handle and dated measured slot cache. Each existing Helm axis can explicitly retain a follow demand bound to that semantic course generation; normal manual axis commands replace it."
+      rationale:
+        - "[ai] Integrator agreed before runtime. Comms acceptance is an available ordinary Navigation selector candidate, not a forced latest-request autopilot. A dedicated received-formation source/fact carries no mission-objective source score; existing authored selector priorities still decide. Human Navigation chooses a genuinely heard request and earned own alias through its own admitted paid command. AI correlates only a unique independently matured observed sender identity."
+        - "[ai] Measurement refresh preserves the course generation; a different/cleared course invalidates prior assistance. Missing/stale permitted leader motion retains the same dated intent but suppresses execution and surfaces the reason. No private actor pose, hidden leader heading or source-UUID identity correlation can improve the sample."
+        - "[ai] Human Helm engages each own axis through an explicit HUD action. Ordinary individual Helm AI makes its normal decision after the existing clearance handoff. The existing mechanical axis consumer and paid integrator remain the only actuator path; follow state is not a new AI, fleet controller or physics owner. Snapshot/digest/preflight extend existing course/axis definitions with actual reference, clock and ownership joins."

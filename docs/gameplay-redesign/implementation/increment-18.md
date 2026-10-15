@@ -534,3 +534,22 @@ preservation, insertion, removal and first-row creation; native execution remain
 integrator-owned. This source checkpoint closes the missing basic form, while
 actual browser/native Workshop Test and the remaining increment-18 movement
 acceptance are still open.
+
+## Adopted formation course and axis owners
+
+Use a Formation variant in the existing NavigationWaypoint, retaining the actual
+heard-and-accepted request reference, earned public leader handle and dated
+measured slot cache. Regular observation refresh keeps its semantic generation;
+a new/cleared course changes it. Stale or absent motion retains the request but
+suppresses execution. Private actor pose and hidden source identity never fill
+the gap. A received-formation candidate joins the ordinary authored Navigation
+selector without a mission-objective source score; receipt alone cannot override
+its mission priorities. Human Navigation uses its own paid admitted selection.
+
+Each existing Helm axis may retain a follow demand bound to that exact course
+generation. Human Helm explicitly enables it through the HUD; individual Helm
+AI decides after the ordinary clearance handoff. Manual axis commands replace
+that demand normally. The current mechanical axis consumer and paid integrator
+remain the actuator path. Existing snapshot/digest/preflight definitions extend
+these owners, rather than adding a parallel goal, fleet controller or physics
+store. Contract adoption alone is no execution evidence.

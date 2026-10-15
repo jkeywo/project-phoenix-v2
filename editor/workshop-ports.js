@@ -5,9 +5,15 @@ const closed = (value, keys) => value && typeof value === 'object' && !Array.isA
 const factionKey = value => typeof value === 'string' ? value.replace(/^urn:uuid:/i, '').replace(/^\{(.*)\}$/, '$1').replaceAll('-', '').toLowerCase() : '';
 const positive = value => Number.isSafeInteger(value) && value > 0;
 const named = value => typeof value === 'string' && value.trim().length > 0;
-function endpointExists(value, resource) {
+function endpointExists(value, resource, claimed) {
   const endpoint = value.resource_services?.[resource] || { kind: 'capacity', id: resource };
-  return endpoint.kind === 'torpedo_magazine' ? resource === 'torpedoes' && !!value.torpedoes
+  const key = endpoint.kind === 'capacity' ? 'capacity/' + endpoint.id : endpoint.kind;
+  const previous = claimed.get(key);
+  if (previous && previous !== resource) throw new Error('A port endpoint cannot represent two different resources.');
+  const managed = value.logistics?.store?.find(store => store.endpoint?.kind === endpoint.kind && store.endpoint?.id === endpoint.id);
+  if (managed && managed.resource !== resource) throw new Error("Keep the managed stock endpoint's actual resource identity.");
+  claimed.set(key, resource);
+  return endpoint.kind === 'torpedo_magazine'  ? resource === 'torpedoes' && !!value.torpedoes
     : endpoint.kind === 'capacity' && value.infrastructure?.capacity?.some(row => row.id === endpoint.id);
 }
 export function inspectPortServices(draft, dependencies, path) {
@@ -19,19 +25,19 @@ export function validatePortService(profile, value) {
     || !Array.isArray(profile.eligible_factions) || profile.eligible_factions.some(id => !/^[0-9a-f]{32}$/.test(factionKey(id)))
     || new Set(profile.eligible_factions.map(factionKey)).size !== profile.eligible_factions.length || (!Array.isArray(profile.offer) || !profile.offer.length))
     throw new Error('Choose a closed port policy, explicit eligible factions and finite offers. Empty factions deny all visitors.');
-  const ids = new Set(), offeredResources = new Set();
+  const ids = new Set(), offeredResources = new Set(), claimedEndpoints = new Map();
   for (const offer of profile.offer) {
     if (!closed(offer, ['id', 'resource', 'quota', 'unit_amount', 'cost']) || !named(offer.id)
       || ids.has(offer.id) || !named(offer.resource) || offeredResources.has(offer.resource) || !Number.isSafeInteger(offer.quota) || offer.quota < 0 || !positive(offer.unit_amount)
       || !Number.isSafeInteger(offer.quota * offer.unit_amount) || (offer.cost !== undefined && !Array.isArray(offer.cost))) throw new Error('Use distinct offer IDs, positive units per lot and bounded nonnegative lot quotas.');
     ids.add(offer.id); offeredResources.add(offer.resource);
-    if (!endpointExists(value, offer.resource)) throw new Error('Create the actual offered finite stock endpoint in Resources first.');
+    if (!endpointExists(value, offer.resource, claimedEndpoints)) throw new Error('Create the actual offered finite stock endpoint in Resources first.');
     const resources = new Set();
     for (const cost of offer.cost || []) {
       if (!closed(cost, ['resource', 'amount']) || !named(cost.resource) || !positive(cost.amount) || resources.has(cost.resource)
         || !Number.isSafeInteger(cost.amount * offer.quota)) throw new Error('Each exchange cost requires a distinct resource and positive bounded units per lot.');
       resources.add(cost.resource);
-      if (!endpointExists(value, cost.resource)) throw new Error('Create the actual exchange-cost receiving endpoint in Resources first.');
+      if (!endpointExists(value, cost.resource, claimedEndpoints)) throw new Error('Create the actual exchange-cost receiving endpoint in Resources first.');
     }
     if (profile.policy === 'free_allied_replenishment' && offer.cost?.length) throw new Error('Free allied replenishment cannot contain exchange costs.');
   }

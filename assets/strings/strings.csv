@@ -5437,7 +5437,7 @@ workshop.ports.factions-hint,Docked port services,An empty faction list permits 
 workshop.ports.offer-id,Docked port services,Offer ID,Angebots-ID,Offer ID,machine
 workshop.ports.resource,Docked port services,Offered resource ID,Angebotene Ressourcen-ID,Offered resource ID,machine
 workshop.ports.unit-amount,Docked port services,Units per lot,Einheiten pro Los,Units per lot,machine
-workshop.ports.quota,Docked port services,Lots per visit,Lose pro Besuch,Lots per visit,machine
+workshop.ports.quota,Docked port services,Lots per visit (0 disables this offer including donations),Lose pro Besuch (0 deaktiviert das Angebot einschließlich Spenden),Lots per visit (0 disables this offer including donations),machine
 workshop.ports.cost-resource,Docked port services,Exchange resource ID,Tauschressourcen-ID,Exchange resource ID,machine
 workshop.ports.cost-amount,Docked port services,Exchange units per lot,Tauscheinheiten pro Los,Exchange units per lot,machine
 workshop.ports.add-cost,Docked port services,Add exchange cost,Tauschkosten hinzufügen,Add exchange cost,machine

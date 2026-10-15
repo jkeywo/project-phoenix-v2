@@ -39,6 +39,15 @@ describe('authorised finite provider source authoring', () => {
     expect(value.infrastructure.capacity.find(row => row.id === 'alloy')).toMatchObject({ amount: 0, ceiling: 10000 });
     expect(value.infrastructure.capacity.find(row => row.id === 'machinery_parts').amount).toBe(10000);
   });
+  it('preserves actual managed commodity identity and rejects two resource names for one endpoint', () => {
+    const value = fixture(), profile = structuredClone(value.port_service);
+    value.resource_services.alloy = { kind: 'capacity', id: 'machinery_parts' };
+    expect(() => validatePortService(profile, value)).toThrow(/two different resources/);
+    const ship = resolve('assets/entities/alliance_cruiser.toml');
+    ship.resource_services.machinery_parts = { kind: 'capacity', id: 'hold-ammunition' };
+    const offer = { policy: 'free_allied_replenishment', eligible_factions: [], offer: [{ id: 'parts', resource: 'machinery_parts', quota: 1, unit_amount: 1 }] };
+    expect(() => validatePortService(offer, ship)).toThrow(/actual resource identity/);
+  });
   it('keeps legacy free service amounts in single units and creates no starting reserve fuel', () => {
     const value = fixture(); validatePortService(value.port_service, value);
     expect(value.port_service.offer.every(row => row.unit_amount === 1 && row.cost.length === 0)).toBe(true);

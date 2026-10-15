@@ -1283,29 +1283,7 @@ fn the_alliance_destroyer_exposes_two_tactical_owned_security_teams() {
         .find(|consumer| consumer.system == system.id)
         .expect("Security work has its actual paid consumer");
     assert!(consumer.continuous_cost_per_sec > 0.0 && consumer.reserve.capacity > 0.0);
-    // …and it does NOT buy the hull a damage compartment. `[[hull.system_hull]]`
-    // is the pool `SystemHull::apply_damage` spreads incoming hull damage across,
-    // so every box a hull authors is durability its combat ladder never priced —
-    // the caveat the destroyer's own hull table already records about its three
-    // coupling compartments. A fourth measurably moved a shipped balance run
-    // (`probe_aggressor`, seed 3: 105 extra ticks of engagement, all of them
-    // inside the cruiser's bow hold), so Security is authored the way `[repair]`
-    // is on this hull — teams, a reach, and no compartment of its own. Asserted
-    // rather than left silent because "no entry" is a DECISION here, and the next
-    // hand to add one should have to come past this line and re-measure.
-    //
-    // The lever stays available and data-driven: `security_disabled` reads
-    // `EntitySystemHull.tier_for("security")` for whatever hull DOES author a box,
-    // and `a_disabled_security_system_makes_every_team_unavailable_and_ends_the_work`
-    // proves the whole knocked-out path against one.
-    assert!(
-        entity
-            .hull
-            .as_ref()
-            .is_some_and(|hull| !hull.system_hull.iter().any(|e| e.system_id.0 == "security")),
-        "the destroyer's Security System must author no [[hull.system_hull]] box: a muster \
-         space is not armour, and adding one silently widens this hull's damage pool"
-    );
+    assert_security_shares_structural_pool(&entity, 390.0);
 }
 
 /// Issue #1389, read off the shipped hull the same way: the Alliance Cruiser
@@ -1369,19 +1347,7 @@ fn the_alliance_cruiser_exposes_two_tactical_owned_security_teams() {
         .find(|consumer| consumer.system == system.id)
         .expect("Security work has its actual paid consumer");
     assert!(consumer.continuous_cost_per_sec > 0.0 && consumer.reserve.capacity > 0.0);
-    // No damage compartment, for the reason spelled out on the destroyer above —
-    // and with more force here, because THIS is the hull whose bow hold moved a
-    // shipped balance run when a fourth box was added. `npm run balance:cruiser`
-    // is a blocking gate on this hull's ladder; a box authored here would move
-    // the destroyed sum it measures.
-    assert!(
-        entity
-            .hull
-            .as_ref()
-            .is_some_and(|hull| !hull.system_hull.iter().any(|e| e.system_id.0 == "security")),
-        "the cruiser's Security System must author no [[hull.system_hull]] box: a muster \
-         space is not armour, and adding one silently widens this hull's damage pool"
-    );
+    assert_security_shares_structural_pool(&entity, 590.0);
 }
 
 /// AC3, read off the shipped world: Falling Skyway authors a complete Security
@@ -1610,3 +1576,69 @@ fn the_host_marker_tracks_teams_independently() {
 
 #[path = "local_server_tests.rs"]
 mod local;
+
+/// Compartment HP is the physical durability owner. Legacy per-System hull
+/// rows are read-only projections and may include Security without extra armour.
+fn assert_security_shares_structural_pool(
+    entity: &crate::entities::config::EntityConfig,
+    expected_hp: f64,
+) {
+    let interior = entity
+        .interior
+        .as_ref()
+        .expect("Security equipment has actual physical placement");
+    assert_eq!(
+        interior
+            .placements
+            .get(&security_system_id())
+            .map(String::as_str),
+        Some("support")
+    );
+    let rooms: std::collections::BTreeSet<_> = interior
+        .compartments
+        .iter()
+        .map(|room| room.id.as_str())
+        .collect();
+    assert_eq!(
+        rooms,
+        std::collections::BTreeSet::from(["bridge", "support", "engineering", "weapons"]),
+        "Security shares an existing compartment; no independent muster armour pool"
+    );
+    assert!(
+        interior
+            .placements
+            .iter()
+            .any(|(id, room)| id != &security_system_id() && room == "support"),
+        "other equipment shares the same support compartment"
+    );
+    let physical = crate::ship::compartment_damage::ShipDamage::from_config(entity)
+        .unwrap()
+        .expect("shipped hull has canonical compartment damage");
+    assert_eq!(
+        physical
+            .state
+            .compartments
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>(),
+        rooms
+    );
+    assert_eq!(
+        physical
+            .state
+            .compartments
+            .values()
+            .map(|room| room.hp)
+            .sum::<f64>(),
+        expected_hp,
+        "Security cannot increase the hull's accepted actual structural durability"
+    );
+    assert_eq!(
+        interior
+            .compartments
+            .iter()
+            .map(|room| f64::from(room.max_hp))
+            .sum::<f64>(),
+        expected_hp
+    );
+}

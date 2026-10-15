@@ -457,7 +457,8 @@ use super::*;
 /// `70` retains actual personnel conditions and typed Treatment work.
 /// `71` retains an accepted root mission promise and received formation lineage.
 /// `72` retains actual identity-emitter intent, never prepaid physical emissions.
-pub const SNAPSHOT_FORMAT: u32 = 72;
+/// `73` requires the single retained personnel roster, including removed origins.
+pub const SNAPSHOT_FORMAT: u32 = 73;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -601,7 +602,9 @@ pub const SNAPSHOT_FORMAT: u32 = 72;
 /// ordered formation suggestions separate from Navigation/Helm execution.
 /// "0.52" emits configured identity only from fully paid real equipment and
 /// substitutes measured identity after ordinary sensor acquisition.
-pub const SIMULATION_RULES: &str = "0.52";
+/// "0.53" retains finite named personnel across actual origin-actor removal,
+/// with shared care/posting consumers and accepted creation provenance.
+pub const SIMULATION_RULES: &str = "0.53";
 
 /// The authored data, computed rather than remembered.
 ///

@@ -136,3 +136,12 @@ on/off and target commands. Tree selection comes from its permitted mission
 request or retained independent target. Workshop composition, authoring data,
 strict channels/owner continuation and exact loss/freshness tests belong to this
 slice. This declaration precedes implementation and claims no playable exit.
+
+
+The accepted `Illuminate { target }` Directive uses the existing closed
+mission/doctrine/effect codec and Sensors relevance. A request is resolved only
+through the emitter's permitted identity/reference picture after the existing
+AI text-reading frontier (`reading_ticks`/TreeRuntime.reading). It is neither a
+new mission planner nor a change to Destroy/Scan routing. The reference case
+must issue this actual supported request so ordinary Backfill can select and
+emit independently of Tactical selection.

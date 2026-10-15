@@ -641,3 +641,16 @@ reading/return, unpaid/unknown/disconnected refusal, no unrelated receipt credit
 Scenario permission separation and full JSON/digest continuation. This extends
 22C's real activity vocabulary; it does not finish continuing modes or opportunity
 search by itself.
+
+
+A validated planned single-recipient Request may mark its same retained Comms
+transmission `sustained`. Existing radio processing retries delivery through the
+current paid live route, with the same origin and recipient-copy identity. It
+charges the one original emission plus ordinary continuous equipment/relay work,
+not repeated mission emission or free delivery. No retry queue, hidden receipt
+oracle or second AI is added. Ordinary manual requests/text keep their existing
+one-shot policy. Candidate preflight requires every sustained Request to match
+its actual accepted activity transmission binding. The existing sustained return
+Outcome remains distinct. An exclusive prepared binding token can be dropped on
+payment failure without writes; consuming it after ordinary paid emission commits
+the accepted reference without a fallible post-payment validation stage.

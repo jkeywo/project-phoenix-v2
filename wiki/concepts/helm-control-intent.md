@@ -35,6 +35,10 @@ replace a different bootstrap. The attacker latch only changes when its value
 changes. Owner tests drive the first physics action, and `tests/snapshot_resume.rs`
 compares fresh-app continuation through subsequent simulation actions.
 
+Per-engine intent indicators read that same canonical `LastHelmInput` as the
+ordinary joystick fan-out. They do not read stale messages left in the ephemeral
+InterSystemQueue by bootstrap when rebuilding a restored Console view.
+
 Impulse hull-damage cancellation samples every ship's HP in Input.
 `ImpulseHullHistory` is required by `ShipImpulse` and travels in the snapshot's
 `DriveState`: a restored damaged hull neither inherits the bootstrap's HP nor

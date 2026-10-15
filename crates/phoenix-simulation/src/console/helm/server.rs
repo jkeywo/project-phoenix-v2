@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::core::messages::{
     CoordinationPayload, HelmBlackboard, HelmEngineBlackboard, HelmLateralThrustBlackboard,
-    InterSystemPayload, InterSystemQueue, ModifierSlot, SystemBlackboard, SystemId,
+    ModifierSlot, SystemBlackboard, SystemId,
 };
 use crate::server_app::{ShipBoost, ShipImpulse};
 use crate::ship::components::{
@@ -147,16 +147,14 @@ pub(crate) fn receive_helm_coordination(
 ///   every ship with the weapons missing-component default idiom.
 /// - **Player-resource-derived data** — the base radar range for the
 ///   LocalShip comes from the player-only `ShipClientConfigResource`
-///   (unchanged), and the engine entries' joystick fan-out is read from the
-///   `InterSystemQueue` only for the LocalShip (the queue carries the player
-///   joystick's channel-1 messages; an NPC has no joystick). An NPC's base
+///   (unchanged). Engine entries use the same canonical LastHelmInput as the
+///   joystick fan-out, rather than an ephemeral queue from bootstrap. An NPC's base
 ///   radar range comes from its own `HelmConsoleSection`.
 ///
 /// None of this reaches the wire for NPCs: `broadcast_blackboard_updates`
 /// is `With<LocalShip>`-filtered, so NPC blackboards add zero bandwidth.
 pub(crate) fn publish_helm_blackboard(
     ship_client_config: Res<crate::lobby::server::ShipClientConfigResource>,
-    queue: Res<InterSystemQueue>,
     // Issue #874: the hostile weapon-arc overlay. `build_world_snapshot` runs
     // under `run_if(ai_snapshot_ready)` (the derived ~10 Hz snapshot cadence,
     // `crates/phoenix-simulation/src/ai/server.rs`) while this system publishes every frame, so the
@@ -504,32 +502,11 @@ pub(crate) fn publish_helm_blackboard(
         for (system_id, engine_sid) in engine_entries {
             let is_online =
                 !crate::ship::compartment_damage::operation_disabled(damage, hull, &engine_sid);
-            // Prefer the JoystickState from the InterSystemQueue (written by
-            // `publish_joystick_to_engines` in SimSet::Physics, which runs
-            // before SimSet::Publish). LocalShip only: the queue's engine
-            // messages are the player joystick's fan-out, keyed by target
-            // system id, and must not bleed into NPC entries. Fall back to
-            // this ship's LastHelmInput otherwise.
-            let last_input_thrust = last_input.thrust;
-            let joystick_thrust = if is_local {
-                queue
-                    .0
-                    .iter()
-                    .filter(|m| m.target == system_id)
-                    .filter_map(|m| {
-                        if let InterSystemPayload::JoystickState { thrust, .. } = &m.payload {
-                            Some(*thrust)
-                        } else {
-                            None
-                        }
-                    })
-                    .next_back()
-                    .unwrap_or(last_input_thrust)
-            } else {
-                last_input_thrust
-            };
+            // This is also the source of the ordinary joystick fan-out. The
+            // queue is ephemeral and can still contain bootstrap's old input
+            // during restore; it is not an alternative intent owner.
             let thrust_fraction = if is_online {
-                joystick_thrust.abs()
+                last_input.thrust.abs()
             } else {
                 0.0
             };

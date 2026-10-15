@@ -1,6 +1,7 @@
 use super::*;
 use crate::core::messages::{
-    CoordinationAddress, CoordinationPayload, SystemBlackboard, WeaponEmitterArc, WeaponFamily,
+    CoordinationAddress, CoordinationPayload, InterSystemMsg, InterSystemPayload, InterSystemQueue,
+    SystemBlackboard, WeaponEmitterArc, WeaponFamily,
 };
 use crate::server_app::ShipSystemBlackboards;
 use crate::ship::boost::BoostState;
@@ -690,7 +691,7 @@ fn engine_is_online_when_no_hull_damage() {
 }
 
 #[test]
-fn engine_thrust_fraction_reflects_last_input() {
+fn engine_thrust_fraction_reflects_canonical_input_despite_stale_bootstrap_fanout() {
     let mut app = base_app();
     // Set helm input to 0.8 thrust.
     {
@@ -707,6 +708,17 @@ fn engine_thrust_fraction_reflects_last_input() {
                 lateral: 0.0,
             });
     }
+    app.world_mut()
+        .resource_mut::<InterSystemQueue>()
+        .0
+        .push(InterSystemMsg {
+            target: helm_engine_port_system_id(),
+            source_entity: None,
+            payload: InterSystemPayload::JoystickState {
+                thrust: 0.25,
+                steering: 0.0,
+            },
+        });
     app.update();
 
     let key = helm_engine_port_system_id();

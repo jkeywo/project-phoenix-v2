@@ -558,3 +558,28 @@ existing validated imported-source history/export transaction. The opt-in
 estimates remain explicitly provisional. Historical validation proves authored
 host/rating vocabulary and saved bounded inputs, not a past Console depth from
 the host Station rating: visiting and GM overrides make that inference invalid.
+
+
+### First 22D continuation: explicit crew/control refusal recovery
+
+Only a retained temporal refusal with no released leaves may be reconsidered
+when the actual bound actor's forecast participation/control input changes.
+Keep the original method graph, actor, chosen difficulty profile and absolute
+announced deadline. Schedule that same graph from the dated cause tick inside
+that existing deadline. A larger crew does not rewrite a revealed commitment.
+
+Append at most eight dated decisions to the same PlanChoice. Each records the
+closed crew/control-change cause with its exact changed owner IDs and the new
+bounded original input/decision. No old decision is evicted, no resources or
+physical outcomes are forecast into existence, and exhaustion keeps the existing
+refusal. Unchanged input never retries. Once any decision commits or any leaf is
+released, this first continuation stops reconsidering; actual execution and
+history remain with their normal owners. This is the first refusal-recovery
+consumer, not the full capability-loss or outside-actor 22D exit.
+
+Preflight recomputes every decision from immutable source and retained dated
+inputs, checks cause differences, increasing clocks, the original deadline and
+profile, and no released work before the effective commitment. Inspect original
+and revised decisions separately. Simulation supplies only the same real
+participation/control projection already used at first choice; no local Session
+fallback, hypothetical job, method swap or fresh mission clock is introduced.

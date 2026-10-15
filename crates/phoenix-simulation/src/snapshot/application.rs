@@ -1212,6 +1212,10 @@ pub(super) fn validate_physical_repair_claims(
 /// tick for an inverse: nothing here simulates the interval, so the value is
 /// simply the reading every age-relative continuation is measured against.
 pub(crate) fn apply_entity_state(world: &mut World, entity: Entity, row: &EntityState, tick: u64) {
+    if let Err(reason) = super::transit::validate_live(world, entity, row, tick) {
+        bevy::log::error!("refused Transit restore for {}: {}", row.uuid, reason);
+        return;
+    }
     if let Err(reason) = super::helm_movement::validate_live(world, entity, row, tick) {
         bevy::log::error!("refused movement restore for {}: {}", row.uuid, reason);
         return;
@@ -1640,6 +1644,17 @@ pub(super) fn apply_entity_state_with(
         entity_mut.insert(saved.clone());
     } else {
         entity_mut.remove::<phoenix_sim_gameplay::ship::helm_control::HelmControlState>();
+    }
+    if let Some(saved) = &row.transit {
+        entity_mut.insert((
+            saved.clone(),
+            crate::console::helm::transit::TransitReadouts::default(),
+        ));
+    } else {
+        entity_mut.remove::<(
+            crate::console::helm::transit::ShipTransitDrives,
+            crate::console::helm::transit::TransitReadouts,
+        )>();
     }
     if let Some(saved) = &row.weapon_targets {
         entity_mut.insert(crate::console::weapons::assignments::ShipWeaponTargets(

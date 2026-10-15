@@ -3,6 +3,23 @@ use phoenix_model::transit::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// One ordinary per-System tree chooses whether to begin/cancel. Numeric
+/// movement, resource payment and arrival remain mechanical owners.
+pub fn bindings() -> crate::ai::state_tree::SupportedBindings {
+    crate::ai::state_tree::SupportedBindings {
+        facts: [
+            "can_operate",
+            "request_present",
+            "course_available",
+            "preparing",
+            "active",
+        ]
+        .map(str::to_owned)
+        .into(),
+        channels: ["begin", "cancel"].map(str::to_owned).into(),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TransitOrder {
@@ -79,7 +96,7 @@ impl TransitArrivalSolution {
             || distance([0.0; 3], self.scatter_offset)
                 > f64::from(order.profile.config.scatter_radius)
             || distance([0.0; 3], self.at_center_direction) == 0.0
-            || self.gravity.len() > 128
+            || self.gravity.len() > MAX_TRANSIT_GRAVITY_BODIES
             || self
                 .gravity
                 .windows(2)
@@ -122,6 +139,15 @@ impl TransitArrivalSolution {
             if !finite(point) {
                 return Err("gravity placement has no finite representable result".into());
             }
+        }
+        if self
+            .gravity
+            .iter()
+            .any(|body| distance(body.position, point) < f64::from(body.policy.exclusion_radius))
+        {
+            return Err(
+                "deterministic placement remains inside an accepted gravity exclusion".into(),
+            );
         }
         Ok(point)
     }

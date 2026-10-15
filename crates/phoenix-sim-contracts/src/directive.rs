@@ -21,6 +21,7 @@ pub enum DirectiveKind {
     Scan,
     Illuminate,
     Jam,
+    Transit,
     Dock,
     Tow,
     Stabilise,
@@ -36,7 +37,7 @@ pub enum DirectiveKind {
 }
 
 impl DirectiveKind {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::None,
         Self::Patrol,
         Self::Destroy,
@@ -46,6 +47,7 @@ impl DirectiveKind {
         Self::Scan,
         Self::Illuminate,
         Self::Jam,
+        Self::Transit,
         Self::Dock,
         Self::Tow,
         Self::Stabilise,
@@ -68,6 +70,7 @@ impl DirectiveKind {
             Self::Scan => "Scan",
             Self::Illuminate => "Illuminate",
             Self::Jam => "Jam",
+            Self::Transit => "Transit",
             Self::Dock => "Dock",
             Self::Tow => "Tow",
             Self::Stabilise => "Stabilise",
@@ -97,6 +100,7 @@ impl DirectiveKind {
             // route is likewise an established resolved-hold default.
             Self::None | Self::Patrol | Self::Destroy => false,
             Self::Reach | Self::Retreat => matches!(slot, DirectiveSlot::Anchor),
+            Self::Transit => matches!(slot, DirectiveSlot::Revision),
             Self::Order => matches!(slot, DirectiveSlot::Target | DirectiveSlot::Route),
             Self::Hail
             | Self::Scan
@@ -130,6 +134,7 @@ pub enum DirectiveSurface {
 /// Canonical value slots consumed by a runtime [`AiDirective`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DirectiveSlot {
+    Revision,
     Anchors,
     Loop,
     Target,
@@ -138,7 +143,8 @@ pub enum DirectiveSlot {
 }
 
 impl DirectiveSlot {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
+        Self::Revision,
         Self::Anchors,
         Self::Loop,
         Self::Target,
@@ -152,6 +158,7 @@ impl DirectiveSlot {
 /// common validator—not an adapter—owns their forbidden-kind rules.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DirectiveField {
+    Revision,
     PatrolAnchors,
     PatrolLoop,
     Anchor,
@@ -167,7 +174,8 @@ pub enum DirectiveField {
 }
 
 impl DirectiveField {
-    const ALL: [Self; 12] = [
+    const ALL: [Self; 13] = [
+        Self::Revision,
         Self::PatrolAnchors,
         Self::PatrolLoop,
         Self::Anchor,
@@ -184,6 +192,7 @@ impl DirectiveField {
 
     pub const fn name(self) -> &'static str {
         match self {
+            Self::Revision => "directive_revision",
             Self::PatrolAnchors => "directive_anchors",
             Self::PatrolLoop => "directive_loop",
             Self::Anchor => "directive_anchor",
@@ -201,6 +210,7 @@ impl DirectiveField {
 
     const fn slot(self) -> DirectiveSlot {
         match self {
+            Self::Revision => DirectiveSlot::Revision,
             Self::PatrolAnchors => DirectiveSlot::Anchors,
             Self::PatrolLoop => DirectiveSlot::Loop,
             Self::Anchor => DirectiveSlot::Anchor,
@@ -217,6 +227,7 @@ impl DirectiveField {
 
     const fn allows(self, kind: DirectiveKind) -> bool {
         match self {
+            Self::Revision => matches!(kind, DirectiveKind::Transit),
             Self::PatrolAnchors | Self::PatrolLoop => matches!(kind, DirectiveKind::Patrol),
             Self::Anchor => matches!(kind, DirectiveKind::Reach | DirectiveKind::Retreat),
             Self::WorldTarget => matches!(
@@ -260,6 +271,7 @@ impl DirectiveField {
 
     const fn appears_on(self, surface: DirectiveSurface) -> bool {
         match self {
+            Self::Revision => true,
             Self::PatrolAnchors | Self::PatrolLoop | Self::Anchor => true,
             Self::WorldTarget | Self::WorldRoute => matches!(surface, DirectiveSurface::World),
             Self::DoctrineDestroyTarget
@@ -284,6 +296,7 @@ impl DirectiveField {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum DirectiveValue {
+    Unsigned(u64),
     Text(String),
     Texts(Vec<String>),
     Bool(bool),
@@ -294,7 +307,7 @@ impl DirectiveValue {
         match self {
             Self::Text(value) => value.trim().is_empty(),
             Self::Texts(values) => values.iter().any(|value| value.trim().is_empty()),
-            Self::Bool(_) => false,
+            Self::Bool(_) | Self::Unsigned(_) => false,
         }
     }
 }
@@ -345,6 +358,14 @@ pub struct AuthoredDirective {
 }
 
 impl AuthoredDirective {
+    pub fn push_unsigned(&mut self, field: DirectiveField, value: Option<u64>) {
+        if let Some(value) = value {
+            self.fields.push(AuthoredDirectiveField {
+                field,
+                value: DirectiveValue::Unsigned(value),
+            });
+        }
+    }
     pub fn new(kind: Option<String>) -> Self {
         Self {
             kind,
@@ -468,6 +489,7 @@ impl DirectiveError {
 
 #[derive(Default)]
 struct Values {
+    revision: Option<u64>,
     anchors: Option<Vec<String>>,
     loop_path: Option<bool>,
     target: Option<String>,
@@ -478,6 +500,7 @@ struct Values {
 impl Values {
     fn contains(&self, slot: DirectiveSlot) -> bool {
         match slot {
+            DirectiveSlot::Revision => self.revision.is_some(),
             DirectiveSlot::Anchors => self.anchors.is_some(),
             DirectiveSlot::Loop => self.loop_path.is_some(),
             DirectiveSlot::Target => self.target.is_some(),
@@ -496,6 +519,9 @@ impl Values {
             return Err(DirectiveError::DuplicateField { kind, slot });
         }
         match (slot, &authored.value) {
+            (DirectiveSlot::Revision, DirectiveValue::Unsigned(value)) => {
+                self.revision = Some(*value)
+            }
             (DirectiveSlot::Anchors, DirectiveValue::Texts(value)) => {
                 self.anchors = Some(value.clone())
             }
@@ -514,6 +540,7 @@ impl Values {
 
     fn empty(&self, slot: DirectiveSlot) -> bool {
         match slot {
+            DirectiveSlot::Revision => false,
             DirectiveSlot::Anchors => self.anchors.as_ref().is_none_or(Vec::is_empty),
             DirectiveSlot::Loop => false,
             DirectiveSlot::Target => self.target.as_deref().is_none_or(|v| v.trim().is_empty()),
@@ -529,6 +556,7 @@ fn expected_field(
     slot: DirectiveSlot,
 ) -> DirectiveField {
     match (surface, slot) {
+        (_, DirectiveSlot::Revision) => DirectiveField::Revision,
         (_, DirectiveSlot::Anchors) => DirectiveField::PatrolAnchors,
         (_, DirectiveSlot::Loop) => DirectiveField::PatrolLoop,
         (_, DirectiveSlot::Anchor) => DirectiveField::Anchor,
@@ -595,6 +623,9 @@ pub fn interpret(raw: &AuthoredDirective) -> Result<AiDirective, DirectiveError>
     }
 
     Ok(match kind {
+        DirectiveKind::Transit => AiDirective::Transit {
+            revision: values.revision.expect("required above"),
+        },
         DirectiveKind::None => AiDirective::None,
         DirectiveKind::Patrol => AiDirective::Patrol {
             anchors: values.anchors.unwrap_or_default(),

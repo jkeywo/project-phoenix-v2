@@ -106,7 +106,8 @@ pub fn directive_relevance(directive: &AiDirective) -> Vec<SystemAffinity> {
         AiDirective::Patrol { .. }
         | AiDirective::Reach { .. }
         | AiDirective::Retreat { .. }
-        | AiDirective::Dock { .. } => {
+        | AiDirective::Dock { .. }
+        | AiDirective::Transit { .. } => {
             vec![SystemAffinity::Helm]
         }
         // Hail is a Comms action: the Backfill Comms AI (issue #753) consumes

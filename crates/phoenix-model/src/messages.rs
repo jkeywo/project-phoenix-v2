@@ -2130,6 +2130,11 @@ pub enum SystemControlPayload {
     },
     StartImpulseCharge,
     CancelImpulse,
+    /// Freeze the permitted own Navigation course. No coordinates are accepted.
+    BeginTransitToWaypoint {
+        request: Option<crate::transit::TransitRequestKey>,
+    },
+    CancelTransit,
     ToggleBoost,
     SetBoost {
         active: bool,
@@ -4827,6 +4832,7 @@ pub enum SystemBlackboard {
     /// detonated — so a Tactical seat can see it may not treat a completed
     /// placement as an automatic detonation.
     Demolition(DemolitionBlackboard),
+    Transit(crate::transit::TransitDriveView),
 }
 
 /// Raw sim truth for a ship's rescue transporter, published each tick under its
@@ -5812,6 +5818,10 @@ impl Default for SensorsBlackboard {
 /// blackboard (issue #567).
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct NavigationBlackboard {
+    /// Revision of this accepted own course, dated independently of any held
+    /// target measurement. Consumers freeze it only with the permitted point.
+    #[serde(default)]
+    pub course_generation: u64,
     /// Deliberate own-faction sharing intent for this actual Navigation owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sharing: Option<crate::sensing_sharing::RadarSharingView>,
@@ -5907,6 +5917,7 @@ pub struct CivilianOrderOptionSnapshot {
 impl Default for NavigationBlackboard {
     fn default() -> Self {
         Self {
+            course_generation: 0,
             sharing: None,
             received_chart: Vec::new(),
             nav_chart_range: default_nav_chart_range(),
@@ -6109,6 +6120,11 @@ pub enum AiDirective {
     /// hands, and the scored pool decides which life-saving order wins it).
     Rescue {
         target: String,
+    },
+    /// Explicit permission for the owning drive to consider the current own
+    /// Navigation course. This is not an instruction to Navigation to move it.
+    Transit {
+        revision: u64,
     },
 }
 

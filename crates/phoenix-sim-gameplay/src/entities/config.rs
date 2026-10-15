@@ -78,6 +78,14 @@ pub struct EntityConfig {
         deserialize_with = "phoenix_model::helm_control::deserialize_optional_config"
     )]
     pub helm_control: Option<phoenix_model::helm_control::HelmControlConfig>,
+    /// Explicit static-body arrival exclusion policy. Mesh size/mass do not
+    /// implicitly create gravity, and the first consumer rejects moving bodies.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "phoenix_model::transit::deserialize_optional_gravity"
+    )]
+    pub arrival_gravity: Option<phoenix_model::transit::ArrivalGravityConfig>,
     /// Optional helm capability declaration (`[helm_capability]`).
     /// Describes vertical movement mode and impulse steering policy.
     #[serde(default)]
@@ -1019,6 +1027,7 @@ impl EntityConfig {
         crate::resources::logistics_profile::compile_entity_logistics(&config)
             .map_err(SerdeError::custom)?;
         weapon_definition::validate_round_feeds(&config).map_err(SerdeError::custom)?;
+        crate::ship::transit_profile::validate_entity(&config).map_err(SerdeError::custom)?;
 
         if config.interior.is_none()
             && config
@@ -1363,6 +1372,24 @@ impl EntityConfig {
                     .map_err(|error| {
                         SerdeError::custom(format!("System '{}' config.ai: {error}", system.id.0))
                     })?;
+                    continue;
+                }
+                if system.kind == crate::ship::system_registry::TRANSIT_DRIVE_KIND {
+                    let authored = authored.ok_or_else(|| SerdeError::custom(format!("Transit System '{}' requires an explicit supported config.ai state tree", system.id.0)))?;
+                    let tree: crate::ai::state_tree::AiTreeConfig =
+                        authored.clone().try_into().map_err(|error| {
+                            SerdeError::custom(format!(
+                                "System '{}' config.ai: {error}",
+                                system.id.0
+                            ))
+                        })?;
+                    crate::ai::state_tree::compile(&tree, &crate::ship::transit::bindings())
+                        .map_err(|error| {
+                            SerdeError::custom(format!(
+                                "System '{}' config.ai: {error}",
+                                system.id.0
+                            ))
+                        })?;
                     continue;
                 }
                 if system.kind == crate::ship::system_registry::ILLUMINATION_KIND {

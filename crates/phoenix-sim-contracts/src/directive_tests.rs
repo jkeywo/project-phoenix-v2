@@ -1,5 +1,43 @@
 use super::*;
 
+#[test]
+fn transit_requires_explicit_revision_and_accepts_no_target_or_course_coordinates() {
+    for surface in [DirectiveSurface::World, DirectiveSurface::Doctrine] {
+        let mut raw = AuthoredDirective::new(Some("Transit".into()));
+        assert!(matches!(
+            interpret(&raw),
+            Err(DirectiveError::MissingField {
+                slot: DirectiveSlot::Revision,
+                ..
+            })
+        ));
+        raw.push_unsigned(DirectiveField::Revision, Some(0));
+        assert_eq!(
+            interpret(&raw).unwrap(),
+            AiDirective::Transit { revision: 0 }
+        );
+        let target = match surface {
+            DirectiveSurface::World => DirectiveField::WorldTarget,
+            DirectiveSurface::Doctrine => DirectiveField::DoctrineOperateTarget,
+        };
+        raw.push_text(target, Some("unrelated-contact".into()));
+        assert!(matches!(
+            interpret(&raw),
+            Err(DirectiveError::ForbiddenField { .. })
+        ));
+    }
+    let mut course_only = AuthoredDirective::new(Some("Reach".into()));
+    course_only.push_text(DirectiveField::Anchor, Some("nav-goal".into()));
+    course_only.push_unsigned(DirectiveField::Revision, Some(1));
+    assert!(matches!(
+        interpret(&course_only),
+        Err(DirectiveError::ForbiddenField {
+            field: DirectiveField::Revision,
+            ..
+        })
+    ));
+}
+
 fn world(kind: &str) -> AuthoredDirective {
     AuthoredDirective::new(Some(kind.to_string()))
 }

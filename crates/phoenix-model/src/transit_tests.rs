@@ -1,4 +1,59 @@
 use super::*;
+
+#[test]
+fn public_drive_reading_is_typed_owner_scoped_and_has_no_private_placement_recipe() {
+    let view = TransitDriveView {
+        owner: crate::identity::SystemId("actual-drive".into()),
+        phase: TransitPhaseView::Preparing,
+        preparation_fraction: 0.5,
+        fuel_required: 2,
+        can_begin: false,
+        can_cancel: true,
+        waiting: Some(TransitWaitingView::Unfunded),
+        request: Some(TransitRequestKey {
+            objective_id: "jump".into(),
+            revision: 7,
+        }),
+        course: Some(TransitDestination::Local {
+            point: [10.0, 0.0, 20.0],
+            course_generation: 3,
+        }),
+        actual_arrival: None,
+        last_step_tick: Some(12),
+    };
+    view.validate().unwrap();
+    let board = crate::messages::SystemBlackboard::Transit(view.clone());
+    assert_eq!(
+        crate::console::ConsoleObservationKind::of(&board),
+        crate::console::ConsoleObservationKind::Transit
+    );
+    let json = serde_json::to_vec(&board).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<crate::messages::SystemBlackboard>(&json).unwrap(),
+        board
+    );
+    assert!(!String::from_utf8(json).unwrap().contains("gravity"));
+    for fault in 0..5 {
+        let mut invalid = view.clone();
+        match fault {
+            0 => invalid.preparation_fraction = f32::NAN,
+            1 => invalid.can_begin = true,
+            2 => invalid.actual_arrival = Some([0.0; 3]),
+            3 => invalid.course = None,
+            _ => invalid.owner.0.clear(),
+        }
+        assert!(invalid.validate().is_err());
+    }
+    let manual = crate::messages::SystemControlPayload::BeginTransitToWaypoint { request: None };
+    let encoded = serde_json::to_vec(&manual).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<crate::messages::SystemControlPayload>(&encoded).unwrap(),
+        manual
+    );
+    let mut private = serde_json::to_value(&view).unwrap();
+    private["gravity"] = serde_json::json!([]);
+    assert!(serde_json::from_value::<TransitDriveView>(private).is_err());
+}
 fn profile() -> AcceptedLocalJumpProfile {
     AcceptedLocalJumpProfile {
         config: LocalJumpConfig {

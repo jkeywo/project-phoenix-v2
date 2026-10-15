@@ -37,6 +37,7 @@ pub mod world {
     pub mod load;
     pub mod manifest;
     pub mod mod_pack;
+    pub mod transit;
     pub mod validate;
 }
 pub mod authoring;

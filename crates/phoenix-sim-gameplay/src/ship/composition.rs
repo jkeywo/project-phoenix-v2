@@ -40,6 +40,12 @@ pub fn enabled_target_bindings(
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SystemComponentConfig {
+    TransitDrive {
+        id: String,
+        power_input: String,
+        navigation_source: crate::core::messages::SystemId,
+        config: phoenix_model::transit::LocalJumpConfig,
+    },
     DockMating {
         id: String,
         enabled_channel: String,
@@ -79,6 +85,7 @@ impl SystemComponentConfig {
     pub fn id(&self) -> &str {
         match self {
             Self::DockMating { id, .. }
+            | Self::TransitDrive { id, .. }
             | Self::IlluminationEmitter { id, .. }
             | Self::JammingEmitter { id, .. }
             | Self::PowerInput { id }
@@ -370,6 +377,27 @@ pub fn validate_composition(system: &super::config::SystemInstanceConfig) -> Res
     if system.kind == super::system_registry::JAMMING_KIND {
         return validate_jamming(system);
     }
+    if system.kind == super::system_registry::TRANSIT_DRIVE_KIND {
+        let binding = transit_composition(&system.components)
+            .ok_or("Transit requires exactly one transit_drive component and its power_input")?;
+        binding.config.validate()?;
+        let mut ids = BTreeSet::new();
+        if system.components.len() != 2
+            || system.power_group.is_none()
+            || !system.channels.is_empty()
+            || system
+                .components
+                .iter()
+                .any(|component| !valid_id(component.id()) || !ids.insert(component.id()))
+            || !system.components.iter().any(|component| {
+                matches!(component,
+                SystemComponentConfig::PowerInput { id } if id == binding.power_input)
+            })
+        {
+            return Err("Transit requires one drive and its distinct power_input, a power group, and no additional channels".into());
+        }
+        return Ok(());
+    }
     if system.kind == super::system_registry::ILLUMINATION_KIND {
         return validate_illumination(system);
     }
@@ -491,6 +519,29 @@ pub fn validate_composition(system: &super::config::SystemInstanceConfig) -> Res
         return Err("Dock power_input requires the System power_group binding".into());
     }
     Ok(())
+}
+
+pub struct TransitComposition<'a> {
+    pub component_id: &'a str,
+    pub power_input: &'a str,
+    pub navigation_source: &'a crate::core::messages::SystemId,
+    pub config: &'a phoenix_model::transit::LocalJumpConfig,
+}
+pub fn transit_composition(components: &[SystemComponentConfig]) -> Option<TransitComposition<'_>> {
+    components.iter().find_map(|component| match component {
+        SystemComponentConfig::TransitDrive {
+            id,
+            power_input,
+            navigation_source,
+            config,
+        } => Some(TransitComposition {
+            component_id: id,
+            power_input,
+            navigation_source,
+            config,
+        }),
+        _ => None,
+    })
 }
 
 #[cfg(test)]

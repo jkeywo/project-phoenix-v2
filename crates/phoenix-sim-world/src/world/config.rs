@@ -812,6 +812,8 @@ pub struct RawActionEntry {
     /// `None`.
     #[serde(default)]
     pub directive_kind: Option<String>,
+    #[serde(default)]
+    pub directive_revision: Option<u64>,
     /// Anchor names for a `Patrol` directive.
     #[serde(default)]
     pub directive_anchors: Option<Vec<String>>,
@@ -1917,6 +1919,7 @@ fn authored_world_directive(
     use crate::objectives::directive::{AuthoredDirective, DirectiveField};
 
     let mut authored = AuthoredDirective::new(raw.directive_kind.clone());
+    authored.push_unsigned(DirectiveField::Revision, raw.directive_revision);
     authored.push_texts(
         DirectiveField::PatrolAnchors,
         raw.directive_anchors.clone().unwrap_or_default(),

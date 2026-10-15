@@ -6,6 +6,9 @@ use crate::objectives::UtilityConfig;
 use crate::world::load::MemoryTemplateLoader;
 use uuid::Uuid;
 
+#[path = "dispatch_transit_tests.rs"]
+mod transit_tests;
+
 /// Deterministic stand-in for `entity_loader::assign_uuid()`.
 const STUB_UUID: &str = "stub-uuid-0001";
 

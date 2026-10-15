@@ -886,6 +886,7 @@ pub(crate) fn publish_navigation_blackboard(
         };
         let mut bb = if is_local {
             NavigationBlackboard {
+                course_generation: waypoint.generation(),
                 nav_chart_range: cfg.nav_chart_range,
                 nav_chart_shows: cfg.nav_chart_shows.clone(),
                 nav_chart_selects: cfg.nav_chart_selects.clone(),
@@ -897,6 +898,7 @@ pub(crate) fn publish_navigation_blackboard(
             }
         } else {
             NavigationBlackboard {
+                course_generation: waypoint.generation(),
                 navigation_waypoint,
                 ..Default::default()
             }

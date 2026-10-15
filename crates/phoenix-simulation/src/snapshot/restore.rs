@@ -108,6 +108,12 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
             .push(RestoreGap::ResourceStateInvalid { uuid, reason });
         return report;
     }
+    if let Err((uuid, reason)) = super::transit::validate_roster(world, snapshot) {
+        report
+            .gaps
+            .push(RestoreGap::ResourceStateInvalid { uuid, reason });
+        return report;
+    }
     if let Err((uuid, reason)) = super::flight_carriers::validate(world, snapshot) {
         report
             .gaps

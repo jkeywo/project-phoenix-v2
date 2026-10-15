@@ -473,6 +473,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("passive-samples", fold_passive_samples_namespace),
     ("system-mounts", fold_mounts_namespace),
     ("helm-movement-intent", fold_helm_movement_namespace),
+    ("transit-drive-orders", fold_transit_namespace),
     ("weapon-target-assignments", fold_weapon_targets_namespace),
     (
         "guided-source-order-knowledge",
@@ -2743,6 +2744,15 @@ fn fold_helm_movement_namespace(world: &World, acc: u64) -> u64 {
         acc,
         "helm-movement-intent",
         |state: &phoenix_sim_gameplay::ship::helm_control::HelmControlState| Some(state.clone()),
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+fn fold_transit_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "transit-drive-orders",
+        |state: &crate::console::helm::transit::ShipTransitDrives| Some(state.clone()),
         |acc, state| fold_serde(acc, &state),
     )
 }

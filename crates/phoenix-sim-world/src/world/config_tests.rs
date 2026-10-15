@@ -1762,6 +1762,10 @@ fn doctrine_and_world_adapters_match_for_every_directive_kind_and_absence() {
 
         match row.unwrap_or(DirectiveKind::None) {
             DirectiveKind::None => {}
+            DirectiveKind::Transit => {
+                doctrine.directive_revision = Some(7);
+                world.directive_revision = Some(7);
+            }
             DirectiveKind::Patrol => {
                 doctrine.directive_anchors = vec!["alpha".into(), "beta".into()];
                 doctrine.directive_loop = true;

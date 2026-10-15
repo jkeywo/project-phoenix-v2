@@ -9,8 +9,8 @@ pub mod damage;
 pub mod eligibility;
 pub mod energy_work;
 pub mod helm;
-pub mod helm_control;
 pub mod helm_ai;
+pub mod helm_control;
 pub mod impulse;
 pub mod lateral_thrust;
 pub mod manual;
@@ -48,3 +48,4 @@ pub mod physical_damage;
 pub mod disablement;
 
 pub mod transit;
+pub mod transit_profile;

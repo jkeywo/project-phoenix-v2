@@ -79,6 +79,9 @@ pub struct DoctrineObjective {
     pub directive_order_target: Option<String>,
     #[serde(default)]
     pub directive_order_route: Option<String>,
+    /// Explicit per-objective local-transit request revision, not a course.
+    #[serde(default)]
+    pub directive_revision: Option<u64>,
     /// Keys serde did not recognise on this doctrine entry. The shared
     /// Directive contract rejects them after deserialization so both doctrine
     /// and World actions fail loudly instead of silently discarding a typo.
@@ -164,6 +167,7 @@ pub fn authored_doctrine_directive(
         doctrine.directive_order_route.clone(),
     );
     authored.push_unknown_fields(doctrine.unrecognised_fields.keys().cloned());
+    authored.push_unsigned(DirectiveField::Revision, doctrine.directive_revision);
     authored
 }
 

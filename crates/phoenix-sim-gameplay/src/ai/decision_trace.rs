@@ -63,6 +63,7 @@ pub fn directive_label(directive: &AiDirective) -> String {
         AiDirective::Scan { target } => format!("Scan({target})"),
         AiDirective::Illuminate { target } => format!("Illuminate({target})"),
         AiDirective::Jam { target } => format!("Jam({target})"),
+        AiDirective::Transit { revision } => format!("Transit(revision {revision})"),
         AiDirective::Retreat { anchor } => format!("Retreat({anchor})"),
         AiDirective::Dock { target } => format!("Dock({target})"),
         AiDirective::Tow { target } => format!("Tow({target})"),
@@ -99,7 +100,7 @@ pub fn directive_target(directive: &AiDirective) -> Option<&str> {
         AiDirective::Order { target, .. } => Some(target.as_str()),
         AiDirective::Reach { anchor } | AiDirective::Retreat { anchor } => Some(anchor.as_str()),
         AiDirective::Patrol { anchors, .. } => anchors.first().map(String::as_str),
-        AiDirective::None => None,
+        AiDirective::None | AiDirective::Transit { .. } => None,
     }
 }
 

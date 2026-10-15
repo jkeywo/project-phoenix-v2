@@ -193,6 +193,17 @@ fn advance(
                             )
                         })
                         .map(|binding| binding.config.reading_ticks)
+                })
+                .or_else(|| {
+                    config
+                        .0
+                        .system(owner)
+                        .and_then(|system| {
+                            phoenix_sim_gameplay::ship::composition::transit_composition(
+                                &system.components,
+                            )
+                        })
+                        .map(|binding| binding.config.reading_ticks)
                 });
             let Some(required) = required else {
                 continue;
@@ -203,6 +214,7 @@ fn advance(
                     crate::ship::system_registry::TACTICAL_RADAR_KIND
                         | crate::ship::system_registry::ILLUMINATION_KIND
                         | crate::ship::system_registry::JAMMING_KIND
+                        | crate::ship::system_registry::TRANSIT_DRIVE_KIND
                 )
             });
             let selected = if tactical {

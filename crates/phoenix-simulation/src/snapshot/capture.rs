@@ -1448,6 +1448,7 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                         .get::<crate::console::weapons::guidance_link::ShipGuidanceKnowledge>()
                         .map(|state| state.0.clone()),
                     helm_movement: entity.get::<phoenix_sim_gameplay::ship::helm_control::HelmControlState>().cloned(),
+                    transit: entity.get::<crate::console::helm::transit::ShipTransitDrives>().cloned(),
                     illumination: entity.get::<crate::console::weapons::illumination::ShipIllumination>().cloned(),
                     jamming: entity.get::<crate::comms::jamming::ShipJamming>().cloned(),
                     weapon_targets: entity

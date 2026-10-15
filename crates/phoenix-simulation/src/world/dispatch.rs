@@ -1151,6 +1151,10 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
                     .push(format!("SpawnEntity '{name}' refused: {reason}"));
                 return out;
             }
+            if config.arrival_gravity.is_some() {
+                out.override_failures.push(format!("SpawnEntity '{name}' refused: arrival_gravity first supports base World static rows only, not runtime action/script spawns"));
+                return out;
+            }
             // 3. Only a spawn that will actually happen consumes a uuid.
             let uuid = (context.uuid_source)();
 

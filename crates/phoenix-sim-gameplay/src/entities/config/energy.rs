@@ -91,6 +91,7 @@ pub fn requires_energy_profile(kind: &str) -> bool {
             | DOCK_KIND
             | ILLUMINATION_KIND
             | JAMMING_KIND
+            | TRANSIT_DRIVE_KIND
             | UMBILICAL_KIND
             | TRANSPORTER_KIND
             | SECURITY_KIND

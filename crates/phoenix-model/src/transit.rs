@@ -1,8 +1,101 @@
 //! Closed accepted LocalJump data. Physical work and phase ownership stay in Gameplay.
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransitPhaseView {
+    Idle,
+    Preparing,
+    Committed,
+    Arrived,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransitWaitingView {
+    Unavailable,
+    Unfunded,
+    OutOfRange,
+    NoPlacement,
+}
+
+/// Own drive intent/progress only. The private physical placement recipe and
+/// undisclosed gravity inputs never enter an ordinary publication.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TransitDriveView {
+    pub owner: crate::identity::SystemId,
+    pub phase: TransitPhaseView,
+    pub preparation_fraction: f32,
+    pub fuel_required: i64,
+    pub can_begin: bool,
+    pub can_cancel: bool,
+    pub waiting: Option<TransitWaitingView>,
+    pub request: Option<TransitRequestKey>,
+    pub course: Option<TransitDestination>,
+    pub actual_arrival: Option<[f32; 3]>,
+    pub last_step_tick: Option<u64>,
+}
+impl TransitDriveView {
+    pub fn validate(&self) -> Result<(), String> {
+        if !identity(&self.owner.0)
+            || !self.preparation_fraction.is_finite()
+            || !(0.0..=1.0).contains(&self.preparation_fraction)
+            || self.fuel_required <= 0
+            || self
+                .actual_arrival
+                .is_some_and(|point| !point.iter().all(|value| value.is_finite()))
+        {
+            return Err("invalid finite own Transit reading".into());
+        }
+        if let Some(request) = &self.request {
+            request.validate()?;
+        }
+        if let Some(course) = &self.course {
+            course.validate()?;
+        }
+        if self.can_cancel && self.phase != TransitPhaseView::Preparing
+            || self.can_begin
+                && !matches!(
+                    self.phase,
+                    TransitPhaseView::Idle | TransitPhaseView::Arrived
+                )
+            || self.actual_arrival.is_some() != (self.phase == TransitPhaseView::Arrived)
+            || self.phase == TransitPhaseView::Idle
+                && (self.preparation_fraction != 0.0 || self.request.is_some())
+            || matches!(
+                self.phase,
+                TransitPhaseView::Committed | TransitPhaseView::Arrived
+            ) && self.preparation_fraction != 1.0
+            || self.phase != TransitPhaseView::Idle && self.course.is_none()
+        {
+            return Err("own Transit reading contradicts its phase".into());
+        }
+        Ok(())
+    }
+}
+
 /// Technical retention bound, never an evicting gameplay message capacity.
 pub const MAX_HANDLED_TRANSIT_OBJECTIVES: usize = 128;
+pub const MAX_TRANSIT_GRAVITY_BODIES: usize = 128;
+
+/// Explicit inherited disable; `true` never fabricates a gravity policy.
+pub fn deserialize_optional_gravity<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<ArrivalGravityConfig>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Authored {
+        Policy(ArrivalGravityConfig),
+        Disabled(bool),
+    }
+    match Authored::deserialize(deserializer)? {
+        Authored::Policy(policy) => Ok(Some(policy)),
+        Authored::Disabled(false) => Ok(None),
+        Authored::Disabled(true) => Err(serde::de::Error::custom(
+            "arrival_gravity accepts a finite policy or false, never true",
+        )),
+    }
+}
 
 fn identity(value: &str) -> bool {
     !value.trim().is_empty() && value.len() <= 512 && !value.chars().any(char::is_control)

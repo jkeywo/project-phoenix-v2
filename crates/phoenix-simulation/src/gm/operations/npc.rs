@@ -45,6 +45,7 @@ fn doctrine_digest_fields(objective: &DoctrineObjective) -> impl Serialize + '_ 
         directive_operate_target,
         directive_order_target,
         directive_order_route,
+        directive_revision,
         unrecognised_fields,
         base_priority,
         zero_gates,
@@ -71,6 +72,7 @@ fn doctrine_digest_fields(objective: &DoctrineObjective) -> impl Serialize + '_ 
             directive_operate_target,
             directive_order_target,
             directive_order_route,
+            directive_revision,
             unrecognised_fields,
         ),
         (
@@ -154,6 +156,7 @@ pub fn compatible(
             AiDirective::Scan { .. } => has(SENSORS_KIND),
             AiDirective::Illuminate { .. } => has(ILLUMINATION_KIND),
             AiDirective::Jam { .. } => has(JAMMING_KIND),
+            AiDirective::Transit { .. } => has(TRANSIT_DRIVE_KIND) && has(NAVIGATION_KIND),
             AiDirective::Tow { .. }
             | AiDirective::Stabilise { .. }
             | AiDirective::Escort { .. } => has(TRACTOR_KIND),

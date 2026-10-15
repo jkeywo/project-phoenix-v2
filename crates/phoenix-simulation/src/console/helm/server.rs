@@ -20,6 +20,7 @@ pub struct HelmPlugin;
 
 impl Plugin for HelmPlugin {
     fn build(&self, app: &mut App) {
+        super::transit::register(app);
         use crate::authoritative::{DeclareState, StateClass};
         app.declare_state::<phoenix_sim_gameplay::ship::helm_control::HelmControlState>(
             StateClass::Folded,

@@ -111,6 +111,7 @@ pub(super) fn install(
     crate::comms::jamming::install(config, cmds);
     crate::weapons::mounts::install(config, cmds);
     crate::console::weapons::illumination::install(config, cmds);
+    crate::console::helm::transit::install(config, cmds);
     crate::console::weapons::assignments::install(config, cmds);
     crate::console::navigation::sharing::install(config, cmds);
     crate::console::navigation::knowledge::install(config, cmds);

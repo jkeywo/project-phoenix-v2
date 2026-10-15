@@ -180,6 +180,7 @@ pub const DOCK_KIND: &str = "dock";
 /// Independent mounted Science illumination.
 pub const ILLUMINATION_KIND: &str = "illumination";
 pub const JAMMING_KIND: &str = "jamming";
+pub const TRANSIT_DRIVE_KIND: &str = "transit-drive";
 pub const ACCESS_GATE_KIND: &str = "access-gate";
 pub const FABRICATION_KIND: &str = crate::resources::production::FABRICATION_KIND;
 pub const RECOVERY_KIND: &str = crate::resources::recovery::RECOVERY_KIND;
@@ -548,6 +549,7 @@ impl SystemKindRegistry {
         registry.register_commandable(DOCK_KIND, ConsoleFamily::Helm)?;
         registry.register_commandable(ILLUMINATION_KIND, ConsoleFamily::Sensors)?;
         registry.register_commandable(JAMMING_KIND, ConsoleFamily::Comms)?;
+        registry.register_commandable(TRANSIT_DRIVE_KIND, ConsoleFamily::Helm)?;
         registry.register_commandable(ACCESS_GATE_KIND, ConsoleFamily::Access)?;
         registry.register_commandable(LOGISTICS_KIND, ConsoleFamily::Logistics)?;
         registry.register_commandable(FABRICATION_KIND, ConsoleFamily::Production)?;
@@ -1023,6 +1025,7 @@ pub fn instance_publication_kinds(
         (FABRICATION_KIND, Kind::Production),
         (RECOVERY_KIND, Kind::Recovery),
         (PASSIVE_RECEIVER_KIND, Kind::Passive),
+        (TRANSIT_DRIVE_KIND, Kind::Transit),
     ]
     .into_iter()
     .map(|(kind, observation)| (kind.to_owned(), observation))

@@ -422,3 +422,60 @@ fn original_scatter_and_static_gravity_justify_saved_point_without_a_final_scatt
     }
     assert!(state.validate(2).is_err());
 }
+
+#[test]
+fn stable_body_pass_refuses_reentry_into_an_earlier_exclusion_before_any_commit() {
+    let mut order = order(1, None);
+    order.profile.config.max_distance = 200.0;
+    order.destination = TransitDestination::Local {
+        point: [75.0, 2.0, 0.0],
+        course_generation: 1,
+    };
+    let body = |id: &str, x| TransitGravityBody {
+        body_id: id.into(),
+        position: [x, 2.0, 0.0],
+        policy: ArrivalGravityConfig {
+            exclusion_radius: 100.0,
+        },
+    };
+    let overlap = vec![body("a", 0.0), body("b", 150.0)];
+    assert!(
+        TransitArrivalSolution::resolve(&order, [0.0; 3], [1.0, 0.0, 0.0], overlap.clone())
+            .is_err()
+    );
+    let positive = TransitArrivalSolution::resolve(
+        &order,
+        [0.0; 3],
+        [1.0, 0.0, 0.0],
+        vec![body("b", 300.0), body("a", 0.0)],
+    )
+    .unwrap();
+    assert_eq!(positive.point, [100.0, 2.0, 0.0]);
+    positive.validate(&order).unwrap();
+    let mut state = TransitState::default();
+    state.begin(order, 1).unwrap();
+    assert_eq!(
+        state
+            .advance(
+                1,
+                2.0,
+                [0.0, 2.0, 0.0],
+                true,
+                true,
+                1.0,
+                |action, _| match action {
+                    TransitWork::Prepare { seconds } => Ok(TransitGrant::Preparation { seconds }),
+                    TransitWork::Commit => panic!("invalid overlap cannot debit fuel or Power"),
+                },
+                |order, _| TransitArrivalSolution::resolve(
+                    order,
+                    [0.0; 3],
+                    [1.0, 0.0, 0.0],
+                    overlap.clone()
+                )
+                .ok()
+            )
+            .unwrap(),
+        TransitAdvance::Waiting(TransitWait::NoPlacement)
+    );
+}

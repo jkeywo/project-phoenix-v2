@@ -526,6 +526,7 @@ pub(super) fn validate_entity_resources(
     super::fitting::validate_entity(world, entity, row)?;
     super::guided_source::validate_entity(world, Some(entity), row, u64::MAX)?;
     super::helm_movement::validate_live(world, entity, row, u64::MAX)?;
+    super::transit::validate_live(world, entity, row, u64::MAX)?;
     super::illumination::validate_entity(world, entity, row)?;
     super::jamming::validate_entity(world, entity, row)?;
     match (

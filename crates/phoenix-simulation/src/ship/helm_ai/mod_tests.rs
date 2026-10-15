@@ -30,6 +30,7 @@ fn test_app() -> App {
         crate::ship::system_registry::navigation_system_id(),
         crate::core::messages::SystemBlackboard::Navigation(
             crate::core::messages::NavigationBlackboard {
+                course_generation: 0,
                 nav_chart_range: 5000.0,
                 nav_chart_shows: vec![],
                 nav_chart_selects: vec![],

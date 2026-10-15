@@ -40,6 +40,78 @@ use crate::world::config::{TriggerAction, WorldConfig, WorldEntity};
 
 pub use phoenix_content::findings::*;
 
+fn validate_arrival_gravity(
+    src: &WorldSource,
+    loader: &dyn TemplateLoader,
+    base: bool,
+) -> Vec<WorldFinding> {
+    let mut findings = Vec::new();
+    let mut body_count = 0usize;
+    for row in &src.config.entities {
+        let Some(template) = loader.load_template(&row.template_path) else {
+            continue;
+        };
+        let resolved = match &row.overrides {
+            Some(overrides) => match crate::entities::loader::apply_overrides(&template, overrides)
+            {
+                Ok(resolved) => resolved,
+                Err(_) => continue, // The ordinary resolution validator owns this failure.
+            },
+            None => template,
+        };
+        if resolved.arrival_gravity.is_none() {
+            continue;
+        }
+        body_count += 1;
+        let result = if base {
+            if body_count > phoenix_model::transit::MAX_TRANSIT_GRAVITY_BODIES {
+                Err("base World exceeds the supported finite static arrival body bound".into())
+            } else {
+                super::transit::body_for_row(row, &resolved).map(|_| ())
+            }
+        } else {
+            Err("arrival_gravity first supports base World static rows only; additive/layer gravity is not yet supported".into())
+        };
+        if let Err(message) = result {
+            let reference = row.name.as_deref().unwrap_or(&row.template_path);
+            findings.push(WorldFinding {
+                severity: Severity::Error,
+                category: "unsupported-arrival-gravity",
+                message,
+                source: SourceLocation {
+                    file: src.path.clone(),
+                    line: line_of(src.toml, reference),
+                    reference: reference.into(),
+                },
+            });
+        }
+    }
+    // Same existing spawn-reference inventory as ordinary template validation.
+    // A computed path/override is checked again by the actual pre-mint owner.
+    for instance in collect_spawned_instances(src)
+        .into_iter()
+        .skip(src.config.entities.len())
+    {
+        let Some(template) = loader.load_template(&instance.template_path) else {
+            continue;
+        };
+        let resolved = match instance.overrides {
+            Some(overrides) => match crate::entities::loader::apply_overrides(&template, overrides)
+            {
+                Ok(value) => value,
+                Err(_) => continue,
+            },
+            None => template,
+        };
+        if resolved.arrival_gravity.is_some() {
+            findings.push(WorldFinding{severity:Severity::Error,category:"unsupported-arrival-gravity",
+                message:"arrival_gravity first supports base World static rows only; runtime action/script spawns are unsupported".into(),
+                source:SourceLocation{file:instance.site_file(src),line:instance.site_line(src),reference:instance.label.clone()}});
+        }
+    }
+    findings
+}
+
 /// The 1-based line in `src.toml` of a scanned script spawn (issue #1046).
 ///
 /// An inline `[script]` body is a SLICE of the world TOML, so the body's own
@@ -1465,6 +1537,7 @@ pub fn validate_supporting_world(
     active_anchors: &[String],
 ) -> Vec<WorldFinding> {
     let mut findings = Vec::new();
+    findings.extend(validate_arrival_gravity(source, template_loader, false));
 
     let mut composed_seen = HashSet::new();
     findings.extend(validate_template_composition_in(
@@ -1751,6 +1824,7 @@ pub fn activation_findings(
     // host whose loader can be authoritative about that), or an `overrides`
     // table that does not merge onto the template it names (on every host).
     let src = WorldSource::new("", "", config);
+    findings.extend(validate_arrival_gravity(&src, templates, true));
     let mut seen = HashSet::new();
     findings.extend(validate_template_resolution_in(&src, templates, &mut seen));
     findings.extend(validate_ship_slot_capacity_in(&src, templates));
@@ -1792,6 +1866,10 @@ pub fn validate_composition_with_fragments(
     fragments: &dyn FragmentSource,
 ) -> Vec<WorldFinding> {
     let mut findings = Vec::new();
+    findings.extend(validate_arrival_gravity(root, template_loader, true));
+    for child in children {
+        findings.extend(validate_arrival_gravity(child, template_loader, false));
+    }
 
     findings.extend(validate_ship_slot_capacity_in(root, template_loader));
     findings.extend(super::activity_bindings::findings(root, template_loader));
@@ -2077,3 +2155,7 @@ fn validate_composition_with(
 #[cfg(test)]
 #[path = "validate_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "transit_validation_tests.rs"]
+mod transit_validation_tests;

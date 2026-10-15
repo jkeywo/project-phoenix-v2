@@ -225,3 +225,34 @@ JSON application, strict old-shape refusal and malformed no-write candidates;
 the integrator still needs to execute those native tests, repin intentionally
 changed digest goldens, run actual hosted continuation and advance compatibility.
 No native, human, route, Medical or increment exit is claimed from this checkpoint.
+
+## Adopted physical local Security tracer
+
+[ai] Optional `security.local` selects an explicitly local-only Security profile:
+one home compartment per existing finite Security team and a closed list of
+compartment targets/actions. Initial supported local verbs are secure/contain and
+assist evacuation, with the existing authored work terms and consequences. The
+ordinary dispatch command, Console, priority selection and admitted Backfill path
+remain in use; local target addresses resolve only within the commanding ship.
+The optional reference changes no shipped hull or scenario. External-only profiles
+retain existing crossing behavior. A local profile offers and admits local work
+only until actual craft/transfer custody supports mixed external operations.
+
+[ai] The same canonical Security Jobs retain one RouteCursor per finite team. It
+uses the existing InteriorGraph and actual InteriorAccess boundary state, including
+its crossing safety interlock; no local deployment or return timer runs beside the
+route. Work begins only at the authored destination, consumes existing actual
+Security energy and Operation grants, and retains the normal work duration. A
+blocked route waits or finds another actual route without reopening a requested
+seal. Recall and machinery loss select return on the same job/cursor; they cannot
+teleport the team home. Safe return continues even if the control machinery is
+unavailable. The Job releases only on actual home arrival.
+
+[ai] Accepted compilation validates homes, compartment actions, topology and
+actual Security work-energy machinery. Capture/digest retain the same cursor with
+mint/work/result state. Preflight validates accepted local mode, team/home count,
+route/crossing, action terms and working/home location joins before writes.
+Workshop edits these same profile values through accepted document history,
+validation and Test; local authoring is not complete until that workflow exists.
+This tracer does not establish hazard simulation, medical care, boarding or a full
+increment20 exit. Native hosted continuation and human acceptance remain separate.

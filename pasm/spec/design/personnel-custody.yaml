@@ -47,3 +47,14 @@ entities:
       rationale:
         - "[ai] Remove the independently saved assignment vector. Idle availability is derived; completion/cancellation/failure remains on the same activity until actual return releases its Job. Returning teams cannot receive a fresh assignment. No duplicate roster, timer, movement, outcome pool or crew AI."
         - "[ai] Save and digest complete canonical job state including mint, clock and outcomes. Whole candidate validation checks accepted owner/count, IDs, finite phases and nonfuture execution before writes; root advances compatibility and rejects unsupported older payloads. Detail and retained external-crossing boundary live in implementation/increment-20.md."
+
+  - decision: redesign-security-physical-local-work
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Local Security Uses the Existing Physical Route Owner
+      summary: "Optional local-only Security profiles bind existing finite teams to actual home compartments and closed local containment/evacuation work. The shared Job retains one actual InteriorGraph cursor; deployment and return use routes instead of duplicate phase timers."
+      rationale:
+        - "[ai] The normal Human/Backfill dispatch, priority, paid Security work and authored consequences remain in use. Actual access blockers and crossing interlocks govern movement; recall or machinery loss returns the same team without teleporting. Work begins only at destination and release only at actual home."
+        - "[ai] Local-only optional references preserve shipped external-only behavior. Mixed external work waits for actual19craft/transfer custody. Accepted homes/actions/energy/topology, saved cursor/work/result joins and Workshop history/Test are required; a source tracer is not hazard, Medical, boarding or increment20 acceptance. Detailed contract lives in implementation/increment-20.md."

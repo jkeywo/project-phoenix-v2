@@ -320,6 +320,65 @@ fn lost_source_or_range_pauses_without_payment_and_recovery_cannot_ignore_a_chan
 }
 
 #[test]
+fn ordinary_recovery_on_off_gate_can_pause_equipment_work_without_a_second_controller() {
+    let (mut world, actor, source) = rig();
+    start_beam(&mut world, actor, source).unwrap();
+    advance(&mut world, actor, 1, 0.25);
+    let progress = world
+        .get::<ShipEquipmentRecovery>(actor)
+        .unwrap()
+        .job
+        .as_ref()
+        .unwrap()
+        .activity
+        .progress;
+    let paid = power(&world, actor);
+    world
+        .get_mut::<crate::resources::recovery_server::ShipRecovery>(actor)
+        .unwrap()
+        .0
+        .set_enabled(false);
+    advance(&mut world, actor, 2, 20.0);
+    assert_eq!(power(&world, actor), paid);
+    assert_eq!(
+        world
+            .get::<ShipEquipmentRecovery>(actor)
+            .unwrap()
+            .job
+            .as_ref()
+            .unwrap()
+            .activity
+            .progress,
+        progress
+    );
+    world
+        .get_mut::<crate::resources::recovery_server::ShipRecovery>(actor)
+        .unwrap()
+        .0
+        .set_enabled(true);
+    for tick in 3..120 {
+        advance(&mut world, actor, tick, 0.25);
+    }
+    assert_eq!(
+        world
+            .get::<ShipEquipmentRecovery>(actor)
+            .unwrap()
+            .job
+            .as_ref()
+            .unwrap()
+            .outcome,
+        Some(JobOutcome::Completed)
+    );
+    assert!(
+        !world
+            .get::<crate::resources::recovery_server::ShipRecovery>(actor)
+            .unwrap()
+            .0
+            .enabled
+    );
+}
+
+#[test]
 fn paid_job_continues_through_json_and_forged_recipe_timers_or_ids_are_rejected() {
     let (mut world, actor, source) = rig();
     start_beam(&mut world, actor, source).unwrap();

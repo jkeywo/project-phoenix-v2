@@ -403,6 +403,14 @@ fn start(
         waiting: String::new(),
     };
     prepare(world, actor, &work, JobId(state.next_id), false)?;
+    let mut machinery = world
+        .get::<crate::resources::recovery_server::ShipRecovery>(actor)
+        .filter(|machinery| machinery.0.owner == *owner)
+        .cloned()
+        .ok_or("no_recovery_machinery")?;
+    // Explicit selection is the same owner's start command. Subsequent AI
+    // decisions continue to own this ordinary on/off control.
+    machinery.0.set_enabled(true);
     state.job = Some(Job {
         id: JobId(state.next_id),
         owner: owner.clone(),
@@ -414,7 +422,7 @@ fn start(
         workflow_error: false,
     });
     state.next_id += 1;
-    world.entity_mut(actor).insert(state);
+    world.entity_mut(actor).insert((state, machinery));
     Ok(())
 }
 
@@ -434,7 +442,13 @@ fn cancel(world: &mut World, actor: Entity, owner: &SystemId) -> Result<(), Stri
     job.outcome = Some(JobOutcome::Cancelled);
     job.paused = false;
     job.activity.waiting.clear();
-    world.entity_mut(actor).insert(state);
+    let mut machinery = world
+        .get::<crate::resources::recovery_server::ShipRecovery>(actor)
+        .filter(|machinery| &machinery.0.owner == owner)
+        .cloned()
+        .ok_or("no_recovery_machinery")?;
+    machinery.0.set_enabled(false);
+    world.entity_mut(actor).insert((state, machinery));
     Ok(())
 }
 
@@ -457,14 +471,20 @@ fn advance(world: &mut World, actor: Entity, now: u64, dt: f32) {
             let policy = sources.0.policy_for(&state.owner);
             policy.accept_human_input || policy.operate_ai
         });
-    let factor = world.get::<ShipDamage>(actor).map_or(0.0, |damage| {
-        damage.factor(
-            &state.owner,
-            phoenix_model::damage::DamageBinding::Operation,
-        )
-    });
+    let factor = world
+        .get::<ShipDamage>(actor)
+        .filter(|damage| !damage.catastrophic())
+        .map_or(0.0, |damage| {
+            damage.factor(
+                &state.owner,
+                phoenix_model::damage::DamageBinding::Operation,
+            )
+        });
     let mut power = world.get::<ShipPowerSystem>(actor).cloned();
-    let result = if !allowed || factor <= 0.0 {
+    let enabled = world
+        .get::<crate::resources::recovery_server::ShipRecovery>(actor)
+        .is_some_and(|machinery| machinery.0.owner == state.owner && machinery.0.enabled);
+    let result = if !allowed || !enabled || factor <= 0.0 {
         Err("recovery_unavailable".to_owned())
     } else {
         prepared
@@ -475,7 +495,8 @@ fn advance(world: &mut World, actor: Entity, now: u64, dt: f32) {
             job.paused = true;
         }
         Ok(prepared) => {
-            let seconds = dt.min((job.activity.work_secs - job.activity.progress).max(0.0));
+            let seconds =
+                dt.min((job.activity.work_secs - job.activity.progress).max(0.0) / factor);
             let fraction = power
                 .as_mut()
                 .and_then(|power| power.0.work_continuous(&state.owner, seconds, 1.0).ok())
@@ -505,6 +526,11 @@ fn advance(world: &mut World, actor: Entity, now: u64, dt: f32) {
                 world.entity_mut(actor).insert(prepared.destination_fitting);
                 job.outcome = Some(JobOutcome::Completed);
                 job.paused = false;
+                if let Some(mut machinery) =
+                    world.get_mut::<crate::resources::recovery_server::ShipRecovery>(actor)
+                {
+                    machinery.0.set_enabled(false);
+                }
             }
         }
     }
@@ -664,7 +690,7 @@ pub fn project(world: &World, actor: Entity) -> Option<EquipmentRecoveryView> {
     }
     let job = owner.job.as_ref();
     Some(EquipmentRecoveryView {
-        can_start: !options.is_empty(),
+        can_start: owner.next_id < u64::MAX && !options.is_empty(),
         can_cancel: active(owner),
         options,
         selected,

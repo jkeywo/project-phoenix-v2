@@ -206,3 +206,28 @@ Actual browser/native/Workshop journeys, no-defaults/layer checks, deterministic
 simulation, appropriate actor/service/delivery performance and 2/4/6/8-human workload
 remain required. Foundations are not workforce/external completion, full 21 exit,
 22 planning acceptance or a substitute for outstanding earlier evidence.
+
+## Explicit transfer and the first physical supply leg
+
+The existing Umbilical AI currently enables free-port Main replenishment before
+checking a standing Transfer directive. That opportunistic mode always collects
+Main deficits and can replace intended unloading. Preserve idle unattended
+replenishment, including the shipped default Deliver configuration; the configured
+direction alone is not an explicit donation order.
+
+A permitted standing Transfer takes precedence: ordinary admitted controls disable
+port maintenance and start the selected resource/direction/store. With no such
+order, the individual AI enables opportunistic replenishment only while idle.
+Already active human work keeps its chosen mode during delegation. Existing
+standing-operation ownership still controls withdrawal and never stops an
+unclaimed human flow. This changes no inventory, movement or service owner.
+
+The bounded physical consumer loads finite goods at one actual equipment-backed
+facility, carries them on an ordinary vessel through actual undock/travel/dock,
+and unloads through the second actual provider's paid finite service. Crew or
+normal authored goals may select the two legs; their fulfillment requires real
+movement and receipts. No shipment progress timer, mirrored cargo, new route AI,
+foreign stock query or automatic scenario-completion flag is added. Validate the
+actual source/vessel/receiver conservation, unavailable/full service pauses and
+complete fresh-host JSON continuation. This foundation does not finish 21's
+outside-actor goal selection, workforce or whole-increment acceptance.

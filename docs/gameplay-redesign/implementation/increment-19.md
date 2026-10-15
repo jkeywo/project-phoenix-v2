@@ -349,3 +349,14 @@ different-LocalShip peers. Forged roster/custody/capacity/claim/order/clock cand
 must refuse without writes. Shipped hull/scenario/Workshop and physical browser/
 native journeys, performance/sortie/combat/activity comparisons and 2/4/6/8-human
 workload remain required; static foundations do not close full 19 or passenger 20.
+
+### Simulation and Presentation presence boundary
+
+Simulation retains only canonical ProbeCustody, derived Disabled membership and
+actual backend handle removal/reinitialisation. It must compile without renderer
+features. Presentation reads that same public custody owner with Allow<Disabled>
+and derives Hidden/Inherited on the same procedural entity before extraction;
+Visibility is neither canonical state nor a Simulation dependency. Headless
+acceptance verifies actual body/backend inactivity; a Presentation owner witness
+verifies visual projection separately. Neither test alone claims a physical
+screen or GPU acceptance pass.

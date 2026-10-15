@@ -103,6 +103,27 @@ pending work instead of claiming completion or omitting an included capability.
 
 ## Physical effects and information
 
+### Optional missile reference and producer evidence
+
+The actual PDC producer probe finds its first loaded firing opportunity at tick
+183, but its first permitted shield assessment only at tick 361, after the
+inherited broadside approach has turned its fore tube away. The failed probe is
+retained as evidence of that mismatch, not proof of interception. Do not weaken
+the assessment gate or expose hidden shields to make it fire.
+
+Add an optional Missile Cruiser using the existing authored artillery doctrine,
+finite stocks, loading, power and guided lifecycle. Provisional reference tuning
+is speed 5, lifetime 120 seconds and range 600 (old Cruiser 15/20/300), with
+matching finite seeker/receiver reach and a 600-unit Tactical radar. Its doctrine
+holds at 80 units within a 100-unit artillery envelope rather than making the
+short-range broadside pass. Both existing axes receive the same envelope.
+These are explicit equipment/doctrine changes on the optional reference, not
+balance changes to the shipped Cruiser or faster/free sensor assessment. The
+PDC single/salvo probes may use this ordinary configured opponent; keep their
+actual launch, acquired contact, interception, saturation, conservation and
+continuation assertions. Verify accepted loading and observed outcomes before
+claiming a playable missile/PDC engagement or balance result.
+
 At launch, freeze actual payload properties, consumption, damage/effect profile,
 flight equipment and firing origin. Later ship upgrades, target changes or
 guidance messages cannot increase an in-flight payload or replenish its fuel.

@@ -1,5 +1,5 @@
 import { t } from './strings.js';
-import { turretKinds, initialTurret, initialIllumination, initialJamming, initialProtection } from '../editor/workshop-system-composition.js';
+import { turretKinds, initialTurret, initialIllumination, initialJamming, initialProtection, initialBay } from '../editor/workshop-system-composition.js';
 
 /** A local composition draft. Only Apply crosses the accepted source/history gate. */
 export function mountSystemComponents({ root, apply }) {
@@ -27,7 +27,7 @@ export function mountSystemComponents({ root, apply }) {
     }
     commit.disabled ||= !owner?.id;
   };
-  const initial = system => system?.kind === 'signal-protection' && !system?.component?.length ? initialProtection() : ['illumination','jamming'].includes(system?.kind) && !system?.component?.length ? (system.kind==='jamming'?initialJamming():initialIllumination()) : ({ components: structuredClone(system?.component?.length ? system.component : system?.kind === 'access-gate'
+  const initial = system => system?.kind === 'signal-protection' && !system?.component?.length ? initialProtection() : system?.kind === 'craft-bay' && !system?.component?.length ? initialBay() : ['illumination','jamming'].includes(system?.kind) && !system?.component?.length ? (system.kind==='jamming'?initialJamming():initialIllumination()) : ({ components: structuredClone(system?.component?.length ? system.component : system?.kind === 'access-gate'
     ? [{ id: 'hatch', kind: 'access_boundary', sealed_channel: 'sealed', transition_secs: 1 }] : turretKinds.includes(system?.kind) ? initialTurret() : []),
     channels: structuredClone(system?.channel?.length ? system.channel : system?.kind === 'access-gate'
       ? [{ name: 'sealed', kind: 'boolean' }] : system?.kind === 'dock' ? [{ name: 'enabled', kind: 'boolean' }, { name: 'target', kind: 'entity_target' }] : []) });

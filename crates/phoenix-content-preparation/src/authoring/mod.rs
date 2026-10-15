@@ -185,6 +185,27 @@ pub fn ship_schema() -> WorkshopShipSchema {
         component_fields: [
             ("power_input".into(), Vec::new()),
             (
+                "craft_bay".into(),
+                [
+                    ("power_input", "power_input_component"),
+                    ("config.compartment", "text"),
+                    ("config.capacity_space", "integer"),
+                    ("config.launch_work_secs", "number"),
+                    ("config.recovery_work_secs", "number"),
+                    ("config.recovery_range", "number"),
+                    ("config.maximum_parent_speed", "number"),
+                    ("config.release_offset.0", "number"),
+                    ("config.release_offset.1", "number"),
+                    ("config.release_offset.2", "number"),
+                ]
+                .into_iter()
+                .map(|(name, kind)| WorkshopComponentField {
+                    name: name.into(),
+                    kind: kind.into(),
+                })
+                .collect(),
+            ),
+            (
                 "jamming_emitter".into(),
                 [
                     ("enabled_channel", "boolean_channel"),
@@ -304,6 +325,7 @@ pub fn ship_schema() -> WorkshopShipSchema {
         ai_state_tree: WorkshopAiTreeSchema {
             system_kinds: vec![
                 crate::ship::system_registry::SIGNAL_PROTECTION_KIND.into(),
+                crate::ship::system_registry::CRAFT_BAY_KIND.into(),
                 crate::ship::system_registry::ILLUMINATION_KIND.into(),
                 crate::ship::system_registry::JAMMING_KIND.into(),
                 crate::ship::system_registry::DOCK_KIND.into(),
@@ -324,6 +346,10 @@ pub fn ship_schema() -> WorkshopShipSchema {
                     crate::ai::state_tree::schema_metadata(
                         &phoenix_sim_gameplay::electronic::protection::bindings("enabled"),
                     ),
+                ),
+                (
+                    crate::ship::system_registry::CRAFT_BAY_KIND.into(),
+                    crate::ai::state_tree::schema_metadata(&crate::ship::craft::bindings()),
                 ),
                 (
                     crate::ship::system_registry::JAMMING_KIND.into(),

@@ -54,6 +54,7 @@ const TORPEDO_TUBE_ENTRY_FIELDS = [
 ];
 
 export const COMPONENT_SCHEMA = {
+  probe: {section:'probe',label:'Physical probe',fields:[{key:'space',type:'number',default:1}]},
   tags: {
     section: 'tags',
     label: 'Tags',
@@ -505,6 +506,7 @@ export const COMPONENT_SCHEMA = {
  * Used by completeness tests.
  */
 export const ENTITY_CONFIG_SECTIONS = [
+  'probe',
   'name',
   'tags',
   'faction',

@@ -126,3 +126,13 @@ it('keeps protection costs and typed initials in one draft and resets on same-so
  editor.refresh(owner,schema,false,first);expect(editor.value().channels[1].name).toBe('ordered');
  editor.refresh(owner,schema,false,replacement);expect(editor.value().channels[1].name).toBe('priorities');expect(editor.value().components[1].config.systems).toEqual({});
 });
+
+it('edits the supported Bay composition and full release vector as one staged owner operation',()=>{
+ document.body.innerHTML='<main></main>';const apply=vi.fn(),editor=mountSystemComponents({root:document.querySelector('main'),apply});
+ const schema={component_fields:{power_input:[],craft_bay:[{name:'power_input',kind:'power_input_component'},{name:'config.compartment',kind:'text'},{name:'config.capacity_space',kind:'integer'},{name:'config.release_offset.2',kind:'number'}]}};
+ editor.refresh({id:'actual-bay',kind:'craft-bay',local:true,power_group:'flow'},schema,false);
+ expect(document.querySelector('fieldset').disabled).toBe(false);expect([...el('kind').options].map(row=>row.value)).toEqual(['power_input','craft_bay']);
+ expect(editor.value().channels).toEqual([]);el('list').value='1';el('list').dispatchEvent(new Event('change'));
+ change(el('field-config-compartment'),'dedicated-bay');change(el('field-config-capacity_space'),'3');change(el('field-config-release_offset-2'),'-25');
+ expect(apply).not.toHaveBeenCalled();el('apply').click();expect(apply.mock.calls[0][0]()).toMatchObject({id:'actual-bay',components:[{kind:'power_input'},{kind:'craft_bay',config:{compartment:'dedicated-bay',capacity_space:3,release_offset:[0,0,-25]}}],channels:[]});
+});

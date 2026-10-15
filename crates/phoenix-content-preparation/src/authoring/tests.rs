@@ -1037,3 +1037,22 @@ fn protection_palette_uses_ordered_channels_and_the_same_local_tree_host() {
         .iter()
         .any(|field| field.name == "config.systems" && field.kind == "json"));
 }
+
+#[test]
+fn actual_bay_authoring_uses_supported_work_and_own_roster_tree_vocabulary() {
+    let schema = super::ship_schema();
+    assert_eq!(
+        schema.ai_state_tree.hosts["craft-bay"],
+        crate::ai::state_tree::schema_metadata(&crate::ship::craft::bindings())
+    );
+    let fields: Vec<_> = schema.component_fields["craft_bay"]
+        .iter()
+        .map(|field| field.name.as_str())
+        .collect();
+    assert!(fields.contains(&"config.compartment"));
+    assert!(fields.contains(&"config.capacity_space"));
+    assert!(fields.contains(&"config.release_offset.2"));
+    assert!(!fields
+        .iter()
+        .any(|field| field.contains("phase") || field.contains("uuid")));
+}

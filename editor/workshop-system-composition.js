@@ -119,3 +119,18 @@ export function writeSystemComposition(source, id, operation, effective) {
     .replace(/^\[\[system\]\]\r?\n/, '').trim().replace(/\n/g, nl);
   return source.slice(0, first.start) + body.trimEnd() + nl + nl + serialized + nl + nl + source.slice(end);
 }
+
+export const initialBay=()=>({components:[{kind:'power_input',id:'input'},{kind:'craft_bay',id:'bay',power_input:'input',config:{compartment:'bay',capacity_space:2,launch_work_secs:2,recovery_work_secs:3,recovery_range:20,maximum_parent_speed:0.1,release_offset:[0,0,-18]}}],channels:[]});
+export function validateBayComposition(system,components,channels){
+ if(system.kind!=='craft-bay')return;
+ const bay=components.find(row=>row.kind==='craft_bay'),input=components.find(row=>row.kind==='power_input'),config=bay?.config;
+ const finite=value=>typeof value==='number'&&Number.isFinite(Math.fround(value));
+ const positive=value=>finite(value)&&Math.fround(value)>0;
+ if(!system.power_group||channels.length||components.length!==2||!bay||!input||bay.id===input.id||bay.power_input!==input.id
+  ||components.some(row=>!row.id||Object.keys(row).some(key=>!(['kind','id',...(row===bay?['power_input','config']:[])].includes(key))))
+  ||!config||Object.keys(config).some(key=>!['compartment','capacity_space','launch_work_secs','recovery_work_secs','recovery_range','maximum_parent_speed','release_offset'].includes(key))
+  ||typeof config.compartment!=='string'||!config.compartment.trim()||!Number.isSafeInteger(config.capacity_space)||config.capacity_space<=0
+  ||!['launch_work_secs','recovery_work_secs','recovery_range'].every(key=>positive(config[key]))
+  ||!finite(config.maximum_parent_speed)||config.maximum_parent_speed<0||!Array.isArray(config.release_offset)||config.release_offset.length!==3||!config.release_offset.every(finite))
+  throw new Error('Craft Bay needs one supported finite handling component, actual power input and dedicated compartment; it has no extra command channels.');
+}

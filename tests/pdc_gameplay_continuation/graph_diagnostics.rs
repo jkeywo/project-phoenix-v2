@@ -43,7 +43,11 @@ impl ScheduleBuildPass for Observe {
             json!({"members":component.iter().copied().map(name).collect::<Vec<_>>(),"edges":edges})
         }).collect();
         let evidence = json!({"cycles":cycles,"nodes":graph.systems.len(),
-            "edges":flattened.graph().all_edges().count()});
+            "edges":flattened.graph().all_edges().count(),
+            "named_edges":flattened.graph().all_edges().map(|(a,b)| json!({
+                "from":format!("{a:?}"),"from_name":name(a),
+                "to":format!("{b:?}"),"to_name":name(b)
+            })).collect::<Vec<_>>()});
         std::fs::write(&self.0, serde_json::to_vec_pretty(&evidence).unwrap()).unwrap();
         Ok(())
     }

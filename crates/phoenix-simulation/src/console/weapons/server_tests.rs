@@ -13762,8 +13762,7 @@ fn the_unengaged_hostile_was_engageable_all_along() {
 // `tick_frequency_hint` path already is (`tick_frequency_hint_high_fidelity`); these two
 // tests cover the newly-added gate on the NPC auto-match path.
 
-/// Spawns a target entity that `tick_npc_auto_match_frequency` can read a
-/// shield frequency from: `EntityUuid` (matched against the locked target),
+/// Spawns physical target truth independently from the acquired fixture: `EntityUuid` (matched against the locked target),
 /// `Transform` (so `ai_target_selection`'s stale-target guard treats it as
 /// alive and keeps the lock), and `ShipShields` carrying `freq`.
 fn spawn_shield_target(app: &mut App, uuid: &str, freq: f32) {
@@ -13780,6 +13779,46 @@ fn spawn_shield_target(app: &mut App, uuid: &str, freq: f32) {
 fn setup_npc_auto_match(app: &mut App, target_uuid: &str) {
     set_tactical_control_source(app, crate::ship::control_source::ControlSource::Ai);
     set_weapons_target(app, Some(target_uuid.into()));
+    let ship = local_ship_entity(app);
+    let source =
+        crate::science::scan_blackboard_key_for(&crate::ship::system_registry::sensors_system_id());
+    {
+        let mut config = app
+            .world_mut()
+            .get_mut::<crate::ship_plugin::ShipConfigComponent>(ship)
+            .unwrap();
+        // This legacy weapons-only rig now explicitly authors its scanner and feed.
+        let scanner = crate::entities::include_resolve::load_entity_config(
+            "assets/entities/alliance_cruiser.toml",
+        )
+        .unwrap()
+        .ship_config
+        .unwrap()
+        .system(&crate::ship::system_registry::sensors_system_id())
+        .unwrap()
+        .clone();
+        let mut scanner = scanner;
+        let mut scanner_console = config.0.consoles[0].clone();
+        scanner_console.id = phoenix_model::identity::ConsoleId("scan-evidence-console".into());
+        scanner_console.feeds.clear();
+        scanner.console = Some(scanner_console.id.clone());
+        config.0.consoles.push(scanner_console);
+        config.0.systems.push(scanner);
+        config.0.consoles[0]
+            .feeds
+            .push(phoenix_model::console::ConsoleFeed {
+                source,
+                kind: phoenix_model::console::ConsoleObservationKind::Scan,
+            });
+    }
+    crate::science::shield_enquiry::fixture::acquired(
+        &mut app
+            .world_mut()
+            .get_mut::<crate::server_app::ShipSystemBlackboards>(ship)
+            .unwrap(),
+        target_uuid,
+        0.8,
+    );
 }
 
 fn local_ship_entity(app: &mut App) -> Entity {
@@ -13792,7 +13831,7 @@ fn local_ship_entity(app: &mut App) -> Entity {
 
 /// Positive path: a high-fidelity NPC whose Tactical is AI-operated and
 /// which has a target locked drives its `ShipPhaserFrequency` toward the
-/// target's shield frequency once `NPC_FREQ_MATCH_DELAY` elapses.
+/// acquired frequency once `NPC_FREQ_MATCH_DELAY` elapses.
 #[test]
 fn npc_auto_match_frequency_matches_with_high_fidelity() {
     let mut app = test_app();

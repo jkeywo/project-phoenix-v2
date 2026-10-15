@@ -195,7 +195,10 @@ Subjects explicitly permit `shield_frequency` acquisition. A typed finding in
 `ScanReading` records quantized frequency, response and the observed configuration
 signature; its history is never upgraded from current enemy state. The existing
 frequency advisories read only qualified acquired Scan publications through the
-consumer's actual Console scope. Broad assessment supplies no such finding.
+consumer's actual Console scope. Broad assessment supplies no such finding. NPC automatic phaser matching uses
+that same acquired evidence through each AI weapon bank's Console; current
+observation loss, feed revocation or Conceal pauses its advisory delay. Target
+frequency rotation never upgrades an old finding.
 `science/shield_enquiry.rs` owns that read seam and `science/enquiry.rs` owns
 physical acquisition. Optional authored shield cycles update the existing
 `ShipShields` frequency from a saved logical anchor in `ship/shield_enquiry.rs`.

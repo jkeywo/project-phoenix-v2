@@ -44,3 +44,7 @@ pub fn latest_permitted_finding<'a>(
 #[cfg(test)]
 #[path = "shield_enquiry_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "shield_enquiry_fixture.rs"]
+pub(crate) mod fixture;

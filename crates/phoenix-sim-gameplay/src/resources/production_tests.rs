@@ -43,7 +43,9 @@ fn fixture() -> Fixture {
         system.id = SystemId(id.into());
         system.kind = kind.into();
         layout.placements.insert(system.id.clone(), home.clone());
-        ship.systems.push(system);
+        if !ship.systems.iter().any(|existing| existing.id == system.id) {
+            ship.systems.push(system);
+        }
     }
     let graph = InteriorGraph::compile(&layout, &ship, layout.team_homes.len()).unwrap();
     let mut stores = Vec::new();

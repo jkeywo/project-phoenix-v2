@@ -32,7 +32,9 @@ fn fixture() -> (
     interior
         .placements
         .insert(handling.id.clone(), home.clone());
-    ship.systems.push(handling);
+    if !ship.systems.iter().any(|system| system.id == handling.id) {
+        ship.systems.push(handling);
+    }
     let graph = InteriorGraph::compile(&interior, &ship, interior.team_homes.len()).unwrap();
     let hold = ResourceEndpoint::Capacity {
         id: "hold-ammo".into(),
@@ -595,7 +597,9 @@ fn authoring_refuses_duplicate_locations_wrong_local_owner_and_nonfinite_limits(
     let mut handling = ship.systems[0].clone();
     handling.id = profile.handling().system.clone();
     handling.kind = LOGISTICS_KIND.into();
-    ship.systems.push(handling);
+    if !ship.systems.iter().any(|system| system.id == handling.id) {
+        ship.systems.push(handling);
+    }
     for mode in 0..8 {
         let mut config = profile.config.clone();
         match mode {

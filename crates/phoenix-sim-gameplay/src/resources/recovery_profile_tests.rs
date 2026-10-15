@@ -120,6 +120,30 @@ fn recoverable_source_requires_real_capacity_or_magazine_and_a_physical_disabled
         )]),
     });
     validate_recoverable_source(&entity).unwrap();
+    let endpoint = entity
+        .recoverable
+        .as_mut()
+        .unwrap()
+        .resources
+        .remove("alloy")
+        .unwrap();
+    entity
+        .recoverable
+        .as_mut()
+        .unwrap()
+        .resources
+        .insert("scrap".into(), endpoint.clone());
+    assert!(validate_recoverable_source(&entity)
+        .unwrap_err()
+        .contains("conflicts with managed store"));
+    entity.recoverable.as_mut().unwrap().resources.clear();
+    entity
+        .recoverable
+        .as_mut()
+        .unwrap()
+        .resources
+        .insert("alloy".into(), endpoint);
+    validate_recoverable_source(&entity).unwrap();
     entity.damage = None;
     assert!(validate_recoverable_source(&entity).is_err());
     entity.recoverable.as_mut().unwrap().availability = RecoveryAvailability::Always;

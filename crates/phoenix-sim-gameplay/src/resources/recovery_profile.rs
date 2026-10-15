@@ -111,7 +111,16 @@ pub fn validate_recoverable_source(config: &EntityConfig) -> Result<(), String> 
             "Disabled recoverable sources require the ordinary physical disablement owner".into(),
         );
     }
-    for endpoint in source.resources.values() {
+    for (resource, endpoint) in &source.resources {
+        if let Some(store) = config.logistics.as_ref().and_then(|profile| {
+            profile
+                .stores
+                .iter()
+                .find(|store| &store.endpoint == endpoint && &store.resource != resource)
+        }) {
+            return Err(format!("Recoverable resource {resource:?} conflicts with managed store {:?} containing {:?}",
+                    store.id, store.resource));
+        }
         match endpoint {
             phoenix_model::logistics::ResourceEndpoint::Capacity { id } => {
                 if !config

@@ -96,6 +96,7 @@ pub struct WorkshopValidation {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct WorkshopShipSchema {
     pub damage: damage::WorkshopDamageSchema,
+    pub console_stock_publication_kind: phoenix_model::console::ConsoleObservationKind,
     pub console_feed_kinds: Vec<String>,
     pub console_feed_sources: Vec<String>,
     pub console_publication_kinds:
@@ -176,6 +177,7 @@ pub fn ship_schema() -> WorkshopShipSchema {
         console_publication_kinds,
         console_instance_publication_kinds:
             crate::ship::system_registry::instance_publication_kinds(),
+        console_stock_publication_kind: phoenix_model::console::ConsoleObservationKind::Stock,
         console_feed_kinds: phoenix_model::console::ConsoleObservationKind::NAMES
             .iter()
             .map(|name| (*name).to_owned())
@@ -226,9 +228,11 @@ pub fn ship_schema() -> WorkshopShipSchema {
                 crate::ship::system_registry::SHIELD_ARC_KIND.into(),
                 crate::ship::system_registry::ACCESS_GATE_KIND.into(),
                 crate::ship::system_registry::LOGISTICS_KIND.into(),
+                crate::ship::system_registry::FABRICATION_KIND.into(),
             ],
             shield_recovery_bindings,
             hosts: BTreeMap::from([
+                (crate::ship::system_registry::FABRICATION_KIND.into(), crate::ai::state_tree::schema_metadata(&phoenix_sim_gameplay::resources::production_ai::bindings())),
                 (
                     crate::ship::system_registry::LOGISTICS_KIND.into(),
                     crate::ai::state_tree::schema_metadata(

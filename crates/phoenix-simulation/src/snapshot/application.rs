@@ -1047,9 +1047,17 @@ fn validate_entity_logistics(
                 };
                 stocks.insert(binding.endpoint.clone(), value);
             }
-            state.validate(&profile.0, &stocks)
+            match (world.get::<crate::resources::production_server::CompiledShipProduction>(entity),
+                world.get::<crate::resources::production_server::ShipProduction>(entity), &row.production) {
+                (Some(production), Some(_), Some(work)) => work.validate(&production.0, &stocks, state),
+                (None, None, None) => state.validate(&profile.0, &stocks),
+                _ => Err("saved production owner disagrees with authored equipment".into()),
+            }
         }
         (None, None, None) => {
+            if row.production.is_some() || world.get::<crate::resources::production_server::ShipProduction>(entity).is_some() {
+                return Err("saved production has no fitted logistics owner".into());
+            }
             let incoming = row.infrastructure.as_ref().is_some_and(|owner| {
                 owner
                     .capacities()
@@ -1176,6 +1184,9 @@ pub(super) fn apply_entity_state_with(
     restored_alert_tick: bevy::ecs::change_detection::Tick,
 ) {
     let mut entity_mut = world.entity_mut(entity);
+    if let (Some(mut production), Some(state)) = (
+        entity_mut.get_mut::<crate::resources::production_server::ShipProduction>(), row.production.as_ref(),
+    ) { production.0 = state.clone(); }
     if let (Some(mut logistics), Some(state)) = (
         entity_mut.get_mut::<crate::resources::logistics_server::ShipLogistics>(),
         row.logistics.as_ref(),

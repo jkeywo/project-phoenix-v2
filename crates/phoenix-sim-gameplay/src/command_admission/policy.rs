@@ -26,7 +26,12 @@ pub fn command_policy(
     target: &crate::core::messages::SystemId,
     payload: &SystemControlPayload,
 ) -> crate::ship::control_source::ControlTickPolicy {
-    if is_repair_crew_order(config, target, payload) {
+    // A stock target is an administrative request, not powered machinery work.
+    // The resource owner still validates the exact fitted store after admission.
+    if is_repair_crew_order(config, target, payload)
+        || (config.system(target).is_some()
+            && matches!(payload, SystemControlPayload::SetStockTarget { .. }))
+    {
         sources.crew_order_policy_for(target)
     } else {
         sources.policy_for(target)

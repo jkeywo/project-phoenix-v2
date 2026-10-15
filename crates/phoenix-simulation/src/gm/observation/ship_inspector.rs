@@ -275,6 +275,7 @@ pub fn projection<'a>(
                     "damage",
                     "interior",
                     "logistics",
+                    "production",
                     "hull",
                     "helm_console",
                     "helm_capability",

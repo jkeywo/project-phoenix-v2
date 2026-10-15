@@ -379,6 +379,7 @@ fn record_leaves(
                 || crate::entity_override::is_atomic_weapon_delivery(merge_path)
                 || crate::entity_override::is_atomic_energy_profile(merge_path)
                 || crate::entity_override::is_atomic_interior(merge_path)
+                || crate::entity_override::is_atomic_logistics_profile(merge_path)
                 || crate::entity_override::is_atomic_damage(merge_path)
             {
                 out.retain(|address, _| address != prefix && !is_descendant(address, prefix));

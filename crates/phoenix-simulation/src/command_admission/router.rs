@@ -97,11 +97,13 @@ impl ConsumerMatcher {
                 (
                     Self::Exact { .. } | Self::Prefix { .. } | Self::UndeclaredExact(_),
                     FeedbackAddress::MatcherSpelling
-                ) | (Self::Kind(_), FeedbackAddress::DeclaredKindOrCanonical(_))
-                    | (
-                        Self::Prefix { .. },
-                        FeedbackAddress::LowercasePrefixSpelling
-                    )
+                ) | (
+                    Self::Kind(_),
+                    FeedbackAddress::DeclaredKindOrCanonical(_) | FeedbackAddress::DeclaredKindOnly
+                ) | (
+                    Self::Prefix { .. },
+                    FeedbackAddress::LowercasePrefixSpelling
+                )
             ),
             "feedback address mode must match the consumer address domain"
         );
@@ -146,6 +148,8 @@ impl ConsumerMatcher {
 pub enum FeedbackAddress {
     MatcherSpelling,
     DeclaredKindOrCanonical(&'static str),
+    /// Generic installed-capability controls have no legacy canonical alias.
+    DeclaredKindOnly,
     LowercasePrefixSpelling,
 }
 
@@ -209,6 +213,9 @@ impl ConsumerRegistration {
             (ConsumerMatcher::Prefix { prefix, .. }, FeedbackAddress::MatcherSpelling) => {
                 target.0.starts_with(prefix)
             }
+            (ConsumerMatcher::Kind(kind), FeedbackAddress::DeclaredKindOnly) => config
+                .and_then(|config| config.system(target))
+                .is_some_and(|system| system.kind == *kind),
             (ConsumerMatcher::Kind(kind), FeedbackAddress::DeclaredKindOrCanonical(canonical)) => {
                 target.0 == canonical
                     || config

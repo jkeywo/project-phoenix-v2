@@ -68,6 +68,8 @@ pub fn compile_ship_trees_with_energy(
                 &booleans,
                 &numbers,
             )
+        } else if system.kind == crate::ship::system_registry::FABRICATION_KIND {
+            compile(&definition, &phoenix_sim_gameplay::resources::production_ai::bindings())
         } else if system.kind == crate::ship::system_registry::LOGISTICS_KIND {
             compile(
                 &definition,

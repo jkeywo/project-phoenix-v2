@@ -218,6 +218,16 @@ pub fn validate_consoles(config: &ShipConfig) -> Result<(), ShipConfigError> {
     let mut publications = super::system_registry::fixed_publication_kinds();
     let instance_kinds = super::system_registry::instance_publication_kinds();
     for system in &config.systems {
+        if system.id.0.starts_with("stock/") {
+            return Err(refuse(
+                "stock/ is reserved for typed local-stock publications, not System identities"
+                    .into(),
+            ));
+        }
+        publications.insert(
+            phoenix_model::logistics_ui::stock_publication(&system.id).0,
+            phoenix_model::console::ConsoleObservationKind::Stock,
+        );
         if let Some(kind) = instance_kinds.get(&system.kind) {
             if publications
                 .get(&system.id.0)

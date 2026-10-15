@@ -366,6 +366,11 @@ pub fn is_atomic_energy_profile(path: &str) -> bool {
     path == "energy"
 }
 
+/// Locations, recipes and their bindings form complete validated profiles.
+pub fn is_atomic_logistics_profile(path: &str) -> bool {
+    matches!(path, "logistics" | "production")
+}
+
 /// Placement, connectivity and team homes form one validated physical layout.
 pub fn is_atomic_interior(path: &str) -> bool {
     path == "interior"
@@ -391,6 +396,7 @@ fn merge_at(
                 || is_atomic_weapon_delivery(path)
                 || is_atomic_energy_profile(path)
                 || is_atomic_interior(path)
+                || is_atomic_logistics_profile(path)
                 || is_atomic_damage(path) =>
         {
             override_.clone()

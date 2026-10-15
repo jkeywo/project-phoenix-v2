@@ -344,6 +344,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         energy: _,
         interior: _,
         logistics: _,
+        production: _,
         damage: _,
         sensors_console: _,
         navigation_console: _,
@@ -419,7 +420,8 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         system,
         source,
         target,
-        reserve
+        reserve,
+        priority
     );
     exhaustive_struct!(
         storage_bay_schema,
@@ -434,7 +436,8 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         system,
         max_active,
         max_batch,
-        units_per_sec
+        units_per_sec,
+        reorder_fraction
     );
     // Physical definitions are authored structure, never generic Live setters.
     // The descriptor walk classifies their leaves RecreateRequired. Explicit

@@ -48,8 +48,8 @@ describe('reading the repository sources', () => {
 });
 
 describe('redesigned equipment compatibility boundary', () => {
-  it('stamps the client for protocol 9 and content epoch 3', async () => {
-    expect(await clientStampField(root)).toBe('9/phoenix-base/3');
+  it('stamps the client for protocol 10 and content epoch 3', async () => {
+    expect(await clientStampField(root)).toBe('10/phoenix-base/3');
     expect(stampField(6, { id: 'phoenix-base', epoch: 2 })).not.toBe(await clientStampField(root));
     expect(stampField(7, { id: 'phoenix-base', epoch: 1 })).not.toBe(await clientStampField(root));
   });

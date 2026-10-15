@@ -1251,3 +1251,16 @@ action = { value = { source = "literal", value = false } }
     assert_eq!(tasks[0]["id"].as_str(), Some("second"));
     assert_eq!(tasks[0]["action"]["value"]["value"].as_bool(), Some(false));
 }
+
+#[test]
+fn logistics_and_production_profiles_replace_without_inheriting_obsolete_bindings() {
+    for key in ["logistics", "production"] {
+        let base: toml::Value =
+            toml::from_str(&format!("[{key}]\nold_binding='obsolete'\nshared=1\n")).unwrap();
+        let child: toml::Value = toml::from_str(&format!("[{key}]\nshared=2\n")).unwrap();
+        for policy in [MergePolicy::ComposeFragments, MergePolicy::InstanceOverride] {
+            let merged = merge_entity_config_toml_with(&base, &child, policy).unwrap();
+            assert_eq!(merged[key], child[key]);
+        }
+    }
+}

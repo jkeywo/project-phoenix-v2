@@ -545,8 +545,8 @@ fn typed_weapons_use_recorded_identity_and_lost_contacts_clear_without_reading_s
 }
 
 #[test]
-fn typed_receipts_are_capped_before_aliasing_and_legacy_targets_do_not_broadcast_to_ungranted_consoles(
-) {
+fn typed_receipts_are_capped_before_aliasing_and_legacy_targets_do_not_broadcast_to_ungranted_consoles()
+ {
     let mut app = fixture();
     let contact = observe(&mut app, "tactical-radar", 0, 1.0);
     let raw = board_packet(&mut app, &["sensor-radar"], Target::All);
@@ -732,9 +732,11 @@ fn live_delta_never_exposes_foreign_position_health_flags_or_shield_frequency() 
         delivery: DeliveryClass::Snapshot,
     });
     assert!(phone(&outputs, "helm").is_none());
-    assert!(outputs
-        .iter()
-        .all(|out| out.delivery == DeliveryClass::Snapshot));
+    assert!(
+        outputs
+            .iter()
+            .all(|out| out.delivery == DeliveryClass::Snapshot)
+    );
     assert_eq!(
         phone(&outputs, crate::console_bridge::LOCAL_CONSOLE_TOKEN),
         Some(&raw)
@@ -1284,7 +1286,35 @@ fn explicit_combat_binding_selects_its_measured_record_among_independent_tactica
         .get_mut::<SensingControls>(local)
         .unwrap()
         .0
-        .combat_lock = Some(second);
+        .combat_lock = Some(second.clone());
+    assert!(
+        selected(&mut app).is_none(),
+        "binding an actuator does not grant Science receipt of its radar"
+    );
+    {
+        use phoenix_model::console::{ConsoleFeed, ConsoleObservationKind};
+        let mut config = app
+            .world_mut()
+            .get_mut::<crate::ship::components::ShipConfigComponent>(local)
+            .unwrap();
+        let science = config
+            .0
+            .console_for_system(&SystemId("sensor-radar".into()))
+            .unwrap()
+            .id
+            .clone();
+        config
+            .0
+            .consoles
+            .iter_mut()
+            .find(|console| console.id == science)
+            .unwrap()
+            .feeds
+            .push(ConsoleFeed {
+                source: second,
+                kind: ConsoleObservationKind::TacticalRadar,
+            });
+    }
     assert_eq!(selected(&mut app), Some(other));
     app.world_mut()
         .get_mut::<SensingControls>(local)

@@ -1,0 +1,12 @@
+# Quiet owner proof using the actual shipped Cruiser and its finite reserves.
+# No synthetic actuator, contact, velocity, control source or resource grant.
+[global]
+seed = 181801
+[player_spawn]
+position = [0, 0, 0]
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+name = "player-ship"
+spawn_on = "game_start"
+transform = { position = [0, 0, 0] }

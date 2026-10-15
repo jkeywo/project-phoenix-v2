@@ -78,6 +78,9 @@ impl EmpClock {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ComponentEmpState {
+    /// Causal resistance episode, retained with this physical component even
+    /// when its next installed hull has a different or absent receiver policy.
+    pub policy: EmpResistanceConfig,
     pub applied_tick: u64,
     pub effect_until_tick: u64,
     pub resistance_stacks: u16,
@@ -87,12 +90,12 @@ pub struct ComponentEmpState {
 impl ComponentEmpState {
     /// Shape validation can be used for portable hardware without consulting
     /// world truth. Full continuation additionally binds the fixed clock.
-    pub fn validate_shape(&self, policy: &EmpResistanceConfig) -> Result<(), String> {
-        policy.validate()?;
+    pub fn validate_shape(&self) -> Result<(), String> {
+        self.policy.validate()?;
         if self.effect_until_tick <= self.applied_tick
             || self.decay_ticks == 0
             || self.resistance_stacks == 0
-            || self.resistance_stacks > policy.max_stacks
+            || self.resistance_stacks > self.policy.max_stacks
             || self
                 .effect_until_tick
                 .checked_add(self.decay_ticks)
@@ -102,11 +105,11 @@ impl ComponentEmpState {
         }
         Ok(())
     }
-    pub fn validate(&self, policy: &EmpResistanceConfig, clock: EmpClock) -> Result<(), String> {
-        self.validate_shape(policy)?;
+    pub fn validate(&self, clock: EmpClock) -> Result<(), String> {
+        self.validate_shape()?;
         clock.validate(clock.tick)?;
         if self.applied_tick > clock.tick
-            || self.decay_ticks != clock.ticks(f64::from(policy.decay_secs))?
+            || self.decay_ticks != clock.ticks(f64::from(self.policy.decay_secs))?
         {
             return Err("EMP component frontier disagrees with the causal fixed clock".into());
         }
@@ -131,7 +134,9 @@ impl ComponentEmpState {
             .saturating_sub(lost.min(u64::from(u16::MAX)) as u16)
     }
     /// Old resistance adjusts this application; the new stack only affects
-    /// later hits. Positive supported EMP always lasts at least one tick.
+    /// later hits. A nonempty resistance episode retains its causal policy;
+    /// only after it fully decays can a new episode use the current receiver.
+    /// Positive supported EMP always lasts at least one tick.
     pub fn apply(
         previous: Option<&Self>,
         policy: &EmpResistanceConfig,
@@ -142,9 +147,12 @@ impl ComponentEmpState {
         payload.validate()?;
         clock.validate(clock.tick)?;
         if let Some(previous) = previous {
-            previous.validate(policy, clock)?;
+            previous.validate(clock)?;
         }
         let stacks = previous.map_or(0, |old| old.stacks_at(clock.tick));
+        let policy = previous
+            .filter(|_| stacks > 0)
+            .map_or(policy, |old| &old.policy);
         let adjusted = f64::from(payload.duration_secs)
             / (1.0 + f64::from(stacks) * f64::from(policy.resistance_per_stack));
         let proposed = clock
@@ -159,6 +167,7 @@ impl ComponentEmpState {
             .checked_add(decay_ticks)
             .ok_or("EMP resistance expiry overflows logical time")?;
         let next = Self {
+            policy: policy.clone(),
             applied_tick: clock.tick,
             effect_until_tick,
             resistance_stacks: stacks.saturating_add(1).min(policy.max_stacks),
@@ -167,7 +176,7 @@ impl ComponentEmpState {
                 .map_or(decay_start, |old| old.next_decay_tick.max(decay_start)),
             decay_ticks,
         };
-        next.validate(policy, clock)?;
+        next.validate(clock)?;
         Ok(next)
     }
 }

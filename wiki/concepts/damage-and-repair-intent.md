@@ -24,6 +24,10 @@ existing fitting and intact-recovery transfers preserve it while stowed hardware
 continues to age. `snapshot/emp.rs` checks installed and portable receipts against
 the complete candidate header before writes. `server_app/system_status.rs`
 reports temporary EMP separately from physical destruction.
+Each receipt includes its originating resistance policy, so a different or absent
+policy on the receiving hull cannot reset it. A nonempty resistance episode
+retains those parameters; the current receiver controls eligibility for a new
+deposit and supplies a new episode's parameters after the old stacks expire.
 
 `HullVisibility` is the single policy used by both live Repair publication and
 reconnect resync:

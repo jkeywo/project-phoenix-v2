@@ -1273,7 +1273,7 @@ pub(super) fn apply_entity_state_with(
         row.physical_damage.as_ref(),
     ) {
         damage.state = stored.clone();
-        damage.emp_clock = damage.definition.config.emp.as_ref().and(emp_clock);
+        damage.emp_clock = emp_clock;
     }
     if let (Some(mut frontier), Some(stored)) = (
         entity_mut.get_mut::<crate::ship::disablement::DisablementObservation>(),

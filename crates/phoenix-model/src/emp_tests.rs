@@ -78,7 +78,61 @@ fn stowed_transferred_and_json_copies_expire_from_causal_ticks_without_a_ticking
     assert_eq!(stored.factor_at(105), 1.0);
     assert_eq!(stored.stacks_at(125), 0);
     assert_eq!(stored, original); // Reading time does not mutate another owner.
-    stored.validate(&policy(), clock(200)).unwrap();
+    stored.validate(clock(200)).unwrap();
+}
+
+#[test]
+fn different_receivers_cannot_rewrite_an_existing_resistance_episode() {
+    let origin = policy();
+    let receiver = EmpResistanceConfig {
+        resistance_per_stack: 10.0,
+        max_stacks: 1,
+        decay_secs: 2.0,
+        bindings: vec![DamageBinding::Operation],
+    };
+    let first = ComponentEmpState::apply(None, &origin, payload(10.0), clock(0)).unwrap();
+    let second = ComponentEmpState::apply(Some(&first), &origin, payload(10.0), clock(1)).unwrap();
+    let carried: ComponentEmpState =
+        serde_json::from_slice(&serde_json::to_vec(&second).unwrap()).unwrap();
+    carried.validate(clock(2)).unwrap();
+    assert_eq!(carried, second);
+    let refreshed =
+        ComponentEmpState::apply(Some(&carried), &receiver, payload(30.0), clock(2)).unwrap();
+    assert_eq!(refreshed.policy, origin);
+    assert_eq!(refreshed.effect_until_tick, 12);
+    assert_eq!(
+        refreshed.resistance_stacks, 3,
+        "destination cap must not cleanse retained stacks"
+    );
+    assert_eq!(refreshed.next_decay_tick, 32);
+    assert_eq!(refreshed.stacks_at(72), 0);
+    let next_episode =
+        ComponentEmpState::apply(Some(&refreshed), &receiver, payload(30.0), clock(72)).unwrap();
+    assert_eq!(next_episode.policy, receiver);
+    assert_eq!(next_episode.effect_until_tick, 102);
+    assert_eq!(next_episode.resistance_stacks, 1);
+    assert_eq!(next_episode.next_decay_tick, 104);
+}
+
+#[test]
+fn receipt_policy_is_required_and_validated_without_a_destination_policy() {
+    let state = ComponentEmpState::apply(None, &policy(), payload(5.0), clock(1)).unwrap();
+    let mut old_shape = serde_json::to_value(&state).unwrap();
+    old_shape.as_object_mut().unwrap().remove("policy");
+    assert!(serde_json::from_value::<ComponentEmpState>(old_shape).is_err());
+    for field in ["resistance_per_stack", "decay_secs"] {
+        let mut malformed = serde_json::to_value(&state).unwrap();
+        malformed["policy"][field] = serde_json::json!(0);
+        let decoded: ComponentEmpState = serde_json::from_value(malformed).unwrap();
+        assert!(decoded.validate(clock(10)).is_err());
+    }
+    let mut malformed = state.clone();
+    malformed.policy.max_stacks = 0;
+    assert!(malformed.validate(clock(10)).is_err());
+    malformed = state.clone();
+    malformed.policy.bindings = vec![DamageBinding::Operation; 2];
+    assert!(malformed.validate(clock(10)).is_err());
+    assert_eq!(state.policy, policy());
 }
 
 #[test]
@@ -110,7 +164,7 @@ fn malformed_profiles_future_frontiers_and_overflow_refuse_without_rewriting_old
             ..state.clone()
         },
     ] {
-        assert!(changed.validate(&policy, clock(10)).is_err());
+        assert!(changed.validate(clock(10)).is_err());
     }
     for changed in [
         EmpResistanceConfig {

@@ -75,6 +75,114 @@ fn emp_follows_the_actual_removed_assembly_and_expires_in_storage_without_cleans
 }
 
 #[test]
+fn actual_assembly_moves_between_custom_and_unconfigured_receivers_with_its_original_receipt() {
+    use phoenix_model::emp::{ComponentEmpState, EmpClock, EmpPayload, EmpResistanceConfig};
+    for receiver in [
+        None,
+        Some(EmpResistanceConfig {
+            resistance_per_stack: 10.0,
+            max_stacks: 1,
+            decay_secs: 2.0,
+            bindings: vec![phoenix_model::damage::DamageBinding::Cooling],
+        }),
+    ] {
+        let (config, source_profile, mut source) = fixture();
+        let mut destination_config = config.clone();
+        destination_config.damage.as_mut().unwrap().emp = receiver;
+        let destination_profile = CompiledFitting::compile(&destination_config)
+            .unwrap()
+            .unwrap();
+        let mut destination = FittingState::from_profile(&destination_profile).unwrap();
+        let mut carried = healthy();
+        carried.emp = Some(
+            ComponentEmpState::apply(
+                None,
+                config.damage.as_ref().unwrap().emp.as_ref().unwrap(),
+                EmpPayload { duration_secs: 6.0 },
+                EmpClock {
+                    tick: 10,
+                    period_nanos: 1_000_000_000,
+                },
+            )
+            .unwrap(),
+        );
+        let old = source
+            .remove_installed(&source_profile, "fore-beam", 8, carried.clone())
+            .unwrap();
+        let mut item = source.assemblies.remove(&old).unwrap();
+        item.id = "salvaged-origin-beam".into();
+        item.location = EquipmentLocation::Stored {
+            locker: "weapons-equipment".into(),
+        };
+        destination.assemblies.insert(item.id.clone(), item);
+        source.validate(&source_profile).unwrap();
+        destination.validate(&destination_profile).unwrap();
+        let mut restored: FittingState =
+            serde_json::from_slice(&serde_json::to_vec(&destination).unwrap()).unwrap();
+        restored.validate(&destination_profile).unwrap();
+        restored
+            .stored_to_work(&destination_profile, "salvaged-origin-beam", 9, "fore-beam")
+            .unwrap();
+        let replacement = restored
+            .remove_installed(&destination_profile, "fore-beam", 9, healthy())
+            .unwrap();
+        assert_eq!(
+            restored
+                .install_from_work(&destination_profile, "fore-beam", "salvaged-origin-beam", 9)
+                .unwrap(),
+            carried
+        );
+        restored
+            .return_to_locker(&destination_profile, &replacement, 9, "weapons-equipment")
+            .unwrap();
+        assert!(
+            restored.assemblies["salvaged-origin-beam"]
+                .condition
+                .is_none(),
+            "installed receipt moves to the sole physical owner"
+        );
+        let mut physical =
+            crate::ship::physical_damage::ShipDamage::from_config(&destination_config)
+                .unwrap()
+                .unwrap();
+        physical.emp_clock = Some(EmpClock {
+            tick: 15,
+            period_nanos: 1_000_000_000,
+        });
+        *physical
+            .state
+            .components
+            .get_mut(&SystemId("phaser-fore".into()))
+            .unwrap()
+            .get_mut("operation")
+            .unwrap() = carried.clone();
+        physical
+            .state
+            .validate_emp_at(&physical.definition, physical.emp_clock.unwrap())
+            .unwrap();
+        assert_eq!(
+            physical.factor(
+                &SystemId("phaser-fore".into()),
+                phoenix_model::damage::DamageBinding::Operation
+            ),
+            0.0
+        );
+        physical.emp_clock.as_mut().unwrap().tick = 16;
+        assert_eq!(
+            physical.factor(
+                &SystemId("phaser-fore".into()),
+                phoenix_model::damage::DamageBinding::Operation
+            ),
+            1.0
+        );
+        assert_eq!(
+            physical.state.components[&SystemId("phaser-fore".into())]["operation"],
+            carried
+        );
+    }
+}
+
+#[test]
 fn actual_team_fetches_support_spare_to_weapons_without_duplicate_or_early_install() {
     use crate::jobs::repair::RepairTeams;
     use crate::ship::interior::{InteriorGraph, TeamLocation};

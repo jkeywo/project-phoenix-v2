@@ -2,10 +2,24 @@ use super::*;
 use crate::ship::compartment_damage::ShipDamage;
 
 fn fixture() -> (World, Entity, PhoenixSnapshot) {
-    let config = crate::entities::include_resolve::load_entity_config(
+    fixture_with(|_| {})
+}
+fn fixture_with(
+    adjust: impl FnOnce(&mut crate::entities::config::EntityConfig),
+) -> (World, Entity, PhoenixSnapshot) {
+    let mut config = crate::entities::include_resolve::load_entity_config(
         "assets/entities/alliance_cruiser.toml",
     )
     .unwrap();
+    let origin_policy = config
+        .damage
+        .as_ref()
+        .unwrap()
+        .emp
+        .as_ref()
+        .unwrap()
+        .clone();
+    adjust(&mut config);
     let mut world = World::new();
     world.register_component::<EntitySystemHull>();
     world.insert_resource(SimTick(20));
@@ -28,10 +42,9 @@ fn fixture() -> (World, Entity, PhoenixSnapshot) {
             },
         ));
     let clock = crate::ship::emp::clock(&world, 20).unwrap();
-    let policy = config.damage.as_ref().unwrap().emp.as_ref().unwrap();
     let effect = phoenix_model::emp::ComponentEmpState::apply(
         None,
-        policy,
+        &origin_policy,
         phoenix_model::emp::EmpPayload { duration_secs: 6.0 },
         clock,
     )
@@ -59,6 +72,44 @@ fn fixture() -> (World, Entity, PhoenixSnapshot) {
         .emp = Some(effect);
     let snapshot = capture(&world);
     (world, entity, snapshot)
+}
+
+#[test]
+fn custom_or_absent_current_policy_cannot_rewrite_saved_installed_or_stowed_receipts() {
+    for absent in [false, true] {
+        let (mut world, entity, snapshot) = fixture_with(|config| {
+            if absent {
+                config.damage.as_mut().unwrap().emp = None;
+            } else {
+                let policy = config.damage.as_mut().unwrap().emp.as_mut().unwrap();
+                policy.max_stacks = 1;
+                policy.decay_secs = 1.0;
+                policy.bindings = vec![phoenix_model::damage::DamageBinding::Cooling];
+            }
+        });
+        let decoded: PhoenixSnapshot =
+            serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
+        validate_roster(&world, &decoded).unwrap();
+        super::super::application::apply_entity_state(
+            &mut world,
+            entity,
+            &decoded.entities[0],
+            decoded.tick,
+        );
+        assert_eq!(capture(&world), decoded);
+        let damage = world.get::<ShipDamage>(entity).unwrap();
+        damage
+            .state
+            .validate_emp_at(&damage.definition, damage.emp_clock.unwrap())
+            .unwrap();
+        assert_eq!(
+            damage.factor(
+                &SystemId("phaser-fore".into()),
+                phoenix_model::damage::DamageBinding::Operation
+            ),
+            0.0
+        );
+    }
 }
 
 #[test]
@@ -90,7 +141,7 @@ fn json_restores_component_expiries_and_derives_current_clock_before_readiness()
 
 #[test]
 fn installed_and_portable_tampering_refuses_before_any_global_or_entity_write() {
-    for variant in 0..6 {
+    for variant in 0..10 {
         let (mut world, entity, mut snapshot) = fixture();
         let installed = snapshot.entities[0]
             .physical_damage
@@ -126,8 +177,27 @@ fn installed_and_portable_tampering_refuses_before_any_global_or_entity_write() 
             4 => {
                 world.remove_resource::<Time<Fixed>>();
             }
-            _ => {
+            5 => {
                 world.entity_mut(entity).remove::<ShipDamage>();
+            }
+            6 => installed.policy.decay_secs = 0.0,
+            7 => installed.policy.max_stacks = 0,
+            8 => installed.policy.bindings = vec![phoenix_model::damage::DamageBinding::Cooling],
+            _ => {
+                snapshot.entities[0]
+                    .fitting
+                    .as_mut()
+                    .unwrap()
+                    .equipment
+                    .assemblies
+                    .values_mut()
+                    .find_map(|item| item.condition.as_mut())
+                    .unwrap()
+                    .emp
+                    .as_mut()
+                    .unwrap()
+                    .policy
+                    .resistance_per_stack = 0.0
             }
         }
         world.resource_mut::<SimTick>().0 = 7;

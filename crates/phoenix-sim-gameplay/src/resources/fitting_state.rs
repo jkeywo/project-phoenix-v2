@@ -33,16 +33,10 @@ impl CompiledFitting {
             })
             .ok_or("fitting Operation hardware is absent")?;
         if let Some(emp) = &condition.emp {
-            let policy = self
-                .base
-                .damage
-                .as_ref()
-                .and_then(|damage| damage.emp.as_ref())
-                .ok_or("portable EMP has no compatible receiver policy")?;
-            if !policy.bindings.contains(&component.binding) {
+            if !emp.policy.bindings.contains(&component.binding) {
                 return Err("portable EMP has an unsupported Operation binding".into());
             }
-            emp.validate_shape(policy)?;
+            emp.validate_shape()?;
         }
         if condition.dose >= f64::from(component.fault_dose_threshold) {
             return Err("portable dose exceeds the supported Operation fault frontier".into());

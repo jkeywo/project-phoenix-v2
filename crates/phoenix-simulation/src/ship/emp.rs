@@ -37,7 +37,7 @@ pub(crate) fn install_clock(commands: &mut EntityCommands) {
         if let Some(mut damage) =
             world.get_mut::<crate::ship::compartment_damage::ShipDamage>(entity)
         {
-            damage.emp_clock = damage.definition.config.emp.as_ref().and(clock);
+            damage.emp_clock = clock;
         }
     });
 }
@@ -55,7 +55,7 @@ pub(crate) fn stamp_clock(
         })
     });
     for mut damage in &mut ships {
-        damage.emp_clock = damage.definition.config.emp.as_ref().and(clock);
+        damage.emp_clock = clock;
     }
 }
 

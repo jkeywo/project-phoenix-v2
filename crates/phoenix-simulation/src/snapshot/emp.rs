@@ -55,11 +55,6 @@ pub(super) fn validate_roster(
                     .ok_or("saved EMP has no physical receiver")?
                     .definition
             };
-            let policy = definition
-                .config
-                .emp
-                .as_ref()
-                .ok_or("EMP has no authored receiver policy")?;
             if let Some(state) = &row.physical_damage {
                 state.validate_emp_at(&definition, clock)?;
             }
@@ -70,7 +65,7 @@ pub(super) fn validate_roster(
                         .as_ref()
                         .and_then(|condition| condition.emp.as_ref())
                     {
-                        emp.validate(policy, clock)?;
+                        emp.validate(clock)?;
                     }
                 }
             }

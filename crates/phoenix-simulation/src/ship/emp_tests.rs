@@ -9,24 +9,30 @@ fn actual_runtime_spawn_initializes_existing_causal_clock_before_any_input_pass(
         "assets/entities/alliance_cruiser.toml",
     )
     .unwrap();
-    let mut world = World::new();
-    world.insert_resource(crate::sim_tick::SimTick(321));
-    world.insert_resource(Time::<Fixed>::from_seconds(0.1));
-    let entity = crate::entities::spawner::spawn_entity(
-        &mut world.commands(),
-        &config,
-        Vec3::ZERO,
-        "runtime-receiver".into(),
-        None,
-    );
-    world.flush();
-    assert_eq!(
-        world.get::<ShipDamage>(entity).unwrap().emp_clock,
-        Some(phoenix_model::emp::EmpClock {
-            tick: 321,
-            period_nanos: 100_000_000
-        })
-    );
+    for supports_new_hits in [true, false] {
+        let mut config = config.clone();
+        if !supports_new_hits {
+            config.damage.as_mut().unwrap().emp = None;
+        }
+        let mut world = World::new();
+        world.insert_resource(crate::sim_tick::SimTick(321));
+        world.insert_resource(Time::<Fixed>::from_seconds(0.1));
+        let entity = crate::entities::spawner::spawn_entity(
+            &mut world.commands(),
+            &config,
+            Vec3::ZERO,
+            "runtime-receiver".into(),
+            None,
+        );
+        world.flush();
+        assert_eq!(
+            world.get::<ShipDamage>(entity).unwrap().emp_clock,
+            Some(phoenix_model::emp::EmpClock {
+                tick: 321,
+                period_nanos: 100_000_000
+            })
+        );
+    }
 }
 
 #[test]

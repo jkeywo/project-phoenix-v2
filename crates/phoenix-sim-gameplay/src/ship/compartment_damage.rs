@@ -320,15 +320,10 @@ impl DamageState {
             for (id, state) in states {
                 let config = &definitions[id];
                 if let Some(emp) = &state.emp {
-                    let policy = definition
-                        .config
-                        .emp
-                        .as_ref()
-                        .ok_or("EMP state has no compatible receiver policy")?;
-                    if !policy.bindings.contains(&config.binding) {
+                    if !emp.policy.bindings.contains(&config.binding) {
                         return Err("EMP state names an unsupported component binding".into());
                     }
-                    emp.validate_shape(policy)?;
+                    emp.validate_shape()?;
                 }
                 let valid_condition = match state.condition {
                     ComponentCondition::Patched { factor } => config
@@ -442,14 +437,7 @@ impl DamageState {
         for components in self.components.values() {
             for component in components.values() {
                 if let Some(emp) = &component.emp {
-                    emp.validate(
-                        definition
-                            .config
-                            .emp
-                            .as_ref()
-                            .ok_or("EMP has no receiver policy")?,
-                        clock,
-                    )?;
+                    emp.validate(clock)?;
                 }
             }
         }

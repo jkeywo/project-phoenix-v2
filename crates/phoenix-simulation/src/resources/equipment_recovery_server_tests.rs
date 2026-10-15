@@ -10,17 +10,23 @@ fn rig() -> (World, Entity, Entity) {
         "assets/entities/alliance_cruiser.toml",
     )
     .unwrap();
+    rig_from_configs(&config, &config)
+}
+fn rig_from_configs(
+    config: &crate::entities::config::EntityConfig,
+    source_config: &crate::entities::config::EntityConfig,
+) -> (World, Entity, Entity) {
     let mut world = World::new();
     let actor = crate::entities::spawner::spawn_entity(
         &mut world.commands(),
-        &config,
+        config,
         Vec3::ZERO,
         "00000000-0000-0000-0000-000000000101".into(),
         None,
     );
     let source = crate::entities::spawner::spawn_entity(
         &mut world.commands(),
-        &config,
+        source_config,
         Vec3::new(4.0, 0.0, 0.0),
         "00000000-0000-0000-0000-000000000102".into(),
         None,
@@ -33,7 +39,7 @@ fn rig() -> (World, Entity, Entity) {
         job: None,
         last_tick: None,
     });
-    observe_source(&mut world, actor, source, &config);
+    observe_source(&mut world, actor, source, config);
     let mut damage = world.get_mut::<ShipDamage>(source).unwrap();
     damage.state.catastrophic = true;
     *damage
@@ -49,6 +55,127 @@ fn rig() -> (World, Entity, Entity) {
         last_source: Some("real-damage".into()),
     };
     (world, actor, source)
+}
+
+#[test]
+fn actual_paid_intact_recovery_retains_foreign_emp_policy_even_without_receiver_equipment() {
+    use bevy::ecs::system::RunSystemOnce;
+    use phoenix_model::emp::{ComponentEmpState, EmpClock, EmpPayload, EmpResistanceConfig};
+    let mut source_config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    source_config.damage.as_mut().unwrap().emp = Some(EmpResistanceConfig {
+        resistance_per_stack: 2.0,
+        max_stacks: 4,
+        decay_secs: 30.0,
+        bindings: vec![phoenix_model::damage::DamageBinding::Operation],
+    });
+    for receiver in [
+        None,
+        Some(EmpResistanceConfig {
+            resistance_per_stack: 10.0,
+            max_stacks: 1,
+            decay_secs: 2.0,
+            bindings: vec![phoenix_model::damage::DamageBinding::Cooling],
+        }),
+    ] {
+        let mut actor_config = source_config.clone();
+        actor_config.damage.as_mut().unwrap().emp = receiver;
+        let (mut world, actor, source) = rig_from_configs(&actor_config, &source_config);
+        world.insert_resource(crate::sim_tick::SimTick(0));
+        world.insert_resource(Time::<Fixed>::from_seconds(1.0));
+        world
+            .run_system_once(crate::ship::emp::stamp_clock)
+            .unwrap();
+        assert!(
+            world.get::<ShipDamage>(actor).unwrap().emp_clock.is_some(),
+            "all physical receivers derive time, including no-current-policy hulls"
+        );
+        let effect = ComponentEmpState::apply(
+            None,
+            source_config.damage.as_ref().unwrap().emp.as_ref().unwrap(),
+            EmpPayload {
+                duration_secs: 300.0,
+            },
+            EmpClock {
+                tick: 0,
+                period_nanos: 1_000_000_000,
+            },
+        )
+        .unwrap();
+        world
+            .get_mut::<ShipDamage>(source)
+            .unwrap()
+            .state
+            .components
+            .get_mut(&sid("phaser-fore"))
+            .unwrap()
+            .get_mut("operation")
+            .unwrap()
+            .emp = Some(effect.clone());
+        let actual = equipment(&world, source)
+            .equipment
+            .installed("fore-beam")
+            .unwrap()
+            .id
+            .clone();
+        let before = power(&world, actor);
+        start_beam(&mut world, actor, source).unwrap();
+        for tick in 1..120 {
+            world.resource_mut::<crate::sim_tick::SimTick>().0 = tick;
+            world
+                .run_system_once(crate::ship::emp::stamp_clock)
+                .unwrap();
+            advance(&mut world, actor, tick, 0.25);
+        }
+        assert_eq!(
+            world
+                .get::<ShipEquipmentRecovery>(actor)
+                .unwrap()
+                .job
+                .as_ref()
+                .unwrap()
+                .outcome,
+            Some(JobOutcome::Completed)
+        );
+        assert!(
+            power(&world, actor).network.consumers[&actor_config.recovery.as_ref().unwrap().system]
+                .energy
+                < before.network.consumers[&actor_config.recovery.as_ref().unwrap().system].energy
+        );
+        assert!(!equipment(&world, source)
+            .equipment
+            .assemblies
+            .contains_key(&actual));
+        let carried = equipment(&world, actor).equipment.assemblies[&actual]
+            .condition
+            .as_ref()
+            .unwrap();
+        assert_eq!(carried.emp.as_ref(), Some(&effect));
+        let decoded: ShipFitting =
+            serde_json::from_slice(&serde_json::to_vec(equipment(&world, actor)).unwrap()).unwrap();
+        decoded
+            .equipment
+            .validate(&world.get::<CompiledShipFitting>(actor).unwrap().0)
+            .unwrap();
+        let emp = decoded.equipment.assemblies[&actual]
+            .condition
+            .as_ref()
+            .unwrap()
+            .emp
+            .as_ref()
+            .unwrap();
+        emp.validate(EmpClock {
+            tick: 360,
+            period_nanos: 1_000_000_000,
+        })
+        .unwrap();
+        assert_eq!(emp.factor_at(299), 0.0);
+        assert_eq!(emp.factor_at(300), 1.0);
+        assert_eq!(emp.policy.decay_secs, 30.0);
+        assert_eq!(emp, &effect);
+    }
 }
 fn observe_source(
     world: &mut World,

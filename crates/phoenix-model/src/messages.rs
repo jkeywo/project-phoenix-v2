@@ -41,7 +41,8 @@ use uuid::Uuid;
 /// Revision 25 distinguishes physical-job and real-transmission activity evidence.
 /// Revision 26 carries own planned Comms requests and actual local Security routes.
 /// Revision 27 carries actual personnel condition and Treatment controls.
-pub const PROTOCOL_VERSION: u32 = 27;
+/// Revision 28 carries explicit formation coordination through ordinary Comms.
+pub const PROTOCOL_VERSION: u32 = 28;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).

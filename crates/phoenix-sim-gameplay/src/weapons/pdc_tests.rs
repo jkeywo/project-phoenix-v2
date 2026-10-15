@@ -55,3 +55,43 @@ fn actual_swept_contact_respects_height_and_tiny_long_link_bodies() {
     );
     assert!(swept_sphere_fraction([0.0; 3], [1.0; 3], [0.0; 3], f32::INFINITY).is_none());
 }
+
+#[test]
+fn moving_relative_sweep_uses_common_time_instead_of_the_missile_endpoint() {
+    // Both centers reach the crossing at t=.5; neither endpoint is near the
+    // other's segment endpoint. Endpoint-only sphere contact misses this.
+    assert!(moving_sphere_fraction(
+        [-10.0, 5.0, 0.0],
+        [10.0, 5.0, 0.0],
+        0.1,
+        [0.0, 5.0, -10.0],
+        [0.0, 5.0, 10.0],
+        0.1
+    )
+    .is_some());
+    // Missile ends on the bolt's old path but arrives after the bolt passed.
+    assert!(
+        swept_sphere_fraction([-10.0, 5.0, 0.0], [10.0, 5.0, 0.0], [-5.0, 5.0, 0.0], 0.2).is_some()
+    );
+    assert!(moving_sphere_fraction(
+        [-10.0, 5.0, 0.0],
+        [10.0, 5.0, 0.0],
+        0.1,
+        [-5.0, 5.0, 10.0],
+        [-5.0, 5.0, 0.0],
+        0.1
+    )
+    .is_none());
+    // Each radius is valid f32, although their sum exceeds f32::MAX.
+    assert_eq!(
+        moving_sphere_fraction(
+            [f32::MAX, 0.0, 0.0],
+            [f32::MAX, 0.0, 0.0],
+            f32::MAX,
+            [-f32::MAX, 0.0, 0.0],
+            [-f32::MAX, 0.0, 0.0],
+            f32::MAX
+        ),
+        Some(0.0)
+    );
+}

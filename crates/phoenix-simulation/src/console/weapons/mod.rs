@@ -12,6 +12,7 @@ pub mod blackboard;
 pub mod blaster;
 mod round_work;
 pub mod flight_carrier;
+pub(crate) mod pdc;
 pub mod server;
 pub mod shared;
 pub mod strike;

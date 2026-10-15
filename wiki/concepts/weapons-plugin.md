@@ -2,7 +2,7 @@
 title: WeaponsPlugin
 type: concept
 tags: [weapons, tactical, phaser, torpedo, blaster, targeting, ai]
-sources: [crates/phoenix-simulation/src/console/weapons/assignments.rs, crates/phoenix-simulation/src/console/weapons/readiness.rs, crates/phoenix-simulation/src/console/weapons/round_work.rs, crates/phoenix-simulation/src/snapshot/weapon_targets.rs, crates/phoenix-model/src/weapon_operation.rs, crates/phoenix-sim-gameplay/src/weapons/operation.rs, crates/phoenix-model/src/turret.rs, crates/phoenix-sim-gameplay/src/weapons/turret.rs, crates/phoenix-simulation/src/weapons/mounts.rs, crates/phoenix-simulation/src/snapshot/mounts.rs, crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-sim-gameplay/src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/weapons/, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml, crates/phoenix-sim-gameplay/src/console/weapons/beam.rs, crates/phoenix-sim-gameplay/src/ship/damage.rs]
+sources: [crates/phoenix-sim-gameplay/src/weapons/pdc.rs, crates/phoenix-simulation/src/console/weapons/pdc.rs, assets/entities/pdc_cruiser.toml, crates/phoenix-simulation/src/console/weapons/assignments.rs, crates/phoenix-simulation/src/console/weapons/readiness.rs, crates/phoenix-simulation/src/console/weapons/round_work.rs, crates/phoenix-simulation/src/snapshot/weapon_targets.rs, crates/phoenix-model/src/weapon_operation.rs, crates/phoenix-sim-gameplay/src/weapons/operation.rs, crates/phoenix-model/src/turret.rs, crates/phoenix-sim-gameplay/src/weapons/turret.rs, crates/phoenix-simulation/src/weapons/mounts.rs, crates/phoenix-simulation/src/snapshot/mounts.rs, crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-sim-gameplay/src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/weapons/, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml, crates/phoenix-sim-gameplay/src/console/weapons/beam.rs, crates/phoenix-sim-gameplay/src/ship/damage.rs]
 updated: 2026-10-15
 ---
 
@@ -151,3 +151,19 @@ compares the complete projection.
 - [Information-Parity Audit](./information-parity-audit.md)
 
 Sustained beam operation is frozen on the existing active bank slot at launch. Its finite duration value stays unchanged while ordinary paid work continues; unavailable control/equipment, shutdown or failed funding ends it through the same cooldown and BeamEnded lifecycle as an explicit Stop. Snapshots require the live slot's operation and preserve fractional damage and its bought cooldown; presentation continues to render the restored live bank directly.
+
+The optional `pdc_cruiser` uses the existing finite Broadside battery, paid local
+rounds and ordinary per-bank control. Its explicit Missile filter and radar
+selection policy require an acquired current classified contact, including its
+dated elevation; the fixed full-coverage mount does not claim finite pitch
+traversal. Straight bolts keep XYZ, pitch, physical payload, speed and visual
+scale on the emitted record. The same emission loop has planar and measured XYZ
+adapters; `advance_flight_only` needs no surviving launcher configuration.
+
+Physical bolt contact merges the earliest actual Rapier Collider shape cast
+with swept guided-round spheres, without faction immunity or a selected-target
+exception. Interception debits the actual guided vector's durability and removes
+a destroyed round without its detonation payload. Interval-local previous bolt
+position is consumed once during Damage and omitted from settled snapshots and
+digests. Restore starts with no pending segment; the next Physics step derives
+it from persisted current XYZ. Detached flight carriers use the same vectors.

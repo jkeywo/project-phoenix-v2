@@ -74,10 +74,48 @@ pub fn swept_sphere_fraction(
     {
         return None;
     }
-    let d = std::array::from_fn::<_, 3, _>(|i| f64::from(end[i]) - f64::from(start[i]));
-    let r = std::array::from_fn::<_, 3, _>(|i| f64::from(center[i]) - f64::from(start[i]));
+    let relative_start = std::array::from_fn(|i| f64::from(start[i]) - f64::from(center[i]));
+    let relative_end = std::array::from_fn(|i| f64::from(end[i]) - f64::from(center[i]));
+    relative_sphere_fraction(relative_start, relative_end, f64::from(radius))
+}
+
+/// Both objects traverse this same fixed interval. Widen before subtraction
+/// and radius addition so finite f32 positions/radii cannot overflow first.
+pub fn moving_sphere_fraction(
+    start: [f32; 3],
+    end: [f32; 3],
+    radius: f32,
+    target_start: [f32; 3],
+    target_end: [f32; 3],
+    target_radius: f32,
+) -> Option<f32> {
+    if !start
+        .into_iter()
+        .chain(end)
+        .chain(target_start)
+        .chain(target_end)
+        .all(f32::is_finite)
+        || !radius.is_finite()
+        || !target_radius.is_finite()
+        || radius < 0.0
+        || target_radius < 0.0
+    {
+        return None;
+    }
+    let relative_start = std::array::from_fn(|i| f64::from(start[i]) - f64::from(target_start[i]));
+    let relative_end = std::array::from_fn(|i| f64::from(end[i]) - f64::from(target_end[i]));
+    relative_sphere_fraction(
+        relative_start,
+        relative_end,
+        f64::from(radius) + f64::from(target_radius),
+    )
+}
+
+fn relative_sphere_fraction(start: [f64; 3], end: [f64; 3], radius: f64) -> Option<f32> {
+    let d = std::array::from_fn::<_, 3, _>(|i| end[i] - start[i]);
+    let r = start.map(|value| -value);
     let length_sq = d.into_iter().map(|v| v * v).sum::<f64>();
-    let radius_sq = f64::from(radius) * f64::from(radius);
+    let radius_sq = radius * radius;
     if length_sq == 0.0 {
         return (r.into_iter().map(|v| v * v).sum::<f64>() <= radius_sq).then_some(0.0);
     }

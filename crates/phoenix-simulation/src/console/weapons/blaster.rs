@@ -933,16 +933,28 @@ pub(crate) fn handle_blaster_hits(
     // sorted into a stable order (issue #1052) rather than taken in archetype
     // order; `EntityUuid` is `Option` because minimal test-only ship spawns
     // omit it, exactly as the beam and collision paths allow.
-    mut blaster_res_q: Query<
-        (
-            Entity,
-            Option<&crate::entities::spawner::EntityUuid>,
-            &mut BlasterSystemResource,
-        ),
-        With<crate::server_app::Ship>,
-    >,
+    mut blaster_res_q: Query<(
+        Entity,
+        Option<&crate::entities::spawner::EntityUuid>,
+        &mut BlasterSystemResource,
+    )>,
     mut commands: Commands,
-    collider_q: Query<&crate::entities::spawner::ColliderSection>,
+    collider_q: Query<(
+        &crate::entities::spawner::ColliderSection,
+        Option<&crate::entities::spawner::EntityUuid>,
+        Option<&AsteroidUuid>,
+    )>,
+    physical_bodies: Query<(
+        Entity,
+        &bevy_rapier3d::prelude::Collider,
+        &Transform,
+        Option<&crate::entities::spawner::EntityUuid>,
+        Option<&AsteroidUuid>,
+        Option<&ShipPhysics>,
+        Has<bevy_rapier3d::prelude::Sensor>,
+        Has<bevy_rapier3d::prelude::ColliderDisabled>,
+    )>,
+    mut guided: Query<&mut super::torpedo::TorpedoSystemResource>,
     // The write-side outputs (outbox, game-over latch, world, destruction event
     // writers, balance sink, tracked registry) bundled as one `SystemParam`
     // (issue #1185). See [`BlasterHitSinks`].
@@ -992,6 +1004,45 @@ pub(crate) fn handle_blaster_hits(
             0.0,
         ));
     }
+    let mut collider_ids: std::collections::BTreeSet<_> = physical_bodies
+        .iter()
+        .filter_map(|(_, _, _, entity, asteroid, _, _, _)| {
+            entity.map(|id| &id.0).or_else(|| asteroid.map(|id| &id.0))
+        })
+        .cloned()
+        .collect();
+    // Authored physical bodies without their actual Collider are unavailable,
+    // not legacy point bodies (for example during a reduced-host transition).
+    collider_ids.extend(collider_q.iter().filter_map(|(_, entity, asteroid)| {
+        entity
+            .map(|id| id.0.clone())
+            .or_else(|| asteroid.map(|id| id.0.clone()))
+    }));
+    // Only genuinely bare legacy fixtures have point bodies. An actual shape
+    // never falls back to a planar or bounding-sphere interpretation.
+    let legacy_targets: Vec<_> = asteroid_q
+        .iter()
+        .map(|(id, pose)| (&id.0, pose.translation))
+        .chain(entity_q.iter().map(|(id, pose)| (&id.0, pose.translation)))
+        .filter(|(id, _)| !collider_ids.contains(*id))
+        .map(|(id, pose)| (id.clone(), pose.to_array()))
+        .collect();
+    let mut guided_targets: Vec<_> = guided
+        .iter()
+        .flat_map(|provider| {
+            provider.0.in_flight.iter().map(|round| {
+                (
+                    round.uuid.clone(),
+                    round
+                        .previous_position
+                        .unwrap_or([round.x, round.y, round.z]),
+                    [round.x, round.y, round.z],
+                    round.profile.detonation_radius,
+                )
+            })
+        })
+        .collect();
+    guided_targets.sort_by(|a, b| a.0.cmp(&b.0));
     // Sorted by uuid before it is used (issue #1052), for the same reason the
     // torpedo path already sorts its own proximity list: `find_hits` takes the
     // FIRST target a projectile overlaps and stops, so this list's order is
@@ -1041,21 +1092,158 @@ pub(crate) fn handle_blaster_hits(
             continue;
         };
         for bank in blaster_res.0.iter_mut() {
-            let hits = bank.find_hits(&targets);
-            for (proj_id, target_uuid) in hits {
-                if let Some(hit_data) = bank.consume_hit(&proj_id) {
-                    detonations.push(BlasterDetonation {
-                        bank_id: bank.config.id.clone(),
-                        projectile_id: proj_id,
-                        target_uuid,
-                        damage: hit_data.damage,
-                        incoming: hit_data.incoming,
-                        delivery: hit_data.delivery(),
-                        source_uuid: Some(hit_data.source_uuid).filter(|u| !u.is_empty()),
-                    });
+            // Physical collision order follows actual emitted vector order. A
+            // destroyed missile is removed before the next bolt is considered.
+            let projectiles = bank.in_flight.clone();
+            for projectile in projectiles {
+                let Some(start) = projectile.previous_position else {
+                    continue;
+                };
+                let end = [projectile.x, projectile.y, projectile.z];
+                #[derive(Clone)]
+                enum Contact {
+                    Body(Option<String>),
+                    Guided(String),
+                }
+                let mut contacts = Vec::new();
+                for (body, collider, transform, uuid, asteroid, physics, sensor, disabled) in
+                    &physical_bodies
+                {
+                    if sensor || disabled {
+                        continue;
+                    }
+                    let id = uuid.map(|id| &id.0).or_else(|| asteroid.map(|id| &id.0));
+                    if body == shooter || id.is_some_and(|id| id == &projectile.source_uuid) {
+                        continue;
+                    }
+                    let (position, rotation) =
+                        physics.map_or((transform.translation, transform.rotation), |pose| {
+                            (
+                                Vec3::new(pose.x, pose.y, pose.z),
+                                Quat::from_rotation_y(pose.yaw),
+                            )
+                        });
+                    if let Some(fraction) = super::pdc::collider_fraction(
+                        start,
+                        end,
+                        projectile.collision_radius,
+                        position,
+                        rotation,
+                        collider,
+                    ) {
+                        contacts.push((
+                            fraction,
+                            id.cloned()
+                                .unwrap_or_else(|| format!("unidentified:{body:?}")),
+                            Contact::Body(id.cloned()),
+                        ));
+                    }
+                }
+                for (id, position) in &legacy_targets {
+                    if id == &projectile.source_uuid {
+                        continue;
+                    }
+                    if let Some(fraction) = crate::weapons::pdc::swept_sphere_fraction(
+                        start,
+                        end,
+                        *position,
+                        projectile.collision_radius,
+                    ) {
+                        contacts.push((fraction, id.clone(), Contact::Body(Some(id.clone()))));
+                    }
+                }
+                for (id, previous, position, radius) in &guided_targets {
+                    if let Some(fraction) = crate::weapons::pdc::moving_sphere_fraction(
+                        start,
+                        end,
+                        projectile.collision_radius,
+                        *previous,
+                        *position,
+                        *radius,
+                    ) {
+                        contacts.push((fraction, id.clone(), Contact::Guided(id.clone())));
+                    }
+                }
+                contacts.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+                let Some((_, _, contact)) = contacts.first() else {
+                    continue;
+                };
+                match contact {
+                    Contact::Guided(id) => {
+                        let mut result = None;
+                        for mut provider in &mut guided {
+                            if provider.0.in_flight.iter().any(|round| &round.uuid == id) {
+                                result = Some(if projectile.damage == 0 {
+                                    Ok(Some(
+                                        provider
+                                            .0
+                                            .in_flight
+                                            .iter()
+                                            .find(|round| &round.uuid == id)
+                                            .unwrap()
+                                            .durability_remaining,
+                                    ))
+                                } else {
+                                    provider.0.apply_interception(id, projectile.damage as f32)
+                                });
+                                break;
+                            }
+                        }
+                        // All candidates came from these same vectors. No actor
+                        // payload explodes when interception consumes its HP.
+                        match result {
+                            Some(Ok(Some(remaining))) => {
+                                bank.consume_hit(&projectile.id);
+                                outbox.push_reliable((
+                                    Target::All,
+                                    ServerMessage::BlasterHit {
+                                        bank: bank.config.id.clone(),
+                                        projectile_id: projectile.id.clone(),
+                                        target_uuid: id.clone(),
+                                    },
+                                ));
+                                if remaining == 0.0 {
+                                    guided_targets.retain(|(uuid, ..)| uuid != id);
+                                    outbox.push_reliable((
+                                        Target::All,
+                                        ServerMessage::TorpedoDestroyed { uuid: id.clone() },
+                                    ));
+                                }
+                            }
+                            Some(Err(error)) => {
+                                warn!("physical interception refused: {error}");
+                                bank.consume_hit(&projectile.id);
+                            }
+                            _ => { /* an absent physical round cannot consume a bolt */ }
+                        }
+                    }
+                    Contact::Body(id) => {
+                        if let Some(hit_data) = bank.consume_hit(&projectile.id) {
+                            if let Some(target_uuid) = id {
+                                detonations.push(BlasterDetonation {
+                                    bank_id: bank.config.id.clone(),
+                                    projectile_id: projectile.id,
+                                    target_uuid: target_uuid.clone(),
+                                    damage: hit_data.damage,
+                                    incoming: hit_data.incoming,
+                                    delivery: hit_data.delivery(),
+                                    source_uuid: Some(hit_data.source_uuid)
+                                        .filter(|u| !u.is_empty()),
+                                });
+                            }
+                            // Unidentified colliders still physically block.
+                        }
+                    }
                 }
             }
+            bank.finish_collision_interval();
         }
+    }
+
+    // Same fixed interval as the bolts. No paused/repeated Damage pass can
+    // replay a guided round's travelled segment after this settlement.
+    for mut provider in &mut guided {
+        provider.0.finish_collision_interval();
     }
 
     for det in detonations {
@@ -1243,7 +1431,7 @@ pub(crate) fn handle_blaster_hits(
                         });
                         let radius = collider_q
                             .get(entity)
-                            .map(|c| c.0.radius)
+                            .map(|(c, ..)| c.0.radius)
                             .unwrap_or(DEFAULT_SHIP_EXPLOSION_RADIUS);
                         ship_vfx_events.write(ShipDestroyedVfx {
                             x: hit_x,

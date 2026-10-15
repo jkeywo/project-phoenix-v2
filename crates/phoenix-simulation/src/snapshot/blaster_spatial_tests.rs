@@ -118,3 +118,28 @@ fn malformed_emitted_xyz_frontiers_refuse_without_replacing_live_flight() {
         );
     }
 }
+
+#[test]
+fn emitted_altitude_is_causal_but_the_consumed_interval_is_not_folded() {
+    let mut world = World::new();
+    world.register_component::<crate::ship::state::ShipPhysics>();
+    world.register_component::<crate::entities::spawner::EntitySystemHull>();
+    world.register_component::<crate::ship::state::ShipRedAlert>();
+    let owner = world
+        .spawn((
+            crate::entities::spawner::EntityUuid("launcher".into()),
+            emitted(),
+        ))
+        .id();
+    let before = crate::sim_digest::world_digest(&world);
+    world.get_mut::<BlasterSystemResource>(owner).unwrap().0[0].in_flight[0].y += 1.0;
+    assert_ne!(crate::sim_digest::world_digest(&world), before);
+    let mut banks = world.get_mut::<BlasterSystemResource>(owner).unwrap();
+    banks.0[0].in_flight[0].y -= 1.0;
+    banks.0[0].in_flight[0].previous_position = Some([999.0; 3]);
+    assert_eq!(
+        crate::sim_digest::world_digest(&world),
+        before,
+        "settled snapshot excludes a segment that the next Physics reconstructs"
+    );
+}

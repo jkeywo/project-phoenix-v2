@@ -710,11 +710,13 @@ impl BlasterSystem {
                     .iter()
                     .filter(|(id, _, _)| id != &projectile.source_uuid)
                     .filter_map(|(id, center, radius)| {
-                        super::pdc::swept_sphere_fraction(
+                        super::pdc::moving_sphere_fraction(
                             start,
                             [projectile.x, projectile.y, projectile.z],
+                            projectile.collision_radius,
                             *center,
-                            projectile.collision_radius + radius,
+                            *center,
+                            *radius,
                         )
                         .map(|fraction| (fraction, id))
                     })

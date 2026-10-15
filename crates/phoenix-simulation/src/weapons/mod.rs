@@ -5,6 +5,7 @@ pub use phoenix_sim_gameplay::weapons::mount;
 pub use phoenix_sim_gameplay::weapons::operation;
 pub mod mounts;
 pub mod pattern;
+pub use phoenix_sim_gameplay::weapons::pdc;
 pub mod phaser;
 pub mod shield;
 pub mod torpedo;

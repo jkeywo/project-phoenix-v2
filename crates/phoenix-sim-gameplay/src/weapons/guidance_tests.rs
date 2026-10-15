@@ -47,6 +47,7 @@ fn link_geometry_and_original_sample_age_bound_actual_received_updates() {
         range: 50.0,
         minimum_transmission: 0.2,
         maximum_sample_age_secs: 2.0,
+        accept_external_illumination: false,
     };
     let original = GuidanceObservation {
         target_uuid: "subject".into(),

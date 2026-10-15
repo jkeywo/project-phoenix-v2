@@ -98,6 +98,18 @@ pub fn compile_ship_trees_with_energy(
                 &definition,
                 &phoenix_sim_gameplay::resources::logistics_ai::bindings(),
             )
+        } else if system.kind == crate::ship::system_registry::ILLUMINATION_KIND {
+            let binding = phoenix_sim_gameplay::ship::composition::illumination_composition(
+                &system.components,
+            )
+            .ok_or("illumination state tree requires emitter composition")?;
+            compile(
+                &definition,
+                &phoenix_sim_gameplay::weapons::illumination::bindings(
+                    binding.enabled_channel,
+                    binding.target_channel,
+                ),
+            )
         } else if system.kind == crate::ship::system_registry::ACCESS_GATE_KIND {
             let [phoenix_sim_gameplay::ship::composition::SystemComponentConfig::AccessBoundary {
                 sealed_channel,

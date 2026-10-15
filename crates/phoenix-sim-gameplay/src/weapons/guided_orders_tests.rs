@@ -11,6 +11,7 @@ fn launch(id: &str, tick: u64) -> KnownGuidedLaunch {
             range: 200.0,
             minimum_transmission: 0.2,
             maximum_sample_age_secs: 2.0,
+            accept_external_illumination: false,
         }),
         issued: IssuedGuidanceOrder {
             revision: 0,

@@ -89,6 +89,7 @@ pub fn requires_energy_profile(kind: &str) -> bool {
             | REPAIR_KIND
             | TRACTOR_KIND
             | DOCK_KIND
+            | ILLUMINATION_KIND
             | UMBILICAL_KIND
             | TRANSPORTER_KIND
             | SECURITY_KIND
@@ -274,6 +275,14 @@ impl EnergyConfigSection {
                 consumer.continuous_cost_per_sec,
             )?;
             finite_nonnegative(&owner, "discrete_cost", consumer.discrete_cost)?;
+            if ship.system(&consumer.system).is_some_and(|system| {
+                system.kind == crate::ship::system_registry::ILLUMINATION_KIND
+            }) && consumer.continuous_cost_per_sec <= 0.0
+            {
+                return Err(format!(
+                    "{owner} illumination requires positive continuous work cost"
+                ));
+            }
             if consumer.discrete_cost > consumer.reserve.capacity {
                 return Err(format!(
                     "{owner}.discrete_cost exceeds reserve capacity and can never be afforded"

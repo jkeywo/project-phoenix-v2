@@ -296,6 +296,7 @@ fn actual_receiver_retains_an_original_sample_with_later_forwarded_receipts() {
             range: 100.0,
             minimum_transmission: 0.1,
             maximum_sample_age_secs: 2.0,
+            accept_external_illumination: false,
         });
     let received = GuidanceObservation {
         target_uuid: "target".into(),
@@ -383,6 +384,7 @@ fn received_retarget_and_stop_change_only_existing_guidance_intent() {
         range: 100.0,
         minimum_transmission: 0.1,
         maximum_sample_age_secs: 2.0,
+        accept_external_illumination: false,
     });
     let before = round.clone();
     assert!(round.receive_guidance(Some(&reading)));
@@ -402,4 +404,66 @@ fn received_retarget_and_stop_change_only_existing_guidance_intent() {
         "a seeker cannot retarget itself through the remote seam"
     );
     assert_eq!(*round, expected);
+}
+
+#[test]
+fn external_illumination_opt_in_improves_only_existing_intent_without_own_seeker() {
+    let mut system = loaded(1);
+    let round = &mut system.in_flight[0];
+    round.profile.seeker = None;
+    round.profile.receiver = Some(phoenix_model::guided_guidance::GuidanceReceiverProfile {
+        range: 200.0,
+        minimum_transmission: 0.2,
+        maximum_sample_age_secs: 2.0,
+        accept_external_illumination: true,
+    });
+    let reading = GuidanceObservation {
+        target_uuid: "target".into(),
+        position: [15.0, 5.0, -70.0],
+        sampled_tick: 40,
+        source: GuidanceSource::Console {
+            ship_uuid: "source".into(),
+            console: phoenix_model::identity::ConsoleId("science".into()),
+            system: phoenix_model::identity::SystemId("science-light".into()),
+            samples: Vec::new(),
+            observation: Some(phoenix_model::observation::ObservationMetadata {
+                observed_tick: Some(40),
+                ..Default::default()
+            }),
+        },
+    };
+    reading.validate(40).unwrap();
+    let before = round.clone();
+    assert!(round.assist_guidance(&reading));
+    let mut expected = before;
+    expected.last_guidance = Some(reading.clone());
+    assert_eq!(round, &expected);
+    let mut different = reading.clone();
+    different.target_uuid = "other-intent".into();
+    assert!(!round.assist_guidance(&different));
+    assert_eq!(round, &expected);
+    round
+        .profile
+        .receiver
+        .as_mut()
+        .unwrap()
+        .accept_external_illumination = false;
+    let refused = round.clone();
+    assert!(!round.assist_guidance(&reading));
+    assert_eq!(round, &refused);
+    round
+        .profile
+        .receiver
+        .as_mut()
+        .unwrap()
+        .accept_external_illumination = true;
+    round.tick(0.1, None);
+    assert!(
+        round.heading > 0.0 && round.pitch > 0.0,
+        "held external point provides real steering beyond absent own seeker"
+    );
+    assert!(round.receive_guidance(None));
+    let stopped = round.clone();
+    assert!(!round.assist_guidance(&reading));
+    assert_eq!(round, &stopped);
 }

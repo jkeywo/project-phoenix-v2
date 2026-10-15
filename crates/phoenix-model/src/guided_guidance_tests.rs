@@ -12,6 +12,7 @@ fn frozen_equipment_is_closed_and_finite_without_a_perfect_seeker_default() {
         range: 240.0,
         minimum_transmission: 0.1,
         maximum_sample_age_secs: 2.0,
+        accept_external_illumination: false,
     };
     receiver.validate().unwrap();
     assert_eq!(

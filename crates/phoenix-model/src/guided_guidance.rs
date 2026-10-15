@@ -25,6 +25,9 @@ pub struct GuidanceReceiverProfile {
     pub range: f32,
     pub minimum_transmission: f32,
     pub maximum_sample_age_secs: f32,
+    /// Explicit opt-in to a separate mounted illumination emitter.
+    #[serde(default)]
+    pub accept_external_illumination: bool,
 }
 
 fn valid_link(range: f32, transmission: f32) -> bool {
@@ -154,3 +157,25 @@ impl GuidanceObservation {
 #[cfg(test)]
 #[path = "guided_guidance_tests.rs"]
 mod tests;
+
+/// Authored includes can explicitly remove optional equipment with `false`.
+/// Runtime frozen profiles keep the closed Option representation.
+pub fn deserialize_optional_profile<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Authored<T> {
+        Profile(T),
+        Disabled(bool),
+    }
+    match Authored::<T>::deserialize(deserializer)? {
+        Authored::Profile(value) => Ok(Some(value)),
+        Authored::Disabled(false) => Ok(None),
+        Authored::Disabled(true) => Err(serde::de::Error::custom(
+            "optional equipment must be a finite profile or false to disable",
+        )),
+    }
+}

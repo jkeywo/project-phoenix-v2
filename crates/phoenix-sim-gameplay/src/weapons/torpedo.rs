@@ -200,6 +200,27 @@ impl Torpedo {
         true
     }
 
+    /// External illumination supplies an observation only for existing intent;
+    /// it cannot retarget or revive a stopped round. Producer validates actual
+    /// logical time, paid emission and finite physical link before this seam.
+    pub fn assist_guidance(
+        &mut self,
+        observation: &phoenix_model::guided_guidance::GuidanceObservation,
+    ) -> bool {
+        if !self
+            .profile
+            .receiver
+            .is_some_and(|receiver| receiver.accept_external_illumination)
+            || !matches!(
+                observation.source,
+                phoenix_model::guided_guidance::GuidanceSource::Console { .. }
+            )
+        {
+            return false;
+        }
+        self.accept_guidance(observation)
+    }
+
     /// Structural/intent acceptance only: the physical producer or link must
     /// validate the original sample and receipt frontier against its actual
     /// logical tick first. A forwarded receipt can postdate its original sample.

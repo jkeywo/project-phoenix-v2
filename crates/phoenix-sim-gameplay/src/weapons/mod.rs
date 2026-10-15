@@ -12,3 +12,5 @@ pub mod phaser;
 pub mod shield;
 pub mod torpedo;
 pub mod turret;
+
+pub mod illumination;

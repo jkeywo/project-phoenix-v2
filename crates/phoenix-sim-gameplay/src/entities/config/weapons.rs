@@ -674,9 +674,17 @@ pub struct TorpedoesConfig {
     /// Finite physical interception durability, frozen into actual launches.
     #[serde(default = "default_torpedo_durability")]
     pub durability: f32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "phoenix_model::guided_guidance::deserialize_optional_profile"
+    )]
     pub seeker: Option<phoenix_model::guided_guidance::SeekerProfile>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "phoenix_model::guided_guidance::deserialize_optional_profile"
+    )]
     pub receiver: Option<phoenix_model::guided_guidance::GuidanceReceiverProfile>,
     #[serde(default = "default_torpedo_speed")]
     pub speed: f32,

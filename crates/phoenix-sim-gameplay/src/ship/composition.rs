@@ -31,6 +31,13 @@ pub enum SystemComponentConfig {
     PowerInput {
         id: String,
     },
+    IlluminationEmitter {
+        id: String,
+        enabled_channel: String,
+        target_channel: String,
+        power_input: String,
+        config: crate::weapons::illumination::IlluminationConfig,
+    },
     Turret {
         id: String,
         power_input: String,
@@ -46,6 +53,7 @@ impl SystemComponentConfig {
     pub fn id(&self) -> &str {
         match self {
             Self::DockMating { id, .. }
+            | Self::IlluminationEmitter { id, .. }
             | Self::PowerInput { id }
             | Self::Turret { id, .. }
             | Self::AccessBoundary { id, .. } => id,
@@ -132,6 +140,95 @@ pub fn dock_composition(components: &[SystemComponentConfig]) -> Option<DockComp
     })
 }
 
+pub struct IlluminationComposition<'a> {
+    pub component_id: &'a str,
+    pub enabled_channel: &'a str,
+    pub target_channel: &'a str,
+    pub power_input: &'a str,
+    pub config: &'a crate::weapons::illumination::IlluminationConfig,
+}
+pub fn illumination_composition(
+    components: &[SystemComponentConfig],
+) -> Option<IlluminationComposition<'_>> {
+    components.iter().find_map(|component| match component {
+        SystemComponentConfig::IlluminationEmitter {
+            id,
+            enabled_channel,
+            target_channel,
+            power_input,
+            config,
+        } => Some(IlluminationComposition {
+            component_id: id,
+            enabled_channel,
+            target_channel,
+            power_input,
+            config,
+        }),
+        _ => None,
+    })
+}
+fn validate_illumination(system: &super::config::SystemInstanceConfig) -> Result<(), String> {
+    let binding = illumination_composition(&system.components)
+        .ok_or("illumination requires one supported emitter component")?;
+    binding.config.validate()?;
+    let mut ids = BTreeSet::new();
+    if system.power_group.is_none()
+        || system
+            .components
+            .iter()
+            .any(|component| !valid_id(component.id()) || !ids.insert(component.id()))
+    {
+        return Err(
+            "illumination requires unique component identities and an actual power group".into(),
+        );
+    }
+    let mut channels = BTreeMap::new();
+    for channel in &system.channels {
+        if !valid_id(&channel.name)
+            || channels
+                .insert(channel.name.as_str(), &channel.kind)
+                .is_some()
+        {
+            return Err("illumination requires unique valid generic channels".into());
+        }
+    }
+    if channels.len() != 2
+        || channels.get(binding.enabled_channel) != Some(&&CommandChannelKind::Boolean)
+        || channels.get(binding.target_channel) != Some(&&CommandChannelKind::EntityTarget)
+    {
+        return Err("illumination requires its exact declared enabled/target channels".into());
+    }
+    let mut emitters = 0;
+    let mut inputs = 0;
+    let mut turrets = 0;
+    for component in &system.components {
+        match component {
+            SystemComponentConfig::IlluminationEmitter { .. } => emitters += 1,
+            SystemComponentConfig::PowerInput { id } if id == binding.power_input => inputs += 1,
+            SystemComponentConfig::Turret {
+                power_input,
+                config,
+                ..
+            } if power_input == binding.power_input => {
+                config.validate()?;
+                turrets += 1;
+            }
+            _ => {
+                return Err(
+                    "illumination contains an unused or incorrectly connected component".into(),
+                )
+            }
+        }
+    }
+    if emitters != 1 || inputs != 1 || turrets > 1 {
+        return Err(
+            "illumination supports one emitter, one power input and at most one shared turret"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 fn valid_id(id: &str) -> bool {
     !id.is_empty()
         && id
@@ -186,6 +283,9 @@ fn validate_turret(system: &super::config::SystemInstanceConfig) -> Result<(), S
 }
 
 pub fn validate_composition(system: &super::config::SystemInstanceConfig) -> Result<(), String> {
+    if system.kind == super::system_registry::ILLUMINATION_KIND {
+        return validate_illumination(system);
+    }
     if system.kind == super::system_registry::ACCESS_GATE_KIND {
         let [SystemComponentConfig::AccessBoundary {
             id,

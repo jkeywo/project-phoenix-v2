@@ -1365,6 +1365,35 @@ impl EntityConfig {
                     })?;
                     continue;
                 }
+                if system.kind == crate::ship::system_registry::ILLUMINATION_KIND {
+                    let authored = authored.ok_or_else(|| SerdeError::custom(format!("Illumination System '{}' requires an explicit supported config.ai state tree", system.id.0)))?;
+                    let tree: crate::ai::state_tree::AiTreeConfig =
+                        authored.clone().try_into().map_err(|error| {
+                            SerdeError::custom(format!(
+                                "System '{}' config.ai: {error}",
+                                system.id.0
+                            ))
+                        })?;
+                    let binding = crate::ship::composition::illumination_composition(
+                        &system.components,
+                    )
+                    .ok_or_else(|| {
+                        SerdeError::custom(
+                            "illumination state tree requires supported emitter composition",
+                        )
+                    })?;
+                    crate::ai::state_tree::compile(
+                        &tree,
+                        &crate::weapons::illumination::bindings(
+                            binding.enabled_channel,
+                            binding.target_channel,
+                        ),
+                    )
+                    .map_err(|error| {
+                        SerdeError::custom(format!("System '{}' config.ai: {error}", system.id.0))
+                    })?;
+                    continue;
+                }
                 if system.kind != crate::ship::system_registry::DOCK_KIND {
                     if authored.is_some() {
                         return Err(SerdeError::custom(format!(

@@ -481,7 +481,27 @@ pub(super) fn validate_entity_resources(
         world.get::<crate::science::ShipScanRecord>(entity),
         &row.scan,
     ) {
-        (Some(record), Some(saved)) => record.validate_state(saved, u64::MAX)?,
+        (Some(record), Some(saved)) => {
+            record.validate_state(saved, u64::MAX)?;
+            let forecasts = saved
+                .instruments
+                .values()
+                .flat_map(|owner| &owner.history)
+                .filter_map(|reading| reading.forecast.as_ref());
+            for forecast in forecasts {
+                let dt = f64::from(
+                    world
+                        .get_resource::<Time<Fixed>>()
+                        .ok_or("forecast continuation requires fixed logical time")?
+                        .timestep()
+                        .as_secs_f32(),
+                );
+                let elapsed = (forecast.sample_ticks[1] - forecast.sample_ticks[0]) as f64 * dt;
+                if forecast.sample_interval_secs != elapsed {
+                    return Err("forecast interval disagrees with fixed logical time".into());
+                }
+            }
+        }
         (None, None) => {}
         _ => return Err("saved observations disagree with the accepted scanner".into()),
     }

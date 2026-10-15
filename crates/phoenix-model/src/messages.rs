@@ -5095,6 +5095,9 @@ pub struct FocusedScanSnapshot {
 /// [`crate::science::scan`] for the derivation and the argument.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct ScanReadingSnapshot {
+    /// Derived only from this instrument's retained readings and authored horizon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forecast: Option<crate::sensing_forecast::ScanForecast>,
     /// Shared metadata derived from this existing recorded observation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observation: Option<crate::observation::ObservationMetadata>,

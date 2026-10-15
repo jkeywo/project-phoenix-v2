@@ -647,7 +647,7 @@ pub fn tick_scans(
                             .focused
                             .as_ref()
                             .map(|work| work.presentation_id.clone());
-                        record.remember(reading, usize::from(policy.history_limit));
+                        record.remember(reading, usize::from(policy.history_limit), f64::from(dt));
                         record.focused = None;
                         if let Some(authored_id) = authored_id {
                             mirror_scanned(runtime.as_deref_mut(), &authored_id.0, &log);

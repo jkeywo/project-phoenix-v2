@@ -29,6 +29,7 @@ pub fn scan_reading_snapshot_from_reading(
     reading: &crate::science::ScanReading,
 ) -> ScanReadingSnapshot {
     ScanReadingSnapshot {
+        forecast: reading.forecast.clone(),
         observation: Some(phoenix_model::observation::ObservationMetadata::at(
             reading.taken_at_tick,
             reading

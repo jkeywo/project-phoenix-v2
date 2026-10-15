@@ -339,3 +339,31 @@ describe('hazard formatting', () => {
     expect(formatSeconds(0)).toBe('0:00');
   });
 });
+
+describe('conditional recorded-reading forecasts', () => {
+  it('shows the supplied horizon, original samples, assumptions and outward rounded ranges', () => {
+    const el = setup();
+    const forecast = {
+      sample_ticks: [100, 200], horizon_secs: 120,
+      assumptions: ['component.scan.forecast.linear', 'component.scan.forecast.quantisation'],
+      ranges: [
+        { quantity: { kind: 'condition' }, lower: 0.25001, upper: 0.54999 },
+        { quantity: { kind: 'capacity', label: 'world.skyhook.berths.label' }, lower: 2.1, upper: 3.9 },
+      ],
+    };
+    el.state = panelState({ scans: [{ system_id: 'focus-array', capable: true, reading: { ...DETAILED, forecast } }] });
+    const shown = el.shadowRoot.querySelector('.forecast');
+    expect(shown.textContent).toContain(t('component.scan.forecast.heading', { seconds: 120, first: 100, last: 200 }));
+    expect(shown.textContent).toContain('25–55%');
+    expect(shown.textContent).toContain('2–4');
+    expect(shown.textContent).toContain(t('component.scan.forecast.linear'));
+    el.state = panelState({ scans: [{ system_id: 'focus-array', capable: true, reading: { ...DETAILED, forecast }, observation_tick: 99999 }] });
+    expect(el.shadowRoot.querySelector('.forecast').textContent).toBe(shown.textContent);
+  });
+  it('does not invent a forecast from a lone reading or carry one between instruments', () => {
+    const el = setup(); el.state = panelState();
+    expect(el.shadowRoot.querySelector('.forecast')).toBeNull();
+    el.state = panelState({ scans: [{ system_id: 'different-instrument', capable: true, reading: DETAILED }] });
+    expect(el.shadowRoot.querySelector('.forecast')).toBeNull();
+  });
+});

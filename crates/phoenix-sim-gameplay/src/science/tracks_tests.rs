@@ -48,7 +48,7 @@ fn synthetic_sample_cannot_claim_actor_permission_and_private_route_shape_is_val
         .observation
         .as_mut()
         .unwrap()
-        .subject = ObservationSubject::Entity { uuid: id };
+        .subject = ObservationSubject::Entity { uuid: id.clone() };
     assert!(state.validate(&p, 4, 0.5).is_err());
     assert!(synthetic_source(&"x".repeat(129)).is_err());
     assert!(synthetic_source("line\nbreak").is_err());

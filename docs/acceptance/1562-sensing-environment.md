@@ -219,3 +219,36 @@ The browser log is `.phoenix/increment14-focused-browser-smoke.log`, SHA256
 It proves instrument choice, exact-owner correlated actions, delegation and stable
 working view in the actual shipped screen. It does not exercise WASM host state,
 multiplayer, native monitor displays or the full increment 14 playable exit.
+
+### Measured viewscreen and issued forecast slices
+
+The isolated measured-viewscreen candidate `1b3fd30e` passed World **2**,
+Presentation **15**, and renderer-independent Science server **19** cases. The
+initial Presentation compile stopped on an unsupported read-view iterator API;
+the committed fix uses sorted permitted-key lookup and the retry passed. Exact
+commands, logs, hashes and source/dependency evidence are retained in
+`.phoenix/worktrees/increment-14-measured-viewscreen/.phoenix/increment14-measured-native-handoff.json`.
+The later generated-rock visual follow-up `4fe7d32e` has independent source
+review; its added native visual case is not included in those earlier counts.
+
+The forecast/track pure owner command passed **26 cases** (54.06s build):
+
+```text
+cargo test -p phoenix-sim-gameplay --lib -- science::forecast::tests science::tracks::tests
+```
+
+Its retained log is `.phoenix/increment14-forecast-owner-tests-retry.log`, SHA256
+`97791bba9ce38f5b3534f259b5800129fa8fbf1590e5fbc32a99b95ae95252a6`.
+The initial compile caught a moved string in a new synthetic-report fixture;
+that fixture is corrected in the passing retry. Independent arithmetic review
+also caught loss of adjacent integer quantities above binary64's exact range;
+such capacity projections are now withheld and covered by a regression.
+
+Forecast GUI and instrument tests passed **30 cases**, with log
+`.phoenix/increment14-forecast-client-tests.log`. The extended actual `@core`
+focused-instrument browser journey passed **1 case in 3.3s** on a freshly rebuilt
+pure-JS client. The browser log is `.phoenix/increment14-forecast-browser-smoke.log`,
+SHA256 `26a127d52bc380c0dc2f2fb74658f93f8f69202cd4efa577ff981a72fa655283`.
+It checks original samples/horizon/range, exact-owner actions, delegation and
+removal of another instrument's forecast when switching. These results do not
+establish full WASM-host, native monitor, multiplayer or increment exit acceptance.

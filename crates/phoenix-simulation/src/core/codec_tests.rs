@@ -3270,6 +3270,7 @@ fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() 
     use std::collections::BTreeSet;
 
     let reading = ScanReadingSnapshot {
+        forecast: None,
         observation: None,
         subject_uuid: "00000000-0000-8000-8000-000000000042".into(),
         subject_name: "world.entity.skyhook.name".into(),
@@ -3374,6 +3375,7 @@ fn a_debris_reading_carries_a_projection_and_still_no_prose() {
     use std::collections::BTreeSet;
 
     let reading = ScanReadingSnapshot {
+        forecast: None,
         observation: None,
         subject_uuid: "00000000-0000-8000-8000-000000000077".into(),
         subject_name: "world.falling_skyway.entity.skyway_debris_alpha.name".into(),

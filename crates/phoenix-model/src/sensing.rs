@@ -43,6 +43,8 @@ pub struct FocusedConfig {
     pub work_secs: f32,
     pub history_limit: u16,
     pub unfinished_retention_secs: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forecast: Option<crate::sensing_forecast::ScanForecastPolicy>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -123,6 +125,9 @@ impl SensingConfig {
             return Err("sensing profile must declare at least one independent instrument".into());
         }
         for config in &self.focused {
+            if let Some(policy) = &config.forecast {
+                policy.validate()?;
+            }
             if !positive(config.work_secs)
                 || config.history_limit == 0
                 || !nonnegative(config.unfinished_retention_secs)

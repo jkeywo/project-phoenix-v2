@@ -60,6 +60,7 @@ entities:
       rationale:
         - "Use shared path geometry with signal-specific responses, not rendered meshes or automatic opacity for every ship/decorative fragment. Supported actual terrain clearing changes obstruction. History behind cover remains evidence, not a live view through terrain. Human and AI sensing obey the same physical rules."
         - "[ai] Physical/authoring samplers may evaluate analytic field parameters at future ticks; crew forecasts cannot read undiscovered parameters, pending scripts or future actor choices. Moving equipment and bounded field evolution remain allowed without restoring orbital motion or changing ordinary planar capital-ship controls."
+        - "[ai] A focused instrument may author a positive finite forecast horizon. Its first forecast consumer projects condition and commonly observed resource quantities from two retained readings of the same public contact, at distinct logical sample times. Quantisation propagates to the condition range. The issued projection stays with that existing ScanReading and states its original samples, horizon and unchanged-trend assumption; copies and missing readings cannot produce a forecast. Pruning prior input samples cannot rewrite an issued prediction. No separate forecast store or future simulation query is introduced."
 
   - decision: sensing-increment-14-consumers-and-exit
     core:

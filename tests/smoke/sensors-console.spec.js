@@ -152,7 +152,12 @@ test('sensors console: independent focused instruments retain their owner and wo
     target_uuid: 'public-contact',
     scans: [
       { system_id: 'focus-one', capable: true, controllable: true, history: [], focused: { subject: 'public-contact', progress: 250, waiting: '' } },
-      { system_id: 'focus-two', capable: true, controllable: true, history: [], focused: null },
+      { system_id: 'focus-two', capable: true, controllable: true, history: [], focused: null,
+        reading: { subject_uuid: 'public-contact', subject_name: '', band: 'detailed', band_label: '',
+          taken_at_tick: 200, condition_fraction: 0.6, condition_step: 0.1, mass: 10,
+          forecast: { sample_ticks: [100, 200], horizon_secs: 120,
+            assumptions: ['component.scan.forecast.linear', 'component.scan.forecast.quantisation'],
+            ranges: [{ quantity: { kind: 'condition' }, lower: 0.25, upper: 0.55 }] } } },
     ],
   };
   await page.evaluate((payload) => {
@@ -163,6 +168,8 @@ test('sensors console: independent focused instruments retain their owner and wo
   const readout = page.locator('ph-scan-readout');
   await expect(readout.locator('#progress')).toContainText('25%');
   await readout.locator('#instrument').selectOption('focus-two');
+  await expect(readout.locator('.forecast')).toContainText('120');
+  await expect(readout.locator('.forecast')).toContainText('25–55%');
   await readout.locator('#action').click();
   const sent = await page.evaluate(() => window.__sent);
   expect(sent).toHaveLength(1);
@@ -176,6 +183,7 @@ test('sensors console: independent focused instruments retain their owner and wo
   await expect(readout.locator('#instrument')).toHaveValue('focus-two');
   await expect(readout.locator('#action')).toBeHidden();
   await readout.locator('#instrument').selectOption('focus-one');
+  await expect(readout.locator('.forecast')).toHaveCount(0);
   await expect(readout.locator('#progress')).toContainText('25%');
   await expect(readout.locator('#cancel')).toBeVisible();
 });

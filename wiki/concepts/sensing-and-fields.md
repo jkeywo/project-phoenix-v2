@@ -4,6 +4,8 @@ type: concept
 tags: [science, observations, regions, simulation]
 sources:
   - crates/phoenix-model/src/sensing.rs
+  - crates/phoenix-model/src/sensing_forecast.rs
+  - crates/phoenix-sim-gameplay/src/science/forecast.rs
   - crates/phoenix-sim-gameplay/src/science/tracks.rs
   - crates/phoenix-sim-gameplay/src/science/sensing.rs
   - crates/phoenix-simulation/src/science/broad.rs
@@ -33,6 +35,16 @@ later live condition changes. The Console publication carries the actual owner
 for controls. Each qualified `scan/{UTF8-byte-length}:{owner}` channel follows its
 actual System’s Console; an exact typed feed grants information only. Completed
 readings retain the public contact alias captured by the enquiry.
+
+An optional focused `forecast` policy supplies a finite positive horizon. On an
+actual completed enquiry, the forecast consumer uses two retained readings of
+the same public contact at different sample ticks. It projects condition ranges
+with quantisation uncertainty and common observed resource levels under an
+explicit unchanged-trend assumption. The issued forecast stays on the existing
+canonical `ScanReading`, including its original samples and horizon; later live
+changes and pruning earlier input samples cannot rewrite it. Snapshot validation
+checks interval shape, observed quantities, accepted policy and fixed logical time.
+The scan readout displays this payload without running its own prediction model.
 
 `PassiveProfile` and `PassiveState` map actual System IDs to independent powered
 receivers, ordinary closed AI frames, enabled intent and actual measured samples.

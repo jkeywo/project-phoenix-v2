@@ -154,6 +154,7 @@ fn instrument_profile() -> SensingConfig {
             work_secs: 2.0,
             history_limit: 64,
             unfinished_retention_secs: 0.0,
+            forecast: None,
         }],
         broad: vec![BroadConfig {
             system: crate::core::messages::SystemId("sensor-radar".into()),

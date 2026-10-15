@@ -953,6 +953,7 @@ fn scan_suite(max_range: f32) -> crate::science::server::ShipScanRecord {
                 work_secs: 1.0,
                 history_limit: 32,
                 unfinished_retention_secs: 0.0,
+                forecast: None,
             },
             last: None,
             refusal: None,

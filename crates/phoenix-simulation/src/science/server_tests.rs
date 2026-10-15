@@ -624,6 +624,90 @@ fn the_reading_is_published_under_the_scan_blackboard_channel() {
     assert_eq!(reading.condition_step, 0.01);
 }
 
+#[test]
+fn forecasts_use_only_retained_readings_and_rebuild_after_derived_board_loss() {
+    let (mut app, ship) = app_with(suite(), 80.0, 200.0);
+    ask_for_scan(&mut app, ship, DEPOT);
+    step(&mut app);
+    let first = app.world().get::<ShipScanRecord>(ship).unwrap().0[&SystemId("sensors".into())]
+        .last
+        .clone()
+        .unwrap();
+    let depot = app
+        .world_mut()
+        .query::<(Entity, &EntityUuid)>()
+        .iter(app.world())
+        .find_map(|(entity, id)| (id.0 == DEPOT).then_some(entity))
+        .unwrap();
+    app.world_mut()
+        .entity_mut(depot)
+        .insert(depot_condition(60.0));
+    ask_for_scan(&mut app, ship, DEPOT);
+    step(&mut app);
+    let board = |app: &App| match &app
+        .world()
+        .get::<crate::server_app::ShipSystemBlackboards>(ship)
+        .unwrap()
+        .0[&scan_key()]
+    {
+        SystemBlackboard::Scan(board) => board.clone(),
+        _ => panic!("actual scan projection"),
+    };
+    let observed = board(&app);
+    let answer = observed
+        .reading
+        .as_ref()
+        .unwrap()
+        .forecast
+        .as_ref()
+        .unwrap();
+    assert_eq!(answer.sample_ticks[0], first.taken_at_tick);
+    assert_eq!(
+        answer.sample_ticks[1],
+        observed.reading.as_ref().unwrap().taken_at_tick
+    );
+    assert_eq!(answer.horizon_secs, 120.0);
+    // Changing actual state without another enquiry cannot improve/change this
+    // forecast, and losing only the derived projection must rebuild identically.
+    app.world_mut()
+        .entity_mut(depot)
+        .insert(depot_condition(99.0));
+    app.world_mut()
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(ship)
+        .unwrap()
+        .0
+        .remove(&scan_key());
+    app.world_mut()
+        .run_system_once(publish_scan_blackboard)
+        .unwrap();
+    assert_eq!(board(&app), observed);
+    // The issued projection is canonical evidence, even if its input sample is
+    // later pruned from bounded history. It is not recomputed after the fact.
+    let saved = app.world().get::<ShipScanRecord>(ship).unwrap().0[&SystemId("sensors".into())]
+        .save_state();
+    let mut pruned = saved.clone();
+    pruned.history.remove(0);
+    app.world_mut()
+        .get_mut::<ShipScanRecord>(ship)
+        .unwrap()
+        .0
+        .get_mut(&SystemId("sensors".into()))
+        .unwrap()
+        .restore(&pruned);
+    app.world_mut()
+        .run_system_once(publish_scan_blackboard)
+        .unwrap();
+    assert_eq!(board(&app).reading, observed.reading);
+    let mut invalid = pruned;
+    invalid.history[0].forecast.as_mut().unwrap().ranges[0].upper = f64::INFINITY;
+    invalid.last = invalid.history.last().cloned();
+    assert!(
+        app.world().get::<ShipScanRecord>(ship).unwrap().0[&SystemId("sensors".into())]
+            .validate_state(&invalid, u64::MAX)
+            .is_err()
+    );
+}
+
 /// A refusal reaches the wire as its own `strings.csv` id.
 #[test]
 fn a_refusal_is_published_as_a_string_id_rather_than_as_prose() {

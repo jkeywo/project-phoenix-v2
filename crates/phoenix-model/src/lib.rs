@@ -32,6 +32,7 @@ pub mod production_ui;
 pub mod recovery;
 pub mod recovery_ui;
 pub mod sensing;
+pub mod sensing_forecast;
 pub mod sensing_tracks;
 
 pub mod logistics_ui;

@@ -1,3 +1,4 @@
+pub mod forecast;
 pub mod scan;
 pub mod sensing;
 pub mod sensing_ai;

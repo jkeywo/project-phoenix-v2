@@ -36,11 +36,37 @@ impl FocusedScanRecord {
         }) {
             return Err("recorded scan names an unsupported instrument fidelity".into());
         }
+        if saved
+            .history
+            .iter()
+            .filter_map(|reading| reading.forecast.as_ref())
+            .any(|forecast| {
+                policy
+                    .forecast
+                    .as_ref()
+                    .is_none_or(|policy| policy.horizon_secs != forecast.horizon_secs)
+            })
+        {
+            return Err("recorded forecast disagrees with accepted instrument policy".into());
+        }
         Ok(())
     }
     /// The latest screen is a projection of this owner's retained readings.
     /// A refusal may clear that screen without erasing earlier evidence.
-    pub(crate) fn remember(&mut self, reading: ScanReading, limit: usize) {
+    pub(crate) fn remember(&mut self, mut reading: ScanReading, limit: usize, tick_secs: f64) {
+        reading.forecast = self.policy.forecast.as_ref().and_then(|policy| {
+            let history: Vec<_> = self
+                .history
+                .iter()
+                .map(crate::core::messages::scan_reading_snapshot_from_reading)
+                .collect();
+            phoenix_sim_gameplay::science::forecast::derive(
+                &history,
+                &crate::core::messages::scan_reading_snapshot_from_reading(&reading),
+                policy,
+                tick_secs,
+            )
+        });
         if !self.history.iter().any(|held| held == &reading) {
             self.history.push(reading.clone());
             if self.history.len() > limit {
@@ -81,6 +107,9 @@ pub(crate) fn validate(
             return Err("invalid recorded scan sample frontier".into());
         }
         previous = reading.taken_at_tick;
+        if let Some(forecast) = &reading.forecast {
+            forecast.validate(reading.taken_at_tick, &reading.capacities)?;
+        }
     }
     if saved
         .last

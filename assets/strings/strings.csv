@@ -5730,3 +5730,6 @@ workshop.sensing.remove-instrument,Workshop sensing editor,Remove instrument,Ins
 workshop.sensing.combat_lock,Workshop sensing editor,Combat lock controller,Kampfzielsteuerung,Combat lock controller,machine
 workshop.sensing.science_target,Workshop sensing editor,Science designation controller,Wissenschaftliche Zielsteuerung,Science designation controller,machine
 component.scan.instrument,Focused enquiry picker,Instrument,Instrument,Instrument,machine
+component.scan.forecast.heading,Conditional scan forecast,[Conditional forecast +{seconds}s from samples {first}–{last}],,,
+component.scan.forecast.linear,Conditional scan forecast,[Assumes the recent observed trend continues; changed causes can invalidate this forecast.],,,
+component.scan.forecast.quantisation,Conditional scan forecast,[Condition ranges include measurement precision; resource changes use observed net flow only.],,,

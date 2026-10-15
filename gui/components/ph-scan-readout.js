@@ -309,6 +309,28 @@ export class PhScanReadout extends PhElement {
         rows.appendChild(this.#row(t(label), String(amount), false));
       }
       body.appendChild(rows);
+      const forecast = reading.forecast;
+      if (forecast && Array.isArray(forecast.ranges) && Array.isArray(forecast.sample_ticks)) {
+        const section = this.ownerDocument.createElement('div');
+        section.className = 'forecast';
+        const heading = this.ownerDocument.createElement('div');
+        heading.textContent = t('component.scan.forecast.heading', { seconds: forecast.horizon_secs,
+          first: forecast.sample_ticks[0], last: forecast.sample_ticks[1] });
+        section.append(heading);
+        for (const range of forecast.ranges) {
+          if (!Number.isFinite(range.lower) || !Number.isFinite(range.upper)) continue;
+          const isCondition = range.quantity?.kind === 'condition';
+          if (!isCondition && range.quantity?.kind !== 'capacity') continue;
+          const value = isCondition
+            ? `${Math.floor(range.lower * 1000) / 10}–${Math.ceil(range.upper * 1000) / 10}%`
+            : `${Math.floor(range.lower)}–${Math.ceil(range.upper)}`;
+          section.append(this.#row(isCondition ? t('component.scan.condition') : wireText(range.quantity.label), value, false));
+        }
+        for (const assumption of forecast.assumptions || []) {
+          const line = this.ownerDocument.createElement('div'); line.textContent = t(assumption); section.append(line);
+        }
+        body.append(section);
+      }
       const details = observationDetails(this.ownerDocument, reading.observation, scan.observation_tick,
         Number.isFinite(reading.condition_fraction) ? { condition_fraction: 'component.scan.condition' } : {});
       details.dataset.subject = reading.subject_uuid || ''; details.open = !!detailsOpen; body.appendChild(details);

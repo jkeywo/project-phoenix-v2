@@ -25,6 +25,8 @@ system = "sensors"
 work_secs = 2
 history_limit = 64
 unfinished_retention_secs = 0
+# Provisional forecast horizon: conditional on the last observed trend continuing.
+forecast = { horizon_secs = 120 }
 
 [[sensing.broad]]
 system = "sensor-radar"

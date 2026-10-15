@@ -500,6 +500,9 @@ impl ScanRefusal {
 /// Every string is a `strings.csv` id; no English crosses the wire.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ScanReading {
+    /// Issued once with this reading, retained with its original assumptions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forecast: Option<phoenix_model::sensing_forecast::ScanForecast>,
     /// The subject's UUID — the row key a dossier comparison joins on.
     pub subject_uuid: String,
     /// Public presentation identity retained at sampling; never resolve it from future truth.
@@ -678,6 +681,7 @@ pub fn derive(
     let mass_class = config.mass_class_for(subject.mass);
 
     Ok(ScanReading {
+        forecast: None,
         contact_id: None,
         subject_uuid: subject.uuid.clone(),
         subject_name: subject.name.clone(),

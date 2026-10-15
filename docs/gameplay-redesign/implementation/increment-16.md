@@ -296,6 +296,66 @@ read-only runtime review by the craft lane passed. Native compilation, actual
 three-endpoint tests and host continuation are pending integrator execution;
 this is not a playable exit or balance acceptance.
 
+## Adopted planned Report Status initiation and retained delivery
+
+The first planner communication consumer reuses actual Report Status rather than
+creating a communication Job. A World-authored released, unaccepted request names
+an issuing actor, actual Comms System, channel and declared base-World recipient.
+Simulation may resolve that authored reference privately, but publishes a typed
+`planned_requests` row only when the same UUID already exists in the issuing
+Console's current permitted Comms contact view. Each row contains the Situation
+identity, original release tick, already-known recipient UUID, supported channel
+and closed request kind. Missing contacts withhold execution without revealing a
+private route or granting a contact. Slot-relative recipients are explicitly
+unsupported in this first join.
+
+The Human uses ordinary correlated `SendCommsRequest`, with an optional
+`planned_request` identity selected from that publication. The existing Comms
+response decision host gains a closed `comms_request` policy output for the same
+own published request; it uses the existing per-System gate, authored policy and
+cadence. It emits that same admitted command. There is no new System controller,
+private AI latch, World automatic send or change to legacy plot weighted draws.
+First selection is stable released-tick/identity order. Human or absent policy
+stands ordinary AI down; invalid/unavailable requests hold under ordinary rules.
+
+Before payment the radio consumer revalidates the exact current published row,
+recipient knowledge, channel/kind and released unaccepted Situation binding.
+The World adapter returns an exclusive prepared acceptance token without writing.
+Failed operation/knowledge/payment drops it unchanged. Actual successful discrete
+emission creates the canonical source inbox record and binds the consumed token
+in the same transaction to a typed actual transmission scope: issuing actor,
+Comms owner, minted origin identity, actual recipient and original emission tick.
+It does not mint a JobId, an imagined receipt or a permission effect. Accepted
+work leaves the unaccepted request publication, so there is no second AI latch.
+
+Only this validated planned Contact request sets immutable `sustained=true` on
+its original transmission. Its same retained source inbox copy retries delivery
+through current paid continuous radio operation and actual compatible physical
+routes. It pays discrete emission once; stable original/recipient copy identity
+prevents repeat delivery/read/decision effects. No secondary queue, retry credit,
+transport acknowledgement, hidden-receiver feedback or message capacity exists.
+Manual generic requests and text retain their existing one-shot delivery;
+returned Outcomes retain their existing sustained service. Clearing structured
+history still dismisses without cancelling work or deleting lineage.
+
+World may acknowledge original reading/report facts only after the issuing actor
+actually hears a matching returned Outcome, using its already-established scoped
+lineage and original read/report ticks plus the actual return receipt tick. A
+Completed report can also carry reading evidence when no separate Read-only
+receipt was emitted. Neither a report nor acknowledgement grants permission;
+only an explicitly authored subsequent Scenario effect may do that. Full snapshot
+preflight binds every sustained planned request to its exact accepted transmission
+and accepted authored Situation before any write. Typed physical Job and
+communication transmission execution remain distinct variants of the existing
+activity owner, with no copied job or remote-private progress census.
+
+The first proof must run ordinary AI initiation and Human initiation through
+normal admission, real paid relay/link loss and recovery, original-clock returned
+evidence, explicit permission and hazard consequences, fresh JSON continuation
+for 360 complete capture/digest steps and malformed-context no-write refusals.
+Authoring, browser, different-LocalShip and measured workload evidence remain
+separate from this adoption and source integration.
+
 ## Ordered implementation and parallel seams
 
 1. **Shared threads and equipment links.** Preserve actual current hails/dialogue;

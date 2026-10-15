@@ -87,3 +87,16 @@ entities:
         - "[ai] First slice requires matching authored channel and actually held matching protection key at each endpoint. Intermediate endpoints explicitly opt in; each hop reuses actual range, terrain, fields, jammer and exact receiver protection. Stable UUID order resolves equal-hop choices and visited identities exclude cycles. Opaque keyless forwarding and captured decoding remain later consumers."
         - "[ai] Same continuous radio work funds forwarding without per-message fees, bandwidth pools, route caches, reservations or a second controller. Text and initial requests remain one-shot; retained returned outcomes reuse existing sustained retry without repeated discrete emission or repeated decisions. Address eligibility concerns only original source and final recipient."
         - "[ai] Author through the existing accepted radio/history flow. Optional relay Cruiser preserves base resources. Actual three-endpoint loss, incompatible-key, cycle/tie and continuation evidence is required; source integration does not close increment 16."
+
+  - decision: redesign-comms-planned-status-request-consumer
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Planned Status Work Uses Actual Comms Initiation and Returned Evidence
+      summary: "A released World communication primitive appears only through the issuing Console's already-known recipient contact. Human and the existing Comms decision host send the same admitted paid ReportStatus with a validated optional Situation context; acceptance binds an actual transmission identity, never a fabricated JobId or receipt."
+      rationale:
+        - "[ai] Typed planned rows retain instance/release tick/known contact/channel/request. Before payment validate exact own publication and unaccepted World binding through an exclusive prepared token; successful source inbox emission and token consumption commit together. Missing contact or failed payment creates no acceptance. First recipient is an explicitly supported declared base-World actor; unsupported slot references refuse."
+        - "[ai] Extend the SAME existing authored per-System Comms policy/cadence with a closed request output. Stable release/identity ordering and normal command admission apply, Human/undeclared AI holds, legacy plot weighted draw order stays unchanged, and no private initiation latch/controller is created."
+        - "[ai] Only validated planned Contact requests set sustained=true. Their canonical retained sent copy retries through actual continuously paid compatible physical routes, one discrete emission and stable deduplicated recipient copy. Source feedback/payment never depends on hidden delivery. Manual requests/text remain one-shot and Outcomes retain existing sustained service. No retry queue or message capacity."
+        - "[ai] Only actually heard matching Outcome evidence may advance original read/report facts. Reports are not permission; later explicitly authored Scenario effects own that consequence. Complete candidate validation binds sustained emissions and typed communication execution to their immutable accepted Situation and actual lineage before writes. Native 360-step/peer, Human/AI, relay-loss, hazard/permission and authoring evidence remains required."

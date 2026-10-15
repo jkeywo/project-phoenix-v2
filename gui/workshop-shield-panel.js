@@ -1,6 +1,6 @@
 import { t } from './strings.js';
 import { runWorkshopMutation } from './workshop-edit-session.js';
-import { inspectShields, applyShieldOperation, defaultShieldArc, SHIELD_ENERGY_FIELDS } from '../editor/workshop-shields.js';
+import { inspectShields, applyShieldOperation, applyShieldFrequencyOperation, defaultShieldArc, SHIELD_ENERGY_FIELDS } from '../editor/workshop-shields.js';
 import { shieldArcSystemId } from '../editor/workshop-generated-systems.js';
 
 /** Authored shield work and recovery bindings use the ordinary draft transaction. */
@@ -20,18 +20,22 @@ export function mountWorkshopShields({ root, provider, runtime, draft: getDraft,
   const fields = Object.fromEntries(['id', 'label', 'center_deg', 'width_deg', 'max_hp', 'regen_per_sec', 'offline_duration']
     .map(key => [key, input(key, ['id', 'label'].includes(key) ? 'text' : 'number')]));
   const work = Object.fromEntries(SHIELD_ENERGY_FIELDS.map(key => [key, input(key)]));
+  const loss=input('mismatch-loss'), cycling=input('cycling','checkbox'), frequencies=input('frequencies','text'), period=input('cycle-period');
+  const frequencySave=el('button','frequency-save','workshop.shield.frequency_save',{type:'button'});
   node.append(el('h3', null, 'workshop.shield.title'), el('p', null, 'workshop.shield.hint'),
     label(template, 'workshop.shield.template'), label(existing, 'workshop.shield.existing'), create,
     label(materialise, 'workshop.shield.materialise'), status,
     ...Object.entries(fields).map(([key, control]) => label(control, 'workshop.shield.' + key)),
     ...Object.entries(work).map(([key, control]) => label(control, 'workshop.shield.' + key)),
     label(targets, 'workshop.shield.targets'), label(compartment, 'workshop.interior.placement'), label(resetAi, 'workshop.shield.reset_ai'), save, remove);
+  node.append(el('h4',null,'workshop.shield.frequency_title'),label(loss,'workshop.shield.mismatch_loss'),label(cycling,'workshop.shield.cycling'),
+    label(frequencies,'workshop.shield.frequencies'),label(period,'workshop.shield.cycle_period'),frequencySave);
   if (attach) root.append(node);
   let dependencies = null, inspection = null, selected = null, observed = null;
   let loading = false, disposed = false, generation = 0;
   function controls() {
     for (const control of node.querySelectorAll('input,select,button')) control.disabled = disposed || loading || busy() || !inspection;
-    fields.id.disabled ||= !!selected; remove.disabled ||= !selected;
+    fields.id.disabled ||= !!selected; remove.disabled ||= !selected; frequencySave.disabled ||= !inspection?.arcs?.length;
   }
   function paint(arc = selected || defaultShieldArc()) {
     for (const [key, control] of Object.entries(fields)) control.value = arc[key] ?? '';
@@ -55,6 +59,9 @@ export function mountWorkshopShields({ root, provider, runtime, draft: getDraft,
     if (!template.value) { inspection = null; controls(); return; }
     try {
       inspection = inspectShields(draft, dependencies, template.value); observed = revision;
+      const policy=inspection.resolved.value.shields_console;
+      loss.value=policy?.frequency_response?.mismatch_loss ?? .5; cycling.checked=!!policy?.frequency_cycle;
+      frequencies.value=policy?.frequency_cycle?.frequencies?.join(', ') || ''; period.value=policy?.frequency_cycle?.period_secs ?? '';
       const previousArc = selected?.id; existing.replaceChildren();
       for (const arc of inspection.arcs) option(existing, arc.id, arc.label || arc.id);
       if (inspection.arcs.some(arc => arc.id === previousArc)) existing.value = previousArc;
@@ -86,6 +93,15 @@ export function mountWorkshopShields({ root, provider, runtime, draft: getDraft,
       error: error => { status.textContent = t('workshop.shield.refused', { reason: error.report?.findings?.[0]?.message || error.message }); }, release: controls });
   }
   save.addEventListener('click', () => void apply()); remove.addEventListener('click', () => void apply(true));
+  frequencySave.onclick=()=>{
+    if(busy() || !inspection)return;
+    const token=++generation,operation={path:template.value,materialise:materialise.checked,value:{response:{mismatch_loss:loss.valueAsNumber},
+      cycle:cycling.checked?{frequencies:frequencies.value.split(',').map(value=>value.trim()===''?NaN:Number(value)),period_secs:period.valueAsNumber}:false}};
+    void runWorkshopMutation({setBusy,current:()=>!disposed&&token===generation,start:controls,
+      invoke:()=>applyShieldFrequencyOperation({draft:getDraft(),provider,runtime,dependencies,operation,current:()=>!disposed&&token===generation}),
+      success:()=>{changed(operation.path);inspect(true);status.textContent=t('workshop.changed');},
+      error:error=>{status.textContent=t('workshop.shield.refused',{reason:error.report?.findings?.[0]?.message||error.message});},release:controls});
+  };
   create.addEventListener('click', () => { selected = null; existing.selectedIndex = -1; paint(); status.textContent = t('workshop.shield.new'); });
   existing.addEventListener('change', select); template.addEventListener('change', () => { selected = null; inspect(true); });
   inspect(); void load();

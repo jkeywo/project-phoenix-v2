@@ -48,6 +48,12 @@ aim = "anomaly"
 work_multiplier = 2
 resource_multiplier = 1
 
+# [ai] Optional shield enquiry uses this same paid slot; General stays default.
+[[sensing.focused.aims]]
+aim = "shields"
+work_multiplier = 2
+resource_multiplier = 1
+
 [[sensing.broad]]
 reading_ticks = 120
 system = "sensor-radar"

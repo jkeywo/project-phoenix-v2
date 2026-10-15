@@ -26,6 +26,7 @@ pub mod focused_enquiry;
 pub mod interior;
 pub mod job;
 pub mod logistics;
+pub mod navigation_sharing;
 pub mod ports;
 pub mod ports_ui;
 pub mod production;
@@ -37,7 +38,7 @@ pub mod sensing_forecast;
 pub mod sensing_references;
 pub mod sensing_sharing;
 pub mod sensing_tracks;
-pub mod navigation_sharing;
+pub mod shield_enquiry;
 
 pub mod logistics_ui;
 pub mod turret;

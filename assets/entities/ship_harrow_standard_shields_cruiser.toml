@@ -1,0 +1,12 @@
+# Explicit ordinary-response comparison; existing Harrow hulls are unchanged.
+includes = ["ship_harrow_cruiser.toml"]
+name = "entity.harrow_standard_shields_cruiser.name"
+
+# [ai] Provisional ordinary response: at most an eleven-percent tuning gain.
+[shields_console.frequency_response]
+mismatch_loss = 0.1
+
+[[enquiry_observation.property]]
+property = { kind = "shield_frequency" }
+normal = true
+step = 0.01

@@ -1395,7 +1395,10 @@ impl EnquiryPhase {
 }
 
 pub fn valid_enquiry_aim(value: &str) -> bool {
-    matches!(value, "general" | "environment" | "resources" | "anomaly")
+    matches!(
+        value,
+        "general" | "environment" | "resources" | "anomaly" | "shields"
+    )
 }
 
 /// A condition that a trigger can check against incoming world events.

@@ -59,7 +59,7 @@ describe('Workshop structured sensing controls', () => {
     draft.undo();panel.refresh();expect(control('focused-forecast-horizon').value).toBe('120');panel.dispose();
   });
   it('authors subject permissions through acceptance and keeps refused edits out of history',async()=>{
-    const {draft,runtime,panel}=fixture(false,false,value=>{value.shape={type:'sphere',radius:10};value.infrastructure={condition_max:100,publish:false,capacity:[{id:'supplies',amount:5,label:'component.scan.quantity.resource_units'}]};});
+    const {draft,runtime,panel}=fixture(false,false,value=>{delete value.enquiry_observation;value.shape={type:'sphere',radius:10};value.infrastructure={condition_max:100,publish:false,capacity:[{id:'supplies',amount:5,label:'component.scan.quantity.resource_units'}]};});
     await settle();const before=parse(draft.read(path));control('observation-add').click();
     control('observation-0-property').value='capacity:supplies';control('observation-0-intrusive').checked=true;control('observation-save').click();await settle();
     const accepted=draft.read(path);expect(parse(accepted).enquiry_observation).toEqual({property:[{property:{kind:'capacity',capacity:'supplies'},normal:false,intrusive:true,point:'receiver',step:1}]});

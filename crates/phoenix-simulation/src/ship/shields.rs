@@ -37,6 +37,7 @@ impl Plugin for ShipShieldsPlugin {
                 ),
         );
         register_shields_replication_lifecycle(app);
+        crate::ship::shield_enquiry::declare(app);
         app.add_message::<CoordinationEnqueue>()
             .add_message::<DeliveredCoordination>()
             .init_resource::<ShieldsAiConfigResource>()
@@ -58,7 +59,8 @@ impl Plugin for ShipShieldsPlugin {
                         .in_set(crate::sim_sets::SimSet::Input),
                     // Shared power intake runs before paid shield work, which
                     // completes before projectiles resolve this tick.
-                    tick_shields
+                    (crate::ship::shield_enquiry::tick, tick_shields)
+                        .chain()
                         .in_set(crate::sim_sets::FixedStep::TickShields)
                         .in_set(crate::sim_sets::SimSet::Physics)
                         .after(crate::sim_sets::FixedStep::TickPowerSystem)

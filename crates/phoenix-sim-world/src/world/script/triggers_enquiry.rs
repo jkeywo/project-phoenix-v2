@@ -32,7 +32,9 @@ fn condition(entity: &str, mut options: Map) -> Result<TriggerCondition, String>
         .as_deref()
         .is_some_and(|value| !valid_enquiry_aim(value))
     {
-        return Err("on_enquiry aim must be general, environment, resources or anomaly".into());
+        return Err(
+            "on_enquiry aim must be general, environment, resources, anomaly or shields".into(),
+        );
     }
     let phase = optional_text(&mut options, "phase")?
         .map(|value| {

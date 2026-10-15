@@ -327,32 +327,14 @@ pub fn handle_sensors_messages(
     }
 }
 
-/// Emit a channel-3 `FrequencyHint` coordination message to Tactical whenever
-/// each ship's locked target changes.
-///
-/// Iterates every ship (player + NPC) so NPC Sensors→Tactical hints flow
-/// through the coordination bus alongside the player's. Each emission
-/// stamps its source ship so the enqueue handler routes it correctly.
-///
-/// # Which ships this system serves
-///
-/// Ships that do NOT carry `AiHighFidelity`. High-fidelity ships hand off to
-/// `console_ai::server::tick_frequency_hint_high_fidelity`, which routes the
-/// same authoritative reading through `console_ai::tick_frequency_hint`'s
-/// operator reaction-delay model instead of this system's immediate readout.
-///
-/// That split is a **level-of-detail** split, and since issue #873 it is
-/// nothing else. It used to also require the ship's Sensors to be
-/// `operate_ai`, which made the hint's existence, content and timing depend on
-/// *who was holding the console* — the exact human/AI branch downstream of
-/// admission that AGENTS.md rule 6 forbids, and the reason a human on Sensors
-/// fed a different bus than the AI did. Whoever holds Sensors, the ship emits
-/// the same fact at the same moment from the same authoritative state; only the
-/// simulation fidelity of the hull decides which of the two models produces it,
-/// and `sender_origin` below is a routing tag stamped after that decision, never
-/// an input to it.
+/// Deliver an existing explicitly permitted acquired shield finding. Low LOD
+/// never substitutes target truth for paid focused work. Retained evidence is
+/// shared by human and AI holders; this adapter only deduplicates advisories.
 pub fn tick_sensors_frequency_hint(
-    funded: Query<&crate::ship::power::ShipPowerSystem>,
+    pictures: Query<(
+        Option<&crate::science::broad::BroadTracks>,
+        Option<&crate::science::broad::SensingControls>,
+    )>,
     contact_runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     mut ship_q: Query<
         (
@@ -367,10 +349,6 @@ pub fn tick_sensors_frequency_hint(
         With<crate::server_app::Ship>,
     >,
     mut writer: MessageWriter<CoordinationEnqueue>,
-    target_shields_q: Query<(
-        &crate::entities::spawner::EntityUuid,
-        &crate::ship::shields::ShipShields,
-    )>,
 ) {
     for (
         entity,
@@ -388,21 +366,14 @@ pub fn tick_sensors_frequency_hint(
         if is_high_fidelity {
             continue;
         }
-        if phoenix_sim_gameplay::ship::energy_work::fraction_for_kind(
-            funded.get(entity).ok().map(|power| &power.0),
-            crate::ship::system_registry::SENSOR_RADAR_KIND,
-        ) <= 0.0
-        {
+        let (tracks, controls) = pictures.get(entity).unwrap_or((None, None));
+        let Some(owner) = crate::science::broad::science_owner(controls, tracks.is_some()) else {
             continue;
-        }
-
+        };
         // Frozen Combat Lock from this ship's viewscreen (issue #829, spec §3).
         let combat_lock = match ship_config
             .0
-            .observations_for_system(
-                &crate::ship::system_registry::sensors_system_id(),
-                &blackboards.0,
-            )
+            .observations_for_system(&owner, &blackboards.0)
             .get(&crate::ship::system_registry::viewscreen_system_id())
         {
             Some(SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
@@ -434,17 +405,25 @@ pub fn tick_sensors_frequency_hint(
             state.last_sent_frequency = None;
             continue;
         }
-        // Look up the target entity's shield frequency; fall back to 0.5.
-        let frequency = target_shields_q
-            .iter()
-            .find_map(|(uuid, shields)| {
-                if uuid.0 == current_target {
-                    Some(shields.frequency())
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(0.5);
+        let Some(public_target) = crate::science::contact_routing::alias_for_source(
+            &ship_config.0,
+            blackboards,
+            tracks,
+            &owner,
+            &current_target,
+        ) else {
+            continue;
+        };
+        let Some(finding) = crate::science::shield_enquiry::latest_permitted_finding(
+            &ship_config.0,
+            blackboards,
+            &owner,
+            &public_target,
+        ) else {
+            continue;
+        };
+        let frequency = finding.frequency;
+        let current_target = public_target;
 
         let target_changed = state.last_sent_target.as_deref() != Some(&current_target);
         let frequency_changed = state.last_sent_frequency != Some(frequency);
@@ -456,13 +435,12 @@ pub fn tick_sensors_frequency_hint(
         state.last_sent_target = Some(current_target);
         state.last_sent_frequency = Some(frequency);
 
-        let sender_origin = control_sources
-            .0
-            .source_for(&crate::ship::system_registry::sensors_system_id());
+        let sender_origin = control_sources.0.source_for(&owner);
 
         let Some(address) = crate::ship::coordination::address_for_system(
             &ship_config.0,
-            &crate::ship::system_registry::tactical_radar_system_id(),
+            &crate::science::broad::combat_owner(controls, tracks.is_some())
+                .unwrap_or_else(crate::ship::system_registry::tactical_radar_system_id),
         ) else {
             continue;
         };
@@ -477,7 +455,7 @@ pub fn tick_sensors_frequency_hint(
             )
             .with_body_param("frequency", frequency),
             sender_label: crate::ship::coordination::CHATTER_SENDER_SENSORS.to_string(),
-            sender_system: crate::ship::system_registry::sensors_system_id(),
+            sender_system: owner,
         });
     }
 }

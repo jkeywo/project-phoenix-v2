@@ -2,11 +2,31 @@ use super::*;
 use bevy::ecs::system::RunSystemOnce;
 
 fn rig(shared: bool, withhold: bool) -> (App, Entity, String) {
+    rig_with_aim(
+        shared,
+        withhold,
+        phoenix_model::focused_enquiry::FocusedAim::General,
+    )
+}
+fn rig_with_aim(
+    shared: bool,
+    withhold: bool,
+    aim: phoenix_model::focused_enquiry::FocusedAim,
+) -> (App, Entity, String) {
     let mut config = crate::entities::include_resolve::load_entity_config(
         "assets/entities/alliance_cruiser.toml",
     )
     .unwrap();
     crate::science::test_support::clone_instrument(&mut config, "sensors", "focused-two");
+    config
+        .sensing
+        .as_mut()
+        .unwrap()
+        .focused
+        .iter_mut()
+        .find(|row| row.system.0 == "focused-two")
+        .unwrap()
+        .default_aim = aim;
     if !shared {
         let ship = config.ship_config.as_mut().unwrap();
         ship.systems
@@ -41,6 +61,11 @@ fn rig(shared: bool, withhold: bool) -> (App, Entity, String) {
                 ("value".into(), toml::Value::Boolean(false)),
             ]));
     }
+    phoenix_sim_gameplay::science::sensing::validate_sensing(
+        config.sensing.as_ref().unwrap(),
+        &config,
+    )
+    .unwrap();
     let mut app = App::new();
     app.insert_resource(crate::sim_tick::SimTick(1))
         .insert_resource(crate::lobby::Sessions(
@@ -111,6 +136,22 @@ fn rig(shared: bool, withhold: bool) -> (App, Entity, String) {
         );
     }
     (app, observer, alias)
+}
+
+#[test]
+fn optional_shield_equipment_uses_the_same_ordinary_tree_and_admitted_scan_command() {
+    let (mut app, observer, alias) = rig_with_aim(
+        true,
+        false,
+        phoenix_model::focused_enquiry::FocusedAim::Shields,
+    );
+    app.update();
+    let commands = &app.world().get::<AdmittedCommands>(observer).unwrap().0;
+    assert_eq!(commands.len(), 1);
+    assert!(
+        matches!(&commands[0].payload,SystemControlPayload::ScanTarget{uuid,aim:phoenix_model::focused_enquiry::FocusedAim::Shields,intrusive:false} if uuid==&alias)
+    );
+    assert_eq!(commands[0].target, SystemId("focused-two".into()));
 }
 
 #[test]

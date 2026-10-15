@@ -51,6 +51,7 @@ export function mountWorkshopSensing({ root, provider, runtime, draft: getDraft,
   }
   function observationChoices() {
     const value=inspection.resolved.value, choices=[];
+    if (value.shield_arc?.length) choices.push(['shield_frequency',t('component.scan.shields.frequency')]);
     if (value.shape) {
       choices.push(['field_exposure',t('component.scan.quantity.field_exposure')]);
       for (const effect of enquiryEffects) choices.push(['effect:'+effect,t('component.scan.effect.'+effect)]);
@@ -60,7 +61,7 @@ export function mountWorkshopSensing({ root, provider, runtime, draft: getDraft,
   }
   function addObservation(value={}) {
     const key=observationSequence++, group=el('fieldset'), property=el('select','observation-'+key+'-property');
-    const selected=value.property?.kind==='capacity' ? 'capacity:'+value.property.capacity : value.property?.kind==='effect_signature' ? 'effect:'+value.property.effect : 'field_exposure';
+    const selected=value.property?.kind==='capacity' ? 'capacity:'+value.property.capacity : value.property?.kind==='effect_signature' ? 'effect:'+value.property.effect : value.property?.kind || 'field_exposure';
     const choices=observationChoices(); fill(property,choices.map(([id])=>id),selected);
     for (const option of property.options) option.textContent=choices.find(([id])=>id===option.value)?.[1] || '';
     const normal=input('observation-'+key+'-normal','checkbox'), intrusive=input('observation-'+key+'-intrusive','checkbox');

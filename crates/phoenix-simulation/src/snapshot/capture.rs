@@ -1429,6 +1429,7 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                     port_provider: entity
                         .get::<crate::resources::ports_server::PortProviderState>()
                         .map(|owner| owner.0.clone()),
+                    shield_frequency: super::shield_enquiry::capture(entity),
                     region_field: entity
                         .get::<crate::regions::field::RegionFieldState>()
                         .cloned(),

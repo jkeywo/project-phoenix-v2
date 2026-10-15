@@ -666,7 +666,7 @@ pub fn tick_scans(
                     now_tick,
                     dt,
                 );
-                let reading = phoenix_sim_gameplay::science::scan::derive_enquiry(
+                let reading = phoenix_sim_gameplay::science::scan::derive_enquiry_with_shield(
                     &record.config,
                     &subject,
                     &conditions,
@@ -674,6 +674,9 @@ pub fn tick_scans(
                     work.intrusive,
                     quantities,
                     now_tick,
+                    (work.aim == phoenix_model::focused_enquiry::FocusedAim::Shields)
+                        .then(|| enquiries.sample_shields(target_uuid, work.intrusive))
+                        .flatten(),
                 );
                 match reading {
                     Ok(mut reading) => {

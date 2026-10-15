@@ -500,6 +500,8 @@ impl ScanRefusal {
 /// Every string is a `strings.csv` id; no English crosses the wire.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ScanReading {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shield_finding: Option<phoenix_model::shield_enquiry::ShieldFinding>,
     pub aim: phoenix_model::focused_enquiry::FocusedAim,
     pub intrusive: bool,
     pub quantities: Vec<phoenix_model::focused_enquiry::ScanQuantity>,
@@ -667,6 +669,7 @@ pub fn derive(
     let mass_class = config.mass_class_for(subject.mass);
 
     Ok(ScanReading {
+        shield_finding: None,
         aim: Default::default(),
         intrusive: false,
         quantities: Vec::new(),
@@ -729,14 +732,54 @@ pub fn derive_enquiry(
     quantities: Vec<phoenix_model::focused_enquiry::ScanQuantity>,
     now_tick: u64,
 ) -> Result<ScanReading, ScanRefusal> {
+    derive_enquiry_with_shield(
+        config, subject, conditions, aim, intrusive, quantities, now_tick, None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn derive_enquiry_with_shield(
+    config: &ScanConfig,
+    subject: &ScanSubject,
+    conditions: &ScanConditions,
+    aim: phoenix_model::focused_enquiry::FocusedAim,
+    intrusive: bool,
+    quantities: Vec<phoenix_model::focused_enquiry::ScanQuantity>,
+    now_tick: u64,
+    shield_finding: Option<phoenix_model::shield_enquiry::ShieldFinding>,
+) -> Result<ScanReading, ScanRefusal> {
     use phoenix_model::focused_enquiry::{FocusedAim, ScanQuantityKind};
     if aim == FocusedAim::General {
+        if shield_finding.is_some() {
+            return Err(ScanRefusal::NoReadableCondition);
+        }
         let mut reading = derive(config, subject, conditions, now_tick)?;
         reading.intrusive = intrusive;
         return Ok(reading);
     }
     let mut labels = std::collections::BTreeSet::new();
-    if quantities.is_empty()
+    if aim == FocusedAim::Shields {
+        let finding = shield_finding
+            .filter(|finding| finding.validate().is_ok())
+            .ok_or(ScanRefusal::NoReadableCondition)?;
+        if !quantities.is_empty() {
+            return Err(ScanRefusal::NoReadableCondition);
+        }
+        let band = answering_band(config, conditions)?;
+        return Ok(ScanReading {
+            aim,
+            intrusive,
+            shield_finding: Some(finding),
+            subject_uuid: subject.uuid.clone(),
+            subject_name: subject.name.clone(),
+            band: band.id.clone(),
+            band_label: band.label.clone(),
+            taken_at_tick: now_tick,
+            ..Default::default()
+        });
+    }
+    if shield_finding.is_some()
+        || quantities.is_empty()
         || quantities.iter().any(|row| {
             row.validate().is_err()
                 || !labels.insert((row.kind, &row.label))

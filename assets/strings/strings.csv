@@ -5833,3 +5833,15 @@ semantic_action.weapon_targets.primary.label,Weapon assignments,Follow primary C
 semantic_action.weapon_targets.primary.accessibility,Weapon assignments,Follow primary Combat Lock,Primaerer Zielerfassung folgen,Follow primary Combat Lock,machine
 weapons.assignments.read_only,Weapon assignment read-only summary,Read only,Schreibgeschuetzt,Read only,machine
 weapons.assignments.override,Weapon individual override summary,Override: {target},Einzelziel: {target},Override: {target},machine
+component.scan.aim.shields,Shield enquiry and equipment,Shield enquiry,Schilduntersuchung,Shield enquiry,machine
+component.scan.shields.frequency,Shield enquiry and equipment,Acquired shield frequency,Ermittelte Schildfrequenz,Acquired shield frequency,machine
+component.scan.shields.response,Shield enquiry and equipment,Maximum mismatch loss,Maximaler Verlust bei Fehlanpassung,Maximum mismatch loss,machine
+component.scan.shields.configuration,Shield enquiry and equipment,Observed configuration,Beobachtete Konfiguration,Observed configuration,machine
+workshop.shield.frequency_title,Shield enquiry and equipment,Shield configuration equipment,Schildkonfiguration,Shield configuration equipment,machine
+workshop.shield.mismatch_loss,Shield enquiry and equipment,Mismatch loss (0–1),Verlust bei Fehlanpassung (0–1),Mismatch loss (0–1),machine
+workshop.shield.cycling,Shield enquiry and equipment,Fitted frequency cycling,Frequenzwechsel eingebaut,Fitted frequency cycling,machine
+workshop.shield.frequencies,Shield enquiry and equipment,Cycle frequencies (comma separated),Frequenzen (durch Kommas getrennt),Cycle frequencies (comma separated),machine
+workshop.shield.cycle_period,Shield enquiry and equipment,Seconds per configuration,Sekunden pro Konfiguration,Seconds per configuration,machine
+workshop.shield.frequency_save,Shield enquiry and equipment,Save frequency equipment,Frequenzausruestung speichern,Save frequency equipment,machine
+entity.harrow_resonant_cruiser.name,Shield enquiry and equipment,Harrow Resonant Cruiser,Harrow Resonanzkreuzer,Harrow Resonant Cruiser,machine
+entity.harrow_standard_shields_cruiser.name,Shield equipment comparison,Harrow Standard-Shield Cruiser,Harrow Standard-Schildkreuzer,Harrow Standard-Shield Cruiser,machine

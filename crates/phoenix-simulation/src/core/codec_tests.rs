@@ -3273,6 +3273,7 @@ fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() 
     use std::collections::BTreeSet;
 
     let reading = ScanReadingSnapshot {
+        shield_finding: None,
         aim: Default::default(),
         intrusive: false,
         quantities: Vec::new(),
@@ -3384,6 +3385,7 @@ fn a_debris_reading_carries_a_projection_and_still_no_prose() {
     use std::collections::BTreeSet;
 
     let reading = ScanReadingSnapshot {
+        shield_finding: None,
         aim: Default::default(),
         intrusive: false,
         quantities: Vec::new(),

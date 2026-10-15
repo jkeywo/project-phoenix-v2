@@ -825,6 +825,7 @@ fn install_shields(config: &EntityConfig, cmds: &mut EntityCommands) {
             unfocused_damage_multiplier: sc.focus_unfocused_damage_multiplier,
         };
         cmds.insert(shields);
+        crate::ship::shield_enquiry::install(freq, sc, cmds);
     } else if !config.shield_arcs.is_empty() {
         // Ships that declare `[[shield_arc]]` blocks without a
         // `[shields_console]` block (some legacy paths). Still build the

@@ -3,6 +3,9 @@ title: Sensing and Spatial Fields
 type: concept
 tags: [science, observations, regions, simulation]
 sources:
+  - crates/phoenix-model/src/shield_enquiry.rs
+  - crates/phoenix-simulation/src/science/shield_enquiry.rs
+  - crates/phoenix-simulation/src/ship/shield_enquiry.rs
   - crates/phoenix-model/src/focused_enquiry.rs
   - crates/phoenix-model/src/sensing.rs
   - crates/phoenix-model/src/sensing_forecast.rs
@@ -185,6 +188,18 @@ authored interaction choices. Live route/compliance requires an explicit receive
 Navigation claim. Its existing waypoint owner retains the latest successful own
 request per public contact to avoid repeated AI payment, without treating that
 receipt as foreign compliance. These receipts save and digest with that owner.
+
+Optional `shields` enquiries use the same paid, System-owned focused slot.
+Subjects explicitly permit `shield_frequency` acquisition. A typed finding in
+`ScanReading` records quantized frequency, response and the observed configuration
+signature; its history is never upgraded from current enemy state. The existing
+frequency advisories read only qualified acquired Scan publications through the
+consumer's actual Console scope. Broad assessment supplies no such finding.
+`science/shield_enquiry.rs` owns that read seam and `science/enquiry.rs` owns
+physical acquisition. Optional authored shield cycles update the existing
+`ShipShields` frequency from a saved logical anchor in `ship/shield_enquiry.rs`.
+Workshop extends its existing sensing/subject and shield forms; no new scanner
+controller, inventory or observation store is involved.
 
 The broader redesign contract and incomplete work belong in PASM and the
 implementation/acceptance records, rather than this current-owner index.

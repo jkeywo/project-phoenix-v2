@@ -11,7 +11,7 @@ export const sensingRoles = {
   broad: { kinds: ['helm_radar', 'tactical_radar', 'sensor_radar'], fields: ['reading_ticks', 'sample_interval_secs', 'identity_secs', 'classification_secs', 'assessment_secs', 'position_error', 'drift_error_per_sec', 'track_retention_secs'] },
   passive: { kind: 'passive_receiver', fields: ['sample_interval_secs', 'min_signal_strength', 'bearing_error_rad'] },
 };
-export const focusedAims = ['general','environment','resources','anomaly'];
+export const focusedAims = ['general','environment','resources','anomaly','shields'];
 export const enquiryEffects = ['damage_zone','slow_zone','blocks_impulse','radar_dampening','comms_jam','sensor_blind','nebula_fog'];
 export const initialPassiveTree = () => ({ root: 'passive', tree: [{ id: 'passive', initial: 'receive', state: [{ id: 'receive', task: [
   { id: 'operate-capable-receiver', action: { kind: 'write', channel: 'operate', value: { source: 'fact', name: 'can_operate' } } },
@@ -86,7 +86,7 @@ export function validateSensing(profile, value) {
 export function replaceSensingSource(source, profile) {
   return replaceSectionSource(source,'sensing',profile);
 }
-function replaceSectionSource(source, section, profile) {
+export function replaceSectionSource(source, section, profile) {
   const headers = [...source.matchAll(/^[ \t]*\[{1,2}([^\r\n]+?)\]{1,2}[ \t]*(?:#.*)?(?:\r?\n|$)/gm)].map(match => ({ start: match.index, name: match[1].replace(/\]$/, '').trim() }));
   const spans = headers.filter(row => row.name === section || row.name.startsWith(section+'.')).map(row => {
     let end = headers.find(next => next.start > row.start)?.start ?? source.length;
@@ -184,6 +184,8 @@ export function validateEnquiryObservation(policy,value) {
     if (property.kind==='capacity') {
       if (!closed(property,['kind','capacity']) || typeof property.capacity!=='string' || !property.capacity || property.capacity.length>128 || /[\u0000-\u001f\u007f]/.test(property.capacity)
         || !value.infrastructure?.capacity?.some(row=>row.id===property.capacity && typeof row.label==='string' && row.label.length)) throw new Error('Choose a real labelled capacity on this subject.');
+    } else if (property.kind==='shield_frequency') {
+      if (!closed(property,['kind']) || !value.shield_arc?.length || !Number.isFinite(Math.fround(row.step)) || Math.fround(row.step)<=0 || row.step>1) throw new Error('Shield frequency requires actual shield arcs and supported precision in (0,1].');
     } else if (property.kind==='field_exposure') {
       if (!closed(property,['kind']) || !value.shape) throw new Error('Exposure requires actual local field geometry.');
     } else if (property.kind==='effect_signature') {

@@ -16,6 +16,15 @@ function setup() {
   return document.getElementById('test-panel');
 }
 
+it('displays only the acquired shield finding and keeps it historical across later readings',()=>{
+ const el=setup();const reading={subject_uuid:'observed',subject_name:'Observed ship',band:'detailed',taken_at_tick:10,aim:'shields',shield_finding:{configuration:'acquired-config',frequency:.2,frequency_step:.01,mismatch_loss:.6}};
+ el.state=panelState({scans:[{system_id:'focus-array',capable:true,controllable:true,aims:[{aim:'shields',intrusive:false}],reading,history:[reading]}]});
+ expect(el.shadowRoot.textContent).toContain(t('component.scan.shields.frequency'));expect(el.shadowRoot.textContent).toContain('0.2');expect(el.shadowRoot.textContent).toContain('acquired-config');
+ const select=el.shadowRoot.getElementById('history');select.value=select.options[1].value;select.dispatchEvent(new Event('change'));
+ el.state=panelState({scans:[{system_id:'focus-array',capable:true,controllable:true,reading:{...reading,taken_at_tick:20,shield_finding:{...reading.shield_finding,frequency:.8,configuration:'later-config'}},history:[reading]}]});
+ expect(el.shadowRoot.textContent).toContain('acquired-config');expect(el.shadowRoot.textContent).not.toContain('later-config');
+});
+
 const DETAILED = {
   subject_uuid: '00000000-0000-8000-8000-000000000042',
   subject_name: 'world.entity.skyhook_depot.name',

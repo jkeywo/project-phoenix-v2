@@ -1,0 +1,15 @@
+# Explicit special equipment demonstration; existing Harrow hulls are unchanged.
+includes = ["ship_harrow_cruiser.toml"]
+name = "entity.harrow_resonant_cruiser.name"
+
+# [ai] Provisional specialist susceptibility and deliberate rotating equipment.
+[shields_console.frequency_response]
+mismatch_loss = 0.6
+[shields_console.frequency_cycle]
+frequencies = [0.2, 0.8]
+period_secs = 30
+
+[[enquiry_observation.property]]
+property = { kind = "shield_frequency" }
+normal = true
+step = 0.01

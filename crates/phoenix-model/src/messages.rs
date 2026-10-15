@@ -5119,6 +5119,8 @@ pub struct FocusedScanSnapshot {
 /// [`crate::science::scan`] for the derivation and the argument.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct ScanReadingSnapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shield_finding: Option<crate::shield_enquiry::ShieldFinding>,
     #[serde(default)]
     pub aim: crate::focused_enquiry::FocusedAim,
     #[serde(default)]

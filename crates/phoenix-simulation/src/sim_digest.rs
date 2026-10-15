@@ -1781,6 +1781,14 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
         acc = fold_physics(acc, physics.as_ref());
         acc = fold_hull(acc, hull.as_ref());
         if let Some(shields) = world.get::<crate::ship::shields::ShipShields>(entity) {
+            acc = fold_str(acc, "shield-frequency-configuration");
+            acc = fold_serde(
+                acc,
+                &(
+                    shields.frequency(),
+                    world.get::<crate::ship::shield_enquiry::ShieldCycleAnchor>(entity),
+                ),
+            );
             acc = fold_str(acc, "shield-energy-operations");
             acc = fold_serde(acc, &shields.0.capture_operations());
             let charge: Vec<_> = shields

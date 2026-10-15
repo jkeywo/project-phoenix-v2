@@ -29,6 +29,7 @@ pub fn scan_reading_snapshot_from_reading(
     reading: &crate::science::ScanReading,
 ) -> ScanReadingSnapshot {
     ScanReadingSnapshot {
+        shield_finding: reading.shield_finding.clone(),
         aim: reading.aim,
         intrusive: reading.intrusive,
         quantities: reading.quantities.clone(),

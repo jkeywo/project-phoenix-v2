@@ -1561,6 +1561,9 @@ pub(super) fn apply_entity_state_with(
             record.restore(scan);
         }
     }
+    if let Some(saved) = &row.shield_frequency {
+        super::shield_enquiry::apply(&mut entity_mut, saved);
+    }
     if let Some(field) = &row.region_field {
         entity_mut.insert(field.clone());
     }

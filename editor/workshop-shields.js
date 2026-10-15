@@ -7,6 +7,33 @@ import { initialShieldTree } from './workshop-shield-ai.js';
 import { shieldArcSystemId } from './workshop-generated-systems.js';
 import { updateInteriorBindings } from './workshop-interiors.js';
 import { defaultDamageComponent } from './workshop-damage-model.js';
+import { replaceSectionSource } from './workshop-sensing.js';
+
+export function validateShieldFrequency(value, entity) {
+  const closed = (row, keys) => row && typeof row === 'object' && !Array.isArray(row) && Object.keys(row).every(key => keys.includes(key));
+  const finite = value => typeof value === 'number' && Number.isFinite(Math.fround(value));
+  if (!entity.shield_arc?.length || !closed(value,['response','cycle']) || !closed(value.response,['mismatch_loss'])
+    || !finite(value.response.mismatch_loss) || value.response.mismatch_loss<0 || value.response.mismatch_loss>1) throw new Error('Shield frequency response requires actual arcs and finite mismatch loss in [0,1].');
+  if (value.cycle !== false && (!closed(value.cycle,['frequencies','period_secs']) || !Array.isArray(value.cycle.frequencies)
+    || value.cycle.frequencies.length<2 || value.cycle.frequencies.length>64 || !finite(value.cycle.period_secs) || Math.fround(value.cycle.period_secs)<=0 || Math.round(Math.fround(value.cycle.period_secs)*1e9)<=0 || Math.fround(value.cycle.period_secs)>=2**64
+    || value.cycle.frequencies.some((row,i,all)=>!finite(row) || row<0 || row>1 || i>0 && Math.fround(row)===Math.fround(all[i-1])))) throw new Error('Shield cycle needs 2..64 frequencies in [0,1], a finite positive period, or explicit false.');
+}
+export function prepareShieldFrequencyOperation(draft, dependencies, operation) {
+  const inspection = inspectShields(draft,dependencies,operation.path), before=draft.read(operation.path);
+  if (!operation.materialise && inspection.fields.some(field=>(field.path==='shields_console' || field.path.startsWith('shields_console.')) && field.owner!==operation.path)) throw new Error('Explicitly materialise inherited shield policy before editing.');
+  validateShieldFrequency(operation.value,inspection.resolved.value);
+  const console={...structuredClone(inspection.resolved.value.shields_console || {}), frequency_response:structuredClone(operation.value.response),frequency_cycle:structuredClone(operation.value.cycle)};
+  const after=replaceSectionSource(before,'shields_console',console);
+  const own=parse(before), parsed=parse(after); delete own.shields_console; delete parsed.shields_console;
+  if (JSON.stringify(own)!==JSON.stringify(parsed)) throw new Error('Expand shield policy into ordinary TOML tables before editing.');
+  return {changes:[{path:operation.path,before,after}]};
+}
+export async function applyShieldFrequencyOperation({draft,provider,runtime,dependencies,operation,current=()=>true}) {
+  const selected=structuredClone(operation);
+  return acceptWorkshopChanges({draft,provider,runtime,dependencies,current,
+    prepare:(captured,effective)=>prepareShieldFrequencyOperation(captured,effective,selected).changes,
+    inspect:(candidate,effective)=>inspectShields(candidate,effective,selected.path)});
+}
 
 export const SHIELD_ENERGY_FIELDS = Object.freeze(['upkeep_per_sec', 'recharge_energy_per_hp', 'recovery_energy_per_hp', 'discharge_hp_per_sec']);
 const clone = value => structuredClone(value);

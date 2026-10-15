@@ -5666,6 +5666,12 @@ kind = "Viewscreen"
 [[console.feed]]
 source = "stock/torpedo-magazine"
 kind = "Stock"
+# Acquired findings are an explicit information feed; no scanner control is granted.
+[[console.feed]]
+source = "scan/7:sensors"
+kind = "Scan"
+
+
 [[console]]
 id = "science"
 name = "Science"
@@ -6622,3 +6628,12 @@ members = ["phaser-fore", "phaser-aft"]
 id = "missiles"
 label = "weapon.group.missiles"
 members = ["torpedo-tube-fore-port", "torpedo-tube-fore-starboard", "torpedo-tube-aft"]
+
+# [ai] Provisional ordinary shielding: a useful, modest optional enquiry benefit.
+[shields_console.frequency_response]
+mismatch_loss = 0.1
+
+[[enquiry_observation.property]]
+property = { kind = "shield_frequency" }
+normal = true
+step = 0.01

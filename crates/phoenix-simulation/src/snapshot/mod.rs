@@ -372,4 +372,5 @@ mod mission_clock_tests;
 mod mounts;
 #[cfg(test)]
 mod navigation_sharing_tests;
+mod shield_enquiry;
 mod spatial_fields;

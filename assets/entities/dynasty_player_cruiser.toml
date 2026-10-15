@@ -3545,6 +3545,12 @@ kind = "Viewscreen"
 [[console.feed]]
 source = "stock/torpedo-magazine"
 kind = "Stock"
+# Acquired findings are an explicit information feed; no scanner control is granted.
+[[console.feed]]
+source = "scan/7:sensors"
+kind = "Scan"
+
+
 [[console]]
 id = "sensors"
 name = "Sensors"

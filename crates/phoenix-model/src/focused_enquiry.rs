@@ -9,6 +9,7 @@ pub enum FocusedAim {
     Environment,
     Resources,
     Anomaly,
+    Shields,
 }
 impl FocusedAim {
     pub fn as_str(self) -> &'static str {
@@ -17,6 +18,7 @@ impl FocusedAim {
             Self::Environment => "environment",
             Self::Resources => "resources",
             Self::Anomaly => "anomaly",
+            Self::Shields => "shields",
         }
     }
 }
@@ -69,6 +71,7 @@ impl EffectSignature {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum EnquiryProperty {
     FieldExposure,
+    ShieldFrequency,
     Capacity { capacity: String },
     EffectSignature { effect: EffectSignature },
 }
@@ -76,6 +79,7 @@ impl EnquiryProperty {
     pub fn aim(&self) -> FocusedAim {
         match self {
             Self::FieldExposure => FocusedAim::Environment,
+            Self::ShieldFrequency => FocusedAim::Shields,
             Self::Capacity { .. } => FocusedAim::Resources,
             Self::EffectSignature { .. } => FocusedAim::Anomaly,
         }
@@ -111,6 +115,8 @@ impl EnquiryObservationConfig {
             if !properties.insert(&row.property)
                 || !row.step.is_finite()
                 || row.step <= 0.0
+                || (row.property == EnquiryProperty::ShieldFrequency
+                    && (!(row.step as f32).is_finite() || row.step as f32 <= 0.0 || row.step > 1.0))
                 || matches!(&row.property, EnquiryProperty::Capacity { capacity } if capacity.is_empty() || capacity.len() > 128 || capacity.chars().any(char::is_control))
             {
                 return Err("enquiry properties require unique supported selectors and finite positive precision".into());

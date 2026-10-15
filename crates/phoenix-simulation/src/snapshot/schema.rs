@@ -11,6 +11,8 @@ pub struct EntityState {
     /// Physical bearings only; target/enabled intent belongs to each System.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mounts: Option<crate::weapons::mounts::ShipMounts>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shield_frequency: Option<super::shield_enquiry::ShieldFrequencyState>,
     /// Navigation's deliberate received fixed-point history and source dating.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub navigation_sharing:

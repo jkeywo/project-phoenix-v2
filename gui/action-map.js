@@ -422,7 +422,7 @@ export const ACTION_MAP = Object.freeze({
   scan_target: (a, send) => {
     if (!a.uuid || !a.control_system_id) return;
     const aim=a.aim ?? 'general', intrusive=a.intrusive ?? false;
-    if (!['general','environment','resources','anomaly'].includes(aim) || typeof intrusive!=='boolean') return;
+    if (!['general','environment','resources','anomaly','shields'].includes(aim) || typeof intrusive!=='boolean') return;
     const correlated = typeof a.correlation === 'string' && a.correlation;
     send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
       ...(correlated ? { correlation: a.correlation } : {}),

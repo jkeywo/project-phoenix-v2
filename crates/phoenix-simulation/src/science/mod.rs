@@ -30,6 +30,7 @@ pub mod scan;
 /// the fixed-tick derivation, and the blackboard publisher.
 pub mod server;
 pub mod sharing;
+pub mod shield_enquiry;
 
 pub use scan::{
     derive, quantise, scanned_flag, ScanBandConfig, ScanConditions, ScanConfig, ScanReading,

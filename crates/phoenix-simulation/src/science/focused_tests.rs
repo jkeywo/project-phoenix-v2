@@ -121,6 +121,135 @@ fn question(
 }
 
 #[test]
+fn optional_shield_question_pays_one_slot_and_retains_old_configuration_after_rotation() {
+    use phoenix_model::focused_enquiry::FocusedAim;
+    let subject = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/ship_harrow_resonant_cruiser.toml",
+    )
+    .unwrap();
+    let (mut app, observer) = rig_from(
+        "tests/fixtures/sensing-enquiry-cruiser.toml",
+        false,
+        Some(&subject),
+    );
+    let owner = SystemId("sensors".into());
+    let before = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(observer)
+        .unwrap()
+        .0
+        .capture_continuation();
+    question(&mut app, observer, FocusedAim::Shields, false);
+    step(&mut app);
+    let work = app.world().get::<ShipScanRecord>(observer).unwrap().0[&owner]
+        .focused
+        .clone()
+        .unwrap();
+    assert!(work.progress > 0.0 && work.progress < work.work_secs);
+    let saved = app.world().get::<ShipScanRecord>(observer).unwrap().0[&owner].save_state();
+    let decoded = serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    app.world().get::<ShipScanRecord>(observer).unwrap().0[&owner]
+        .validate_state(&decoded, 1)
+        .unwrap();
+    app.world_mut()
+        .get_mut::<crate::ship_plugin::ShipSystemControlSources>(observer)
+        .unwrap()
+        .0
+        .set(
+            owner.clone(),
+            crate::ship::control_source::ControlSource::Offline,
+        );
+    let charge = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(observer)
+        .unwrap()
+        .0
+        .capture_continuation();
+    for _ in 0..5 {
+        step(&mut app);
+    }
+    assert_eq!(
+        app.world().get::<ShipScanRecord>(observer).unwrap().0[&owner]
+            .focused
+            .as_ref()
+            .unwrap()
+            .progress,
+        work.progress
+    );
+    assert_eq!(
+        app.world()
+            .get::<crate::ship::power::ShipPowerSystem>(observer)
+            .unwrap()
+            .0
+            .capture_continuation(),
+        charge
+    );
+    app.world_mut()
+        .get_mut::<crate::ship_plugin::ShipSystemControlSources>(observer)
+        .unwrap()
+        .0
+        .set(
+            owner.clone(),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+    for _ in 0..50 {
+        step(&mut app);
+    }
+    let original = app.world().get::<ShipScanRecord>(observer).unwrap().0[&owner]
+        .history
+        .last()
+        .unwrap()
+        .clone();
+    let finding = original.shield_finding.as_ref().unwrap();
+    assert_eq!(finding.frequency, 0.2);
+    assert_eq!(finding.mismatch_loss, 0.6);
+    let target = app
+        .world_mut()
+        .query::<(Entity, &crate::entities::spawner::EntityUuid)>()
+        .iter(app.world())
+        .find_map(|(entity, id)| (id.0.ends_with("142")).then_some(entity))
+        .unwrap();
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 301;
+    app.world_mut()
+        .run_system_once(crate::ship::shield_enquiry::tick)
+        .unwrap();
+    assert_eq!(
+        app.world()
+            .get::<crate::ship::shields::ShipShields>(target)
+            .unwrap()
+            .frequency(),
+        0.8
+    );
+    assert_eq!(
+        app.world().get::<ShipScanRecord>(observer).unwrap().0[&owner]
+            .history
+            .last(),
+        Some(&original)
+    );
+    let mut tampered = app.world().get::<ShipScanRecord>(observer).unwrap().0[&owner].save_state();
+    tampered
+        .history
+        .last_mut()
+        .unwrap()
+        .shield_finding
+        .as_mut()
+        .unwrap()
+        .frequency = 0.9;
+    assert!(
+        app.world().get::<ShipScanRecord>(observer).unwrap().0[&owner]
+            .validate_state(&tampered, 301)
+            .is_err()
+    );
+    let after = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(observer)
+        .unwrap()
+        .0
+        .capture_continuation();
+    assert!(after.network.consumers[&owner].energy < before.network.consumers[&owner].energy);
+}
+
+#[test]
 fn different_questions_share_one_paid_slot_and_resume_only_their_own_retained_progress() {
     use phoenix_model::focused_enquiry::FocusedAim;
     let (mut app, observer) = enquiry_rig();

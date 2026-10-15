@@ -42,8 +42,16 @@ fn optional_namespace_fixture() -> World {
             withdraw_duration_secs: 2.0,
             range: 600.0,
         });
-        security.teams[1].state = crate::security::SecurityTeamState::Withdrawing;
-        security.teams[1].target = Some("platform".into());
+        assert!(security.teams.deploy(
+            1,
+            "platform".into(),
+            crate::security::SecurityAction::Board,
+            0.0,
+            1.0
+        ));
+        security
+            .teams
+            .withdraw(1, 2.0, phoenix_model::job::JobOutcome::Completed);
         world.spawn((EntityUuid(id), security));
     }
     // Two identical literal UUIDs retain entity-index ordering, even with distinct payloads.

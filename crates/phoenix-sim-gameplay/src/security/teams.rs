@@ -425,7 +425,8 @@ impl SecurityTeamState {
 /// crossing, the work, or the return — so `progress` is one division whichever
 /// state it is in, and the console does not have to know which authored number to
 /// divide by.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SecurityTeam {
     /// Which of the five states this team is in.
     pub state: SecurityTeamState,

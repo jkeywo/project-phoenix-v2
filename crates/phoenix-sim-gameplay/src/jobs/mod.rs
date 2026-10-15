@@ -3,6 +3,7 @@ pub mod activity_bindings;
 pub mod repair;
 mod repair_navigation;
 pub mod repair_workflow;
+pub mod security;
 use crate::ai::state_tree::TreeRuntime;
 use crate::core::messages::SystemId;
 use phoenix_model::job::{JobId, JobOutcome};

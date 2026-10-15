@@ -1005,15 +1005,15 @@ pub(super) fn capture_umbilicals(
 
 /// The Security-team assignments, captured directly from its entity — see
 /// [`EntityState::security`]. Only hulls that authored a `[security]` table carry
-/// one, so most worlds capture an empty list. A muster with every team home
-/// captures nothing, the same reading `fold_security_namespace` takes.
+/// one. A never-used muster omits the payload; consumed JobIds and terminal
+/// outcomes remain captured after the last team returns.
 pub(super) fn capture_security(
     entity: EntityRef<'_>,
 ) -> Option<crate::security::SecuritySaveState> {
     let state = entity
         .get::<crate::security::ShipSecurityTeams>()?
         .save_state();
-    (state != crate::security::SecuritySaveState::default()).then_some(state)
+    state.has_history().then_some(state)
 }
 
 /// The scan records, captured directly from its entity — see

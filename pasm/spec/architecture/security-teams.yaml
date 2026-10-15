@@ -86,11 +86,10 @@ entities:
       confidence: confirmed
       origin: ai
       title: Security Team State
-      summary: "Per-ship: the authored `[security]` terms (team count, crossing and return times, reach) and every team's live state - available, deploying, working, withdrawing or unavailable - with its target, action, authored risk and phase clock, plus why the last dispatch was refused. Authoritative: a host that thought a team was still working disagrees about whether the work completes."
+      summary: "Per-ship finite Security commitments use shared TeamJobs with JobId mint, actual action/phase clock and return/outcome frontier. Idle/unavailable and refusal are projections; consumed job history remains canonical after return."
       rationale:
-        - "[ai] FOLDED into the authoritative-state digest, in a namespace of its own keyed on the minted entity id: each committed team's index, state and target, for every ship with anybody abroad. What a completed action leaves behind lands on the world flag store (which folds through the scenario scope), but WHICH teams are out, where, and in what state is the fact that decides whether the next tick completes the work at all - exactly as the umbilical folds its running fact and the dock the docked one. The authored terms are content, which content_digest answers for; the risk and the last refusal are projections the next tick re-derives. The phase clock is NOT a projection - it is accumulated authoritative state that nothing reconstructs, which is why SecuritySaveState carries it; it is left unfolded deliberately, because folding it would make every tick of a live assignment a fresh digest - a rate, not a fact - and a drifting clock is caught one tick later anyway, when it crosses a phase boundary and moves the team's folded state."
-        - "[ai] A muster with every team HOME folds NOTHING - not even a row, the umbilical namespace's empty-walk affordance. That is what lets a shipped hull gain a `[security]` table without moving any committed world's digest."
-        - "[ai] Snapshotted as a PROJECTION rather than whole: each committed team's assignment and its position in it travel (SecuritySaveState), while the authored terms ride the template and are re-derived on spawn. A team the save does not name was home when the snapshot was taken and stays home. The last refusal is not persisted - it is re-derived on the first resumed tick, so a stored one would only ever name a condition that no longer holds. EntityConfig sets deny_unknown_fields, so a build predating the `[security]` table refuses the template outright, which is why this did not bump SNAPSHOT_FORMAT."
+        - "[ai] Increment20 replaces the independent assignment vector with the shared TeamJobs owner. One activity retains physical commitment through deploy/work/return. A work result does not free a returning team; actual home arrival moves its result to the terminal Job outcome. Existing external crossing, paid work and authored World consequences remain equivalent before local routing/custody changes."
+        - "[ai] Save and digest the whole canonical Jobs, consumed mint and phase clocks, with canonical float folding. A never-used muster omits state, while used history remains even with every team home. Whole candidate and single-row preflight reject owner/count, ID/mint, finite phase and result/return mismatches before writes. Unsupported old assignment saves require root compatibility refusal."
     architecture:
       classification: authoritative
       owner: security-team-controller
@@ -102,7 +101,6 @@ entities:
       symbols:
         - ShipSecurityTeams
         - SecuritySaveState
-        - SecurityTeamSaveState
       tests: [cargo test]
 
   - state: security-target-state

@@ -150,8 +150,9 @@ fn commit_team_to_obstruction(app: &mut App, operator: Entity) {
         .entity_mut(operator)
         .get_mut::<ShipSecurityTeams>()
         .expect("the operator musters Security teams")
-        .teams[0]
+        .teams
         .deploy(
+            0,
             OBSTRUCTION.to_string(),
             SecurityAction::PlaceCharges,
             0.5,

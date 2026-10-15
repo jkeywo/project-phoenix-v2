@@ -632,17 +632,24 @@ fn a_target_beyond_the_reach_is_listed_but_marked_out_of_range() {
 #[test]
 fn an_idle_muster_saves_as_default_and_a_committed_one_round_trips() {
     let mut security = ShipSecurityTeams::new(config());
-    assert_eq!(security.save_state(), SecuritySaveState::default());
+    assert!(!security.save_state().has_history());
 
-    security.teams[1].deploy(TARGET.into(), SecurityAction::Board, 0.8, 2.0);
-    security.teams[1].elapsed = 0.5;
+    security
+        .teams
+        .deploy(1, TARGET.into(), SecurityAction::Board, 0.8, 2.0);
+    security.teams.get_mut(1).unwrap().elapsed = 0.5;
     security.last_refusal = Some(SecurityRefusal::OutOfRange);
     let save = security.save_state();
-    assert_eq!(save.teams.len(), 1, "only committed teams travel");
-    assert_eq!(save.teams[0].team_idx, 1);
+    assert_eq!(
+        save.jobs.teams.iter().flatten().count(),
+        1,
+        "one canonical commitment"
+    );
+    assert!(save.jobs.teams[0].is_none());
+    assert_eq!(save.jobs.teams[1].as_ref().unwrap().id.0, 1);
 
     let mut restored = ShipSecurityTeams::new(config());
-    restored.restore(&save);
+    restored.restore(&save).unwrap();
     assert_eq!(restored.teams[1].state, SecurityTeamState::Deploying);
     assert_eq!(restored.teams[1].target.as_deref(), Some(TARGET));
     assert_eq!(restored.teams[1].action, Some(SecurityAction::Board));
@@ -899,7 +906,8 @@ fn the_second_team_takes_the_lesser_job_while_the_first_works_the_urgent_one() {
         let mut muster = ship
             .get_mut::<ShipSecurityTeams>()
             .expect("the operator musters Security teams");
-        muster.teams[0].deploy(
+        muster.teams.deploy(
+            0,
             TARGET.to_string(),
             SecurityAction::AssistEvacuation,
             0.6,
@@ -978,7 +986,9 @@ fn the_host_never_recalls_a_team_on_work_outside_its_pool() {
         let mut muster = ship
             .get_mut::<ShipSecurityTeams>()
             .expect("the operator musters Security teams");
-        muster.teams[1].deploy(TARGET.to_string(), SecurityAction::Board, 0.5, 2.0);
+        muster
+            .teams
+            .deploy(1, TARGET.to_string(), SecurityAction::Board, 0.5, 2.0);
     }
     app.update();
     assert!(
@@ -1021,22 +1031,23 @@ fn a_restored_team_is_re_adopted_within_one_ai_tick_and_still_recalled() {
 
     // The post-restore shape, built through the real save/restore seam rather
     // than by hand, so it cannot drift from what a resume actually produces.
-    let save = SecuritySaveState {
-        teams: vec![SecurityTeamSaveState {
-            team_idx: 0,
-            state: SecurityTeamState::Working,
-            target: Some(TARGET.to_string()),
-            action: Some(SecurityAction::AssistEvacuation),
-            risk: 0.6,
-            elapsed: 1.0,
-            phase_duration: 4.0,
-        }],
-    };
+    let mut save = SecuritySaveState::new(2, security_system_id());
+    assert!(save.deploy(
+        0,
+        TARGET.to_string(),
+        SecurityAction::AssistEvacuation,
+        0.6,
+        2.0
+    ));
+    let team = save.get_mut(0).unwrap();
+    team.begin_work(4.0);
+    team.elapsed = 1.0;
     {
         let mut ship = app.world_mut().entity_mut(operator);
         ship.get_mut::<ShipSecurityTeams>()
             .expect("the operator musters Security teams")
-            .restore(&save);
+            .restore(&save)
+            .unwrap();
     }
     assert!(
         app.world()

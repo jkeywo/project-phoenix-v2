@@ -336,22 +336,8 @@ pub struct EntityState {
     /// build that predates this vocabulary refuses the template outright.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub umbilical: Option<crate::umbilical::UmbilicalSaveState>,
-    /// The ship's Security-team assignments (issue #1346) — which teams are out,
-    /// where, doing what, and how far through.
-    ///
-    /// A **projection**, not the whole [`crate::security::ShipSecurityTeams`]
-    /// component, for `umbilical`'s reason: the authored `[security]` terms ride
-    /// the component and are re-derived from the template on spawn. What travels
-    /// is the one thing the fold cannot otherwise recover — a team's live
-    /// assignment and its position in it, which a resume would otherwise drop,
-    /// bringing every team home mid-job and losing the work already done. The last
-    /// refusal is deliberately not persisted: it is a projection the next tick
-    /// re-derives.
-    ///
-    /// Did not bump [`SNAPSHOT_FORMAT`] for `umbilical`'s reason: a world gains
-    /// Security by its hull TOML gaining a `[security]` table (and a `kind =
-    /// "security"` system), and `EntityConfig` sets `deny_unknown_fields`, so a
-    /// build that predates this vocabulary refuses the template outright.
+    /// Complete canonical shared Security Jobs. A never-used accepted muster
+    /// omits this payload; consumed JobIds, clocks and outcomes survive return.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security: Option<crate::security::SecuritySaveState>,
     /// The ship's scan record (issue #1032) — the last reading its sensor suite

@@ -2591,6 +2591,7 @@ export function buildSecurityConsoleState(state, systemIds = []) {
   return {
     system_id: entry?.systemId ?? systemIds[0] ?? null,
     range: bb.range ?? 0,
+    jobs: Array.isArray(bb.jobs) ? bb.jobs : [],
     teams: Array.isArray(bb.teams) ? bb.teams : [],
     targets: Array.isArray(bb.targets) ? bb.targets : [],
     refusal: bb.refusal ?? null,

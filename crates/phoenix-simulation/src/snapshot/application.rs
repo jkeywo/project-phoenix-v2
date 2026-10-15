@@ -1255,6 +1255,10 @@ pub(crate) fn apply_entity_state(world: &mut World, entity: Entity, row: &Entity
         bevy::log::error!("refused activity job rewind for {}: {}", row.uuid, reason);
         return;
     }
+    if let Err(reason) = super::security::validate_live(world, entity, row, tick) {
+        bevy::log::error!("refused Security job restore for {}: {}", row.uuid, reason);
+        return;
+    }
     if let Err(reason) = super::personnel::validate_live(world, entity, row, tick) {
         bevy::log::error!("refused personnel restore for {}: {}", row.uuid, reason);
         return;
@@ -1628,9 +1632,13 @@ pub(super) fn apply_entity_state_with(
             control.restore(umbilical);
         }
     }
-    if let Some(security) = &row.security {
-        if let Some(mut teams) = entity_mut.get_mut::<crate::security::ShipSecurityTeams>() {
-            teams.restore(security);
+    if let Some(mut teams) = entity_mut.get_mut::<crate::security::ShipSecurityTeams>() {
+        if let Some(security) = &row.security {
+            teams
+                .restore_at(security, tick)
+                .expect("preflighted Security commitments");
+        } else {
+            *teams = crate::security::ShipSecurityTeams::new(teams.config.clone());
         }
     }
     if let Some(scan) = &row.scan {

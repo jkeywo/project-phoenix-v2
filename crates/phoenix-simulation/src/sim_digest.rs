@@ -2336,65 +2336,26 @@ fn fold_umbilical_namespace(world: &World, acc: u64) -> u64 {
     )
 }
 
-/// Every ship with a Security team OUT (issue #1346), in [`FoldKey`] order, in
-/// its own namespace.
-///
-/// # What is folded, and why it has to be
-///
-/// Each committed team's index, state and target, for every ship with anybody
-/// abroad. This is the authoritative divergence signal a resume must survive that
-/// nothing else catches: what a completed action leaves behind lands on the world
-/// flag store (which folds through the scenario scope), but WHICH teams are out,
-/// where, and how far along, is the state that decides whether the next tick
-/// completes the work at all — exactly as the umbilical folds its running fact
-/// and the dock the docked one. The authored terms are content, which
-/// `content_digest` answers for; the risk and the last refusal are projections the
-/// next tick re-derives, so neither is folded.
-///
-/// The elapsed phase clock is a different case, and the difference matters. It is
-/// accumulated authoritative state — `tick_security_teams` adds this tick's delta
-/// to it and nothing reconstructs it from anything else, which is precisely why
-/// `SecuritySaveState` has to carry it. It is left UNFOLDED deliberately, not
-/// because it is derived: folding it would make every tick of a live assignment a
-/// fresh digest, which reports a rate rather than a fact. Two hosts whose clocks
-/// drift still diverge here — one tick later, when a clock crosses a phase
-/// boundary and the team's folded state changes underneath it.
-///
-/// The empty-walk affordance is [`fold_umbilical_namespace`]'s, and does the same
-/// real work: a hull that authored `[security]` and has every team home folds
-/// NOTHING — not even a row — so a shipped hull can gain Security teams without
-/// moving any committed world's digest. The moment one team crosses over, the row
-/// count is in the accumulator like everyone else's.
+/// Complete canonical shared Security jobs, including clocks, outcomes and mint.
+/// An unused muster remains absent; consumed history cannot be discarded.
 fn fold_security_namespace(world: &World, acc: u64) -> u64 {
     fold_optional_namespace(
         world,
         acc,
         "security-namespace",
         |security: &ShipSecurityTeams| {
-            let committed: Vec<(u8, &'static str, String)> = security
-                .teams
-                .iter()
-                .enumerate()
-                .filter(|(_, team)| team.is_committed())
-                .map(|(index, team)| {
-                    (
-                        index as u8,
-                        team.state.as_str(),
-                        team.target.clone().unwrap_or_default(),
-                    )
-                })
-                .collect();
-            (!committed.is_empty()).then_some(committed)
+            security.teams.has_history().then(|| {
+                let mut state = security.save_state();
+                for job in state.jobs.teams.iter_mut().flatten() {
+                    let team = &mut job.activity.team;
+                    team.risk = f32::from_bits(canon_f32(team.risk));
+                    team.elapsed = f32::from_bits(canon_f32(team.elapsed));
+                    team.phase_duration = f32::from_bits(canon_f32(team.phase_duration));
+                }
+                state
+            })
         },
-        |mut acc, committed| {
-            acc = fold_u64(acc, committed.len() as u64);
-            for (index, state, target) in committed {
-                acc = fold_u64(acc, index as u64);
-                acc = fold_str(acc, state);
-                acc = fold_str(acc, &target);
-            }
-            acc
-        },
+        |acc, state| fold_serde(acc, &state),
     )
 }
 

@@ -3054,6 +3054,7 @@ fn security_blackboard_round_trips_and_omits_its_optional_fields_when_idle() {
     };
 
     let working = SystemBlackboard::Security(SecurityBlackboard {
+        jobs: Vec::new(),
         range: 400.0,
         teams: vec![
             SecurityTeamSlot {
@@ -3095,6 +3096,7 @@ fn security_blackboard_round_trips_and_omits_its_optional_fields_when_idle() {
     );
 
     let idle = SystemBlackboard::Security(SecurityBlackboard {
+        jobs: Vec::new(),
         range: 400.0,
         teams: vec![SecurityTeamSlot {
             state: "available".into(),

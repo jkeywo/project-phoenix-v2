@@ -43,7 +43,7 @@ use crate::entities::spawner::{EntityName, EntitySystemHull, EntityUuid};
 use crate::security::teams::{
     dispatch_status, is_assigned, select_assignments, unassigned_candidates, SecurityAction,
     SecurityActionConfig, SecurityCandidate, SecurityConfig, SecurityRefusal, SecurityTargetConfig,
-    SecurityTeam, SecurityTeamState,
+    SecurityTeamState,
 };
 use crate::ship::system_registry::{security_system_id, SECURITY_KIND, SECURITY_SYSTEM_ID};
 use crate::world::content::WorldEvent;
@@ -79,7 +79,7 @@ pub struct ShipSecurityTeams {
     /// The authored terms — team count, crossing times, reach.
     pub config: SecurityConfig,
     /// Every team, in authored index order. `teams.len() == config.team_count`.
-    pub teams: Vec<SecurityTeam>,
+    pub teams: phoenix_sim_gameplay::jobs::security::SecurityJobs,
     /// Why the last dispatch could not form, or why a live assignment was ended
     /// by the world rather than by the operator — the reason the console shows,
     /// retained until the operator dispatches or recalls again. A projection the
@@ -90,7 +90,10 @@ pub struct ShipSecurityTeams {
 impl ShipSecurityTeams {
     /// A fresh muster: every authored team available, nothing refused.
     pub fn new(config: SecurityConfig) -> Self {
-        let teams = vec![SecurityTeam::default(); config.team_count as usize];
+        let teams = phoenix_sim_gameplay::jobs::security::SecurityJobs::new(
+            config.team_count as usize,
+            security_system_id(),
+        );
         Self {
             config,
             teams,
@@ -119,77 +122,21 @@ impl ShipSecurityTeams {
     /// is re-derived on spawn, exactly as `UmbilicalSaveState` leaves the flow
     /// terms out; the last refusal is a projection the next tick re-derives.
     pub fn save_state(&self) -> SecuritySaveState {
-        SecuritySaveState {
-            teams: self
-                .teams
-                .iter()
-                .enumerate()
-                .filter(|(_, team)| team.is_committed())
-                .map(|(index, team)| SecurityTeamSaveState {
-                    team_idx: index as u8,
-                    state: team.state,
-                    target: team.target.clone(),
-                    action: team.action,
-                    risk: team.risk,
-                    elapsed: team.elapsed,
-                    phase_duration: team.phase_duration,
-                })
-                .collect(),
-        }
+        self.teams.saved()
     }
-
-    /// Reseed the committed teams from a restored snapshot, onto a muster that
-    /// already carries its authored config from the fresh spawn. A team the save
-    /// does not name was home when the snapshot was taken and stays home; the
-    /// last refusal is NOT restored, because it is a projection the next tick
-    /// re-derives and a stale one would name a condition that no longer holds.
-    pub fn restore(&mut self, save: &SecuritySaveState) {
-        for team in self.teams.iter_mut() {
-            *team = SecurityTeam::default();
-        }
-        for row in &save.teams {
-            let Some(team) = self.teams.get_mut(row.team_idx as usize) else {
-                continue;
-            };
-            team.state = row.state;
-            team.target = row.target.clone();
-            team.action = row.action;
-            team.risk = row.risk;
-            team.elapsed = row.elapsed;
-            team.phase_duration = row.phase_duration;
-        }
+    pub fn restore(&mut self, save: &SecuritySaveState) -> Result<(), String> {
+        self.restore_at(save, u64::MAX)
+    }
+    pub fn restore_at(&mut self, save: &SecuritySaveState, tick: u64) -> Result<(), String> {
+        save.validate_config(&self.config, tick)?;
+        self.teams = save.saved();
         self.last_refusal = None;
+        Ok(())
     }
 }
 
-/// One committed team's assignment, as the snapshot carries it (issue #1346).
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct SecurityTeamSaveState {
-    pub team_idx: u8,
-    pub state: SecurityTeamState,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub action: Option<SecurityAction>,
-    #[serde(default)]
-    pub risk: f32,
-    #[serde(default)]
-    pub elapsed: f32,
-    #[serde(default)]
-    pub phase_duration: f32,
-}
-
-/// The snapshot-carried half of a [`ShipSecurityTeams`] (issue #1346): the
-/// committed teams, and nothing else.
-///
-/// `Default` is the idle muster — every team home — which is what a hull that
-/// authored Security and never used it captures, so a resume of such a ship
-/// restores byte-identically and folds the same number.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct SecuritySaveState {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub teams: Vec<SecurityTeamSaveState>,
-}
+/// Complete canonical shared commitments, including the consumed JobId mint.
+pub type SecuritySaveState = phoenix_sim_gameplay::jobs::security::SecurityJobs;
 
 /// A world entity's authored `[security_target]` table (issue #1346) — what
 /// Security teams may be sent here to do.
@@ -412,8 +359,15 @@ pub fn handle_security_commands(
                     match (verdict, offered, action) {
                         (Ok(()), Some(offered), Some(action)) => {
                             let crossing = security.config.deploy_duration_secs;
-                            if let Some(team) = security.teams.get_mut(team_idx as usize) {
-                                team.deploy(target.clone(), action, offered.risk, crossing);
+                            if !security.teams.deploy(
+                                team_idx as usize,
+                                target.clone(),
+                                action,
+                                offered.risk,
+                                crossing,
+                            ) {
+                                security.last_refusal = Some(SecurityRefusal::TeamBusy);
+                                continue;
                             }
                             security.last_refusal = None;
                             push_lifecycle(
@@ -437,7 +391,7 @@ pub fn handle_security_commands(
                 }
                 Request::Recall { team_idx } => {
                     let withdraw = security.config.withdraw_duration_secs;
-                    let Some(team) = security.teams.get_mut(team_idx as usize) else {
+                    let Some(team) = security.teams.get(team_idx as usize) else {
                         security.last_refusal = Some(SecurityRefusal::NoSuchTeam);
                         continue;
                     };
@@ -446,7 +400,11 @@ pub fn handle_security_commands(
                         // of a team that is not out is idempotent, not an error.
                         continue;
                     }
-                    team.withdraw(withdraw);
+                    security.teams.withdraw(
+                        team_idx as usize,
+                        withdraw,
+                        phoenix_model::job::JobOutcome::Cancelled,
+                    );
                     security.last_refusal = None;
                     push_lifecycle(
                         lifecycle.as_deref_mut(),
@@ -707,9 +665,16 @@ pub fn tick_security_teams(
     }
 
     // Advance every committed clock and apply the decided transitions.
-    for (_, uuid, _, _, _, mut security) in operators.iter_mut() {
+    for (_, uuid, _, hull, damage, mut security) in operators.iter_mut() {
         let withdraw = security.config.withdraw_duration_secs;
-        for (index, team) in security.teams.iter_mut().enumerate() {
+        security
+            .teams
+            .set_unavailable(security_disabled(hull, damage));
+        for (index, job) in security.teams.jobs.teams.iter_mut().enumerate() {
+            let Some(job) = job else {
+                continue;
+            };
+            let team = &mut job.activity.team;
             if team.is_committed() {
                 team.elapsed += work_steps
                     .get(&(uuid.0.clone(), index))
@@ -718,18 +683,28 @@ pub fn tick_security_teams(
             }
         }
         for transition in decided.iter().filter(|t| t.operator == uuid.0) {
-            let Some(team) = security.teams.get_mut(transition.team_idx as usize) else {
-                continue;
-            };
+            let index = transition.team_idx as usize;
             match transition.next {
-                TeamTransition::BeginWork(duration) => team.begin_work(duration),
-                TeamTransition::Withdraw => team.withdraw(withdraw),
-                TeamTransition::Home => team.arrive_home(),
-                TeamTransition::Unavailable => {
-                    team.arrive_home();
-                    team.state = SecurityTeamState::Unavailable;
+                TeamTransition::BeginWork(duration) => {
+                    if let Some(team) = security.teams.get_mut(index) {
+                        team.begin_work(duration);
+                    }
                 }
-                TeamTransition::Restore => team.arrive_home(),
+                TeamTransition::Withdraw => security.teams.withdraw(
+                    index,
+                    withdraw,
+                    if transition.terminal == Some(TaskTerminalReason::Completed) {
+                        phoenix_model::job::JobOutcome::Completed
+                    } else {
+                        phoenix_model::job::JobOutcome::Failed
+                    },
+                ),
+                TeamTransition::Home => security.teams.home(index),
+                TeamTransition::Unavailable => {
+                    security.teams.home(index);
+                    security.teams.set_unavailable(true);
+                }
+                TeamTransition::Restore => {}
             }
             if let Some(refusal) = transition.refusal {
                 security.last_refusal = Some(refusal);
@@ -1007,7 +982,8 @@ pub fn operate_security_ai(
         // already on would spend a free team's slot on a duplicate — and that team
         // would sit at home while the next job down went unworked. Each free team
         // is ranked against the best REMAINING job.
-        let unassigned = unassigned_candidates(&candidates, &security.teams);
+        let team_readout: Vec<_> = security.teams.iter().cloned().collect();
+        let unassigned = unassigned_candidates(&candidates, &team_readout);
         let free = security.free_team_indices();
         let picks = select_assignments(&unassigned, free.len());
 
@@ -1093,10 +1069,10 @@ pub fn operate_security_ai(
             // already removed every job a committed team holds, so a duplicate
             // here would mean the pool and the muster disagreed.
             debug_assert!(
-                !is_assigned(candidate, &security.teams),
+                !is_assigned(candidate, &team_readout),
                 "the selection pool must never offer work a team already holds"
             );
-            if is_assigned(candidate, &security.teams) {
+            if is_assigned(candidate, &team_readout) {
                 continue;
             }
             claimed.claim(*team_idx);
@@ -1203,6 +1179,7 @@ pub fn publish_security_blackboard(
         let blackboard = SystemBlackboard::Security(SecurityBlackboard {
             range: security.config.range,
             teams,
+            jobs: security.teams.work_list(),
             targets: target_options,
             refusal: security.last_refusal.map(|r| r.string_id().to_string()),
         });

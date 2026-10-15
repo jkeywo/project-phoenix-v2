@@ -199,7 +199,11 @@ returning team. No elapsed work, target or result is reconstructed from an AI cl
 [ai] Capture saves the complete bounded canonical jobs, including next mint,
 workflow state, phase clock and terminal result. Restore validates actual accepted
 owner/team count, unique prior JobIds, finite clock/risk, closed activity/phase,
-nonfuture execution ticks and valid completion/return joins before writes. The
+nonfuture execution ticks and valid completion/return joins before writes.
+Deployment/return duration must match accepted operator terms; a still-present
+candidate target must offer the saved action with exactly the accepted risk and
+working duration. Removed targets remain valid interruption/return continuations,
+whose ordinary executor withdraws before any completion or consequence. The
 digest includes that same complete canonical state. Initial idle Security may omit
 the save payload; a used mint or retained terminal outcome cannot be omitted.
 Legacy Security assignment saves require the increment's explicit version refusal;
@@ -211,3 +215,13 @@ local deployment/return clocks; external crossing remains the explicitly retaine
 legacy capability until the real increment19 transfer/custody consumer joins it.
 This structural checkpoint does not claim local routing, treatment, external custody
 or a complete increment20 exit. Root integration owns compatibility versions.
+
+The structural Security source checkpoint adds permitted shared Job work-list rows
+to the existing Security blackboard and existing screen, using the established
+read-only work-list renderer. Its six targeted client files pass 459 tests
+(15 October 2026; worker tree), including return/terminal display and unchanged
+Security dispatch/recall. New owner and snapshot tests cover identity, recall,
+JSON application, strict old-shape refusal and malformed no-write candidates;
+the integrator still needs to execute those native tests, repin intentionally
+changed digest goldens, run actual hosted continuation and advance compatibility.
+No native, human, route, Medical or increment exit is claimed from this checkpoint.

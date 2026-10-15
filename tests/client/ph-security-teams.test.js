@@ -192,4 +192,17 @@ describe('PhSecurityTeams', () => {
     el.state = BLACKBOARD;
     expect(el.shadowRoot.getElementById('refusal').hidden).toBe(true);
   });
+  it('shows the same canonical job through return and its terminal outcome without exposing controls', () => {
+    const el = setup();
+    const jobs = [{ id: 42, owner: 'security', team_idx: 0, phase: 'returning',
+      target_entity: TARGET, outcome: null, paused: false, workflow_error: false }];
+    el.state = { ...BLACKBOARD, jobs };
+    const list = el.shadowRoot.getElementById('job-work-list');
+    expect(list.querySelector('[data-job-id="42"]').textContent).toContain(t('job.phase.returning'));
+    expect(list.querySelector('button')).toBeNull();
+    el.state = { ...BLACKBOARD, jobs: [{ ...jobs[0], phase: 'finished', outcome: 'cancelled' }] };
+    expect(list.querySelectorAll('[data-job-id="42"]')).toHaveLength(1);
+    expect(list.textContent).toContain(t('job.outcome.cancelled'));
+  });
+
 });

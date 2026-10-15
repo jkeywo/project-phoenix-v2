@@ -6,6 +6,7 @@ import '../strings-boot.js';
 import { t } from '../strings.js';
 import { PhElement, phDefine } from './ph-element.js';
 import { securityTeamRows, securityActionRows } from '../security-dispatch.js';
+import { renderJobWorkList } from '../job-work-list.js';
 
 /**
  * `<ph-security-teams>` — the Security console panel (issue #1346, PRD #1337).
@@ -91,6 +92,7 @@ export class PhSecurityTeams extends PhElement {
       <div id="jobs"></div>
     </div>
   </div>
+  <div id="job-work-list" role="status"></div>
   <div class="refusal" id="refusal" hidden></div>
 `;
   }
@@ -141,6 +143,7 @@ export class PhSecurityTeams extends PhElement {
     const bb = this.state || null;
     const teams = securityTeamRows(bb);
     const jobs = securityActionRows(bb);
+    renderJobWorkList(this.$('job-work-list'), bb?.jobs, teams.map(team => ({ id: team.teamIdx })));
 
     this.teamsEl.textContent = '';
     if (teams.length === 0) {

@@ -4983,6 +4983,9 @@ pub struct SecurityBlackboard {
     /// dispatch or recall names.
     #[serde(default)]
     pub teams: Vec<SecurityTeamSlot>,
+    /// Permitted shared commitments; these rows grant no machinery authority.
+    #[serde(default)]
+    pub jobs: Vec<crate::job::JobWorkItem>,
     /// Every entity in the world that offers Security work, in uuid order, with
     /// the actions each of them offers.
     #[serde(default)]

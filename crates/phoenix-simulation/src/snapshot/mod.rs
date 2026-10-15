@@ -381,6 +381,7 @@ mod mounts;
 #[cfg(test)]
 mod navigation_sharing_tests;
 mod personnel;
+mod security;
 mod sensing_publications;
 mod shield_enquiry;
 mod spatial_fields;

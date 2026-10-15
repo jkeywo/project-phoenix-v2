@@ -41,8 +41,7 @@ pub mod server;
 pub use server::{
     handle_security_commands, operate_security_ai, publish_security_blackboard,
     security_blackboard_key, tick_security_teams, SecurityAiDispatched, SecurityPlugin,
-    SecuritySaveState, SecurityTargetActions, SecurityTeamSaveState, ShipSecurityTeams,
-    TASK_VERB_SECURITY_TEAM,
+    SecuritySaveState, SecurityTargetActions, ShipSecurityTeams, TASK_VERB_SECURITY_TEAM,
 };
 pub use teams::{
     dispatch_status, select_assignments, SecurityAction, SecurityActionConfig, SecurityCandidate,

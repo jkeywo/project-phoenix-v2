@@ -408,3 +408,30 @@ foreign readiness oracle. Formation jump membership/readiness subsequently binds
 these real acknowledgements and each member's own paid drive, with best admitted
 range/accuracy/gravity stats and one shared reference displacement as already
 specified. This contract alone implements neither movement nor formation travel.
+
+
+## Adopted current World policy binding
+
+Keep one small canonical `TransitWorldBinding` per actual drive-equipped ship:
+Base, or an accepted authored destination binding. It records the current arrival
+policy/route context only. The same successful physical World arrival updates it;
+preparing, refused, cancelled and merely accepted requests cannot overwrite it.
+A local drive uses this current accepted World and its relevant static supporting
+recipes rather than silently reverting to base-world gravity after sector travel.
+Dormant prefetched masses do not act as physical global obstacles. Original body
+positions, visibility, removal, physics and ordinary World layer lifetime remain
+with their existing owners.
+
+Seed from actual authored placement: base actors start Base; a layer-authored
+actor must map unambiguously to its accepted destination context or refuse the
+unsupported drive binding. Preserve the existing EntityOriginLayer lifetime and
+script ownership; travelling does not reparent an actor into an unload list or
+rewrite its AI flag chain. The new binding is not a physical-space identity,
+interaction filter, second sector simulation or a substitute for World membership.
+
+Capture/fold and whole-candidate preflight validate the binding against accepted
+content, actual supported source and the same Transit owner. Cross-check completed
+World arrival records where present. Restore cannot infer it from current render
+content or whichever file loaded most recently. Departure/return and subsequent
+local-jump witnesses must exercise the actual selected/current World recipe scope,
+including relevant static supporting worlds, before claiming that joined exit.

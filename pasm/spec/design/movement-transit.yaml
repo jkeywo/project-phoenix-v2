@@ -148,3 +148,13 @@ entities:
         - "[ai] Human selects an earned own contact alias; AI requires uniquely matured independently observed identity/name and genuinely held faction/reference evidence. Private Broad source UUID maps cannot correlate a Comms sender. Missing/ambiguous evidence stays pending, and explicit supported Console feeds grant only genuinely heard suggestions."
         - "[ai] Navigation owns slot intent; Helm owns assistance/motion. Execute only from own current earned leader position/velocity, pause/report stale or absent evidence, preserve source/rating authority and manual breakaway. World-axis offset requires no hidden heading, snapping or guaranteed station keeping. No Comms/Scenario/planner foreign actuator write."
         - "Actual status distinguishes received, coordination acceptance, leader selection, awaiting Helm, executing, paused and broken away. Source learns stages only through real paid Comms reports; accepting a request proves no machinery or jump readiness. Formation travel later binds real acknowledgements and each member's own paid drive. Contract only, no runtime/exit evidence."
+
+  - decision: current-transit-world-policy-binding
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Actual Transit Retains Its Current Accepted World Policy Context
+      summary: "One canonical TransitWorldBinding records Base or an accepted destination for actual drive-equipped ships. Successful physical World arrival alone changes it; local jumps use this current World and relevant static supporting recipes. It is policy/route context, not new spatial identity or physics/filter/lifetime ownership."
+      rationale:
+        - "[ai] Adopted with integrator agreement before runtime. Preparing/refused/cancelled work cannot overwrite context. Seed Base or an unambiguous accepted authored-layer mapping; refuse unsupported ambiguity. Existing EntityOriginLayer remains lifetime/script ownership, without reparenting flag chains or unload lists."
+        - "[ai] Capture/digest and full no-write preflight bind context to accepted content/source and actual Transit records. Dormant prefetched masses are not physical global obstacles; actual body pose/visibility/removal/physics retain their owners. Actual departure, return and later local jump must prove destination/current-World scope including relevant static supporting worlds."

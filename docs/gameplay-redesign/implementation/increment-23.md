@@ -86,3 +86,40 @@ with each. Use targeted tests and human playtests, then the established integrat
 gates. Hand the working examples and their outcome expectations to
 [increment 24](increment-24.md), which discovers combinations rather than requiring
 a bespoke captured-ship evacuation template.
+
+
+## First23A consumer: bind acceptance to the existing promise ledger
+
+Adopted 15 October 2026. An optional `planning.required_commitment` names one
+existing World CommitmentLedger promise. Before the first root choice, the exact
+unique record must be Open with a valid made-at clock. A normal Comms dialogue
+response records that promise through its existing admitted callback/effect path.
+An offered or declined dialogue does not record acceptance and does not start work.
+There is no new promise store, resource claim, physical executor or forced Human
+command. Existing plans without this field keep their current behaviour.
+
+The accepted PlanChoice retains the immutable required promise ID. Full-candidate
+preflight checks that source binding against the same saved ledger record, its
+original made/resolved clocks and the choice tick. Later Kept or Broken resolution
+does not erase the root, alter its deadline or abandon ordinary physical work.
+Only explicit authored Situation outcomes may request cancellation through the
+actual owning mechanism. Actual Scenario evidence can explicitly keep or break
+the same promise via the existing buffered callback; script success is not itself
+proof of any physical completion.
+
+Preserve missing-root protection for a launch-resolved actor. A dormant root may
+lack its required promise, or await the collection pass after a promise made this
+same tick. A promise made and resolved within one tick can close without a root.
+An earlier Open interval spanning collection requires the retained choice; later
+resolution cannot explain away an erased accepted plan. Unresolved actors retain
+the existing delayed-binding behaviour. Validate unique referenced records, closed
+Open/resolved clock shape and nonfuture clocks before writes, including malformed
+whole-candidate restore.
+
+Expose the bound promise ID through existing privileged Scenario inspection and
+edit the optional source field through Workshop's existing validated root/history
+workflow. Prove ordinary Comms accept/refuse, no pre-acceptance instruction, real
+owner work, explicit outcome resolution and fresh JSON continuation. This bounded
+consumer establishes acceptance/history plumbing. It does not deliver proposals
+for multiple roots, physical capacity reservations or the Patrol capture/transport/
+reception demonstration, which still needs the actual20/19/21 custody consumers.

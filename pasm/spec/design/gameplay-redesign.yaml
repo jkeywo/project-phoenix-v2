@@ -69,6 +69,7 @@ entities:
       rationale:
         - "User-approved revision 2026-10-14; docs/gameplay-redesign/implementation/increment-23.md defines the capture, service, return-to-port and evacuation demonstration before procedural search."
         - "Distinguish proposals, revealed offers, acceptance and completion. Ordinary observations, Comms and optional objectives reveal opportunities; acceptance is not a command. Outside actors change needs through actual work without automatic cross-objective credit."
+        - "[ai] First23A optionally binds planning.required_commitment to the existing unique real CommitmentLedger Open promise before root choice. Normal Comms dialogue acceptance records it through the existing effect path; offered/refused dialogue creates no acceptance or forced System command. PlanChoice retains immutable required ID; candidate preflight validates original made/resolved clocks and choice relation using that same ledger. Later resolution preserves root/deadline/physical work; only explicit authored actual-owner cancellation may stop work. Missing-root protection allows absent promise, same-tick acceptance awaiting collection or same-tick make/resolve, never laundering an earlier open interval by later resolution. Existing plans unchanged; full Patrol awaits actual custody/capture/transport/reception."
   - decision: redesign-bounded-opportunity-discovery
     core:
       status: accepted

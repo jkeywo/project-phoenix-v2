@@ -199,7 +199,17 @@ Request copies retain a local dismissed flag on the same canonical inbox record;
 Clear hides eligible rows without creating read/decision/completion facts,
 cancelling work or discarding pending returns. Actual lineage remains until session
 end in this persistent slice. A new returned stage is a new visible outcome row
-and does not silently un-dismiss the old request. Ordinary text/plot Clear is
+and does not silently un-dismiss the old request. Return delivery is a sustained
+reliable service: discrete work admits each immutable local Outcome transmission
+once, independent of whether the requester hears it. The same retained copy and
+actual continuously paid radio operation fund later delivery attempts, each gated
+by both actual endpoints, compatible channel/key and physical path. Reception is
+idempotent. The internal returned frontier cannot alter reporter-visible work,
+payment, availability, sent history or AI choices and is omitted from permitted
+publication. Near/far histories and reserves must match through delayed delivery
+and exhaustion. Ordinary text retains its existing one-shot semantics. No extra
+retry queue, work credit or public private-acknowledgement field is introduced.
+Ordinary text/plot Clear is
 unchanged; there is no separate archive or expiry/garbage-collection success.
 The same Console continues receiving its own retained records; a Show cleared
 requests filter reveals them. Default hiding does not revoke human knowledge while

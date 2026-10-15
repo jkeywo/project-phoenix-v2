@@ -242,8 +242,14 @@ fn checkpoint(fetch: bool, ai: bool, stage: &str) -> (App, Entity) {
     let (mut app, entity) = prepared(fetch, ai);
     for _ in 0..2400 {
         if let Some(work) = fitting(&app, entity).work.get(SLOT) {
-            let physical_fetch = stage == "Fetching" && app.world().get::<project_phoenix::console::repair::server::ShipRepairTeams>(entity).unwrap().0.navigation()
-                .is_some_and(|teams| teams.iter().any(|team| matches!(team.location,phoenix_model::interior::TeamLocation::Crossing { elapsed, .. } if elapsed > 0.0)));
+            let physical_fetch = stage == "Fetching"
+                && app
+                    .world()
+                    .get::<project_phoenix::console::repair::server::ShipRepairTeams>(entity)
+                    .unwrap()
+                    .0
+                    .refit_location(work.job)
+                    .is_some_and(|location| matches!(location, phoenix_model::interior::TeamLocation::Crossing { elapsed, .. } if *elapsed > 0.0));
             if format!("{:?}", work.stage) == stage && (physical_fetch || work.progress > 0.0) {
                 if stage != "Fetching" {
                     assert!(app
@@ -341,7 +347,7 @@ fn real_human_and_ordinary_ai_field_fits_resume_active_removal_and_installation_
             resumed.update();
             if saw_finished {
                 finished_ticks += 1;
-                if finished_ticks >= 20 {
+                if finished_ticks >= 20 && step >= 359 {
                     break;
                 }
             }
@@ -410,7 +416,7 @@ fn accepted_source_support_spare_fetch_resumes_the_actual_team_route() {
                 .is_some_and(|item| item.definition == CHOICE)
         {
             finished_ticks += 1;
-            if finished_ticks >= 20 {
+            if finished_ticks >= 20 && step >= 359 {
                 break;
             }
         }
@@ -698,7 +704,7 @@ fn two_actual_local_ship_peers_apply_human_requests_and_ordinary_ai_fits_identic
                 })
         }) {
             finished_ticks += 1;
-            if finished_ticks >= 20 {
+            if finished_ticks >= 20 && step >= 359 {
                 break;
             }
         }

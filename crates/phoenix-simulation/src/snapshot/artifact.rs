@@ -463,7 +463,8 @@ use super::*;
 /// `76` retains optional plan executions, original opportunity evidence and replies.
 /// `77` retains requested officer destinations and shared physical escort jobs.
 /// `78` retains heard formation lineage and dated measured Navigation courses.
-pub const SNAPSHOT_FORMAT: u32 = 78;
+/// `79` retains selected radio call intent; device leases and media bytes are excluded.
+pub const SNAPSHOT_FORMAT: u32 = 79;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -622,7 +623,9 @@ pub const SNAPSHOT_FORMAT: u32 = 78;
 /// "0.59" refuses stale officer dispatch before any job, claim or identity mint.
 /// "0.60" selects formation courses only from heard acceptance and an earned
 /// leader measurement, retaining intent while missing evidence pauses the course.
-pub const SIMULATION_RULES: &str = "0.60";
+/// "0.61" derives paid selected-call carriers through ordinary radio work;
+/// transient Session media cannot issue commands or alter retained state.
+pub const SIMULATION_RULES: &str = "0.61";
 
 /// The authored data, computed rather than remembered.
 ///

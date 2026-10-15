@@ -24,7 +24,7 @@ use project_phoenix::{
     sim_digest::world_digest,
     sim_sets::FixedStep,
     sim_tick::{sim_tick_period, SimTick},
-    snapshot::{capture, ready_to_restore, restore, PhoenixSnapshot},
+    snapshot::{capture, ready_to_rebuild, restore, PhoenixSnapshot},
     world::config::WorldConfig,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -755,7 +755,7 @@ fn ordinary_pdc_intercepts_and_survives_launcher_removal_with_exact_json_continu
     let saved: PhoenixSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
     let (mut resumed, restored, _) = prepare(SINGLE);
-    assert!(ready_to_restore(resumed.world(), &saved));
+    assert!(ready_to_rebuild(resumed.world(), &saved));
     let applied = restore(resumed.world_mut(), &saved);
     assert!(applied.is_complete(), "{:?}", applied.gaps);
     // Trace is intentionally outside gameplay state. Its original launch and

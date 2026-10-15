@@ -206,6 +206,20 @@ fn carrier_json_restore_discards_bootstrap_flights_and_continues_same_vector_exa
     resumed
         .world_mut()
         .spawn((EntityUuid("bootstrap-not-saved".into()), launched()));
+    assert!(!crate::snapshot::ready_to_restore(
+        resumed.world(),
+        &snapshot
+    ));
+    assert!(crate::snapshot::ready_to_rebuild(
+        resumed.world(),
+        &snapshot
+    ));
+    let mut invalid = snapshot.clone();
+    invalid.entities[0].physics = Some(Default::default());
+    assert!(!crate::snapshot::ready_to_rebuild(
+        resumed.world(),
+        &invalid
+    ));
     let report = crate::snapshot::restore(resumed.world_mut(), &snapshot);
     assert!(report.is_complete(), "{report:?}");
     resumed.world_mut().flush();

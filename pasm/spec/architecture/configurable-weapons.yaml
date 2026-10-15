@@ -16,12 +16,12 @@ entities:
       confidence: confirmed
       title: Shared Weapon Mount and Delivery
       summary: "Gameplay owns reusable planar geometry and shield/hull payload routing. Beam, bolt and guided consumers use these contracts while retaining their authoritative cycle/projectile lifecycles, impact-facing policies and RNG order. A down shield receives the hull payload; an up shield routes its own payload through existing pierce/overflow arithmetic."
+      rationale:
+        - "Resume keeps existing-roster readiness strict. Delayed rebuild recognises absent closed weapon-flight carriers only through complete candidate carrier validation, using the existing empty-carrier materialisation and actual saved flight vector; ordinary missing actors still require their accepted SpawnOrigin."
     architecture:
       kind: subsystem
       authority: authoritative
       owns: [finite-system-turrets, weapon-flight-carrier-state, weapon-flight-restore-guard, guided-source-order-knowledge, ship-illumination-intent, illumination-emission-readout]
-      constraints:
-        - "Resume keeps existing-roster readiness strict. Delayed rebuild recognises absent closed weapon-flight carriers only through complete candidate carrier validation, using the existing empty-carrier materialisation and actual saved flight vector; ordinary missing actors still require their accepted SpawnOrigin."
     implementation:
       status: declared
       paths: [crates/phoenix-sim-gameplay/src/weapons/mount.rs, crates/phoenix-sim-gameplay/src/weapons/phaser.rs, crates/phoenix-sim-gameplay/src/weapons/blaster.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs]

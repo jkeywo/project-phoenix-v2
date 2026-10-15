@@ -347,14 +347,19 @@ pub fn ready_to_restore(world: &World, snapshot: &PhoenixSnapshot) -> bool {
 /// restore inserts their canonical bundle from the captured tier before writing
 /// them.
 pub fn ready_to_rebuild(world: &World, snapshot: &PhoenixSnapshot) -> bool {
+    // Missing physical flight carriers have a closed runtime recipe rather
+    // than an authored SpawnOrigin. Validate that whole candidate namespace
+    // before advertising the same materialisation restore already supports.
+    if super::flight_carriers::validate(world, snapshot).is_err() {
+        return false;
+    }
     let Some(mut query) = world.try_query::<&EntityUuid>() else {
         return false;
     };
     let present: Vec<&str> = query.iter(world).map(|uuid| uuid.0.as_str()).collect();
-    let roster_rebuildable = snapshot
-        .entities
-        .iter()
-        .all(|row| present.contains(&row.uuid.as_str()) || row.spawn.is_some());
+    let roster_rebuildable = snapshot.entities.iter().all(|row| {
+        present.contains(&row.uuid.as_str()) || row.spawn.is_some() || row.weapon_flight_carrier
+    });
     roster_rebuildable && belt_ready(world, snapshot) && layers_ready(world, snapshot)
 }
 

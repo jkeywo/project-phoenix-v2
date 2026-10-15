@@ -26,6 +26,7 @@ pub(crate) fn install(
             super::media_control::ShipCommsMediaIntent::default(),
         ));
     }
+    super::capture::install(config, commands);
 }
 
 #[derive(Clone)]
@@ -153,6 +154,7 @@ pub(crate) fn copy_message(
 /// work once per radio, irrespective of message count or chosen audience.
 pub(crate) fn tick_radio(
     mut sources: Sources,
+    mut captured: Query<&mut super::capture::ShipCommsCapture>,
     mut inbox: ResMut<CommsInboxRes>,
     mut runtime: ResMut<CommsRuntime>,
     paths: crate::regions::signal_path::RegionSignalQuery,
@@ -446,6 +448,17 @@ pub(crate) fn tick_radio(
                 crate::world_id::IdNamespace::Message,
             )
         },
+    );
+    super::capture::settle(
+        &endpoints,
+        &mut sources,
+        &mut captured,
+        &inbox,
+        &mut runtime,
+        &paths,
+        tick.0,
+        fixed.timestep().as_secs_f32(),
+        outbox.as_deref_mut(),
     );
     if let Some(cache) = media.as_deref_mut() {
         // Read the SAME endpoints whose ordinary carrier work was paid above.

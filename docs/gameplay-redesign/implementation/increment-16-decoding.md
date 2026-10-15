@@ -106,3 +106,70 @@ Console isolation; decoded-request non-participation; Workshop/history/Preview/T
 and partially decoded fresh JSON continuation for at least 360 full state/digest
 steps. Malformed owner/capability/clock/frontier/content must refuse without writes.
 Source-only checks are not native, device, workload or balance acceptance.
+
+## Bounded leaf source handoff — 16 October 2026
+
+New Model DTOs, pure Gameplay state/work/validation, actual radio acquisition and
+decoder payment, the existing policy's closed decoder output, optional reference
+hull, independent controls and accepted Workshop edits are prepared together.
+The radio hook runs after actual send/outcome creation and before media's final
+paid-carrier derivation. Every acquisition requires emitted_tick == current tick;
+the pure owner also enforces this before inserting evidence. It cannot consume
+retained history, private recipient deduplication or a prior paid media carrier.
+
+Focused JavaScript: 17 tests across three files passed (latest 4.17s); strict strings
+6,307 with zero errors/warnings; Workshop bundle and layer import checks passed.
+Rust leaves are formatted. Pure Model/Gameplay source review passed under the
+explicit immutable accepted-key boundary; actual runtime review/execution and
+integrated continuation remain pending. The Rust owner tests use real spawned
+radios and reserves for paid foreign capture, no addressed inbox/early body,
+paid decode, impossible protection and never-captured archive refusal. Their
+execution is root-owned; this handoff claims no native or milestone exit.
+
+### Root-owned central joins
+
+- Export Model `comms_capture` and Gameplay `electronic::capture`; export Simulation
+  `comms::capture` and `capture_ai`. Preserve existing media registrations.
+- Add optional serde-default Radio `capture: Option<CommsCaptureConfig>` and keyed
+  channel `protection_level: u8` default 1, validated 1–3. Unkeyed effective level
+  is always 0. Call capture config validation from Radio validation. Preserve
+  existing no-decoder behavior and media capability; update explicit constructors.
+- Add `SelectCommsCapture { capture: Option<u64> }` under existing Comms admission,
+  including an own safe-positive-integer handle bound (2^53−1). Add optional
+  `CommsBlackboard.captured: Option<CommsCaptureControlsView>`. Publish only
+  `capture::views` for that exact actor/System and explicit Console feed; the
+  private captured payload type must never enter a client/AI publication.
+- Add one `ShipCommsCapture(CaptureState)` canonical component declaration in the
+  existing radio owner. Installation and the coordinated radio measurement/work
+  hook are in the donor; preserve media's tail hook after capture work.
+- Existing `operate_comms_response_ai` calls `capture_ai::decision` at the same
+  normal cadence with actual config/boards/sources/radio/policy/flag chain and own
+  availability. Collect its `(entity, owner, capture)` result and emit normal
+  `SelectCommsCapture` via the existing `emit_ai_command` pass. The helper holds
+  behind visible open conversation/released request work and already selected
+  decoding, so it does not replace reading or create a second controller/state.
+- Add optional canonical EntityState capture payload, complete capture/digest and
+  restore. Validate required/forbidden presence from the exact accepted Radio
+  recipe for all canonical actors including Disabled/carried ones; call
+  `CaptureState::validate` with its exact owner/capability/immutable keys and tick.
+  Its `payloads()` accessor is trusted preflight only: verify each source differs
+  from receiver, accepted actual source equipment/channel/key/effective level,
+  and every surviving matching original/heard inbox copy agrees with source name,
+  body/literal flag and immutable wire (ignoring the copy's received_tick).
+  Do not require cleared source text to reappear or publish a source UUID.
+- Advance epochs coherently and refuse malformed owners, missing/extra state,
+  capture clock != actual emission clock, impossible paid interval/work/frontier,
+  private source/copy mismatch and incompatible accepted capability before writes.
+  There is no derived prepaid decoding resource to restore; listening is rebuilt
+  through the existing actual radio pass before work can advance.
+- Client central plumbing calls `capturedPayload(bb.captured, owner, authorised)`
+  from the explicit Comms read view into `comms_capture`. Register independent
+  `registerCaptureActions`, map `comms_capture_select` to that exact owner and
+  closed payload, and mount/update/dispose `mountCommsCaptureControls` on the
+  existing Comms console. No new screen/seat or layout redesign.
+
+Required next evidence is joined native owner execution, actual Human/ordinary AI
+full-host partially paid JSON360/digest/no-write proof, explicit-feed isolation and
+actual Workshop Preview/Test. It is not replaced by the pure state JSON test or
+the focused GUI/history fixtures. Dynamic keys and retransmission/hop capture
+remain explicit later consumers within 16; other unfinished 16/17 scope remains.

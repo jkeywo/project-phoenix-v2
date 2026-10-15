@@ -1,0 +1,24 @@
+# Optional receiver/codebreaker. All seats, physical hardware and reserves are
+# inherited unchanged. Fleet monitoring has no fleet key or audience authority.
+includes = ["alliance_cruiser.toml"]
+name = "entity.capture_cruiser.name"
+
+[comms.radio]
+system = "comms"
+request_reading_ticks = 30
+keys = []
+
+[comms.radio.capture]
+max_level = 1
+ticks_per_level = 90
+held_key_ticks = 1
+
+[[comms.radio.channel]]
+id = "public"
+range = 200
+work_units = 1
+
+[[comms.radio.channel]]
+id = "fleet"
+range = 1200
+work_units = 4

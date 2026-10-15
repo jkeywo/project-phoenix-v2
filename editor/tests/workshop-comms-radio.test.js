@@ -11,6 +11,20 @@ const profile = () => ({ system: 'comms', request_reading_ticks: 45, keys: ['cre
   { id: 'open', range: 100, work_units: 1 }, { id: 'operations', range: 50, work_units: 2, key: 'crew-key' },
 ] });
 const make = source => new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: '[pack]\nformat=1\nid="radio"\nname="Radio"\nversion="1"\n' }, { path, text: source }]));
+it('accepts closed capture capability and protected levels through existing history without changing keys', async () => {
+  const draft = make(stringify(entity())), value = profile();
+  value.capture = { max_level: 1, ticks_per_level: 90, held_key_ticks: 2 }; value.channel[1].protection_level = 3;
+  await applyCommsRadioOperation({ draft, runtime: { validate: async () => ({ accepted: true }) }, dependencies: deps, operation: { path, value } });
+  expect(inspectCommsRadio(new WorkshopDocument(draft.archive()), deps, path).radio).toEqual(value);
+  expect(inspectCommsRadio(draft, deps, path).radio.keys).toEqual(['crew-key']);
+  draft.undo(); expect(parse(draft.read(path)).comms.radio).toBeUndefined(); draft.redo();
+  expect(inspectCommsRadio(draft, deps, path).radio.capture).toEqual(value.capture);
+  for (const mutate of [p => p.capture.max_level = 4, p => p.capture.max_level = -1, p => p.capture.ticks_per_level = 0,
+    p => p.capture.ticks_per_level = 36001, p => p.capture.held_key_ticks = 1.5, p => p.capture.secret = 'private',
+    p => p.channel[1].protection_level = 0, p => p.channel[1].protection_level = 4]) {
+    const bad = structuredClone(value); mutate(bad); expect(() => validateCommsRadio(bad, entity())).toThrow();
+  }
+});
 it('validates exact equipment, finite endpoint-bounded channels, paid work and actually held keys', () => {
   validateCommsRadio(profile(), entity());
   for (const media of ['audio', 'audio_video']) validateCommsRadio({...profile(), media}, entity());

@@ -67,6 +67,7 @@ entities:
       summary: "Supported finite profiles and controls use existing accepted Workshop source/history/includes/Preview/Test, normal admitted Human/AI actions and immediate snapshot/digest integration. Whole-candidate owner/phase/clock/geometry/resource preflight precedes writes; initial source does not claim a verified playable exit."
       rationale:
         - "[ai] Actual assisted/direct, stale match, coupled/separating and paid transit checkpoints require fresh JSON bootstrap with at least 360 complete capture/digest comparisons and different-LocalShip peer proof. Shipped content, gameplay/movement comparisons, physical browser/native controls and 2/4/6/8-human workload/performance acceptance remain distinct."
+        - "[ai] Per-engine intent presentation derives from this ship's canonical restored LastHelmInput (or NPC actuator input), the same source as the ordinary joystick fan-out. An ephemeral queue left by bootstrap must not overwrite restored intent during publication; restore must not create a second saved joystick state."
 
   - decision: movement-sustained-boost-existing-owner
     core:

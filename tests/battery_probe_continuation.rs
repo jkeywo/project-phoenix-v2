@@ -14,6 +14,10 @@ use project_phoenix::{
 use std::collections::BTreeSet;
 
 fn boot() -> App {
+    project_phoenix::entities::include_resolve::load_entity_config(
+        "assets/entities/battery_probe.toml",
+    )
+    .expect("ordinary probe source must pass the real include/entity schema");
     let mut app = build_headless_app(&HeadlessArgs {
         world_path: "tests/fixtures/battery-probe-world.toml".into(),
         ship_path: "assets/entities/alliance_cruiser.toml".into(),

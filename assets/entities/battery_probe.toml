@@ -12,6 +12,7 @@ description = "entity.battery_probe.description"
 [collider]
 shape = "Ball"
 radius = 0.5
+length = 0
 movable = false
 
 [radar_appearance]
@@ -91,7 +92,7 @@ default_cooling_per_sec = 0
 
 [energy.reactor.reserve]
 capacity = 1
-max_intake_per_sec = 0
+max_intake_per_sec = 1
 passive_loss_at_full_per_sec = 0.951
 charge_heat_per_unit = 0.1
 discharge_heat_per_unit = 0.1
@@ -112,7 +113,7 @@ discrete_cost = 0
 
 [energy.consumer.reserve]
 capacity = 12
-max_intake_per_sec = 0
+max_intake_per_sec = 1
 passive_loss_at_full_per_sec = 0.1
 charge_heat_per_unit = 0.1
 discharge_heat_per_unit = 0.1

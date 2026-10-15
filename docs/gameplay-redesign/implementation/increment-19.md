@@ -79,7 +79,13 @@ generation while retaining positive ramp and all other finite bounds. The existi
 Workshop energy controls and fitting validator use the same supported coefficients.
 Three Gameplay owner cases pass (zero-profile bounds, transactional refit refusal
 and finite work through JSON); 45 affected Workshop checks pass. The actual-host
-probe continuation is still pending. These checks do not establish a launch bay,
+probe identifies a real contact, exhausts its actual reserve and preserves dated
+history across 360 complete JSON capture/digest comparisons (5.98 seconds;
+`.phoenix/battery-real-host-positive-intake-retry.log`). Its accepted hardware has
+positive intake capacity, zero allocation and zero generation; intake capacity
+does not create energy. The initial source's omitted collider length and invalid
+zero intake capacities were corrected before this passing data run. These checks
+do not establish a launch bay,
 deployment/recovery job, command link or completed increment 19.
 
 Preserve a stable craft/deployable identity and actual equipment/resource/condition

@@ -1421,3 +1421,185 @@ fn region_despawn_while_inside_removes_slow_zone_modifiers() {
     check_modifier(&mut app, ModifierSlot::MaxSpeed, 1.0);
     check_modifier(&mut app, ModifierSlot::MaxYawRate, 1.0);
 }
+
+// Increment14 fields use the real membership, machinery and damage owners.
+fn field_profile() -> crate::regions::field::FieldConfig {
+    crate::regions::field::FieldConfig {
+        falloff: crate::regions::field::FieldFalloff::Linear,
+        strength: 1.0,
+        sensor_absorption_per_unit: 0.0,
+        comms_absorption_per_unit: 0.0,
+        evolution: None,
+    }
+}
+#[test]
+fn field_local_effects_refresh_without_reentry_and_pause_at_zero_exposure() {
+    let mut app = blocks_impulse_test_app();
+    app.add_plugins(crate::modifiers::coordination::ModifierCoordinationPlugin);
+    app.insert_resource(crate::sim_tick::SimTick(0));
+    let region = spawn_blocks_impulse_region(&mut app, 0.0, 0.0, 10.0);
+    app.world_mut().entity_mut(region).insert((
+        crate::regions::field::RegionFieldState::new(field_profile(), 0, [0.0; 3]).unwrap(),
+        RegionEffectsSection(vec![
+            RegionEffectKind::BlocksImpulse,
+            RegionEffectKind::RadarDampening { multiplier: -1.0 },
+        ]),
+    ));
+    set_ship_pos(&mut app, 10.0, 0.0);
+    set_impulse_charging(&mut app);
+    tick_with_dt(&mut app, 1.0);
+    assert!(is_inside(&mut app, region));
+    assert_impulse_phase(&mut app, ImpulsePhase::Charging);
+    assert_eq!(
+        get_ship_modifiers(&mut app).get(&ModifierSlot::RadarRange),
+        1.0
+    );
+    set_ship_pos(&mut app, 5.0, 0.0);
+    tick_with_dt(&mut app, 1.0);
+    assert_impulse_phase(&mut app, ImpulsePhase::Idle);
+    assert!((get_ship_modifiers(&mut app).get(&ModifierSlot::RadarRange) - 2.0 / 3.0).abs() < 1e-6);
+    let ship = ship_entity(&mut app);
+    app.world_mut()
+        .get_mut::<ShipModifiers>(ship)
+        .unwrap()
+        .pending_events
+        .clear();
+    tick_with_dt(&mut app, 1.0);
+    assert!(app
+        .world()
+        .get::<ShipModifiers>(ship)
+        .unwrap()
+        .pending_events
+        .is_empty());
+    app.world_mut()
+        .get_mut::<crate::regions::field::RegionFieldState>(region)
+        .unwrap()
+        .profile
+        .strength = 0.0;
+    tick_with_dt(&mut app, 1.0);
+    assert!(is_inside(&mut app, region));
+    assert_eq!(
+        get_ship_modifiers(&mut app).get(&ModifierSlot::RadarRange),
+        1.0
+    );
+}
+#[test]
+fn field_motion_updates_membership_and_presentation_cache_from_logical_anchor() {
+    let mut app = test_app();
+    app.insert_resource(crate::sim_tick::SimTick(0));
+    let region = spawn_region(&mut app, 0.0, 0.0, RegionShape::Sphere { radius: 5.0 });
+    let mut profile = field_profile();
+    profile.evolution = Some(crate::regions::field::FieldEvolution {
+        duration_secs: 10.0,
+        translation: [100.0, 0.0, 0.0],
+        final_scale: 2.0,
+        final_strength: 1.0,
+    });
+    app.world_mut()
+        .entity_mut(region)
+        .insert(crate::regions::field::RegionFieldState::new(profile, 0, [0.0; 3]).unwrap());
+    tick_with_dt(&mut app, 1.0);
+    assert!(is_inside(&mut app, region));
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 10;
+    tick_with_dt(&mut app, 1.0);
+    assert!(!is_inside(&mut app, region));
+    let pose = app
+        .world()
+        .get::<crate::regions::field::SampledRegionFieldPose>(region)
+        .unwrap()
+        .0;
+    assert_eq!(pose.origin, Vec3::new(100.0, 0.0, 0.0));
+    assert_eq!(pose.scale, 2.0);
+    assert_eq!(
+        app.world().get::<Transform>(region).unwrap().translation,
+        Vec3::ZERO
+    );
+}
+#[test]
+fn field_damage_uses_actual_local_exposure_without_another_damage_budget() {
+    let mut app = damage_test_app();
+    app.insert_resource(crate::sim_tick::SimTick(0));
+    let region = spawn_damage_zone_with_pierce(&mut app, 0.0, 0.0, 10.0, 10.0, 1.0);
+    app.world_mut().entity_mut(region).insert(
+        crate::regions::field::RegionFieldState::new(field_profile(), 0, [0.0; 3]).unwrap(),
+    );
+    set_ship_pos(&mut app, 5.0, 0.0);
+    let before = ship_hull_hp(&mut app);
+    tick_with_dt(&mut app, 1.0);
+    assert!((before - ship_hull_hp(&mut app) - 5.0).abs() < 1e-6);
+}
+
+#[test]
+fn restored_read_cache_gates_actual_impulse_input_before_another_physics_tick() {
+    use crate::core::messages::{
+        AdmittedCommand, AdmittedCommands, SystemControlPayload, SystemId,
+    };
+    let mut app = App::new();
+    app.insert_resource(crate::sim_tick::SimTick(40))
+        .insert_resource(Time::<Fixed>::from_seconds(1.0))
+        .add_systems(
+            Update,
+            phoenix_sim_gameplay::ship::helm_admission::process_helm_inputs,
+        );
+    let mut physics = ShipPhysics::default();
+    physics.x = 5.0;
+    let ship = app
+        .world_mut()
+        .spawn((
+            Ship,
+            physics,
+            crate::ship::helm::ImpulseCommand::default(),
+            AdmittedCommands(vec![AdmittedCommand {
+                target: SystemId(crate::ship::system_registry::HELM_IMPULSE_SYSTEM_ID.into()),
+                payload: SystemControlPayload::StartImpulseCharge,
+                response_token: None,
+                feedback_correlation: None,
+            }]),
+        ))
+        .id();
+    let saved = crate::regions::field::RegionFieldState::new(field_profile(), 0, [0.0; 3]).unwrap();
+    let restored: crate::regions::field::RegionFieldState =
+        serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+    let region = app
+        .world_mut()
+        .spawn((
+            Transform::default(),
+            RegionShapeSection(RegionShape::Sphere { radius: 10.0 }),
+            RegionEffectsSection(vec![RegionEffectKind::BlocksImpulse]),
+            restored,
+        ))
+        .id();
+    rebuild_region_read_cache(app.world_mut());
+    assert_eq!(
+        app.world().resource::<RegionMembership>().exposure[&(ship, region)],
+        0.5
+    );
+    assert_eq!(
+        app.world()
+            .get::<crate::regions::field::RegionFieldState>(region)
+            .unwrap(),
+        &saved
+    );
+    app.update();
+    assert_eq!(
+        app.world()
+            .get::<crate::ship::helm::ImpulseCommand>(ship)
+            .unwrap()
+            .0,
+        ImpulsePhase::Idle
+    );
+    app.world_mut()
+        .get_mut::<crate::regions::field::RegionFieldState>(region)
+        .unwrap()
+        .profile
+        .strength = 0.0;
+    rebuild_region_read_cache(app.world_mut());
+    app.update();
+    assert_eq!(
+        app.world()
+            .get::<crate::ship::helm::ImpulseCommand>(ship)
+            .unwrap()
+            .0,
+        ImpulsePhase::Charging
+    );
+}

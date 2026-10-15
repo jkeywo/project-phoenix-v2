@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::core::messages::{GamePhase, ModifierSlot, ServerMessage};
 use crate::debug_overlay::{DamageLog, DamageLogEntry};
@@ -13,8 +13,111 @@ use crate::ship::state::ShipPhysics;
 
 pub struct RegionPlugin;
 
+/// Rebuild only read caches after snapshot adoption, before Input can consult
+/// BlocksImpulse. No boundary events, modifier updates or actuator commands.
+pub fn rebuild_region_read_cache(world: &mut World) {
+    use crate::regions::field::{
+        local_exposure, FieldFalloff, FieldPose, RegionFieldState, SampledRegionFieldPose,
+    };
+    let clock = world
+        .get_resource::<crate::sim_tick::SimTick>()
+        .map(|tick| tick.0)
+        .zip(
+            world
+                .get_resource::<Time<Fixed>>()
+                .map(|fixed| fixed.timestep().as_secs_f32()),
+        );
+    let regions: Vec<_> = world
+        .query::<(
+            Entity,
+            &Transform,
+            &RegionShapeSection,
+            Option<&RegionFieldState>,
+            Option<&RegionEffectsSection>,
+            Option<&EntityUuid>,
+            Option<&crate::regions::signal_path::SignalMaterialConfig>,
+        )>()
+        .iter(world)
+        .filter(|(_, _, _, field, effects, _, material)| {
+            !(material.is_some() && field.is_none() && effects.is_none())
+        })
+        .filter_map(|(entity, transform, shape, field, _, uuid, _)| {
+            let pose = if let Some(field) = field {
+                clock.and_then(|(tick, dt)| field.sample_pose(tick, dt).ok())
+            } else {
+                Some(FieldPose::stationary(transform.translation))
+            }?;
+            Some((
+                entity,
+                shape.0.clone(),
+                field.map(|field| field.profile.falloff),
+                uuid.map(|uuid| uuid.0.clone()),
+                pose,
+            ))
+        })
+        .collect();
+    let ships: Vec<_> = world
+        .query_filtered::<(Entity, &ShipPhysics), With<Ship>>()
+        .iter(world)
+        .map(|(entity, physics)| (entity, Vec3::new(physics.x, 0.0, physics.z)))
+        .collect();
+    let mut membership = RegionMembership::default();
+    for (entity, _, field, uuid, pose) in &regions {
+        if let Some(uuid) = uuid {
+            membership.region_uuids.insert(*entity, uuid.clone());
+        }
+        if field.is_some() {
+            world
+                .entity_mut(*entity)
+                .insert(SampledRegionFieldPose(*pose));
+        }
+    }
+    for (ship, position) in ships {
+        let mut inside = std::collections::BTreeSet::new();
+        for (region, shape, falloff, _, pose) in &regions {
+            let contains = if falloff.is_some() {
+                local_exposure(
+                    shape,
+                    FieldPose {
+                        strength: 1.0,
+                        ..*pose
+                    },
+                    FieldFalloff::Step,
+                    position,
+                ) > 0.0
+            } else {
+                shape.contains(position, pose.origin)
+            };
+            if contains {
+                inside.insert(*region);
+                if let Some(falloff) = falloff {
+                    membership.exposure.insert(
+                        (ship, *region),
+                        local_exposure(shape, *pose, *falloff, position),
+                    );
+                }
+            }
+        }
+        membership.inside.insert(ship, inside);
+    }
+    world.insert_resource(membership);
+}
+
 impl Plugin for RegionPlugin {
     fn build(&self, app: &mut App) {
+        use crate::authoritative::{DeclareState, StateClass};
+        app.declare_state::<crate::regions::field::RegionFieldState>(
+            StateClass::Folded,
+            "spatial-fields",
+        )
+        .declare_state::<crate::regions::signal_path::SignalMaterialConfig>(
+            StateClass::Derived,
+            "spatial-fields",
+        )
+        .declare_state::<crate::regions::field::SampledRegionFieldPose>(
+            StateClass::Derived,
+            "spatial-fields",
+        );
         app.init_resource::<RegionMembership>()
             .add_systems(
                 FixedUpdate,
@@ -41,75 +144,116 @@ impl Plugin for RegionPlugin {
 pub(crate) fn update_region_membership(
     mut commands: Commands,
     mut membership: ResMut<RegionMembership>,
-    region_query: Query<(Entity, &Transform, &RegionShapeSection)>,
-    uuid_query: Query<&EntityUuid>,
-    ship_query: Query<(Entity, &ShipPhysics), With<Ship>>,
+    region_query: Query<(
+        Entity,
+        &Transform,
+        &RegionShapeSection,
+        Option<&crate::regions::field::RegionFieldState>,
+        Option<&RegionEffectsSection>,
+        Option<&EntityUuid>,
+        Option<&crate::regions::signal_path::SignalMaterialConfig>,
+    )>,
+    mut ship_query: Query<
+        (
+            Entity,
+            &ShipPhysics,
+            Option<&mut ShipModifiers>,
+            Option<&mut ShipImpulse>,
+        ),
+        With<Ship>,
+    >,
+    tick: Option<Res<crate::sim_tick::SimTick>>,
+    fixed: Option<Res<Time<Fixed>>>,
 ) {
-    // Cache UUIDs for all current region entities (survives despawn).
-    for (entity, _, _) in region_query.iter() {
-        if let Ok(uuid) = uuid_query.get(entity) {
+    use crate::regions::field::{local_exposure, FieldFalloff, FieldPose};
+    let mut regions = Vec::new();
+    for (entity, transform, shape, field, effects, uuid, material) in &region_query {
+        if material.is_some() && field.is_none() && effects.is_none() {
+            continue;
+        }
+        if let Some(uuid) = uuid {
             membership.region_uuids.insert(entity, uuid.0.clone());
         }
+        let pose = if let Some(field) = field {
+            tick.as_ref().zip(fixed.as_ref()).and_then(|(tick, fixed)| {
+                field
+                    .sample_pose(tick.0, fixed.timestep().as_secs_f32())
+                    .ok()
+            })
+        } else {
+            Some(FieldPose::stationary(transform.translation))
+        };
+        if let Some(pose) = pose {
+            if field.is_some() {
+                commands
+                    .entity(entity)
+                    .insert(crate::regions::field::SampledRegionFieldPose(pose));
+            }
+            regions.push((entity, shape, field, effects, uuid, pose));
+        }
     }
-
-    // Collect region positions/shapes into a Vec so we can reuse them across
-    // every ship without re-iterating the query per ship.
-    let regions: Vec<(Entity, Vec3)> = region_query
-        .iter()
-        .map(|(entity, transform, _)| (entity, transform.translation))
-        .collect();
-    let region_shapes: HashMap<Entity, &RegionShapeSection> = region_query
-        .iter()
-        .map(|(entity, _, shape)| (entity, shape))
-        .collect();
-
-    // Track which ship entities are still present so stale membership entries
-    // for despawned ships can be cleaned up at the end.
-    let mut seen_ships: HashSet<Entity> = HashSet::new();
-
-    for (ship_entity, physics) in ship_query.iter() {
+    membership.exposure.clear();
+    let mut seen_ships = HashSet::new();
+    for (ship_entity, physics, mut modifiers, mut impulse) in &mut ship_query {
         seen_ships.insert(ship_entity);
         let ship_pos = glam::Vec3::new(physics.x, 0.0, physics.z);
-
-        // Determine current region occupancy for this ship.
-        let current_inside: std::collections::BTreeSet<Entity> = regions
-            .iter()
-            .filter(|(entity, origin)| {
-                region_shapes
-                    .get(entity)
-                    .is_some_and(|shape| shape.0.contains(ship_pos, *origin))
-            })
-            .map(|(entity, _)| *entity)
-            .collect();
-
+        let mut current_inside = std::collections::BTreeSet::new();
+        for (entity, shape, field, effects, uuid, pose) in &regions {
+            let inside = if field.is_some() {
+                local_exposure(
+                    &shape.0,
+                    FieldPose {
+                        strength: 1.0,
+                        ..*pose
+                    },
+                    FieldFalloff::Step,
+                    ship_pos,
+                ) > 0.0
+            } else {
+                shape.0.contains(ship_pos, pose.origin)
+            };
+            if !inside {
+                continue;
+            }
+            current_inside.insert(*entity);
+            if let Some(field) = field {
+                let exposure = local_exposure(&shape.0, *pose, field.profile.falloff, ship_pos);
+                membership.exposure.insert((ship_entity, *entity), exposure);
+                if let Some(effects) = effects {
+                    if let (Some(modifiers), Some(uuid)) = (modifiers.as_deref_mut(), uuid) {
+                        if let Ok(uuid) = uuid::Uuid::parse_str(&uuid.0) {
+                            crate::modifiers::coordination::apply_weighted_region_effects(
+                                modifiers, uuid, &effects.0, exposure,
+                            );
+                        }
+                    }
+                    if exposure > 0.0 && effects.0.contains(&RegionEffectKind::BlocksImpulse) {
+                        if let Some(impulse) = impulse.as_deref_mut() {
+                            impulse.0.cancel_charge();
+                        }
+                    }
+                }
+            }
+        }
         let prev_inside = membership
             .inside
             .get(&ship_entity)
             .cloned()
             .unwrap_or_default();
-
         for entity in prev_inside.difference(&current_inside) {
             commands.trigger(RegionExited {
                 subject: ship_entity,
                 region_entity: *entity,
             });
         }
-
         for entity in current_inside.difference(&prev_inside) {
             commands.trigger(RegionEntered {
                 subject: ship_entity,
                 region_entity: *entity,
             });
         }
-
         membership.inside.insert(ship_entity, current_inside);
     }
-
-    // Clean up membership entries for ships that no longer exist. Emit
-    // implicit exit events so downstream systems (modifier caches, etc.)
-    // can clear per-region state tied to the vanished ship.
-    // Sorted, because these keys come from a `HashMap` and each one below
-    // emits an implicit exit event per region the vanished ship was in.
     let mut stale_ships: Vec<Entity> = membership
         .inside
         .keys()
@@ -247,7 +391,16 @@ fn apply_damage_zone_damage(
                 else {
                     continue;
                 };
-                let total_damage = dps * dt;
+                let exposure = membership
+                    .exposure
+                    .get(&(ship_entity, region_entity))
+                    .copied()
+                    .unwrap_or(1.0);
+                let total_damage =
+                    (*dps as f64 * dt as f64 * exposure as f64).min(f32::MAX as f64) as f32;
+                if total_damage <= 0.0 {
+                    continue;
+                }
                 let (pierced, absorbed) =
                     crate::ship::damage::split_damage_for_pierce(total_damage, *shield_pierce);
 
@@ -485,6 +638,7 @@ fn apply_damage_zone_damage(
 fn handle_blocks_impulse_region_enter(
     trigger: On<RegionEntered>,
     region_query: Query<&RegionEffectsSection>,
+    membership: Res<RegionMembership>,
     mut impulse_q: Query<&mut ShipImpulse>,
 ) {
     let ev = trigger.event();
@@ -494,7 +648,14 @@ fn handle_blocks_impulse_region_enter(
     let Ok(effects) = region_query.get(ev.region_entity) else {
         return;
     };
-    if effects.0.contains(&RegionEffectKind::BlocksImpulse) {
+    if effects.0.contains(&RegionEffectKind::BlocksImpulse)
+        && membership
+            .exposure
+            .get(&(ev.subject, ev.region_entity))
+            .copied()
+            .unwrap_or(1.0)
+            > 0.0
+    {
         impulse.0.cancel_charge();
     }
 }

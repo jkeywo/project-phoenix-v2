@@ -3,6 +3,8 @@ use std::collections::HashMap;
 /// Resource tracking which entities are inside which regions.
 #[derive(Resource, Default)]
 pub struct RegionMembership {
+    /// Derived per-fixed-step field exposure; absent legacy pairs mean strength one.
+    pub exposure: HashMap<(Entity, Entity), f32>,
     /// Maps ship entity → set of region entities the ship is currently inside.
     /// A `BTreeSet` of regions, not a `HashSet` (issue #965). The set
     /// differences in `update_region_membership` are what emit

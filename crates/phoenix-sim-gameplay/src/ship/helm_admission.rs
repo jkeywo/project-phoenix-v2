@@ -31,6 +31,15 @@ fn entity_inside_blocks_impulse(
         return false;
     };
     for &region_entity in inside {
+        if membership
+            .exposure
+            .get(&(entity, region_entity))
+            .copied()
+            .unwrap_or(1.0)
+            <= 0.0
+        {
+            continue;
+        }
         if let Ok(effects) = region_query.get(region_entity) {
             if effects
                 .0

@@ -730,6 +730,19 @@ fn auto_clear_on_screen_message(
 /// front-end this is the roster's ONLY source; the union rule and the
 /// deterministic append order still live in `crate::comms::roster`, where they
 /// now keep the per-tick re-derivation idempotent.
+fn signal_comms_in_range(
+    signals: &crate::regions::signal_path::RegionSignalQuery,
+    start: Vec3,
+    end: Vec3,
+    own_range: f32,
+    other_range: f32,
+) -> bool {
+    let transmission =
+        signals.transmission(start, end, crate::regions::signal_path::SignalClass::Comms);
+    transmission > 0.0
+        && crate::comms::in_range(start.distance(end) / transmission, own_range, other_range)
+}
+
 pub(crate) fn update_comms_range_flags(
     mut comms: ResMut<CommsRuntime>,
     ship_q: Query<
@@ -753,6 +766,7 @@ pub(crate) fn update_comms_range_flags(
         Option<&crate::comms::CommsHailable>,
         Option<&crate::entities::spawner::EntityName>,
     )>,
+    signals: crate::regions::signal_path::RegionSignalQuery,
 ) {
     // ── The fleet-wide half (issue #1343) ────────────────────────────────────
     //
@@ -773,7 +787,7 @@ pub(crate) fn update_comms_range_flags(
             .map(|(uuid, tf, range, _, _)| {
                 (
                     uuid.0.clone(),
-                    crate::comms::in_range(hull_pos.distance(tf.translation), hull_range, range.0),
+                    signal_comms_in_range(&signals, hull_pos, tf.translation, hull_range, range.0),
                 )
             })
             .collect();
@@ -831,8 +845,8 @@ pub(crate) fn update_comms_range_flags(
     let mut live: HashSet<String> = HashSet::new();
     let mut derived_contacts: Vec<crate::comms::EntityContact> = Vec::new();
     for (uuid, tf, range, hailable, entity_name) in entity_q.iter() {
-        let dist = ship_pos.distance(tf.translation);
-        let in_range = crate::comms::in_range(dist, ship_range, range.0);
+        let in_range =
+            signal_comms_in_range(&signals, ship_pos, tf.translation, ship_range, range.0);
         let prior = comms.range_flags.insert(uuid.0.clone(), in_range);
         if prior != Some(in_range) {
             any_changed = true;
@@ -1040,3 +1054,7 @@ pub(crate) fn broadcast_comms_state(
 #[cfg(test)]
 #[path = "server_tests.rs"]
 pub(crate) mod tests;
+
+#[cfg(test)]
+#[path = "signal_path_tests.rs"]
+mod signal_path_tests;

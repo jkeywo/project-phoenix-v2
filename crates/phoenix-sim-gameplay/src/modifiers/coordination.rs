@@ -358,6 +358,73 @@ pub fn apply_region_effects(
     }
 }
 
+/// Refresh one actual field's existing modifier source without stacking or
+/// remove/re-add events on every unchanged fixed step.
+pub fn apply_weighted_region_effects(
+    modifiers: &mut ShipModifiers,
+    region_uuid: uuid::Uuid,
+    effects: &[RegionEffectKind],
+    exposure: f32,
+) {
+    let source = ModifierSource::RegionEffect { uuid: region_uuid };
+    if !exposure.is_finite() || exposure <= 0.0 {
+        modifiers.clear_source(&source);
+        return;
+    }
+    let mut radar = false;
+    let mut thrust = false;
+    let mut yaw = false;
+    let mut comms = false;
+    let mut blind = false;
+    let weighted: Vec<_> = effects
+        .iter()
+        .map(|effect| match effect {
+            RegionEffectKind::RadarDampening { multiplier } => {
+                radar = true;
+                RegionEffectKind::RadarDampening {
+                    multiplier: multiplier * exposure,
+                }
+            }
+            RegionEffectKind::SlowZone {
+                thrust_modifier,
+                yaw_rate_modifier,
+            } => {
+                thrust |= thrust_modifier.is_some();
+                yaw |= yaw_rate_modifier.is_some();
+                RegionEffectKind::SlowZone {
+                    thrust_modifier: thrust_modifier.map(|value| value * exposure),
+                    yaw_rate_modifier: yaw_rate_modifier.map(|value| value * exposure),
+                }
+            }
+            RegionEffectKind::CommsJam => {
+                comms = true;
+                effect.clone()
+            }
+            RegionEffectKind::SensorBlind => {
+                blind = true;
+                effect.clone()
+            }
+            _ => effect.clone(),
+        })
+        .collect();
+    for (present, slot) in [
+        (radar, ModifierSlot::RadarRange),
+        (thrust, ModifierSlot::MaxSpeed),
+        (yaw, ModifierSlot::MaxYawRate),
+    ] {
+        if !present {
+            modifiers.remove(&source, &slot);
+        }
+    }
+    if !comms {
+        modifiers.remove_flag(source.clone(), FlagKind::CommsJammed);
+    }
+    if !blind {
+        modifiers.remove_flag(source.clone(), FlagKind::SensorBlind);
+    }
+    apply_region_effects(modifiers, region_uuid, &weighted);
+}
+
 /// Apply impulse-drive modifiers to `modifiers` based on the current
 /// `ImpulseState`.
 ///
@@ -402,13 +469,20 @@ pub fn translate_impulse_modifiers(
 /// Observer: applies region effects to `ShipModifiers` when the ship enters a region.
 fn on_region_entered(
     trigger: On<RegionEntered>,
-    region_query: Query<(&EntityUuid, &RegionEffectsSection)>,
+    region_query: Query<(
+        &EntityUuid,
+        &RegionEffectsSection,
+        Option<&crate::regions::field::RegionFieldState>,
+    )>,
     mut modifiers_q: Query<&mut ShipModifiers>,
 ) {
     let ev = trigger.event();
-    let Ok((uuid_comp, effects)) = region_query.get(ev.region_entity) else {
+    let Ok((uuid_comp, effects, field)) = region_query.get(ev.region_entity) else {
         return;
     };
+    if field.is_some() {
+        return;
+    } // Continuously refreshed by the sole Region owner.
     let uuid = match uuid::Uuid::parse_str(&uuid_comp.0) {
         Ok(u) => u,
         Err(_) => return,

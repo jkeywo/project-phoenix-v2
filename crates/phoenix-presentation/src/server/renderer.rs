@@ -162,7 +162,7 @@ impl Plugin for RendererPlugin {
                     tick_ripples.run_if(in_state(GamePhase::InProgress)),
                     draw_warp_exit_markers.run_if(in_state(GamePhase::InProgress)),
                     nebula_fog_system.run_if(in_state(GamePhase::InProgress)),
-                    spawn_nebula_cloud_particles,
+                    (spawn_nebula_cloud_particles, update_nebula_cloud_poses).chain(),
                 ),
             )
             .add_systems(OnExit(GamePhase::InProgress), cleanup_nebula_fog);
@@ -1181,7 +1181,11 @@ fn tick_ripples(
 
 /// Marker on nebula cloud particle meshes.
 #[derive(Component)]
-struct NebulaCloudParticle;
+struct NebulaCloudParticle {
+    region: Entity,
+    offset: Vec3,
+    scale: f32,
+}
 
 /// Tracks which region entities have had their cloud particles spawned.
 #[derive(Resource, Default)]
@@ -1255,7 +1259,15 @@ fn nebula_fog_system(
                 region_q.get(region).ok().and_then(|effects| {
                     effects.0.iter().find_map(|e| {
                         if let RegionEffectKind::NebulaFog { color, density } = e {
-                            Some((*color, *density))
+                            Some((
+                                *color,
+                                *density
+                                    * membership
+                                        .exposure
+                                        .get(&(ship_entity, region))
+                                        .copied()
+                                        .unwrap_or(1.0),
+                            ))
                         } else {
                             None
                         }
@@ -1394,7 +1406,11 @@ fn spawn_nebula_cloud_particles(
 
             let p = commands
                 .spawn((
-                    NebulaCloudParticle,
+                    NebulaCloudParticle {
+                        region: entity,
+                        offset: pos - center,
+                        scale,
+                    },
                     Mesh3d(particle_mesh.clone()),
                     MeshMaterial3d(particle_mat.clone()),
                     Transform::from_translation(pos).with_scale(Vec3::splat(scale)),
@@ -1403,6 +1419,24 @@ fn spawn_nebula_cloud_particles(
             particles.push(p);
         }
         state.entities.insert(entity, particles);
+    }
+}
+
+/// Follow the derived logical pose without integrating a second field motion.
+fn update_nebula_cloud_poses(
+    fields: Query<&crate::regions::field::SampledRegionFieldPose>,
+    mut particles: Query<(&NebulaCloudParticle, &mut Transform, &mut Visibility)>,
+) {
+    for (particle, mut transform, mut visibility) in &mut particles {
+        if let Ok(field) = fields.get(particle.region) {
+            transform.translation = field.0.origin + particle.offset * field.0.scale;
+            transform.scale = Vec3::splat(particle.scale * field.0.scale);
+            *visibility = if field.0.strength > 0.0 {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+        }
     }
 }
 

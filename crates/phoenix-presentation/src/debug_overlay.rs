@@ -43,21 +43,34 @@ fn should_install_region_wireframes() -> bool {
 }
 
 /// Draws wireframe outlines for every region entity with a shape component.
-fn draw_region_wireframes(regions: Query<(&Transform, &RegionShapeSection)>, mut gizmos: Gizmos) {
-    for (transform, shape) in regions.iter() {
-        let origin = transform.translation - Vec3::Y * 10.0;
+fn draw_region_wireframes(
+    regions: Query<(
+        &Transform,
+        &RegionShapeSection,
+        Option<&crate::regions::field::SampledRegionFieldPose>,
+    )>,
+    mut gizmos: Gizmos,
+) {
+    for (transform, shape, field) in regions.iter() {
+        let origin = field.map_or(transform.translation, |field| field.0.origin) - Vec3::Y * 10.0;
+        let scale = field.map_or(1.0, |field| field.0.scale);
         match &shape.0 {
             RegionShape::Sphere { radius } => {
-                draw_sphere_wireframe(&mut gizmos, origin, *radius);
+                draw_sphere_wireframe(&mut gizmos, origin, *radius * scale);
             }
             RegionShape::Box { half_extents, .. } => {
-                draw_box_wireframe(&mut gizmos, origin, *half_extents);
+                draw_box_wireframe(&mut gizmos, origin, half_extents.map(|value| value * scale));
             }
             RegionShape::Torus {
                 inner_radius,
                 outer_radius,
             } => {
-                draw_torus_wireframe(&mut gizmos, origin, *inner_radius, *outer_radius);
+                draw_torus_wireframe(
+                    &mut gizmos,
+                    origin,
+                    *inner_radius * scale,
+                    *outer_radius * scale,
+                );
             }
         }
     }

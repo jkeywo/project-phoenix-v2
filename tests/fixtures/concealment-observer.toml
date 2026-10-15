@@ -1,0 +1,88 @@
+# Actual independent instruments: long Broad earns the focused target while
+# narrow Helm acquisition and focused coverage respond to real concealment.
+includes = ["../../assets/entities/alliance_cruiser.toml"]
+[[sensing.focused]]
+system = "sensors"
+# This fixture exercises active-work handoff immediately; shipped reading work
+# remains authored independently and is verified by the reading owner tests.
+reading_ticks = 0
+work_secs = 30
+history_limit = 64
+unfinished_retention_secs = 8
+forecast = { horizon_secs = 120 }
+aims = [
+  { aim = "environment", work_multiplier = 1, resource_multiplier = 1 },
+  { aim = "resources", work_multiplier = 1, resource_multiplier = 2, intrusive = true },
+  { aim = "anomaly", work_multiplier = 2, resource_multiplier = 1 },
+  { aim = "shields", work_multiplier = 2, resource_multiplier = 1 },
+]
+
+# Sensing is an atomic authored profile: retain the actual inherited broad,
+# passive and control equipment when replacing the focused test ladder.
+[[sensing.broad]]
+reading_ticks = 0
+system = "sensor-radar"
+sample_interval_secs = 0.5
+identity_secs = 0.1
+classification_secs = 0.2
+assessment_secs = 0.3
+position_error = 2
+drift_error_per_sec = 0.5
+track_retention_secs = 60
+
+[[sensing.passive]]
+system = "passive-receiver"
+sample_interval_secs = 0.5
+min_signal_strength = 0.005
+bearing_error_rad = 0.15
+
+[sensing.passive.mount]
+facing_deg = 0
+arc_deg = 360
+range = 200
+
+
+[[sensing.broad]]
+reading_ticks = 0
+system = "tactical-radar"
+sample_interval_secs = 0.5
+identity_secs = 0.1
+classification_secs = 0.2
+assessment_secs = 0.3
+position_error = 2
+drift_error_per_sec = 0.5
+track_retention_secs = 60
+
+[[sensing.broad]]
+reading_ticks = 0
+system = "helm-radar"
+sample_interval_secs = 0.5
+identity_secs = 0.1
+classification_secs = 0.2
+assessment_secs = 0.3
+position_error = 2
+drift_error_per_sec = 0.5
+track_retention_secs = 60
+
+[sensing.control]
+combat_lock = "tactical-radar"
+science_target = "sensors"
+# Sharing is an explicit operator choice; reception alone does not publish a feed.
+[[sensing.sharing]]
+system = "sensor-radar"
+share_own_faction = false
+receive = true
+
+[[sensing.sharing]]
+system = "tactical-radar"
+share_own_faction = false
+receive = true
+
+[sensors_console.long_range_radar]
+range = 1000
+shows = ["player","ship"]
+selects = ["ship"]
+[scan]
+power_group = "sensors"
+min_power_level = 1
+band = [{id="cloak-proof",label="entity.alliance_destroyer.scan.band.detailed.label",max_range=100,condition_step=0.1,report_thresholds=true,report_capacities=true}]

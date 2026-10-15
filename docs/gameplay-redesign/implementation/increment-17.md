@@ -572,3 +572,26 @@ The initial run had 126 passes and one missing-inventory expectation; its log is
 retained. Strict strings checked 6,341 entries without findings and layer rules
 passed. These are source/client results: native owner and full-host sensing,
 continuation, balance, multiplayer/device and human acceptance remain open.
+
+### Actual concealment host proof source
+
+`tests/concealment_continuation.rs` uses the real optional field Cruiser and an
+authored independent observer. Ordinary field AI enables from false initial
+intent, then actual joined Science and Engineering holders control the field
+and reactor. Long Broad retains a permitted focused target while the existing
+narrow Helm radar, finite focused ladder and paid Passive receiver lose and
+recover acquisition from actual reactor output with cloak intent still enabled.
+The fixture authors equipment/geometry and an ordinary Scan objective; it grants
+no power, observation, scan progress or actuator work.
+
+The proof retains earned aliases and partial work, checks actual fully paid
+field operation through 360 complete fresh-JSON captures/digests, refuses three
+malformed whole candidates without writes, clears bootstrap/saved derived work,
+and rejects an Engineering attempt to control Science's field. Its finite
+reference sensing thresholds and timing establish causal coverage, not balance
+or a 2/4/6/8-seat acceptance result.
+
+Independent integration-review source review passed. A read-only resolved-source
+check passed 12 fixture range/profile/group-parent assertions. Rust is formatted;
+native execution awaits the root's central hooks and owner Cargo batch. There is
+no executed full-host or increment17 exit claim from this source handoff.

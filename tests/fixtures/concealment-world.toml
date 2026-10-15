@@ -1,0 +1,29 @@
+# Actual quiet field and independently paid broad/focused/passive instruments.
+# No scripted power grants, observations, work or condition are authored.
+[global]
+seed=15621726
+[player_spawn]
+position=[0,0,0]
+[[entity]]
+template_path="assets/entities/concealment_cruiser.toml"
+id="concealed-source"
+name="Veiled ship"
+spawn_on="game_start"
+transform={position=[0,0,0]}
+[entity.overrides]
+name="Veiled ship"
+[entity.overrides.infrastructure]
+publish=true
+[[entity]]
+template_path="tests/fixtures/concealment-observer.toml"
+id="observer"
+name="Observer"
+spawn_on="game_start"
+transform={position=[50,0,0]}
+[entity.overrides]
+name="Observer"
+[script]
+setup="""
+on_world_loaded("inspect");
+fn inspect(ctx){ctx.effects.add_objective(#{id:"observe-veiled-ship",text:"component.scan.aim.general",mandatory:false,source:"mission",base_priority:50,directive_kind:"Scan",target:"Veiled ship",targets:["Veiled ship"]});}
+"""

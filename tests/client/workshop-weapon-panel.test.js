@@ -75,3 +75,27 @@ it('uses closed native target choices and keeps explicit empty hold versus legac
   control('targets-mode').value='legacy';control('targets-mode').dispatchEvent(new Event('change'));control('save').click();await settle();expect(parse(current.read(path)).weapon[0].targets).toBe(false);
   current.undo();panel.refresh();expect(control('targets-mode').value).toBe('explicit');expect([...control('target-tags').selectedOptions].map(o=>o.value)).toEqual(['ship','missile']);panel.dispose();
 });
+
+it('authors a single shared guided receiver with explicit opt-in and false disable through ordinary history',async()=>{
+ const text='[torpedoes]\nspeed=15\nlifespan=20\n[torpedoes.receiver]\nrange=200\nminimum_transmission=0.1\nmaximum_sample_age_secs=2\n[[torpedoes.tubes]]\nid="fore"\nfacing_deg=0\nfire_arc_deg=90\n[torpedoes.tubes.impact]\ndamage_type="physical"\npenetration=20\n';
+ const{current,panel}=fixture(text);await settle();const shared=id=>document.getElementById('workshop-guided-'+id);
+ expect(shared('seeker-range').disabled).toBe(true);expect(shared('receiver-range').disabled).toBe(false);
+ shared('external').checked=true;shared('receiver-maximum_sample_age_secs').value='3';shared('apply').click();await settle();
+ expect(parse(current.read(path)).torpedoes.receiver).toMatchObject({maximum_sample_age_secs:3,accept_external_illumination:true});
+ shared('receiver').checked=false;shared('receiver').dispatchEvent(new Event('change'));expect(shared('external').disabled).toBe(true);shared('apply').click();await settle();
+ expect(parse(current.read(path)).torpedoes.receiver).toBe(false);expect(parse(current.read(path)).torpedoes.tubes).toEqual(parse(text).torpedoes.tubes);
+ current.undo();panel.refresh();expect(shared('receiver').checked).toBe(true);expect(shared('external').checked).toBe(true);panel.dispose();
+});
+
+it('resets shared profile drafts on same-revision document replacement and refuses late acceptance into the old document',async()=>{
+ const make=speed=>new WorkshopDocument(createStoreZip([{path:'scenarios.toml',text:'[pack]\nformat=1\nid="mine"\nname="Mine"\nversion="1"\n'},{path,text:`[torpedoes]\nspeed=${speed}\nlifespan=20\n`} ]));
+ document.body.innerHTML='<main></main>';let current=make(15);const old=current;
+ const runtime={dependencies:async()=>({base_files:{},packs:[]}),validate:vi.fn(async()=>({accepted:true,findings:[]}))};
+ const panel=mountWorkshopWeapons({root:document.querySelector('main'),runtime,draft:()=>current,busy:()=>false,setBusy:vi.fn()});await settle();
+ const field=()=>document.getElementById('workshop-guided-speed');field().value='77';
+ current=make(25);expect(current.sourceRevision).toBe(old.sourceRevision);panel.refresh();expect(field().value).toBe('25');
+ document.getElementById('workshop-guided-apply').click();await settle();expect(parse(current.read(path)).torpedoes.speed).toBe(25);expect(parse(old.read(path)).torpedoes.speed).toBe(15);
+ let finish;runtime.validate.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));field().value='31';document.getElementById('workshop-guided-apply').click();await settle();
+ const outgoing=current;current=make(40);finish({accepted:true,findings:[]});await settle();panel.refresh();
+ expect(parse(outgoing.read(path)).torpedoes.speed).toBe(25);expect(parse(current.read(path)).torpedoes.speed).toBe(40);expect(field().value).toBe('40');panel.dispose();
+});

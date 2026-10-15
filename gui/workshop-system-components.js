@@ -1,5 +1,5 @@
 import { t } from './strings.js';
-import { turretKinds, initialTurret } from '../editor/workshop-system-composition.js';
+import { turretKinds, initialTurret, initialIllumination } from '../editor/workshop-system-composition.js';
 
 /** A local composition draft. Only Apply crosses the accepted source/history gate. */
 export function mountSystemComponents({ root, apply }) {
@@ -27,7 +27,7 @@ export function mountSystemComponents({ root, apply }) {
     }
     commit.disabled ||= !owner?.id;
   };
-  const initial = system => ({ components: structuredClone(system?.component?.length ? system.component : system?.kind === 'access-gate'
+  const initial = system => system?.kind === 'illumination' && !system?.component?.length ? initialIllumination() : ({ components: structuredClone(system?.component?.length ? system.component : system?.kind === 'access-gate'
     ? [{ id: 'hatch', kind: 'access_boundary', sealed_channel: 'sealed', transition_secs: 1 }] : turretKinds.includes(system?.kind) ? initialTurret() : []),
     channels: structuredClone(system?.channel?.length ? system.channel : system?.kind === 'access-gate'
       ? [{ name: 'sealed', kind: 'boolean' }] : system?.kind === 'dock' ? [{ name: 'enabled', kind: 'boolean' }, { name: 'target', kind: 'entity_target' }] : []) });
@@ -87,9 +87,9 @@ export function mountSystemComponents({ root, apply }) {
     schema = currentSchema; owner = system;
     const next = JSON.stringify([system?.id, system?.kind, system?.component, system?.channel, currentSchema?.component_fields]);
     if (next !== fingerprint) { fingerprint = next; draft = initial(system); materialise.checked = false;
-      const allowed = system?.kind === 'access-gate' ? ['access_boundary'] : turretKinds.includes(system?.kind) ? ['turret', 'power_input'] : ['dock_mating', 'power_input'];
+      const allowed = system?.kind === 'illumination' ? ['illumination_emitter', 'power_input', 'turret'] : system?.kind === 'access-gate' ? ['access_boundary'] : turretKinds.includes(system?.kind) ? ['turret', 'power_input'] : ['dock_mating', 'power_input'];
       kind.replaceChildren(...Object.keys(schema?.component_fields || {}).filter(key => allowed.includes(key)).map(option)); paint(); }
-    section.disabled = disabled || !['dock', 'access-gate', ...turretKinds].includes(system?.kind);
+    section.disabled = disabled || !['dock', 'access-gate', 'illumination', ...turretKinds].includes(system?.kind);
     editability();
   } };
 }

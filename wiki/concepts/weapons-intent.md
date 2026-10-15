@@ -2,7 +2,7 @@
 title: Weapons Intent
 type: concept
 tags: [weapons, tactical, phaser, blaster, torpedo, replication, reconnect]
-sources: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/core/broadcast/lifecycle.rs, crates/phoenix-sim-gameplay/src/weapons/blaster.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, gui/components/ph-phasers-controls.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js, crates/phoenix-sim-gameplay/src/weapons/mount.rs, crates/phoenix-sim-gameplay/src/weapons/pattern.rs, crates/phoenix-sim-gameplay/src/entities/config/weapon_definition.rs, gui/components/weapon-target-controls.js, gui/stations/weapon-target-actions.js, editor/workshop-weapon-groups.js, gui/workshop-weapon-groups-panel.js, crates/phoenix-simulation/src/console/weapons/readiness.rs, gui/sensor-tracks.js, crates/phoenix-simulation/src/console/weapons/guidance_link.rs, crates/phoenix-simulation/src/console/weapons/guidance_ui.rs, crates/phoenix-sim-gameplay/src/weapons/guided_orders.rs, gui/components/guidance-controls.js, gui/stations/guidance-actions.js]
+sources: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/core/broadcast/lifecycle.rs, crates/phoenix-sim-gameplay/src/weapons/blaster.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, gui/components/ph-phasers-controls.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js, crates/phoenix-sim-gameplay/src/weapons/mount.rs, crates/phoenix-sim-gameplay/src/weapons/pattern.rs, crates/phoenix-sim-gameplay/src/entities/config/weapon_definition.rs, gui/components/weapon-target-controls.js, gui/stations/weapon-target-actions.js, editor/workshop-weapon-groups.js, gui/workshop-weapon-groups-panel.js, crates/phoenix-simulation/src/console/weapons/readiness.rs, gui/sensor-tracks.js, crates/phoenix-simulation/src/console/weapons/guidance_link.rs, crates/phoenix-simulation/src/console/weapons/guidance_ui.rs, crates/phoenix-sim-gameplay/src/weapons/guided_orders.rs, gui/components/guidance-controls.js, gui/stations/guidance-actions.js, crates/phoenix-simulation/src/console/weapons/illumination.rs, crates/phoenix-sim-gameplay/src/weapons/illumination.rs, gui/components/illumination-controls.js, editor/workshop-guided-profile.js, gui/workshop-guided-profile.js]
 updated: 2026-10-15
 ---
 
@@ -101,3 +101,24 @@ and AI delivery follow the current flight advance, so a newly heard order can
 steer on the next advance. Original sample/provenance ages remain unchanged.
 Native receiver/continuation and independent illumination acceptance are tracked
 separately from the focused JavaScript controls tests.
+
+## Independent Science illumination
+
+An authored `illumination` System combines an emitter, actual power input and
+optional shared turret. Its generic Boolean/EntityTarget channels are the one
+intent used by controls, ordinary per-System state tree, mount and save state.
+The source must pay continuous work with available equipment and a ready mount
+using its own permitted dated XYZ observation. An explicitly opted-in frozen
+receiver may accept that reading only when its existing physical target matches
+and original age, range and signal path remain valid. Assistance changes no
+Tactical selection, payload, launch permission or endurance. Lost emission leaves
+only the previous dated point; source feedback reports its own paid interval,
+with no receiver count, survival or application result.
+
+The optional `illumination_cruiser.toml` supplies Science equipment and an
+empty-target-only request tree. `Illuminate {target}` is an ordinary Sensors
+mission/doctrine request subject to the existing reading frontier. Shared
+System details expose exact-owner target/enabled controls. Workshop edits the
+composed emitter and shared guided flight/seeker/receiver profile through its
+normal source validation and document history; explicit `false` disables inherited
+seeker/receiver equipment. Already emitted rounds retain their frozen profiles.

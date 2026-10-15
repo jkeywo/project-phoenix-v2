@@ -11,7 +11,7 @@ import { scanPublicationSource } from '../gui/scan-source.js';
 import { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
 export { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
 import { writeStateTrees, writeRepairWorkflow, rebindStateTreeChannel } from './workshop-state-trees.js';
-import { writeSystemComposition, validateTurretComposition } from './workshop-system-composition.js';
+import { writeSystemComposition, validateTurretComposition, validateIlluminationComposition } from './workshop-system-composition.js';
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
 import { acceptWorkshopChanges } from './workshop-acceptance.js';
@@ -265,15 +265,27 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
     if (!system) throw new Error('Unknown System');
     if (!system.local && !operation.materialise) throw new Error('Materialise the containing System before editing its components.');
     validateTurretComposition(system, operation.components || [], operation.channels || []);
+    validateIlluminationComposition(system, operation.components || [], operation.channels || []);
     const local = system.local ? before : append(before, { system: [{ id: system.id }] });
     after = writeSystemComposition(local, operation.id, operation, system);
-    const oldChannel = system.component?.find(row => row.kind === 'dock_mating')?.enabled_channel
-      || system.component?.find(row => row.kind === 'access_boundary')?.sealed_channel;
-    const newChannel = operation.components?.find(row => row.kind === 'dock_mating')?.enabled_channel
-      || operation.components?.find(row => row.kind === 'access_boundary')?.sealed_channel;
-    if (oldChannel && newChannel && oldChannel !== newChannel && system.config?.ai) {
-      after = writeStateTrees(after, system, rebindStateTreeChannel(system.config.ai, oldChannel, newChannel), { materialise: true });
+    let rebound=system.config?.ai;
+    const oldEmitter=system.component?.find(row=>row.kind==='illumination_emitter');
+    const newEmitter=operation.components?.find(row=>row.kind==='illumination_emitter');
+    const pairs=oldEmitter&&newEmitter
+      ? [[oldEmitter.enabled_channel,newEmitter.enabled_channel],[oldEmitter.target_channel,newEmitter.target_channel]]
+      : [[system.component?.find(row=>row.kind==='dock_mating')?.enabled_channel || system.component?.find(row=>row.kind==='access_boundary')?.sealed_channel,
+          operation.components?.find(row=>row.kind==='dock_mating')?.enabled_channel || operation.components?.find(row=>row.kind==='access_boundary')?.sealed_channel]];
+    const renamed=pairs.filter(([a,b])=>a&&b&&a!==b);
+    if(rebound){
+      // Rename simultaneously, so exchanging the two channel names preserves
+      // each component's meaning rather than rewriting the first one twice.
+      const names=new Set([...(system.channel||[]).map(row=>row.name),...(operation.channels||[]).map(row=>row.name),...renamed.flat()]);
+      const temporary=renamed.map(([a,b],index)=>{let key=`workshop-rebind-${index}`;while(names.has(key))key+='-next';names.add(key);return[a,b,key];});
+      for(const[a,,key]of temporary)rebound=rebindStateTreeChannel(rebound,a,key);
+      for(const[,b,key]of temporary)rebound=rebindStateTreeChannel(rebound,key,b);
     }
+    if(rebound&&pairs.some(([a,b])=>a&&b&&a!==b))after=writeStateTrees(after,system,rebound,{materialise:true});
+
   }
   else if (operation.type === 'station-add') after = append(after, { station: [{ id: operation.id, name: operation.name || operation.id,
     description: operation.description || operation.id, rank: operation.rank || '' }] });

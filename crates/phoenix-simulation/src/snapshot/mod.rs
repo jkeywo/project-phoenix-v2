@@ -382,6 +382,7 @@ mod shield_enquiry;
 mod spatial_fields;
 
 mod guided_source;
+mod illumination;
 #[cfg(test)]
 mod sustained_beam_tests;
 mod weapon_targets;

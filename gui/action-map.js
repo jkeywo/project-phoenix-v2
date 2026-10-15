@@ -65,6 +65,8 @@ function logisticsCommand(type, fields) {
 }
 
 export const ACTION_MAP = Object.freeze({
+  illumination_target: logisticsCommand('SetIlluminationTarget', ['target_uuid']),
+  illumination_enabled: logisticsCommand('SetIlluminationEnabled', ['enabled']),
   guidance_target: logisticsCommand('RetargetGuidedRound', ['round_uuid', 'target_uuid']),
   guidance_stop: logisticsCommand('StopGuidedRoundGuidance', ['round_uuid']),
   set_duty_officer_posting: logisticsCommand('SetDutyOfficerPosting', ['officer', 'team_idx']),

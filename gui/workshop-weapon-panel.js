@@ -1,3 +1,5 @@
+import { mountGuidedProfile } from './workshop-guided-profile.js';
+import { applyGuidedProfileOperation } from '../editor/workshop-guided-profile.js';
 import { WEAPON_TARGET_TAGS } from '../editor/workshop-weapon-model.js';
 import { t } from './strings.js';
 import { runWorkshopMutation } from './workshop-edit-session.js';
@@ -28,7 +30,16 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
   const save = el('button', 'save', 'workshop.weapon.save', { type: 'button' });
   const create = el('button', 'new', 'workshop.weapon.new', { type: 'button' });
   const addStep = el('button', 'add-step', 'workshop.weapon.add_step', { type: 'button' });
-  let dependencies = null, inspection = null, selected = null, paramInputs = {}, steps = [], disposed = false, loading = false, generation = 0, observed = null, stepSerial = 0;
+  let dependencies = null, inspection = null, selected = null, paramInputs = {}, steps = [], disposed = false, loading = false, generation = 0, observed = null, observedDraft = null, stepSerial = 0;
+  const sharedProfile=mountGuidedProfile({root:node,apply: async operation=>{
+    if(busy()||loading||!inspection)return;
+    if(getDraft()!==observedDraft){inspect(true);return;}
+    const token=++generation,draft=getDraft();
+    return runWorkshopMutation({setBusy,current:()=>!disposed&&token===generation&&getDraft()===draft,start:controls,
+      invoke:()=>applyGuidedProfileOperation({draft,provider,runtime,dependencies,operation,current:()=>!disposed&&token===generation&&getDraft()===draft}),
+      success:()=>{changed(operation.path);inspect(true);status.textContent=t('workshop.changed');},
+      error:error=>{status.textContent=t('workshop.weapon.refused',{reason:error.report?.findings?.[0]?.message||error.message});},release:controls});
+  }});
   const option = (select, value, text) => { const item = el('option'); item.value = value; item.textContent = text; select.append(item); };
   for (const value of ['legacy','explicit']) option(targetMode, value, t('workshop.weapon.targets.' + value));
   for (const tag of WEAPON_TARGET_TAGS) option(targetTags, tag, tag);
@@ -60,6 +71,7 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
     if (kind.value === 'beam' && operation.value === 'sustained') for (const key of ['duration_secs','cycle_jitter']) if (paramInputs[key]) paramInputs[key].disabled = true;
     pattern.hidden = kind.value === 'beam';
     for (const control of [console, group, compartment]) control.disabled ||= !!selected;
+    sharedProfile.refresh(inspection,disabled,getDraft());
   }
   function addPatternStep(value = { offset_secs: 0, barrels: [0] }) {
     const index = stepSerial++, row = el('div'), offset = input('step-offset-' + index, 'number'), indices = input('step-barrels-' + index);
@@ -111,9 +123,10 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
     template.value = paths.includes(previous) ? previous : paths[0] || '';
     if (!template.value) { inspection = null; controls(); return; }
     const revision = JSON.stringify([draft.sourceRevision, template.value, dependencies]);
-    if (!force && revision === observed) { controls(); return; }
+    if (!force && revision === observed && draft === observedDraft) { controls(); return; }
     try {
-      inspection = inspectWeapons(draft, dependencies, template.value); observed = revision;
+      if(draft!==observedDraft){generation+=1;selected=null;}
+      inspection = inspectWeapons(draft, dependencies, template.value); observed = revision; observedDraft = draft;
       const previousWeapon = selected?.weapon.id, previousSection = selected?.section;
       existing.replaceChildren(); inspection.weapons.forEach((row, index) => option(existing, String(index), `${row.weapon.id} (${t('workshop.weapon.' + row.weapon.delivery.kind)})`));
       const index = inspection.weapons.findIndex(row => row.weapon.id === previousWeapon && row.section === previousSection);
@@ -132,6 +145,7 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
   const names = value => value.split(',').map(item => item.trim()).filter(Boolean);
   async function apply() {
     if (busy() || loading || !inspection) return;
+    if(getDraft()!==observedDraft){inspect(true);return;}
     const value = structuredClone(selected?.weapon || defaultWeapon(kind.value));
     value.targets = targetMode.value === 'explicit' ? [...targetTags.selectedOptions].map(option => option.value) : false;
     value.id = id.value; value.mount = Object.fromEntries(Object.entries(mount).map(([key, control]) => [key, control.valueAsNumber]));
@@ -149,8 +163,8 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
     const token = ++generation, draft = getDraft(), editOperation = { path: template.value, section: selected?.section,
       console: console.value, power_group: group.value, compartment: compartment.value,
       ...(selected ? { originalId: selected.weapon.id } : {}), weapon: value, materialise: materialise.checked };
-    return runWorkshopMutation({ setBusy, current: () => !disposed && token === generation, start: controls,
-      invoke: () => applyWeaponOperation({ draft, provider, runtime, dependencies, operation: editOperation, current: () => !disposed && token === generation }),
+    return runWorkshopMutation({ setBusy, current: () => !disposed && token === generation && getDraft() === draft, start: controls,
+      invoke: () => applyWeaponOperation({ draft, provider, runtime, dependencies, operation: editOperation, current: () => !disposed && token === generation && getDraft() === draft }),
       success: () => { selected = { section: editOperation.section || 'weapon', weapon: value }; changed(editOperation.path); inspect(true); status.textContent = t('workshop.changed'); },
       error: error => { status.textContent = t('workshop.weapon.refused', { reason: error.report?.findings?.[0]?.message || error.message }); }, release: controls });
   }
@@ -168,5 +182,5 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
   template.addEventListener('change', () => { selected = null; inspect(true); }); existing.addEventListener('change', select);
   addStep.addEventListener('click', () => addPatternStep());
   inspect(); void load();
-  return { node, refresh() { inspect(); void load(); }, dispose() { disposed = true; generation += 1; node.remove(); } };
+  return { node, refresh() { inspect(); void load(); }, dispose() { disposed = true; generation += 1; sharedProfile.dispose(); node.remove(); } };
 }

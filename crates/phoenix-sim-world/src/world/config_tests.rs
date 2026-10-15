@@ -1794,7 +1794,8 @@ fn doctrine_and_world_adapters_match_for_every_directive_kind_and_absence() {
             | DirectiveKind::Transfer
             | DirectiveKind::FieldRepair
             | DirectiveKind::Secure
-            | DirectiveKind::Rescue => {
+            | DirectiveKind::Rescue
+            | DirectiveKind::Illuminate => {
                 doctrine.directive_operate_target = Some("casualty".into());
                 world.target = Some("casualty".into());
             }

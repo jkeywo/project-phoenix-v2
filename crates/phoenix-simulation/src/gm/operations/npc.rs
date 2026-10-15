@@ -152,6 +152,7 @@ pub fn compatible(
             // Configuring their Systems does not give an NPC a doctrine consumer.
             AiDirective::Hail { .. } | AiDirective::Order { .. } => false,
             AiDirective::Scan { .. } => has(SENSORS_KIND),
+            AiDirective::Illuminate { .. } => has(ILLUMINATION_KIND),
             AiDirective::Tow { .. }
             | AiDirective::Stabilise { .. }
             | AiDirective::Escort { .. } => has(TRACTOR_KIND),

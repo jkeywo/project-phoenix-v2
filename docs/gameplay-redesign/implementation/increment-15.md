@@ -202,3 +202,23 @@ simultaneous Science investigation/illumination/protection and Engineering work.
 Record observed workload, waiting, overload and repetitive upkeep separately
 from automated correctness. Browser/native and human acceptance remain distinct.
 The integrator runs required repository gates once before a combined push.
+
+### Illumination source checkpoint
+
+The source consumer uses the canonical composed channel map, the actual mounted
+System's continuous work and permitted dated XYZ. The optional Cruiser reference
+adds finite equipment and a Sensors-only Illuminate mission request; it changes no
+shipped hull's combat tuning. Receiver opt-in is frozen at launch. Independent
+source feedback describes its own emission only. Workshop now edits component
+bindings, both tree-output channels and the one shared guided profile, including
+explicit inherited equipment disablement. Owner and continuation tests are
+source-written; JavaScript controls/history have targeted evidence. Native,
+whole-host and human acceptance remain pending until recorded by integration.
+
+Targeted source-checkpoint evidence (2026-10-15): eight JavaScript suites passed
+47 tests; the subsequent simultaneous-channel destination-collision fix passed
+all 13 ship-authoring cases (overlapping the earlier batch). Offline Workshop
+packaging passed; strict strings reported 5,931 entries with zero errors/warnings,
+and layer imports plus owned Rust formatting/diff checks passed. The new runtime
+owner and snapshot cases have not yet executed. This is source integration
+readiness, not the increment's native, whole-host, human or balance exit.

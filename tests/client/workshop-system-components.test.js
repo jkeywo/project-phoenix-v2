@@ -80,3 +80,15 @@ it('stages the first Dock System without pretending it is already an editable ow
     channels: [{ name: 'enabled', kind: 'boolean' }, { name: 'target', kind: 'entity_target' }] });
   expect(apply).not.toHaveBeenCalled();
 });
+
+it('stages illumination enabled/target bindings with finite component fields and no Tactical selection',()=>{
+ document.body.innerHTML='<main></main>';const apply=vi.fn();const editor=mountSystemComponents({root:document.querySelector('main'),apply});
+ const illumination={component_fields:{power_input:[],illumination_emitter:[{name:'enabled_channel',kind:'boolean_channel'},{name:'target_channel',kind:'entity_target_channel'},{name:'power_input',kind:'power_input_component'},{name:'config.link_range',kind:'number'}],turret:[]}};
+ editor.refresh({id:'science-light',kind:'illumination',local:true,power_group:'science'},illumination,false);
+ expect(document.querySelector('fieldset').disabled).toBe(false);
+ expect(editor.value().components.map(row=>row.kind)).toEqual(['power_input','illumination_emitter']);
+ change(el('channels').querySelector('[aria-label="entity_target"]'),'subject');
+ el('list').value='1';el('list').dispatchEvent(new Event('change'));expect(el('field-target_channel').value).toBe('subject');
+ change(el('field-config-link_range'),'125');el('apply').click();
+ expect(apply.mock.calls[0][0]()).toMatchObject({id:'science-light',components:[{kind:'power_input'},{kind:'illumination_emitter',target_channel:'subject',config:{link_range:125}}],channels:[{kind:'boolean'},{name:'subject',kind:'entity_target'}]});
+});

@@ -478,6 +478,7 @@ const FOLD_STAGES: &[FoldStage] = &[
         "guided-source-order-knowledge",
         fold_guided_source_namespace,
     ),
+    ("ship-illumination-intent", fold_illumination_namespace),
     ("broad-tracks", fold_broad_tracks_namespace),
     ("navigation-sharing", fold_navigation_sharing_namespace),
     ("navigation-request", fold_navigation_request_namespace),
@@ -2962,5 +2963,15 @@ fn fold_navigation_request_namespace(world: &World, acc: u64) -> u64 {
             Some(owner.accepted_requests.clone())
         },
         |acc, receipt| fold_serde(acc, &receipt),
+    )
+}
+
+fn fold_illumination_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "ship-illumination-intent",
+        |owner: &crate::console::weapons::illumination::ShipIllumination| Some(owner.0.clone()),
+        |acc, state| fold_serde(acc, &state),
     )
 }

@@ -55,3 +55,5 @@ pub mod umbilical;
 pub mod weapon_operation;
 
 pub mod weapon_targets_view;
+
+pub mod illumination_ui;

@@ -42,7 +42,7 @@ pub struct GuidanceMeasurements<'w, 's> {
 }
 
 impl GuidanceMeasurements<'_, '_> {
-    fn concealed(&self, observer: &str, target: &str) -> bool {
+    pub(crate) fn concealed(&self, observer: &str, target: &str) -> bool {
         self.runtime.as_ref().is_some_and(|runtime| {
             crate::gm::operations::contact::mode(&runtime.contact_overrides, observer, target)
                 == crate::gm::operations::contact::ContactMode::Conceal

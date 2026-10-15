@@ -107,6 +107,7 @@ impl Plugin for WeaponsPlugin {
         super::blackboard::register_weapons_replication_lifecycle(app);
         super::flight_carrier::register(app);
         super::guidance_link::register(app);
+        super::illumination::register(app);
         // The AI host spine's read-only world context (issue #1207): the phaser,
         // blaster, torpedo, doctrine and tactical-selector hosts in this plugin
         // now consume `AiHostEnv`, a bare-`Res` param, so every app that runs

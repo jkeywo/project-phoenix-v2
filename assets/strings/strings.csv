@@ -5997,3 +5997,40 @@ workshop.comms_radio.identity,Workshop radio channel authoring,Held key id,Kennu
 workshop.comms_radio.remove,Workshop radio channel authoring,Remove row,Zeile entfernen,Remove row,machine
 workshop.comms_radio.save,Workshop radio channel authoring,Save radio channels,Funkkanaele speichern,Save radio channels,machine
 workshop.comms_radio.refused,Workshop radio channel authoring,Radio edit refused: {reason},Funkbearbeitung abgelehnt: {reason},Radio edit refused: {reason},machine
+illumination.title,Independent Science illumination,Illumination,Beleuchtung,Illumination,machine
+illumination.target,Independent Science illumination,Support target,Unterstützungsziel,Support target,machine
+illumination.enabled,Independent Science illumination,Enable illumination,Beleuchtung aktivieren,Enable illumination,machine
+illumination.apply,Independent Science illumination,Select support target,Unterstützungsziel wählen,Select support target,machine
+illumination.clear,Independent Science illumination,Clear support target,Unterstützungsziel löschen,Clear support target,machine
+illumination.emitting,Independent Science illumination,Emitting; receiver outcome unknown,Sendet; Empfängerstatus unbekannt,Emitting; receiver outcome unknown,machine
+illumination.waiting,Independent Science illumination,Enabled; awaiting own readiness and evidence,Aktiv; wartet auf eigene Bereitschaft und Messung,Enabled; awaiting own readiness and evidence,machine
+illumination.off,Independent Science illumination,Emitter off,Sender aus,Emitter off,machine
+illumination.enable,Independent Science illumination,Enable emitter,Sender aktivieren,Enable emitter,machine
+illumination.disable,Independent Science illumination,Disable emitter,Sender deaktivieren,Disable emitter,machine
+illumination.mission.support,Independent Science illumination,Provide Science illumination support,Wissenschaftliche Zielbeleuchtung bereitstellen,Provide Science illumination support,machine
+entity.illumination_cruiser.name,Optional reference hull,Illumination Cruiser,Beleuchtungskreuzer,Illumination Cruiser,machine
+semantic_action.illumination.target.label,Independent Science illumination,Select illumination target,Beleuchtungsziel wählen,Select illumination target,machine
+semantic_action.illumination.target.accessibility,Independent Science illumination,Select illumination target,Beleuchtungsziel wählen,Select illumination target,machine
+semantic_action.illumination.enabled.label,Independent Science illumination,Set illumination emitter,Beleuchtungssender einstellen,Set illumination emitter,machine
+semantic_action.illumination.enabled.accessibility,Independent Science illumination,Set illumination emitter,Beleuchtungssender einstellen,Set illumination emitter,machine
+workshop.guided.title,Shared guided equipment authoring,Shared guided-round equipment,Gemeinsame Lenkwaffenausrüstung,Shared guided-round equipment,machine
+workshop.guided.apply,Shared guided equipment authoring,Apply shared profile,Gemeinsames Profil anwenden,Apply shared profile,machine
+workshop.guided.materialise,Shared guided equipment authoring,Materialise inherited profile,Geerbtes Profil übernehmen,Materialise inherited profile,machine
+workshop.guided.seeker,Shared guided equipment authoring,Own seeker fitted,Eigener Suchkopf eingebaut,Own seeker fitted,machine
+workshop.guided.receiver,Shared guided equipment authoring,Remote receiver fitted,Fernempfänger eingebaut,Remote receiver fitted,machine
+workshop.guided.external,Shared guided equipment authoring,Accept Science illumination,Wissenschaftliche Beleuchtung annehmen,Accept Science illumination,machine
+workshop.guided.speed,Shared guided equipment authoring,Flight speed,Fluggeschwindigkeit,Flight speed,machine
+workshop.guided.turn_rate_deg_per_sec,Shared guided equipment authoring,Turn rate (degrees/s),Drehrate (Grad/s),Turn rate (degrees/s),machine
+workshop.guided.lifespan,Shared guided equipment authoring,Flight endurance (s),Flugdauer (s),Flight endurance (s),machine
+workshop.guided.durability,Shared guided equipment authoring,Interception durability,Abfangbeständigkeit,Interception durability,machine
+workshop.guided.detonation_radius,Shared guided equipment authoring,Detonation radius,Detonationsradius,Detonation radius,machine
+workshop.guided.damage_hull,Shared guided equipment authoring,Hull payload,Rumpfschaden,Hull payload,machine
+workshop.guided.damage_shields,Shared guided equipment authoring,Shield payload,Schildschaden,Shield payload,machine
+workshop.guided.shield_pierce,Shared guided equipment authoring,Shield penetration fraction,Schilddurchdringungsanteil,Shield penetration fraction,machine
+workshop.guided.burst_interval_secs,Shared guided equipment authoring,Burst interval (s),Salvenabstand (s),Burst interval (s),machine
+workshop.guided.seeker-range,Shared guided equipment authoring,Seeker range,Suchkopfreichweite,Seeker range,machine
+workshop.guided.seeker-fire_arc_deg,Shared guided equipment authoring,Seeker cone (degrees),Suchkopfkegel (Grad),Seeker cone (degrees),machine
+workshop.guided.seeker-minimum_transmission,Shared guided equipment authoring,Seeker minimum transmission,Suchkopf-Mindestübertragung,Seeker minimum transmission,machine
+workshop.guided.receiver-range,Shared guided equipment authoring,Receiver range,Empfängerreichweite,Receiver range,machine
+workshop.guided.receiver-minimum_transmission,Shared guided equipment authoring,Receiver minimum transmission,Empfänger-Mindestübertragung,Receiver minimum transmission,machine
+workshop.guided.receiver-maximum_sample_age_secs,Shared guided equipment authoring,Maximum original sample age (s),Höchstalter der ursprünglichen Messung (s),Maximum original sample age (s),machine

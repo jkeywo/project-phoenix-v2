@@ -2178,6 +2178,13 @@ pub enum SystemControlPayload {
         target_uuid: Option<String>,
     },
     /// Issue through the actual source tube; target_uuid is a permitted public contact handle.
+    /// Independent mounted Science emitter; target is a permitted Console handle.
+    SetIlluminationTarget {
+        target_uuid: Option<String>,
+    },
+    SetIlluminationEnabled {
+        enabled: bool,
+    },
     RetargetGuidedRound {
         round_uuid: String,
         target_uuid: String,
@@ -5960,6 +5967,8 @@ pub enum AiDirective {
     /// directive names intent rather than bypassing range, capability or the
     /// subject's live condition.
     Scan { target: String },
+    /// Independently illuminate this known target through the Science emitter.
+    Illuminate { target: String },
     /// Retreat to the named anchor position.
     Retreat { anchor: String },
     /// Proceed to and berth at the named structure (issue #1028).

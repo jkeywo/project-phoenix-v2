@@ -310,7 +310,10 @@ fn tick(
         Option<&crate::science::broad::BroadTracks>,
         Option<&crate::science::broad::SensingControls>,
         Option<&crate::console::weapons::assignments::ShipWeaponTargets>,
-        Option<&crate::science::passive::PassiveState>,
+        (
+            Option<&crate::science::passive::PassiveState>,
+            Option<&crate::console::weapons::illumination::ShipIllumination>,
+        ),
         &crate::core::messages::AdmittedCommands,
         Option<(
             &crate::resources::fitting_server::CompiledShipFitting,
@@ -335,7 +338,7 @@ fn tick(
             tracks,
             controls,
             assignments,
-            passive,
+            (passive, illumination),
             admitted,
             fitting,
         )) = ships.iter_mut().find(|(id, ..)| id.0 == uuid)
@@ -354,7 +357,14 @@ fn tick(
             let is_passive = config.0.system(owner).is_some_and(|system| {
                 system.kind == crate::ship::system_registry::PASSIVE_RECEIVER_KIND
             });
-            let contact = if is_passive {
+            let is_illumination = config.0.system(owner).is_some_and(|system| {
+                system.kind == crate::ship::system_registry::ILLUMINATION_KIND
+            });
+            let contact = if is_illumination {
+                illumination
+                    .and_then(|state| state.target(&config.0, owner))
+                    .map(str::to_owned)
+            } else if is_passive {
                 passive_contact(&config.0, boards, tracks, controls, owner)
             } else {
                 let filter = blasters
@@ -415,7 +425,10 @@ fn tick(
                             .map(|state| state.enabled)
                     })
                     .unwrap_or(false);
+            let emitter_enabled = !is_illumination
+                || illumination.is_some_and(|state| state.enabled(&config.0, owner));
             let enabled = receiver_enabled
+                && emitter_enabled
                 && fitting.is_none_or(|(profile, state)| {
                     !crate::resources::fitting_server::unavailable(profile, state, owner)
                 })

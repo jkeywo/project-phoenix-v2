@@ -20,6 +20,7 @@ const editorModules = [
   'ordered-form', 'workshop-migration', 'workshop-diff', 'workshop-definitions', 'workshop-composition', 'workshop-entity', 'workshop-resources', 'workshop-logistics', 'workshop-production', 'workshop-fields', 'workshop-fitting', 'workshop-sensing', 'workshop-helm-projection', 'workshop-helm-movement', 'workshop-resource-recovery', 'workshop-ports', 'workshop-stock-bindings', 'workshop-weapons', 'workshop-weapon-model', 'workshop-weapon-groups', 'workshop-energy', 'workshop-energy-ai', 'workshop-energy-model', 'workshop-generated-systems', 'workshop-shields', 'workshop-shield-ai', 'workshop-interiors',
   'workshop-personnel',
   'workshop-comms-radio',
+  'workshop-guided-profile',
   'workshop-presets', 'workshop-scripts', 'workshop-script-references', 'workshop-objective-snippet', 'workshop-localisation', 'workshop-slot-authoring', 'script-editor', 'script-editor-view',
   'undo-stack', 'validation', 'entity-includes', 'component-schema', 'component-templates', 'world-toml', 'entity-toml',
   'stations-validate', 'marker-validate', 'blaster-validate', 'torpedo-validate', 'barrel-pattern-validate',

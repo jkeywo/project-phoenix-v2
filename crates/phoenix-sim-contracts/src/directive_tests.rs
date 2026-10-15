@@ -134,3 +134,32 @@ fn diagnostics_distinguish_absent_kind_from_explicit_none() {
     assert!(explicit_message.contains("which reads no directive field"));
     assert!(!explicit_message.contains("no directive_kind is authored"));
 }
+
+#[test]
+fn illumination_uses_existing_world_and_doctrine_target_codec_with_science_relevance_only() {
+    let mut request = world("Illuminate");
+    assert!(matches!(
+        interpret(&request),
+        Err(DirectiveError::MissingField { .. })
+    ));
+    request.push_text(DirectiveField::WorldTarget, Some("observed-subject".into()));
+    let expected = AiDirective::Illuminate {
+        target: "observed-subject".into(),
+    };
+    assert_eq!(interpret(&request).unwrap(), expected);
+    assert_eq!(
+        crate::objective_utility::directive_relevance(&expected),
+        vec![phoenix_model::messages::SystemAffinity::Sensors]
+    );
+    let mut doctrine = world("Illuminate");
+    doctrine.push_text(
+        DirectiveField::DoctrineOperateTarget,
+        Some("observed-subject".into()),
+    );
+    assert_eq!(interpret(&doctrine).unwrap(), expected);
+    doctrine.push_text(
+        DirectiveField::DoctrineScanTarget,
+        Some("unrelated-scan".into()),
+    );
+    assert!(interpret(&doctrine).is_err());
+}

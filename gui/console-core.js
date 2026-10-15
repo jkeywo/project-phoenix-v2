@@ -1,3 +1,4 @@
+import { registerIlluminationActions } from './stations/illumination-actions.js';
 import { registerGuidanceActions } from './stations/guidance-actions.js';
 import { registerFittingActions } from './stations/fitting-actions.js';
 import { mountLocalStockControls } from './components/local-stock-controls.js';
@@ -445,6 +446,7 @@ export function initConsole({
   registerLogisticsActions(_semanticActions, { getState: () => _latestState, sendAction });
   registerFittingActions(_semanticActions, { getState: () => _latestState, sendAction });
   registerGuidanceActions(_semanticActions, { getState: () => _latestState, sendAction });
+  registerIlluminationActions(_semanticActions, { getState: () => _latestState, sendAction });
 
   // ── Inbound: __updateConsole (ADR-0001 §2) ─────────────────────────────
   const workingView = createConsoleViewSession({

@@ -171,12 +171,27 @@ fn advance(
                     broad
                         .and_then(|broad| broad.0.get(owner))
                         .map(|profile| profile.profile.reading_ticks)
+                })
+                .or_else(|| {
+                    config
+                        .0
+                        .system(owner)
+                        .and_then(|system| {
+                            phoenix_sim_gameplay::ship::composition::illumination_composition(
+                                &system.components,
+                            )
+                        })
+                        .map(|binding| binding.config.reading_ticks)
                 });
             let Some(required) = required else {
                 continue;
             };
             let tactical = config.0.system(owner).is_some_and(|system| {
-                system.kind == crate::ship::system_registry::TACTICAL_RADAR_KIND
+                matches!(
+                    system.kind.as_str(),
+                    crate::ship::system_registry::TACTICAL_RADAR_KIND
+                        | crate::ship::system_registry::ILLUMINATION_KIND
+                )
             });
             let selected = if tactical {
                 mission_key(&config.0, boards, owner).map(|key| (key, required))

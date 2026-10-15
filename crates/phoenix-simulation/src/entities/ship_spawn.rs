@@ -94,6 +94,7 @@ pub(super) fn install(
     crate::science::broad::install(config, cmds);
     crate::comms::radio::install(config, cmds);
     crate::weapons::mounts::install(config, cmds);
+    crate::console::weapons::illumination::install(config, cmds);
     crate::console::weapons::assignments::install(config, cmds);
     crate::console::navigation::sharing::install(config, cmds);
     crate::console::navigation::knowledge::install(config, cmds);

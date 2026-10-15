@@ -121,3 +121,20 @@ entities:
       paths: [crates/phoenix-sim-gameplay/src/weapons/illumination.rs, crates/phoenix-simulation/src/console/weapons/illumination.rs]
       symbols: [IlluminationConfig, ShipIllumination]
       tests: [crates/phoenix-sim-gameplay/src/weapons/illumination_tests.rs, crates/phoenix-simulation/src/console/weapons/illumination_tests.rs]
+
+  - state: illumination-emission-readout
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Own Last Illumination Emission
+      summary: "Derived own paid interval only; no receiver census, survival or acceptance result."
+    architecture:
+      classification: derived
+      owner: shared-weapon-mount-and-delivery
+      writers: [shared-weapon-mount-and-delivery]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/console/weapons/illumination.rs]
+      symbols: [IlluminationEmissions]
+      tests: [crates/phoenix-simulation/src/console/weapons/illumination_tests.rs]

@@ -1600,6 +1600,17 @@ pub(super) fn apply_entity_state_with(
     if let Some(saved) = &row.mounts {
         entity_mut.insert(saved.clone());
     }
+    if let Some(saved) = &row.illumination {
+        entity_mut.insert((
+            saved.clone(),
+            crate::console::weapons::illumination::IlluminationEmissions::default(),
+        ));
+    } else {
+        entity_mut.remove::<(
+            crate::console::weapons::illumination::ShipIllumination,
+            crate::console::weapons::illumination::IlluminationEmissions,
+        )>();
+    }
     if let Some(saved) = &row.guided_source {
         entity_mut
             .insert(crate::console::weapons::guidance_link::ShipGuidanceKnowledge(saved.clone()));

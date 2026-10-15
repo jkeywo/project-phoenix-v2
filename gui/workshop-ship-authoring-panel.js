@@ -80,7 +80,7 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
   const systemAdd = button('workshop-ship-system-add', 'workshop.ship.add_system', () => ({ type: 'system-add', id: systemId.value,
     kind: systemKind.value, ...ownership(), power_group: systemPowerGroup.value || undefined,
     compartment: systemCompartment.value, materialise: interiorMaterialise.checked,
-    ...(['dock', 'access-gate'].includes(systemKind.value) ? { ...componentEditor.value(), ai: stateTreeEditor.value() } : {}) }));
+    ...(['dock', 'access-gate', 'illumination'].includes(systemKind.value) ? { ...componentEditor.value(), ai: stateTreeEditor.value() } : {}) }));
   const systemApply = button('workshop-ship-system-apply', 'workshop.ship.apply_system', () => ({ type: 'system-update', id: systems.value,
     compartment: systemCompartment.value, materialise: interiorMaterialise.checked,
     fields: { kind: systemKind.value, ...ownership(), power_group: systemPowerGroup.value || undefined } }));
@@ -151,7 +151,7 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
     if (doctrineKind.value === 'Hail') return value ? { directive_hail_target: value } : {};
     if (doctrineKind.value === 'Scan') return value ? { directive_scan_target: value } : {};
     if (doctrineKind.value === 'Dock') return value ? { directive_dock_target: value } : {};
-    if (['Tow', 'Stabilise', 'Escort', 'Transfer', 'FieldRepair', 'Secure', 'Rescue'].includes(doctrineKind.value)) return value ? { directive_operate_target: value } : {};
+    if (['Tow', 'Stabilise', 'Escort', 'Transfer', 'FieldRepair', 'Secure', 'Rescue', 'Illuminate'].includes(doctrineKind.value)) return value ? { directive_operate_target: value } : {};
     if (doctrineKind.value === 'Order') return { ...(value ? { directive_order_target: value } : {}), ...(route ? { directive_order_route: route } : {}) };
     return {};
   }

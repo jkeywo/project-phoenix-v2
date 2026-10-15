@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { parse } from 'smol-toml';
+import { parse, stringify } from 'smol-toml';
 import { createStoreZip } from '../mod-pack-export.js';
 import { WorkshopDocument } from '../workshop-document.js';
 import { applyShipOperation, inspectShipAuthoring, prepareShipOperation } from '../workshop-ship-authoring.js';
-import { initialTurret } from '../workshop-system-composition.js';
+import { initialTurret, initialIllumination } from '../workshop-system-composition.js';
 
 const manifest = '[pack]\nformat=1\nid="mine"\nversion="1"\nname="Mine"\n[pack.requires]\ncontent_id="phoenix-base"\ncontent_epoch=1\n';
 const source = `# ship comments stay
@@ -240,4 +240,17 @@ id = "wait"
   const final = parse(cleared.changes[0].after).system.at(-1);
   expect(final).not.toHaveProperty('power_group');
   expect(final.config.ai).toEqual(before);
+});
+
+it('rebinds both illumination AI output meanings when a destination collides with temporary rename names',async()=>{
+ const draft=pack(),initial=initialIllumination(),data=parse(source);
+ data.system.push({id:'science-light',kind:'illumination',console:'scan-screen',power_group:'science',component:initial.components,channel:initial.channels,
+ config:{ai:{root:'support',tree:[{id:'support',initial:'watch',state:[{id:'watch',task:[{id:'enable',action:{kind:'write',channel:'enabled',value:{source:'literal',value:true}}},{id:'target',action:{kind:'write',channel:'target',value:{source:'literal',value:false}}}]}]}]}}});
+ draft.edit(op({}).path,stringify(data));const candidate=structuredClone(initial);
+ candidate.channels[0].name='workshop-rebind-1';candidate.channels[1].name='subject';candidate.components[1].enabled_channel='workshop-rebind-1';candidate.components[1].target_channel='subject';
+ const runtime={shipSchema:async()=>({...schema,system_kinds:[...schema.system_kinds,'illumination']}),dependencies:async()=>dependencies,validate:vi.fn(async()=>({accepted:true,findings:[]}))};
+ await applyShipOperation({draft,runtime,operation:op({type:'system-composition-set',id:'science-light',...candidate})});
+ const actual=parse(draft.read(op({}).path)).system.find(row=>row.id==='science-light');
+ expect(actual.config.ai.tree.find(tree=>tree.id==='support'&&!tree._remove).state[0].task.map(task=>task.action.channel)).toEqual(['workshop-rebind-1','subject']);
+ expect(actual.component[1]).toMatchObject({enabled_channel:'workshop-rebind-1',target_channel:'subject'});
 });

@@ -120,7 +120,7 @@ pub fn directive_relevance(directive: &AiDirective) -> Vec<SystemAffinity> {
         // Scan is a Sensors action (issue #1139). The Backfill Sensors host
         // consumes it and emits the ordinary admitted ScanTarget command; no
         // other affinity gets the directive and the scan applier stays shared.
-        AiDirective::Scan { .. } => vec![SystemAffinity::Sensors],
+        AiDirective::Scan { .. } | AiDirective::Illuminate { .. } => vec![SystemAffinity::Sensors],
         // The tractor operate directives (issue #1162): each routes to the
         // owning system's affinity — Engineering, which owns the tractor. The
         // seat decides the concrete `EngageTractor`/`ReleaseTractor`, so these

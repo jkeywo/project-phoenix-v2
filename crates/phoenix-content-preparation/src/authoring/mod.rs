@@ -185,6 +185,26 @@ pub fn ship_schema() -> WorkshopShipSchema {
         component_fields: [
             ("power_input".into(), Vec::new()),
             (
+                "illumination_emitter".into(),
+                [
+                    ("enabled_channel", "boolean_channel"),
+                    ("target_channel", "entity_target_channel"),
+                    ("power_input", "power_input_component"),
+                    ("config.mount.facing_deg", "number"),
+                    ("config.mount.fire_arc_deg", "number"),
+                    ("config.mount.range", "number"),
+                    ("config.link_range", "number"),
+                    ("config.minimum_transmission", "number"),
+                    ("config.reading_ticks", "integer"),
+                ]
+                .into_iter()
+                .map(|(name, kind)| WorkshopComponentField {
+                    name: name.into(),
+                    kind: kind.into(),
+                })
+                .collect(),
+            ),
+            (
                 "turret".into(),
                 [
                     ("power_input", "power_input_component"),
@@ -239,6 +259,7 @@ pub fn ship_schema() -> WorkshopShipSchema {
         channel_kinds: vec!["boolean".into(), "entity_target".into()],
         ai_state_tree: WorkshopAiTreeSchema {
             system_kinds: vec![
+                crate::ship::system_registry::ILLUMINATION_KIND.into(),
                 crate::ship::system_registry::DOCK_KIND.into(),
                 crate::ship::system_registry::POWER_REACTOR_KIND.into(),
                 crate::ship::system_registry::SHIELD_ARC_KIND.into(),
@@ -252,6 +273,12 @@ pub fn ship_schema() -> WorkshopShipSchema {
             ],
             shield_recovery_bindings,
             hosts: BTreeMap::from([
+                (
+                    crate::ship::system_registry::ILLUMINATION_KIND.into(),
+                    crate::ai::state_tree::schema_metadata(
+                        &phoenix_sim_gameplay::weapons::illumination::bindings("enabled", "target"),
+                    ),
+                ),
                 (
                     crate::ship::system_registry::SENSORS_KIND.into(),
                     crate::ai::state_tree::schema_metadata(

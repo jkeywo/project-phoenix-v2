@@ -27,6 +27,11 @@ fixes. Neither result establishes native gameplay or device acceptance.
 
 ## Outstanding proof and scope
 
+The [integrated receipt](../gameplay-redesign/implementation/parallel-checkpoint.json)
+records 287 native passes and eight failures. The actual renamed lateral feed
+case passes. The two movement fixture bootstrap corrections are integrated as
+`9f657b83`; their rebuilt execution remains pending.
+
 Run actual paid Direct movement, coasting, turning and ordinary AI handoff in the
 full host. Compare fresh JSON restore using complete captures/digests for 360
 fixed steps and exercise malformed candidate no-write cases. Execute actual

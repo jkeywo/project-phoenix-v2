@@ -36,6 +36,7 @@
     ],
     "corrections": "Copied child energy tables now retain the required positive listening cost. Radio continuation seeds real pre-save publications; the renamed lateral case receives a separate real kind/publication ownership fix. Both source corrections await rebuilt execution."
   },
+  "rebuilt_followup": "parallel-checkpoint.json records the later rebuilt run: radio JSON/no-write continuation and actual lateral feed cases now pass; 287 native cases pass and eight newly exposed movement/illumination/facility fixture cases await corrected execution. The full run is not green.",
   "compatibility": "This checkpoint initially used protocol 15, snapshot 56 and simulation rules 0.28 for canonical Helm movement and dated radio facts. Later integrated lanes advance the shared pins at their authoritative constants. Unsupported older saves/peers must fail explicitly.",
   "limits": "Initial checkpoint, not a verified increment exit. No updated native continuation result, whole-host radio demonstration, browser/native device acceptance, balance/performance result, complete ordinary-AI radio policy, generic requests, receipts, interception/decoding, relays or media is claimed. No push or full integration gate run."
 }

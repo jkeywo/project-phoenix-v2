@@ -1,0 +1,53 @@
+{
+  "date": "2026-10-15",
+  "status": "partial",
+  "scope": "Integrated communication, movement, illumination, local personnel and equipment-bound facility checkpoints; no increment exit",
+  "source": "873ca2d9 plus authored illumination power-group correction ba716438; later fixture corrections are not part of this executable",
+  "compile": {
+    "command": "cargo check -p phoenix-simulation --tests --no-default-features",
+    "result": "passed after four bounded integration corrections",
+    "log": ".phoenix/parallel-integrated-check-retry.log"
+  },
+  "native": {
+    "command": "phoenix_simulation-d920f9d6624e4bd2.exe comms:: guided_ guidance_ helm_movement console::helm::control lateral_owner_tests console::weapons::illumination illumination_ flight_carrier:: pdc:: assignments:: mounts:: personnel ports_equipment ports_server boost",
+    "result": "287 passed, 8 failed, 4344 filtered out; 77.11 seconds",
+    "log": ".phoenix/parallel-integrated-native-data-retry.log",
+    "log_sha256": "a057849c7c5338bd051416ac60f52459acda20ebcae89db449cf4057da8af751",
+    "executable_sha256": "14612fad1af8789ce2cd7fe483f5fa6b96364ecb0a1e285c8ba61b684fa3d8ba",
+    "new_positive_evidence": [
+      "Actual paid radio inbox and reserves continue through JSON and reject malformed copies before writes",
+      "Renamed lateral publication follows actual owner condition/source and exact Console feed",
+      "Five actual illumination emitter cases: paid matching assistance, unavailable evidence, receiver absence, Offline source and original-source concealment",
+      "Local personnel custody and snapshot owner cases",
+      "Existing guided flight, PDC, mounts and communication owner cases"
+    ],
+    "failed_cases": {
+      "movement": "Two manually promoted owner fixtures omitted the normal high-fidelity actuator bundle; correction integrated as 9f657b83, rebuilt execution pending",
+      "illumination": "AI fixture replaced App schedule resources with a bare World; correction integrated as 4770c21a, rebuilt execution pending",
+      "facility": "Five cases used a legacy finite-stock visitor fixture without actual damage/repair owners; correction integrated as 5e66d584, rebuilt execution pending"
+    },
+    "initial_failure": "172 passed, 122 failed. Of those failures, 115 shared the missing authored illumination admission power group. Original log retained as .phoenix/parallel-integrated-native.log."
+  },
+  "client": {
+    "command": "npx vitest run (18 affected client and Workshop suites)",
+    "result": "548 passed, 0 failed",
+    "log": ".phoenix/parallel-integrated-client.log",
+    "bundle": "node scripts/build-client.mjs passed; protocol 17"
+  },
+  "design": {
+    "validate": "passed; 1123 entities, 614 informational findings, Status OK",
+    "scan": "passed; .phoenix/parallel-integrated-pasm-scan.log",
+    "traceability": "passed; 246 rows",
+    "wiki": "72 pages, 70 index entries, 2043 references, no findings",
+    "strings": "6037 strings, zero errors or warnings",
+    "layers": "dependency-tree check passed"
+  },
+  "pending": [
+    "Rebuilt execution of all eight corrected owner cases",
+    "Real headless-host PDC and joined-crew Helm continuation probes",
+    "Full-host illumination and radio journeys",
+    "Remaining runtime scope in increments 16 through 24",
+    "Browser/native devices, multiplayer peers, performance, balance and human workload acceptance",
+    "Required final integrated gates before any push"
+  ]
+}

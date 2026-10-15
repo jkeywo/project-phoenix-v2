@@ -39,8 +39,13 @@ composition, paired payment and duplicate-tick refusal, unavailable work and
 rejected stock without debits, partial funded output, real external Repair
 recovery, stable two-visitor settlement, and a fresh JSON restore during paid
 fractional work followed by 360 exact existing-owner comparisons. These cases
-have not been compiled or executed at this source checkpoint. The JSON case is
-an owner continuation test, not a full-host capture/digest or mesh proof.
+were unexecuted at the initial source checkpoint. The later integrated native
+run found five fixture failures: the legacy finite-stock visitor had no actual
+damage/repair owners. `5e66d584` supplies those owners from the accepted Cruiser
+without changing stocks, power or behavioral assertions. Rebuilt execution is
+pending; see the [integrated receipt](../gameplay-redesign/implementation/parallel-checkpoint.json).
+The JSON case is an owner continuation test, not a full-host capture/digest or
+mesh proof.
 
 Independent read-only review covers production paired settlement and the six
 new owner tests, Model/config acceptance, source/forms and binding-only data.

@@ -607,7 +607,9 @@ pub const SNAPSHOT_FORMAT: u32 = 74;
 /// with shared care/posting consumers and accepted creation provenance.
 /// "0.54" uses actual paid Transit and tracked layers for authored World routes,
 /// retaining original drive receipts and the current accepted arrival context.
-pub const SIMULATION_RULES: &str = "0.54";
+/// "0.55" preserves actual paid machinery work across the complete fixed
+/// interval so later observations include both Input and Physics operation.
+pub const SIMULATION_RULES: &str = "0.55";
 
 /// The authored data, computed rather than remembered.
 ///

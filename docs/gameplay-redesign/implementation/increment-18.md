@@ -191,7 +191,21 @@ arrival policy on actual World/body content; a star/planet visual, displayed siz
 or mass alone grants no gravity behaviour. The physical placement solver may read
 those actual bodies solely for arrival resolution and reports only the supported
 own result. Validate finite representable geometry and stable body ordering;
-ordinary propulsion and static orbital bodies remain unchanged. Publish the
+ordinary propulsion and static orbital bodies remain unchanged.
+
+First supported sources use typed optional `arrival_gravity` on the normally
+resolved EntityConfig, explicitly authored through the static World row's
+ordinary overrides. Require an unambiguous finite absolute position and an
+ordinary non-movable resolved actor. Relative, random, conditional and movable
+sources refuse with an actionable error. At commitment, the actual physical
+source must still agree with that accepted fixed policy and pose; a moved source
+refuses instead of applying its obsolete authored location. Keep the original
+sorted body inputs and keyed scatter only in the same order's private arrival
+receipt; after commitment that receipt survives later source loss. Validate its
+accepted immutable provenance and deterministic reconstruction before restoring
+any state. These private inputs are not operator observations.
+
+Publish the
 supported own arrival forecast and actual displacement through normal views;
 refuse nonrepresentable/no-valid-placement results without guaranteeing collision
 clearance. A formation later

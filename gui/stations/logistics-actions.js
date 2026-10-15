@@ -1,3 +1,4 @@
+import {plannedDeliveryDispatch} from '../planned-requests.js';
 import { defineStationAction, createCorrelatedActionSender } from './action-support.js';
 import { familyView, familySystemId } from '../console-payload.js';
 export const LOGISTICS_ACTION_IDS = Object.freeze({ enabled: 'logistics.enabled', target: 'stock.target', reserve: 'stock.reserve', priority: 'stock.priority', dispatch: 'logistics.dispatch', return: 'logistics.return' });
@@ -24,6 +25,10 @@ export function registerLogisticsActions(registry, options = {}) {
       target = local.system_id; payload = { store: detail.store, amount: detail.amount };
     } else {
       if (!target || view.logistics_auto) return false;
+      if(name==='dispatch'&&detail.planned_request!=null){
+        payload=plannedDeliveryDispatch(view,detail.planned_request);
+        return payload?send(actionId,correlation,inputMs,'logistics_dispatch',{...payload,control_system_id:target}):false;
+      }
       const store = view.stores?.find(row => row.id === detail.store);
       if (name === 'enabled' && typeof detail.enabled === 'boolean') payload = { enabled: detail.enabled };
       else if (name === 'priority' && store && Number.isInteger(detail.priority) && detail.priority >= 0 && detail.priority <= 65535)

@@ -1829,6 +1829,7 @@ pub fn activation_findings(
     findings.extend(validate_template_resolution_in(&src, templates, &mut seen));
     findings.extend(validate_ship_slot_capacity_in(&src, templates));
     findings.extend(super::activity_bindings::findings(&src, templates));
+    findings.extend(super::planning::findings(&src, templates));
     findings
 }
 
@@ -1873,6 +1874,7 @@ pub fn validate_composition_with_fragments(
 
     findings.extend(validate_ship_slot_capacity_in(root, template_loader));
     findings.extend(super::activity_bindings::findings(root, template_loader));
+    findings.extend(super::planning::findings(root, template_loader));
 
     // Per-world identity (duplicate names).
     findings.extend(validate_entity_identity(

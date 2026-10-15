@@ -119,6 +119,15 @@ pub(crate) fn collect_world_events(
     mut buffer: ResMut<WorldEventBuffer>,
     time: Option<Res<bevy::time::Time>>,
     tick: Option<Res<crate::sim_tick::SimTick>>,
+    base_world: Option<Res<crate::world::config::WorldConfig>>,
+    planning_actors: Query<(
+        &crate::entities::spawner::EntityUuid,
+        Option<&crate::ship_slots::AuthoredShipSlotId>,
+        &crate::ship_plugin::ShipConfigComponent,
+        Option<&crate::ship::compartment_damage::ShipDamage>,
+        Option<&crate::console::repair::server::ShipRepairTeams>,
+        Option<&crate::resources::logistics_server::CompiledShipLogistics>,
+    )>,
     hulls: Query<(
         &crate::entities::spawner::EntityUuid,
         Option<&crate::entities::spawner::EntitySystemHull>,
@@ -127,6 +136,42 @@ pub(crate) fn collect_world_events(
 ) {
     if let Some(tick) = tick {
         crate::world::activities::acknowledge_pending(&mut runtime, tick.0);
+        if let Some(base) = base_world.as_deref() {
+            let mut actors = planning_actors.iter().collect::<Vec<_>>();
+            actors.sort_by(|left, right| left.0 .0.cmp(&right.0 .0));
+            for (uuid, slot, config, damage, teams, logistics) in actors {
+                let result = crate::world::planning::advance_for_actor(
+                    &mut runtime,
+                    base,
+                    &uuid.0,
+                    slot.map(|id| id.0.as_str()),
+                    tick.0,
+                    |request| match request {
+                        phoenix_sim_world::world::activities::ActivityRequest::Repair {
+                            ..
+                        } => damage.zip(teams).is_some_and(|(damage, teams)| {
+                            crate::world::activities::repair_binding_supported(
+                                request,
+                                &config.0,
+                                damage,
+                                &crate::ship::system_registry::repair_system_id(),
+                                teams.0.slots().len(),
+                            )
+                        }),
+                        phoenix_sim_world::world::activities::ActivityRequest::Delivery {
+                            ..
+                        } => logistics.is_some_and(|profile| {
+                            crate::world::activities::delivery_binding_supported(
+                                request, &profile.0,
+                            )
+                        }),
+                    },
+                );
+                if let Err(error) = result {
+                    bevy::log::warn!(actor=%uuid.0,%error,"Maintenance plan release withheld");
+                }
+            }
+        }
     }
     let mut world_events: Vec<WorldEvent> = Vec::new();
     for ev in ai_events.attacked.read() {

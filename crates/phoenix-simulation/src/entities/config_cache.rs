@@ -371,6 +371,11 @@ fn advance_world_preload() {
     );
     match result {
         Ok(dependencies) => {
+            WORLD_CONFIG.with(|slot| {
+                if let Some(config) = slot.borrow_mut().as_mut() {
+                    config.compiled_planning = dependencies.planning.clone();
+                }
+            });
             WORLD_PRELOAD_PENDING
                 .with(|pending| *pending.borrow_mut() = !dependencies.pending.is_empty());
             for template in dependencies.templates {

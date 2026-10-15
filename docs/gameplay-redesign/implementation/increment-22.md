@@ -392,3 +392,19 @@ activity vocabulary and authored demonstration to [increment 23](increment-23.md
 Concrete schema encoding, solver implementation and calibrated tuning are resolved
 in this increment's implementation specification before runtime changes. The
 contracts above are approved; numerical attention/duration estimates remain tuning.
+
+The first imported maintenance expansion retains 22A's disjoint binding rule
+across all selected leaves, including historical bindings. An ordering edge does
+not grant sequential reuse of the same bound Repair team/target or delivery
+request. Such a domain is refused with the ordinary binding-conflict error;
+reusable lifecycle/operator identities require a later explicitly designed
+extension rather than deleting evidence to make room.
+
+Body-only snapshot application and GM removal inverse leave the World owner in
+place. They must refuse a physical Repair/Logistics job rewind beneath an
+already accepted World binding. A removed bound actor requires a full-roster
+restore with its matching World frontier; an ordinary unbound inverse is
+unchanged. Whole-snapshot rollback validates its own candidate World rather than
+requiring equality with today's accepted jobs. An explicit candidate spawn
+origin must resolve exactly and retain the accepted base/slot equipment recipe;
+a failed replacement cannot borrow bootstrap capability.

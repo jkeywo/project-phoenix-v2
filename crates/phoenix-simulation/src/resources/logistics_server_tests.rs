@@ -704,3 +704,6 @@ fn damaged_local_tools_keep_stock_orders_but_explicit_offline_does_not() {
         4
     );
 }
+
+#[path = "logistics_planning_tests.rs"]
+mod planning;

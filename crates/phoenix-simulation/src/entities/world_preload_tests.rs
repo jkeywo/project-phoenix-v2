@@ -108,3 +108,44 @@ fn missing_sibling_is_a_path_specific_terminal_refusal() {
     assert!(error.contains("HTTP 404"));
     assert!(!crate::content_ledger::is_frozen());
 }
+
+#[test]
+fn imported_domain_waits_for_existing_source_queue_then_freezes_exact_closure() {
+    crate::content_ledger::reset();
+    let world =
+        crate::content_fs::read_to_string("tests/fixtures/maintenance-htn-world.toml").unwrap();
+    let library = "assets/worlds/domains/maintenance.toml";
+    let missing = discover(
+        ROOT,
+        &world,
+        &[],
+        &|_| Ok(None),
+        &crate::world::script::load::NoSiblingScripts,
+    )
+    .unwrap();
+    assert_eq!(missing.pending, BTreeSet::from([library.into()]));
+    assert!(missing.planning.is_none());
+    assert!(!crate::content_ledger::is_frozen());
+    let text = crate::content_fs::read_to_string(library).unwrap();
+    let ready = discover(
+        ROOT,
+        &world,
+        &[],
+        &|path| Ok((path == library).then(|| text.clone())),
+        &crate::world::script::load::NoSiblingScripts,
+    )
+    .unwrap();
+    assert!(ready.pending.is_empty());
+    let compiled = ready.planning.unwrap();
+    assert_eq!(compiled.libraries().len(), 1);
+    let denied = discover(
+        ROOT,
+        &world,
+        &[],
+        &|_| Err("HTTP 404".into()),
+        &crate::world::script::load::NoSiblingScripts,
+    )
+    .err()
+    .unwrap();
+    assert!(denied.contains(library) && denied.contains("HTTP 404"));
+}

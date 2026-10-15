@@ -218,3 +218,15 @@ pub(crate) fn declared_actor_fixture(
 #[cfg(test)]
 #[path = "activity_bridge_tests.rs"]
 mod tests;
+
+/// A body-only inverse cannot roll back the physical owner under this World's
+/// already accepted job/evidence. Unbound and merely offered work is unchanged.
+pub(crate) fn has_accepted_binding(
+    instances: &phoenix_sim_world::world::activities::SituationInstances,
+    actor: &str,
+) -> bool {
+    instances
+        .instances
+        .values()
+        .any(|row| row.request.actor() == actor && row.accepted.is_some())
+}

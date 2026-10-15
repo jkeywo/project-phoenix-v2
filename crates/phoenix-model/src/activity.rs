@@ -160,3 +160,25 @@ fn valid_condition(value: &crate::damage::ComponentCondition) -> bool {
 #[cfg(test)]
 #[path = "activity_tests.rs"]
 mod tests;
+
+/// A released mission instruction, not a report about current damage or stock.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlannedRepairRequest {
+    pub id: String,
+    pub released_tick: u64,
+    pub team: u8,
+    pub request: crate::messages::RepairTarget,
+    pub target: RepairWorkTarget,
+    pub goal: RepairGoal,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlannedDeliveryRequest {
+    pub id: String,
+    pub released_tick: u64,
+    pub source: String,
+    pub destination: String,
+    pub commodity: String,
+    pub amount: i64,
+}

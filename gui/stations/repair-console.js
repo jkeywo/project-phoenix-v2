@@ -68,6 +68,8 @@ export function makeRepairRender(variant) {
       teamsEl.state = {
         teams: s.teams || [],
         personnel: s.personnel || null,
+        planned_requests: s.planned_requests || [],
+        planned_controllable: s.planned_controllable === true,
         reports: s.reports || [],
         jobs: s.jobs || [],
         interior: s.interior || null,

@@ -370,6 +370,7 @@ pub(crate) use materialization::spawn_from_origin;
 pub use materialization::LayerReconcileStatus;
 
 mod activities;
+pub(crate) use activities::validate_single_row as validate_activity_single_row;
 mod emp;
 mod helm_movement;
 #[cfg(test)]

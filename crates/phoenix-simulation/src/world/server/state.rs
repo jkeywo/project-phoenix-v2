@@ -44,6 +44,8 @@ pub struct WorldContentRuntime {
     /// Immutable authored definitions, rebuilt from accepted content.
     pub situation_definitions: Vec<phoenix_sim_world::world::activities::SituationDefinition>,
     pub situation_configs: Vec<phoenix_sim_world::world::activities::SituationConfig>,
+    /// Sole saved method/release frontier; graph derives from accepted sources.
+    pub plan_choice: Option<phoenix_sim_world::world::planning::PlanChoice>,
     /// Ordered continuation/handler pairs and their observer generation.
     pub triggers: crate::world::trigger_registry::WorldTriggerRegistry,
     /// Named-entity → UUID mapping (populated from `WorldConfig.name_to_uuid`).

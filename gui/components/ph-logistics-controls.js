@@ -1,3 +1,4 @@
+import {renderPlannedRequests} from './planned-requests.js';
 import { t, wireText } from '../strings.js';
 import { LOGISTICS_ACTION_IDS } from '../stations/logistics-actions.js';
 import { activateEngineeringAction } from '../stations/engineering-action-control.js';
@@ -10,7 +11,7 @@ export class PhLogisticsControls extends HTMLElement {
   render() {
     const state = this._state; this.hidden = !state?.system_id;
     if (!state?.system_id) return;
-    const signature = JSON.stringify([state.system_id, state.enabled, state.logistics_auto, state.max_batch, state.max_active, state.stores, state.deliveries, state.refusal]);
+    const signature = JSON.stringify([state.system_id, state.enabled, state.logistics_auto, state.max_batch, state.max_active, state.stores, state.deliveries, state.refusal, state.planned_requests,state.planned_controllable]);
     if (signature === this._signature) return; this._signature = signature;
     // Preserve a currently edited input across snapshot paints of unchanged structure.
     const focused = this.shadowRoot.activeElement, selected = focused?.dataset?.key;
@@ -21,6 +22,8 @@ export class PhLogisticsControls extends HTMLElement {
     const button = (key, action, detail) => { const node = el('button', t('logistics.' + key)); node.type = 'button'; node.disabled = !!state.logistics_auto;
       node.addEventListener('click', () => activateEngineeringAction(null, LOGISTICS_ACTION_IDS[action], typeof detail === 'function' ? detail() : detail)); return node; };
     const style = el('style', ':host{display:block;margin-top:1em}fieldset{margin:.5em 0;min-width:0}label{display:flex;gap:.5em;align-items:center;flex-wrap:wrap}input{min-width:4em;width:6em}button{min-height:44px;margin:.2em}p{overflow-wrap:anywhere}'); root.append(style, el('h2', t('logistics.title')));
+    const planned=el('section');root.append(planned);
+    renderPlannedRequests(planned,state,id=>activateEngineeringAction(null,LOGISTICS_ACTION_IDS.dispatch,{planned_request:id}));
     const toggle = button(state.enabled ? 'pause' : 'enable', 'enabled', { enabled: !state.enabled }); root.append(toggle);
     root.append(el('p', t('logistics.maintain-hint')));
     for (const store of state.stores || []) {

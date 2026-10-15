@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LogisticsBlackboard {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub planned_requests: Vec<crate::activity::PlannedDeliveryRequest>,
     pub enabled: bool,
     pub max_batch: i64,
     pub max_active: u16,

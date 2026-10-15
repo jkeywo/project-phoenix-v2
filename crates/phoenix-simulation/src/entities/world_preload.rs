@@ -12,6 +12,7 @@ use crate::world::script::load::{
 pub(crate) struct Dependencies {
     pub pending: BTreeSet<String>,
     pub templates: BTreeSet<String>,
+    pub planning: Option<phoenix_sim_world::world::planning::CompiledPlanning>,
 }
 
 /// `Ok(None)` is an outstanding read; `Err` is terminal. The caller issues the
@@ -38,6 +39,44 @@ pub(crate) fn discover(
     for (path, text, is_root) in documents {
         let config =
             crate::world::config::parse_world(&text).map_err(|e| format!("{path}: {e}"))?;
+        if let Some(planning) = config.planning.clone() {
+            if !is_root {
+                return Err(format!(
+                    "{path}: maintenance planning is supported only on the base world"
+                ));
+            }
+            // Missing reads remain in the ordinary asynchronous source queue.
+            // Resolve one bounded closure before the normal load freezes it.
+            let mut missing = BTreeSet::new();
+            let mut failure = None;
+            let compiled =
+                phoenix_sim_world::world::planning::CompiledPlanning::load(planning, |source| {
+                    match read(source) {
+                        Ok(Some(text)) => Some(text),
+                        Ok(None) => {
+                            missing.insert(source.to_string());
+                            None
+                        }
+                        Err(error) => {
+                            failure = Some(format!("{source}: {error}"));
+                            None
+                        }
+                    }
+                });
+            if let Some(error) = failure {
+                return Err(error);
+            }
+            if !missing.is_empty() {
+                result.pending.extend(missing);
+            } else {
+                let (compiled, sources) =
+                    compiled.map_err(|error| format!("{path}: planning: {error}"))?;
+                for source in sources {
+                    crate::content_ledger::record(&source.path, &source.text);
+                }
+                result.planning = Some(compiled);
+            }
+        }
         crate::content_ledger::record(&path, &text);
         result
             .templates

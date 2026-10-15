@@ -1,3 +1,4 @@
+import {plannedRepairDispatch} from '../planned-requests.js';
 import { PERSONNEL_ACTION, registerPersonnelActions } from './personnel-actions.js';
 import { PORT_ACTIONS, registerPortActions } from './port-actions.js';
 import { RECOVERY_ACTIONS, registerRecoveryActions } from './recovery-actions.js';
@@ -242,6 +243,7 @@ function abroadTeamId(view) {
 }
 
 function chooseRepairDispatch(view, detail) {
+  if(detail?.planned_request!=null)return plannedRepairDispatch(view,detail.planned_request);
   if (!view || view.repair_auto) return null;
   const teams = Array.isArray(view.teams) ? view.teams : [];
   const targets = Array.isArray(view.dispatch_targets) ? view.dispatch_targets : [];

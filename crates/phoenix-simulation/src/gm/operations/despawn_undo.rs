@@ -536,6 +536,21 @@ pub fn apply_armed_restores(world: &mut World) {
         None => return,
     };
     for restore in armed {
+        let refusal = world
+            .get_resource::<crate::world::server::WorldContentRuntime>()
+            .and_then(|runtime| {
+                runtime.gm_despawn_captures.capture_for(
+                    &restore.original.operator_id,
+                    &restore.original.correlation,
+                    restore.original.sequence,
+                )
+            })
+            .and_then(|capture| capture.state.as_deref())
+            .and_then(|state| crate::snapshot::validate_activity_single_row(world, state).err());
+        if let Some(reason) = refusal {
+            bevy::log::warn!(%reason,"GM body-only restore refused before spawn: accepted World activity requires full restore");
+            continue;
+        }
         let capture = world
             .get_resource_mut::<crate::world::server::WorldContentRuntime>()
             .and_then(|mut runtime| runtime.gm_despawn_captures.consume(&restore.original));

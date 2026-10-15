@@ -7,6 +7,7 @@ pub mod content;
 pub mod deadlines;
 pub mod delayed;
 pub mod native_render_config;
+pub mod planning;
 pub mod script;
 pub mod trigger_registry;
 pub mod workforce;

@@ -208,6 +208,13 @@ pub(super) fn apply_loaded_layer(
         scripts,
     } = layer;
 
+    if scenario_config.planning.is_some() {
+        bevy::log::error!(
+            "layer {path}: maintenance planning is supported only on the accepted base world"
+        );
+        return;
+    }
+
     if scenario_config.gm_npc_doctrine_palette.iter().any(|entry| {
         runtime
             .gm_npc_doctrine_palette

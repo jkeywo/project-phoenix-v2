@@ -1,3 +1,4 @@
+import {plannedRequests} from './planned-requests.js';
 import { personnelPayload } from './personnel.js';
 import { weaponTargetsPayload } from './weapon-targets.js';
 import { buildHelmMovement } from './helm-movement.js';
@@ -1687,8 +1688,10 @@ export function buildRepairConsoleState(state, systemIds = []) {
     const destroyed = bb.destroyed_hull_fraction ?? state.hullDestroyed;
     const { coreSystems, targets } =
       repairCoreAndTargets(systemHull, state.stationSystems, damageableSystems, bb.repair_groups);
+    const planned=plannedRequests(bb.planned_requests,'repair');
     return {
       teams,
+      ...(planned.length?{planned_requests:planned,planned_controllable:(state.controlSystemIds || systemIds).includes(entry.systemId)&&state.controlSources?.[entry.systemId]==='Human'}:{}),
       personnel_controllable: (state.controlSystemIds || systemIds).includes(entry.systemId)
         && state.controlSources?.[entry.systemId] === 'Human',
       personnel: personnelPayload(bb.personnel, entry.systemId,
@@ -2560,7 +2563,9 @@ export function buildLocalStockViews(state, ownedSystems = []) {
 
 export function buildLogisticsConsoleState(state, systemIds = []) {
   const entry = blackboardOfKind(state, 'Logistics', systemIds), bb = entry?.data || {};
-  return { system_id: entry?.systemId ?? systemIds[0] ?? null, enabled: !!bb.enabled, max_batch: bb.max_batch ?? null, max_active: bb.max_active ?? null,
+  const planned=plannedRequests(bb.planned_requests,'delivery');
+  return { ...(planned.length?{planned_requests:planned,planned_controllable:(state.controlSystemIds || systemIds).includes(entry?.systemId)&&state.controlSources?.[entry?.systemId]==='Human'}:{}),
+    system_id: entry?.systemId ?? systemIds[0] ?? null, enabled: !!bb.enabled, max_batch: bb.max_batch ?? null, max_active: bb.max_active ?? null,
     stores: bb.stores || [], deliveries: bb.deliveries || [], next_delivery: bb.next_delivery || null, refusal: bb.refusal || null };
 }
 

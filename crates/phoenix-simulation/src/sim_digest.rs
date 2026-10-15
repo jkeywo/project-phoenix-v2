@@ -1257,6 +1257,9 @@ fn fold_scenario_schedule(world: &World, mut acc: u64) -> u64 {
         if !runtime.situations.instances.is_empty() {
             acc = activities::instances(acc, &runtime.situations);
         }
+        if let Some(choice) = &runtime.plan_choice {
+            acc = activities::plan(acc, choice);
+        }
     }
     if callbacks.is_empty() && events.is_empty() {
         return acc;

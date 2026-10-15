@@ -133,3 +133,6 @@ fn forged_custody_refuses_before_any_global_or_entity_write() {
         assert_eq!(crate::sim_digest::world_digest(&world), before_digest);
     }
 }
+
+#[path = "planning_snapshot_tests.rs"]
+mod planning;

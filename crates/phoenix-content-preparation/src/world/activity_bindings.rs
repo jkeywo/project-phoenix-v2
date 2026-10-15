@@ -17,7 +17,7 @@ fn resolve(row: &WorldEntity, loader: &dyn TemplateLoader) -> Result<EntityConfi
         crate::entities::loader::apply_overrides(&base, value)
     })
 }
-fn candidates(
+pub(super) fn candidates(
     actor: &str,
     source: &WorldSource,
     loader: &dyn TemplateLoader,
@@ -86,7 +86,7 @@ fn candidates(
     Ok(configs)
 }
 
-fn supports(request: &ActivityRequest, config: &EntityConfig) -> Result<bool, String> {
+pub(super) fn supports(request: &ActivityRequest, config: &EntityConfig) -> Result<bool, String> {
     match request {
         ActivityRequest::Repair {
             owner,

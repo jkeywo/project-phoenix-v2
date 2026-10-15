@@ -6159,3 +6159,5 @@ workshop.transit.gravity,LocalJump accepted authoring,Enable fixed-body arrival 
 workshop.transit.radius,LocalJump accepted authoring,Exclusion radius,Exclusion radius,Exclusion radius,source
 workshop.transit.save_gravity,LocalJump accepted authoring,Save fixed-body gravity,Save fixed-body gravity,Save fixed-body gravity,source
 workshop.transit.refused,LocalJump accepted authoring,Transit edit refused: {reason},Transit edit refused: {reason},Transit edit refused: {reason},source
+planning.request.apply,Planning,Undertake,Ausführen,Undertake,machine
+planning.request.instruction,Planning,"Requested work {id} (tick {tick}): {subject}","Angeforderte Arbeit {id} (Tick {tick}): {subject}","Requested work {id} (tick {tick}): {subject}",machine

@@ -715,6 +715,8 @@ pub fn tick_repair_teams(
 /// the wire broadcaster stays `LocalShip`-filtered.
 pub(crate) fn publish_repair_blackboard(
     tick: Option<Res<crate::sim_tick::SimTick>>,
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    base_world: Option<Res<crate::world::config::WorldConfig>>,
     mut ship_q: Query<(
         Option<&ShipRepairTeams>,
         Option<&crate::entities::spawner::EntitySystemHull>,
@@ -734,6 +736,7 @@ pub(crate) fn publish_repair_blackboard(
         (
             Option<&phoenix_sim_gameplay::personnel::CompiledPersonnel>,
             Option<&phoenix_sim_gameplay::personnel::PersonnelState>,
+            Option<&crate::entities::spawner::EntityUuid>,
         ),
     )>,
     // Resolve a dispatched target's world entity-name id for the readout — no
@@ -766,7 +769,7 @@ pub(crate) fn publish_repair_blackboard(
         access,
         layout,
         physical,
-        (personnel_profile, personnel_state),
+        (personnel_profile, personnel_state, actor),
     ) in ship_q.iter_mut()
     {
         let default_teams;
@@ -921,6 +924,17 @@ pub(crate) fn publish_repair_blackboard(
             .map(|config| repair_group_definitions(&config.0, &damageable_systems))
             .unwrap_or_default();
         let bb = RepairBlackboard {
+            planned_requests: actor
+                .map(|actor| {
+                    crate::world::planning::repair_requests(
+                        runtime.as_deref(),
+                        base_world.as_deref(),
+                        &actor.0,
+                        &repair_system_id(),
+                        tick.as_ref().map_or(0, |tick| tick.0),
+                    )
+                })
+                .unwrap_or_default(),
             personnel: personnel_profile
                 .zip(personnel_state)
                 .and_then(|(profile, state)| {
@@ -1459,6 +1473,7 @@ pub fn operate_repair_ai(
             Option<&crate::resources::fitting_server::CompiledShipFitting>,
             Option<&crate::resources::fitting_server::ShipFitting>,
             &mut crate::core::messages::AdmittedCommands,
+            Option<&crate::server_app::ShipSystemBlackboards>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -1478,6 +1493,7 @@ pub fn operate_repair_ai(
         fitting_profile,
         fitting,
         mut admitted,
+        boards,
     ) in ships.iter_mut()
     {
         // Control-Source gate through the shared AI host spine (issue #1208): a
@@ -1490,6 +1506,55 @@ pub fn operate_repair_ai(
             .operate_ai
         {
             continue;
+        }
+        // A mission instruction changes intent, not diagnosis. A current
+        // ordinary Repair report must independently identify this visit's group.
+        if let (Some(teams), Some(queue), Some(config), Some(damage)) =
+            (teams_comp, repair_queue_comp, config_comp, physical)
+        {
+            let permitted = boards.map(|boards| {
+                config
+                    .0
+                    .observations_for_system(&repair_system_id(), &boards.0)
+            });
+            if let Some(crate::core::messages::SystemBlackboard::Repair(board)) = permitted
+                .as_ref()
+                .and_then(|view| view.get(&repair_system_id()))
+            {
+                let mut dispatched = false;
+                let free = teams.0.free_team_indices(teams.0.external_team());
+                for request in &board.planned_requests {
+                    if !free.contains(&usize::from(request.team)) {
+                        continue;
+                    }
+                    let Some(visit) = crate::jobs::activity_bindings::resolve_repair_visit(
+                        &request.request,
+                        &config.0,
+                        &damage.definition,
+                    ) else {
+                        continue;
+                    };
+                    let group = repair_group(&visit, &config.0);
+                    if !queue.entries.iter().any(|entry| entry.group == group) {
+                        continue;
+                    }
+                    dispatched |= emit_ai_command(
+                        entity_uuid,
+                        repair_system_id(),
+                        crate::core::messages::SystemControlPayload::DispatchRepairTeam {
+                            team_idx: request.team,
+                            target: request.request.clone(),
+                        },
+                        sources,
+                        &sessions,
+                        Some(config),
+                        &mut admitted,
+                    );
+                }
+                if dispatched {
+                    continue;
+                }
+            }
         }
         // Fitting is another request handled by Repair's sole ordinary
         // controller. Outstanding damage reports take priority. A permitted

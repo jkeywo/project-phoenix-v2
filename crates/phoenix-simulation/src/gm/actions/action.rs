@@ -3481,6 +3481,17 @@ pub fn apply_due_actions(
                                     GmActionOutcome::Refused,
                                     Some(GmActionRefusalReason::InverseUnsupported),
                                 ),
+                                Some(capture)
+                                    if crate::world::activities::has_accepted_binding(
+                                        &runtime.situations,
+                                        &capture.entity,
+                                    ) =>
+                                {
+                                    (
+                                        GmActionOutcome::Refused,
+                                        Some(GmActionRefusalReason::InverseUnsupported),
+                                    )
+                                }
                                 Some(capture) => {
                                     let live: std::collections::BTreeSet<String> =
                                         objective_control

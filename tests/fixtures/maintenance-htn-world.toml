@@ -1,0 +1,17 @@
+# Quiet runtime probe, without mission pacing/deadlines or resource grants.
+[global]
+seed=156222
+[player_spawn]
+position=[0,0,0]
+[[entity]]
+template_path="assets/entities/alliance_cruiser.toml"
+id="maintenance-ship"
+name="maintenance-ship"
+spawn_on="game_start"
+transform={position=[0,0,0]}
+
+[planning]
+id="maintenance"
+task="maintenance::maintain"
+arguments={actor={kind="actor",value="maintenance-ship"}}
+import=[{path="assets/worlds/domains/maintenance.toml",as="maintenance",names=["maintain"]}]

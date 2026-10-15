@@ -359,7 +359,15 @@ pub(crate) fn operate_ai(
                     Control::DispatchDelivery {
                         source: request.source.clone(),
                         destination: request.destination.clone(),
-                        amount: request.amount,
+                        amount: board
+                            .planned_requests
+                            .iter()
+                            .find(|planned| {
+                                planned.source == request.source
+                                    && planned.destination == request.destination
+                                    && planned.amount <= request.amount
+                            })
+                            .map_or(request.amount, |planned| planned.amount),
                     },
                     sources,
                     &sessions,
@@ -652,7 +660,11 @@ pub(crate) fn tick(
 
 #[allow(clippy::type_complexity)]
 pub(crate) fn publish(
+    tick: Option<Res<crate::sim_tick::SimTick>>,
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    base_world: Option<Res<crate::world::config::WorldConfig>>,
     mut ships: Query<(
+        Option<&crate::entities::spawner::EntityUuid>,
         &CompiledShipLogistics,
         &ShipLogistics,
         &ShipConfigComponent,
@@ -661,7 +673,7 @@ pub(crate) fn publish(
         &mut crate::server_app::ShipSystemBlackboards,
     )>,
 ) {
-    for (profile, state, config, inventory, torpedoes, mut boards) in &mut ships {
+    for (actor, profile, state, config, inventory, torpedoes, mut boards) in &mut ships {
         let Ok(physical_stores) = endpoint_view(&profile.0, inventory, torpedoes) else {
             continue;
         };
@@ -818,6 +830,17 @@ pub(crate) fn publish(
         boards.0.insert(
             state.0.owner.clone(),
             SystemBlackboard::Logistics(LogisticsBlackboard {
+                planned_requests: actor
+                    .map(|actor| {
+                        crate::world::planning::delivery_requests(
+                            runtime.as_deref(),
+                            base_world.as_deref(),
+                            &actor.0,
+                            &state.0.owner,
+                            tick.as_ref().map_or(0, |tick| tick.0),
+                        )
+                    })
+                    .unwrap_or_default(),
                 enabled: state.0.enabled,
                 max_batch: profile.0.handling().max_batch,
                 max_active: profile.0.handling().max_active,

@@ -65,11 +65,119 @@ fn slot_binding(
     )))
 }
 
+/// Derive only the candidate's selected source graph, never the live choice.
+fn planning_frontier(
+    world: &World,
+    snapshot: &PhoenixSnapshot,
+) -> Result<
+    (
+        Vec<phoenix_sim_world::world::activities::SituationDefinition>,
+        Vec<phoenix_sim_world::world::activities::SituationConfig>,
+    ),
+    String,
+> {
+    let runtime = world
+        .get_resource::<WorldContentRuntime>()
+        .ok_or("missing World activity owner")?;
+    let stored = snapshot
+        .scenario
+        .as_ref()
+        .ok_or("missing saved World activity owner")?;
+    let mut definitions = world
+        .get_resource::<crate::world::config::WorldConfig>()
+        .map_or_else(
+            || runtime.situation_definitions.clone(),
+            |base| base.situation_definitions.clone(),
+        );
+    let mut configs = runtime.situation_configs.clone();
+    let base = world.get_resource::<crate::world::config::WorldConfig>();
+    let compiled = base.and_then(|base| base.compiled_planning.as_ref());
+    match (&stored.plan_choice, compiled) {
+        (Some(choice), Some(compiled)) => {
+            let base = base.ok_or("missing plan base-world definition")?;
+            let actor = compiled.actor_reference()?;
+            base.validate_situation_actor(actor)?;
+            let valid = if let Some(slot) = actor.strip_prefix("slot:") {
+                slot_binding(world, snapshot, slot)?
+                    .is_some_and(|(uuid, _)| uuid == choice.actor_uuid)
+            } else {
+                base.name_to_uuid.get(actor) == Some(&choice.actor_uuid)
+            };
+            if !valid {
+                return Err("saved plan actor disagrees with accepted bootstrap identity".into());
+            }
+            let graph = compiled.validate_history(choice, &stored.situations, snapshot.tick)?;
+            for definition in graph.definitions.values() {
+                if definitions.iter().any(|row| row.id == definition.id) {
+                    return Err("duplicate plan Scenario identity".into());
+                }
+                definitions.push(definition.clone());
+            }
+            // Keep authored actor references for the existing immutable actor /
+            // historical equipment checks below; its request is bound once.
+            validate_plan_publications(snapshot, choice, &graph)?;
+            configs.extend(graph.leaves.values().cloned());
+        }
+        (Some(_), None) => return Err("saved plan has no accepted imported source closure".into()),
+        (None, Some(compiled)) if stored.mission_elapsed.is_some() => {
+            let base = base.ok_or("missing plan base-world definition")?;
+            let actor = compiled.actor_reference()?;
+            let initially_resolved = if let Some(slot) = actor.strip_prefix("slot:") {
+                slot_binding(world, snapshot, slot)?.is_some()
+            } else {
+                base.entities
+                    .iter()
+                    .enumerate()
+                    .find(|(_, row)| row.name.as_deref() == Some(actor))
+                    .is_some_and(|(index, row)| {
+                        (row.spawn_on == crate::world::config::WorldEntitySpawnOn::Immediate
+                            && row.when.is_none()
+                            && row.when_predicate.is_none())
+                            || snapshot.boot_identity.as_ref().is_some_and(|boot| {
+                                boot.game_start_entity_uuids
+                                    .iter()
+                                    .any(|row| row.authored_index as usize == index)
+                            })
+                    })
+            };
+            if initially_resolved {
+                return Err(
+                    "resolved maintenance plan lost its saved method/release frontier".into(),
+                );
+            }
+        }
+        _ => {}
+    }
+    if stored.plan_choice.is_none()
+        && snapshot
+            .entities
+            .iter()
+            .flat_map(|row| &row.blackboards)
+            .any(|(_, board)| match board {
+                crate::core::messages::SystemBlackboard::Repair(board) => {
+                    !board.planned_requests.is_empty()
+                }
+                crate::core::messages::SystemBlackboard::Logistics(board) => {
+                    !board.planned_requests.is_empty()
+                }
+                _ => false,
+            })
+    {
+        return Err("planned publication lacks its saved World choice".into());
+    }
+    Ok((definitions, configs))
+}
+
 pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), String> {
     let Some(stored) = snapshot.scenario.as_ref() else {
         if world
             .get_resource::<WorldContentRuntime>()
-            .is_some_and(|runtime| !runtime.situation_configs.is_empty())
+            .is_some_and(|runtime| {
+                !runtime.situation_configs.is_empty() || runtime.plan_choice.is_some()
+            })
+            || world
+                .get_resource::<crate::world::config::WorldConfig>()
+                .is_some_and(|base| base.planning.is_some())
         {
             return Err("configured situations require their saved World owner".into());
         }
@@ -77,6 +185,7 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
     };
     let Some(runtime) = world.get_resource::<WorldContentRuntime>() else {
         return if stored.situations.instances.is_empty()
+            && stored.plan_choice.is_none()
             && !stored.pending_events.iter().any(|event| event.kind == 13)
         {
             Ok(())
@@ -84,9 +193,8 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
             Err("activity evidence requires its World owner".into())
         };
     };
-    stored
-        .situations
-        .validate(&runtime.situation_definitions, snapshot.tick)?;
+    let (definitions, configs) = planning_frontier(world, snapshot)?;
+    stored.situations.validate(&definitions, snapshot.tick)?;
     let pending = stored
         .pending_events
         .iter()
@@ -110,8 +218,7 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
         return Err("situations require the actual logical clock".into());
     }
     for (id, instance) in &stored.situations.instances {
-        let authored = runtime
-            .situation_configs
+        let authored = configs
             .iter()
             .find(|config| &config.id == id)
             .ok_or("unknown authored situation instance")?;
@@ -120,13 +227,6 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
             .ok_or("activity history requires its accepted base-world definition")?
             .validate_situation_actor(authored.request.actor())?;
         let actor = instance.request.actor();
-        let live = world
-            .try_query::<(Entity, &EntityUuid)>()
-            .and_then(|mut query| {
-                query
-                    .iter(world)
-                    .find_map(|(entity, uuid)| (uuid.0 == actor).then_some(entity))
-            });
         // A forged saved name map must not redirect an immutable binding.
         // Bootstrap mints the base world's named identities before spawning.
         let named = world
@@ -236,19 +336,11 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
             }
         }
         // Immutable equipment validation also covers retained history. Prefer
-        // bootstrap equipment; source origins cover captured runtime spawns.
-        let config = row
-            .and_then(|row| row.spawn.as_ref())
-            .and_then(|origin| {
-                origin.resolve(
-                    &crate::entities::loader::WasmTemplateLoader,
-                    &mut Vec::new(),
-                )
-            })
-            .or_else(|| slot_source.as_ref().map(|(_, config)| config.clone()))
+        // bootstrap equipment; explicit origins must resolve to that same recipe.
+        let accepted = slot_source
+            .as_ref()
+            .map(|(_, config)| config.clone())
             .or_else(|| {
-                // Terminal evidence survives actor removal. Reuse the SAME accepted
-                // base-world template+overrides resolver, never a live damage row.
                 let authored_entity = world
                     .get_resource::<crate::world::config::WorldConfig>()?
                     .entities
@@ -260,55 +352,60 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
                     &crate::entities::loader::WasmTemplateLoader,
                 )
                 .ok()
-            });
+            })
+            .ok_or("cannot resolve accepted immutable activity equipment")?;
+        let config = if let Some(origin) = row.and_then(|row| row.spawn.as_ref()) {
+            let mut warnings = Vec::new();
+            let candidate = origin
+                .resolve(&crate::entities::loader::WasmTemplateLoader, &mut warnings)
+                .ok_or("cannot resolve explicit candidate activity origin")?;
+            if !warnings.is_empty() {
+                return Err("candidate activity origin did not resolve exactly".into());
+            }
+            {
+                // First-consumer actors are fixed base/slot recipes. Compare
+                // immutable machinery only; presentation name/placement is not
+                // an extra capability, and current damage is never consulted.
+                let recipe = |config: &crate::entities::config::EntityConfig| {
+                    serde_json::to_value((
+                        &config.ship_config,
+                        &config.interior,
+                        &config.damage,
+                        &config.repair,
+                        &config.logistics,
+                        &config.energy,
+                    ))
+                };
+                if recipe(&candidate).map_err(|error| error.to_string())?
+                    != recipe(&accepted).map_err(|error| error.to_string())?
+                {
+                    return Err(
+                        "candidate activity origin replaces the accepted immutable equipment"
+                            .into(),
+                    );
+                }
+            }
+            candidate
+        } else {
+            accepted
+        };
         match &instance.request {
             ActivityRequest::Repair { target, .. } => {
-                let ship = live
-                    .and_then(|entity| world.get::<crate::ship_plugin::ShipConfigComponent>(entity))
-                    .map(|config| config.0.clone())
-                    .or_else(|| {
-                        config
-                            .as_ref()
-                            .and_then(|config| config.ship_config.clone())
-                    })
+                let ship = config
+                    .ship_config
+                    .as_ref()
                     .ok_or("cannot resolve activity Repair equipment")?;
-                let damage = live
-                    .and_then(|entity| {
-                        world.get::<crate::ship::compartment_damage::ShipDamage>(entity)
-                    })
-                    .cloned()
-                    .or_else(|| {
-                        config.as_ref().and_then(|config| {
-                            crate::ship::compartment_damage::ShipDamage::from_config(config)
-                                .ok()
-                                .flatten()
-                        })
-                    })
+                let damage = crate::ship::compartment_damage::ShipDamage::from_config(&config)?
                     .ok_or("cannot resolve activity Repair definition")?;
-                let (team_owner, count) = live
-                    .and_then(|entity| {
-                        world.get::<crate::console::repair::server::ShipRepairTeams>(entity)
-                    })
-                    .map(|teams| {
-                        (
-                            teams.0.job_state().owner.clone(),
-                            teams.0.job_state().teams.len(),
-                        )
-                    })
-                    .or_else(|| {
-                        config.as_ref().and_then(|config| {
-                            config.repair.as_ref().map(|repair| {
-                                (
-                                    crate::ship::system_registry::repair_system_id(),
-                                    repair.repair_team_count as usize,
-                                )
-                            })
-                        })
-                    })
+                let repair = config
+                    .repair
+                    .as_ref()
                     .ok_or("cannot resolve activity Repair team definition")?;
+                let team_owner = crate::ship::system_registry::repair_system_id();
+                let count = repair.repair_team_count as usize;
                 if !crate::world::activities::repair_binding_supported(
                     &instance.request,
-                    &ship,
+                    ship,
                     &damage,
                     &team_owner,
                     count,
@@ -358,21 +455,9 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
                 }
             }
             ActivityRequest::Delivery { .. } => {
-                let profile = live
-                    .and_then(|entity| {
-                        world.get::<crate::resources::logistics_server::CompiledShipLogistics>(
-                            entity,
-                        )
-                    })
-                    .map(|profile| profile.0.clone())
-                    .or_else(|| {
-                        config.as_ref().and_then(|config| {
-                            crate::resources::logistics_profile::compile_entity_logistics(config)
-                                .ok()
-                                .flatten()
-                        })
-                    })
-                    .ok_or("cannot resolve activity delivery equipment")?;
+                let profile =
+                    crate::resources::logistics_profile::compile_entity_logistics(&config)?
+                        .ok_or("cannot resolve activity delivery equipment")?;
                 if !crate::world::activities::delivery_binding_supported(
                     &instance.request,
                     &profile,
@@ -485,6 +570,163 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
                     return Err("resolved supported situation lost its saved armed instance".into());
                 }
             }
+        }
+    }
+    Ok(())
+}
+
+/// Cached mission instructions may predate acceptance by one publication step,
+/// but can never invent another actor, command, method, or original release tick.
+fn validate_plan_publications(
+    snapshot: &PhoenixSnapshot,
+    choice: &phoenix_sim_world::world::planning::PlanChoice,
+    graph: &phoenix_sim_world::world::planning::Decomposition,
+) -> Result<(), String> {
+    use crate::core::messages::SystemBlackboard;
+    let released = choice
+        .released
+        .iter()
+        .map(|(node, tick)| {
+            (
+                graph.leaves[node].id.clone(),
+                (&graph.leaves[node].request, *tick),
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    for row in &snapshot.entities {
+        for (owner, board) in &row.blackboards {
+            let mut ids = std::collections::BTreeSet::new();
+            match board {
+                SystemBlackboard::Repair(board) => {
+                    if board.planned_requests.len() > phoenix_sim_world::world::planning::MAX_LEAVES
+                    {
+                        return Err("planned Repair publication exceeds bound".into());
+                    }
+                    for request in &board.planned_requests {
+                        let Some((
+                            ActivityRequest::Repair {
+                                owner: expected,
+                                team,
+                                request: command,
+                                target,
+                                goal,
+                                ..
+                            },
+                            tick,
+                        )) = released.get(&request.id).copied()
+                        else {
+                            return Err("Repair publication has no released primitive".into());
+                        };
+                        if row.uuid != choice.actor_uuid
+                            || expected.0.as_str() != owner.as_str()
+                            || !ids.insert(&request.id)
+                            || request.released_tick != tick
+                            || u32::from(request.team) != *team
+                            || &request.request != command
+                            || &request.target != target
+                            || request.goal != *goal
+                        {
+                            return Err(
+                                "Repair publication disagrees with released mission instruction"
+                                    .into(),
+                            );
+                        }
+                    }
+                }
+                SystemBlackboard::Logistics(board) => {
+                    if board.planned_requests.len() > phoenix_sim_world::world::planning::MAX_LEAVES
+                    {
+                        return Err("planned delivery publication exceeds bound".into());
+                    }
+                    for request in &board.planned_requests {
+                        let Some((
+                            ActivityRequest::Delivery {
+                                owner: expected,
+                                source,
+                                destination,
+                                commodity,
+                                amount,
+                                ..
+                            },
+                            tick,
+                        )) = released.get(&request.id).copied()
+                        else {
+                            return Err("delivery publication has no released primitive".into());
+                        };
+                        if row.uuid != choice.actor_uuid
+                            || expected.0.as_str() != owner.as_str()
+                            || !ids.insert(&request.id)
+                            || request.released_tick != tick
+                            || &request.source != source
+                            || &request.destination != destination
+                            || &request.commodity != commodity
+                            || request.amount != *amount
+                        {
+                            return Err(
+                                "delivery publication disagrees with released mission instruction"
+                                    .into(),
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Single-row application leaves the World owner untouched. It therefore may
+/// alter a bound actor's body, but cannot rewind its physical job frontiers.
+/// Full-roster restore uses its candidate World and apply_entity_state_with.
+pub(crate) fn validate_single_row(world: &World, row: &EntityState) -> Result<(), String> {
+    let Some(runtime) = world.get_resource::<WorldContentRuntime>() else {
+        return Ok(());
+    };
+    let bound = runtime
+        .situations
+        .instances
+        .values()
+        .filter(|instance| instance.request.actor() == row.uuid && instance.accepted.is_some())
+        .collect::<Vec<_>>();
+    if bound.is_empty() {
+        return Ok(());
+    }
+    let entity = world
+        .try_query::<(Entity, &EntityUuid)>()
+        .and_then(|mut query| {
+            query
+                .iter(world)
+                .find_map(|(entity, uuid)| (uuid.0 == row.uuid).then_some(entity))
+        })
+        .ok_or("body-only inverse of accepted World activity requires full-roster restore")?;
+    if bound
+        .iter()
+        .any(|instance| matches!(instance.request, ActivityRequest::Repair { .. }))
+    {
+        let actual = world
+            .get::<crate::console::repair::server::ShipRepairTeams>(entity)
+            .ok_or("bound activity lacks current Repair owner")?
+            .0
+            .save_state();
+        if row.repair.as_ref().and_then(|repair| repair.jobs.as_ref()) != Some(&actual) {
+            return Err(
+                "single-row restore would rewind Repair beneath accepted World activity".into(),
+            );
+        }
+    }
+    if bound
+        .iter()
+        .any(|instance| matches!(instance.request, ActivityRequest::Delivery { .. }))
+    {
+        let actual = &world
+            .get::<crate::resources::logistics_server::ShipLogistics>(entity)
+            .ok_or("bound activity lacks current Logistics owner")?
+            .0;
+        if row.logistics.as_ref() != Some(actual) {
+            return Err(
+                "single-row restore would rewind Logistics beneath accepted World activity".into(),
+            );
         }
     }
     Ok(())

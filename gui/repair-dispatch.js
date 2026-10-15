@@ -1,3 +1,4 @@
+import {repairWorkTarget} from './planned-requests.js';
 /**
  * gui/repair-dispatch.js — the Repair console's outbound command surface.
  *
@@ -44,6 +45,7 @@ export const EXTERNAL_REPAIR_TARGET = 'external';
  */
 export function repairTargetFor(target) {
   if (target && typeof target === 'object') {
+    if(target.type==='Work'&&repairWorkTarget(target.data))return {type:'Work',data:structuredClone(target.data)};
     if (target.type === 'Core' || target.type === 'External') return { type: target.type };
     if (['Station', 'Console', 'System'].includes(target.type) && typeof target.data === 'string' && target.data) {
       return { type: target.type, data: target.data };

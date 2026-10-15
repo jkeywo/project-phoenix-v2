@@ -626,6 +626,22 @@ pub(super) fn restore_scenario(
         return;
     };
     let now = world.get_resource::<Time<Fixed>>().map(Time::elapsed);
+    let plan_definitions = world
+        .get_resource::<crate::world::config::WorldConfig>()
+        .map(|base| {
+            let mut definitions = base.situation_definitions.clone();
+            if let Some((compiled, choice)) = base
+                .compiled_planning
+                .as_ref()
+                .zip(stored.plan_choice.as_ref())
+            {
+                let graph = compiled
+                    .derive(choice)
+                    .expect("whole-candidate plan preflight checked source graph");
+                definitions.extend(graph.definitions.into_values());
+            }
+            definitions
+        });
 
     if let Some(mut runtime) = world.get_resource_mut::<WorldContentRuntime>() {
         // Rebase exact age, with no subtraction or rounding through f32.
@@ -703,6 +719,11 @@ pub(super) fn restore_scenario(
             .map(|(uuid, fraction)| (uuid.clone(), *fraction))
             .collect();
         runtime.situations = stored.situations.clone();
+        runtime.plan_choice = stored.plan_choice.clone();
+        // Source graph is derived once after candidate-only validation.
+        if let Some(definitions) = plan_definitions {
+            runtime.situation_definitions = definitions;
+        }
         runtime.pending_world_events = stored
             .pending_events
             .iter()
@@ -1218,6 +1239,10 @@ pub(crate) fn apply_entity_state(world: &mut World, entity: Entity, row: &Entity
     }
     if let Err(reason) = super::helm_movement::validate_live(world, entity, row, tick) {
         bevy::log::error!("refused movement restore for {}: {}", row.uuid, reason);
+        return;
+    }
+    if let Err(reason) = super::activities::validate_single_row(world, row) {
+        bevy::log::error!("refused activity job rewind for {}: {}", row.uuid, reason);
         return;
     }
     if let Err(reason) = super::personnel::validate_live(world, entity, row, tick) {

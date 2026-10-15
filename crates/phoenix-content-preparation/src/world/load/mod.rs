@@ -519,7 +519,32 @@ pub fn load(
     } = request;
 
     let text = read_root(reader, &path)?;
-    let config = parse_root(&path, &text)?;
+    let mut config = parse_root(&path, &text)?;
+    // Resolve the same overlay-aware text source as worlds/scripts. Imported
+    // source bytes join the caller-applied ledger before the content freeze.
+    let mut domain_records = Vec::new();
+    if let Some(planning) = config
+        .planning
+        .clone()
+        .filter(|_| !matches!(policy, LoadPolicy::Inspect))
+    {
+        let (compiled, sources) =
+            phoenix_sim_world::world::planning::CompiledPlanning::load(planning, |source| {
+                reader.read(source)
+            })
+            .map_err(|message| LoadError::ParseFailed {
+                path: path.clone(),
+                message: format!("planning: {message}"),
+            })?;
+        config.compiled_planning = Some(compiled);
+        domain_records = sources
+            .into_iter()
+            .map(|source| LedgerRecord {
+                path: source.path,
+                text: source.text,
+            })
+            .collect();
+    }
 
     match policy {
         LoadPolicy::Inspect => Ok(LoadedWorld {
@@ -538,10 +563,12 @@ pub fn load(
                 children: Vec::new(),
                 findings: Vec::new(),
                 ledger: LedgerPlan {
-                    records: vec![LedgerRecord {
+                    records: std::iter::once(LedgerRecord {
                         path: path.clone(),
                         text,
-                    }],
+                    })
+                    .chain(domain_records)
+                    .collect(),
                     digests,
                 },
             })
@@ -551,6 +578,8 @@ pub fn load(
                 path: path.clone(),
                 text: text.clone(),
             }];
+
+            records.extend(domain_records);
 
             // Read, parse, compile and record each `extra_worlds` child. Static
             // children need their own compiled set HERE, before the content-ledger
@@ -577,6 +606,12 @@ pub fn load(
                         path: child_path.clone(),
                         message: e,
                     })?;
+                if child_config.planning.is_some() {
+                    return Err(LoadError::ChildParseFailed {
+                        path: child_path.clone(),
+                        message: "maintenance planning is supported only on the base world".into(),
+                    });
+                }
                 let child_scripts =
                     compile_scripts(child_path, &child_text, script_resolver, None)?;
                 records.push(LedgerRecord {

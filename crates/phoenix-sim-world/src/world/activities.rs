@@ -206,6 +206,19 @@ pub enum SituationCondition {
     Received,
     Returned,
 }
+impl SituationCondition {
+    /// Original acknowledged evidence clock, shared by Scenario activation and
+    /// HTN release. No live condition, job slot or stock polling is involved.
+    pub fn satisfied_tick(&self, instance: &SituationInstance) -> Option<u64> {
+        match self {
+            Self::Accepted => instance.accepted.as_ref().and(instance.accepted_tick),
+            Self::Achieved => instance.achieved.as_ref().filter(|fact| matches!(fact.outcome, ActivityOutcome::RepairAchieved { .. })).map(|fact| fact.tick),
+            Self::Settled { outcome } => instance.settled.as_ref().filter(|fact| matches!(&fact.outcome, ActivityOutcome::RepairSettled { outcome: actual } if actual == outcome)).map(|fact| fact.tick),
+            Self::Received => instance.settled.as_ref().filter(|fact| matches!(fact.outcome, ActivityOutcome::Delivery { returned: false, .. })).map(|fact| fact.tick),
+            Self::Returned => instance.settled.as_ref().filter(|fact| matches!(fact.outcome, ActivityOutcome::Delivery { returned: true, .. })).map(|fact| fact.tick),
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScenarioCall {
@@ -498,19 +511,27 @@ impl SituationInstances {
         Ok(true)
     }
     pub fn ready(&self, definitions: &[SituationDefinition]) -> Vec<ScenarioActivation> {
-        self.instances.iter().filter_map(|(id,instance)|{
-            let state=instance.state.as_ref()?;
-            if instance.activations.contains_key(state) {return None;}
-            let state=definitions.iter().find(|definition|definition.id==instance.definition)?.state.iter().find(|row|&row.id==state)?;
-            let ready=match &state.when {
-                SituationCondition::Accepted=>instance.accepted.is_some(),
-                SituationCondition::Achieved=>instance.achieved.is_some(),
-                SituationCondition::Settled {outcome}=>instance.settled.as_ref().is_some_and(|fact|matches!(&fact.outcome,ActivityOutcome::RepairSettled {outcome:actual} if actual==outcome)),
-                SituationCondition::Received=>instance.settled.as_ref().is_some_and(|fact|matches!(fact.outcome,ActivityOutcome::Delivery {returned:false,..})),
-                SituationCondition::Returned=>instance.settled.as_ref().is_some_and(|fact|matches!(fact.outcome,ActivityOutcome::Delivery {returned:true,..})),
-            };
-            ready.then(||ScenarioActivation {instance:id.clone(),state:state.id.clone(),call:state.call.clone()})
-        }).collect()
+        self.instances
+            .iter()
+            .filter_map(|(id, instance)| {
+                let state = instance.state.as_ref()?;
+                if instance.activations.contains_key(state) {
+                    return None;
+                }
+                let state = definitions
+                    .iter()
+                    .find(|definition| definition.id == instance.definition)?
+                    .state
+                    .iter()
+                    .find(|row| &row.id == state)?;
+                let ready = state.when.satisfied_tick(instance).is_some();
+                ready.then(|| ScenarioActivation {
+                    instance: id.clone(),
+                    state: state.id.clone(),
+                    call: state.call.clone(),
+                })
+            })
+            .collect()
     }
     pub fn finish_activation(
         &mut self,

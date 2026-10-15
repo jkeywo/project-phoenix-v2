@@ -183,3 +183,61 @@ pub(super) fn instances(mut acc: u64, values: &SituationInstances) -> u64 {
     }
     acc
 }
+
+/// Source-ordered typed arguments and original method/release frontiers only.
+pub(super) fn plan(mut acc: u64, value: &phoenix_sim_world::world::planning::PlanChoice) -> u64 {
+    use phoenix_sim_world::world::planning::Value;
+    acc = fold_str(acc, "world-plan-choice");
+    acc = fold_str(acc, &value.id);
+    acc = fold_u64(acc, value.chosen_tick);
+    acc = fold_str(acc, &value.actor_uuid);
+    acc = fold_u64(acc, value.root_arguments.len() as u64);
+    for (name, arg) in &value.root_arguments {
+        acc = fold_str(acc, name);
+        acc = fold_str(
+            acc,
+            match arg {
+                Value::Actor(_) => "actor",
+                Value::System(_) => "system",
+                Value::Team(_) => "team",
+                Value::RepairRequest(_) => "repair_request",
+                Value::RepairTarget(_) => "repair_target",
+                Value::RepairGoal(_) => "repair_goal",
+                Value::Store(_) => "store",
+                Value::Commodity(_) => "commodity",
+                Value::Quantity(_) => "quantity",
+            },
+        );
+        acc = match arg {
+            Value::Actor(value) | Value::Store(value) | Value::Commodity(value) => {
+                fold_str(acc, value)
+            }
+            Value::System(value) => fold_str(acc, &value.0),
+            Value::Team(value) => fold_u64(acc, u64::from(*value)),
+            Value::Quantity(value) => fold_u64(acc, *value as u64),
+            Value::RepairRequest(value) => request_target(acc, value),
+            Value::RepairTarget(value) => target(acc, value),
+            Value::RepairGoal(value) => fold_u64(
+                acc,
+                match value {
+                    RepairGoal::Structure => 0,
+                    RepairGoal::Patch => 1,
+                    RepairGoal::Full => 2,
+                },
+            ),
+        };
+    }
+    acc = fold_u64(acc, value.methods.len() as u64);
+    for (node, method) in &value.methods {
+        acc = fold_str(acc, node);
+        acc = fold_str(acc, &method.task.library_path);
+        acc = fold_str(acc, &method.task.task);
+        acc = fold_str(acc, &method.method);
+    }
+    acc = fold_u64(acc, value.released.len() as u64);
+    for (node, tick) in &value.released {
+        acc = fold_str(acc, node);
+        acc = fold_u64(acc, *tick);
+    }
+    acc
+}

@@ -348,6 +348,7 @@ pub(super) fn capture_scenario(world: &World) -> Option<ScenarioState> {
     observed_hull_fractions.sort_by(|a, b| a.0.cmp(&b.0));
 
     Some(ScenarioState {
+        plan_choice: runtime.plan_choice.clone(),
         situations: runtime.situations.clone(),
         mission_elapsed,
         triggers,

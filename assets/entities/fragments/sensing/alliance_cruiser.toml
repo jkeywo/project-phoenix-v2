@@ -1,4 +1,25 @@
 # [ai] Increment14 first instrument tuning; physical stores/AI remain ordinary.
+# Initial focused ladder is provisional instrument tuning. Existing ScanConfig
+# derives published physical quantities; timed work is authored separately.
+[scan]
+power_group = "sensors"
+min_power_level = 0
+degraded_by = ["nebula_fog", "sensor_blind", "radar_dampening"]
+interference_bands = 1
+
+[[scan.band]]
+id = "detailed"
+label = "sensing.scan.detailed.label"
+max_range = 60.0
+condition_step = 0.05
+
+[[scan.band]]
+id = "coarse"
+label = "sensing.scan.coarse.label"
+max_range = 100.0
+condition_step = 0.25
+report_capacities = false
+
 [sensing.focused]
 system = "sensors"
 work_secs = 2

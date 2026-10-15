@@ -1,3 +1,4 @@
+import { guardSensingReferences } from './workshop-sensing.js';
 import { guardFittingReferences } from './workshop-fitting.js';
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
@@ -138,6 +139,7 @@ export function prepareDamageOperation(draft, dependencies, operation) {
     // through Resources. No runtime fallback or second inventory is introduced.
   } else throw new Error('Unsupported damage authoring operation.');
   guardFittingReferences(inspection.resolved.value, inspectDamage({ paths: () => draft.paths(), isBinary: path => draft.isBinary(path), read: path => path === operation.path ? after : draft.read(path) }, dependencies, operation.path).resolved.value);
+  guardSensingReferences(inspection.resolved.value, inspectDamage({ paths: () => draft.paths(), isBinary: path => draft.isBinary(path), read: path => path === operation.path ? after : draft.read(path) }, dependencies, operation.path).resolved.value);
   validateDamage(value.damage, authoredAndGeneratedSystems(value), value);
   parse(after);
   return { changes: [{ path: operation.path, before, after }] };

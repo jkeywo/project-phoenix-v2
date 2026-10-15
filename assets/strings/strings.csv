@@ -5611,3 +5611,36 @@ workshop.fitting.option.laser,Equipment fitting Workshop option,Laser,Laser,Lase
 workshop.fitting.option.physical,Equipment fitting Workshop option,Physical,Physisch,Physical,machine
 fitting.plan.prelaunch-hint,Fitting plan before launch,"Plan equipment for your home Station. Choices stay on this device and carry into the mission; request physical refits there. Unclaimed Stations keep their defaults.","Plane Ausrüstung für deine Heimatstation. Die Auswahl bleibt auf diesem Gerät und wird in die Mission übernommen; beauftrage dort die tatsächliche Umrüstung. Unbesetzte Stationen behalten ihre Standardausrüstung.","Plan equipment for your home Station. Choices stay on this device and carry into the mission; request physical refits there. Unclaimed Stations keep their defaults.",machine
 sensing.passive.label,Passive sensing equipment,Passive receiver,Passiver Empfaenger,Passive receiver,machine
+workshop.sensing.title,Workshop sensing authoring,Sensing instruments,Sensorinstrumente,Sensing instruments,machine
+workshop.sensing.hint,Workshop sensing authoring,Independent timed focused scans and broad and passive observations use real fitted Systems.,Unabhaengige zeitgebundene Fokusanalysen sowie breite und passive Beobachtungen nutzen tatsaechlich eingebaute Systeme.,Independent timed focused scans and broad and passive observations use real fitted Systems.,machine
+workshop.sensing.template,Workshop sensing authoring,Template,Vorlage,Template,machine
+workshop.sensing.materialise,Workshop sensing authoring,Materialise inherited profiles and owners,Geerbte Profile und Eigentuemer materialisieren,Materialise inherited profiles and owners,machine
+workshop.sensing.none,Workshop sensing authoring,None,Keine,None,machine
+workshop.sensing.focused,Workshop sensing authoring,Focused scanner,Fokusscanner,Focused scanner,machine
+workshop.sensing.broad,Workshop sensing authoring,Broad scanner,Breitenscanner,Broad scanner,machine
+workshop.sensing.passive,Workshop sensing authoring,Passive receiver,Passiver Empfaenger,Passive receiver,machine
+workshop.sensing.system,Workshop sensing authoring,Actual System,Tatsaechliches System,Actual System,machine
+workshop.sensing.work_secs,Workshop sensing authoring,Focused work seconds,Fokusarbeitszeit in Sekunden,Focused work seconds,machine
+workshop.sensing.history_limit,Workshop sensing authoring,History limit,Verlaufslimit,History limit,machine
+workshop.sensing.unfinished_retention_secs,Workshop sensing authoring,Unfinished retention seconds,Aufbewahrung unfertiger Arbeit in Sekunden,Unfinished retention seconds,machine
+workshop.sensing.sample_interval_secs,Workshop sensing authoring,Sample interval seconds,Abtastintervall in Sekunden,Sample interval seconds,machine
+workshop.sensing.identity_secs,Workshop sensing authoring,Identity assessment seconds,Identitaetsbewertung in Sekunden,Identity assessment seconds,machine
+workshop.sensing.classification_secs,Workshop sensing authoring,Classification assessment seconds,Klassifikationsbewertung in Sekunden,Classification assessment seconds,machine
+workshop.sensing.assessment_secs,Workshop sensing authoring,Full assessment seconds,Vollstaendige Bewertung in Sekunden,Full assessment seconds,machine
+workshop.sensing.position_error,Workshop sensing authoring,Position uncertainty,Positionsunsicherheit,Position uncertainty,machine
+workshop.sensing.drift_error_per_sec,Workshop sensing authoring,Uncertainty growth per second,Unsicherheitswachstum pro Sekunde,Uncertainty growth per second,machine
+workshop.sensing.track_retention_secs,Workshop sensing authoring,Track retention seconds,Spuraufbewahrung in Sekunden,Track retention seconds,machine
+workshop.sensing.min_signal_strength,Workshop sensing authoring,Minimum signal strength,Minimale Signalstaerke,Minimum signal strength,machine
+workshop.sensing.bearing_error_rad,Workshop sensing authoring,Bearing uncertainty radians,Peilunsicherheit in Radiant,Bearing uncertainty radians,machine
+workshop.sensing.facing_deg,Workshop sensing authoring,Mount facing degrees,Ausrichtung in Grad,Mount facing degrees,machine
+workshop.sensing.arc_deg,Workshop sensing authoring,Mount arc degrees,Erfassungswinkel in Grad,Mount arc degrees,machine
+workshop.sensing.range,Workshop sensing authoring,Mount range,Reichweite,Mount range,machine
+workshop.sensing.save,Workshop sensing authoring,Save sensing profile,Sensorprofil speichern,Save sensing profile,machine
+workshop.sensing.fit,Workshop sensing authoring,Fit a passive receiver,Passiven Empfaenger einbauen,Fit a passive receiver,machine
+workshop.sensing.new-id,Workshop sensing authoring,New System identity,Neue Systemidentitaet,New System identity,machine
+workshop.sensing.console,Workshop sensing authoring,Owning Console,Zustaendige Konsole,Owning Console,machine
+workshop.sensing.group,Workshop sensing authoring,Energy group,Energiegruppe,Energy group,machine
+workshop.sensing.room,Workshop sensing authoring,Physical compartment,Physischer Raum,Physical compartment,machine
+workshop.sensing.refused,Workshop sensing authoring,Sensing change refused: {reason},Sensoraenderung abgelehnt: {reason},Sensing change refused: {reason},machine
+sensing.scan.detailed.label,Focused scanner fidelity,Detailed,Detailliert,Detailed,machine
+sensing.scan.coarse.label,Focused scanner fidelity,Coarse,Grob,Coarse,machine

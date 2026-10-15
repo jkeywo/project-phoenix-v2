@@ -1,3 +1,4 @@
+import { guardSensingReferences } from './workshop-sensing.js';
 import { guardFittingReferences } from './workshop-fitting.js';
 import { guardRecoveryReferences } from './workshop-resource-recovery.js';
 import { guardProductionReferences } from './workshop-production.js';
@@ -441,6 +442,7 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
     guardLogisticsSystemRemoval(inspection.composition.resolved.value, operation.id);
   if (effectiveValue.interior) guardLogisticsLayout(effectiveValue, effectiveValue.interior);
   guardFittingReferences(inspection.composition.resolved.value, effectiveValue);
+  guardSensingReferences(inspection.composition.resolved.value, effectiveValue);
   guardProductionReferences(inspection.composition.resolved.value, effectiveValue);
   guardRecoveryReferences(inspection.composition.resolved.value, effectiveValue);
   if (operation.type === 'system-composition-set') {

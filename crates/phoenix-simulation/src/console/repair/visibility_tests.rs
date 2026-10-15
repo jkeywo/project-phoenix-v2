@@ -500,6 +500,7 @@ fn the_projection_names_every_field_so_none_can_ride_through_unprojected() {
 #[test]
 fn a_withheld_blackboard_clears_the_field_claim_too() {
     let mut bb = bb_with_queue(queue(&[("helm", 40.0)]));
+    bb.personnel = Some(phoenix_model::personnel::PersonnelView::default());
     bb.external_dispatch_range = Some(800.0);
     bb.external_dispatch_target = Some("ally-1".into());
     bb.external_dispatch_team_idx = Some(1);
@@ -508,6 +509,7 @@ fn a_withheld_blackboard_clears_the_field_claim_too() {
     bb.external_dispatch_candidate_refusal = Some("repair.dispatch.refused.out_of_range".into());
 
     let withheld = super::withheld_repair_blackboard(&bb);
+    assert!(withheld.personnel.is_none());
     assert_eq!(withheld.external_dispatch_range, None);
     assert_eq!(withheld.external_dispatch_target, None);
     assert_eq!(withheld.external_dispatch_team_idx, None);

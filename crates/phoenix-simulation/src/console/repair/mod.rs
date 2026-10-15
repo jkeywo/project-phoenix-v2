@@ -14,3 +14,5 @@ pub use external_server::{operate_external_repair_ai, ExternalRepairDispatch};
 pub use server::*;
 
 pub(crate) mod reports;
+
+pub(crate) mod personnel;

@@ -8,6 +8,7 @@ entities:
       rationale:
         - "Selected G012/G061/G064/G068–71/G076/G110 and S028–30/S040/S079–82/S085/S087–88/S100/S102; detailed contracts live in docs/gameplay-redesign/implementation/increment-20.md. Local work may follow 15 initial integration/targeted checks under parallel-work; full completion requires 14/19 verified exits. Preparation starts no runtime."
         - "[ai] First attach actual expertise to an existing Repair team/compatible System using real navigation and finite commitment, then migrate actual Security/Medical consumers. Reuse shared underlying team/jobs, physical cursor and normal admitted Human/AI commands; do not introduce a global crew planner or duplicate movement timer."
+        - "[ai] First local consumer: an accepted officer posting joins one actual Repair team only while both are idle and co-located at that team's authored home. Custody then references the existing team navigation; posting/release cannot teleport to an away team. At most one officer supports a team. A finite authored mechanical-repair work multiplier affects only compatible on-site physical remedy progress, separately from travel time, energy grants and finite parts. Optional demonstration multiplier 1.25 is provisional authoring, not a fleet balance claim; no officer keeps the unchanged baseline."
   - decision: redesign-personnel-single-custody-with-carried-craft
     core:
       status: accepted

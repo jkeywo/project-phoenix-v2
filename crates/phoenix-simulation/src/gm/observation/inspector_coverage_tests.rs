@@ -395,6 +395,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         resource_services: _,
         fitting: _,
         refit_facility: _,
+        personnel: _,
         // Authored spatial/instrument recipes are recreate-required in Live;
         // their bounded supported editors belong to Workshop.
         field: _,

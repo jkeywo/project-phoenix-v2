@@ -41,6 +41,7 @@ pub mod demolition;
 pub mod dock;
 pub mod dossier;
 pub mod infrastructure;
+pub mod personnel;
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) mod repo_fixtures;
 pub mod science;

@@ -1416,6 +1416,7 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                     helm_waypoint_clearance: navigation.helm_clearance,
                     weapons,
                     repair,
+                    personnel: entity.get::<phoenix_sim_gameplay::personnel::PersonnelState>().cloned(),
                     blackboards,
                     patrol_cursors,
                     shield_ai: context

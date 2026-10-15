@@ -125,6 +125,7 @@ export function makeEngineeringRender(variant) {
     if (repairEl) {
       repairEl.state = {
         teams: r.teams || [],
+        personnel: r.personnel || null,
         reports: r.reports || [],
         jobs: r.jobs || [],
         interior: r.interior || null,

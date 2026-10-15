@@ -1,3 +1,4 @@
+import { PERSONNEL_ACTION, registerPersonnelActions } from './personnel-actions.js';
 import { PORT_ACTIONS, registerPortActions } from './port-actions.js';
 import { RECOVERY_ACTIONS, registerRecoveryActions } from './recovery-actions.js';
 import { PRODUCTION_ACTIONS, registerProductionActions } from './production-actions.js';
@@ -144,7 +145,7 @@ export const ENGINEERING_ACTIONS = Object.freeze([
   ...ENERGY_ACTIONS,
   ...LOGISTICS_ACTIONS,
   ...PRODUCTION_ACTIONS,
-  ...RECOVERY_ACTIONS, ...PORT_ACTIONS,
+  ...RECOVERY_ACTIONS, ...PORT_ACTIONS, PERSONNEL_ACTION,
   defineStationAction({ id: UMBILICAL_DIRECTION_ACTION_ID, contexts: ENGINEERING_CONTEXTS,
     labelKey: 'engineering.transfer_direction', bindings: [null, null] }),
   defineStationAction({ id: UMBILICAL_RESOURCE_ACTION_ID, contexts: ENGINEERING_CONTEXTS,
@@ -335,6 +336,7 @@ export function registerEngineeringActions(registry, options = {}) {
   registerProductionActions(registry, { ...options, getState, sendAction });
   registerRecoveryActions(registry, { ...options, getState, sendAction });
   registerPortActions(registry, { ...options, getState, sendAction });
+  registerPersonnelActions(registry, { ...options, getState, sendAction });
 
   const power = (direction) => ({ actionId, correlation, inputMs, detail } = {}) => {
     const state = getState();

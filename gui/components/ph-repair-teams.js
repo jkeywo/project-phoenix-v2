@@ -3,6 +3,7 @@
 // table is loaded, so the constructor's template t() calls never see an
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
+import { renderPersonnelControls } from './personnel-controls.js';
 import { t } from '../strings.js';
 import { observationDetails } from '../observation-details.js';
 import { renderJobWorkList } from '../job-work-list.js';
@@ -94,6 +95,12 @@ export class PhRepairTeams extends PhElement {
        column past its grid cell and onto the panels below it. The heading
        stays put; only the cards move. Where the host is not height-bounded
        (a hull that lets the panel size itself) this is inert. */
+    #personnel-controls { flex-shrink: 0; border: 1px solid var(--line-faint); padding: 0.4rem; }
+    #personnel-controls[hidden] { display: none; }
+    #personnel-controls h3 { margin: 0 0 0.4rem; font-size: var(--text-sm); }
+    .personnel-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.35rem; margin-top: 0.4rem; }
+    .personnel-row > span { font-size: var(--text-xs); }
+    .personnel-row :is(select,button) { min-height: var(--control-hit-min); font: inherit; }
     #teams-container { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 0.4rem; }
     .card { flex-shrink: 0; border: 1px solid var(--line-faint); background: var(--bg-card); padding: 0.5rem; display: flex; flex-direction: column; gap: 0.3rem; }
     .card.selected { border-color: var(--cyan); }
@@ -168,6 +175,7 @@ export class PhRepairTeams extends PhElement {
     <span class="auto-badge" id="auto-badge" style="display:none">${t('console.common.auto')}</span>
   </div>
   <div id="teams-container"></div>
+  <section id="personnel-controls" hidden></section>
   <div id="observation-reports"></div>
   <div id="job-work-list" role="status"></div>
   <div id="interior-map"></div>
@@ -489,6 +497,7 @@ export class PhRepairTeams extends PhElement {
 
   #render() {
     const s = this.#state || {};
+    renderPersonnelControls(this.shadowRoot.getElementById('personnel-controls'), s, this);
     renderInteriorMap(this.shadowRoot.getElementById('interior-map'), {
       ...s, selectedTeam: this.#selectedTeamId,
     }, t, target => activateEngineeringAction(this, REPAIR_DISPATCH_ACTION_ID,

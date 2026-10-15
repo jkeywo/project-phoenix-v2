@@ -34,6 +34,7 @@ pub mod interior;
 pub mod job;
 pub mod logistics;
 pub mod navigation_sharing;
+pub mod personnel;
 pub mod ports;
 pub mod ports_ui;
 pub mod production;

@@ -5952,3 +5952,30 @@ helm.movement.hint,Helm retained movement intent display,Direct applies force; c
 helm.movement.heading_goal,Helm retained movement intent display,Heading {value}°,Kurs {value}°,Heading {value}°,machine
 helm.movement.speed_goal,Helm retained movement intent display,Speed {value} AU/s,Geschwindigkeit {value} AE/s,Speed {value} AU/s,machine
 helm.movement.stick_goal,Helm retained movement intent display,Input {value}%,Eingabe {value}%,Input {value}%,machine
+personnel.team.alpha,Repair team name,[Alpha team],[Team Alpha],[Alpha team],machine
+personnel.team.beta,Repair team name,[Beta team],[Team Beta],[Beta team],machine
+personnel.officer.repair_chief,Duty Officer name,[Repair Chief],[Reparaturleiter],[Repair Chief],machine
+entity.personnel_cruiser.name,Optional Personnel20 demonstration hull,[Personnel demonstration Cruiser],[Personal-Demonstrationskreuzer],[Personnel demonstration Cruiser],machine
+personnel.title,Repair expertise heading,[Duty officers],[Dienstoffiziere],[Duty officers],machine
+personnel.action.post,Post officer action,[Assign],[Zuweisen],[Assign],machine
+personnel.action.release,Release officer action,[Release at home],[Am Heimatort freigeben],[Release at home],machine
+personnel.choose_team,Officer team picker,[Choose team],[Team waehlen],[Choose team],machine
+personnel.choose_for,Officer team accessible picker,[Team for {officer}],[Team fuer {officer}],[Team for {officer}],machine
+personnel.at_home,Own officer home status,[At {location}],[Bei {location}],[At {location}],machine
+personnel.with_team,Own officer posting status,[With {location}; active work x{multiplier}],[Bei {location}; aktive Arbeit x{multiplier}],[With {location}; active work x{multiplier}],machine
+personnel.competency.mechanical_repair,Duty team competency,[Mechanical repair],[Mechanische Reparatur],[Mechanical repair],machine
+workshop.personnel.title,Personnel authoring heading,[Duty officer roster],[Dienstoffizier-Liste],[Duty officer roster],machine
+workshop.personnel.hint,Finite personnel authoring explanation,[Bind named officers to existing Repair teams. Posting requires an idle team at home. Expertise changes internal repair work only.],[Benannte Offiziere an vorhandene Reparaturteams binden. Zuweisung nur am Heimatort. Fachwissen beeinflusst nur interne Reparaturarbeit.],[Bind named officers to existing Repair teams. Posting requires an idle team at home. Expertise changes internal repair work only.],machine
+workshop.personnel.template,Personnel template picker,[Hull template],[Rumpfvorlage],[Hull template],machine
+workshop.personnel.materialise,Inherited personnel override consent,[Materialise inherited roster],[Geerbte Liste lokal bearbeiten],[Materialise inherited roster],machine
+workshop.personnel.id,Stable personnel identifier,[Identifier],[Kennung],[Identifier],machine
+workshop.personnel.label,Personnel localized label,[Name or string key],[Name oder Textschluessel],[Name or string key],machine
+workshop.personnel.team_idx,Actual repair team binding,[Actual team index],[Vorhandener Teamindex],[Actual team index],machine
+workshop.personnel.home_compartment,Actual officer home compartment,[Home compartment],[Heimatabteil],[Home compartment],machine
+workshop.personnel.repair_work_multiplier,Internal remedy progress multiplier,[Internal repair work multiplier],[Multiplikator interner Reparaturarbeit],[Internal repair work multiplier],machine
+workshop.personnel.competency,Supported personnel competency,[Mechanical repair],[Mechanische Reparatur],[Mechanical repair],machine
+workshop.personnel.remove,Remove roster entry,[Remove entry],[Eintrag entfernen],[Remove entry],machine
+workshop.personnel.add_team,Add existing team binding,[Bind existing team],[Vorhandenes Team binden],[Bind existing team],machine
+workshop.personnel.add_officer,Add finite officer definition,[Add officer],[Offizier hinzufuegen],[Add officer],machine
+workshop.personnel.save,Accept roster edit,[Apply roster],[Liste anwenden],[Apply roster],machine
+workshop.personnel.refused,Personnel validation refusal,[Roster refused: {reason}],[Liste abgelehnt: {reason}],[Roster refused: {reason}],machine

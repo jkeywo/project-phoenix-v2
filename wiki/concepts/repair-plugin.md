@@ -2,8 +2,8 @@
 title: Repair Runtime
 type: concept
 tags: [repair, damage, teams, blackboard, ai, external-repair, semantic-actions, feedback]
-sources: [crates/phoenix-sim-gameplay/src/jobs/repair_external_physical.rs, crates/phoenix-sim-gameplay/src/jobs/repair_physical.rs, crates/phoenix-model/src/job.rs, crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/jobs/repair_workflow.rs, gui/job-work-list.js, crates/phoenix-simulation/src/console/repair/reports.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/command_admission/mod.rs, gui/components/ph-repair-teams.js, gui/stations/engineering-actions.js, gui/action-map.js]
-updated: 2026-10-14
+sources: [crates/phoenix-model/src/personnel.rs, crates/phoenix-sim-gameplay/src/personnel.rs, crates/phoenix-simulation/src/console/repair/personnel.rs, crates/phoenix-simulation/src/snapshot/personnel.rs, editor/workshop-personnel.js, gui/workshop-personnel-panel.js, crates/phoenix-sim-gameplay/src/jobs/repair_external_physical.rs, crates/phoenix-sim-gameplay/src/jobs/repair_physical.rs, crates/phoenix-model/src/job.rs, crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/jobs/repair_workflow.rs, gui/job-work-list.js, crates/phoenix-simulation/src/console/repair/reports.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/command_admission/mod.rs, gui/components/ph-repair-teams.js, gui/stations/engineering-actions.js, gui/action-map.js]
+updated: 2026-10-15
 ---
 
 # Repair Runtime
@@ -46,6 +46,26 @@ That observation does not resolve other outstanding damage in the group.
 recovery watermarks participate in capture, restore and deterministic digest.
 
 ## Jobs and workflows
+
+The optional `[personnel]` roster binds named officers to existing finite Repair
+teams. `phoenix-model/src/personnel.rs` declares closed competencies and custody;
+Gameplay `personnel.rs` validates postings against the same Repair jobs and team
+navigation. The admitted `SetDutyOfficerPosting` consumer requires the actual
+Repair owner and an idle team at the officer's authored home. Posting and release
+cannot move an officer to or from an away team. Attached custody follows that
+team's existing cursor; there is no second movement timer.
+
+Mechanical expertise scales only on-site internal remedy progress. Travel,
+parts reservation/consumption and paid tool intervals retain their existing
+owners. External repair and refitting retain custody without this bonus. The
+optional `personnel_cruiser.toml` demonstrates a provisional 1.25 multiplier.
+Repair's permitted publication carries the roster and available handoffs; its
+existing widget uses exact owned Human authority for controls. Workshop's
+`workshop-personnel.js` and structured panel use accepted-source history,
+explicit inherited roster materialisation, and existing Preview/Test. Snapshot
+`personnel.rs` validates custody against the candidate's own saved Repair jobs
+before writes and the digest folds custody once. This local Repair consumer
+does not establish Medical, Security or external personnel acceptance.
 
 `TeamJobs<RepairActivity>` is the single per-ship owner of assignments and team
 commitments. Each row retains a ship-scoped JobId, issuing System, activity,

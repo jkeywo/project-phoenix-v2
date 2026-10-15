@@ -458,6 +458,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("collisions", fold_collisions),
     ("security", fold_security_namespace),
     ("internal-repair", fold_internal_repair_namespace),
+    ("personnel-custody", fold_personnel_namespace),
     ("interior-access", fold_access_namespace),
     ("logistics", fold_logistics_namespace),
     ("production", fold_production_namespace),
@@ -2526,6 +2527,15 @@ mod tests;
 
 /// Repair commitments, requests and notification latches use independent sorted
 /// entity walks. Empty components contribute nothing; map insertion order is not state.
+fn fold_personnel_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "personnel-custody",
+        |owner: &phoenix_sim_gameplay::personnel::PersonnelState| Some(owner.clone()),
+        |acc, state| fold_serde(acc, &state),
+    )
+}
 fn fold_internal_repair_namespace(world: &World, acc: u64) -> u64 {
     use crate::console::repair::server::{RepairRequestQueue, ShipRepairTeams};
     use crate::ship::components::RepairHumanAlerted;

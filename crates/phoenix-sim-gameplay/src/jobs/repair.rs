@@ -203,6 +203,10 @@ impl RepairTeams {
             || self.state.next_id != 1
             || self.state.teams.iter().any(Option::is_some)
     }
+    /// Borrow the canonical job/navigation frontier for local personnel joins.
+    pub fn job_state(&self) -> &RepairJobState {
+        &self.state
+    }
     pub fn save_state(&self) -> RepairJobState {
         self.state.clone()
     }

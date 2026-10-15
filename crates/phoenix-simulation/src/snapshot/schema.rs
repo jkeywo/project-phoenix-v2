@@ -188,6 +188,8 @@ pub struct EntityState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repair: Option<RepairState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub personnel: Option<phoenix_sim_gameplay::personnel::PersonnelState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub access: Option<Vec<phoenix_model::interior::BoundaryStatus>>,
     /// The Weapons→Helm arc-bearing seam — see [`ArcRequestState`].
     #[serde(default, skip_serializing_if = "Option::is_none")]

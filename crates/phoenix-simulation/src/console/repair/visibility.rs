@@ -680,6 +680,7 @@ impl HullVisibility {
         bb: &RepairBlackboard,
     ) -> RepairBlackboard {
         RepairBlackboard {
+            personnel: bb.personnel.clone(),
             boundaries: bb.boundaries.clone(),
             interior: bb.interior.clone(),
             navigation: bb.navigation.clone(),
@@ -832,6 +833,7 @@ pub(crate) fn physical_system_status(
 /// is ever shown again.
 fn withheld_repair_blackboard(bb: &RepairBlackboard) -> RepairBlackboard {
     RepairBlackboard {
+        personnel: None,
         boundaries: vec![],
         interior: None,
         navigation: vec![],

@@ -2377,6 +2377,11 @@ pub enum SystemControlPayload {
         team_idx: u8,
         priority: u8,
     },
+    /// A co-located physical posting to an existing finite Repair team.
+    SetDutyOfficerPosting {
+        officer: String,
+        team_idx: Option<u32>,
+    },
     /// Prioritise ONE named system in whichever repair team's sweep already
     /// covers it (issue #1015) — the repair console's damaged-systems list taps.
     ///
@@ -5547,6 +5552,8 @@ pub struct QueueEntryPreview {
 /// blackboard (issue #564).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct RepairBlackboard {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub personnel: Option<crate::personnel::PersonnelView>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub boundaries: Vec<crate::interior::BoundaryStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -133,6 +133,7 @@ impl Plugin for RepairPlugin {
         // here keeps both shapes out of the generic lifecycle runner and the
         // server composition root.
         super::visibility::register_hull_replication_lifecycle(app);
+        super::personnel::register(app);
         // The shared AI decision cadence (issue #889): `operate_repair_ai` was
         // one of four hosts #895's FixedUpdate migration left ungated — see
         // the identical note on `NavigationPlugin::build`. `register_ai_cadence`
@@ -400,6 +401,10 @@ pub fn tick_repair_teams(
                 Option<&mut crate::infrastructure::InfrastructureCondition>,
                 Option<&crate::resources::server::ResourceServices>,
                 Option<&ShipSystemControlSources>,
+                (
+                    Option<&phoenix_sim_gameplay::personnel::CompiledPersonnel>,
+                    Option<&phoenix_sim_gameplay::personnel::PersonnelState>,
+                ),
             ),
             With<crate::server_app::Ship>,
         >,
@@ -470,6 +475,7 @@ pub fn tick_repair_teams(
         mut inventory,
         services,
         tool_controls,
+        (personnel_profile, personnel_state),
     ) in ship_q.iter_mut()
     {
         // Crew wrecks remain for identity and cinematic spectating. A queued
@@ -505,7 +511,11 @@ pub fn tick_repair_teams(
                 .collect();
             let before: f64 = damage.state.compartments.values().map(|room| room.hp).sum();
             let mut changes = Vec::new();
-            teams.0.tick_physical_with_claims(
+            let expertise = personnel_profile
+                .zip(personnel_state)
+                .map(|(profile, state)| state.repair_work_multipliers(profile, teams.0.job_state()))
+                .unwrap_or_default();
+            teams.0.tick_physical_with_expertise(
                 dt * modifiers.get(&ModifierSlot::RepairRate),
                 &mut damage.state,
                 &blocked,
@@ -513,6 +523,7 @@ pub fn tick_repair_teams(
                     .and_then(|uuid| foreign_claims.get(&uuid.0))
                     .cloned()
                     .unwrap_or_default(),
+                &expertise,
                 |action, claim, recipe| {
                     if recipe.requirements.is_empty() {
                         return true;
@@ -692,6 +703,7 @@ pub fn tick_repair_teams(
 /// `ShipSystemBlackboards`, so the query naturally scopes to AI-bearing ships;
 /// the wire broadcaster stays `LocalShip`-filtered.
 pub(crate) fn publish_repair_blackboard(
+    tick: Option<Res<crate::sim_tick::SimTick>>,
     mut ship_q: Query<(
         Option<&ShipRepairTeams>,
         Option<&crate::entities::spawner::EntitySystemHull>,
@@ -708,6 +720,10 @@ pub(crate) fn publish_repair_blackboard(
         Option<&crate::ship::access::InteriorAccess>,
         Option<&crate::ship::access::InteriorLayout>,
         Option<&crate::ship::compartment_damage::ShipDamage>,
+        (
+            Option<&phoenix_sim_gameplay::personnel::CompiledPersonnel>,
+            Option<&phoenix_sim_gameplay::personnel::PersonnelState>,
+        ),
     )>,
     // Resolve a dispatched target's world entity-name id for the readout — no
     // English crosses the wire, exactly as the tractor publisher reports its
@@ -739,6 +755,7 @@ pub(crate) fn publish_repair_blackboard(
         access,
         layout,
         physical,
+        (personnel_profile, personnel_state),
     ) in ship_q.iter_mut()
     {
         let default_teams;
@@ -893,6 +910,16 @@ pub(crate) fn publish_repair_blackboard(
             .map(|config| repair_group_definitions(&config.0, &damageable_systems))
             .unwrap_or_default();
         let bb = RepairBlackboard {
+            personnel: personnel_profile
+                .zip(personnel_state)
+                .and_then(|(profile, state)| {
+                    Some(state.view(
+                        profile,
+                        teams.0.job_state(),
+                        teams.0.layout()?,
+                        tick.as_ref().map_or(0, |tick| tick.0),
+                    ))
+                }),
             boundaries: access.map(|access| access.statuses()).unwrap_or_default(),
             interior: layout.map(|layout| layout.0.clone()),
             navigation: teams.0.navigation().unwrap_or_default().to_vec(),

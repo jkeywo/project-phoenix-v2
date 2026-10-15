@@ -1214,6 +1214,10 @@ pub(crate) fn apply_entity_state(world: &mut World, entity: Entity, row: &Entity
         bevy::log::error!("refused movement restore for {}: {}", row.uuid, reason);
         return;
     }
+    if let Err(reason) = super::personnel::validate_live(world, entity, row, tick) {
+        bevy::log::error!("refused personnel restore for {}: {}", row.uuid, reason);
+        return;
+    }
     if row.weapon_flight_carrier {
         bevy::log::error!(
             "refused single-row restore: physical flight carriers require full-roster restore"
@@ -1262,6 +1266,7 @@ pub(super) fn apply_entity_state_with(
         crate::console::weapons::flight_carrier::seed_banks(world, entity, &row.carrier_bolt_banks);
     }
     super::fitting::apply(world, entity, row);
+    super::personnel::apply(world, entity, row);
     let emp_clock = crate::ship::emp::clock(world, tick).ok();
     let mut entity_mut = world.entity_mut(entity);
     if let Some(saved) = &row.equipment_recovery {

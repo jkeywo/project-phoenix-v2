@@ -73,6 +73,194 @@ fn advance(
 }
 
 #[test]
+fn expertise_changes_only_on_site_work_with_identical_travel_parts_and_tool_grants() {
+    let (mut ordinary, mut ordinary_damage, mut ordinary_stock, services) = fixture(8);
+    let (mut expert, mut expert_damage, mut expert_stock, _) = fixture(8);
+    for (teams, damage) in [
+        (&mut ordinary, &mut ordinary_damage),
+        (&mut expert, &mut expert_damage),
+    ] {
+        damage.compartments.get_mut("rear").unwrap().hp = 0.0;
+        damage.compartments.get_mut("rear").unwrap().disabled = true;
+        assert!(teams.dispatch_physical(0, SystemId("scanner".into()), None, "Scanner".into()));
+    }
+    let mut ordinary_paid_time = 0.0;
+    let mut expert_paid_time = 0.0;
+    let mut witnessed = false;
+    for _ in 0..16 {
+        ordinary.tick_physical_with_expertise(
+            0.25,
+            &mut ordinary_damage,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+            &[],
+            |action, claim, recipe| {
+                ordinary_stock
+                    .repair_parts(action, claim, recipe, &services)
+                    .is_ok()
+            },
+            |_, elapsed| {
+                ordinary_paid_time += elapsed;
+                1.0
+            },
+        );
+        expert.tick_physical_with_expertise(
+            0.25,
+            &mut expert_damage,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+            &[1.25, 1.0],
+            |action, claim, recipe| {
+                expert_stock
+                    .repair_parts(action, claim, recipe, &services)
+                    .is_ok()
+            },
+            |_, elapsed| {
+                expert_paid_time += elapsed;
+                1.0
+            },
+        );
+        assert_eq!(
+            ordinary.navigation(),
+            expert.navigation(),
+            "expertise cannot accelerate travel"
+        );
+        let ordinary_state = ordinary.save_state();
+        let expert_state = expert.save_state();
+        if let Some(work) = ordinary_state
+            .physical_work
+            .values()
+            .find(|work| work.progress > 0.0)
+        {
+            let skilled = expert_state
+                .physical_work
+                .values()
+                .find(|other| other.target == work.target)
+                .unwrap();
+            assert!(skilled.progress > work.progress);
+            assert_eq!(ordinary_paid_time, expert_paid_time);
+            assert_eq!(
+                ordinary_stock.capacity_stock("parts"),
+                expert_stock.capacity_stock("parts")
+            );
+            assert_eq!(
+                ordinary_stock.capacity("parts"),
+                Some(8),
+                "reserved parts are not consumed early"
+            );
+            witnessed = true;
+            break;
+        }
+    }
+    assert!(
+        witnessed,
+        "both actual teams must arrive and begin paid remedy work"
+    );
+}
+
+#[test]
+fn json_personnel_and_active_remedy_resume_exactly_for_360_real_work_steps() {
+    use crate::personnel::{CompiledPersonnel, PersonnelConfig, PersonnelState};
+    let (mut live, mut damage, mut stock, services) = fixture(8);
+    let config: PersonnelConfig = serde_json::from_value(json!({
+        "repair_team":[{"id":"alpha","label":"Alpha","team_idx":0,"competencies":["mechanical_repair"]}],
+        "officer":[{"id":"chief","label":"Chief","home_compartment":"front","competencies":["mechanical_repair"],"repair_work_multiplier":1.25}]
+    })).unwrap();
+    let profile = CompiledPersonnel::compile(&config, live.layout().unwrap(), 2).unwrap();
+    let mut personnel = PersonnelState::new(&profile);
+    personnel
+        .post(
+            &profile,
+            live.job_state(),
+            live.layout().unwrap(),
+            "chief",
+            Some(0),
+            1,
+        )
+        .unwrap();
+    damage.compartments.get_mut("rear").unwrap().hp = 0.0;
+    damage.compartments.get_mut("rear").unwrap().disabled = true;
+    assert!(live.dispatch_physical(0, SystemId("scanner".into()), None, "Scanner".into()));
+    let advance_expert = |teams: &mut RepairTeams,
+                          state: &mut DamageState,
+                          inventory: &mut InfrastructureState,
+                          personnel: &PersonnelState| {
+        let multipliers = personnel.repair_work_multipliers(&profile, teams.job_state());
+        teams.tick_physical_with_expertise(
+            0.05,
+            state,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+            &multipliers,
+            |action, claim, recipe| {
+                inventory
+                    .repair_parts(action, claim, recipe, &services)
+                    .is_ok()
+            },
+            |_, _| 1.0,
+        );
+    };
+    for _ in 0..200 {
+        advance_expert(&mut live, &mut damage, &mut stock, &personnel);
+        if live
+            .job_state()
+            .physical_work
+            .values()
+            .any(|work| work.progress > 0.0 && work.reserved)
+        {
+            break;
+        }
+    }
+    assert!(
+        live.job_state()
+            .physical_work
+            .values()
+            .any(|work| work.progress > 0.0 && work.reserved),
+        "save during actual paid work with finite parts reserved"
+    );
+    let saved = serde_json::to_vec(&(live.save_state(), &personnel, &damage, &stock)).unwrap();
+    let (jobs, resumed_personnel, mut resumed_damage, mut resumed_stock): (
+        super::super::repair::RepairJobState,
+        PersonnelState,
+        DamageState,
+        InfrastructureState,
+    ) = serde_json::from_slice(&saved).unwrap();
+    let (mut resumed, _, _, _) = fixture(8);
+    resumed.restore_state(&jobs).unwrap();
+    resumed_personnel
+        .validate(&profile, resumed.job_state(), 200)
+        .unwrap();
+    for step in 0..360 {
+        advance_expert(&mut live, &mut damage, &mut stock, &personnel);
+        advance_expert(
+            &mut resumed,
+            &mut resumed_damage,
+            &mut resumed_stock,
+            &resumed_personnel,
+        );
+        assert_eq!(
+            serde_json::to_value((live.save_state(), &personnel, &damage, &stock)).unwrap(),
+            serde_json::to_value((
+                resumed.save_state(),
+                &resumed_personnel,
+                &resumed_damage,
+                &resumed_stock
+            ))
+            .unwrap(),
+            "step {step}"
+        );
+    }
+    assert!(
+        damage.compartments["rear"].hp > 0.0,
+        "actual repaired structure remains the consumer"
+    );
+    assert!(
+        stock.capacity("parts").unwrap() < 8,
+        "actual completed remedies consume finite parts"
+    );
+}
+
+#[test]
 fn unpowered_team_restores_its_room_with_real_finite_parts_and_parallel_component_work() {
     let (mut teams, mut damage, mut stock, services) = fixture(8);
     damage.compartments.get_mut("front").unwrap().hp = 0.0;

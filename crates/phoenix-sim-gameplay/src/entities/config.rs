@@ -122,6 +122,8 @@ pub struct EntityConfig {
     pub torpedoes: Option<TorpedoesConfig>,
     /// Repair team timings (travel duration, repair rate).
     pub repair: Option<RepairConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub personnel: Option<phoenix_model::personnel::PersonnelConfig>,
     /// Ship audio: filenames and tuning for the ambient bed, engine, blaster,
     /// phaser loop, and forcefield. Server-only playback — the host page's JS
     /// builds its audio graph from this. `None` ⇒ the ship is silent.
@@ -981,6 +983,7 @@ impl EntityConfig {
             }
         }
         comms::validate_radio(&config).map_err(SerdeError::custom)?;
+        crate::personnel::compile_entity(&config).map_err(SerdeError::custom)?;
         if let Some(controls) = &config.helm_control {
             crate::ship::helm_control::validate_profile(controls, &config)
                 .map_err(SerdeError::custom)?;

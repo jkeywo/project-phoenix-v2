@@ -160,6 +160,7 @@ pub enum FixedStep {
     HandleSecurityCommands,
     HandleTransporterCommands,
     PruneRepairRequestQueue,
+    HandleDutyOfficerPosting,
     OperateRepairAi,
     HandleLoadTube,
     HandleUnloadTube,

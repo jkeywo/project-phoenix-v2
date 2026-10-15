@@ -217,6 +217,21 @@ impl RepairTeams {
         state: &mut DamageState,
         blocked: &BTreeSet<String>,
         foreign_claims: &BTreeSet<RepairWorkTarget>,
+        stock: impl FnMut(RepairStockAction, &str, &RemedyConfig) -> bool,
+        tools: impl FnMut(&SystemId, f32) -> f32,
+    ) {
+        self.tick_physical_with_expertise(dt, state, blocked, foreign_claims, &[], stock, tools);
+    }
+    /// Expertise changes only on-site remedy progress. Real navigation, parts
+    /// and the existing per-interval tool grant keep their original clocks.
+    #[allow(clippy::too_many_arguments)]
+    pub fn tick_physical_with_expertise(
+        &mut self,
+        dt: f32,
+        state: &mut DamageState,
+        blocked: &BTreeSet<String>,
+        foreign_claims: &BTreeSet<RepairWorkTarget>,
+        work_multipliers: &[f32],
         mut stock: impl FnMut(RepairStockAction, &str, &RemedyConfig) -> bool,
         mut tools: impl FnMut(&SystemId, f32) -> f32,
     ) {
@@ -543,7 +558,17 @@ impl RepairTeams {
             }
             let grant = tools(&self.state.jobs.owner, dt).clamp(0.0, 1.0);
             let rate = recipe.manual_work_fraction + (1.0 - recipe.manual_work_fraction) * grant;
-            work.progress = (work.progress + dt * rate).min(recipe.work_secs);
+            let expertise = work_multipliers
+                .get(team)
+                .copied()
+                .filter(|value| value.is_finite() && *value >= 1.0)
+                .unwrap_or(1.0);
+            work.progress = if expertise == 1.0 {
+                (work.progress + dt * rate).min(recipe.work_secs)
+            } else {
+                ((work.progress as f64 + dt as f64 * rate as f64 * expertise as f64)
+                    .min(recipe.work_secs as f64)) as f32
+            };
             if work.progress >= recipe.work_secs {
                 let mut restored = state.clone();
                 let restoration = match work.target.as_ref().expect("reserved work has target") {

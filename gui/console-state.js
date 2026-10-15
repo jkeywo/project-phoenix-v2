@@ -1,3 +1,4 @@
+import { personnelPayload } from './personnel.js';
 import { weaponTargetsPayload } from './weapon-targets.js';
 import { buildHelmMovement } from './helm-movement.js';
 import { scanPublicationOwner } from './scan-source.js';
@@ -1678,6 +1679,11 @@ export function buildRepairConsoleState(state, systemIds = []) {
       repairCoreAndTargets(systemHull, state.stationSystems, damageableSystems, bb.repair_groups);
     return {
       teams,
+      personnel_controllable: (state.controlSystemIds || systemIds).includes(entry.systemId)
+        && state.controlSources?.[entry.systemId] === 'Human',
+      personnel: personnelPayload(bb.personnel, entry.systemId,
+        (state.controlSystemIds || systemIds).includes(entry.systemId)
+          && state.controlSources?.[entry.systemId] === 'Human'),
       reports: bb.queue_depth || [],
       jobs: bb.jobs || [],
       interior: bb.interior || null,

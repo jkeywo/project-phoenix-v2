@@ -67,6 +67,7 @@ export function makeRepairRender(variant) {
     if (teamsEl) {
       teamsEl.state = {
         teams: s.teams || [],
+        personnel: s.personnel || null,
         reports: s.reports || [],
         jobs: s.jobs || [],
         interior: s.interior || null,

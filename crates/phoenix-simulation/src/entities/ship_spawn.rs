@@ -571,6 +571,18 @@ fn insert_power_multipliers_and_modifiers(
                             Err(error) => { error!("refusing repair teams with invalid damage definition: {error}"); return; }
                         }
                     }
+                    match phoenix_sim_gameplay::personnel::compile_entity(config) {
+                        Ok(Some(profile)) => {
+                            let state =
+                                phoenix_sim_gameplay::personnel::PersonnelState::new(&profile);
+                            cmds.insert((profile, state));
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            error!("refusing invalid personnel roster: {error}");
+                            return;
+                        }
+                    }
                     cmds.insert(crate::console::repair::server::ShipRepairTeams(teams));
                 }
                 Err(error) => {

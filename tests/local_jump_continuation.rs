@@ -427,16 +427,15 @@ fn actual_hardened_drive_uses_original_gravity_and_keeps_paid_json360_continuati
             .0
             .get_mut(&id("local-jump"))
             .unwrap();
-        let project_phoenix::ship::transit::TransitPhase::Preparing { order, .. } =
-            &mut state.phase
-        else {
-            panic!("actual partial drive")
-        };
+        let mut phase = serde_json::to_value(&state.phase).unwrap();
+        assert_eq!(phase["phase"], "preparing", "actual partial drive");
         if fault == 0 {
-            order.profile.config.gravity_response = 0.5;
+            phase["order"]["profile"]["config"]["gravity_response"] = serde_json::json!(0.5);
         } else {
-            order.profile.commit_energy *= 0.5;
+            let cost = phase["order"]["profile"]["commit_energy"].as_f64().unwrap();
+            phase["order"]["profile"]["commit_energy"] = serde_json::json!(cost * 0.5);
         }
+        state.phase = serde_json::from_value(phase).unwrap();
         assert!(!restore(resumed.world_mut(), &forged).is_complete());
         assert_eq!(capture(resumed.world()), before);
         assert_eq!(world_digest(resumed.world()), digest);

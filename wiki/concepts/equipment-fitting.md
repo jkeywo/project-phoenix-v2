@@ -2,7 +2,7 @@
 title: Equipment Fitting
 type: concept
 tags: [equipment, repair, resources, workshop, continuation]
-sources: [crates/phoenix-model/src/fitting.rs, crates/phoenix-sim-gameplay/src/resources/fitting.rs, crates/phoenix-sim-gameplay/src/resources/fitting_state.rs, crates/phoenix-sim-gameplay/src/jobs/repair/refit.rs, crates/phoenix-simulation/src/resources/fitting_server.rs, crates/phoenix-simulation/src/resources/equipment_recovery_server.rs, crates/phoenix-simulation/src/snapshot/fitting.rs, editor/workshop-fitting.js, gui/components/fitting-controls.js, gui/fitting-plans.js, pasm/spec/design/equipment-fitting-and-refitting.yaml]
+sources: [crates/phoenix-model/src/fitting.rs, crates/phoenix-sim-gameplay/src/resources/fitting.rs, crates/phoenix-sim-gameplay/src/resources/fitting_state.rs, crates/phoenix-sim-gameplay/src/jobs/repair_refit.rs, crates/phoenix-simulation/src/resources/fitting_server.rs, crates/phoenix-simulation/src/resources/equipment_recovery_server.rs, crates/phoenix-simulation/src/snapshot/fitting.rs, crates/phoenix-sim-contracts/src/logical_clock.rs, crates/phoenix-simulation/src/snapshot/historical_clock.rs, editor/workshop-fitting.js, gui/components/fitting-controls.js, gui/fitting-plans.js, pasm/spec/design/equipment-fitting-and-refitting.yaml]
 updated: 2026-10-15
 ---
 

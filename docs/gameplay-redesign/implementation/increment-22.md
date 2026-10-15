@@ -138,6 +138,25 @@ Existing authored scenarios remain opt-in and retain their original trigger cred
 
 #### First implementation sequence and proof
 
+The first implementation uses a closed shared physical-fact vocabulary and
+explicitly armed disjoint request bindings. Repair acceptance returns its actual
+JobId from the dispatch operation; delivery retains the JobId already returned
+by its dispatch. Matching display strings, later team slots and action feedback
+are not binding sources. Arming reserves two named evidence slots for a Repair
+activity (one declared achieved result and one settlement), or one terminal
+Receive/Return slot for a delivery. Unrelated later sweep stages do not acquire
+planner obligations. Ordinary unbound work has no planner retention requirement.
+
+The existing pending World event owner retains bound committed facts until
+acknowledgement. Collection sends these only to the bound situation consumer,
+without repeatedly replaying them through legacy scripts or replacing existing
+event drain semantics. Situation definitions lower their supported conditions
+and explicit script-call effects through the existing World evaluator and staged
+script-effect application boundary. Each live instance retains the activation
+identity/result required for exactly-once application and refusal/re-entry.
+The definition and live instance identities remain separate. This lowering
+implements the first Scenario lifecycle; it does not deliver 22B's actual HTN.
+
 1. Add the narrow shared fact schema and pure matching/deduplication rules, then
    wire the actual repair work/settlement and exact delivery Receive boundaries.
    Preserve ordinary dispatch, operator authority and one controller per System.

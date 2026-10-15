@@ -193,6 +193,13 @@ impl CaptureState {
         if !paid_fraction.is_finite() || paid_fraction <= 0.0 || paid_fraction > 1.0 {
             return false;
         }
+        if self
+            .rows
+            .iter()
+            .any(|row| row.last_work_tick.is_some_and(|last| last >= now))
+        {
+            return false;
+        }
         let units = (f64::from(paid_fraction) * WORK_PER_TICK as f64).floor() as u64;
         let row = self
             .rows
@@ -270,6 +277,7 @@ impl CaptureState {
             return Err("capture state has invalid equipment owner, sequence or retirement");
         }
         let mut origins = BTreeSet::new();
+        let mut paid_ends = BTreeSet::new();
         let mut last_sequence = 0;
         for row in &self.rows {
             row.payload.validate(now)?;
@@ -301,6 +309,9 @@ impl CaptureState {
                         .is_none())
                 || (row.work > 0) != row.started_tick.is_some()
                 || row.started_tick.is_some() != row.last_work_tick.is_some()
+                || row
+                    .last_work_tick
+                    .is_some_and(|last| !paid_ends.insert(last))
                 || row
                     .started_tick
                     .is_some_and(|tick| tick < row.captured_tick || tick > now)

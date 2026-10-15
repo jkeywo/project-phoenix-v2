@@ -96,6 +96,31 @@ fn impossible_security_stays_unreadable_and_held_key_requires_actual_paid_step()
         .validate(&SystemId("comms".into()), &config, &keys, 20_002)
         .is_ok());
 }
+#[test]
+fn switching_selection_cannot_spend_one_paid_interval_on_two_retained_captures() {
+    let mut state = state();
+    let config = config();
+    assert!(state.observe(payload(1, 1), 1));
+    let mut other = payload(1, 1);
+    other.transmission.origin_id = "second-actual-emission".into();
+    assert!(state.observe(other, 1));
+    assert!(state.select(Some(1), &config, &[]));
+    assert!(state.advance(2, 1.0, &config, &[]));
+    assert!(state.select(Some(2), &config, &[]));
+    assert!(!state.advance(2, 1.0, &config, &[]));
+    assert_eq!(state.views(&config, &[])[1].progress_per_mille, 0);
+    assert!(state.advance(3, 1.0, &config, &[]));
+    assert!(state
+        .validate(&SystemId("comms".into()), &config, &[], 3)
+        .is_ok());
+    let mut bad = serde_json::to_value(state).unwrap();
+    bad["rows"][1]["started_tick"] = 2.into();
+    bad["rows"][1]["last_work_tick"] = 2.into();
+    let bad: CaptureState = serde_json::from_value(bad).unwrap();
+    assert!(bad
+        .validate(&SystemId("comms".into()), &config, &[], 3)
+        .is_err());
+}
 
 #[test]
 fn public_capture_is_evidence_without_addressed_request_or_action_reference() {

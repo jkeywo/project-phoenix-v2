@@ -155,10 +155,16 @@ execution is root-owned; this handoff claims no native or milestone exit.
   recipe for all canonical actors including Disabled/carried ones; call
   `CaptureState::validate` with its exact owner/capability/immutable keys and tick.
   Its `payloads()` accessor is trusted preflight only: verify each source differs
-  from receiver, accepted actual source equipment/channel/key/effective level,
-  and every surviving matching original/heard inbox copy agrees with source name,
+  from receiver; cross-check source equipment/channel/key/effective level where a
+  genuinely retained candidate source/accepted origin is available. A historical
+  emitter may be absent after ordinary removal: never preserve/protect its body
+  or add an actor archive to validate dated intercepted evidence. Validate the
+  immutable captured provenance/header/payload internally; every surviving
+  matching original/heard inbox copy must agree with source name,
   body/literal flag and immutable wire (ignoring the copy's received_tick).
-  Do not require cleared source text to reappear or publish a source UUID.
+  This proves structural and retained-evidence consistency, not authentication of
+  erased historical truth. Do not require cleared text to reappear or publish a
+  source UUID.
 - Advance epochs coherently and refuse malformed owners, missing/extra state,
   capture clock != actual emission clock, impossible paid interval/work/frontier,
   private source/copy mismatch and incompatible accepted capability before writes.

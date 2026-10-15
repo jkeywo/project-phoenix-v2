@@ -1265,9 +1265,24 @@ fn the_alliance_destroyer_exposes_two_tactical_owned_security_teams() {
         "Tactical owns Security on this hull"
     );
     assert_eq!(
-        system.power_group, None,
-        "Security is people: no power group to brown out"
+        system.power_group.as_ref().map(|group| group.0.as_str()),
+        Some("energy-security"),
+        "Security equipment uses its accepted local energy group"
     );
+    let energy = entity
+        .energy
+        .as_ref()
+        .expect("Security has actual energy hardware");
+    assert!(energy
+        .groups
+        .iter()
+        .any(|group| Some(&group.id) == system.power_group.as_ref()));
+    let consumer = energy
+        .consumers
+        .iter()
+        .find(|consumer| consumer.system == system.id)
+        .expect("Security work has its actual paid consumer");
+    assert!(consumer.continuous_cost_per_sec > 0.0 && consumer.reserve.capacity > 0.0);
     // …and it does NOT buy the hull a damage compartment. `[[hull.system_hull]]`
     // is the pool `SystemHull::apply_damage` spreads incoming hull damage across,
     // so every box a hull authors is durability its combat ladder never priced —
@@ -1336,9 +1351,24 @@ fn the_alliance_cruiser_exposes_two_tactical_owned_security_teams() {
         "Tactical owns Security on this hull too"
     );
     assert_eq!(
-        system.power_group, None,
-        "Security is people: no power group to brown out"
+        system.power_group.as_ref().map(|group| group.0.as_str()),
+        Some("energy-security"),
+        "Security equipment uses its accepted local energy group"
     );
+    let energy = entity
+        .energy
+        .as_ref()
+        .expect("Security has actual energy hardware");
+    assert!(energy
+        .groups
+        .iter()
+        .any(|group| Some(&group.id) == system.power_group.as_ref()));
+    let consumer = energy
+        .consumers
+        .iter()
+        .find(|consumer| consumer.system == system.id)
+        .expect("Security work has its actual paid consumer");
+    assert!(consumer.continuous_cost_per_sec > 0.0 && consumer.reserve.capacity > 0.0);
     // No damage compartment, for the reason spelled out on the destroyer above —
     // and with more force here, because THIS is the hull whose bow hold moved a
     // shipped balance run when a fourth box was added. `npm run balance:cruiser`

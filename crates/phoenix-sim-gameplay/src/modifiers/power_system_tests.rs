@@ -1,5 +1,43 @@
 use super::*;
 
+#[test]
+fn accepted_discrete_amount_uses_actual_reserve_and_rejects_malformed_or_missing_owner_without_writes(
+) {
+    let mut power = PowerSystem::default();
+    let consumer = power.config().consumers[0].clone();
+    let owner = consumer.system;
+    power
+        .network_mut()
+        .consumers
+        .get_mut(&owner)
+        .unwrap()
+        .energy = consumer.reserve.capacity;
+    let before = power.clone();
+    for amount in [-1.0, f32::NAN, f32::INFINITY] {
+        assert!(power.try_work_discrete_amount(&owner, amount).is_err());
+        assert_eq!(power, before);
+    }
+    assert!(power
+        .try_work_discrete_amount(&SystemId("absent-drive".into()), 1.0)
+        .is_err());
+    assert_eq!(power, before);
+    assert!(power.try_work_discrete_amount(&owner, 0.5).unwrap());
+    assert_eq!(
+        power.network().consumers[&owner].energy,
+        consumer.reserve.capacity - 0.5
+    );
+    assert_eq!(power.emitted_work(&owner), 0.5);
+    power
+        .network_mut()
+        .consumers
+        .get_mut(&owner)
+        .unwrap()
+        .thermal_stopped = true;
+    let stopped = power.clone();
+    assert!(!power.try_work_discrete_amount(&owner, 0.5).unwrap());
+    assert_eq!(power, stopped);
+}
+
 fn group(id: &str) -> PowerGroupId {
     PowerGroupId(id.into())
 }

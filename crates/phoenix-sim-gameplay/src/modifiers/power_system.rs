@@ -368,6 +368,25 @@ impl PowerSystem {
             .find(|consumer| &consumer.system == system)
             .ok_or("unknown energy consumer")?;
         let amount = consumer.discrete_cost * count as f32;
+        self.try_work_discrete_amount(system, amount)
+    }
+
+    /// Debit an immutable accepted work requirement through the actual current
+    /// consumer's reserve and thermal policy. This creates no separate credit.
+    pub fn try_work_discrete_amount(
+        &mut self,
+        system: &SystemId,
+        amount: f32,
+    ) -> Result<bool, String> {
+        if !amount.is_finite() || amount < 0.0 {
+            return Err("discrete work requires a finite nonnegative amount".into());
+        }
+        let consumer = self
+            .hardware
+            .consumers
+            .iter()
+            .find(|consumer| &consumer.system == system)
+            .ok_or("unknown energy consumer")?;
         let paid = self
             .network
             .consumers

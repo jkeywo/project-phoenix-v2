@@ -24,6 +24,9 @@ fn factor(world: &mut World, point: Vec3) -> f32 {
         .unwrap()
 }
 fn fixture() -> (World, Entity, Entity, String) {
+    fixture_with_faction(None)
+}
+fn fixture_with_faction(faction: Option<&str>) -> (World, Entity, Entity, String) {
     let config = crate::entities::include_resolve::load_entity_config(
         "assets/entities/jamming_cruiser.toml",
     )
@@ -32,6 +35,16 @@ fn fixture() -> (World, Entity, Entity, String) {
         "assets/entities/alliance_cruiser.toml",
     )
     .unwrap();
+    let target_config = faction.map_or_else(
+        || target_config.clone(),
+        |faction| {
+            crate::entities::loader::apply_overrides(
+                &target_config,
+                &toml::toml! { faction = faction },
+            )
+            .unwrap()
+        },
+    );
     let mut world = World::new();
     world.insert_resource(crate::sim_tick::SimTick(0));
     world.insert_resource(Time::<Fixed>::from_hz(60.0));
@@ -432,4 +445,82 @@ fn actual_late_spawn_never_creates_free_global_denial_or_erases_current_paid_pee
         before,
         "disabled actual owner still cannot emit"
     );
+}
+
+#[test]
+fn actual_radio_loses_friendly_and_other_faction_links_without_changing_local_emission_then_recovers(
+) {
+    use crate::world_id::InstallWorldIdMint;
+    use phoenix_model::comms_channel::CommsAudience;
+    let mut local = Vec::new();
+    for faction in [
+        "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+        "cccccccc-3333-4333-8333-cccccccccccc",
+    ] {
+        for enabled in [false, true] {
+            let (mut world, source, _, contact) = fixture_with_faction(Some(faction));
+            world.insert_world_id_mint(crate::world_id::WorldIdMint::default());
+            if enabled {
+                prepare(&mut world, source, &contact);
+            }
+            world.run_system_once(tick).unwrap();
+            let send = |world: &mut World| {
+                world.get_mut::<AdmittedCommands>(source).unwrap().0 = vec![AdmittedCommand {
+                    target: id("comms"),
+                    payload: Control::SendCommsText {
+                        channel: "public".into(),
+                        audience: CommsAudience::All,
+                        body: "Local emission only".into(),
+                    },
+                    response_token: None,
+                    feedback_correlation: None,
+                }];
+                world
+                    .run_system_once(super::super::radio::tick_radio)
+                    .unwrap();
+                world.get_mut::<AdmittedCommands>(source).unwrap().0.clear();
+            };
+            let messages = |world: &World, recipient: &str| {
+                world
+                    .resource::<super::super::server::CommsInboxRes>()
+                    .0
+                    .messages()
+                    .into_iter()
+                    .filter(|message| message.is_for_ship(Some(recipient)))
+                    .collect::<Vec<_>>()
+            };
+            send(&mut world);
+            let sent = messages(&world, "jam-source");
+            assert_eq!(sent.len(), 1);
+            assert_eq!(
+                messages(&world, "actual-receiver").len(),
+                usize::from(!enabled),
+                "actual receiver faction {faction} has no immunity"
+            );
+            local.push((
+                sent,
+                world
+                    .get::<ShipPowerSystem>(source)
+                    .unwrap()
+                    .0
+                    .network()
+                    .consumers[&id("comms")]
+                    .energy,
+            ));
+            command(
+                &mut world,
+                source,
+                Control::SetJammingEnabled { enabled: false },
+            );
+            world.resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+            world.run_system_once(tick).unwrap();
+            send(&mut world);
+            assert_eq!(
+                messages(&world, "actual-receiver").len(),
+                if enabled { 1 } else { 2 },
+                "another admitted transmission uses the actual recovered link"
+            );
+        }
+    }
+    assert!(local.windows(2).all(|pair|pair[0]==pair[1]),"sender's original fact and finite radio debit never reveal hidden reception or affiliation");
 }

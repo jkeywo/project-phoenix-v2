@@ -659,7 +659,7 @@ fn two_actual_local_ship_peers_apply_human_requests_and_ordinary_ai_fits_identic
     let mut local_slots = BTreeMap::new();
     let mut paid = BTreeSet::new();
     let mut finished_ticks = 0;
-    for _ in 0..1800 {
+    for step in 0..1800 {
         mesh_step(&mut hosts);
         for (index, app) in hosts.iter_mut().enumerate() {
             let entity = local(app);

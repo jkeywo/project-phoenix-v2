@@ -1,0 +1,13 @@
+# Actual finite carry vessel; existing systems, handling, energy and crew.
+includes = ["alliance_cruiser.toml"]
+name = "entity.alliance_cruiser.name"
+[umbilical]
+capacity = "alloy"
+allowed_resources = []
+direction = "collect"
+[[infrastructure.capacity]]
+id = "alloy"
+amount = 0
+[[logistics.store]]
+id = "hold-alloy"
+target = 6

@@ -1,0 +1,35 @@
+# Quiet physical supply probe: no deadlines, free cargo or completion flags.
+[global]
+seed = 156221
+[player_spawn]
+position = [0,0,0]
+[[entity]]
+template_path = "assets/entities/facility_supply_cruiser.toml"
+id = "player-ship"
+name = "player-ship"
+spawn_on = "game_start"
+transform = { position = [0,0,0] }
+[[entity]]
+template_path = "tests/fixtures/facility-supply-source.toml"
+id = "supply-source"
+name = "supply-source"
+spawn_on = "game_start"
+transform = { position = [-80,0,0] }
+[[entity]]
+template_path = "tests/fixtures/facility-supply-full-receiver.toml"
+id = "supply-receiver"
+name = "supply-receiver"
+spawn_on = "game_start"
+transform = { position = [400,0,0] }
+[script]
+setup = """
+on_world_loaded("supply_goals");
+fn supply_goals(ctx) {
+    ctx.effects.add_objective(#{id:"supply-load",text:"production.alloy",
+        mandatory:false,source:"mission",base_priority:50,
+        directive_kind:"Transfer",target:"supply-source",targets:["supply-source"]});
+    ctx.effects.add_objective(#{id:"supply-unload",text:"production.alloy",
+        mandatory:false,source:"mission",base_priority:50,
+        directive_kind:"Transfer",target:"supply-receiver",targets:["supply-receiver"]});
+}
+"""

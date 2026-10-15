@@ -1,0 +1,17 @@
+# Same actual powered facility equipment; bounded finite supply endpoint.
+includes = ["../../assets/entities/station_axiom.toml"]
+name = "supply-source"
+[[infrastructure.capacity]]
+id = "alloy"
+amount = 6
+ceiling = 6
+[port_service]
+system = "dock"
+policy = "free_allied_replenishment"
+eligible_factions = ["aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"]
+[[port_service.offer]]
+id = "alloy"
+resource = "alloy"
+unit_amount = 1
+quota = 6
+cost = []

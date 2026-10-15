@@ -45,6 +45,7 @@
  *   `(s, view, doc, t, activeMessage)` after the common panels are set.
  */
 
+import {visibleCommsMessages} from '../comms-requests.js';
 import { t } from '../strings.js';
 import { setAutoState } from '../console-ui.js';
 import { setConsoleOverlay } from '../console-overlays.js';
@@ -77,12 +78,15 @@ export function makeCommsRender(variant) {
   let selectedMessageId = null;
   let selectedThreadId = null;
   let pendingThreadId = null;
+  let showCleared = false;
+  let boundComposer = null;
+  let lastState = null;
 
   const commsView = (s) => (variant.commsView ? variant.commsView(s) : s);
 
   function messagesFor(s) {
     const view = s ? commsView(s) : null;
-    return Array.isArray(view && view.messages) ? view.messages : [];
+    return visibleCommsMessages(view?.messages, showCleared);
   }
 
   /**
@@ -192,8 +196,16 @@ export function makeCommsRender(variant) {
     // flat `comms` family, a metadata-selected family slice for the cruiser.
     const view = commsView(s);
     const composer = doc.getElementById('comms-text-composer');
+    lastState = s;
+    if (composer && composer !== boundComposer) {
+      boundComposer = composer;
+      composer.addEventListener('comms-history-change', event => {
+        showCleared = event.detail?.show === true;
+        renderStation(lastState, doc);
+      });
+    }
     if (composer) composer.state = view;
-    const msgs = Array.isArray(view.messages) ? view.messages : [];
+    const msgs = visibleCommsMessages(view.messages, showCleared);
     if (pendingThreadId && msgs.some(message => effectiveThreadId(message) === pendingThreadId)) {
       selectedThreadId = pendingThreadId;
       pendingThreadId = null;
@@ -226,6 +238,7 @@ export function makeCommsRender(variant) {
           messages: open.messages,
           sender_name: openSummary ? openSummary.sender_name : null,
           rejection: view.rejection,
+          ...(open.active?.request_progress ? {read_only:!!view.comms_auto} : {}),
         };
       }
     }
@@ -363,6 +376,8 @@ export function makeCommsRender(variant) {
   // and isolated renderer fixtures from carrying presentation state between
   // sessions without exposing the selected ids as mutable component state.
   renderStation.resetSelection = function resetSelection() {
+    showCleared = false;
+    lastState = null;
     pendingThreadId = null;
     selectedMessageId = null;
     selectedThreadId = null;

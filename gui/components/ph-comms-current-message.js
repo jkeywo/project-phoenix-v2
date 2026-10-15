@@ -6,7 +6,8 @@ import '../strings-boot.js';
 import { t } from '../strings.js';
 import { isLatestLiveCriticalMessage, isLatestLivePriorityMessage, COMMS_PRIORITY } from '../comms-state.js';
 import { PhElement, phDefine } from './ph-element.js';
-import { COMMS_RESPOND_ACTION_ID } from '../stations/comms-actions.js';
+import {requestStatus, structuredComms} from '../comms-requests.js';
+import { COMMS_RESPOND_ACTION_ID, COMMS_MARK_READ_ACTION_ID } from '../stations/comms-actions.js';
 
 /**
  * Normalise a wire response into `{ text, important, available }`.
@@ -104,6 +105,7 @@ export class PhCommsCurrentMessage extends PhElement {
     <div class="thread" id="thread" style="display:none">
       <div class="sender-label"><span id="sender-label"></span><span class="priority-cue" id="priority-cue" hidden></span></div>
       <div class="messages" id="messages"></div>
+      <button id="read-request" type="button" hidden></button>
     </div>
   </div>
 `;
@@ -121,6 +123,8 @@ export class PhCommsCurrentMessage extends PhElement {
     if (!this.#messagesEl) this.#messagesEl = root.getElementById('messages');
 
     if (!thread) {
+      root.getElementById('read-request').textContent = '';
+      root.getElementById('read-request').hidden = true;
       this.#placeholderEl.style.display = '';
       this.#threadEl.style.display = 'none';
       this.#prevThreadId = null;
@@ -147,6 +151,13 @@ export class PhCommsCurrentMessage extends PhElement {
     const urgent = isLatestLivePriorityMessage(thread, messages, COMMS_PRIORITY.URGENT);
     // Rejection targeting THIS thread (#761 AC3): the attempted control flashes.
     const rejection = s.rejection && s.rejection.message_id === tid ? s.rejection : null;
+
+    const readButton = root.getElementById('read-request');
+    readButton.hidden = !structuredComms(thread) || thread.transmission.received_tick == null || thread.is_read;
+    readButton.textContent = readButton.hidden ? '' : t('comms.request.mark_read');
+    readButton.disabled = !!s.read_only;
+    readButton.onclick = () => window.activateSemanticAction?.(COMMS_MARK_READ_ACTION_ID,
+      {source:'control',detail:{message_id:thread.id}});
 
     this.#senderEl.textContent = sender;
     this.#priorityEl.hidden = !critical && !urgent;
@@ -190,7 +201,7 @@ export class PhCommsCurrentMessage extends PhElement {
       if (!node) {
         node = document.createElement('div');
         node.className = 'msg';
-        node.innerHTML = '<span class="speaker"></span><span class="radio-status"></span><span class="text"></span>';
+        node.innerHTML = '<span class="speaker"></span><span class="radio-status"></span><span class="text"></span><span class="request-status"></span>';
         this.#msgCache.set(key, node);
       }
       // The order has to follow the projection, but ONLY where it differs:
@@ -205,8 +216,7 @@ export class PhCommsCurrentMessage extends PhElement {
         ? ((m && m.sender_name) || '') : '';
       node.querySelector('.radio-status').textContent = m?.transmission
         ? t(m.transmission.received_tick == null ? 'comms.radio.sent' : 'comms.radio.received') + ' ' : '';
-      node.querySelector('.radio-status').textContent = m?.transmission
-        ? t(m.transmission.received_tick == null ? 'comms.radio.sent' : 'comms.radio.received') + ' ' : '';
+      node.querySelector('.request-status').textContent = requestStatus(m);
       node.querySelector('.text').textContent = (m && m.body) || '(empty)';
     });
 
@@ -240,11 +250,11 @@ export class PhCommsCurrentMessage extends PhElement {
         // Stash per-response flags on the element so the (persistent) click
         // handler always reads the current render's values.
         btn.dataset.important = r.important ? 'true' : 'false';
-        btn.dataset.available = r.available ? 'true' : 'false';
+        btn.dataset.available = r.available && !(s.read_only && structuredComms(thread)) ? 'true' : 'false';
 
         const armed = this.#armedIdx === idx;
         // A greyed unavailable response is disabled; a chosen one is disabled.
-        btn.disabled = chosen || !r.available;
+        btn.disabled = chosen || !r.available || (s.read_only && structuredComms(thread));
         btn.classList.toggle('unavailable', !r.available && !chosen);
         btn.classList.toggle('important', r.important && armed && r.available && !chosen);
 

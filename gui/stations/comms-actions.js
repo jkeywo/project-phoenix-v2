@@ -11,6 +11,7 @@ import { defineStationAction, createCorrelatedActionSender, keyboard, gamepad } 
 
 import { ACTION_FEEDBACK_STATE } from '../action-feedback.js';
 import { isLatestLiveCriticalMessage } from '../comms-state.js';
+import { visibleCommsMessages, structuredComms } from '../comms-requests.js';
 import { familyView } from '../console-payload.js';
 import { createSemanticActionRegistry } from '../semantic-action-registry.js';
 
@@ -21,6 +22,8 @@ export const COMMS_RESPOND_ACTION_ID = 'comms.respond';
 export const COMMS_CLEAR_ACTION_ID = 'comms.clear';
 export const COMMS_SHOW_ON_SCREEN_ACTION_ID = 'comms.show-on-screen';
 export const COMMS_SEND_TEXT_ACTION_ID = 'comms.send-text';
+export const COMMS_SEND_REQUEST_ACTION_ID = 'comms.send-request';
+export const COMMS_MARK_READ_ACTION_ID = 'comms.mark-read';
 
 function action(id, label, keyboardBinding, gamepadBinding, feedback = 'authoritative') {
   return defineStationAction({ id, contexts: [COMMS_ACTION_CONTEXT], labelKey: `comms.${label}`,
@@ -55,6 +58,8 @@ export const COMMS_SHOW_ON_SCREEN_ACTION = action(
 
 export const COMMS_ACTIONS = Object.freeze([
   COMMS_HAIL_ACTION,
+  ...[[COMMS_SEND_REQUEST_ACTION_ID, 'request.report_status'], [COMMS_MARK_READ_ACTION_ID, 'request.mark_read']]
+    .map(([id, label]) => defineStationAction({id, contexts:[COMMS_ACTION_CONTEXT], labelKey:`comms.${label}`, bindings:[null,null], feedback:'authoritative'})),
   COMMS_SELECT_MESSAGE_ACTION,
   COMMS_RESPOND_ACTION,
   COMMS_CLEAR_ACTION,
@@ -71,7 +76,7 @@ export function commsActionView(state) {
 
 /** Keep semantic defaults identical to the shared Comms renderer's selection. */
 export function currentCommsMessage(view) {
-  const messages = Array.isArray(view && view.messages) ? view.messages : [];
+  const messages = visibleCommsMessages(view?.messages);
   return [...messages].reverse().find((message) => isLatestLiveCriticalMessage(message, messages))
     || messages.find((message) => !message.is_read)
     || messages[messages.length - 1]
@@ -139,6 +144,27 @@ export function registerCommsActions(registry, options = {}) {
     });
   });
 
+  registry.register(COMMS_ACTIONS.find(entry => entry.id === COMMS_SEND_REQUEST_ACTION_ID), ({actionId, correlation, inputMs, detail} = {}) => {
+    const view = commsActionView(getState());
+    const draft = detail ?? getRadioDraft();
+    if (!view || view.comms_auto || !sendAction || !draft || draft.request !== 'report_status'
+      || !(view.channels || []).some(channel => channel.id === draft.channel)) return false;
+    const audience = draft.audience;
+    if (!audience || !['all', 'fleet', 'contact'].includes(audience.kind)) return false;
+    if (audience.kind === 'contact' && !(view.contacts || []).some(contact => contactId(contact) === audience.target_uuid)
+      && !(view.messages || []).some(message => message.sender_uuid === audience.target_uuid && message.transmission?.received_tick != null)) return false;
+    return send(actionId, correlation, inputMs, 'send_comms_request', {
+      channel:draft.channel, audience:audience.kind === 'contact' ? {kind:'contact',target_uuid:audience.target_uuid} : {kind:audience.kind}, request:'report_status',
+    });
+  });
+  registry.register(COMMS_ACTIONS.find(entry => entry.id === COMMS_MARK_READ_ACTION_ID), ({actionId, correlation, inputMs, detail} = {}) => {
+    const view = commsActionView(getState());
+    const message = (view?.messages || []).find(message => message.id === detail?.message_id);
+    if (!view || view.comms_auto || !sendAction || !message || !structuredComms(message)
+      || message.transmission.received_tick == null || message.is_read) return false;
+    return send(actionId, correlation, inputMs, 'mark_comms_read', {message_id:message.id});
+  });
+
   // One selection identity for both grains (issue #1380). The inbox lists
   // THREADS, so a HAILS row supplies `thread_id`; the parameter-free
   // keyboard/gamepad binding and any control naming an exact message still
@@ -177,6 +203,9 @@ export function registerCommsActions(registry, options = {}) {
     const explicitMessageId = detail && typeof detail.message_id === 'string'
       ? detail.message_id : null;
     const messageId = explicitMessageId || (active && active.id);
+    const addressed = (view.messages || []).find(message => message.id === messageId)
+      || (active?.id === messageId ? active : null);
+    if (view.comms_auto && structuredComms(addressed)) return false;
     let responseIndex = detail && Number.isInteger(detail.response_index)
       ? detail.response_index : null;
     if (responseIndex == null && active) {

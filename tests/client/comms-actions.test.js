@@ -10,6 +10,8 @@ import {
   COMMS_SELECT_MESSAGE_ACTION_ID,
   COMMS_SHOW_ON_SCREEN_ACTION_ID,
   COMMS_SEND_TEXT_ACTION_ID,
+  COMMS_SEND_REQUEST_ACTION_ID,
+  COMMS_MARK_READ_ACTION_ID,
   createCommsActionRegistry,
   currentCommsMessage,
 } from '../../gui/stations/comms-actions.js';
@@ -39,6 +41,8 @@ describe('Comms semantic action family', () => {
   it('publishes every shipped action with stable context and two remappable device slots', () => {
     expect(COMMS_ACTIONS.map((entry) => entry.id)).toEqual([
       COMMS_HAIL_ACTION_ID,
+      COMMS_SEND_REQUEST_ACTION_ID,
+      COMMS_MARK_READ_ACTION_ID,
       COMMS_SELECT_MESSAGE_ACTION_ID,
       COMMS_RESPOND_ACTION_ID,
       COMMS_CLEAR_ACTION_ID,
@@ -48,8 +52,12 @@ describe('Comms semantic action family', () => {
     for (const action of COMMS_ACTIONS) {
       expect(action.contexts).toEqual([COMMS_ACTION_CONTEXT]);
       expect(action.bindings).toHaveLength(2);
-      expect(action.bindings[0]).toMatchObject({ type: 'keyboard' });
-      expect(action.bindings[1]).toMatchObject({ type: 'gamepad' });
+      if ([COMMS_SEND_REQUEST_ACTION_ID, COMMS_MARK_READ_ACTION_ID].includes(action.id)) {
+        expect(action.bindings).toEqual([null, null]); // new controls are remappable, initially unbound
+      } else {
+        expect(action.bindings[0]).toMatchObject({ type: 'keyboard' });
+        expect(action.bindings[1]).toMatchObject({ type: 'gamepad' });
+      }
     }
     expect(COMMS_ACTIONS.find((entry) => entry.id === COMMS_SELECT_MESSAGE_ACTION_ID).feedback)
       .toBe('local');

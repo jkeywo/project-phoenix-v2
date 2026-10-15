@@ -6047,3 +6047,11 @@ comms.request.returned_outcome,Generic Comms requests,Request update received.,A
 comms.request.report,Generic Comms requests,Report,Berichten,Report,machine
 comms.request.decline,Generic Comms requests,Decline,Ablehnen,Decline,machine
 workshop.comms_radio.request_reading_ticks,Comms request authoring,AI reading time (logical ticks; blank uses equipment default),KI-Lesezeit (logische Takte; leer nutzt Gerätvorgabe),AI reading time (logical ticks; blank uses equipment default),machine
+comms.request.mark_read,Generic Comms requests,Mark as read,Als gelesen markieren,Mark as read,machine
+comms.request.show_cleared,Generic Comms requests,Show cleared requests,Gelöschte Anfragen anzeigen,Show cleared requests,machine
+comms.request.heard_at,Generic Comms requests,Heard at tick {tick},Empfangen bei Takt {tick},Heard at tick {tick},machine
+comms.request.read_at,Generic Comms requests,Read at tick {tick},Gelesen bei Takt {tick},Read at tick {tick},machine
+comms.request.reported_at,Generic Comms requests,Reported at tick {tick},Berichtet bei Takt {tick},Reported at tick {tick},machine
+comms.request.declined_at,Generic Comms requests,Declined at tick {tick},Abgelehnt bei Takt {tick},Declined at tick {tick},machine
+comms.request.available_at,Generic Comms requests,Comms available at tick {tick},Comms verfügbar bei Takt {tick},Comms available at tick {tick},machine
+comms.request.unavailable_at,Generic Comms requests,Comms unavailable at tick {tick},Comms nicht verfügbar bei Takt {tick},Comms unavailable at tick {tick},machine

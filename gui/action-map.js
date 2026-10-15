@@ -911,6 +911,24 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
+  /** Closed generic request and explicit read through the same actual owner. */
+  send_comms_request: (a, send) => {
+    if (a.request !== 'report_status') return;
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? {correlation:a.correlation} : {}), target:'comms',
+      payload:{type:'SendCommsRequest',data:{channel:a.channel,audience:a.audience,request:a.request}},
+    });
+  },
+  mark_comms_read: (a, send) => {
+    if (!a.message_id) return;
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? {correlation:a.correlation} : {}), target:'comms',
+      payload:{type:'MarkCommsRead',data:{message_id:a.message_id}},
+    });
+  },
+
   /** Clear all read/acknowledged comms messages from the inbox. */
   clear_comms: (a, send) => {
     const correlated = typeof a.correlation === 'string' && a.correlation;

@@ -1,7 +1,7 @@
 import '../strings-boot.js';
 import {t} from '../strings.js';
 import {PhElement, phDefine} from './ph-element.js';
-import {COMMS_SEND_TEXT_ACTION_ID} from '../stations/comms-actions.js';
+import {COMMS_SEND_TEXT_ACTION_ID, COMMS_SEND_REQUEST_ACTION_ID} from '../stations/comms-actions.js';
 
 /** Local draft only. The inbox is the sole owner of sent/received facts. */
 export class PhCommsTextComposer extends PhElement {
@@ -11,12 +11,20 @@ export class PhCommsTextComposer extends PhElement {
       <label>${t('comms.radio.channel')}<select id="channel"></select></label>
       <label>${t('comms.radio.audience')}<select id="audience"></select></label>
       <textarea id="body" aria-label="${t('comms.radio.body')}" maxlength="4096"></textarea>
-      <button id="send" type="button">${t('comms.send_text')}</button></fieldset>`;
+      <button id="send" type="button">${t('comms.send_text')}</button>
+      <button id="request" type="button">${t('comms.request.report_status')}</button></fieldset>
+      <label><input id="cleared" type="checkbox">${t('comms.request.show_cleared')}</label>`;
   }
   onTemplate() {
     this.channel = this.$('channel'); this.audience = this.$('audience');
     this.body = this.$('body'); this.controls = this.$('controls'); this.pending = null;
     this.$('send').addEventListener('click', () => this.submit());
+    this.$('request').addEventListener('click', () => {
+      if (!this.controls.disabled) window.activateSemanticAction?.(COMMS_SEND_REQUEST_ACTION_ID,
+        {source:'control', detail:{...this.draft(), request:'report_status'}});
+    });
+    this.$('cleared').addEventListener('change', () => this.dispatchEvent(new CustomEvent('comms-history-change',
+      {bubbles:true, detail:{show:this.$('cleared').checked}})));
     this.addEventListener('keydown', event => {
       // Text entry never leaks movement/Station shortcuts to the document.
       if (event.composedPath().includes(this.body)) {

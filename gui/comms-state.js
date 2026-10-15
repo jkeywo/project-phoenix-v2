@@ -1,3 +1,4 @@
+import {structuredComms} from './comms-requests.js';
 /**
  * gui/comms-state.js — Pure JS port of src/client_comms.rs
  * (ClientCommsState + ThreadSummary helpers). Issue #460.
@@ -139,7 +140,7 @@ export function activeThreadMessageFrom(messages, threadId) {
     if ((m.responses || []).length > 0
         && (m.selected_response === null || m.selected_response === undefined)
         && !m.is_orphaned
-        && m.sender_in_range !== false) {
+        && (structuredComms(m) || m.sender_in_range !== false)) {
       return m;
     }
   }
@@ -193,7 +194,7 @@ export function sortedThreadsFrom(messages, contacts) {
       any_unread: anyUnread,
       any_urgent: anyUrgent,
       latest_priority: latestPriority,
-      latest_out_of_range: latest.sender_in_range === false,
+      latest_out_of_range: !structuredComms(latest) && latest.sender_in_range === false,
       latest_orphaned: !!latest.is_orphaned,
     };
   });

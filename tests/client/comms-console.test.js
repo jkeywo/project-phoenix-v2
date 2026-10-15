@@ -294,6 +294,7 @@ describe('cruiser comms renderStation', () => {
     cruiserRender(payload, document);
     expect(el('navigation-map').state).toEqual({
       blips: [{ uuid: 'n1' }], regions: [{ id: 'r1' }], range: 4000,
+      navigation_auto: true, radar_sharing: [], received_chart: [],
       ship_pos: { x: 1, z: 2 }, ship_heading: 90, waypoint: { name: 'Gate' }, auto: true,
     });
     expect(el('waypoint-name').textContent).toBe('Gate');
@@ -361,6 +362,7 @@ describe('cruiser comms renderStation', () => {
     expect(el('comms-view').hidden).toBe(true);
     expect(el('navigation-map').state).toEqual({
       blips: [{ uuid: 'n1' }], regions: [{ id: 'r1' }], range: 4000,
+      navigation_auto: true, radar_sharing: [], received_chart: [],
       ship_pos: { x: 1, z: 2 }, ship_heading: 90, waypoint: { name: 'Gate' }, auto: true,
     });
     expect(el('waypoint-name').textContent).toBe('Gate');

@@ -50,6 +50,11 @@ pub struct CommsTransmission {
     pub audience: CommsAudience,
     pub emitted_tick: u64,
     pub received_tick: Option<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::comms_request::CommsRadioContent::is_text"
+    )]
+    pub content: crate::comms_request::CommsRadioContent,
 }
 
 impl CommsTransmission {
@@ -63,6 +68,9 @@ impl CommsTransmission {
                 .is_some_and(|tick| tick < self.emitted_tick || tick > now)
         {
             return Err("radio transmission has invalid identity, audience or original clock");
+        }
+        if let crate::comms_request::CommsRadioContent::Outcome { outcome } = &self.content {
+            outcome.validate(self.emitted_tick)?;
         }
         Ok(())
     }
@@ -142,6 +150,9 @@ pub fn validate_transmissions(
             return Err("Comms message identities must be unique");
         }
         let Some(transmission) = &message.transmission else {
+            if message.request_progress.is_some() {
+                return Err("generic request progress requires a physical transmission");
+            }
             continue;
         };
         transmission.validate(now)?;
@@ -154,20 +165,14 @@ pub fn validate_transmissions(
         }
         if !identity(&message.sender_uuid)
             || !identity(&recipient.0)
-            || !message.literal_body
-            || !valid_text(&message.body)
-            || !message.body_params.is_empty()
-            || !message.responses.is_empty()
-            || message.selected_response.is_some()
             || (transmission.received_tick.is_none()
                 && (recipient.0 != message.sender_uuid || !message.is_read))
             || (transmission.received_tick.is_some() && recipient.0 == message.sender_uuid)
             || matches!(&transmission.audience, CommsAudience::Contact { target_uuid } if transmission.received_tick.is_some() && target_uuid != &recipient.0)
         {
-            return Err(
-                "radio copy disagrees with literal text, recipient or sent/received ownership",
-            );
+            return Err("radio copy disagrees with its sent/received ownership");
         }
+        crate::comms_request::validate_copy(message, now)?;
         let origin = (
             &message.sender_uuid,
             &message.sender_name,
@@ -175,6 +180,7 @@ pub fn validate_transmissions(
             &transmission.channel,
             &transmission.audience,
             transmission.emitted_tick,
+            &transmission.content,
         );
         if originals
             .insert(&transmission.origin_id, origin)
@@ -183,7 +189,7 @@ pub fn validate_transmissions(
             return Err("radio copies disagree with their original emission");
         }
     }
-    Ok(())
+    crate::comms_request::validate_lineage(messages)
 }
 
 #[cfg(test)]

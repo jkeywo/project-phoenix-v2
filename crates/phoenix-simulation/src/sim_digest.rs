@@ -1605,6 +1605,9 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
             if let Some(transmission) = &message.transmission {
                 acc = fold_serde(fold_str(acc, "radio-transmission"), transmission);
             }
+            if let Some(progress) = &message.request_progress {
+                acc = fold_serde(fold_str(acc, "request-local-progress"), progress);
+            }
             acc = fold_u64(acc, u64::from(message.sender_in_range));
             acc = fold_u64(acc, message.responses.len() as u64);
             for response in &message.responses {

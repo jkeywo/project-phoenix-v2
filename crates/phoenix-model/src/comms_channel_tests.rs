@@ -38,6 +38,7 @@ fn reception_keeps_the_original_emission_and_cannot_claim_a_future_receipt() {
         audience: CommsAudience::All,
         emitted_tick: 10,
         received_tick: None,
+        content: Default::default(),
     };
     let mut heard = sent.clone();
     heard.received_tick = Some(12);
@@ -85,6 +86,7 @@ fn copied_text_keeps_one_original_and_cannot_forge_sent_or_received_ownership() 
         audience: CommsAudience::All,
         emitted_tick: 10,
         received_tick: None,
+        content: Default::default(),
     });
     let mut heard = sent.clone();
     heard.id = "heard-copy".into();

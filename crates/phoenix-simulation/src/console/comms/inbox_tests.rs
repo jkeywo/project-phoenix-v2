@@ -11,6 +11,7 @@ fn msg(id: &str) -> CommsMessage {
         recipient_ship: None,
         literal_body: false,
         transmission: None,
+        request_progress: None,
         responses: vec![
             crate::core::messages::CommsResponseView {
                 text: "Understood".into(),

@@ -115,3 +115,223 @@ fn closed_returned_claim_rejects_future_cross_owner_and_unread_completion_shapes
             .is_err()
     );
 }
+
+fn copy(
+    id: &str,
+    source: &str,
+    recipient: &str,
+    body: &str,
+    transmission: crate::comms_channel::CommsTransmission,
+) -> crate::messages::CommsMessage {
+    let received = transmission.received_tick.is_some();
+    let request = matches!(transmission.content, CommsRadioContent::Request { .. });
+    let mut message = crate::messages::CommsMessage::injected(
+        id.into(),
+        source.into(),
+        source.into(),
+        body.into(),
+        Default::default(),
+        if request && received {
+            [REPORT_RESPONSE, DECLINE_RESPONSE]
+                .into_iter()
+                .map(|text| crate::messages::CommsResponseView {
+                    text: text.into(),
+                    important: false,
+                    available: true,
+                })
+                .collect()
+        } else {
+            vec![]
+        },
+        "request-thread".into(),
+        true,
+        false,
+    );
+    message.recipient_ship = Some(crate::wire::ShipKey(recipient.into()));
+    message.is_read = !received;
+    message.transmission = Some(transmission);
+    message.request_progress = Some(CommsRequestProgress::default());
+    message
+}
+fn lineage() -> Vec<crate::messages::CommsMessage> {
+    use crate::comms_channel::{CommsAudience, CommsTransmission};
+    let sent = CommsTransmission {
+        origin_id: "request-one".into(),
+        channel: "public".into(),
+        audience: CommsAudience::Contact {
+            target_uuid: "reporter".into(),
+        },
+        emitted_tick: 10,
+        received_tick: None,
+        content: CommsRadioContent::Request {
+            request: GenericCommsRequest::ReportStatus,
+        },
+    };
+    let mut heard = sent.clone();
+    heard.received_tick = Some(12);
+    let source = copy(
+        "source-copy",
+        "requester",
+        "requester",
+        REPORT_STATUS_BODY,
+        sent,
+    );
+    let mut receiver = copy(
+        "receiver-copy",
+        "requester",
+        "reporter",
+        REPORT_STATUS_BODY,
+        heard,
+    );
+    let progress = receiver.request_progress.as_mut().unwrap();
+    progress
+        .decide(12, 20, CommsRequestDecision::Report, Some(report(20)))
+        .unwrap();
+    progress.last_returned = Some(CommsRequestStage::Completed);
+    receiver.is_read = true;
+    receiver.selected_response = Some(0);
+    let reply = CommsTransmission {
+        origin_id: "return-one".into(),
+        channel: "public".into(),
+        audience: CommsAudience::Contact {
+            target_uuid: "requester".into(),
+        },
+        emitted_tick: 25,
+        received_tick: None,
+        content: CommsRadioContent::Outcome {
+            outcome: CommsRequestOutcome {
+                request: reference(),
+                facts: progress.facts.clone(),
+            },
+        },
+    };
+    let mut received_reply = reply.clone();
+    received_reply.received_tick = Some(26);
+    vec![
+        source,
+        receiver,
+        copy(
+            "reporter-return",
+            "reporter",
+            "reporter",
+            OUTCOME_BODY,
+            reply,
+        ),
+        copy(
+            "requester-return",
+            "reporter",
+            "requester",
+            OUTCOME_BODY,
+            received_reply,
+        ),
+    ]
+}
+
+#[test]
+fn actual_retained_inbox_lineage_binds_return_to_reporting_recipient_and_original_events() {
+    let good = lineage();
+    assert!(crate::comms_channel::validate_transmissions(&good, 26).is_ok());
+    let restored: Vec<crate::messages::CommsMessage> =
+        serde_json::from_str(&serde_json::to_string(&good).unwrap()).unwrap();
+    assert_eq!(good, restored);
+    for mutate in [
+        |rows: &mut Vec<crate::messages::CommsMessage>| {
+            rows.remove(0);
+        },
+        |rows: &mut Vec<crate::messages::CommsMessage>| {
+            rows.remove(1);
+        },
+        |rows: &mut Vec<crate::messages::CommsMessage>| {
+            rows.remove(2);
+        },
+        |rows: &mut Vec<crate::messages::CommsMessage>| {
+            rows.remove(3);
+        },
+        |rows: &mut Vec<crate::messages::CommsMessage>| {
+            rows[1].request_progress.as_mut().unwrap().last_returned = None;
+        },
+        |rows: &mut Vec<crate::messages::CommsMessage>| {
+            rows[1].request_progress.as_mut().unwrap().facts.read_tick = Some(19);
+        },
+        |rows: &mut Vec<crate::messages::CommsMessage>| {
+            rows[1].selected_response = Some(1);
+        },
+        |rows: &mut Vec<crate::messages::CommsMessage>| {
+            rows[1]
+                .request_progress
+                .as_mut()
+                .unwrap()
+                .facts
+                .report
+                .as_mut()
+                .unwrap()
+                .available = false;
+        },
+    ] {
+        let mut bad = good.clone();
+        mutate(&mut bad);
+        assert!(crate::comms_channel::validate_transmissions(&bad, 26).is_err());
+    }
+    let mut pending = good.clone();
+    pending.remove(3);
+    pending[1].request_progress.as_mut().unwrap().last_returned = None;
+    assert!(
+        crate::comms_channel::validate_transmissions(&pending, 26).is_ok(),
+        "local paid return emission is not evidence that the requester heard it"
+    );
+    let mut dismissed = good.clone();
+    dismissed[0].request_progress.as_mut().unwrap().dismissed = true;
+    dismissed[1].request_progress.as_mut().unwrap().dismissed = true;
+    assert!(crate::comms_channel::validate_transmissions(&dismissed, 26).is_ok());
+    assert_eq!(
+        dismissed[1].request_progress.as_ref().unwrap().facts,
+        good[1].request_progress.as_ref().unwrap().facts
+    );
+}
+
+#[test]
+fn text_and_plot_records_cannot_carry_hidden_request_progress() {
+    let mut rows = lineage();
+    rows[0].transmission = None;
+    assert!(crate::comms_channel::validate_transmissions(&rows, 26).is_err());
+    let mut rows = lineage();
+    rows[0].transmission.as_mut().unwrap().content = CommsRadioContent::Text;
+    rows[0].literal_body = true;
+    rows[0].body = "ordinary text".into();
+    assert!(crate::comms_channel::validate_transmissions(&rows, 26).is_err());
+}
+
+#[test]
+fn real_eligible_reading_ticks_pause_and_resume_without_counting_human_or_offline_time() {
+    let mut reading = CommsRequestReading::start(30, 10).unwrap();
+    assert!(!reading.advance(20, true).unwrap());
+    assert_eq!(reading.remaining_ticks, 20);
+    assert!(!reading.advance(100, false).unwrap());
+    assert_eq!(reading.remaining_ticks, 20);
+    let mut resumed: CommsRequestReading =
+        serde_json::from_str(&serde_json::to_string(&reading).unwrap()).unwrap();
+    assert!(!resumed.advance(119, true).unwrap());
+    assert_eq!(resumed.remaining_ticks, 1);
+    assert!(resumed.advance(120, true).unwrap());
+    assert_eq!(resumed.remaining_ticks, 0);
+    let before = resumed;
+    assert!(resumed.advance(119, true).is_err());
+    assert_eq!(resumed, before);
+    assert!(CommsRequestReading::start(0, 10).is_err());
+    assert!(CommsRequestReading::start(30, u64::MAX - 1).is_err());
+    let before = reading;
+    assert!(reading.advance(u64::MAX, false).is_err());
+    assert_eq!(reading, before);
+    assert!(CommsRequestReading {
+        remaining_ticks: 31,
+        last_tick: 10
+    }
+    .validate(30, 10)
+    .is_err());
+    assert!(CommsRequestReading {
+        remaining_ticks: 1,
+        last_tick: 11
+    }
+    .validate(30, 10)
+    .is_err());
+}

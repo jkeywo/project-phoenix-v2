@@ -93,6 +93,65 @@ impl CommsRequestFacts {
     }
 }
 
+/// Partial reading inside the existing pending-response entry. Mechanical
+/// elapsed ticks do not choose or emit a response. Human/Offline pauses preserve
+/// accumulated work; callers keep the same actual operator/message ownership.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommsRequestReading {
+    pub remaining_ticks: u32,
+    pub last_tick: u64,
+}
+
+impl CommsRequestReading {
+    pub fn start(total_ticks: u32, now: u64) -> Result<Self, &'static str> {
+        let state = Self {
+            remaining_ticks: total_ticks,
+            last_tick: now,
+        };
+        if total_ticks == 0 || state.due_tick().is_none() {
+            return Err("request reading needs positive authored ticks within the logical clock");
+        }
+        Ok(state)
+    }
+
+    pub fn due_tick(&self) -> Option<u64> {
+        self.last_tick.checked_add(u64::from(self.remaining_ticks))
+    }
+
+    pub fn validate(&self, total_ticks: u32, now: u64) -> Result<(), &'static str> {
+        if total_ticks == 0
+            || self.remaining_ticks > total_ticks
+            || self.last_tick > now
+            || self.due_tick().is_none()
+        {
+            return Err("invalid request reading ownership/clock frontier");
+        }
+        Ok(())
+    }
+
+    pub fn advance(&mut self, now: u64, eligible_ai: bool) -> Result<bool, &'static str> {
+        if now < self.last_tick {
+            return Err("request reading cannot rewind logical time");
+        }
+        let elapsed = now - self.last_tick;
+        let remaining = if eligible_ai {
+            u64::from(self.remaining_ticks).saturating_sub(elapsed) as u32
+        } else {
+            self.remaining_ticks
+        };
+        let next = Self {
+            remaining_ticks: remaining,
+            last_tick: now,
+        };
+        if next.due_tick().is_none() {
+            return Err("request reading exceeds logical clock");
+        }
+        *self = next;
+        Ok(remaining == 0)
+    }
+}
+
 /// Immutable binding carried by a returned claim, not a remote actuator token.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -147,6 +206,17 @@ pub enum CommsRadioContent {
         outcome: CommsRequestOutcome,
     },
 }
+
+impl CommsRadioContent {
+    pub fn is_text(&self) -> bool {
+        matches!(self, Self::Text)
+    }
+}
+
+pub const REPORT_STATUS_BODY: &str = "comms.request.report_status";
+pub const OUTCOME_BODY: &str = "comms.request.returned_outcome";
+pub const REPORT_RESPONSE: &str = "comms.request.report";
+pub const DECLINE_RESPONSE: &str = "comms.request.decline";
 
 /// Same inbox copy, local facts only. Sent copies have no recipient events.
 /// Dismissal is presentation, never cancellation or a new read event. Last
@@ -204,6 +274,226 @@ impl CommsRequestProgress {
         *self = next;
         Ok(())
     }
+}
+
+/// Validate one canonical inbox record; projection-only reach flags do not
+/// control a local request decision and never become a returned claim.
+pub(crate) fn validate_copy(
+    message: &crate::messages::CommsMessage,
+    now: u64,
+) -> Result<(), &'static str> {
+    use crate::comms_request::CommsRadioContent::*;
+    let transmission = message
+        .transmission
+        .as_ref()
+        .ok_or("request copy lacks transmission")?;
+    if !message.body_params.is_empty() {
+        return Err("radio copy cannot interpolate unbound contents");
+    }
+    match &transmission.content {
+        Text => {
+            if !message.literal_body
+                || !crate::comms_channel::valid_text(&message.body)
+                || !message.responses.is_empty()
+                || message.selected_response.is_some()
+                || message.request_progress.is_some()
+            {
+                return Err("ordinary radio text cannot carry request state or responses");
+            }
+        }
+        Request { .. } | Outcome { .. } => {
+            let progress = message
+                .request_progress
+                .as_ref()
+                .ok_or("structured radio copy requires local progress")?;
+            if message.literal_body
+                || (progress.dismissed && !message.is_read && !message.is_orphaned)
+            {
+                return Err("request dismissal requires an eligible local inbox copy");
+            }
+            if let Request { .. } = &transmission.content {
+                progress.validate(transmission.received_tick, now)?;
+                if message.body != REPORT_STATUS_BODY {
+                    return Err("request body is not its closed definition");
+                }
+                if transmission.received_tick.is_some() {
+                    let expected = match progress.facts.decision.as_ref().map(|value| value.choice)
+                    {
+                        Some(CommsRequestDecision::Report) => Some(0),
+                        Some(CommsRequestDecision::Decline) => Some(1),
+                        None => None,
+                    };
+                    if message.is_read != progress.facts.read_tick.is_some()
+                        || message.selected_response != expected
+                        || message.responses.len() != 2
+                        || message.responses[0].text != REPORT_RESPONSE
+                        || message.responses[1].text != DECLINE_RESPONSE
+                        || message
+                            .responses
+                            .iter()
+                            .any(|response| response.important || !response.available)
+                    {
+                        return Err(
+                            "received request surface disagrees with its actual local decision",
+                        );
+                    }
+                } else if !message.responses.is_empty() || message.selected_response.is_some() {
+                    return Err("issuing copy cannot make the recipient decision");
+                }
+            } else if progress.facts != CommsRequestFacts::default()
+                || progress.last_returned.is_some()
+                || message.body != OUTCOME_BODY
+                || !message.responses.is_empty()
+                || message.selected_response.is_some()
+            {
+                return Err("returned outcome cannot invent local request progress");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn contains_facts(current: &CommsRequestFacts, older: &CommsRequestFacts) -> bool {
+    older
+        .read_tick
+        .is_none_or(|value| current.read_tick == Some(value))
+        && older
+            .decision
+            .as_ref()
+            .is_none_or(|value| current.decision.as_ref() == Some(value))
+        && older
+            .report
+            .as_ref()
+            .is_none_or(|value| current.report.as_ref() == Some(value))
+}
+
+/// Historical lineages stay in these same inbox records after local dismissal.
+/// A return is not validated against a live remote actor or its private state.
+pub(crate) fn validate_lineage(
+    messages: &[crate::messages::CommsMessage],
+) -> Result<(), &'static str> {
+    use crate::comms_request::CommsRadioContent::*;
+    let mut stages = std::collections::BTreeMap::new();
+    for message in messages {
+        let Some(transmission) = &message.transmission else {
+            continue;
+        };
+        match &transmission.content {
+            Text => {}
+            Request { request } => {
+                if let Some(heard_tick) = transmission.received_tick {
+                    let issued = messages.iter().any(|source| {
+                        source.sender_uuid == message.sender_uuid
+                            && source.transmission.as_ref().is_some_and(|original| {
+                                original.origin_id == transmission.origin_id
+                                    && original.received_tick.is_none()
+                                    && original.content == (Request { request: *request })
+                            })
+                    });
+                    if !issued || heard_tick < transmission.emitted_tick {
+                        return Err("heard request lacks its retained original issue");
+                    }
+                    let progress = message
+                        .request_progress
+                        .as_ref()
+                        .ok_or("heard request lacks local progress")?;
+                    if let Some(stage) = progress.last_returned {
+                        let returned = messages.iter().any(|copy| {
+                            copy.transmission.as_ref().is_some_and(|receipt| {
+                                match &receipt.content {
+                                    Outcome { outcome } => {
+                                        receipt.received_tick.is_some()
+                                            && outcome.request.origin_id == transmission.origin_id
+                                            && Some(outcome.request.recipient_ship.as_str())
+                                                == message
+                                                    .recipient_ship
+                                                    .as_ref()
+                                                    .map(|key| key.0.as_str())
+                                            && outcome.facts.stage() == stage
+                                    }
+                                    _ => false,
+                                }
+                            })
+                        });
+                        if !returned {
+                            return Err("returned frontier lacks actual retained reverse delivery");
+                        }
+                    }
+                }
+            }
+            Outcome { outcome } => {
+                let reference = &outcome.request;
+                if message.sender_uuid != reference.recipient_ship
+                    || transmission.audience
+                        != (crate::comms_channel::CommsAudience::Contact {
+                            target_uuid: reference.source_ship.clone(),
+                        })
+                {
+                    return Err("returned claim disagrees with its reporting source and requester");
+                }
+                let actual = messages.iter().find(|request| {
+                    request.sender_uuid == reference.source_ship
+                        && request
+                            .recipient_ship
+                            .as_ref()
+                            .is_some_and(|key| key.0 == reference.recipient_ship)
+                        && request.transmission.as_ref().is_some_and(|original| {
+                            original.origin_id == reference.origin_id
+                                && original.emitted_tick == reference.emitted_tick
+                                && original.received_tick == Some(reference.heard_tick)
+                                && original.content
+                                    == (Request {
+                                        request: reference.request,
+                                    })
+                        })
+                });
+                let facts = actual
+                    .and_then(|actual| actual.request_progress.as_ref())
+                    .map(|progress| &progress.facts)
+                    .ok_or(
+                        "returned claim lacks the request actually heard by its reporting source",
+                    )?;
+                if !contains_facts(facts, &outcome.facts) {
+                    return Err("returned claim exceeds actual original recipient events");
+                }
+                let progress = actual
+                    .and_then(|actual| actual.request_progress.as_ref())
+                    .expect("checked actual request");
+                let delivered = messages.iter().any(|copy| {
+                    copy.transmission.as_ref().is_some_and(|record| {
+                        record.origin_id == transmission.origin_id && record.received_tick.is_some()
+                    })
+                });
+                let locally_sent = messages.iter().any(|copy| {
+                    copy.transmission.as_ref().is_some_and(|record| {
+                        record.origin_id == transmission.origin_id && record.received_tick.is_none()
+                    })
+                });
+                if !locally_sent
+                    || (delivered
+                        && progress
+                            .last_returned
+                            .is_none_or(|stage| stage < outcome.facts.stage()))
+                {
+                    return Err(
+                        "returned outcome lacks its local emission or actual delivery frontier",
+                    );
+                }
+                let key = (
+                    &reference.origin_id,
+                    &reference.recipient_ship,
+                    outcome.facts.stage(),
+                );
+                if stages
+                    .insert(key, &transmission.origin_id)
+                    .is_some_and(|old| old != &transmission.origin_id)
+                {
+                    return Err("one actual request stage cannot mint multiple returned emissions");
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

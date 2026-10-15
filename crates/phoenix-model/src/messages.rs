@@ -800,6 +800,8 @@ pub struct CommsMessage {
     /// The sender remains the fictional identity on every crew surface.
     pub literal_body: bool,
     pub transmission: Option<crate::comms_channel::CommsTransmission>,
+    /// Recipient-local request progress or retained structured-history dismissal.
+    pub request_progress: Option<crate::comms_request::CommsRequestProgress>,
     /// Available response options. Empty while awaiting a reply (loading).
     ///
     /// Promoted from `Vec<String>` (issue #761) to a per-response view so the
@@ -846,6 +848,8 @@ struct CommsMessageWire {
     literal_body: bool,
     #[serde(default)]
     transmission: Option<crate::comms_channel::CommsTransmission>,
+    #[serde(default)]
+    request_progress: Option<crate::comms_request::CommsRequestProgress>,
     responses: Vec<CommsResponseView>,
     selected_response: Option<usize>,
     is_read: bool,
@@ -898,6 +902,7 @@ impl<'de> Deserialize<'de> for CommsMessage {
             recipient_ship: wire.recipient_ship,
             literal_body: wire.literal_body,
             transmission: wire.transmission,
+            request_progress: wire.request_progress,
             responses: wire.responses,
             selected_response: wire.selected_response,
             is_read: wire.is_read,
@@ -917,7 +922,7 @@ impl Serialize for CommsMessage {
         use serde::ser::SerializeStruct;
 
         let priority = self.effective_priority();
-        let field_count = if self.body_params.is_empty() { 16 } else { 17 };
+        let field_count = if self.body_params.is_empty() { 17 } else { 18 };
         let mut wire = serializer.serialize_struct("CommsMessage", field_count)?;
         wire.serialize_field("id", &self.id)?;
         wire.serialize_field("sender_uuid", &self.sender_uuid)?;
@@ -930,6 +935,7 @@ impl Serialize for CommsMessage {
         wire.serialize_field("recipient_ship", &self.recipient_ship)?;
         wire.serialize_field("literal_body", &self.literal_body)?;
         wire.serialize_field("transmission", &self.transmission)?;
+        wire.serialize_field("request_progress", &self.request_progress)?;
         wire.serialize_field("responses", &self.responses)?;
         wire.serialize_field("selected_response", &self.selected_response)?;
         wire.serialize_field("is_read", &self.is_read)?;
@@ -989,6 +995,7 @@ impl CommsMessage {
             recipient_ship: None,
             literal_body: false,
             transmission: None,
+            request_progress: None,
             responses,
             selected_response: None,
             is_read: false,

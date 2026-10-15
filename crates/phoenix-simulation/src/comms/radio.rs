@@ -269,6 +269,7 @@ pub(crate) fn tick_radio(
                 audience: audience.clone(),
                 emitted_tick: tick.0,
                 received_tick: None,
+                content: Default::default(),
             };
             inbox.0.inject(copy_message(
                 new_id(),

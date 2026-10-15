@@ -828,6 +828,7 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                     recipient_ship: None,
                     literal_body: false,
                     transmission: None,
+                    request_progress: None,
                     responses: vec![crate::core::messages::CommsResponseView {
                         text: "Acknowledged".into(),
                         important: true,

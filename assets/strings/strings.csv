@@ -6042,3 +6042,7 @@ workshop.ports.producer,Actual powered port producer,[Provider Dock System],[Doc
 workshop.ports.producer-legacy,Explicit legacy passive port selection,[Legacy passive service],[Bisheriger passiver Dienst],[Legacy passive service],machine
 workshop.ports.producer-hint,Physical port work explanation,[A bound Dock pays for actual transfer work and pauses when unavailable. Existing stocks and terms remain authoritative.],[Ein gebundenes Dock bezahlt echte Transferarbeit und pausiert bei Ausfall. Vorhandene Bestaende und Bedingungen bleiben massgeblich.],[A bound Dock pays for actual transfer work and pauses when unavailable. Existing stocks and terms remain authoritative.],machine
 console.dock.separating,Own accepted Dock separation remaining distance. {distance} is world units,SEPARATING - {distance} m,TRENNUNG - {distance} m,SEPARATING - {distance} m,machine
+comms.request.report_status,Generic Comms requests,Report status.,Status melden.,Report status.,machine
+comms.request.returned_outcome,Generic Comms requests,Request update received.,Anfrageaktualisierung empfangen.,Request update received.,machine
+comms.request.report,Generic Comms requests,Report,Berichten,Report,machine
+comms.request.decline,Generic Comms requests,Decline,Ablehnen,Decline,machine

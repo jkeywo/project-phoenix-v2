@@ -15,6 +15,7 @@ fn msg(id: &str) -> CommsMessage {
         recipient_ship: None,
         literal_body: false,
         transmission: None,
+        request_progress: None,
         responses: vec![crate::core::messages::CommsResponseView {
             text: "OK".into(),
             important: false,
@@ -3949,6 +3950,7 @@ fn clear_comms_removes_orphaned_messages_and_broadcasts_update() {
         recipient_ship: None,
         literal_body: false,
         transmission: None,
+        request_progress: None,
         responses: vec![],
         selected_response: None,
         is_read: false,

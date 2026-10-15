@@ -111,6 +111,9 @@ impl RepairTeams {
         true
     }
     pub(super) fn validate_treatment_shape(&self, state: &RepairJobState) -> Result<(), String> {
+        if state.teams.len() != self.state.teams.len() {
+            return Err("treatment must retain the accepted finite team roster".into());
+        }
         let mut patients = BTreeSet::new();
         for (index, entry) in state.teams.iter().enumerate() {
             let Some(job) = entry else {

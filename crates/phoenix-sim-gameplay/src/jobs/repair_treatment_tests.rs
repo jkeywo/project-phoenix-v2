@@ -324,3 +324,36 @@ fn actual_completed_care_survives_a_supported_failing_return_tree_and_still_goes
     assert_eq!(state.officers["chief"].condition, PersonnelCondition::Fit);
     assert_eq!(stock, 0);
 }
+
+#[test]
+fn forged_extra_treatment_team_is_rejected_before_navigation_or_home_indexing() {
+    let (mut teams, profile, state) = fixture();
+    teams.claim_treatment(&profile, &state, "chief", 0).unwrap();
+    let original = teams.save_state();
+    let mut bad = original.clone();
+    let mut extra = bad.teams[0].clone().unwrap();
+    extra.id.0 += 1;
+    extra.outcome = Some(JobOutcome::Cancelled);
+    let RepairActivity::Treatment {
+        phase, cancelled, ..
+    } = &mut extra.activity
+    else {
+        panic!()
+    };
+    *cancelled = true;
+    *phase = TeamSlot::Returning {
+        remaining: 0.0,
+        system_id: None,
+        display_name: None,
+        queued_system_id: None,
+        queued_display_name: None,
+    };
+    bad.next_id = extra.id.0 + 1;
+    bad.teams.push(Some(extra));
+    bad.navigation
+        .as_mut()
+        .unwrap()
+        .push(original.navigation.as_ref().unwrap()[0].clone());
+    assert!(teams.restore_state(&bad).is_err());
+    assert_eq!(teams.save_state(), original);
+}

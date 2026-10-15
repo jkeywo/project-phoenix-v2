@@ -42,20 +42,6 @@ fn steps(app: &mut App, count: usize) {
         app.update();
     }
 }
-fn begin(fetch: bool) -> App {
-    let mut app = unstarted(
-        if fetch {
-            FETCH_WORLD
-        } else {
-            "assets/worlds/probe_recovery.toml"
-        },
-        if fetch { FETCH_CRUISER } else { CRUISER },
-    );
-    app.finish();
-    app.cleanup();
-    steps(&mut app, 10);
-    app
-}
 fn claim_messages(app: &mut App, station: &str, token: &str) -> Vec<ClientMessage> {
     let entity = local(app);
     // The authored ladder is most detailed first. Selecting complexity uses

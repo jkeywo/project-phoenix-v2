@@ -501,6 +501,20 @@ export const ACTION_MAP = Object.freeze({
   },
 
   /** Continuous semantic steering uses only the existing narrow axis route. */
+  begin_transit: (a, send) => {
+    if (!a.control_system_id) return;
+    send(a.correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(a.correlation ? { correlation: a.correlation } : {}), target: a.control_system_id,
+      payload: { type: 'BeginTransitToWaypoint', data: { request: null } },
+    });
+  },
+  cancel_transit: (a, send) => {
+    if (!a.control_system_id) return;
+    send(a.correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(a.correlation ? { correlation: a.correlation } : {}), target: a.control_system_id,
+      payload: { type: 'CancelTransit' },
+    });
+  },
   set_helm_mode: (a, send) => {
     if (!a.control_system_id || !['assisted', 'direct'].includes(a.mode)) return;
     send(a.correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {

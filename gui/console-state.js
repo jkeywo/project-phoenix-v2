@@ -1,6 +1,7 @@
 import { personnelPayload } from './personnel.js';
 import { weaponTargetsPayload } from './weapon-targets.js';
 import { buildHelmMovement } from './helm-movement.js';
+import { buildTransitDrives } from './transit.js';
 import { scanPublicationOwner } from './scan-source.js';
 import { buildReferenceControls } from './sensor-references.js';
 import { observationTickFor } from './observation-details.js';
@@ -1284,9 +1285,11 @@ export function buildHelmConsoleState(state, systemIds = []) {
     systemIds, controlSources: state.controlSources,
     tracks: [...delivered, ...blackboardsOfKind(state, 'SensorRadar').flatMap(entry => entry.data.tracks || [])], tick: state.observationTick,
   }) : null;
+  const transitEntries = blackboardsOfKind(state, 'Transit');
 
   return {
     ...(movementEntry ? { helm_movement: movement } : {}),
+    ...(transitEntries.length ? {transit_drives:buildTransitDrives(transitEntries, {systemIds, controlSources:state.controlSources})} : {}),
     ...(trackMode ? { track_mode: true, tracks: observed.tracks,
       observed_approaches: blackboardsOfKind(state, 'Helm').flatMap(entry => entry.data.approaches || []) } : {}),
     range,

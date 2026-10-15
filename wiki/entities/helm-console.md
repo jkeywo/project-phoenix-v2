@@ -2,7 +2,7 @@
 title: Helm Console
 type: entity
 tags: [console, helm, input, ship, physics, radar, impulse, boost, dock]
-sources: [gui/battleship/helm.html, gui/cruiser/helm.html, gui/destroyer/helm.html, gui/stations/helm-console.js, gui/console-state.js, gui/components/ph-helm-radar.js, gui/components/ph-helm-joystick.js, gui/stations/helm-actions.js, gui/gamepad-input.js, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-sim-gameplay/src/ship/helm_admission.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/ship/physics.rs, crates/phoenix-sim-gameplay/src/ship/impulse.rs, crates/phoenix-sim-gameplay/src/ship/boost.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-sim-gameplay/src/modifiers/coordination.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/entities/spawner.rs, assets/entities/alliance_destroyer.toml, assets/entities/alliance_cruiser.toml]
+sources: [gui/transit.js, gui/components/ph-transit-drives.js, gui/stations/transit-actions.js, gui/battleship/helm.html, gui/cruiser/helm.html, gui/destroyer/helm.html, gui/stations/helm-console.js, gui/console-state.js, gui/components/ph-helm-radar.js, gui/components/ph-helm-joystick.js, gui/stations/helm-actions.js, gui/gamepad-input.js, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-sim-gameplay/src/ship/helm_admission.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/ship/physics.rs, crates/phoenix-sim-gameplay/src/ship/impulse.rs, crates/phoenix-sim-gameplay/src/ship/boost.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-sim-gameplay/src/modifiers/coordination.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/entities/spawner.rs, assets/entities/alliance_destroyer.toml, assets/entities/alliance_cruiser.toml]
 updated: 2026-10-15
 ---
 
@@ -118,6 +118,16 @@ arcs. A human Helm sees the request on the console. Backfill Helm's receiver
 accepts only an AI delivery for the authored Helm Station, rechecks the live
 `helm-steering` policy, and preserves the exact arc geometry for the next
 steering decision. A withdrawal clears that request across weapon families.
+
+## LocalJump
+
+Installed Transit drives publish their own typed Console rows. The shared
+`ph-transit-drives` widget shows only those permitted rows: accepted course,
+preparation, fuel requirement and own actual arrival. Begin sends no position;
+the actual drive freezes its permitted Navigation course. Cancel is available
+only before commitment. Controls require that exact System's current Human
+ownership, including on a read-only feed. No private gravity inputs or future
+placement recipe enter the phone view.
 
 ## Related
 

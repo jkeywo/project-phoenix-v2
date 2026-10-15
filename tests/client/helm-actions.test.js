@@ -1,4 +1,5 @@
 import { HELM_MOVEMENT_ACTIONS } from '../../gui/stations/helm-movement-actions.js';
+import { HELM_TRANSIT_ACTIONS } from '../../gui/stations/transit-actions.js';
 import { describe, expect, it, vi } from 'vitest';
 import {
   clientSettingsSemanticActions,
@@ -48,6 +49,7 @@ describe('Helm semantic actions', () => {
       HELM_VIEWSCREEN_ACTION,
       HELM_DOCK_ACTION,
       ...HELM_MOVEMENT_ACTIONS,
+      ...HELM_TRANSIT_ACTIONS,
     ]);
     for (const action of HELM_ACTIONS) {
       expect(action.contexts).toEqual([HELM_ACTION_CONTEXT]);

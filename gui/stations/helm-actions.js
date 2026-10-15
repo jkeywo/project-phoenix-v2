@@ -11,6 +11,7 @@ import { defineStationAction, createCorrelatedActionSender, keyboard as key, but
 
 import { familyView } from '../console-payload.js';
 import { HELM_MOVEMENT_ACTIONS, registerHelmMovementActions } from './helm-movement-actions.js';
+import { HELM_TRANSIT_ACTIONS, registerTransitActions } from './transit-actions.js';
 import {
   createSemanticActionRegistry,
   SEMANTIC_HANDLED_WITHOUT_FEEDBACK,
@@ -84,6 +85,7 @@ export const HELM_ACTIONS = Object.freeze([
   HELM_VIEWSCREEN_ACTION,
   HELM_DOCK_ACTION,
   ...HELM_MOVEMENT_ACTIONS,
+  ...HELM_TRANSIT_ACTIONS,
 ]);
 
 export function helmActionView(state) {
@@ -120,6 +122,7 @@ export function registerHelmActions(registry, options = {}) {
     ? options.hasDockControl : () => true;
   const send = createCorrelatedActionSender(sendAction);
   registerHelmMovementActions(registry, { getState, sendAction });
+  registerTransitActions(registry, { getState, sendAction });
 
   registry.register(HELM_THRUST_ACTION, ({ value } = {}) => {
     const view = helmActionView(getState());

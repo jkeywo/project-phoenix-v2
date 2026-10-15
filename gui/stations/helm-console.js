@@ -90,6 +90,8 @@ export function makeHelmRender(variant) {
     // ── Joystick(s) ──────────────────────────────────────────────────────
     const movementEl = doc.getElementById('helm-movement');
     if (movementEl) movementEl.state = s.helm_movement || null;
+    const transitEl = doc.getElementById('transit-drives');
+    if (transitEl) transitEl.state = s.transit_drives || [];
     const joystickEl = doc.getElementById(ids.joystick);
     updateControl(joystickEl, { auto: Object.hasOwn(s, 'helm_movement')
       ? !s.helm_movement?.axes?.some(axis => ['thrust', 'steering'].includes(axis.role) && axis.controllable)

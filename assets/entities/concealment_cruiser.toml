@@ -75,7 +75,11 @@ id = "science"
 [[station.rating]]
 name = "Std"
 automated_systems = []
-detailed_systems = ["sensors","sensor-radar","passive-receiver","concealment"]
+detailed_systems = ["sensors","sensor-radar","passive-receiver","shields-system","shield-arc-fore","shield-arc-port","shield-arc-aft","shield-arc-starboard","concealment"]
+[[station.rating]]
+name = "Guard"
+automated_systems = ["passive-receiver","shields-system","shield-arc-fore","shield-arc-port","shield-arc-aft","shield-arc-starboard","concealment"]
+detailed_systems = ["sensors","sensor-radar"]
 
 [energy.reactor]
 sustainable_output_per_sec = 31.7

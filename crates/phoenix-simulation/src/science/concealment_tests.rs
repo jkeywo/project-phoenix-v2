@@ -7,6 +7,53 @@ pub(crate) fn config() -> crate::entities::config::EntityConfig {
     crate::entities::include_resolve::load_entity_config("assets/entities/concealment_cruiser.toml")
         .unwrap()
 }
+#[test]
+fn optional_cloak_hull_keeps_every_base_science_rating_assignment_and_real_equipment() {
+    let base = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    let equipped = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/concealment_cruiser.toml",
+    )
+    .unwrap();
+    let base_ship = base.ship_config.as_ref().unwrap();
+    let equipped_ship = equipped.ship_config.as_ref().unwrap();
+    assert_eq!(base_ship.stations.len(), equipped_ship.stations.len());
+    let science = |ship: &crate::ship::config::ShipConfig| {
+        ship.stations
+            .iter()
+            .find(|row| row.id.0 == "science")
+            .unwrap()
+            .ratings
+            .clone()
+    };
+    for old in science(base_ship) {
+        let next = science(equipped_ship)
+            .into_iter()
+            .find(|row| row.name == old.name)
+            .unwrap();
+        assert!(old
+            .automated_systems
+            .iter()
+            .all(|system| next.automated_systems.contains(system)));
+        assert!(old
+            .detailed_systems
+            .as_ref()
+            .unwrap()
+            .iter()
+            .all(|system| next.detailed_systems.as_ref().unwrap().contains(system)));
+        if old.name == "Std" {
+            assert!(next.detailed_systems.unwrap().contains(&id()));
+        } else {
+            assert!(next.automated_systems.contains(&id()));
+        }
+    }
+    for system in &base_ship.systems {
+        assert!(equipped_ship.systems.iter().any(|next| next == system));
+    }
+    assert_eq!(base.shield_arcs, equipped.shield_arcs);
+}
 pub(crate) fn fixture() -> (World, Entity) {
     let mut world = World::new();
     world.insert_resource(crate::sim_tick::SimTick(100));

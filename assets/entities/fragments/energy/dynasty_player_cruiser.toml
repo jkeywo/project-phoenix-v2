@@ -795,9 +795,9 @@ restore_delay_secs = 0.5
 [[energy.group]]
 id = "sensors"
 max_flow_per_sec = 4
-default_flow_per_sec = 3.15
+default_flow_per_sec = 3.3
 max_cooling_per_sec = 10
-default_cooling_per_sec = 2
+default_cooling_per_sec = 2.1
 priority = 4
 restore_delay_secs = 0.5
 
@@ -1192,4 +1192,38 @@ default_flow_per_sec = 1
 max_cooling_per_sec = 5
 default_cooling_per_sec = 1
 priority = 28
+restore_delay_secs = 0.5
+
+# [ai] Increment14 passive receiver: 0.1 paid work/sec, independent reserve.
+[power_groups.energy-passive-receiver]
+label = "sensing.passive.label"
+default_level = 2
+min_level = 0
+max_level = 4
+[[energy.consumer]]
+system = "passive-receiver"
+initial_energy = 7.5
+initial_heat = 0
+continuous_cost_per_sec = 0.1
+discrete_cost = 0
+[energy.consumer.reserve]
+capacity = 10
+max_intake_per_sec = 0.25
+passive_loss_at_full_per_sec = 0.05
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+[energy.consumer.coolant]
+service = "coolant"
+[[energy.group]]
+id = "energy-passive-receiver"
+parent = "sensors"
+max_flow_per_sec = 0.25
+default_flow_per_sec = 0.15
+max_cooling_per_sec = 1
+default_cooling_per_sec = 0.1
+priority = 29
 restore_delay_secs = 0.5

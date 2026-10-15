@@ -141,7 +141,7 @@ faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 # Resolution happens at authoring time. The runtime never sees a fragment — it
 # sees one resolved document, and PRD #774's "every AI-capable fine system
 # declares a policy" is satisfied by that document, not by this file.
-includes = ["fragments/jobs/repair_workflow.toml","fragments/ai/dock_state_tree.toml","fragments/ai/fleet_baseline.toml","fragments/ai/captain_alliance.toml","fragments/ai/movement_broadside_orbit.toml","fragments/energy/alliance_cruiser.toml","fragments/damage/common.toml","fragments/fitting/alliance_cruiser.toml"]
+includes = ["fragments/jobs/repair_workflow.toml","fragments/ai/dock_state_tree.toml","fragments/ai/fleet_baseline.toml","fragments/ai/captain_alliance.toml","fragments/ai/movement_broadside_orbit.toml","fragments/energy/alliance_cruiser.toml","fragments/damage/common.toml","fragments/fitting/alliance_cruiser.toml","fragments/sensing/alliance_cruiser.toml"]
 
 [mesh]
 model = "assets/models/alliance_cruiser_recreated.glb"
@@ -1870,11 +1870,11 @@ manual_overview = "You run sensors and the shield grid. Sweep the long-range rad
 [[station.rating]]
 name = "Std"
 automated_systems = []
-detailed_systems = ["sensors","sensor-radar","shields-system","shield-arc-fore","shield-arc-port","shield-arc-aft","shield-arc-starboard"]
+detailed_systems = ["sensors","sensor-radar","passive-receiver","shields-system","shield-arc-fore","shield-arc-port","shield-arc-aft","shield-arc-starboard"]
 
 [[station.rating]]
 name = "Guard"
-automated_systems = ["shields-system","shield-arc-fore","shield-arc-port","shield-arc-aft","shield-arc-starboard"]
+automated_systems = ["passive-receiver","shields-system","shield-arc-fore","shield-arc-port","shield-arc-aft","shield-arc-starboard"]
 detailed_systems = ["sensors","sensor-radar"]
 
 [[station.tutorial]]
@@ -3039,7 +3039,7 @@ id = "flow-sensors"
 [system.config.ai.tree.state.task.action]
 kind = "write_number"
 channel = "flow-sensors"
-value = 3.1500000953674316
+value = 3.3
 
 [[system.config.ai.tree.state.task]]
 id = "cooling-sensors"
@@ -3047,7 +3047,7 @@ id = "cooling-sensors"
 [system.config.ai.tree.state.task.action]
 kind = "write_number"
 channel = "cooling-sensors"
-value = 2
+value = 2.1
 
 [[system.config.ai.tree.state.task]]
 id = "fill-sensors"
@@ -4520,6 +4520,21 @@ field_replaceable = true
 [system.damage_component.susceptibility]
 physical = 1
 laser = 1
+
+# [ai] The passive receiver is independent, with its actual finite reserve.
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-passive-receiver"
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-passive-receiver"
+value = 0.15
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-passive-receiver"
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-passive-receiver"
+value = 0.1
+
 [[system]]
 id = "power-battery"
 kind = "power_battery"
@@ -5639,6 +5654,11 @@ kind = "TacticalRadar"
 source = "viewscreen"
 kind = "Viewscreen"
 
+
+[[console.feed]]
+source = "passive-receiver"
+kind = "Passive"
+
 [[console]]
 id = "engineering"
 name = "Engineering"
@@ -5927,6 +5947,7 @@ torpedo-tube-fore-starboard = "weapons"
 torpedo-tube-aft = "weapons"
 sensors = "bridge"
 sensor-radar = "bridge"
+passive-receiver = "bridge"
 shields-system = "weapons"
 navigation = "bridge"
 power-reactor = "engineering"

@@ -1,0 +1,83 @@
+# [ai] Increment14 first instrument tuning; physical stores/AI remain ordinary.
+[sensing.focused]
+system = "sensors"
+work_secs = 2
+history_limit = 64
+unfinished_retention_secs = 0
+
+[sensing.broad]
+system = "sensor-radar"
+sample_interval_secs = 0.5
+identity_secs = 1
+classification_secs = 3
+assessment_secs = 6
+position_error = 2
+drift_error_per_sec = 0.5
+track_retention_secs = 60
+
+[sensing.passive]
+system = "passive-receiver"
+sample_interval_secs = 0.5
+min_signal_strength = 0.01
+bearing_error_rad = 0.15
+
+[sensing.passive.mount]
+facing_deg = 0
+arc_deg = 360
+range = 100
+
+[[system]]
+id = "passive-receiver"
+kind = "passive_receiver"
+console = "science"
+power_group = "energy-passive-receiver"
+
+[system.config.ai]
+root = "passive"
+[[system.config.ai.tree]]
+id = "passive"
+initial = "receive"
+[[system.config.ai.tree.state]]
+id = "receive"
+[[system.config.ai.tree.state.task]]
+id = "operate-capable-receiver"
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "operate"
+value = { source = "fact", name = "can_operate" }
+
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1

@@ -1474,7 +1474,7 @@ id = "flow-sensors"
 [system.config.ai.tree.state.task.action]
 kind = "write_number"
 channel = "flow-sensors"
-value = 3.1500000953674316
+value = 3.3
 
 [[system.config.ai.tree.state.task]]
 id = "cooling-sensors"
@@ -1482,7 +1482,7 @@ id = "cooling-sensors"
 [system.config.ai.tree.state.task.action]
 kind = "write_number"
 channel = "cooling-sensors"
-value = 2
+value = 2.1
 
 [[system.config.ai.tree.state.task]]
 id = "fill-sensors"
@@ -2974,6 +2974,21 @@ value = { source = "literal", value = false }
 equals = true
 value = { source = "number_compare", name = "strike_boost_enabled", comparison = "greater", value = 0.0 }
 
+
+# [ai] The passive receiver is independent, with its actual finite reserve.
+[[system.config.ai.tree.state.task]]
+id = "flow-energy-passive-receiver"
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "flow-energy-passive-receiver"
+value = 0.15
+[[system.config.ai.tree.state.task]]
+id = "cooling-energy-passive-receiver"
+[system.config.ai.tree.state.task.action]
+kind = "write_number"
+channel = "cooling-energy-passive-receiver"
+value = 0.1
+
 [[system]]
 id = "power-battery"
 console = "power"
@@ -3572,6 +3587,11 @@ kind = "TacticalRadar"
 source = "viewscreen"
 kind = "Viewscreen"
 
+
+[[console.feed]]
+source = "passive-receiver"
+kind = "Passive"
+
 [[console]]
 id = "power"
 name = "Power"
@@ -3817,6 +3837,7 @@ torpedo-tube-fore-starboard = "weapons"
 torpedo-tube-aft = "weapons"
 sensors = "bridge"
 sensor-radar = "bridge"
+passive-receiver = "bridge"
 shields-system = "weapons"
 navigation = "bridge"
 power-reactor = "engineering"
@@ -6748,3 +6769,7 @@ slot = []
 equipment = []
 locker = []
 assembly = []
+
+[[system]]
+id = "passive-receiver"
+console = "sensors"

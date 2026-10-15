@@ -17,3 +17,20 @@ export function renderPlannedRequests(container,view,onActivate){
     node.lastChild.disabled=view.planned_controllable!==true;
   }
 }
+
+/** Accepted future work is visible without offering premature controls. */
+export function renderPlannedRepairIntents(container,view){
+  if(!container)return;
+  const waiting=(view?.planned_intents||[]).filter(row=>row.released_tick===null||row.disposition);
+  container.hidden=!waiting.length;
+  container.replaceChildren();
+  for(const intent of waiting){
+    const row=container.ownerDocument.createElement('p');row.dataset.intent=intent.id;
+    const subject=wireText(intent.target?.compartment??intent.target?.system);
+    const requirements=intent.prerequisites.filter(dep=>!dep.satisfied).map(dep=>t(`planning.intent.wait_${dep.condition.kind}`)).join('; ')||t('planning.intent.wait_release');
+    const status=intent.disposition;
+    const detail=status?t(`planning.intent.status_${status.kind}`)+(status.kind==='restored_externally'?' '+t(status.consequence_applied===null?'planning.intent.consequence_pending':status.consequence_applied?'planning.intent.consequence_applied':'planning.intent.consequence_refused'):''):requirements;
+    row.textContent=t('planning.intent.instruction',{subject,requirements:detail});
+    container.append(row);
+  }
+}

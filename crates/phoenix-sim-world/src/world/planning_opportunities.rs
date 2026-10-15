@@ -43,6 +43,8 @@ pub struct MaintenanceSearchConfig {
     pub commodity: String,
     pub offer_script: String,
     pub offer_function: String,
+    /// Explicit authored consequence for a restored, never-accepted final leaf.
+    pub changed_work: crate::world::activities::ScenarioCall,
     pub terms: String,
     pub resolves_when: String,
 }
@@ -103,9 +105,11 @@ impl CompiledMaintenanceSearch {
             || config.source_store == config.destination_store
             || !super::compile::identifier(&config.commodity)
             || !super::compile::identifier(&config.offer_function)
+            || !super::compile::identifier(&config.changed_work.function)
             || [
                 config.actor.as_str(),
                 config.offer_script.as_str(),
+                config.changed_work.script.as_str(),
                 config.terms.as_str(),
                 config.resolves_when.as_str(),
             ]
@@ -489,12 +493,38 @@ mod tests {
             refused_methods: Vec::new(),
             temporal: None,
             temporal_reconsiderations: Vec::new(),
+            node_dispositions: BTreeMap::new(),
         };
         let mut instances = crate::world::activities::SituationInstances::default();
         graph
             .release(&mut choice, &mut instances, &reference.actor, 10)
             .unwrap();
         assert_eq!(instances.instances.len(), 1);
+        let before_intent = (choice.clone(), instances.clone());
+        let orders = graph.intent_requests(&choice, &instances, 10).unwrap();
+        let future = orders
+            .iter()
+            .find(|row| {
+                matches!(
+                    row.config.request,
+                    crate::world::activities::ActivityRequest::Repair { .. }
+                )
+            })
+            .unwrap();
+        assert!(future.released_tick.is_none());
+        assert_eq!(future.config.request.actor(), reference.actor);
+        assert_eq!(future.prerequisites.len(), 1);
+        assert_eq!(
+            future.prerequisites[0].condition,
+            phoenix_model::activity::PlannedPrerequisiteKind::Received
+        );
+        assert!(!future.prerequisites[0].satisfied);
+        assert!(!instances.instances.contains_key(&future.config.id));
+        assert_eq!(
+            before_intent,
+            (choice.clone(), instances.clone()),
+            "intent creates no admission or reservation"
+        );
         for fault in 0..4 {
             let mut forged = choice.clone();
             match fault {

@@ -179,6 +179,7 @@ impl CompiledPlanning {
                 refused_methods: refused_methods.clone(),
                 temporal: None,
                 temporal_reconsiderations: Vec::new(),
+                node_dispositions: BTreeMap::new(),
             },
             graph,
             refused_methods,

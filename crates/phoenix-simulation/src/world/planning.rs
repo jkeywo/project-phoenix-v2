@@ -200,6 +200,91 @@ pub(crate) fn requests(
         .collect()
 }
 
+/// Accepted own-owner intent uses the same frozen graph as release; a future
+/// leaf is not admitted machinery and contains no current damage diagnosis.
+pub(crate) fn repair_intents(
+    runtime: Option<&WorldContentRuntime>,
+    base: Option<&WorldConfig>,
+    actor: &str,
+    owner: &phoenix_model::identity::SystemId,
+    now: u64,
+) -> Vec<phoenix_model::activity::PlannedRepairIntent> {
+    let (Some(runtime), Some(base)) = (runtime, base) else {
+        return Vec::new();
+    };
+    let mut rows = Vec::new();
+    if let (Some(compiled), Some(choice)) = (&base.compiled_planning, &runtime.plan_choice) {
+        if choice
+            .effective_temporal()
+            .is_none_or(|schedule| schedule.nodes().is_some())
+        {
+            if let Ok(graph) = compiled.validate_history(choice, &runtime.situations, now) {
+                rows.extend(
+                    graph
+                        .intent_requests(choice, &runtime.situations, now)
+                        .unwrap_or_default(),
+                );
+            }
+        }
+    }
+    if let Some(source) = &base.compiled_opportunity_search {
+        for record in &runtime.opportunities {
+            if let crate::world::opportunities::OpportunityState::Accepted {
+                input, choice, ..
+            } = &record.state
+            {
+                if let Ok(graph) = source.derive(&record.reference, input, &record.proposal) {
+                    rows.extend(
+                        graph
+                            .intent_requests(choice, &runtime.situations, now)
+                            .unwrap_or_default(),
+                    );
+                }
+            }
+        }
+    }
+    rows.into_iter()
+        .filter_map(project_repair_intent)
+        .filter(|(target_actor, target_owner, _)| target_actor == actor && target_owner == owner)
+        .map(|(_, _, intent)| intent)
+        .collect()
+}
+
+pub(crate) fn project_repair_intent(
+    row: phoenix_sim_world::world::planning::PlanIntentRequest,
+) -> Option<(
+    String,
+    phoenix_model::identity::SystemId,
+    phoenix_model::activity::PlannedRepairIntent,
+)> {
+    let ActivityRequest::Repair {
+        actor,
+        owner,
+        team,
+        request,
+        target,
+        goal,
+    } = row.config.request
+    else {
+        return None;
+    };
+    Some((
+        actor,
+        owner,
+        phoenix_model::activity::PlannedRepairIntent {
+            id: row.config.id,
+            chosen_tick: row.chosen_tick,
+            released_tick: row.released_tick,
+            team: u8::try_from(team).ok()?,
+            request,
+            target,
+            goal,
+            prerequisites: row.prerequisites,
+            disposition: row.disposition,
+        },
+    ))
+}
+
 pub(crate) fn repair_requests(
     runtime: Option<&WorldContentRuntime>,
     base: Option<&WorldConfig>,

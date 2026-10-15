@@ -1,6 +1,55 @@
 //! Triggers.
 use super::*;
 
+/// Typed invocation identity; neither variant grants physical completion.
+enum ScenarioDispatch {
+    Situation(phoenix_sim_world::world::activities::ScenarioActivation),
+    Node(crate::world::planning_monitor::NodeActivation),
+}
+impl ScenarioDispatch {
+    fn identity(&self) -> String {
+        match self {
+            Self::Situation(row) => row.instance.clone(),
+            Self::Node(row) => format!("{}/{}", row.reference.instance_id(), row.node),
+        }
+    }
+    fn invoke(
+        &self,
+        scripts: &mut WorldScriptRuntime,
+        context: &ScriptCallContext<'_>,
+        runtime: &WorldContentRuntime,
+        layers: Option<&WorldLayerMap>,
+    ) -> Result<Option<CallEffects>, String> {
+        match self {
+            Self::Situation(row) => scripts.invoke_situation_effects(context, runtime, layers, row),
+            Self::Node(row) => scripts.invoke_plan_node_effects(context, runtime, layers, row),
+        }
+    }
+    fn finish(
+        &self,
+        runtime: &mut WorldContentRuntime,
+        base: Option<&crate::world::config::WorldConfig>,
+        result: phoenix_sim_world::world::activities::ScenarioCallResult,
+        tick: u64,
+    ) -> Result<(), String> {
+        match self {
+            Self::Situation(row) => runtime.situations.finish_activation(
+                row,
+                result,
+                tick,
+                &runtime.situation_definitions,
+            ),
+            Self::Node(row) => crate::world::planning_monitor::finish(
+                runtime,
+                base.ok_or("missing changed-work source")?,
+                row,
+                result,
+                tick,
+            ),
+        }
+    }
+}
+
 /// Observer: bridge `RegionEntered` (player ship boundary crossing into a
 /// region) into a queued `WorldEvent::EnteredRegion` so `collect_world_events`
 /// can buffer it for the trigger pipeline on the next tick.
@@ -274,6 +323,14 @@ pub(crate) fn collect_world_events(
                     continue;
                 }
                 let result = (|| -> Result<(), String> {
+                    crate::world::planning_monitor::observe(
+                        &mut runtime,
+                        base,
+                        &uuid.0,
+                        config,
+                        boards,
+                        tick.0,
+                    )?;
                     crate::world::opportunities::advance(&mut runtime, base, &uuid.0, tick.0)?;
                     let inputs = crate::world::opportunity_inputs::project(
                         source, tick.0, config, damage, teams, reports, profile, logistics,
@@ -452,6 +509,7 @@ pub(crate) fn tick_trigger_pipeline(
     let template_loader = crate::entities::loader::WasmTemplateLoader;
     if buffer.0.is_empty()
         && runtime.situations.ready(&runtime.situation_definitions).is_empty()
+        && world_layers.base_world_config.as_deref().is_none_or(|base|crate::world::planning_monitor::ready(&runtime,base).is_empty())
         && runtime.pending_delayed_actions.is_empty()
         && runtime.pending_gm_event_fires.is_empty()
         && runtime.pending_gm_spawns.is_empty()
@@ -776,7 +834,7 @@ pub(crate) fn tick_trigger_pipeline(
                             entity_name: None,
                         },
                     },
-                    Some(activation),
+                    Some(ScenarioDispatch::Situation(activation)),
                 ));
             } else {
                 runtime
@@ -788,6 +846,26 @@ pub(crate) fn tick_trigger_pipeline(
                         &runtime.situation_definitions,
                     )
                     .expect("ready closed Scenario transition");
+            }
+        }
+        if let Some(base) = world_layers.base_world_config.as_deref() {
+            for activation in crate::world::planning_monitor::ready(runtime, base) {
+                dispatches.push((
+                    phoenix_sim_world::world::trigger_registry::FiredWorldTrigger {
+                        trigger_id: None,
+                        handler: Some(
+                            phoenix_sim_world::world::trigger_registry::ScriptHandlerRef {
+                                script_path: activation.call.script.clone(),
+                                fn_name: activation.call.function.clone(),
+                            },
+                        ),
+                        context: crate::world::content::FiredTrigger {
+                            origin_layer: None,
+                            entity_name: None,
+                        },
+                    },
+                    Some(ScenarioDispatch::Node(activation)),
+                ));
             }
         }
         if dispatches.is_empty() {
@@ -841,16 +919,16 @@ pub(crate) fn tick_trigger_pipeline(
                         function: &h.fn_name,
                     };
                     let effects = if let Some(activation) = &activation {
-                        match sr.invoke_situation_effects(
+                        match activation.invoke(
+                            sr,
                             &context,
                             runtime,
                             world_layers.layer_map.as_deref(),
-                            activation,
                         ) {
                             Ok(effects) => effects,
                             Err(error) => {
-                                bevy::log::warn!(instance=%activation.instance,%error,"Scenario call refused; buffered effects discarded");
-                                runtime.situations.finish_activation(activation, phoenix_sim_world::world::activities::ScenarioCallResult::Refused, now_tick, &runtime.situation_definitions).expect("ready Scenario refusal");
+                                bevy::log::warn!(instance=%activation.identity(),%error,"Scenario call refused; buffered effects discarded");
+                                activation.finish(runtime,world_layers.base_world_config.as_deref(),phoenix_sim_world::world::activities::ScenarioCallResult::Refused,now_tick).expect("ready Scenario refusal");
                                 None
                             }
                         }
@@ -902,20 +980,19 @@ pub(crate) fn tick_trigger_pipeline(
                         );
                         if completed {
                             if let Some(activation) = &activation {
-                                runtime.situations.finish_activation(activation, phoenix_sim_world::world::activities::ScenarioCallResult::Applied, now_tick, &runtime.situation_definitions).expect("applied Scenario activation");
+                                activation.finish(runtime,world_layers.base_world_config.as_deref(),phoenix_sim_world::world::activities::ScenarioCallResult::Applied,now_tick).expect("applied Scenario activation");
                             }
                         }
                     }
                 }
             } else if let Some(activation) = &activation {
-                bevy::log::warn!(instance=%activation.instance,"Scenario call refused: no accepted script runtime");
-                runtime
-                    .situations
-                    .finish_activation(
-                        activation,
+                bevy::log::warn!(instance=%activation.identity(),"Scenario call refused: no accepted script runtime");
+                activation
+                    .finish(
+                        runtime,
+                        world_layers.base_world_config.as_deref(),
                         phoenix_sim_world::world::activities::ScenarioCallResult::Refused,
                         now_tick,
-                        &runtime.situation_definitions,
                     )
                     .expect("ready Scenario missing-runtime refusal");
             }

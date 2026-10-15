@@ -63,6 +63,7 @@ impl Decomposition {
         {
             return Err("invalid plan choice/release clock or bound".into());
         }
+        self.validate_dispositions(choice, instances, now)?;
         let mut expected = BTreeSet::new();
         for (node, tick) in &choice.released {
             if !self.leaves.contains_key(node) || *tick < choice.chosen_tick || *tick > now {
@@ -155,6 +156,12 @@ impl CompiledPlanning {
         Ok(choice
             .released
             .keys()
+            .filter(|node| {
+                !choice
+                    .node_dispositions
+                    .get(*node)
+                    .is_some_and(PlanNodeDisposition::withheld)
+            })
             .filter_map(|node| {
                 let config = graph.bound(node, choice);
                 instances
@@ -185,7 +192,13 @@ impl Decomposition {
         let mut next_instances = instances.clone();
         let mut released = Vec::new();
         for node in self.leaves.keys() {
-            if next_choice.released.contains_key(node) || !self.ready(node, &next_instances) {
+            if next_choice.released.contains_key(node)
+                || choice
+                    .node_dispositions
+                    .get(node)
+                    .is_some_and(PlanNodeDisposition::withheld)
+                || !self.ready(node, &next_instances)
+            {
                 continue;
             }
             if next_choice.effective_temporal().is_some_and(|saved| {
@@ -215,6 +228,12 @@ impl Decomposition {
         Ok(choice
             .released
             .keys()
+            .filter(|node| {
+                !choice
+                    .node_dispositions
+                    .get(*node)
+                    .is_some_and(PlanNodeDisposition::withheld)
+            })
             .filter_map(|node| {
                 let config = self.bound(node, choice);
                 instances
@@ -222,6 +241,83 @@ impl Decomposition {
                     .get(&config.id)
                     .filter(|instance| instance.accepted.is_none())
                     .map(|_| config)
+            })
+            .collect())
+    }
+    /// Accepted future intent is information only. A missing instance is not
+    /// an assignment; no physical admission or reservation happens here.
+    pub fn intent_requests(
+        &self,
+        choice: &PlanChoice,
+        instances: &SituationInstances,
+        now: u64,
+    ) -> Result<Vec<PlanIntentRequest>, String> {
+        use crate::world::activities::SituationCondition as Condition;
+        use phoenix_model::activity::{PlannedPrerequisite, PlannedPrerequisiteKind as Kind};
+        self.validate_history(choice, instances, now)?;
+        if choice
+            .effective_temporal()
+            .is_some_and(|schedule| schedule.nodes().is_none())
+        {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .leaves
+            .keys()
+            .filter_map(|node| {
+                let config = self.bound(node, choice);
+                if instances
+                    .instances
+                    .get(&config.id)
+                    .is_some_and(|row| row.accepted.is_some())
+                {
+                    return None;
+                }
+                let prerequisites = self
+                    .dependencies
+                    .iter()
+                    .filter(|edge| &edge.to == node)
+                    .map(|edge| {
+                        let predecessor = &self.leaves[&edge.from].id;
+                        PlannedPrerequisite {
+                            id: predecessor.clone(),
+                            condition: match &edge.when {
+                                Condition::Accepted => Kind::Accepted,
+                                Condition::Achieved => Kind::Achieved,
+                                Condition::Settled { outcome } => {
+                                    Kind::Settled { outcome: *outcome }
+                                }
+                                Condition::Received => Kind::Received,
+                                Condition::Returned => Kind::Returned,
+                                Condition::CommunicationRead {} => Kind::CommunicationRead,
+                                Condition::CommunicationReported {} => Kind::CommunicationReported,
+                                Condition::CommunicationDeclined {} => Kind::CommunicationDeclined,
+                                Condition::ScenarioApplied { state } => Kind::ScenarioApplied {
+                                    state: state.clone(),
+                                },
+                            },
+                            satisfied: instances
+                                .instances
+                                .get(predecessor)
+                                .is_some_and(|row| edge.when.satisfied_tick(row).is_some()),
+                        }
+                    })
+                    .collect();
+                Some(PlanIntentRequest {
+                    config,
+                    chosen_tick: choice.chosen_tick,
+                    released_tick: choice.released.get(node).copied(),
+                    prerequisites,
+                    disposition: choice.node_dispositions.get(node).map(|row|phoenix_model::activity::PlannedRepairDisposition{
+                        kind:match row.latest.reason {
+                            PlanNodeReason::PartsUnavailable=>phoenix_model::activity::PlannedRepairDispositionKind::PartsUnavailable,
+                            PlanNodeReason::RouteUnavailable=>phoenix_model::activity::PlannedRepairDispositionKind::RouteUnavailable,
+                            PlanNodeReason::WorkInProgress=>phoenix_model::activity::PlannedRepairDispositionKind::WorkInProgress,
+                            PlanNodeReason::Available=>phoenix_model::activity::PlannedRepairDispositionKind::Available,
+                            PlanNodeReason::RestoredExternally=>phoenix_model::activity::PlannedRepairDispositionKind::RestoredExternally,
+                        },tick:row.latest.tick().expect("validated receipt"),consequence_applied:row.consequence.as_ref().map(|receipt|receipt.result==crate::world::activities::ScenarioCallResult::Applied),
+                    }),
+                })
             })
             .collect())
     }
@@ -234,11 +330,21 @@ impl Decomposition {
         now: u64,
     ) -> Result<Option<u64>, String> {
         self.validate_history(choice, instances, now)?;
-        if choice.released.len() != self.leaves.len() {
-            return Ok(None);
-        }
         let mut latest = choice.chosen_tick;
         for node in self.leaves.keys() {
+            if let Some(row) = choice
+                .node_dispositions
+                .get(node)
+                .filter(|row| row.latest.terminal())
+            {
+                let Some(receipt) = row.consequence.as_ref().filter(|receipt| {
+                    receipt.result == crate::world::activities::ScenarioCallResult::Applied
+                }) else {
+                    return Ok(None);
+                };
+                latest = latest.max(receipt.tick);
+                continue;
+            }
             let Some(instance) = instances.instances.get(&self.leaves[node].id) else {
                 return Ok(None);
             };

@@ -408,3 +408,52 @@ fn accepted_root_promise_and_its_original_clocks_preflight_before_any_writes() {
         assert_eq!(crate::sim_digest::world_digest(&world), digest);
     }
 }
+
+#[test]
+fn accepted_repair_intent_projection_cannot_invent_a_target_prerequisite_or_owner() {
+    let (mut world, _, saved) = prepared();
+    let before = capture(&world);
+    for fault in 0..5 {
+        let mut forged = saved.clone();
+        if fault == 4 {
+            forged.scenario = None;
+        } else {
+            let board = forged
+                .entities
+                .iter_mut()
+                .flat_map(|row| &mut row.blackboards)
+                .find_map(|(_, board)| match board {
+                    crate::core::messages::SystemBlackboard::Repair(board)
+                        if !board.planned_intents.is_empty() =>
+                    {
+                        Some(board)
+                    }
+                    _ => None,
+                })
+                .expect("actual accepted graph publishes its own intent");
+            match fault {
+                0 => board.planned_intents[0].id = "foreign/node".into(),
+                1 => board.planned_intents[0].chosen_tick += 1,
+                2 => {
+                    board.planned_intents[0].target =
+                        phoenix_model::damage::RepairWorkTarget::Compartment {
+                            compartment: "foreign".into(),
+                        }
+                }
+                _ => board.planned_intents[0].prerequisites.push(
+                    phoenix_model::activity::PlannedPrerequisite {
+                        id: "invented prerequisite".into(),
+                        condition: phoenix_model::activity::PlannedPrerequisiteKind::Received,
+                        satisfied: true,
+                    },
+                ),
+            }
+        }
+        assert!(crate::snapshot::activities::validate(&world, &forged).is_err());
+        assert!(!restore(&mut world, &forged).is_complete());
+        assert!(
+            capture(&world) == before,
+            "intent refusal{fault} must write nothing"
+        );
+    }
+}

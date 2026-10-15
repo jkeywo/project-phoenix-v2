@@ -324,3 +324,60 @@ pub struct PlannedDeliveryRequest {
     pub commodity: String,
     pub amount: i64,
 }
+
+/// One primary graph plus eight retained optional graphs, each at most 32 leaves.
+pub const MAX_PLANNED_REPAIR_INTENTS: usize = 9 * 32;
+
+/// Accepted mission intent, distinct from released machinery or observed damage.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PlannedPrerequisiteKind {
+    Accepted,
+    Achieved,
+    Settled { outcome: JobOutcome },
+    Received,
+    Returned,
+    CommunicationRead,
+    CommunicationReported,
+    CommunicationDeclined,
+    ScenarioApplied { state: String },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlannedPrerequisite {
+    pub id: String,
+    pub condition: PlannedPrerequisiteKind,
+    pub satisfied: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlannedRepairIntent {
+    pub id: String,
+    pub chosen_tick: u64,
+    pub released_tick: Option<u64>,
+    pub team: u8,
+    pub request: crate::messages::RepairTarget,
+    pub target: RepairWorkTarget,
+    pub goal: RepairGoal,
+    pub prerequisites: Vec<PlannedPrerequisite>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disposition: Option<PlannedRepairDisposition>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlannedRepairDispositionKind {
+    PartsUnavailable,
+    RouteUnavailable,
+    WorkInProgress,
+    Available,
+    RestoredExternally,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlannedRepairDisposition {
+    pub kind: PlannedRepairDispositionKind,
+    pub tick: u64,
+    /// None is pending; false is actual callback refusal, true actual application.
+    pub consequence_applied: Option<bool>,
+}

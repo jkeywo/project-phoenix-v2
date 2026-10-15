@@ -2,8 +2,8 @@
 title: Activity Contracts
 type: concept
 tags: [world, activities, repair, logistics, continuation]
-sources: [crates/phoenix-sim-world/src/world/planning_opportunities.rs, crates/phoenix-content-preparation/src/world/opportunities.rs, crates/phoenix-simulation/src/world/opportunities.rs, crates/phoenix-simulation/src/world/opportunity_inputs.rs, crates/phoenix-model/src/activity.rs, crates/phoenix-sim-world/src/world/activities.rs, crates/phoenix-sim-world/src/world/planning.rs, crates/phoenix-sim-world/src/world/planning_compile.rs, crates/phoenix-sim-world/src/world/planning_runtime.rs, crates/phoenix-sim-world/src/world/planning_temporal.rs, crates/phoenix-simulation/src/world/planning_inputs.rs, crates/phoenix-simulation/src/lobby/crew_replication.rs, crates/phoenix-simulation/src/snapshot/crew_presence.rs, crates/phoenix-content-preparation/src/world/planning.rs, crates/phoenix-simulation/src/world/planning.rs, gui/planned-requests.js, editor/workshop-planning.js, gui/workshop-planning-panel.js, crates/phoenix-simulation/src/debug/scenario.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/activities.rs, crates/phoenix-simulation/src/world/server/triggers.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/resources/logistics_server.rs, crates/phoenix-simulation/src/snapshot/activities.rs, crates/phoenix-simulation/src/sim_digest_activities.rs, crates/phoenix-sim-gameplay/src/jobs/activity_bindings.rs, crates/phoenix-content-preparation/src/world/activity_bindings.rs, editor/workshop-activities.js, gui/workshop-activities-panel.js, crates/phoenix-simulation/src/debug/scenario.rs]
-updated: 2026-10-15
+sources: [crates/phoenix-sim-world/src/world/planning_dispositions.rs, crates/phoenix-simulation/src/world/planning_monitor.rs, crates/phoenix-sim-world/src/world/planning_opportunities.rs, crates/phoenix-content-preparation/src/world/opportunities.rs, crates/phoenix-simulation/src/world/opportunities.rs, crates/phoenix-simulation/src/world/opportunity_inputs.rs, crates/phoenix-model/src/activity.rs, crates/phoenix-sim-world/src/world/activities.rs, crates/phoenix-sim-world/src/world/planning.rs, crates/phoenix-sim-world/src/world/planning_compile.rs, crates/phoenix-sim-world/src/world/planning_runtime.rs, crates/phoenix-sim-world/src/world/planning_temporal.rs, crates/phoenix-simulation/src/world/planning_inputs.rs, crates/phoenix-simulation/src/lobby/crew_replication.rs, crates/phoenix-simulation/src/snapshot/crew_presence.rs, crates/phoenix-content-preparation/src/world/planning.rs, crates/phoenix-simulation/src/world/planning.rs, gui/planned-requests.js, editor/workshop-planning.js, gui/workshop-planning-panel.js, crates/phoenix-simulation/src/debug/scenario.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/activities.rs, crates/phoenix-simulation/src/world/server/triggers.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/resources/logistics_server.rs, crates/phoenix-simulation/src/snapshot/activities.rs, crates/phoenix-simulation/src/sim_digest_activities.rs, crates/phoenix-sim-gameplay/src/jobs/activity_bindings.rs, crates/phoenix-content-preparation/src/world/activity_bindings.rs, editor/workshop-activities.js, gui/workshop-activities-panel.js, crates/phoenix-simulation/src/debug/scenario.rs]
+updated: 2026-10-16
 ---
 
 # Activity Contracts
@@ -176,3 +176,16 @@ Final script-root failures record a dated closed source-unavailable cause withou
 player decision or Promise; budget deferral retains the pending envelope. A bound
 reply missing its decision refuses before buffered effects or response selection.
 Retained originating response metadata cannot contradict a recorded decision.
+
+
+Accepted future Repair orders now have a distinct readonly own-Console intent
+view. Their original prerequisite evidence does not dispatch work. Ordinary Repair
+AI holds only competing generic visit footprints for unaccepted intent, leaving
+other reported groups available. Disposition monitoring for the generated final
+Structure leaf reads its own permitted HP, local stores, route and work list.
+It retains bounded blocked/cleared or externally restored observations without
+creating or rebinding physical execution. A source-declared changed-work callback
+uses the existing script sandbox/budget and actual effect result/tick; it alone
+chooses any Promise consequence. Prior real assignments still settle normally.
+The new native autonomous/override probes are authored and awaiting integration
+execution; source review of projection and client tests are separate evidence.

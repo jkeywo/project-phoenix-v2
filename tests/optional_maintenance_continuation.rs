@@ -739,3 +739,275 @@ fn actual_scratch_delivery_enables_paid_repair_and_retains_frozen_plan_through_j
         "both actual consumers paid finite machinery work"
     );
 }
+
+#[test]
+fn ordinary_ai_observes_future_intent_then_executes_useful_supply_and_repair_through_json_resume() {
+    let (mut live, actor) = boot();
+    let (healthy, original_parts) = establish_need(&mut live, actor);
+    answer_offer(&mut live, 0);
+    let OpportunityState::Accepted { choice, .. } = &runtime(&live).opportunities[0].state else {
+        panic!("actual offered acceptance")
+    };
+    let original_choice = choice.clone();
+    assert_eq!(choice.released.len(), 1);
+    let known = live
+        .world()
+        .get::<ShipConfigComponent>(actor)
+        .unwrap()
+        .0
+        .observations_for_system(
+            &id("repair"),
+            &live.world().get::<ShipSystemBlackboards>(actor).unwrap().0,
+        );
+    let Some(SystemBlackboard::Repair(board)) = known.get(&id("repair")) else {
+        panic!("actual own Repair publication")
+    };
+    assert!(board
+        .planned_intents
+        .iter()
+        .any(|intent| intent.released_tick.is_none()
+            && intent
+                .prerequisites
+                .iter()
+                .any(|dependency| !dependency.satisfied)));
+    // Both ordinary controllers take over the same released and future orders;
+    // no Human starts either Job, and no temporary-controller policy is added.
+    for token in [TOKEN, COMMS] {
+        send(&mut live, token, ClientMessage::ReleaseStation);
+    }
+    let mut saved = None;
+    for _ in 0..2400 {
+        live.update();
+        let work = &runtime(&live).situations.instances;
+        for job in live
+            .world()
+            .get::<ShipRepairTeams>(actor)
+            .unwrap()
+            .0
+            .job_state()
+            .teams
+            .iter()
+            .flatten()
+        {
+            assert!(
+                work.values()
+                    .any(|row| row
+                        .accepted
+                        .as_ref()
+                        .is_some_and(|scope| scope.owner == id("repair")
+                            && scope.physical_job() == Some(job.id))),
+                "generic AI cannot consume the accepted future target first"
+            );
+        }
+        if live
+            .world()
+            .get::<ShipRepairTeams>(actor)
+            .unwrap()
+            .0
+            .job_state()
+            .physical_work
+            .values()
+            .any(|work| work.reserved && work.progress > 0.0 && work.progress < 2.0)
+        {
+            saved = Some(capture(live.world()));
+            break;
+        }
+    }
+    let saved: PhoenixSnapshot = serde_json::from_slice(
+        &serde_json::to_vec(&saved.expect("ordinary AI reaches actual paid partial repair"))
+            .unwrap(),
+    )
+    .unwrap();
+    let OpportunityState::Accepted { choice, .. } = &runtime(&live).opportunities[0].state else {
+        unreachable!()
+    };
+    assert_eq!(choice.chosen_tick, original_choice.chosen_tick);
+    assert_eq!(choice.methods, original_choice.methods);
+    let delivery = runtime(&live)
+        .situations
+        .instances
+        .values()
+        .find(|row| row.request.owner() == &id("logistics"))
+        .unwrap();
+    let repair = runtime(&live)
+        .situations
+        .instances
+        .values()
+        .find(|row| row.request.owner() == &id("repair"))
+        .unwrap();
+    assert!(repair.accepted_tick.unwrap() >= delivery.settled.as_ref().unwrap().tick);
+    let (mut resumed, restored) = boot_definition(WORLD, HULL);
+    let result = restore(resumed.world_mut(), &saved);
+    assert!(result.is_complete(), "{:?}", result.gaps);
+    for step in 0..1200 {
+        assert_same(&live, &resumed, step);
+        live.update();
+        resumed.update();
+    }
+    assert_same(&live, &resumed, 1200);
+    assert_eq!(hp(&live, actor), healthy);
+    assert_eq!(hp(&resumed, restored), healthy);
+    assert_eq!(parts(&live, actor), original_parts - 1);
+    assert_eq!(runtime(&live).flags.counter("actual_optional_structure"), 1);
+    assert_eq!(runtime(&live).flags.counter("actual_optional_changed"), 0);
+    assert!(live
+        .world()
+        .resource::<ActivityPaymentWitness>()
+        .repair
+        .is_some());
+    assert!(live
+        .world()
+        .resource::<ActivityPaymentWitness>()
+        .delivery
+        .is_some());
+}
+
+#[test]
+fn human_override_restores_future_target_without_retroactive_job_credit_and_runs_authored_consequence_once(
+) {
+    let (mut live, actor) = boot();
+    let (healthy, original_parts) = establish_need(&mut live, actor);
+    answer_offer(&mut live, 0);
+    let delivery = released_delivery(&mut live, actor);
+    // A different team performs a legitimate manual order before its planned
+    // peer is released. Empty local stores make it wait for real delivered parts.
+    control(
+        &mut live,
+        TOKEN,
+        "engineering",
+        "repair",
+        Control::DispatchRepairTeam {
+            team_idx: 1,
+            target: project_phoenix::core::messages::RepairTarget::Work(
+                phoenix_model::damage::RepairWorkTarget::Compartment {
+                    compartment: "engineering".into(),
+                },
+            ),
+        },
+    );
+    assert!(runtime(&live)
+        .situations
+        .instances
+        .values()
+        .all(|row| row.request.owner() != &id("repair") || row.accepted.is_none()));
+    control(
+        &mut live,
+        TOKEN,
+        "engineering",
+        "logistics",
+        Control::DispatchDelivery {
+            source: delivery.source,
+            destination: delivery.destination,
+            amount: delivery.amount,
+        },
+    );
+    let mut saved = None;
+    for _ in 0..2400 {
+        live.update();
+        if live
+            .world()
+            .get::<ShipRepairTeams>(actor)
+            .unwrap()
+            .0
+            .job_state()
+            .physical_work
+            .values()
+            .any(|work| work.reserved && work.progress > 0.0 && work.progress < 2.0)
+        {
+            saved = Some(capture(live.world()));
+            break;
+        }
+    }
+    assert!(saved.is_some(), "actual override partial-work checkpoint");
+    for token in [TOKEN, COMMS] {
+        send(&mut live, token, ClientMessage::ReleaseStation);
+    }
+    steps(&mut live, 2);
+    let saved = Some(capture(live.world()));
+    let saved: PhoenixSnapshot = serde_json::from_slice(
+        &serde_json::to_vec(&saved.expect("unbound Human override reaches real paid partial work"))
+            .unwrap(),
+    )
+    .unwrap();
+    let (mut resumed, restored) = boot_definition(WORLD, HULL);
+    let result = restore(resumed.world_mut(), &saved);
+    assert!(result.is_complete(), "{:?}", result.gaps);
+    for step in 0..1200 {
+        assert_same(&live, &resumed, step);
+        live.update();
+        resumed.update();
+    }
+    assert_same(&live, &resumed, 1200);
+    assert_eq!(hp(&live, actor), healthy);
+    assert_eq!(hp(&resumed, restored), healthy);
+    assert_eq!(parts(&live, actor), original_parts - 1);
+    let OpportunityState::Accepted { choice, .. } = &runtime(&live).opportunities[0].state else {
+        unreachable!()
+    };
+    let changed = choice
+        .node_dispositions
+        .values()
+        .next()
+        .expect("actual own gauge observes restored future target");
+    assert!(changed.latest.terminal());
+    assert_eq!(
+        serde_json::to_value(changed.consequence.as_ref().unwrap().result).unwrap(),
+        serde_json::json!("applied")
+    );
+    assert_eq!(runtime(&live).flags.counter("actual_optional_changed"), 1);
+    assert_eq!(
+        runtime(&live).flags.counter("actual_optional_structure"),
+        0,
+        "unbound physical work is not a planned achievement"
+    );
+    assert_eq!(
+        runtime(&live)
+            .commitments
+            .get(choice.required_commitment.as_ref().unwrap())
+            .unwrap()
+            .state,
+        project_phoenix::world::commitments::CommitmentState::Broken,
+        "only the actual authored consequence resolves this promise"
+    );
+    for row in runtime(&live)
+        .situations
+        .instances
+        .values()
+        .filter(|row| row.request.owner() == &id("repair"))
+    {
+        assert!(
+            row.accepted.is_none() && row.achieved.is_none() && row.settled.is_none(),
+            "no fabricated Repair execution or evidence"
+        );
+    }
+    let final_state = capture(live.world());
+    for fault in 0..5 {
+        let mut forged = final_state.clone();
+        let OpportunityState::Accepted { choice, .. } =
+            &mut forged.scenario.as_mut().unwrap().opportunities[0].state
+        else {
+            unreachable!()
+        };
+        let disposition = choice.node_dispositions.values_mut().next().unwrap();
+        match fault {
+            0 => disposition.latest.hp -= 1.0,
+            1 => disposition.latest.max_hp += 1.0,
+            2 => disposition.latest.observation.provenance.system = Some(id("foreign")),
+            3 => disposition.consequence.as_mut().unwrap().tick = final_state.tick + 1,
+            _ => {
+                disposition.latest.observation.subject =
+                    phoenix_model::observation::ObservationSubject::System { id: id("helm") }
+            }
+        };
+        let before = serde_json::to_value(capture(live.world())).unwrap();
+        assert!(
+            !restore(live.world_mut(), &forged).is_complete(),
+            "changed-work history fault{fault}"
+        );
+        assert_eq!(
+            before,
+            serde_json::to_value(capture(live.world())).unwrap(),
+            "candidate refuses before writes{fault}"
+        );
+    }
+}

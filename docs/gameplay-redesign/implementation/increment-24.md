@@ -259,10 +259,11 @@ offer answerable. Historical preflight checks exact source/ref/actor/clocks and
 reserved promise absence, including an empty optional-record history.
 
 
-## Next slice: accepted prerequisite intent and explicit changed work
+## Accepted prerequisite intent and explicit changed work
 
-This follow-up is pending implementation and native evidence. Its first consumer
-extends the same generated maintenance child; it does not add a physical executor.
+This bounded runtime is implemented on the worker branch; native execution and
+independent disposition review remain pending. It extends the same generated
+maintenance child and introduces no physical executor.
 
 ### Permitted intent and ordinary priority
 
@@ -322,3 +323,53 @@ explicit changed-work disposition and authored consequence. Retain original work
 and compare fresh-JSON continuation across waiting, override and disposition
 frontiers. Candidate preflight must reject forged target/cause/clocks, erased
 history and dispositions that contradict an already accepted scoped job.
+
+
+### Bounded implementation and evidence, 16 October 2026
+
+The common graph publishes accepted, unaccepted Repair intent through its own
+Console, including the original identity/team/target and actual acknowledged
+prerequisite booleans. The technical aggregate bound is 288 rows: one primary
+32-leaf graph plus eight retained optional graphs, without truncation. Ordinary
+Repair AI filters generic visits by their actual router-resolved compartment
+footprint for every free team; unrelated reported groups remain eligible. This
+uses the same controller and feed after delegation.
+
+Only the generated maintenance source currently supports dispositions, and only
+its final compartment Structure leaf. The source must declare a real one-context
+`changed_work = {script, function}` callback in the accepted World script closure.
+Unsupported activity families/targets cannot acquire a disposition. Retain at
+most first and latest observations per node. Current blockers are missing local
+parts, an unavailable known route, or another own visible job already performing
+that exact footprint. A dated cleared observation restores normal admission;
+original choices, deadlines and released ticks stay fixed. An observed job is
+never rebound or credited as the future leaf's execution.
+
+Reasons are derived from the actual own Repair, Stock and route/boundary views.
+The GUI presents readonly blocked/cleared/changed status with the callback's
+pending/applied/refused result. A restored target becomes immutable external
+change only before scoped Job acceptance. The existing trigger application body
+invokes its exact authored consequence using the same sandbox and shared tick
+budget. No Situation or Job is invented, and the callback alone chooses any
+Promise resolution. Actual earlier physical work and callbacks must still settle
+before subsequent admission. A refused consequence cannot establish settlement.
+
+Source-only projection review passed independently. Ten targeted client tests
+pass, including multi-graph bounds, readonly status and no premature dispatch;
+strict string validation is rerun at handoff. New native owner tests cover exact
+footprints, real ordinary-AI dispatch to unrelated work, bounded blocked/cleared
+history, original clocks, manual binding exclusion and unfinished prior physical
+assignments. Two further full-host probes cover ordinary AI starting both useful
+Delivery and Repair after delegation, and a Human's other-team manual override
+followed by delegation. Each captures actual paid partial work, restores fresh
+JSON and compares 1200 complete state/digest updates; malformed cause/target/tick
+candidates must refuse before writes. These native tests are authored, not yet
+executed by this worker. Full disposition source review and integration-owner
+native evidence remain required. This is not a 2/6-player acceptance result.
+
+A retained published disposition must agree exactly with canonical frozen node
+history. The candidate guards establish structural/provenance/clock consistency;
+they do not authenticate arbitrary coordinated replacement of every saved fact.
+No second action ledger is added for that purpose. Comms forwarding of these
+Repair statuses, richer visual opportunity authoring, broader plan repair and
+pacing remain separate work, as do the remaining full 23/24 playable exits.

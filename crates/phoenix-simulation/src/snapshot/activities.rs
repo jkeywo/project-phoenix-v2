@@ -227,6 +227,9 @@ fn planning_frontier(
 
 pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), String> {
     super::activity_communication::validate_emissions(snapshot)?;
+    let has_repair_intents = snapshot.entities.iter().flat_map(|row| &row.blackboards).any(|(_, board)| {
+        matches!(board, crate::core::messages::SystemBlackboard::Repair(board) if !board.planned_intents.is_empty())
+    });
     let Some(stored) = snapshot.scenario.as_ref() else {
         if world
             .get_resource::<WorldContentRuntime>()
@@ -238,6 +241,7 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
             || world
                 .get_resource::<crate::world::config::WorldConfig>()
                 .is_some_and(|base| base.planning.is_some() || base.opportunity_search.is_some())
+            || has_repair_intents
         {
             return Err("configured situations require their saved World owner".into());
         }
@@ -247,6 +251,7 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
         return if stored.situations.instances.is_empty()
             && stored.plan_choice.is_none()
             && stored.opportunities.is_empty()
+            && !has_repair_intents
             && !stored.pending_events.iter().any(|event| event.kind == 13)
         {
             Ok(())
@@ -671,11 +676,52 @@ fn validate_plan_publications(
             })
         })
         .collect::<std::collections::BTreeMap<_, _>>();
+    let mut expected_intents = std::collections::BTreeMap::new();
+    for (choice, graph) in bindings {
+        for intent in graph.intent_requests(
+            choice,
+            &snapshot
+                .scenario
+                .as_ref()
+                .ok_or("missing intent World owner")?
+                .situations,
+            snapshot.tick,
+        )? {
+            if let Some((actor, owner, intent)) =
+                crate::world::planning::project_repair_intent(intent)
+            {
+                if expected_intents
+                    .insert((actor, owner.0, intent.id.clone()), intent)
+                    .is_some()
+                {
+                    return Err("duplicate accepted repair intent identity".into());
+                }
+            }
+        }
+    }
     for row in &snapshot.entities {
         for (owner, board) in &row.blackboards {
             let mut ids = std::collections::BTreeSet::new();
             match board {
                 SystemBlackboard::Repair(board) => {
+                    if board.planned_intents.len()
+                        > phoenix_model::activity::MAX_PLANNED_REPAIR_INTENTS
+                    {
+                        return Err("planned Repair intent publication exceeds bound".into());
+                    }
+                    let mut intents = std::collections::BTreeSet::new();
+                    for intent in &board.planned_intents {
+                        if !intents.insert(&intent.id)
+                            || expected_intents.get(&(
+                                row.uuid.clone(),
+                                owner.clone(),
+                                intent.id.clone(),
+                            )) != Some(intent)
+                        {
+                            return Err("Repair intent publication differs from its exact accepted own plan".into());
+                        }
+                    }
+
                     if board.planned_requests.len() > phoenix_sim_world::world::planning::MAX_LEAVES
                     {
                         return Err("planned Repair publication exceeds bound".into());

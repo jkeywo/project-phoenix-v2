@@ -27,6 +27,7 @@ pub mod opportunities;
 pub(crate) mod opportunity_inputs;
 pub mod pack_asset_validation;
 pub(crate) mod planning;
+pub(crate) mod planning_monitor;
 pub mod script;
 pub mod server;
 /// What a runtime-spawned entity was made from (issue #863) — the template,

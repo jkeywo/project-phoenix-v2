@@ -75,6 +75,53 @@ impl WorldScriptRuntime {
             )
             .map_err(|error| error.to_string())
     }
+    /// A nonphysical changed-work consequence uses the same sandbox, shared
+    /// tick budget and application receipt as ordinary Scenario callbacks.
+    pub(crate) fn invoke_plan_node_effects(
+        &mut self,
+        context: &ScriptCallContext<'_>,
+        content: &WorldContentRuntime,
+        layers: Option<&WorldLayerMap>,
+        activation: &crate::world::planning_monitor::NodeActivation,
+    ) -> Result<Option<CallEffects>, String> {
+        self.prepare_invocation_tick(context.clock.tick);
+        if !self.budget.can_admit() {
+            return Ok(None);
+        }
+        let ast = self
+            .asts
+            .get(context.script_path)
+            .ok_or("missing changed-work script unit")?;
+        let flags = layered_flag_chain(context.origin_layer.as_deref(), &content.flags, layers)
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut extra = rhai::Map::new();
+        extra.insert("actor".into(), activation.actor.clone().into());
+        extra.insert("system".into(), activation.owner.0.clone().into());
+        extra.insert(
+            "execution".into(),
+            activation.reference.instance_id().into(),
+        );
+        extra.insert("node".into(), activation.node.clone().into());
+        extra.insert("disposition".into(), "restored_externally".into());
+        extra.insert("promise".into(), activation.promise.clone().into());
+        self.host
+            .try_call_scoped_budgeted(
+                &mut self.budget,
+                &context.clock,
+                ast,
+                context.script_path,
+                context.function,
+                &flags,
+                &content.deadlines,
+                &content.commitments,
+                &content.evidence,
+                context.origin_layer.as_deref(),
+                extra,
+            )
+            .map_err(|error| error.to_string())
+    }
     /// Retain charges within a tick, including calls made by another adapter.
     /// Drains also call this at their existing entry point when no call follows.
     pub(crate) fn prepare_invocation_tick(&mut self, tick: u64) {

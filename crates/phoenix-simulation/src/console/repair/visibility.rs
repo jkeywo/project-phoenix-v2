@@ -680,6 +680,7 @@ impl HullVisibility {
         bb: &RepairBlackboard,
     ) -> RepairBlackboard {
         RepairBlackboard {
+            planned_intents: bb.planned_intents.clone(),
             planned_requests: bb.planned_requests.clone(),
             personnel: bb.personnel.clone(),
             boundaries: bb.boundaries.clone(),
@@ -834,6 +835,7 @@ pub(crate) fn physical_system_status(
 /// is ever shown again.
 fn withheld_repair_blackboard(bb: &RepairBlackboard) -> RepairBlackboard {
     RepairBlackboard {
+        planned_intents: vec![],
         planned_requests: vec![],
         personnel: None,
         boundaries: vec![],

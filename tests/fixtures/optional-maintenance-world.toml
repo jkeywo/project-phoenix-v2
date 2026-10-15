@@ -23,6 +23,7 @@ destination_store="repair-structural"
 commodity="structural_parts"
 offer_script="tests/fixtures/optional-maintenance-world.toml#script.setup"
 offer_function="maintenance_offer"
+changed_work={script="tests/fixtures/optional-maintenance-world.toml#script.setup",function="changed_optional"}
 terms="world.optional_maintenance.terms"
 resolves_when="world.optional_maintenance.resolves"
 import=[{path="tests/fixtures/maintenance-opportunity-domain.toml",as="maintenance",names=["restore-room","deliver-parts"]}]
@@ -41,6 +42,10 @@ fn request_maintenance(ctx) {
 }
 fn decline_maintenance(ctx) {
     #{message:"world.optional_maintenance.declined",responses:[],opportunity_decision:"decline"}
+}
+fn changed_optional(ctx) {
+    ctx.commitments.break_promise(ctx.promise);
+    ctx.flags.increment("actual_optional_changed",1);
 }
 fn complete_optional(ctx) {
     let scope=ctx.situation.split("/");

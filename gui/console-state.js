@@ -1,6 +1,6 @@
 import { capturedPayload } from './comms-capture.js';
 import { formationNavigation } from './formation.js';
-import {plannedRequests} from './planned-requests.js';
+import {plannedRequests,plannedRepairIntents} from './planned-requests.js';
 import { personnelPayload } from './personnel.js';
 import { weaponTargetsPayload } from './weapon-targets.js';
 import { buildHelmMovement } from './helm-movement.js';
@@ -1691,8 +1691,10 @@ export function buildRepairConsoleState(state, systemIds = []) {
     const { coreSystems, targets } =
       repairCoreAndTargets(systemHull, state.stationSystems, damageableSystems, bb.repair_groups);
     const planned=plannedRequests(bb.planned_requests,'repair');
+    const intents=plannedRepairIntents(bb.planned_intents);
     return {
       teams,
+      ...(intents.length?{planned_intents:intents}:{}),
       ...(planned.length?{planned_requests:planned,planned_controllable:(state.controlSystemIds || systemIds).includes(entry.systemId)&&state.controlSources?.[entry.systemId]==='Human'}:{}),
       personnel_controllable: (state.controlSystemIds || systemIds).includes(entry.systemId)
         && state.controlSources?.[entry.systemId] === 'Human',

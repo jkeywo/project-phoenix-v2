@@ -1427,11 +1427,11 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     println!("reviewed schema counts={counts:?}; fingerprint={fingerprint}");
     assert_eq!(
         counts,
-        [55, 71, 950, 51, 56],
+        [55, 71, 957, 51, 56],
         "update the reviewed inventory ratchet"
     );
     assert_eq!(
-        fingerprint, 8_520_873_128_864_333_453,
+        fingerprint, 10_443_560_904_241_087_441,
         "update the reviewed inventory fingerprint"
     );
 }

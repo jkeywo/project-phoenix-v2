@@ -64,7 +64,9 @@ pub(crate) fn register(app: &mut App) {
         FixedUpdate,
         publish
             .in_set(crate::sim_sets::SimSet::Publish)
-            .after(crate::resources::logistics_server::publish),
+            .after(crate::resources::logistics_server::publish)
+            .after(crate::sim_sets::FixedStep::PublishSensorRadarBlackboard)
+            .after(crate::sim_sets::FixedStep::PublishTacticalRadarBlackboard),
     );
 }
 

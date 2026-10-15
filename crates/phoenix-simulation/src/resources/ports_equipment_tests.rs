@@ -33,7 +33,14 @@ fn equipped(policy: PortServicePolicy) -> (App, Entity, Entity) {
         .entity_mut(machinery)
         .take::<crate::console::repair::server::ShipRepairTeams>()
         .unwrap();
-    app.world_mut().entity_mut(visitor).insert((damage, repair));
+    let services = app
+        .world_mut()
+        .entity_mut(machinery)
+        .take::<ResourceServices>()
+        .expect("accepted physical Repair equipment binds actual part services");
+    app.world_mut()
+        .entity_mut(visitor)
+        .insert((damage, repair, services));
     assert!(app.world_mut().despawn(machinery));
     assert_eq!(
         app.world().get::<ShipDamage>(visitor).unwrap().factor(

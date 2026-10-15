@@ -10,6 +10,32 @@ pub enum GenericCommsRequest {
     ReportStatus,
 }
 
+/// A released own task whose recipient is ALREADY in this Console's permitted
+/// contact view. This is a request choice, not a new contact or actuator grant.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlannedCommsRequest {
+    pub id: String,
+    pub released_tick: u64,
+    pub recipient_uuid: String,
+    pub channel: String,
+    pub request: GenericCommsRequest,
+}
+impl PlannedCommsRequest {
+    pub fn validate(&self, now: u64) -> Result<(), &'static str> {
+        if self.id.trim().is_empty()
+            || self.id.len() > 2048
+            || self.id.chars().any(char::is_control)
+            || !identity(&self.recipient_uuid)
+            || !crate::comms_channel::channel_id(&self.channel)
+            || self.released_tick > now
+        {
+            return Err("invalid published planned Comms request identity/channel/clock");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CommsRequestDecision {

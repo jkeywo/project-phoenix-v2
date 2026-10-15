@@ -72,6 +72,16 @@ and transmission through the usual paid work owners, without clearing acquired
 history or refilling on restore. This prerequisite alone does not implement
 physical deploy/recover or close the first lifecycle slice.
 
+The first source checkpoint adds `assets/entities/battery_probe.toml`, an ordinary
+AI-only broad instrument with finite local energy and zero generation. The shared
+authoring, saved-network validation and accepted refit path allow nonnegative
+generation while retaining positive ramp and all other finite bounds. The existing
+Workshop energy controls and fitting validator use the same supported coefficients.
+Three Gameplay owner cases pass (zero-profile bounds, transactional refit refusal
+and finite work through JSON); 45 affected Workshop checks pass. The actual-host
+probe continuation is still pending. These checks do not establish a launch bay,
+deployment/recovery job, command link or completed increment 19.
+
 Preserve a stable craft/deployable identity and actual equipment/resource/condition
 state through carried, launching, deployed, recovering and lost/destroyed phases.
 For the first supported adapter, retain the actual ordinary entity/continuation

@@ -235,8 +235,7 @@ impl EnergyNetworkState {
             config.reactor.sustainable_output_per_sec,
         )?;
         nonnegative("reactor ramp", config.reactor.ramp_per_sec)?;
-        if config.reactor.sustainable_output_per_sec <= 0.0
-            || config.reactor.ramp_per_sec <= 0.0
+        if config.reactor.ramp_per_sec <= 0.0
             || config.reactor.sustainable_output_per_sec > config.reactor.max_output_per_sec
         {
             return Err("invalid reactor generation or ramp".into());

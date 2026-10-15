@@ -24,6 +24,29 @@ fn fitting_reconfiguration_preserves_every_continuation_and_refuses_buffer_or_li
     assert_eq!(power, preserved);
 }
 #[test]
+fn battery_only_reconfiguration_keeps_charge_and_rejects_invalid_generation_without_writes() {
+    let mut power = PowerSystem::default();
+    tick(&mut power, 10);
+    let before = power.capture_continuation();
+    let mut hardware = power.config().clone();
+    hardware.reactor.sustainable_output_per_sec = 0.0;
+    power.reconfigure_energy(hardware).unwrap();
+    assert_eq!(before, power.capture_continuation());
+    let preserved = power.clone();
+    for output in [-1.0, f32::NAN, f32::INFINITY] {
+        let mut invalid = power.config().clone();
+        invalid.reactor.sustainable_output_per_sec = output;
+        assert!(power.reconfigure_energy(invalid).is_err());
+        assert_eq!(power, preserved);
+    }
+    for ramp in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+        let mut invalid = power.config().clone();
+        invalid.reactor.ramp_per_sec = ramp;
+        assert!(power.reconfigure_energy(invalid).is_err());
+        assert_eq!(power, preserved);
+    }
+}
+#[test]
 fn fractional_coolant_credit_survives_json_continuation_bit_for_bit() {
     let mut state = PowerState::default();
     // Observed in a real seeded duel. The non-roundtrip JSON parser changes

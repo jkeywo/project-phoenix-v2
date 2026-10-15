@@ -1,0 +1,21 @@
+# Quiet physical equipment proof, not a mission with pacing or deadlines.
+[global]
+seed = 156219
+[player_spawn]
+position = [0, 0, 0]
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+name = "player-ship"
+spawn_on = "game_start"
+[[entity]]
+template_path = "assets/entities/battery_probe.toml"
+id = "battery-probe"
+name = "battery-probe"
+spawn_on = "game_start"
+transform = { position = [10, 0, 0] }
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+id = "subject"
+name = "subject"
+transform = { position = [10, 0, -20] }

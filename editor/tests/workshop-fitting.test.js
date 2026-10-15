@@ -26,6 +26,22 @@ describe('closed physical fitting authoring', () => {
     expect(value.fitting.slot.map(slot => slot.family)).toEqual(['beam', 'reactor']);
     expect(() => validateFitting(value.fitting, value)).not.toThrow();
   });
+  it('authors a zero-generation reactor without weakening finite output or positive ramp bounds', () => {
+    const { value } = damageFixture();
+    const profile = value.fitting;
+    const slot = profile.slot.find(row => row.family === 'reactor');
+    const hardware = profile.equipment.find(row => row.id === slot.default_equipment).hardware;
+    Object.assign(value.energy.reactor, { sustainable_output_per_sec: 0, max_output_per_sec: 0, initial_output_per_sec: 0 });
+    Object.assign(hardware, { sustainable_output_per_sec: 0, max_output_per_sec: 0 });
+    expect(() => validateFitting(profile, value)).not.toThrow();
+    for (const field of ['sustainable_output_per_sec', 'max_output_per_sec', 'ramp_per_sec']) {
+      for (const invalid of [-1, Infinity, NaN, ...(field === 'ramp_per_sec' ? [0] : [])]) {
+        const candidate = structuredClone(profile);
+        candidate.equipment.find(row => row.id === slot.default_equipment).hardware[field] = invalid;
+        expect(() => validateFitting(candidate, value)).toThrow(/Reactor/);
+      }
+    }
+  });
   it('roundtrips actual hardware, stored conditions and exact-source history through authoritative acceptance', async () => {
     const { value, profile } = fittingFixture(); expect(() => validateFitting(profile, value)).not.toThrow();
     const source = '# header\n' + stringify(value) + '\n# unaffected tail\n', draft = make(source), next = structuredClone(profile);
@@ -77,7 +93,10 @@ describe('closed physical fitting authoring', () => {
     expect(draft.read(path)).toBe(source);
   });
   it('protects actual slot references during ordinary System editing', () => {
-    const { source, value, schema } = fittingFixture(), draft = make(source);
+    const { value, schema } = fittingFixture();
+    // Isolate the fitting guard from the independently enforced weapon group.
+    delete value.weapons_console.group;
+    const source = stringify(value), draft = make(source);
     expect(() => prepareShipOperation(draft, deps, schema, { path, type: 'system-remove', id: value.fitting.slot[0].system })).toThrow(/Fitting/);
     expect(draft.read(path)).toBe(source);
   });

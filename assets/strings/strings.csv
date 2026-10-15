@@ -6066,3 +6066,6 @@ settings.debug.scenario.activity.settled,Scenario activity author inspection,Set
 settings.debug.scenario.activity.outcome,Scenario activity author inspection,Terminal evidence,Terminal evidence,Terminal evidence,source
 settings.debug.scenario.activity.state,Scenario activity author inspection,Awaiting state,Awaiting state,Awaiting state,source
 settings.debug.scenario.activity.pending,Scenario activity author inspection,Pending {kind} at tick {tick},Pending {kind} at tick {tick},Pending {kind} at tick {tick},source
+entity.battery_probe.name,Finite battery probe name,Battery probe,Batteriesonde,Battery probe,machine
+entity.battery_probe.room,Finite probe compartment,Probe core,Sondenkern,Probe core,machine
+entity.battery_probe.description,Finite sensing equipment,Finite battery-powered sensor probe.,Sensorkapsel mit begrenzter Batterie.,Finite battery-powered sensor probe.,machine

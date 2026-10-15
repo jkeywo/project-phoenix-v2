@@ -84,7 +84,7 @@ export function validateFitting(profile, value) {
       validateEmpPayload(hardware.impact.emp);
     } else if (hardware?.kind === 'reactor') {
       if (!closed(hardware, ['kind', 'sustainable_output_per_sec', 'max_output_per_sec', 'ramp_per_sec', 'charge_heat_per_unit', 'discharge_heat_per_unit'])
-        || work.class !== 'facility' || !['sustainable_output_per_sec', 'max_output_per_sec', 'ramp_per_sec'].every(key => positive(hardware[key]))
+        || work.class !== 'facility' || !['sustainable_output_per_sec', 'max_output_per_sec'].every(key => finite(hardware[key])) || !positive(hardware.ramp_per_sec)
         || hardware.sustainable_output_per_sec > hardware.max_output_per_sec || value.energy.reactor.initial_output_per_sec > hardware.max_output_per_sec
         || !['charge_heat_per_unit', 'discharge_heat_per_unit'].every(key => finite(hardware[key]))) throw new Error('Reactor hardware needs facility work and compatible finite output, ramp and heat.');
     } else throw new Error('Only the supported beam and reactor fitting adapters can be authored.');

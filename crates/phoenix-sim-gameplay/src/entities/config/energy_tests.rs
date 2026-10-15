@@ -108,6 +108,24 @@ fn authored_energy_round_trips_and_default_link_binds_actual_stock() {
         .unwrap_err()
         .contains("capacity"));
 }
+
+#[test]
+fn battery_only_profile_accepts_zero_generation_but_retains_other_hardware_bounds() {
+    let (mut energy, ship, services, capacities) = fixture();
+    energy.reactor.sustainable_output_per_sec = 0.0;
+    energy.validate(&ship, &services, &capacities).unwrap();
+    for invalid in [-1.0, f32::NAN, f32::INFINITY] {
+        let mut forged = energy.clone();
+        forged.reactor.sustainable_output_per_sec = invalid;
+        assert!(forged.validate(&ship, &services, &capacities).is_err());
+    }
+    let mut forged = energy.clone();
+    forged.reactor.ramp_per_sec = 0.0;
+    assert!(forged.validate(&ship, &services, &capacities).is_err());
+    energy.reactor.max_output_per_sec = 0.0;
+    energy.reactor.initial_output_per_sec = 0.0;
+    energy.validate(&ship, &services, &capacities).unwrap();
+}
 #[test]
 fn rejects_missing_duplicate_unknown_and_alias_consumers() {
     let (mut energy, mut ship, services, capacities) = fixture();

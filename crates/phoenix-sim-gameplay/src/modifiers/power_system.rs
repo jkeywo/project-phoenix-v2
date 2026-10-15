@@ -205,7 +205,7 @@ impl PowerSystem {
         ]
         .iter()
         .any(|value| !value.is_finite() || *value < 0.0)
-            || hardware.reactor.sustainable_output_per_sec <= 0.0
+            || hardware.reactor.ramp_per_sec <= 0.0
             || hardware.reactor.sustainable_output_per_sec > hardware.reactor.max_output_per_sec
             || hardware.consumers.iter().any(|consumer| {
                 !consumer.continuous_cost_per_sec.is_finite()

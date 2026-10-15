@@ -179,13 +179,12 @@ impl EnergyConfigSection {
         ] {
             finite_nonnegative("energy.reactor", field, value)?;
         }
-        if reactor.sustainable_output_per_sec <= 0.0
-            || reactor.max_output_per_sec < reactor.sustainable_output_per_sec
+        if reactor.max_output_per_sec < reactor.sustainable_output_per_sec
             || reactor.initial_output_per_sec > reactor.max_output_per_sec
             || reactor.ramp_per_sec <= 0.0
             || reactor.default_cooling_per_sec > reactor.max_cooling_per_sec
         {
-            return Err("energy.reactor requires positive sustainable output/ramp, sustainable <= maximum, initial output <= maximum and initial cooling <= maximum".into());
+            return Err("energy.reactor requires nonnegative generation and positive ramp, sustainable <= maximum, initial output <= maximum and initial cooling <= maximum".into());
         }
         coolant_link("energy.reactor", &reactor.coolant, services, capacities)?;
         let groups: BTreeMap<_, _> = self.groups.iter().map(|group| (&group.id, group)).collect();

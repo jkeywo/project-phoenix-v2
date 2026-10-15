@@ -718,3 +718,34 @@ fn invalid_transient_effects_refuse_before_state_or_randomness_changes() {
     assert_eq!(state, before);
     assert_eq!(draws, 0);
 }
+
+#[test]
+fn battery_only_work_exhausts_real_reserves_and_json_never_replenishes_them() {
+    for export in [0.0, 2.0] {
+        let (mut cfg, ship, bindings, coolant) = fixture(vec![group("probe", None, export, 0)]);
+        cfg.reactor.sustainable_output_per_sec = 0.0;
+        cfg.reactor.max_output_per_sec = export;
+        cfg.reactor.initial_output_per_sec = export;
+        cfg.reactor.initial_energy = if export > 0.0 { 4.0 } else { 0.0 };
+        cfg.consumers[0].initial_energy = if export == 0.0 { 4.0 } else { 0.0 };
+        let id = cfg.consumers[0].system.clone();
+        let mut state = EnergyNetworkState::new(&cfg, &ship).unwrap();
+        let mut work = 0.0;
+        for step in 0..360 {
+            run(&mut state, &cfg, &ship, &bindings, &coolant, 1.0);
+            work += state.spend_continuous(&cfg, &id, 2.0).unwrap().granted;
+            let restored: EnergyNetworkState =
+                serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+            restored.validate_against(&cfg, &ship).unwrap();
+            assert_eq!(state, restored, "battery continuation {step}");
+            state = restored;
+        }
+        close(work, 4.0);
+        close(state.reactor.energy, 0.0);
+        close(state.consumers[&id].energy, 0.0);
+        close(
+            state.spend_continuous(&cfg, &id, 2.0).unwrap().fraction,
+            0.0,
+        );
+    }
+}

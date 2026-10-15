@@ -249,7 +249,7 @@ fn live_delta_never_exposes_foreign_position_health_flags_or_shield_frequency() 
 }
 
 #[test]
-fn runtime_spawn_and_removal_publish_only_current_chart_roster_without_a_seen_actor_store() {
+fn runtime_spawn_and_terminal_envelopes_never_disclose_hidden_actor_keys() {
     let mut app = fixture();
     for uuid in ["hidden", "obstruction", "concealed-chart"] {
         let projection = capture(&mut app);
@@ -293,24 +293,105 @@ fn runtime_spawn_and_removal_publish_only_current_chart_roster_without_a_seen_ac
             .entities
             .retain(|entity| entity.uuid != "chart");
         let output = capture(&mut app).project(&packet(removal));
-        let visible = phone(&output, "science").unwrap();
-        assert_no_hidden(visible);
-        let ServerMessage::WorldSetup { world } = visible else {
-            panic!("complete public roster");
-        };
-        assert_eq!(
-            world
-                .entities
-                .iter()
-                .map(|e| e.uuid.as_str())
-                .collect::<Vec<_>>(),
-            ["own"]
+        assert!(
+            phone(&output, "science").is_none(),
+            "an unseen death has no phone frame"
         );
     }
     let own_death = packet(ServerMessage::EntityDespawned { uuid: "own".into() });
     assert_eq!(
         phone(&capture(&mut app).project(&own_death), "science"),
         Some(&own_death.msg)
+    );
+}
+
+#[test]
+fn actual_reconciliation_refreshes_only_a_removed_visible_chart_landmark_once() {
+    use crate::server_app::{
+        LastBroadcastEntityHealth, LastBroadcastEntityPositions, SimOutbox, TrackedEntities,
+    };
+    use bevy::ecs::system::RunSystemOnce;
+    let mut app = fixture();
+    let old = app.world().resource::<WorldResource>().0.clone();
+    let mut entities = std::collections::BTreeMap::new();
+    for record in &old.entities {
+        let position = record.position.unwrap();
+        let bundle = (
+            Transform::from_xyz(position[0], position[1], position[2]),
+            crate::entities::spawner::EntityTagsSection(crate::entities::tags::parse_tags(
+                &record.tags,
+            )),
+        );
+        let entity = if record.uuid == "own" {
+            let mut local = app.world_mut().query_filtered::<Entity, With<LocalShip>>();
+            let entity = local.single(app.world()).unwrap();
+            app.world_mut().entity_mut(entity).insert(bundle);
+            entity
+        } else {
+            app.world_mut()
+                .spawn((EntityUuid(record.uuid.clone()), bundle))
+                .id()
+        };
+        entities.insert(record.uuid.clone(), entity);
+    }
+    app.insert_resource(TrackedEntities {
+        reported: old
+            .entities
+            .iter()
+            .map(|record| record.uuid.clone())
+            .collect(),
+        seeded: true,
+    });
+    app.init_resource::<LastBroadcastEntityPositions>()
+        .init_resource::<LastBroadcastEntityHealth>()
+        .init_resource::<SimOutbox>();
+    let reconcile = |app: &mut App| {
+        app.world_mut()
+            .run_system_cached(crate::server_app::reconcile_runtime_entities)
+            .unwrap();
+        let messages = app.world_mut().resource_mut::<SimOutbox>().drain();
+        let projection = capture(app);
+        messages
+            .into_iter()
+            .flat_map(|out| {
+                projection.project(&OutboundMessage {
+                    target: out.target,
+                    msg: out.message,
+                    delivery: out.delivery,
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    for uuid in ["hidden", "concealed-chart"] {
+        app.world_mut().despawn(entities[uuid]);
+        assert!(
+            phone(&reconcile(&mut app), "science").is_none(),
+            "{uuid} must not reveal even removal timing"
+        );
+    }
+    app.world_mut().despawn(entities["chart"]);
+    let output = reconcile(&mut app);
+    let phone_frames = output
+        .iter()
+        .filter(|out| out.target == Target::Token("science".into()))
+        .collect::<Vec<_>>();
+    assert_eq!(phone_frames.len(), 1);
+    assert_eq!(phone_frames[0].delivery, DeliveryClass::Reliable);
+    assert_no_hidden(&phone_frames[0].msg);
+    let ServerMessage::WorldSetup { world } = &phone_frames[0].msg else {
+        panic!("one current public roster");
+    };
+    assert_eq!(
+        world
+            .entities
+            .iter()
+            .map(|entity| entity.uuid.as_str())
+            .collect::<Vec<_>>(),
+        ["own"]
+    );
+    assert!(
+        reconcile(&mut app).is_empty(),
+        "chart refresh is not a new periodic publisher"
     );
 }
 

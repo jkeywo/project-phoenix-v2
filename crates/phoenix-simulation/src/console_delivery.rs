@@ -175,14 +175,12 @@ impl CapturedConsoleDelivery {
                 });
             }
             EntitySpawned { snapshot } => *snapshot = self.entity(snapshot)?,
-            // Reconciliation has already removed the entity, so do not add a
-            // seen-ID cache merely to distinguish vanished chart landmarks.
-            // A complete current public roster removes old chart entries too.
+            // The actual lifecycle publisher emits a public roster only when
+            // a chart landmark disappears. An unseen death creates no phone
+            // traffic, including no replacement packet that reveals its timing.
             EntityDespawned { uuid } | StationDestroyed { uuid } | AsteroidDestroyed { uuid } => {
                 if !self.is_own(uuid) {
-                    return Some(WorldSetup {
-                        world: self.world(&self.world),
-                    });
+                    return None;
                 }
             }
             StationSpawned { uuid, .. } | AsteroidSpawned { uuid, .. } => {

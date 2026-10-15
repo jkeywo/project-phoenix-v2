@@ -712,6 +712,8 @@ pub fn reconcile_runtime_entities(
     objectives: Option<Res<ObjectiveManagerRes>>,
     mut positions_cache: ResMut<LastBroadcastEntityPositions>,
     mut health_cache: ResMut<LastBroadcastEntityHealth>,
+    local: Query<&EntityUuid, With<LocalShip>>,
+    content: Option<Res<crate::world::server::WorldContentRuntime>>,
 ) {
     // Build set of entity names referenced by active mission objectives.
     let active_objective_names: std::collections::HashSet<String> = objectives
@@ -939,6 +941,29 @@ pub fn reconcile_runtime_entities(
 
     // Emit EntityDespawned for entities no longer in the ECS.
     let reported_snapshot: Vec<String> = registry.reported.iter().cloned().collect();
+    // This owner still has the old roster. Only a public chart disappearance
+    // warrants a replacement roster; an unseen death must create no phone
+    // packet or recipient-local seen-entity cache. Conceal remains stronger.
+    let observer = local.iter().next();
+    let chart_removed = reported_snapshot.iter().any(|uuid| {
+        !current.contains_key(uuid)
+            && world.0.entities.iter().any(|entity| {
+                entity.uuid == *uuid
+                    && entity
+                        .tags
+                        .iter()
+                        .any(|tag| tag == crate::console_delivery::CHARTED_TAG)
+            })
+            && !observer.is_some_and(|observer| {
+                content.as_ref().is_some_and(|content| {
+                    crate::gm::operations::contact::mode(
+                        &content.contact_overrides,
+                        &observer.0,
+                        uuid,
+                    ) == crate::gm::operations::contact::ContactMode::Conceal
+                })
+            })
+    });
     for uuid in &reported_snapshot {
         if !current.contains_key(uuid) {
             registry.reported.remove(uuid);
@@ -956,6 +981,14 @@ pub fn reconcile_runtime_entities(
                 ServerMessage::EntityDespawned { uuid: uuid.clone() },
             ));
         }
+    }
+    if chart_removed {
+        outbox.push_reliable((
+            Target::All,
+            ServerMessage::WorldSetup {
+                world: world.0.clone(),
+            },
+        ));
     }
 }
 

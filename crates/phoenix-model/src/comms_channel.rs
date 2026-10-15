@@ -54,6 +54,9 @@ pub enum CommsAudience {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CommsTransmission {
+    /// Only an actually accepted planned Contact request supports retained delivery.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub sustained: bool,
     pub origin_id: String,
     pub channel: String,
     pub audience: CommsAudience,
@@ -68,6 +71,14 @@ pub struct CommsTransmission {
 
 impl CommsTransmission {
     pub fn validate(&self, now: u64) -> Result<(), &'static str> {
+        if self.sustained
+            && (!matches!(
+                self.content,
+                crate::comms_request::CommsRadioContent::Request { .. }
+            ) || !matches!(self.audience, CommsAudience::Contact { .. }))
+        {
+            return Err("sustained delivery requires a scoped planned Contact request");
+        }
         if !identity(&self.origin_id)
             || !channel_id(&self.channel)
             || !self.audience.is_valid()
@@ -190,6 +201,7 @@ pub fn validate_transmissions(
             &transmission.channel,
             &transmission.audience,
             transmission.emitted_tick,
+            transmission.sustained,
             &transmission.content,
         );
         if originals
@@ -205,3 +217,7 @@ pub fn validate_transmissions(
 #[cfg(test)]
 #[path = "comms_channel_tests.rs"]
 mod tests;
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}

@@ -1469,14 +1469,13 @@ impl EntityConfig {
                                 system.id.0
                             ))
                         })?;
-                    let binding = crate::ship::composition::protection_composition(
-                        &system.components,
-                    )
-                    .ok_or_else(|| {
-                        SerdeError::custom(
+                    let binding =
+                        crate::ship::composition::protection_composition(&system.components)
+                            .ok_or_else(|| {
+                                SerdeError::custom(
                             "protection state tree requires supported protection composition",
                         )
-                    })?;
+                            })?;
                     crate::ai::state_tree::compile(
                         &tree,
                         &crate::electronic::protection::bindings(binding.enabled_channel),
@@ -2051,6 +2050,18 @@ impl EntityConfig {
                 COMMS_RESPOND_VERBS,
             )
             .map_err(SerdeError::custom)?;
+            for rule in ai
+                .rule
+                .iter()
+                .chain(ai.state.iter().flat_map(|state| state.rule.iter()))
+            {
+                let pair = (rule.channel.as_str(), rule.verb.as_str());
+                if pair != (COMMS_RESPOND_CHANNEL, COMMS_RESPOND_VERB)
+                    && pair != (COMMS_REQUEST_CHANNEL, COMMS_REQUEST_VERB)
+                {
+                    return Err(SerdeError::custom("Comms output channel must use its matching supported response/request verb"));
+                }
+            }
         }
 
         // Reject a doctrine entry whose `directive_*` fields do not match its

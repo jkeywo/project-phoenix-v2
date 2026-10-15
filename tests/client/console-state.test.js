@@ -4870,3 +4870,10 @@ it('shows the public neutralized fact without removing human target selection or
   const [unknown] = foldTorpedoBadges([{ uuid: 'unknown', description: 'damaged vessel' }]);
   expect(unknown).not.toHaveProperty('neutralized_badge');
 });
+
+it('Comms keeps own planned rows and receiver notice on the actual typed Console publication',()=>{
+ const planned=[{id:'instance',recipient_uuid:'peer',channel:'public',request:'report_status',released_tick:2}];
+ const state=buildCommsConsoleState({blackboards:{comms:{messages:[],contacts:[{uuid:'peer'}],planned_requests:planned,receiver_interference:true}}});
+ expect(state.planned_requests).toEqual(planned);expect(state.receiver_interference).toBe(true);
+ const empty=buildCommsConsoleState({blackboards:{comms:{messages:[]}}});expect(empty.planned_requests).toEqual([]);expect(empty.receiver_interference).toBeNull();
+});

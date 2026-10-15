@@ -983,9 +983,9 @@ const COMMS_RESPONSE_FACTS: &[FactDescriptor] = &[
     ship(
         REQUEST_REPORT_STATUS,
         "comms",
-        "1.0 for a permitted heard typed ReportStatus request",
+        "1.0 for the current permitted typed ReportStatus request (received or planned)",
         "absent for ordinary plot/text messages",
-        "comms::requests::response_facts",
+        "comms::requests::response_facts / comms::planned::decision",
     ),
     ship(
         COMMS_AVAILABLE,

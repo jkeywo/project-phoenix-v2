@@ -6241,3 +6241,6 @@ settings.debug.scenario.planning.original_schedule,Privileged Scenario plan insp
 settings.debug.scenario.planning.reconsideration,Privileged Scenario plan inspection,[Dated reconsideration cause and decision],,,
 workshop.transit.gravity_response,LocalJump accepted authoring,Gravity response,Gravity response,Gravity response,source
 entity.gravity_hardened_jump_cruiser.name,Optional LocalJump reference,Gravity-hardened Cruiser,Gravity-hardened Cruiser,Gravity-hardened Cruiser,source
+comms.request.planned_title,Planned Comms work,Requested communications,,,
+comms.request.planned_choice,Planned Comms work,Request,,,
+comms.request.planned_target,Planned Comms work,Report status from {target},,,

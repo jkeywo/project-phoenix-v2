@@ -198,8 +198,11 @@ pub struct CommsRuntime {
 pub struct PendingAiResponseKey {
     /// Actual operator ship, independent of local display and fleet membership.
     pub ship_uuid: String,
-    /// The [`crate::console::comms::CommsMessage`] id the wait is on.
+    /// Inbox message id, or Situation id when planned_request is true.
     pub message_id: String,
+    /// Distinguishes a planned Situation reading from any legal inbox message id.
+    #[serde(default)]
+    pub planned_request: bool,
 }
 
 impl PendingAiResponseKey {
@@ -208,6 +211,14 @@ impl PendingAiResponseKey {
         Self {
             ship_uuid: ship_uuid.into(),
             message_id: message_id.into(),
+            planned_request: false,
+        }
+    }
+    pub fn planned(ship_uuid: impl Into<String>, instance: impl Into<String>) -> Self {
+        Self {
+            ship_uuid: ship_uuid.into(),
+            message_id: instance.into(),
+            planned_request: true,
         }
     }
 }

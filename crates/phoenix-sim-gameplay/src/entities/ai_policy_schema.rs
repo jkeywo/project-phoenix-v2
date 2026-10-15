@@ -475,9 +475,11 @@ pub const COMMS_RESPOND_CHANNEL: &str = "comms_respond";
 pub const COMMS_RESPOND_VERB: &str = "respond_to_message";
 
 /// The registered output channels a Comms response policy may drive (#786).
-pub const COMMS_RESPOND_CHANNELS: &[&str] = &[COMMS_RESPOND_CHANNEL];
+pub const COMMS_REQUEST_CHANNEL: &str = "comms_request";
+pub const COMMS_REQUEST_VERB: &str = "send_planned_comms_request";
+pub const COMMS_RESPOND_CHANNELS: &[&str] = &[COMMS_RESPOND_CHANNEL, COMMS_REQUEST_CHANNEL];
 /// The registered verbs a Comms response policy may emit (issue #786).
-pub const COMMS_RESPOND_VERBS: &[&str] = &[COMMS_RESPOND_VERB];
+pub const COMMS_RESPOND_VERBS: &[&str] = &[COMMS_RESPOND_VERB, COMMS_REQUEST_VERB];
 
 // ── Weapons doctrine: which family the ship turns to present (issue #956) ─────
 //
@@ -1188,6 +1190,7 @@ fn decode_verb(r: &FineSystemAiRuleToml) -> Result<crate::ai::policy::AiPolicyVe
         // value-carrying verb. Only the response INDEX rides the verb —
         // WHICH message is being answered comes from the host context.
         COMMS_RESPOND_VERB => crate::ai::policy::AiPolicyVerb::RespondToMessage(r.response_index),
+        COMMS_REQUEST_VERB => crate::ai::policy::AiPolicyVerb::SendPlannedCommsRequest,
         // Weapons doctrine family verbs (issue #956): value-less, like the
         // fire verbs. The RANK is the channel and the FAMILY is the verb; the
         // arcs, ranges and geometry the resulting `ArcBearingRequest` carries

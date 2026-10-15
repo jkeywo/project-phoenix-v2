@@ -93,6 +93,7 @@ pub(super) fn settle(
             facts: progress.facts.clone(),
         };
         let metadata = CommsTransmission {
+            sustained: false,
             origin_id: new_id(),
             channel: wire.channel.clone(),
             audience: CommsAudience::Contact {
@@ -149,9 +150,13 @@ pub(super) fn settle(
         }
         let mut heard = wire.clone();
         heard.received_tick = Some(now);
+        let original_source = Endpoint {
+            name: sent.sender_name.clone(),
+            ..source.clone()
+        };
         inbox.0.inject(copy_message(
             copy_id,
-            source,
+            &original_source,
             &receiver.uuid,
             OUTCOME_BODY,
             heard,

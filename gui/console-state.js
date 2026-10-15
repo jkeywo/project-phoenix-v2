@@ -2298,6 +2298,8 @@ export function buildCommsConsoleState(state, systemIds = []) {
       objectives: bb.objectives ?? [],
       contacts:   bb.contacts   ?? [],
       channels:   bb.channels   ?? [],
+      planned_requests: bb.planned_requests ?? [],
+      receiver_interference: bb.receiver_interference ?? null,
       on_screen:  state.currentView === 'Comms',
       own_hull:   aggregateStationHull('comms', state.consoleHull, state.stationSystems),
       // Dossiers ride their own blackboard (issue #1030), so they are read from

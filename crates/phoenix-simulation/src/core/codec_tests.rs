@@ -4641,6 +4641,7 @@ fn comms_control_system_payloads_round_trip() {
                 target_uuid: "other-ship".into(),
             },
             request: phoenix_model::comms_request::GenericCommsRequest::ReportStatus,
+            planned_request: None,
         },
         SystemControlPayload::MarkCommsRead {
             message_id: "m1".into(),

@@ -154,6 +154,8 @@ pub(crate) fn tick_radio(
     fixed: Res<Time<Fixed>>,
     mint: crate::world_id::LiveMint<'_, { crate::world_id::IdNamespace::Message as usize }>,
     mut outbox: Option<ResMut<crate::server_app::SimOutbox>>,
+    mut world_runtime: Option<ResMut<crate::world::server::WorldContentRuntime>>,
+    base: Option<Res<crate::world::config::WorldConfig>>,
 ) {
     let mut ordered: Vec<_> = sources
         .iter()
@@ -219,7 +221,7 @@ pub(crate) fn tick_radio(
             continue;
         };
         for command in commands.for_target(source.radio.system.0.as_str()) {
-            let (channel, audience, body, content) = match &command.payload {
+            let (channel, audience, body, content, planned_context) = match &command.payload {
                 SystemControlPayload::SendCommsText {
                     channel,
                     audience,
@@ -229,16 +231,19 @@ pub(crate) fn tick_radio(
                     audience,
                     body.as_str(),
                     phoenix_model::comms_request::CommsRadioContent::Text,
+                    None,
                 ),
                 SystemControlPayload::SendCommsRequest {
                     channel,
                     audience,
                     request,
+                    planned_request,
                 } => (
                     channel,
                     audience,
                     phoenix_model::comms_request::REPORT_STATUS_BODY,
                     phoenix_model::comms_request::CommsRadioContent::Request { request: *request },
+                    planned_request.as_deref(),
                 ),
                 _ => continue,
             };
@@ -264,7 +269,34 @@ pub(crate) fn tick_radio(
                 }
                 CommsAudience::All => true,
             };
-            let applied = profile.is_some()
+            let context_known = planned_context.is_none_or(|instance| match &content {
+                phoenix_model::comms_request::CommsRadioContent::Request { request } => {
+                    super::planned::matches(
+                        config,
+                        boards,
+                        &source.radio.system,
+                        instance,
+                        audience,
+                        channel,
+                        request,
+                        tick.0,
+                    )
+                }
+                _ => false,
+            });
+            let prepared=match &content {
+                phoenix_model::comms_request::CommsRadioContent::Request{request} if context_known=>
+                    crate::world::activities::prepare_communication_request(world_runtime.as_deref_mut(),base.as_deref(),
+                        &source.uuid,&source.radio.system,planned_context,audience,channel,request,tick.0),
+                _ if planned_context.is_none()=>Ok(None),
+                _=>Err("planned request is not present in this Console's current permitted publication".into()),
+            };
+            let context_valid = prepared.is_ok();
+            let prepared = prepared.ok().flatten();
+            let sustained = prepared.is_some();
+            let applied = context_known
+                && context_valid
+                && profile.is_some()
                 && source.listening > 0.0
                 && address_known
                 && audience.is_valid()
@@ -297,6 +329,7 @@ pub(crate) fn tick_radio(
                 )
             };
             let metadata = CommsTransmission {
+                sustained,
                 origin_id: new_id(),
                 channel: channel.clone(),
                 audience: audience.clone(),
@@ -311,6 +344,19 @@ pub(crate) fn tick_radio(
                 body,
                 metadata.clone(),
             ));
+            if let Some(prepared) = prepared {
+                crate::world::activities::bind_communication_request(
+                    prepared,
+                    &metadata.origin_id,
+                    tick.0,
+                );
+                runtime
+                    .pending_ai_responses
+                    .remove(&super::server::PendingAiResponseKey::planned(
+                        &source.uuid,
+                        planned_context.expect("validated prepared context"),
+                    ));
+            }
             for receiver in &endpoints {
                 if receiver.uuid == source.uuid
                     || receiver.listening <= 0.0
@@ -333,6 +379,7 @@ pub(crate) fn tick_radio(
             runtime.needs_broadcast = true;
         }
     }
+    request_delivery::settle(&endpoints, &mut inbox, &mut runtime, &paths, tick.0);
     // Same radio work/frontier, retained canonical inbox and endpoint pass.
     // Structured outcomes are a sustained service; text above remains one-shot.
     super::request_returns::settle(
@@ -350,6 +397,9 @@ pub(crate) fn tick_radio(
         },
     );
 }
+
+#[path = "request_delivery.rs"]
+mod request_delivery;
 
 #[path = "radio_route.rs"]
 mod route;

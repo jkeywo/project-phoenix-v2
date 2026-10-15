@@ -103,6 +103,9 @@ pub(crate) fn publish_comms_blackboard(
         With<crate::server_app::Ship>,
     >,
     paths: crate::regions::signal_path::RegionSignalQuery,
+    content: Option<Res<WorldContentRuntime>>,
+    base: Option<Res<crate::world::config::WorldConfig>>,
+    tick: Option<Res<crate::sim_tick::SimTick>>,
 ) {
     let key = crate::ship::system_registry::comms_system_id();
     for (
@@ -234,6 +237,18 @@ pub(crate) fn publish_comms_blackboard(
         }
         for message in &mut bb.messages {
             crate::comms::requests::redact_private_progress(message);
+        }
+        if let (Some(content), Some(base), Some(uuid), Some(tick)) =
+            (content.as_deref(), base.as_deref(), uuid, tick.as_deref())
+        {
+            bb.planned_requests = crate::world::activities::communication_requests(
+                Some(content),
+                Some(base),
+                &uuid.0,
+                &key,
+                tick.0,
+                |recipient| bb.contacts.iter().any(|contact| contact.uuid == recipient),
+            );
         }
         bb.host_station = hosts.and_then(|h| h.0.get(&key).cloned());
         boards.0.insert(key.clone(), SystemBlackboard::Comms(bb));
@@ -2331,6 +2346,7 @@ pub fn operate_comms_response_ai(
     // sweep is read-only over the whole fleet while an emission needs
     // `&mut AdmittedCommands` for one ship — not because any of it is local.
     let mut answers: Vec<(Entity, String, usize)> = Vec::new();
+    let mut planned_requests = Vec::new();
 
     // ── Pass one: every fleet hull decides, in ROSTER ORDER ──────────────────
     //
@@ -2418,6 +2434,22 @@ pub fn operate_comms_response_ai(
         let red_alert = red_alert.map(|r| r.0).unwrap_or(false);
         let comms_available = comms_system_available(hull, damage);
         let power_rating = selector_comp.and_then(|s| s.power_rating);
+        if let (Some(config), Some(boards), Some(radio)) = (_ship_config, boards, radio) {
+            if let Some(request) = crate::comms::planned::decision(
+                &operator_uuid.0,
+                config,
+                boards,
+                sources,
+                radio,
+                policy,
+                &flag_chain,
+                &mut pending_next,
+                tick,
+                comms_available,
+            ) {
+                planned_requests.push((entity, radio.0.system.clone(), request));
+            }
+        }
 
         // Inbox order is insertion order, so the decision sequence is
         // deterministic on the fixed tick.
@@ -2643,6 +2675,29 @@ pub fn operate_comms_response_ai(
     // identical to the one already there.
     if fleet_seen && comms_res.pending_ai_responses != pending_next {
         comms_res.pending_ai_responses = pending_next;
+    }
+
+    // Same existing owner and cadence; no additional controller or private latch.
+    for (entity, owner, request) in planned_requests {
+        let Ok((_, uuid, _, sources, config, mut admitted, ..)) = ships.get_mut(entity) else {
+            continue;
+        };
+        crate::command_admission::ai_emit::emit_ai_command(
+            uuid,
+            owner,
+            crate::core::messages::SystemControlPayload::SendCommsRequest {
+                channel: request.channel,
+                audience: phoenix_model::comms_channel::CommsAudience::Contact {
+                    target_uuid: request.recipient_uuid,
+                },
+                request: request.request,
+                planned_request: Some(request.id),
+            },
+            sources,
+            &sessions,
+            config,
+            &mut admitted,
+        );
     }
 
     // ── Pass two: submit the fleet's answers ─────────────────────────────────

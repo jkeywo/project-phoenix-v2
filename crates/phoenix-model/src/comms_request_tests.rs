@@ -156,6 +156,7 @@ fn copy(
 fn lineage() -> Vec<crate::messages::CommsMessage> {
     use crate::comms_channel::{CommsAudience, CommsTransmission};
     let sent = CommsTransmission {
+        sustained: false,
         origin_id: "request-one".into(),
         channel: "public".into(),
         audience: CommsAudience::Contact {
@@ -191,6 +192,7 @@ fn lineage() -> Vec<crate::messages::CommsMessage> {
     receiver.is_read = true;
     receiver.selected_response = Some(0);
     let reply = CommsTransmission {
+        sustained: false,
         origin_id: "return-one".into(),
         channel: "public".into(),
         audience: CommsAudience::Contact {
@@ -340,4 +342,30 @@ fn real_eligible_reading_ticks_pause_and_resume_without_counting_human_or_offlin
     }
     .validate(30, 10)
     .is_err());
+}
+
+#[test]
+fn planned_choices_keep_generated_instance_identity_and_cannot_supply_future_or_hidden_route_shapes(
+) {
+    let row = PlannedCommsRequest {
+        id: format!("htn/plan/{}", "node/".repeat(40)),
+        released_tick: 12,
+        recipient_uuid: "already-known-contact".into(),
+        channel: "public".into(),
+        request: GenericCommsRequest::ReportStatus,
+    };
+    assert!(
+        row.validate(12).is_ok(),
+        "legal generated paths exceed a plain actor id bound"
+    );
+    assert!(row.validate(11).is_err());
+    for fault in 0..3 {
+        let mut bad = row.clone();
+        match fault {
+            0 => bad.id = "x".repeat(2049),
+            1 => bad.id = "bad\ninstance".into(),
+            _ => bad.recipient_uuid.clear(),
+        }
+        assert!(bad.validate(12).is_err());
+    }
 }

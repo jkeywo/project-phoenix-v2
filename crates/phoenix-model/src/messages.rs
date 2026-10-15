@@ -2329,6 +2329,8 @@ pub enum SystemControlPayload {
         channel: String,
         audience: crate::comms_channel::CommsAudience,
         request: crate::comms_request::GenericCommsRequest,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        planned_request: Option<String>,
     },
     MarkCommsRead {
         message_id: String,
@@ -5742,6 +5744,9 @@ pub struct RepairBlackboard {
 /// blackboard (issue #565).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct CommsBlackboard {
+    /// Own released tasks; recipients must already exist in this Console's contacts.
+    #[serde(default)]
+    pub planned_requests: Vec<crate::comms_request::PlannedCommsRequest>,
     /// Own receiver's supported notice, never an emitter attribution/census.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receiver_interference: Option<bool>,

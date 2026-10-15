@@ -2,7 +2,7 @@
 title: Comms Panel
 type: concept
 tags: [comms, client, inbox, hails, priority, localisation, input, feedback]
-sources: [crates/phoenix-simulation/src/comms/radio_route.rs, assets/entities/relay_cruiser.toml, crates/phoenix-model/src/comms_request.rs, crates/phoenix-simulation/src/comms/requests.rs, crates/phoenix-simulation/src/comms/request_returns.rs, crates/phoenix-simulation/src/snapshot/comms_requests.rs, gui/comms-requests.js, gui/components/ph-comms-text-composer.js, editor/workshop-comms-radio.js, gui/workshop-comms-radio-panel.js, gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/world/server/mod.rs, tests/publisher_ordering.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm/operations/comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
+sources: [crates/phoenix-simulation/src/comms/planned.rs, crates/phoenix-simulation/src/comms/request_delivery.rs, crates/phoenix-simulation/src/comms/radio_route.rs, assets/entities/relay_cruiser.toml, crates/phoenix-model/src/comms_request.rs, crates/phoenix-simulation/src/comms/requests.rs, crates/phoenix-simulation/src/comms/request_returns.rs, crates/phoenix-simulation/src/snapshot/comms_requests.rs, gui/comms-requests.js, gui/components/ph-comms-text-composer.js, editor/workshop-comms-radio.js, gui/workshop-comms-radio-panel.js, gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/world/server/mod.rs, tests/publisher_ordering.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm/operations/comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
 updated: 2026-10-15
 ---
 
@@ -32,7 +32,7 @@ protection. This first protected relay requires its held matching key.
 `relay_cruiser.toml` is an optional materialised radio reference with unchanged
 base energy. Forwarding neither changes the original sender/audience nor gives a
 relay an unaddressed inbox copy. No route membership is published or persisted.
-One-shot text/request emission and sustained returned outcomes share the route;
+One-shot text/manual-request emission, retained accepted planned requests and returned outcomes share the route;
 returned retries retain the existing single discrete emission/payment frontier.
 
 Runtime messages keep canonical `priority`. Legacy `is_urgent` is derived at the wire boundary and at its historical digest fold position; deserialization promotes legacy urgency only when no priority was supplied.
@@ -80,6 +80,31 @@ for the Console operator; it grants no other Console's history. New returned
 outcomes have their own presentation state. Ordinary plot/text Clear retains
 its prior behaviour. `last_returned` is an internal idempotence frontier and is
 removed from Blackboard, direct CommsState and ShowOnScreen projections.
+
+## Planned status requests
+
+`comms/planned.rs` reads released requests from the Comms System's existing typed
+Console publication. A row requires the recipient's actual UUID already in that
+Console's contacts and a published equipment channel. Neither a shared Station
+nor a task identifier expands this knowledge. The composer passes the chosen
+row through the same correlated request action; sending revalidates the exact
+row, audience, channel and request before charging real radio work.
+
+The existing Comms response AI has an authored `comms_request` output alongside
+its response output. Planned reading uses the same `pending_ai_responses` owner
+with a distinct key kind; Human control, missing current knowledge and Offline
+operation pause reading. Only successful real emission retires the pending read.
+The World binding uses a prepared exclusive permit: a refused send leaves the
+Situation unaccepted, while its successful same-tick commit binds the actual
+minted transmission identity.
+
+`comms/request_delivery.rs` derives retained delivery from that original sent
+inbox fact and current paid endpoints. Only accepted planned Contact requests
+have this flag. Retries reuse the original origin, sender, request and emission
+tick, and a stable recipient-copy id prevents duplicate reception. There is no
+separate retry queue or repeated emission charge. Ordinary text and manually
+sent status requests retain one-shot delivery. Actual returned reports remain
+distinct from permission to act.
 
 ## Priority
 

@@ -250,6 +250,7 @@ pub(crate) fn advance_reading(
     mut inbox: ResMut<CommsInboxRes>,
     mut runtime: ResMut<CommsRuntime>,
     tick: Res<crate::sim_tick::SimTick>,
+    content: Option<Res<crate::world::server::WorldContentRuntime>>,
 ) {
     let operators: std::collections::BTreeMap<_, _> =
         ships.iter().map(|row| (row.0 .0.as_str(), row)).collect();
@@ -266,6 +267,48 @@ pub(crate) fn advance_reading(
             runtime.pending_ai_responses.remove(&key);
             continue;
         };
+        if key.planned_request {
+            let active = content.as_deref().and_then(|runtime| {
+                crate::world::activities::communication_request_release(
+                    runtime,
+                    &key.ship_uuid,
+                    &profile.0.system,
+                    &key.message_id,
+                    tick.0,
+                )
+            });
+            if active.is_none() {
+                runtime.pending_ai_responses.remove(&key);
+                continue;
+            }
+            let known = super::planned::rows(config, boards, &profile.0.system, tick.0)
+                .iter()
+                .any(|row| row.id == key.message_id);
+            let eligible = known
+                && sources.0.entries().any(|(id, _)| id == &profile.0.system)
+                && crate::ai::host::ai_operates(&sources.0, &profile.0.system)
+                && !crate::ship::compartment_damage::operation_disabled(
+                    damage,
+                    hull,
+                    &profile.0.system,
+                );
+            let record = runtime
+                .pending_ai_responses
+                .get_mut(&key)
+                .expect("same planned reading");
+            if let Some(reading) = record.request_reading.as_mut() {
+                if reading
+                    .validate(profile.0.request_reading_ticks, tick.0)
+                    .is_ok()
+                    && reading.advance(tick.0, eligible).is_ok()
+                {
+                    record.due_tick = reading
+                        .due_tick()
+                        .expect("checked planned reading frontier");
+                }
+            }
+            continue;
+        }
         let Some(message) = inbox
             .0
             .iter()

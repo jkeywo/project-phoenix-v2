@@ -36,6 +36,7 @@ fn channels_require_actual_finite_reach_paid_work_and_held_keys() {
 #[test]
 fn reception_keeps_the_original_emission_and_cannot_claim_a_future_receipt() {
     let sent = CommsTransmission {
+        sustained: false,
         origin_id: "emission".into(),
         channel: "public".into(),
         audience: CommsAudience::All,
@@ -84,6 +85,7 @@ fn copied_text_keeps_one_original_and_cannot_forge_sent_or_received_ownership() 
     sent.is_read = true;
     sent.recipient_ship = Some(ShipKey("source".into()));
     sent.transmission = Some(CommsTransmission {
+        sustained: false,
         origin_id: "one-emission".into(),
         channel: "public".into(),
         audience: CommsAudience::All,
@@ -115,4 +117,29 @@ fn copied_text_keeps_one_original_and_cannot_forge_sent_or_received_ownership() 
     assert!(validate_transmissions(&[sent.clone(), forged], 10).is_err());
     heard.transmission.as_mut().unwrap().received_tick = None;
     assert!(validate_transmissions(&[sent, heard], 10).is_err());
+}
+
+#[test]
+fn sustained_delivery_cannot_be_attached_to_unscoped_text_or_group_traffic() {
+    let mut wire = CommsTransmission {
+        sustained: true,
+        origin_id: "actual-emission".into(),
+        channel: "public".into(),
+        audience: CommsAudience::Contact {
+            target_uuid: "known-recipient".into(),
+        },
+        emitted_tick: 12,
+        received_tick: None,
+        content: crate::comms_request::CommsRadioContent::Request {
+            request: crate::comms_request::GenericCommsRequest::ReportStatus,
+        },
+    };
+    assert!(wire.validate(12).is_ok());
+    wire.audience = CommsAudience::All;
+    assert!(wire.validate(12).is_err());
+    wire.audience = CommsAudience::Contact {
+        target_uuid: "known-recipient".into(),
+    };
+    wire.content = crate::comms_request::CommsRadioContent::Text;
+    assert!(wire.validate(12).is_err());
 }

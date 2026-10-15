@@ -92,3 +92,34 @@ describe('closed generic Comms requests',()=>{
     expect(document.getElementById('list').state.threads.map(row=>row.thread_id)).toEqual(['new-thread']);
   });
 });
+
+describe('actual own planned request choices',()=>{
+  const row=()=>({id:'htn/maintenance/request',released_tick:10,recipient_uuid:'peer',channel:'public',request:'report_status'});
+  it('uses the ordinary correlated payload and rejects mismatched, withdrawn or delegated contexts',()=>{
+    let view={channels:[{id:'public'},{id:'fleet'}],contacts:[{uuid:'peer'}],messages:[],planned_requests:[row()],comms_auto:false};
+    const packets=[];const sendAction=vi.fn((action,data)=>dispatchConsoleAction({action,...data},(type,data)=>packets.push({type,data}),()=>{}));
+    const registry=createCommsActionRegistry({getState:()=>view,sendAction,actionFeedback:new ActionFeedbackLifecycle()});
+    const detail={channel:'public',audience:{kind:'contact',target_uuid:'peer'},request:'report_status',planned_request:row().id};
+    expect(registry.activate(COMMS_SEND_REQUEST_ACTION_ID,{context:'comms',source:'control',detail}).handled).toBe(true);
+    expect(packets[0].data.payload).toEqual({type:'SendCommsRequest',data:detail});
+    for(const invalid of [{...detail,planned_request:'other-instance'},{...detail,channel:'fleet'},{...detail,audience:{kind:'all'}},{...detail,planned_request:'x'.repeat(2049)}])
+      expect(registry.activate(COMMS_SEND_REQUEST_ACTION_ID,{context:'comms',source:'control',detail:invalid}).handled).toBe(false);
+    for(const replacement of [{...view,contacts:[],messages:[received()]},{...view,planned_requests:[]},{...view,comms_auto:true}]){
+      view=replacement;expect(registry.activate(COMMS_SEND_REQUEST_ACTION_ID,{context:'comms',source:'control',detail}).handled).toBe(false);
+    }
+    expect(packets).toHaveLength(1);
+  });
+  it('shows known target labels safely and preserves draft/focus when sending a planned choice',()=>{
+    document.body.innerHTML='<ph-comms-text-composer></ph-comms-text-composer>';
+    const el=document.body.firstElementChild,state={channels:[{id:'public'}],contacts:[{uuid:'peer',name:'<b>Beacon</b>'}],messages:[],planned_requests:[row()],comms_auto:false};
+    el.state=state;const select=el.shadowRoot.getElementById('planned'),body=el.shadowRoot.getElementById('body');
+    expect(select.options[0].textContent).toContain('<b>Beacon</b>');expect(el.shadowRoot.querySelector('b')).toBeNull();
+    body.value='Keep literal text';select.focus();const option=select.options[0];el.state={...state};
+    expect(select.options[0]).toBe(option);expect(el.shadowRoot.activeElement).toBe(select);
+    window.activateSemanticAction=vi.fn(()=>({handled:true}));el.shadowRoot.getElementById('send-planned').click();
+    expect(window.activateSemanticAction).toHaveBeenCalledWith(COMMS_SEND_REQUEST_ACTION_ID,{source:'control',detail:{channel:'public',audience:{kind:'contact',target_uuid:'peer'},request:'report_status',planned_request:row().id}});
+    expect(body.value).toBe('Keep literal text');
+    el.state={...state,comms_auto:true};el.shadowRoot.getElementById('send-planned').click();expect(window.activateSemanticAction).toHaveBeenCalledTimes(1);
+    el.state={...state,contacts:[]};expect(el.shadowRoot.getElementById('planned-controls').hidden).toBe(true);
+  });
+});

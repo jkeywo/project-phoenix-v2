@@ -1,5 +1,5 @@
 import '../strings-boot.js';
-import {t} from '../strings.js';
+import {t, wireText} from '../strings.js';
 import {PhElement, phDefine} from './ph-element.js';
 import {COMMS_SEND_TEXT_ACTION_ID, COMMS_SEND_REQUEST_ACTION_ID} from '../stations/comms-actions.js';
 
@@ -14,6 +14,9 @@ export class PhCommsTextComposer extends PhElement {
       <textarea id="body" aria-label="${t('comms.radio.body')}" maxlength="4096"></textarea>
       <button id="send" type="button">${t('comms.send_text')}</button>
       <button id="request" type="button">${t('comms.request.report_status')}</button></fieldset>
+      <fieldset id="planned-controls" hidden><legend>${t('comms.request.planned_title')}</legend>
+      <label>${t('comms.request.planned_choice')}<select id="planned"></select></label>
+      <button id="send-planned" type="button">${t('comms.request.report_status')}</button></fieldset>
       <label><input id="cleared" type="checkbox">${t('comms.request.show_cleared')}</label>`;
   }
   onTemplate() {
@@ -23,6 +26,13 @@ export class PhCommsTextComposer extends PhElement {
     this.$('request').addEventListener('click', () => {
       if (!this.controls.disabled) window.activateSemanticAction?.(COMMS_SEND_REQUEST_ACTION_ID,
         {source:'control', detail:{...this.draft(), request:'report_status'}});
+    });
+    this.$('send-planned').addEventListener('click', () => {
+      if (this.$('planned-controls').disabled) return;
+      const row = (this.state?.planned_requests || []).find(row => row.id === this.$('planned').value);
+      if (row) window.activateSemanticAction?.(COMMS_SEND_REQUEST_ACTION_ID, {source:'control', detail:{
+        channel:row.channel, audience:{kind:'contact',target_uuid:row.recipient_uuid}, request:row.request, planned_request:row.id,
+      }});
     });
     this.$('cleared').addEventListener('change', () => this.dispatchEvent(new CustomEvent('comms-history-change',
       {bubbles:true, detail:{show:this.$('cleared').checked}})));
@@ -65,6 +75,16 @@ export class PhCommsTextComposer extends PhElement {
         .map(contact => [`contact:${contact.uuid || contact.id}`, contact.name || contact.uuid || contact.id]),
     ]);
     this.controls.disabled = state.comms_auto || !state.channels?.length;
+    const planned = (state.planned_requests || []).filter(row => row.request === 'report_status'
+      && (state.channels || []).some(channel => channel.id === row.channel)
+      && (state.contacts || []).some(contact => (contact.uuid || contact.id) === row.recipient_uuid));
+    this.options(this.$('planned'), planned.map(row => {
+      const contact = state.contacts.find(contact => (contact.uuid || contact.id) === row.recipient_uuid);
+      return [row.id, t('comms.request.planned_target', {target:wireText(contact.name || row.recipient_uuid)})];
+    }));
+    this.$('planned-controls').hidden = !planned.length;
+    this.$('planned-controls').disabled = state.comms_auto || !planned.length;
+
     if (this.pending && JSON.stringify(this.draft()) === this.pending.draft) {
       const sent = (state.messages || []).some(message => !this.pending.ids.has(message.id)
         && message.transmission && message.transmission.received_tick == null

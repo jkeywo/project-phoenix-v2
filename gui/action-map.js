@@ -944,7 +944,7 @@ export const ACTION_MAP = Object.freeze({
     const correlated = typeof a.correlation === 'string' && a.correlation;
     send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
       ...(correlated ? {correlation:a.correlation} : {}), target:'comms',
-      payload:{type:'SendCommsRequest',data:{channel:a.channel,audience:a.audience,request:a.request}},
+      payload:{type:'SendCommsRequest',data:{channel:a.channel,audience:a.audience,request:a.request,...(a.planned_request ? {planned_request:a.planned_request} : {})}},
     });
   },
   mark_comms_read: (a, send) => {

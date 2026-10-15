@@ -1712,6 +1712,9 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
             // same message ids and is still diverged.
             acc = fold_str(acc, &key.ship_uuid);
             acc = fold_str(acc, &key.message_id);
+            if key.planned_request {
+                acc = fold_str(acc, "planned-request-reading");
+            }
             acc = fold_u64(acc, record.due_tick);
             acc = fold_u64(acc, record.response_fingerprint);
             if let Some(reading) = &record.request_reading {

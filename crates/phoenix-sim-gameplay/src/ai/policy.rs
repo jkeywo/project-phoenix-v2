@@ -360,6 +360,8 @@ pub enum AiPolicyVerb {
     /// identically for both. Its absence ("hold"/idle) leaves the dialogue open
     /// this tick — there is no "decline" index.
     RespondToMessage(u8),
+    /// Send the current own permitted planned status request through normal admission.
+    SendPlannedCommsRequest,
 }
 
 /// One inline stateless policy rule.

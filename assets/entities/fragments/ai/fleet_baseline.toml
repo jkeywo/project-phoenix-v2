@@ -273,6 +273,13 @@ emergency_threshold = 22
 # repair seam to answer, not a tuning question for this staircase.
 [comms_console.ai]
 
+# Own known planned request, after the same Comms reading owner completes.
+[[comms_console.ai.rule]]
+priority = 10
+channel = "comms_request"
+when = "fact(request_report_status) > 0 and fact(comms_available) > 0"
+verb = "send_planned_comms_request"
+
 # A heard structured request is locally answerable after actual reading;
 # reverse reach remains unknown and only gates its independently paid return.
 [[comms_console.ai.rule]]

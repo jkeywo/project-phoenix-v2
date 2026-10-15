@@ -91,6 +91,7 @@ fn prepared() -> (App, Entity) {
         channel: "public".into(),
         audience: CommsAudience::All,
         request: GenericCommsRequest::ReportStatus,
+        planned_request: None,
     };
     for _ in 0..120 {
         let sessions = app.world().resource::<Sessions>();
@@ -163,6 +164,7 @@ fn human_request_partial_ai_reading_and_original_clock_report_resume_exactly_for
                 channel: "public".into(),
                 audience: CommsAudience::All,
                 request: GenericCommsRequest::ReportStatus,
+                planned_request: None,
             },
         },
     );

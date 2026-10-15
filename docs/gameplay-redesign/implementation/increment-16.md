@@ -429,3 +429,19 @@ appropriate activity/performance comparisons. Test 2/4/6/8-human layouts and
 delegation, simultaneous conversation/other duties and known overload. Automated
 or source-only proof cannot claim physical-device/media or human workload
 acceptance. Initial 16 integration is not its verified exit, nor completion of 17–24.
+
+### Planned request consumer source handoff (2026-10-15)
+
+The joint increment 16/22 source slice adds the existing Comms policy's typed
+planned-request output, a current-own-Console human choice, the same reading
+owner, the exclusive prepared World binding and canonical retained delivery.
+It depends on increment 22's Communication execution identity, released-request
+APIs, actual returned-outcome consumer and complete candidate validation.
+No native or milestone completion is claimed by this source handoff.
+
+Focused client checks: 430 tests across comms-requests, comms-radio and
+console-state passed; strict String Table checks passed with 6,151 strings and
+no errors or warnings. Owner tests added for exact binding, missing feed/contact,
+ordinary Cruiser policy reading, handoff and unavailable/undeclared operation
+remain unexecuted until root runs the joined native source. Independent craft
+source review passed after correcting the optional publication API arguments.

@@ -50,24 +50,30 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
                     .is_some_and(|recipient| recipient.0 == key.ship_uuid)
         });
         let Some(reading) = &record.request_reading else {
-            if message.is_some_and(crate::comms::requests::is_request) {
+            if key.planned_request || message.is_some_and(crate::comms::requests::is_request) {
                 return Err("structured request cannot acquire a legacy weighted wait".into());
             }
             continue;
         };
-        let message =
-            message.ok_or("pending request reading has no actual recipient inbox copy")?;
-        if !crate::comms::requests::is_request(message)
-            || message.is_read
-            || message.selected_response.is_some()
-        {
-            return Err("pending request reading must own an unfinished heard request".into());
-        }
-        let heard = message
-            .transmission
-            .as_ref()
-            .and_then(|wire| wire.received_tick)
-            .ok_or("request reading cannot precede physical delivery")?;
+        let heard = if key.planned_request {
+            None
+        } else {
+            let message =
+                message.ok_or("pending request reading has no actual recipient inbox copy")?;
+            if !crate::comms::requests::is_request(message)
+                || message.is_read
+                || message.selected_response.is_some()
+            {
+                return Err("pending request reading must own an unfinished heard request".into());
+            }
+            Some(
+                message
+                    .transmission
+                    .as_ref()
+                    .and_then(|wire| wire.received_tick)
+                    .ok_or("request reading cannot precede physical delivery")?,
+            )
+        };
         let row = snapshot
             .entities
             .iter()
@@ -137,7 +143,17 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
         reading
             .validate(profile.request_reading_ticks, snapshot.tick)
             .map_err(str::to_string)?;
-        if reading.remaining_ticks == 0
+        let heard = if key.planned_request {
+            crate::world::activities::validate_planned_communication_reading(
+                snapshot,
+                &key.ship_uuid,
+                &profile.system,
+                &key.message_id,
+            )?
+        } else {
+            heard.expect("validated incoming receipt")
+        };
+        if (!key.planned_request && reading.remaining_ticks == 0)
             || reading.last_tick < heard
             || u64::from(reading.required_ticks - reading.remaining_ticks)
                 > reading.last_tick - heard

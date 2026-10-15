@@ -14,6 +14,7 @@ fn request_fixture() -> (App, Entity, Entity, String) {
         channel: "public".into(),
         audience: CommsAudience::All,
         request: GenericCommsRequest::ReportStatus,
+        planned_request: None,
     };
     app.world_mut().run_system_once(tick_radio).unwrap();
     app.world_mut()

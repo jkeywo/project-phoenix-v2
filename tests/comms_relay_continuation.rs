@@ -91,6 +91,7 @@ fn prepared() -> (App, Entity) {
         channel: "public".into(),
         audience: CommsAudience::All,
         request: GenericCommsRequest::ReportStatus,
+        planned_request: None,
     };
     for _ in 0..120 {
         let sessions = app.world().resource::<Sessions>();
@@ -233,6 +234,7 @@ fn actual_three_hull_relay_keeps_original_request_and_return_across_360_restored
                     target_uuid: reporter_uuid.clone(),
                 },
                 request: GenericCommsRequest::ReportStatus,
+                planned_request: None,
             },
         },
     );

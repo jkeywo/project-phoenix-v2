@@ -23,7 +23,7 @@ import { vi } from 'vitest';
 const METHODS = [
   'fillRect', 'clearRect', 'beginPath', 'closePath', 'moveTo', 'lineTo',
   'arc', 'fill', 'stroke', 'clip', 'fillText', 'strokeText', 'drawImage',
-  'save', 'restore', 'translate', 'rotate', 'scale', 'setTransform',
+  'save', 'restore', 'translate', 'rotate', 'scale', 'setTransform', 'setLineDash',
 ];
 
 /**

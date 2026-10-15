@@ -1,5 +1,6 @@
 import { observationTickFor } from './observation-details.js';
 import { consoleReadState } from './console-topology.js';
+import { projectSensorTracks } from './sensor-tracks.js';
 /**
  * gui/console-state.js — Pure state builder functions for HTML console iframes.
  *
@@ -1958,6 +1959,28 @@ function scanPayload(state, systemIds = []) {
  *           regions, complexity, impulseChargeProgress }} state
  */
 export function buildSensorsConsoleState(state, systemIds = []) {
+  const trackEntry = blackboardOfKind(state, 'SensorRadar', systemIds);
+  // Presence, including [], is authoritative. Never fill gaps from live entity snapshots.
+  if (Array.isArray(trackEntry?.data?.tracks)) {
+    const sensor = blackboardOfKind(state, 'Sensors', systemIds)?.data;
+    const range = sensor?.radar_range ?? state.sensorsRadarRange ?? SENSORS_RADAR_RANGE;
+    return {
+      ...projectSensorTracks(trackEntry.data.tracks, { x: state.shipX || 0, z: state.shipZ || 0,
+        yaw: state.shipYaw || 0, range, selected: trackEntry.data.selected_target ?? null,
+        tick: observationTickFor(state, trackEntry.systemId) }),
+      scan_range: range, ship_x: state.shipX || 0, ship_z: state.shipZ || 0,
+      ship_heading: (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
+      ship_speed: state.forwardSpeed || 0, impulse_charge_progress: state.impulseChargeProgress || 0,
+      on_screen: state.currentView === 'SensorsRadar' || state.currentView === 'ScienceRadar',
+      regions: [], observation_tick: observationTickFor(state, trackEntry.systemId),
+      scan: scanPayload(state, systemIds),
+      passive: blackboardsOfKind(state, 'Passive', systemIds).map(entry => ({ ...entry.data,
+        system_id: entry.systemId, controllable: systemIds.includes(entry.systemId) && state.controlSources?.[entry.systemId] === 'Human',
+        observation_tick: observationTickFor(state, entry.systemId) })),
+      own_hull: aggregateStationHull('sensors', state.consoleHull, state.stationSystems),
+      sensors_auto: systemIds.length > 0 ? systemIds.every(id => state.controlSources?.[id] === 'Ai') : state.stationRatings?.sensors === 'Backfill',
+    };
+  }
   const sensorEntry = blackboardOfKind(state, 'Sensors', systemIds);
   const bb = sensorEntry?.data;
   const overrides = bb?.contact_overrides || {};

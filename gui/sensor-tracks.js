@@ -1,0 +1,57 @@
+import { t, wireText } from './strings.js';
+
+const pair = value => Array.isArray(value) && value.length === 2 && value.every(Number.isFinite);
+const stages = new Set(['return', 'identified', 'classified', 'assessed']);
+
+/** Project only delivered measurements. Entity snapshots are deliberately not an input. */
+export function projectSensorTracks(tracks, { x = 0, z = 0, yaw = 0, range = 0, selected = null, tick = null } = {}) {
+  const validRange = Number.isFinite(range) && range > 0;
+  const cos = Math.cos(yaw), sin = Math.sin(yaw);
+  const rows = [], blips = [], records = new Map();
+  for (const track of Array.isArray(tracks) ? tracks : []) {
+    if (!track || typeof track.contact_id !== 'string' || !track.contact_id || records.has(track.contact_id)
+      || !pair(track.position) || !Number.isFinite(track.position_error) || track.position_error < 0
+      || !Number.isSafeInteger(track.observed_tick) || track.observed_tick < 0 || !stages.has(track.stage)) continue;
+    records.set(track.contact_id, track);
+    const dx = track.position[0] - x, dz = track.position[1] - z;
+    const name = track.stage !== 'return' && track.identity?.name ? wireText(track.identity.name) : t('console.sensors.basic_contact');
+    const age = Number.isSafeInteger(tick) && tick >= track.observed_tick ? tick - track.observed_tick : null;
+    const row = { id: track.contact_id, name, stage: track.stage, predicted: track.predicted === true,
+      error: track.position_error, age, selectable: track.predicted === false && validRange && Math.hypot(dx, dz) <= range };
+    rows.push(row);
+    if (validRange && Math.hypot(dx, dz) <= range) blips.push({
+      uuid: row.id, radar_x: (dx * cos + dz * sin) / range, radar_y: (dx * sin - dz * cos) / range,
+      scaled_radius: 0, uncertainty_radius: row.error / range, track: true, predicted: row.predicted,
+      icon: null, kind: 'contact', name, label: name, selectable: row.selectable,
+    });
+  }
+  const row = rows.find(row => row.id === selected);
+  const track = row && records.get(row.id);
+  const dx = track ? track.position[0] - x : null, dz = track ? track.position[1] - z : null;
+  const velocity = track && pair(track.velocity) ? track.velocity : null;
+  return { blips, tracks: rows, track_mode: true, target_uuid: row?.id ?? null,
+    target_track: row ? { ...row, fact_ages: ['identity', 'classification', 'assessment'].flatMap(kind => {
+      const observed = track[`${kind}_tick`];
+      return track[kind] && Number.isSafeInteger(observed) ? [{ kind, ticks: Number.isSafeInteger(tick) && tick >= observed ? tick - observed : null }] : [];
+    }) } : null, target_name: row?.name ?? null,
+    target_bearing: track ? (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360 : null,
+    target_range: track ? Math.hypot(dx, dz) : null,
+    target_faction: track?.identity?.faction ? wireText(track.identity.faction) : null,
+    target_class: track?.classification ? wireText(track.classification) : null,
+    target_speed: velocity ? Math.hypot(...velocity) : null,
+    target_heading: velocity && Math.hypot(...velocity) > 0 ? (Math.atan2(velocity[0], -velocity[1]) * 180 / Math.PI + 360) % 360 : null,
+    target_alert: track?.assessment?.alert ?? null,
+    target_weapons: null, target_restrained: track?.assessment?.weapons_restrained ?? null,
+    target_disabled: track?.assessment?.disabled ?? null,
+    target_kind: null, target_stance: null, target_hull_pct: null, target_threat: null,
+    target_shield_freq: null, target_shields: null, target_shield_fraction: null, target_report: null,
+    target_projection: null,
+  };
+}
+
+export function sensorTrackText(row) {
+  return [row.name, t(`sensing.track.stage.${row.stage}`),
+    t(row.predicted ? 'sensing.track.predicted' : 'sensing.track.measured'),
+    t('sensing.track.error', { radius: Math.round(row.error * 10) / 10 }),
+    row.age === null ? t('observation.unknown') : t('observation.ticks', { ticks: row.age })].join(' · ');
+}

@@ -2,8 +2,8 @@
 title: Radar Projection
 type: concept
 tags: [radar, helm, navigation, viewscreen, gm, map, inspector, pure-iterator, shared]
-sources: [crates/phoenix-simulation/src/ship/continuation.rs, crates/phoenix-simulation/src/snapshot/mod.rs, gui/console-state.js, gui/components/ph-scope-chrome.js, gui/battleship/navigation.html, gui/sim-state.js, gui/host-channel.js, gui/gm-local-projection.js, gui/entity-inspector.js, gui/components/ph-radar.js, gui/components/ph-tactical-radar.js, gui/components/ph-navigation-map.js, client.html, server.html, crates/phoenix-simulation/src/gm/observation/projection.rs, crates/phoenix-presentation/src/gui/radar.rs, crates/phoenix-simulation/src/radar.rs, crates/phoenix-sim-gameplay/src/radar_config.rs, crates/phoenix-sim-gameplay/src/entities/tags.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, CONTEXT.md]
-updated: 2026-09-07
+sources: [gui/sensor-tracks.js, gui/components/ph-sensor-panel.js, crates/phoenix-simulation/src/ship/continuation.rs, crates/phoenix-simulation/src/snapshot/mod.rs, gui/console-state.js, gui/components/ph-scope-chrome.js, gui/battleship/navigation.html, gui/sim-state.js, gui/host-channel.js, gui/gm-local-projection.js, gui/entity-inspector.js, gui/components/ph-radar.js, gui/components/ph-tactical-radar.js, gui/components/ph-navigation-map.js, client.html, server.html, crates/phoenix-simulation/src/gm/observation/projection.rs, crates/phoenix-presentation/src/gui/radar.rs, crates/phoenix-simulation/src/radar.rs, crates/phoenix-sim-gameplay/src/radar_config.rs, crates/phoenix-sim-gameplay/src/entities/tags.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, CONTEXT.md]
+updated: 2026-10-15
 ---
 
 # Radar Projection
@@ -27,6 +27,23 @@ Saved target memory is separate from those published projections. The Ship-owned
 Science Target and last attacker, including cleared targets; `crates/phoenix-simulation/src/snapshot/mod.rs`
 retains entity matching and the compatibility re-export. Live AI consumers still
 read the published viewscreen facts.
+
+## Broad sensing tracks
+
+For a permitted SensorRadar publication with a `tracks` array,
+`buildSensorsConsoleState` delegates to `gui/sensor-tracks.js`. Empty arrays
+remain empty. This path reads measured/predicted positions, observer-local contact
+IDs and acquired facts only; it does not join entity snapshots, authored hull
+silhouettes, physical sizes or region geometry. A missing tracks field retains the
+legacy projection for equipment without the broad capability.
+
+`ph-radar` draws a generic wireframe and the published positional uncertainty
+radius. Dashed outlines distinguish predicted positions. `ph-sensor-panel` keeps
+native contact-list buttons stable across updates, with evidence stage, logical
+sample age and uncertainty text. Retained identity, classification and assessment
+have their own ages. Predicted returns remain visible but cannot send targeting or
+focused-enquiry actions; current selections use the published contact ID through
+the existing correlated semantic action and normal host admission.
 
 ## GM inspect mode
 

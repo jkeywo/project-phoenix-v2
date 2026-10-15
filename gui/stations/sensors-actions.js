@@ -133,7 +133,7 @@ export function shieldsActionView(state) {
 
 function visibleTarget(view, selected) {
   const candidates = (Array.isArray(view && view.blips) ? view.blips : [])
-    .filter((blip) => blip && typeof blip.uuid === 'string' && blip.uuid)
+    .filter((blip) => blip && blip.selectable !== false && typeof blip.uuid === 'string' && blip.uuid)
     .map((blip) => blip.uuid);
   if (selected != null) return candidates.includes(selected) ? selected : null;
   if (candidates.length === 0) return null;
@@ -184,7 +184,7 @@ export function registerSensorScienceActions(registry, options = {}) {
     const view = sensorsActionView(getState());
     const uuid = view && typeof view.target_uuid === 'string' ? view.target_uuid : '';
     const requested = detail && detail.uuid;
-    if (!view || !view.scan?.capable || !view.scan.controllable || !view.scan.system_id || !uuid
+    if (!view || view.target_track?.predicted || !view.scan?.capable || !view.scan.controllable || !view.scan.system_id || !uuid
         || (requested != null && requested !== uuid) || (detail?.system_id && detail.system_id !== view.scan.system_id)) return false;
     return send(actionId, correlation, inputMs, 'scan_target', { uuid, control_system_id: view.scan.system_id });
   });

@@ -235,7 +235,23 @@ export class PhRadar extends PhElement {
       const dotR = Math.max(6 * px, (b.scaled_radius || 0) * R * 0.6);
       const color = b.color || 'var(--ink-dim)';
 
-      if (b.kind === 'waypoint') {
+      if (b.track && Number.isFinite(b.uncertainty_radius) && b.uncertainty_radius > 0) {
+        octx.save();
+        octx.beginPath(); octx.arc(cx, cy, R, 0, Math.PI * 2); octx.clip();
+        if (b.predicted) octx.setLineDash([4 * px, 3 * px]);
+        this.#drawRing(octx, bx, by, b.uncertainty_radius * R, px, forced ? 'CanvasText' : 'var(--science)');
+        octx.restore();
+      }
+
+      if (b.track) {
+        // A measured return has no known hull silhouette or physical size.
+        octx.save();
+        if (b.predicted) octx.setLineDash([3 * px, 2 * px]);
+        octx.beginPath(); octx.moveTo(bx, by - dotR); octx.lineTo(bx + dotR, by);
+        octx.lineTo(bx, by + dotR); octx.lineTo(bx - dotR, by); octx.closePath();
+        octx.strokeStyle = phColor(this, forced ? 'CanvasText' : 'var(--science)');
+        octx.lineWidth = 1.5 * px; octx.stroke(); octx.restore();
+      } else if (b.kind === 'waypoint') {
         this.#drawTargetBlip(octx, bx, by, dotR, !!b.edge, 'var(--gold)');
       } else if (b.kind === 'tactical-target') {
         this.#drawTargetBlip(octx, bx, by, dotR, !!b.edge, 'var(--fire-hot)');
@@ -298,7 +314,7 @@ export class PhRadar extends PhElement {
         this.#drawRing(octx, bx, by, dotR + 8 * px + LOCK_RING_GAP_CSS * px, 1.5 * px, lockColor);
       }
 
-      this.#projectedBlips.push({ uuid: b.uuid, bx, by, dotR });
+      if (b.selectable !== false) this.#projectedBlips.push({ uuid: b.uuid, bx, by, dotR });
     }
 
     // Selected-target trajectory projection (issue #1339). Drawn after the

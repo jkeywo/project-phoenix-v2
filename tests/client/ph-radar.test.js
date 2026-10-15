@@ -121,6 +121,20 @@ function tapCss(h, cssX, cssY) {
 // ── Tests ────────────────────────────────────────────────────────────
 
 describe('PhRadar', () => {
+  it('draws measured uncertainty as a scaled circle and a generic wireframe; stale returns do not target', () => {
+    const sendAction = vi.fn(), h = setup({ sendAction });
+    h.el.state = { range: 100, blips: [{ uuid: 'track-1', radar_x: .2, radar_y: .4,
+      track: true, uncertainty_radius: .1, predicted: true, selectable: false, label: 'Retained return' }] };
+    h.tickRaf();
+    expect(h.fakeCtx.arc.mock.calls.some(([x, y, radius]) => x === 360 && y === 180 && radius === 30)).toBe(true);
+    expect(h.fakeCtx.setLineDash).toHaveBeenCalledWith([8, 6]);
+    expect(h.fakeCtx.moveTo).toHaveBeenCalledWith(360, 168);
+    expect(imageSources.some(source => source.includes('radar_icons'))).toBe(false);
+    tapCss(h, 180, 90); expect(sendAction).not.toHaveBeenCalled();
+    h.el.state = { range: 100, blips: [{ uuid: 'track-1', radar_x: .2, radar_y: .4,
+      track: true, uncertainty_radius: .1, predicted: false, selectable: true }] };
+    h.tickRaf(); tapCss(h, 180, 90); expect(sendAction).toHaveBeenCalledWith('set_target', { uuid: 'track-1' });
+  });
   // ── Registration & structure ──────────────────────────────────────
 
   it('is defined and registered as a custom element', () => {

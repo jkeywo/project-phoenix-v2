@@ -4,6 +4,8 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { sensorTrackText } from '../sensor-tracks.js';
+import { SENSORS_TARGET_ACTION_ID } from '../stations/sensors-actions.js';
 import { observationDetails } from '../observation-details.js';
 import { renderSensorReport } from '../sensor-report.js';
 import { PhElement, phDefine } from './ph-element.js';
@@ -27,6 +29,7 @@ export class PhSensorPanel extends PhElement {
   #badgesEl = null;
   #brgEl = null;
   #rngEl = null;
+  #trackRows = new Map();
 
   static get observedAttributes() { return ['hide-shield-rows']; }
 
@@ -92,6 +95,7 @@ export class PhSensorPanel extends PhElement {
     </div>
   </div>
   <div class="scan-data" id="scan-data"></div>
+  <section id="tracks" hidden aria-label="${t('sensing.track.list')}"></section>
 `;
   }
 
@@ -102,6 +106,24 @@ export class PhSensorPanel extends PhElement {
     root.getElementById('range-val').textContent = s.scan_range || 0;
 
     const blips = s.blips || [];
+    const trackList = root.getElementById('tracks'); trackList.hidden = !s.track_mode;
+    // Native button Enter/Space belongs to the list, not a station shortcut.
+    trackList.onkeydown = event => event.stopPropagation();
+    const present = new Set();
+    for (const track of s.tracks || []) {
+      present.add(track.id);
+      let row = this.#trackRows.get(track.id);
+      if (!row) {
+        row = this.ownerDocument.createElement('button'); row.type = 'button';
+        row.style.cssText = 'display:block;width:100%;text-align:left;min-height:44px;font:inherit;color:inherit;background:var(--bg-card);border:1px solid var(--line-faint);padding:.5rem;overflow-wrap:anywhere';
+        row.addEventListener('click', () => window.activateSemanticAction?.(SENSORS_TARGET_ACTION_ID,
+          { source: 'control', detail: { uuid: track.id } }));
+        this.#trackRows.set(track.id, row); trackList.append(row);
+      }
+      row.textContent = sensorTrackText(track); row.disabled = !track.selectable;
+      row.setAttribute('aria-pressed', String(s.target_uuid === track.id));
+    }
+    for (const [id, row] of this.#trackRows) if (!present.has(id)) { row.remove(); this.#trackRows.delete(id); }
     root.getElementById('blip-count').textContent = blips.length === 1
       ? t('console.common.contacts.one', { n: 1 })
       : t('console.common.contacts.other', { n: blips.length });
@@ -152,6 +174,10 @@ export class PhSensorPanel extends PhElement {
       this.#badgesEl.children[0].className = 'badge ' + stanceClass;
       this.#badgesEl.children[0].textContent = stanceLabel;
       this.#badgesEl.children[1].textContent = kindLabel;
+      if (s.track_mode) {
+        this.#badgesEl.children[0].textContent = t(`sensing.track.stage.${s.target_track.stage}`);
+        this.#badgesEl.children[1].textContent = t(s.target_track.predicted ? 'sensing.track.predicted' : 'sensing.track.measured');
+      }
 
       this.#brgEl.textContent = s.target_bearing != null ? s.target_bearing.toFixed(1) : '—';
       this.#rngEl.textContent = s.target_range != null ? Math.round(s.target_range) : '—';
@@ -159,6 +185,14 @@ export class PhSensorPanel extends PhElement {
 
     const sd = root.getElementById('scan-data');
     const scanRows = [];
+    if (s.target_track) {
+      scanRows.push({ k: t('sensing.track.uncertainty'), v: String(s.target_track.error) });
+      scanRows.push({ k: t('observation.age'), v: s.target_track.age === null ? t('observation.unknown') : t('observation.ticks', { ticks: s.target_track.age }) });
+      for (const fact of s.target_track.fact_ages || []) scanRows.push({ k: t(`sensing.track.age.${fact.kind}`),
+        v: fact.ticks === null ? t('observation.unknown') : t('observation.ticks', { ticks: fact.ticks }) });
+    }
+    if (s.target_disabled != null) scanRows.push({ k: t('sensing.track.disabled'), v: t(s.target_disabled ? 'sensing.track.yes' : 'sensing.track.no') });
+    if (s.target_restrained != null) scanRows.push({ k: t('sensing.track.restrained'), v: t(s.target_restrained ? 'sensing.track.yes' : 'sensing.track.no') });
     if (s.target_class) scanRows.push({ k: t('component.sensor_panel.class'), v: s.target_class });
     if (s.target_hull_pct != null) scanRows.push({ k: t('component.sensor_panel.hull'), v: Math.round(s.target_hull_pct) + '%' });
     if (s.target_heading != null) scanRows.push({ k: t('component.sensor_panel.heading'), v: s.target_heading.toFixed(0) + '°' });

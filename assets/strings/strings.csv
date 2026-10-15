@@ -5706,3 +5706,19 @@ semantic_action.sensors.cancel_scan.label,Sensing control and historical evidenc
 semantic_action.sensors.cancel_scan.accessibility,Sensing control and historical evidence,Cancel this instrument’s focused enquiry,Fokusuntersuchung dieses Instruments abbrechen,Cancel this instrument’s focused enquiry,machine
 semantic_action.sensors.passive_enabled.label,Sensing control and historical evidence,Set passive receiver enabled,Passiven Empfaenger aktivieren,Set passive receiver enabled,machine
 semantic_action.sensors.passive_enabled.accessibility,Sensing control and historical evidence,Enable or disable the selected passive receiver,Ausgewaehlten passiven Empfaenger aktivieren oder deaktivieren,Enable or disable the selected passive receiver,machine
+sensing.track.list,Broad sensing tracks,Measured and retained tracks,Gemessene und gespeicherte Spuren,Measured and retained tracks,machine
+sensing.track.stage.return,Broad sensing tracks,Unidentified return,Unbekanntes Echo,Unidentified return,machine
+sensing.track.stage.identified,Broad sensing tracks,Identified,Identifiziert,Identified,machine
+sensing.track.stage.classified,Broad sensing tracks,Classified,Klassifiziert,Classified,machine
+sensing.track.stage.assessed,Broad sensing tracks,Assessed,Beurteilt,Assessed,machine
+sensing.track.predicted,Broad sensing tracks,Predicted position,Vorhergesagte Position,Predicted position,machine
+sensing.track.measured,Broad sensing tracks,Measured position,Gemessene Position,Measured position,machine
+sensing.track.error,Broad sensing tracks,Position radius ±{radius},Positionsradius ±{radius},Position radius ±{radius},machine
+sensing.track.uncertainty,Broad sensing tracks,Position radius,Positionsradius,Position radius,machine
+sensing.track.age.identity,Broad sensing tracks,Identity age,Alter der Identitaet,Identity age,machine
+sensing.track.age.classification,Broad sensing tracks,Classification age,Alter der Klassifizierung,Classification age,machine
+sensing.track.age.assessment,Broad sensing tracks,Assessment age,Alter der Beurteilung,Assessment age,machine
+sensing.track.disabled,Broad sensing tracks,Disabled observed,Kampfunfaehigkeit beobachtet,Disabled observed,machine
+sensing.track.restrained,Broad sensing tracks,Weapons restrained observed,Waffenzurueckhaltung beobachtet,Weapons restrained observed,machine
+sensing.track.yes,Broad sensing tracks,Yes,Ja,Yes,machine
+sensing.track.no,Broad sensing tracks,No,Nein,No,machine

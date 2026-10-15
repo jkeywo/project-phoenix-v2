@@ -1651,12 +1651,12 @@ pub struct CommsState {
     /// message id is the map's own key.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dialogues: Vec<DialogueState>,
-    /// `CommsRuntime::open_hails`, already ordered (a `BTreeSet`). The record of
-    /// which targets this ship has hailed and not cleared; without it a resumed
+    /// `CommsRuntime::open_hails`, ordered by source ship and then target.
+    /// Retains which hull issued each not-yet-cleared hail; without it a resumed
     /// Backfill comms officer re-hails a contact it had already hailed, which
     /// seats a duplicate thread in the restored inbox.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub open_hails: Vec<String>,
+    #[serde(default)]
+    pub open_hails: phoenix_model::comms_history::HailHistory,
     /// `WorldScriptRuntime::pending_comms_opens`, **in queue order**.
     ///
     /// Not sorted, and the justification is [`ScenarioState::script_callbacks`]'

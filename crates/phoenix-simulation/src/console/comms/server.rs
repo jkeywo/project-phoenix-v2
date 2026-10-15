@@ -190,88 +190,59 @@ pub(crate) fn publish_comms_blackboard(
 /// Range-gates the hail, records it on `CommsRuntime::open_hails`, and emits
 /// `WorldEvent::Hailed` so a scripted `on_hailed` handler can answer it.
 pub(crate) fn handle_hail(
-    mut ship_query: Query<
+    mut ships: Query<
         (
+            &EntityUuid,
+            Option<&crate::lockstep::FleetSlotOf>,
+            bevy::ecs::query::Has<crate::server_app::LocalShip>,
             &crate::core::messages::AdmittedCommands,
             Option<&mut crate::ship::power::ShipPowerSystem>,
         ),
-        With<crate::server_app::LocalShip>,
+        With<crate::server_app::Ship>,
     >,
     mut runtime: ResMut<WorldContentRuntime>,
     mut comms: ResMut<CommsRuntime>,
     mut outbox: Option<ResMut<crate::server_app::SimOutbox>>,
 ) {
-    let Some((admitted, mut power)) = ship_query.iter_mut().next() else {
-        return;
-    };
-    for cmd in admitted.for_target(crate::ship::system_registry::COMMS_SYSTEM_ID) {
-        let target_uuid = match &cmd.payload {
-            crate::core::messages::SystemControlPayload::Hail { target_uuid } => target_uuid,
-            _ => continue,
-        };
-
-        // Server-side range gate: when range tracking is active, the target
-        // must be a known, in-range entity. The command remains refused (the
-        // client gate is only UX); a correlated action gets an explicit
-        // terminal result without changing that reachability rule.
-        if comms.range_active {
-            match comms.range_flags.get(target_uuid).copied() {
-                Some(true) => {}
-                _ => {
-                    if let Some(outbox) = outbox.as_deref_mut() {
-                        finish_action_feedback(
-                            cmd,
-                            outbox,
-                            crate::core::messages::ActionFeedbackOutcome::Refused,
-                        );
-                    }
-                    continue;
-                }
-            }
+    // Every peer applies every fleet hull's admitted command. LocalShip only
+    // identifies the legacy single-hull host, never the owner of fleet state.
+    let mut ordered: Vec<_> = ships.iter_mut().collect();
+    ordered.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
+    for (source, slot, is_local, admitted, mut power) in ordered {
+        if !is_local && slot.is_none() {
+            continue;
         }
-
-        if !power.as_deref_mut().is_some_and(|power| {
-            power
-                .0
-                .try_work_discrete(&crate::ship::system_registry::comms_system_id())
-                .unwrap_or(false)
-        }) {
+        for cmd in admitted.for_target(crate::ship::system_registry::COMMS_SYSTEM_ID) {
+            let crate::core::messages::SystemControlPayload::Hail { target_uuid } = &cmd.payload
+            else {
+                continue;
+            };
+            let reachable =
+                crate::comms::server::may_hail_sender(&comms, slot.map(|slot| slot.0), target_uuid);
+            let applied = reachable
+                && power.as_deref_mut().is_some_and(|power| {
+                    power
+                        .0
+                        .try_work_discrete(&crate::ship::system_registry::comms_system_id())
+                        .unwrap_or(false)
+                });
+            if applied {
+                comms.open_hails.record(&source.0, target_uuid);
+                runtime.pending_world_events.push(WorldEvent::Hailed {
+                    target_uuid: target_uuid.clone(),
+                });
+            }
             if let Some(outbox) = outbox.as_deref_mut() {
                 finish_action_feedback(
                     cmd,
                     outbox,
-                    crate::core::messages::ActionFeedbackOutcome::Refused,
+                    if applied {
+                        crate::core::messages::ActionFeedbackOutcome::Applied
+                    } else {
+                        crate::core::messages::ActionFeedbackOutcome::Refused
+                    },
                 );
             }
-            continue;
-        }
-
-        // Record the hail as authoritative comms state (issue #786). This is
-        // the ONLY place a hail is known to have actually been issued: it is
-        // past the range gate and applies identically to a human officer's hail
-        // and a Backfill AI's. The Comms AI's anti-respam gate reads it back as
-        // `candidate_fact(has_open_hail_thread)`; `handle_clear_comms` clears
-        // it. Deliberately recorded before the event is routed, because a hail
-        // that no handler answers still happened.
-        comms.open_hails.insert(target_uuid.clone());
-
-        // Route the Hailed event into the trigger system. This is now the ONLY
-        // thing a hail does beyond recording itself: issue #985 deleted the
-        // `[[comms]]` template table this used to evaluate, so a hail no longer
-        // injects anything of its own. A scripted `on_hailed(entity, "handler")`
-        // registration rides this same event and calls
-        // `ctx.effects.open_comms(#{...})` — the same tick, because
-        // `tick_trigger_pipeline` drains `pending_world_events` in
-        // `SimSet::Physics`, which runs after `SimSet::Input`.
-        runtime.pending_world_events.push(WorldEvent::Hailed {
-            target_uuid: target_uuid.clone(),
-        });
-        if let Some(outbox) = outbox.as_deref_mut() {
-            finish_action_feedback(
-                cmd,
-                outbox,
-                crate::core::messages::ActionFeedbackOutcome::Applied,
-            );
         }
     }
 }
@@ -918,64 +889,15 @@ pub(crate) fn handle_respond_to_message(
 
 /// Handle `ClearComms` from Comms console holders.
 ///
-/// Clearing the inbox also retires the authoritative `CommsRuntime.open_hails`
-/// record (issue #786): the officer has declared the comms slate empty, so a
-/// standing `Hail` directive becomes eligible to hail its target ONE more time.
-/// That re-arm cannot loop on its own — it needs another `ClearComms`.
+/// Clear the requesting ship's inbox/dialogues and its own issued-hail history.
+/// Existing unaddressed narrative threads retain their shared clear semantics;
+/// another ship's explicitly addressed thread and issued hails remain intact.
+/// Missing dialogue entries take the ordinary stale-response path. Already
+/// committed callbacks/effects retain their existing owners and may open a new
+/// thread later; clearing the current surface does not roll them back.
 ///
-/// This is a HUMAN path only. `ClearComms` is emitted by the Comms console
-/// (`gui/comms-state.js`, `gui/action-map.js`) and by nothing else —
-/// `TriggerAction` has no `ClearComms` variant, so no scenario can script one.
-/// An unmanned (Backfill) ship therefore never reaches this handler at all, and
-/// its latch re-arms through [`operate_comms_ai`]'s candidacy retirement
-/// instead. See [`has_open_hail_thread_with`].
-///
-/// # `active_dialogues` is HARD-cleared (issue #1049)
-///
-/// Clearing empties `CommsRuntime::active_dialogues` alongside the inbox and
-/// `open_hails` — a full clear, not a selective prune. That is safe because
-/// nothing consumes an `active_dialogues` entry except by looking it up
-/// through `message_id` and treating a miss as an ordinary, already-handled
-/// case, never as an invariant violation:
-///
-///   * [`handle_respond_to_message`] is the only path that can advance a
-///     dialogue, and it already has a "stale submission" arm for a missing
-///     entry (already answered, never existed, or now cleared) — it rejects
-///     with `CommsResponseRejected` so the client flashes the attempted
-///     control red. A clear simply routes every open dialogue through the
-///     SAME arm a late/duplicate submission already takes.
-///   * [`operate_comms_response_ai`] skips any inbox message with no
-///     `active_dialogues` entry — it never decides about a thread that isn't
-///     there, so a clear just leaves it nothing to decide about.
-///
-/// There is also no PENDING server-side continuation that a hard clear could
-/// orphan. A scripted dialogue's only deferred work — `in_seconds` effects
-/// (`pending_delayed_actions`) and `after` callbacks (`pending_callbacks`) —
-/// never re-enters an existing `active_dialogues` entry by id; when one of
-/// them eventually queues a follow-up `open_comms` request,
-/// `open_scripted_comms_threads` mints a BRAND NEW message id and inserts a
-/// fresh entry (`comms/scripted.rs`), exactly as a live `on_pick`'s own
-/// follow-up node does (`handle_respond_to_message` below). Neither writer
-/// ever mutates or resurrects a cleared entry, so there is nothing to cancel
-/// and nothing selective to preserve — a full clear and a "prune only the
-/// entries with no pending effect" clear are the same operation here.
-///
-/// # Why it drains EVERY fleet hull (issue #1343's input audit)
-///
-/// It ran `With<LocalShip>` until the audit, which is the same hole
-/// [`handle_respond_to_message`] had and for a sharper reason: what this writes
-/// — the inbox, `active_dialogues`, `open_hails` — is folded by
-/// `sim_digest::fold_comms_scope`, and the inbox is ONE resource for the whole
-/// fleet. A human officer's `ClearComms` on a peer's bridge is a replicated
-/// command: it lands in THAT hull's `AdmittedCommands` on every host
-/// (`lockstep::apply_mesh_inbox` applies by `ShipKey`), so a drain that read
-/// only the hull this host projects applied the clear on the admitting host and
-/// nowhere else — two peers then disagree about the whole comms scope from that
-/// tick.
-///
-/// Order needs no tiebreak here, unlike the response drain: clearing is
-/// idempotent, mints no ids and writes no flags, so two hulls clearing on one
-/// tick reach the same state in either order.
+/// Drain every hull's admitted command on every peer. LocalShip is a screen
+/// choice and cannot decide which replicated crew's clear takes effect.
 pub(crate) fn handle_clear_comms(
     ship_query: Query<
         (
@@ -1019,7 +941,9 @@ pub(crate) fn handle_clear_comms(
                 .pending_ai_responses
                 .retain(|key, _| !dialogue_ids.contains(&key.message_id));
             inbox.0.clear_for_ship(ship);
-            comms.open_hails.clear();
+            if let Some(source) = ship {
+                comms.open_hails.clear_source(source);
+            }
             if let Some(outbox) = outbox.as_deref_mut() {
                 finish_action_feedback(
                     cmd,
@@ -1548,8 +1472,12 @@ fn comms_system_available(
 ///
 /// The alternative (re-arming on inbox emptiness) reintroduces the unterminating
 /// loop above, which is strictly worse.
-fn has_open_hail_thread_with(target_uuid: &str, comms: Option<&CommsRuntime>) -> bool {
-    comms.is_some_and(|rt| rt.open_hails.contains(target_uuid))
+fn has_open_hail_thread_with(
+    source: &str,
+    target_uuid: &str,
+    comms: Option<&CommsRuntime>,
+) -> bool {
+    comms.is_some_and(|rt| rt.open_hails.contains(source, target_uuid))
 }
 
 /// Whether `sender_uuid` has any live inbound traffic in the officer's inbox —
@@ -1750,6 +1678,8 @@ pub fn operate_comms_ai(
         (
             Entity,
             Option<&EntityUuid>,
+            Option<&crate::lockstep::FleetSlotOf>,
+            bevy::ecs::query::Has<crate::server_app::LocalShip>,
             &ShipSystemControlSources,
             Option<&crate::ship_plugin::ShipConfigComponent>,
             &mut crate::core::messages::AdmittedCommands,
@@ -1758,7 +1688,7 @@ pub fn operate_comms_ai(
             Option<&crate::ship::compartment_damage::ShipDamage>,
             Option<&CommsTargetSelector>,
         ),
-        With<crate::server_app::LocalShip>,
+        With<crate::server_app::Ship>,
     >,
 ) {
     // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
@@ -1781,9 +1711,16 @@ pub fn operate_comms_ai(
         in_range: bool,
     }
 
+    let mut ordered: Vec<_> = ships.iter_mut().collect();
+    ordered.sort_by(|a, b| {
+        a.1.map(|id| id.0.as_str())
+            .cmp(&b.1.map(|id| id.0.as_str()))
+    });
     for (
         entity,
         entity_uuid,
+        slot,
+        is_local,
         sources,
         ship_config,
         mut admitted,
@@ -1791,8 +1728,14 @@ pub fn operate_comms_ai(
         hull,
         damage,
         selector_comp,
-    ) in ships.iter_mut()
+    ) in ordered
     {
+        if !is_local && slot.is_none() {
+            continue;
+        }
+        let Some(source) = entity_uuid else {
+            continue;
+        };
         // Control-Source gate through the shared AI host spine (issue #1208): a
         // human holder (or an offline system) stands the hail selector down.
         // Comms hail selection resolves a data-driven SELECTOR the spine does not
@@ -1826,6 +1769,22 @@ pub fn operate_comms_ai(
             hull_fraction,
             attacked: false,
         };
+
+        // Urgency belongs to this ship's delivered inbox, not the roster's
+        // LocalShip presentation stamp. Co-located crews do not pool private mail.
+        let urgent_senders: std::collections::BTreeSet<String> = inbox
+            .as_ref()
+            .map(|inbox| inbox.0.messages())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|message| {
+                message.is_for_ship(Some(&source.0))
+                    && !message.is_orphaned
+                    && !message.is_read
+                    && message.effective_priority().is_urgent()
+            })
+            .map(|message| message.sender_uuid)
+            .collect();
 
         // ── Pass 1: this tick's DIRECTIVE candidacy ──────────────────────────
         // Source `hail-objectives`: every positive, Comms-relevant Hail directive
@@ -1884,12 +1843,9 @@ pub fn operate_comms_ai(
                 // `current_sender_in_range` does: while range tracking is
                 // inactive (lobby, pure-handler fixtures) every target counts as
                 // in range.
-                let in_range = match comms.as_deref() {
-                    Some(rt) if rt.range_active => {
-                        rt.range_flags.get(&uuid).copied().unwrap_or(false)
-                    }
-                    _ => true,
-                };
+                let in_range = comms.as_deref().is_none_or(|runtime| {
+                    crate::comms::server::may_hail_sender(runtime, slot.map(|slot| slot.0), &uuid)
+                });
                 hits.push(DirectiveHit {
                     uuid,
                     score: scored.score,
@@ -1913,16 +1869,18 @@ pub fn operate_comms_ai(
         // Below the `operate_ai` gate on purpose: a human officer's open
         // channels are theirs to close with `ClearComms`.
         if let Some(rt) = comms.as_mut() {
-            rt.open_hails
-                .retain(|uuid| hits.iter().any(|h| &h.uuid == uuid && h.in_range));
+            rt.open_hails.retain_source(&source.0, |uuid| {
+                hits.iter().any(|h| h.uuid == uuid && h.in_range)
+            });
         }
 
         // ── Pass 2: candidate seeding ────────────────────────────────────────
         // Reads the POST-retirement `open_hails`, so `has_open_hail_thread`
         // reflects this tick's latch, not last tick's.
-        let in_range = |uuid: &str| match comms.as_deref() {
-            Some(rt) if rt.range_active => rt.range_flags.get(uuid).copied().unwrap_or(false),
-            _ => true,
+        let in_range = |uuid: &str| {
+            comms.as_deref().is_none_or(|runtime| {
+                crate::comms::server::may_hail_sender(runtime, slot.map(|slot| slot.0), uuid)
+            })
         };
         let contact_for = |uuid: &str| {
             comms
@@ -1937,8 +1895,12 @@ pub fn operate_comms_ai(
                 source_comms_contact: contact.is_some(),
                 objective_score: hit.score,
                 in_range: hit.in_range,
-                is_urgent: contact.is_some_and(|c| c.is_urgent),
-                has_open_hail_thread: has_open_hail_thread_with(&hit.uuid, comms.as_deref()),
+                is_urgent: urgent_senders.contains(&hit.uuid),
+                has_open_hail_thread: has_open_hail_thread_with(
+                    entity_uuid.map_or("", |uuid| uuid.0.as_str()),
+                    &hit.uuid,
+                    comms.as_deref(),
+                ),
                 has_unread_from_sender: has_unread_from_sender_with(
                     &hit.uuid,
                     comms.as_deref(),
@@ -1969,8 +1931,9 @@ pub fn operate_comms_ai(
                     source_comms_contact: true,
                     objective_score: 0.0,
                     in_range: in_range(&contact.uuid),
-                    is_urgent: contact.is_urgent,
+                    is_urgent: urgent_senders.contains(&contact.uuid),
                     has_open_hail_thread: has_open_hail_thread_with(
+                        entity_uuid.map_or("", |uuid| uuid.0.as_str()),
                         &contact.uuid,
                         comms.as_deref(),
                     ),

@@ -1,4 +1,13 @@
 entities:
+  - decision: redesign-comms-issued-hail-ownership
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Issued Hails Belong to the Issuing Hull
+      summary: "Increment 16 first preserves existing single-ship hail/dialogue behaviour while applying admitted Human/ordinary AI hails per fleet hull. Canonical issued history retains source and target, and clear or AI candidacy retirement changes only the issuing ship's entries."
+      rationale:
+        - "[ai] Use the existing fleet-slot physical range gate for both origins, never another host's LocalShip projection. Existing paid Comms work and World Hailed events remain their actual consumers. Synthetic narrative readability does not widen physical hail admission."
+        - "[ai] Model HailHistory is the one source-scoped record inside existing CommsRuntime, snapshot state and ordered digest; no per-controller cache or second inbox is introduced. Validate the complete candidate before writes and reject unconverted unscoped saves explicitly. New channels, requests, relays and media remain later slices of the same increment."
   - decision: redesign-comms-shared-human-ai-channels
     core:
       status: accepted

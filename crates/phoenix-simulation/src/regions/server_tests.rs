@@ -36,6 +36,7 @@ fn restored_field_projections_settle_first_input_hail_without_a_physics_step() {
         .spawn((
             Ship,
             LocalShip,
+            EntityUuid("region-fixture-ship".into()),
             ShipPhysics::default(),
             Transform::default(),
             crate::ship::power::ShipPowerSystem(power),
@@ -108,7 +109,7 @@ fn restored_field_projections_settle_first_input_hail_without_a_physics_step() {
     app.world_mut()
         .resource_mut::<CommsRuntime>()
         .open_hails
-        .insert("departed-captured-hail".into());
+        .record("region-fixture-ship", "departed-captured-hail");
     rebuild_region_projections(app.world_mut());
     let modifiers = app.world().get::<ShipModifiers>(ship).unwrap();
     assert!(!modifiers.has_flag(&FlagKind::CommsJammed));
@@ -120,13 +121,13 @@ fn restored_field_projections_settle_first_input_hail_without_a_physics_step() {
         .world()
         .resource::<CommsRuntime>()
         .open_hails
-        .contains("departed-captured-hail"));
+        .contains("region-fixture-ship", "departed-captured-hail"));
     app.update();
     assert!(app
         .world()
         .resource::<CommsRuntime>()
         .open_hails
-        .contains("contact"));
+        .contains("region-fixture-ship", "contact"));
     assert!(
         app.world()
             .get::<crate::ship::power::ShipPowerSystem>(ship)

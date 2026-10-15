@@ -117,6 +117,7 @@ fn recipient_comms_app() -> App {
             crate::lockstep::FleetSlotOf(crate::command_admission::HostSlot(index)),
             crate::entities::spawner::FactionComponent(faction),
             crate::ship::components::load_ship_config_from_disk(),
+            crate::console::weapons::assignments::ShipWeaponTargets::default(),
             crate::server_app::ShipSystemBlackboards::default(),
         ));
     }
@@ -999,6 +1000,7 @@ fn live_comms_app() -> App {
     app.init_resource::<crate::world::server::WorldEventBuffer>()
         .add_message::<crate::ai::server::AiEntityAttacked>()
         .add_message::<crate::ai::server::AiEntityDestroyed>()
+        .add_message::<crate::ai::server::AiEntityDisabled>()
         .add_message::<crate::ai::server::AiWaypointReached>()
         .add_systems(
             FixedUpdate,
@@ -1568,7 +1570,9 @@ fn a_hail_on_a_script_free_world_delivers_nothing() {
     let comms = app.world().resource::<CommsRuntime>();
     assert!(comms.active_dialogues.is_empty());
     assert!(
-        comms.open_hails.contains(STATION_UUID),
+        comms
+            .open_hails
+            .contains("comms-fixture-ship", STATION_UUID),
         "the hail itself is still recorded — that is what re-arms the AI gate"
     );
 }
@@ -1628,4 +1632,96 @@ fn queued_one_way_reports_reach_the_inbox_in_order_with_their_body_and_urgency()
         messages.iter().all(|m| m.responses.is_empty()),
         "one-way reports carry no responses"
     );
+}
+
+#[test]
+fn issuing_hail_histories_continue_paid_work_and_clear_independently_after_json_restore() {
+    use crate::core::messages::{AdmittedCommand, AdmittedCommands, SystemControlPayload};
+    use bevy::ecs::system::RunSystemOnce;
+    fn host() -> App {
+        let mut app = recipient_comms_app();
+        app.insert_resource(crate::sim_tick::SimTick(20));
+        let mut query = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::server_app::Ship>>();
+        let ships: Vec<_> = query.iter(app.world()).collect();
+        for ship in ships {
+            app.world_mut().entity_mut(ship).insert((
+                crate::comms::server::tests::comms_test_power(),
+                AdmittedCommands::default(),
+            ));
+        }
+        app
+    }
+    fn command(app: &mut App, step: u64) {
+        let mut query = app
+            .world_mut()
+            .query_filtered::<(&EntityUuid, &mut AdmittedCommands), With<crate::server_app::Ship>>(
+            );
+        for (source, mut commands) in query.iter_mut(app.world_mut()) {
+            commands.0.clear();
+            commands.0.push(AdmittedCommand {
+                target: crate::ship::system_registry::comms_system_id(),
+                payload: if step % 31 == 0 && source.0 == "lead" {
+                    SystemControlPayload::ClearComms
+                } else {
+                    SystemControlPayload::Hail {
+                        target_uuid: format!("contact-{}", step % 7),
+                    }
+                },
+                response_token: None,
+                feedback_correlation: None,
+            });
+        }
+        app.world_mut()
+            .run_system_once(crate::console::comms::server::handle_hail)
+            .unwrap();
+        app.world_mut()
+            .run_system_once(crate::console::comms::server::handle_clear_comms)
+            .unwrap();
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+    }
+    let mut original = host();
+    command(&mut original, 1);
+    let saved = crate::snapshot::capture(original.world());
+    let saved = serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    let mut restored = host();
+    restored
+        .world_mut()
+        .resource_mut::<CommsRuntime>()
+        .open_hails
+        .record("lead", "bootstrap-only");
+    let report = crate::snapshot::restore(restored.world_mut(), &saved);
+    assert!(report.is_complete(), "{report:?}");
+    for step in 2..362 {
+        assert_eq!(
+            crate::snapshot::capture(original.world()),
+            crate::snapshot::capture(restored.world()),
+            "step {step}"
+        );
+        let stages = crate::sim_digest::digest_stages(original.world());
+        assert_eq!(
+            crate::sim_digest::world_digest(original.world()),
+            crate::sim_digest::world_digest(restored.world()),
+            "step {step}, scope {:?}",
+            crate::sim_digest::first_divergent_scope(restored.world(), &stages)
+        );
+        command(&mut original, step);
+        command(&mut restored, step);
+        if step % 31 == 0 {
+            let history = &original.world().resource::<CommsRuntime>().open_hails;
+            assert!(!history.entries().any(|(source, _)| source == "lead"));
+            assert!(history.entries().any(|(source, _)| source == "wing"));
+        }
+    }
+    let before = crate::snapshot::capture(original.world());
+    let digest = crate::sim_digest::world_digest(original.world());
+    let mut malformed = before.clone();
+    malformed.tick += 10;
+    malformed.comms.as_mut().unwrap().open_hails =
+        serde_json::from_str(r#"{" ":["target"]}"#).unwrap();
+    let report = crate::snapshot::restore(original.world_mut(), &malformed);
+    assert!(!report.is_complete());
+    assert_eq!(crate::snapshot::capture(original.world()), before);
+    assert_eq!(crate::sim_digest::world_digest(original.world()), digest);
 }

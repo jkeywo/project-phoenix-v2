@@ -67,8 +67,8 @@ pub struct CommsRuntime {
     /// [`crate::snapshot::CommsState`] both leave it out — and it is equally why
     /// nothing that feeds authoritative state may read it. Its legitimate
     /// consumers are the ones whose output IS this host's own screen: the
-    /// `CommsState` broadcast stamp, the local comms blackboard, and the
-    /// `LocalShip`-gated hail host. Anything deciding for a hull — the response
+    /// `CommsState` broadcast stamp and the local comms blackboard. Anything
+    /// deciding for a fleet hull — the hail/response
     /// router's range gate, the Backfill decision sweep, an inbox injection that
     /// folds — reads [`Self::fleet_range_flags`] through
     /// [`sender_in_range_for_slot`] / [`sender_in_range_for_fleet`] instead
@@ -111,13 +111,13 @@ pub struct CommsRuntime {
     /// [`current_sender_in_range`], which is the behaviour every pure-handler
     /// test was written against.
     pub fleet_range_active: bool,
-    /// Entity UUIDs this ship has HAILED and not yet cleared (issue #786).
+    /// Issued hail targets grouped by their actual source ship (issue #1562).
     ///
     /// Authoritative comms state, not AI memory: `handle_hail` records EVERY
     /// hail that passes the server-side range gate — human officer or Backfill
-    /// AI alike — and `handle_clear_comms` empties it alongside the inbox it
-    /// mirrors. It is the record of a command that actually happened, in the
-    /// same category as `range_flags`, and both actors read the same set.
+    /// AI alike. Clear and candidacy retirement change only the issuing ship.
+    /// This is command history, distinct from the derived range projections;
+    /// both operators read the same source-scoped record.
     ///
     /// It exists because "did we hail them?" is NOT derivable from the inbox: a
     /// hail to a target with no matching (or already-`fired`) `on_hailed`
@@ -131,7 +131,7 @@ pub struct CommsRuntime {
     /// re-arm), and the target's entity despawning
     /// ([`update_comms_range_flags`], which keeps the set from growing
     /// monotonically across world-layer cycles).
-    pub open_hails: std::collections::BTreeSet<String>,
+    pub open_hails: phoenix_model::comms_history::HailHistory,
     /// The session token `broadcast_comms_state` last addressed a `CommsState`
     /// to, so a change of Comms host forces a fresh broadcast even when nothing
     /// in the inbox, contacts or objectives is dirty. Without this a host that
@@ -632,6 +632,18 @@ pub(crate) fn slot_may_answer_sender(
     flags.get(sender_uuid).copied() == Some(true)
 }
 
+/// The same physical hail gate for a human and its ordinary System AI.
+/// Legacy bare hosts have no range pass; live fleet slots never borrow a
+/// different host's LocalShip projection or the synthetic narrative bypass.
+pub(crate) fn may_hail_sender(
+    comms: &CommsRuntime,
+    host: Option<crate::command_admission::HostSlot>,
+    target: &str,
+) -> bool {
+    !(comms.range_active || (host.is_some() && comms.fleet_range_active))
+        || slot_may_answer_sender(comms, host, target)
+}
+
 /// Whether ANY hull in the fleet can currently reach `sender_uuid`
 /// (issue #1343).
 ///
@@ -925,7 +937,9 @@ pub(crate) fn update_comms_range_flags(
     // too. Deliberately does NOT touch `any_changed`: `open_hails` is not part
     // of the broadcast `CommsState`, so dropping a stale entry is not a reason
     // to re-broadcast.
-    comms.open_hails.retain(|uuid| live_ref.contains(uuid));
+    comms
+        .open_hails
+        .retain_targets(|uuid| live_ref.contains(uuid));
 
     // Union in the entity-derived contacts (issue #985), AFTER the prune so a
     // candidate is never added and dropped in the same pass, and BEFORE the

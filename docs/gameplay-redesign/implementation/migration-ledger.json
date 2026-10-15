@@ -259,14 +259,16 @@
     {
       "id": 16,
       "title": "Shared Comms channels and remote orders",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         14,
         15
       ],
       "completion": "Human/AI channels, generic requests, public chatter, security/interception, relays, receipts and human media use existing networking without message-capacity accounting.",
       "evidence": [
-        "docs/gameplay-redesign/implementation/increment-16.md"
+        "docs/gameplay-redesign/implementation/increment-16.md",
+        "docs/acceptance/1562-shared-comms.md",
+        "docs/gameplay-redesign/implementation/comms-checkpoint.json"
       ]
     },
     {

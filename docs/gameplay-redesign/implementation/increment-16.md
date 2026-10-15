@@ -39,6 +39,12 @@ middle/detailed electronic-operation controls do not become 16 prerequisites.
 
 ## Extend actual owners
 
+The first structural migration scopes issued hail history to its actual source
+ship. Human and ordinary AI hails use the issuing fleet slot's existing range
+gate, and each crew clears or retires only its own issued history. Preserve
+single-ship plot events and dialogue outcomes. This migration adds no channels,
+generic requests or media by itself; those remain the subsequent consumers below.
+
 Current `console/comms/server.rs` applies admitted hails/replies and publishes the
 ship audience; `console/comms/inbox.rs` owns chronological messages/read state.
 `comms/server.rs`, `range.rs` and `roster.rs` own endpoints/reach; `scripted.rs`

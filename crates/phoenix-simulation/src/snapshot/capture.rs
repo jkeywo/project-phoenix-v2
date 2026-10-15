@@ -429,7 +429,7 @@ pub(super) fn capture_comms(world: &World) -> Option<CommsState> {
             .map(|inbox| inbox.0.messages())
             .unwrap_or_default(),
         dialogues,
-        open_hails: comms.open_hails.iter().cloned().collect(),
+        open_hails: comms.open_hails.clone(),
         // The scripted half, absent for every script-free world — the same
         // shape-preserving property `ScenarioState::script_callbacks` has.
         pending_opens: world

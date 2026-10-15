@@ -28,3 +28,6 @@ pub use component::{CommsHailable, CommsRange};
 pub use range::in_range;
 pub use roster::{entity_contact_label, merge_entity_contacts, EntityContact};
 pub use server::CommsWorldPlugin;
+
+#[cfg(test)]
+mod fleet_hail_tests;

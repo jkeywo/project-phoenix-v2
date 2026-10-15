@@ -15,6 +15,20 @@ fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>)
     }
 }
 
+pub(crate) fn comms_test_power() -> crate::ship::power::ShipPowerSystem {
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    crate::ship::power::ShipPowerSystem(
+        crate::modifiers::power_system::PowerSystem::from_energy(
+            config.energy.unwrap(),
+            config.ship_config.unwrap(),
+        )
+        .unwrap(),
+    )
+}
+
 pub(crate) fn comms_test_app() -> App {
     let mut app = App::new();
     // These are the real Comms handlers below, so install their production promise.
@@ -75,6 +89,8 @@ pub(crate) fn comms_test_app() -> App {
     app.world_mut().spawn((
         crate::server_app::Ship,
         crate::server_app::LocalShip,
+        crate::entities::spawner::EntityUuid("comms-fixture-ship".into()),
+        comms_test_power(),
         // The host-neutral fleet identity `operate_comms_response_ai` walks by
         // since #1343 (it may not read `LocalShip`, which names a different hull
         // on each host of a fleet). Production inserts it on every ship the
@@ -323,7 +339,7 @@ fn despawning_a_hailed_entity_prunes_the_open_hail_record() {
         app.world()
             .resource::<CommsRuntime>()
             .open_hails
-            .contains(station_uuid),
+            .contains("comms-fixture-ship", station_uuid),
         "the hail must be recorded while the target is live"
     );
 
@@ -334,7 +350,7 @@ fn despawning_a_hailed_entity_prunes_the_open_hail_record() {
         !app.world()
             .resource::<CommsRuntime>()
             .open_hails
-            .contains(station_uuid),
+            .contains("comms-fixture-ship", station_uuid),
         "a despawned entity's open-hail record must be pruned alongside its \
          contact and range flag"
     );

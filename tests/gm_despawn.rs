@@ -56,7 +56,7 @@ fn references(app: &mut App, target: &str) -> Entity {
         in_range: true,
         is_urgent: false,
     });
-    comms.open_hails.insert(target.into());
+    comms.open_hails.record("issuer", target);
     comms.range_flags.insert(target.into(), true);
     comms
         .fleet_range_flags
@@ -111,7 +111,7 @@ fn protected_classes_and_unknown_peers_refuse_without_touching_live_references()
             .world()
             .resource::<phoenix::comms::server::CommsRuntime>()
             .open_hails
-            .contains("protected"));
+            .contains("issuer", "protected"));
         assert!(app
             .world()
             .resource::<WorldContentRuntime>()

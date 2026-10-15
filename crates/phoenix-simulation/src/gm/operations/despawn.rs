@@ -356,7 +356,7 @@ pub fn remove_entity(world: &mut World, entity: Entity) -> Vec<GmRemovalReferenc
         let before = comms.contacts.len();
         comms.contacts.retain(|contact| contact.uuid != uuid);
         comms.needs_broadcast |= comms.contacts.len() != before;
-        comms.open_hails.remove(&uuid);
+        comms.open_hails.remove_actor(&uuid);
         comms.range_flags.remove(&uuid);
         for flags in comms.fleet_range_flags.values_mut() {
             flags.remove(&uuid);

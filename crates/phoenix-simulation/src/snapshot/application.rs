@@ -823,7 +823,7 @@ pub(super) fn restore_comms(
             })
             .collect();
 
-        comms.open_hails = stored.open_hails.iter().cloned().collect();
+        comms.open_hails = stored.open_hails.clone();
         // The unmanned console's running waits resume where they were, rather
         // than restarting — see `CommsState::pending_ai_responses`.
         comms.pending_ai_responses = stored

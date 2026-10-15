@@ -2291,7 +2291,7 @@ fn every_other_comms_surface_moves_the_digest() {
     world
         .resource_mut::<CommsRuntime>()
         .open_hails
-        .insert("contact-uuid".into());
+        .record("digest-fixture-ship", "contact-uuid");
     let hailed = world_digest(&world);
     assert_ne!(
         previous, hailed,
@@ -2476,7 +2476,7 @@ fn insertion_order_does_not_reach_the_fold() {
                 comms
                     .active_dialogues
                     .insert((*name).into(), dialogue(name));
-                comms.open_hails.insert((*name).into());
+                comms.open_hails.record("digest-fixture-ship", *name);
             }
         }
         world_digest(&world)

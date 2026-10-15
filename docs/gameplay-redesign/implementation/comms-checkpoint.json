@@ -1,0 +1,43 @@
+{
+  "status": "partial",
+  "increment": 16,
+  "date": "2026-10-15",
+  "scope": "First structural migration: source-scoped issued hail history, per-fleet hail ownership and ordinary AI candidacy retirement",
+  "source_base": "c41f2d17",
+  "model": {
+    "command": "cargo test -p phoenix-model --lib comms_history",
+    "passed": 3,
+    "failed": 0
+  },
+  "simulation": {
+    "command": "cargo test -p phoenix-simulation --lib --no-default-features -- comms:: hail_histories comms_range",
+    "initial_result": {
+      "passed": 161,
+      "failed": 9,
+      "ignored": 0
+    },
+    "diagnosis": "Seven legacy scripted fixtures omitted the existing AiEntityDisabled message; two restore fixtures omitted the accepted hull's existing empty ShipWeaponTargets owner. Fixture bootstraps corrected without changing assertions or runtime admission.",
+    "retry": {
+      "passed": 170,
+      "failed": 0,
+      "ignored": 0,
+      "filtered_out": 4424,
+      "duration_seconds": 45.93,
+      "log": "increment16-hail-native-retry.log",
+      "sha256": "87f7eec06c920bc5fae5f9f314e762f822d9d637dce740c5d736d82cd07beeb7"
+    }
+  },
+  "other_validation": {
+    "pasm_validate": "Passed: 1113 entities, Status OK",
+    "pasm_scan": "Passed: Validation OK",
+    "pasm_traceability": "Passed: 246 rows",
+    "wiki_lint": "Passed: 72 pages, 70 index entries, 2018 references, no findings",
+    "independent_source_review": "PASS from weapon_authoring, including the two bounded fixture bootstrap corrections"
+  },
+  "limits": "Initial checkpoint only. No shared-channel/request/relay/media implementation, physical-radio coverage, full integration gate, balance/performance or human acceptance is claimed. The narrow 360-step continuation includes finite initial paid hails followed by resource refusals, not continuously funded transmission.",
+  "tested_source": "Initial increment 16 commit containing this receipt; native tested the reviewed runtime and fixture corrections before commit. Only evidence/report edits followed execution.",
+  "environment": {
+    "CARGO_TARGET_DIR": "C:/Coding/project-phoenix-v2/target",
+    "cargo_coordination": "One sequential Cargo lease; byte-preserving Simulation library timestamp refresh on source-tree switch."
+  }
+}

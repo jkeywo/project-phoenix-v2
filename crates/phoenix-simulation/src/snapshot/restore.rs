@@ -38,6 +38,17 @@ impl RestoreReport {
 /// what tell a host which world that is.
 pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
     let mut report = RestoreReport::default();
+    if let Some(reason) = snapshot
+        .comms
+        .as_ref()
+        .and_then(|comms| comms.open_hails.validate().err())
+    {
+        report.gaps.push(RestoreGap::ResourceStateInvalid {
+            uuid: "comms".into(),
+            reason: reason.into(),
+        });
+        return report;
+    }
     if let Err((uuid, reason)) = super::flight_carriers::validate(world, snapshot) {
         report
             .gaps

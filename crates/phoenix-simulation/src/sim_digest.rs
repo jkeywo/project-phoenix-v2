@@ -1653,7 +1653,8 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
         }
 
         acc = fold_u64(acc, hail_len as u64);
-        for target in &comms.open_hails {
+        for (source, target) in comms.open_hails.entries() {
+            acc = fold_str(acc, source);
             acc = fold_str(acc, target);
         }
 

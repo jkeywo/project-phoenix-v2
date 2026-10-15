@@ -434,7 +434,9 @@ use super::*;
 /// `52` adds per-instrument sensing histories and spatial-field continuation.
 /// `53` retains weapon assignments, finite mounts, causal EMP episodes, active
 /// beam operation and frozen guided-round equipment. Older state is refused.
-pub const SNAPSHOT_FORMAT: u32 = 53;
+/// `54` scopes issued hails to the actual issuing ship. Old unscoped history
+/// cannot be assigned to a fleet hull without inventing ownership.
+pub const SNAPSHOT_FORMAT: u32 = 54;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -527,7 +529,8 @@ pub const SNAPSHOT_FORMAT: u32 = 53;
 /// "0.24" adds paid sensing continuation and causally anchored spatial fields.
 /// "0.25" adds measured per-bank targeting, finite mounted fire and shared
 /// weapon resources, temporary EMP and equipment-supported shield enquiry.
-pub const SIMULATION_RULES: &str = "0.25";
+/// "0.26" applies fleet hails and their anti-repeat history per issuing hull.
+pub const SIMULATION_RULES: &str = "0.26";
 
 /// The authored data, computed rather than remembered.
 ///

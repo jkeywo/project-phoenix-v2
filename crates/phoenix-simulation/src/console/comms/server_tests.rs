@@ -225,6 +225,8 @@ fn comms_ai_app(comms_source: ControlSource) -> App {
     app.world_mut().spawn((
         crate::server_app::Ship,
         crate::server_app::LocalShip,
+        EntityUuid("comms-fixture-ship".into()),
+        crate::comms::server::tests::comms_test_power(),
         ShipSystemControlSources(resolver),
         crate::ship::components::load_ship_config_from_disk(),
         AdmittedCommands::default(),
@@ -799,7 +801,7 @@ fn comms_ai_does_not_respam_a_standing_hail_while_its_thread_is_live() {
         app.world()
             .resource::<CommsRuntime>()
             .open_hails
-            .contains("station-alpha-uuid"),
+            .contains("comms-fixture-ship", "station-alpha-uuid"),
         "the hail must be recorded — that record IS the guard"
     );
 
@@ -851,7 +853,7 @@ fn comms_ai_rehails_once_after_clear_comms_and_then_terminates() {
         .world()
         .resource::<CommsRuntime>()
         .open_hails
-        .contains("station-alpha-uuid"));
+        .contains("comms-fixture-ship", "station-alpha-uuid"));
 
     // The officer clears the slate. Same tick: the AI has already decided
     // (it is ordered before the handlers), so the re-hail lands on the NEXT
@@ -1054,13 +1056,13 @@ fn the_candidacy_re_arm_never_touches_a_human_officers_open_hails() {
     app.world_mut()
         .resource_mut::<CommsRuntime>()
         .open_hails
-        .insert("station-alpha-uuid".to_string());
+        .record("comms-fixture-ship", "station-alpha-uuid");
     app.update();
     assert!(
         app.world()
             .resource::<CommsRuntime>()
             .open_hails
-            .contains("station-alpha-uuid"),
+            .contains("comms-fixture-ship", "station-alpha-uuid"),
         "with a human at Comms the AI must not retire their open-hail record"
     );
 }
@@ -1142,7 +1144,7 @@ fn comms_ai_keeps_no_private_memory_between_ticks() {
     app.world_mut()
         .resource_mut::<CommsRuntime>()
         .open_hails
-        .insert("station-alpha-uuid".to_string());
+        .record("comms-fixture-ship", "station-alpha-uuid");
     app.update();
     assert!(
         admitted_hail_targets(&mut app).is_empty(),
@@ -1155,7 +1157,7 @@ fn comms_ai_keeps_no_private_memory_between_ticks() {
     app.world_mut()
         .resource_mut::<CommsRuntime>()
         .open_hails
-        .clear();
+        .clear_source("comms-fixture-ship");
     assert_eq!(
         tick_and_count_hails(&mut app),
         1,
@@ -2906,7 +2908,7 @@ fn correlated_hail_reports_the_existing_range_gate_result() {
         app.world()
             .resource::<CommsRuntime>()
             .open_hails
-            .contains(station_uuid),
+            .contains("comms-fixture-ship", station_uuid),
         "an applied hail keeps the existing authoritative open-hail effect"
     );
 
@@ -2935,7 +2937,7 @@ fn correlated_hail_reports_the_existing_range_gate_result() {
         !app.world()
             .resource::<CommsRuntime>()
             .open_hails
-            .contains("out-of-range"),
+            .contains("comms-fixture-ship", "out-of-range"),
         "feedback must not widen the existing reachability gate"
     );
 }
@@ -4188,7 +4190,7 @@ fn control_system_hail_dispatches_same_as_client_message_hail() {
         app.world()
             .resource::<CommsRuntime>()
             .open_hails
-            .contains(station_uuid),
+            .contains("comms-fixture-ship", station_uuid),
         "ControlSystem::Hail must reach handle_hail and be recorded"
     );
 }

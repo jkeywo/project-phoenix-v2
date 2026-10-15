@@ -990,6 +990,7 @@ fn build_system_status(
         row.illumination = crate::console::weapons::illumination::project(world, entity, owner);
         row.jamming = crate::comms::jamming::project(world, entity, owner);
         row.signal_protection = crate::science::protection::project(world, entity, owner);
+        row.identity = crate::science::identity::project(world, entity, owner);
         row.bay = crate::entities::craft::project(world, entity, owner);
     }
     let owners = config

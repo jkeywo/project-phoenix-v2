@@ -483,6 +483,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("ship-illumination-intent", fold_illumination_namespace),
     ("ship-jamming-intent", fold_jamming_namespace),
     ("ship-signal-protection-intent", fold_protection_namespace),
+    ("ship-identity-emitter-intent", fold_identity_namespace),
     ("broad-tracks", fold_broad_tracks_namespace),
     ("navigation-sharing", fold_navigation_sharing_namespace),
     ("navigation-request", fold_navigation_request_namespace),
@@ -3006,6 +3007,16 @@ fn fold_jamming_namespace(world: &World, acc: u64) -> u64 {
         acc,
         "ship-jamming-intent",
         |owner: &crate::comms::jamming::ShipJamming| Some(owner.0.clone()),
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+
+fn fold_identity_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "ship-identity-emitter-intent",
+        |owner: &crate::science::identity::ShipIdentityEmitters| Some(owner.0.clone()),
         |acc, state| fold_serde(acc, &state),
     )
 }

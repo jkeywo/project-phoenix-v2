@@ -412,3 +412,18 @@ JSON restore with no prepaid derived claim, and malformed no-write candidates;
 these are unexecuted until the integration owner joins the central declarations,
 spawn, status projection, persistence and digest hooks. Full-host human/AI and
 360-step continuation evidence is pending. This slice is not an increment 17 exit.
+
+### Integrated identity ownership
+
+The host now installs the actual identity equipment with its single per-System
+state-tree controller, admitted toggle consumer and shared permitted status.
+Snapshots retain enabled intent; accepted-recipe preflight runs before writes,
+restore clears current emissions, and the deterministic fold includes intent
+without treating a previous paid claim as future work. The protocol is 29,
+snapshot format 72 and rules 0.52. No transport or knowledge owner changed.
+
+The renderer-free Simulation test compilation passed (53.50s). Identity controls,
+Workshop composition and the action-map inventory passed 128 JavaScript tests
+across three files. Actual native identity continuation and the corrected
+commitment/clearance scenarios still require execution; these compile/client
+results do not close the increment.

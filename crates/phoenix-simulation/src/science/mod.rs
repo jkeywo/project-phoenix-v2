@@ -21,6 +21,7 @@ pub mod contact_routing;
 pub(crate) mod enquiry;
 pub mod focused;
 mod focused_ai;
+pub mod identity;
 pub mod passive;
 pub mod protection;
 /// The pure, Bevy-free derivation: the authored `[scan]` vocabulary, the

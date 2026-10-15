@@ -27,6 +27,8 @@ pub struct EntityState {
     pub jamming: Option<crate::comms::jamming::ShipJamming>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signal_protection: Option<crate::science::protection::ShipSignalProtection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_emitters: Option<crate::science::identity::ShipIdentityEmitters>,
     /// Nonspatial owner of already-launched rounds after launcher removal.
     #[serde(default, skip_serializing_if = "is_false")]
     pub weapon_flight_carrier: bool,

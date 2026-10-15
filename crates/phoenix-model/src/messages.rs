@@ -42,7 +42,8 @@ use uuid::Uuid;
 /// Revision 26 carries own planned Comms requests and actual local Security routes.
 /// Revision 27 carries actual personnel condition and Treatment controls.
 /// Revision 28 carries explicit formation coordination through ordinary Comms.
-pub const PROTOCOL_VERSION: u32 = 28;
+/// Revision 29 carries paid identity-emitter controls and permitted status.
+pub const PROTOCOL_VERSION: u32 = 29;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).
@@ -2213,6 +2214,10 @@ pub enum SystemControlPayload {
     /// Issue through the actual source tube; target_uuid is a permitted public contact handle.
     /// Independent mounted Science emitter; target is a permitted Console handle.
     /// Retained intent of one actual onboard finite signal protector.
+    /// Retained intent of an actual paid identity transmitter.
+    SetIdentityEmitterEnabled {
+        enabled: bool,
+    },
     SetSignalProtectionEnabled {
         enabled: bool,
     },

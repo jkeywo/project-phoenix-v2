@@ -219,12 +219,15 @@ pub(crate) fn register(app: &mut App) {
         (
             control::operate_ai
                 .in_set(SimSet::Input)
+                .in_set(FixedStep::OperateIdentityEmitterAi)
                 .before(control::handle_commands)
-                .before(FixedStep::OperateSignalProtectionAi)
                 .run_if(crate::ai::cadence::ai_tick_ready),
-            control::handle_commands.in_set(SimSet::Input).before(tick),
+            control::handle_commands
+                .in_set(SimSet::Input)
+                .in_set(FixedStep::HandleIdentityEmitterCommands)
+                .before(tick),
             tick.in_set(SimSet::Input)
-                .before(FixedStep::TickSignalProtection),
+                .in_set(FixedStep::TickIdentityEmitters),
         ),
     );
 }

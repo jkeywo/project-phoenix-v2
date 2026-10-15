@@ -54,6 +54,8 @@ pub struct SystemStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signal_protection: Option<crate::protection_ui::ProtectionControlsView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<crate::identity_ui::IdentityControlsView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bay: Option<crate::craft::BayControlsView>,
 }
 
@@ -134,6 +136,7 @@ impl SystemStatus {
             illumination: None,
             jamming: None,
             signal_protection: None,
+            identity: None,
             bay: None,
         };
         if offline && !matches!(damage, Some(DamageTier::Disabled | DamageTier::Destroyed)) {

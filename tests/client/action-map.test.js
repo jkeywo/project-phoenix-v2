@@ -113,6 +113,7 @@ describe('ACTION_MAP', () => {
       'follow_weapon_group',
       'guidance_stop',
       'guidance_target',
+      'identity_emitter_enabled',
       'illumination_enabled',
       'illumination_target',
       'jamming_enabled',

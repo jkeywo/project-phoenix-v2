@@ -56,10 +56,11 @@ pub mod umbilical;
 pub mod weapon_operation;
 
 pub mod activity;
+pub mod craft;
 pub mod illumination_ui;
 pub mod jamming_ui;
-pub mod craft;
 pub mod transit;
 pub mod weapon_targets_view;
 
+pub mod identity_ui;
 pub mod protection_ui;

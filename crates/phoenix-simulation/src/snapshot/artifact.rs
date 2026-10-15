@@ -456,7 +456,8 @@ use super::*;
 /// `69` retains original applied Scenario callback ticks for causal dependencies.
 /// `70` retains actual personnel conditions and typed Treatment work.
 /// `71` retains an accepted root mission promise and received formation lineage.
-pub const SNAPSHOT_FORMAT: u32 = 71;
+/// `72` retains actual identity-emitter intent, never prepaid physical emissions.
+pub const SNAPSHOT_FORMAT: u32 = 72;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -598,7 +599,9 @@ pub const SNAPSHOT_FORMAT: u32 = 71;
 /// "0.50" executes finite Treatment through the existing exclusive Repair jobs.
 /// "0.51" gates optional HTN roots on real accepted promises and keeps actual
 /// ordered formation suggestions separate from Navigation/Helm execution.
-pub const SIMULATION_RULES: &str = "0.51";
+/// "0.52" emits configured identity only from fully paid real equipment and
+/// substitutes measured identity after ordinary sensor acquisition.
+pub const SIMULATION_RULES: &str = "0.52";
 
 /// The authored data, computed rather than remembered.
 ///

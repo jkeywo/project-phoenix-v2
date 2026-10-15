@@ -1,6 +1,53 @@
 use super::*;
 use crate::ship::disablement::{publish_ship_disablement, DisablementObservation};
 
+#[test]
+fn paid_enquiry_event_codec_preserves_every_observer_field_and_refuses_bad_pending_state() {
+    use crate::world::config::EnquiryPhase;
+    for phase in [EnquiryPhase::Started, EnquiryPhase::Completed] {
+        let event = WorldEvent::Enquiry {
+            target_uuid: "subject".into(),
+            observer_uuid: "observer".into(),
+            system: phoenix_model::identity::SystemId("science".into()),
+            aim: "anomaly".into(),
+            intrusive: true,
+            phase,
+        };
+        let record = super::super::capture::world_event_record(&event);
+        let stored: WorldEventRecord =
+            serde_json::from_slice(&serde_json::to_vec(&record).unwrap()).unwrap();
+        assert_eq!(
+            super::super::application::world_event_from_record(&stored),
+            Some(event)
+        );
+        for change in [0, 1, 2, 3, 4] {
+            let mut bad = record.clone();
+            match change {
+                0 => bad.aim = "secret".into(),
+                1 => bad.system.clear(),
+                2 => bad.other.clear(),
+                3 => bad.subject.clear(),
+                _ => bad.enquiry_phase = None,
+            }
+            assert!(super::super::application::world_event_from_record(&bad).is_none());
+            let mut world = World::new();
+            let before = capture(&world);
+            let mut saved = before.clone();
+            saved.scenario = Some(ScenarioState {
+                pending_events: vec![bad],
+                ..Default::default()
+            });
+            let report = restore(&mut world, &saved);
+            assert!(!report.is_complete());
+            assert_eq!(
+                capture(&world),
+                before,
+                "invalid event must refuse before any writes"
+            );
+        }
+    }
+}
+
 fn actor() -> (App, Entity) {
     let config = crate::entities::include_resolve::load_entity_config(
         "assets/entities/alliance_cruiser.toml",

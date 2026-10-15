@@ -6,6 +6,26 @@ use super::*;
 /// gate is what refuses, not a `match` arm here.
 pub(super) fn world_event_from_record(row: &WorldEventRecord) -> Option<WorldEvent> {
     Some(match row.kind {
+        12 => {
+            let valid = |value: &str| {
+                !value.is_empty() && value.len() <= 128 && !value.chars().any(char::is_control)
+            };
+            if !valid(&row.subject)
+                || !valid(&row.other)
+                || !valid(&row.system)
+                || !crate::world::config::valid_enquiry_aim(&row.aim)
+            {
+                return None;
+            }
+            WorldEvent::Enquiry {
+                target_uuid: row.subject.clone(),
+                observer_uuid: row.other.clone(),
+                system: phoenix_model::identity::SystemId(row.system.clone()),
+                aim: row.aim.clone(),
+                intrusive: row.intrusive,
+                phase: row.enquiry_phase?,
+            }
+        }
         0 => WorldEvent::Destroyed {
             uuid: row.subject.clone(),
         },

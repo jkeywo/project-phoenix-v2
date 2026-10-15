@@ -532,6 +532,8 @@ pub fn render_condition(condition: &TriggerCondition) -> String {
             )
         }
         TriggerCondition::OnAttacked { entity_name } => format!("on_attacked({entity_name})"),
+        TriggerCondition::OnEnquiry { entity_name, observer_name, system, aim, intrusive, phase } =>
+            format!("on_enquiry({entity_name}, observer={observer_name:?}, system={system:?}, aim={aim:?}, intrusive={intrusive:?}, phase={})", phase.as_str()),
         TriggerCondition::OnHullBelow {
             entity_name,
             threshold,

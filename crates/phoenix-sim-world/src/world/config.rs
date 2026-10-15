@@ -1370,6 +1370,34 @@ pub enum DelayedUnloadPolicy {
     Resolve,
 }
 
+/// The two observable boundaries of one paid focused enquiry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnquiryPhase {
+    Started,
+    Completed,
+}
+
+impl EnquiryPhase {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Started => "started",
+            Self::Completed => "completed",
+        }
+    }
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "started" => Some(Self::Started),
+            "completed" => Some(Self::Completed),
+            _ => None,
+        }
+    }
+}
+
+pub fn valid_enquiry_aim(value: &str) -> bool {
+    matches!(value, "general" | "environment" | "resources" | "anomaly")
+}
+
 /// A condition that a trigger can check against incoming world events.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TriggerCondition {
@@ -1392,6 +1420,16 @@ pub enum TriggerCondition {
     OnAllDestroyed { group: String, after_secs: f32 },
     /// Fires when the named entity is attacked.
     OnAttacked { entity_name: String },
+    /// A paid enquiry of this subject. Optional filters resolve observer names
+    /// in the same scenario roster as the subject; they grant no knowledge.
+    OnEnquiry {
+        entity_name: String,
+        observer_name: Option<String>,
+        system: Option<phoenix_model::identity::SystemId>,
+        aim: Option<String>,
+        intrusive: Option<bool>,
+        phase: EnquiryPhase,
+    },
     /// Fires when the named entity's aggregate hull fraction crosses strictly
     /// below the authored threshold.
     OnHullBelow { entity_name: String, threshold: f32 },

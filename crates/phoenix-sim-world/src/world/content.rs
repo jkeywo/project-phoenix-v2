@@ -29,6 +29,14 @@ use crate::world::flags::FlagStore;
 /// A world event that triggers can react to.
 #[derive(Clone, Debug, PartialEq)]
 pub enum WorldEvent {
+    Enquiry {
+        target_uuid: String,
+        observer_uuid: String,
+        system: phoenix_model::identity::SystemId,
+        aim: String,
+        intrusive: bool,
+        phase: crate::world::config::EnquiryPhase,
+    },
     /// An entity (by UUID) was destroyed.
     Destroyed { uuid: String },
     /// Reversible combat defeat. False means normal recovery, not a new entity.
@@ -167,6 +175,7 @@ pub fn entity_name_from_condition(condition: &TriggerCondition) -> Option<String
         | TriggerCondition::OnDisabled { entity_name }
         | TriggerCondition::OnNeutralized { entity_name }
         | TriggerCondition::OnAttacked { entity_name }
+        | TriggerCondition::OnEnquiry { entity_name, .. }
         | TriggerCondition::OnHullBelow { entity_name, .. }
         | TriggerCondition::OnHailed { entity_name }
         | TriggerCondition::OnEnteredRegion { entity_name }
@@ -528,6 +537,36 @@ pub fn condition_matches(
     layer_chain: &[Option<String>],
 ) -> bool {
     match (condition, event) {
+        (
+            TriggerCondition::OnEnquiry {
+                entity_name,
+                observer_name,
+                system,
+                aim,
+                intrusive,
+                phase,
+            },
+            WorldEvent::Enquiry {
+                target_uuid,
+                observer_uuid,
+                system: actual_system,
+                aim: actual_aim,
+                intrusive: actual_intrusive,
+                phase: actual_phase,
+            },
+        ) => {
+            crate::world::config::valid_enquiry_aim(actual_aim)
+                && name_to_uuid.get(entity_name) == Some(target_uuid)
+                && observer_name
+                    .as_ref()
+                    .is_none_or(|name| name_to_uuid.get(name) == Some(observer_uuid))
+                && system
+                    .as_ref()
+                    .is_none_or(|expected| expected == actual_system)
+                && aim.as_ref().is_none_or(|expected| expected == actual_aim)
+                && intrusive.is_none_or(|expected| expected == *actual_intrusive)
+                && phase == actual_phase
+        }
         (TriggerCondition::OnDestroyed { entity_name }, WorldEvent::Destroyed { uuid }) => {
             name_to_uuid
                 .get(entity_name)
@@ -650,3 +689,7 @@ mod tests;
 #[cfg(test)]
 #[path = "neutralized_tests.rs"]
 mod neutralized_tests;
+
+#[cfg(test)]
+#[path = "enquiry_tests.rs"]
+mod enquiry_tests;

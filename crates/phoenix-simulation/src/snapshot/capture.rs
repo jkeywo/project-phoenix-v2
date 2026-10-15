@@ -449,6 +449,22 @@ pub(super) fn capture_comms(world: &World) -> Option<CommsState> {
 pub(super) fn world_event_record(event: &WorldEvent) -> WorldEventRecord {
     let mut row = WorldEventRecord::default();
     match event {
+        WorldEvent::Enquiry {
+            target_uuid,
+            observer_uuid,
+            system,
+            aim,
+            intrusive,
+            phase,
+        } => {
+            row.kind = 12;
+            row.subject = target_uuid.clone();
+            row.other = observer_uuid.clone();
+            row.system = system.0.clone();
+            row.aim = aim.clone();
+            row.intrusive = *intrusive;
+            row.enquiry_phase = Some(*phase);
+        }
         WorldEvent::Disabled { uuid, disabled } => {
             row.kind = 11;
             row.subject = uuid.clone();

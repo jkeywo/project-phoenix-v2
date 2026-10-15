@@ -38,6 +38,17 @@ impl RestoreReport {
 /// what tell a host which world that is.
 pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
     let mut report = RestoreReport::default();
+    if snapshot.scenario.as_ref().is_some_and(|scenario| {
+        scenario.pending_events.iter().any(|event| {
+            event.kind == 12 && super::application::world_event_from_record(event).is_none()
+        })
+    }) {
+        report.gaps.push(RestoreGap::ResourceStateInvalid {
+            uuid: "world".into(),
+            reason: "invalid pending enquiry event".into(),
+        });
+        return report;
+    }
     if let Err((uuid, reason)) = super::spatial_fields::validate_roster(world, snapshot) {
         report
             .gaps

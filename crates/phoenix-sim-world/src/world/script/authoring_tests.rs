@@ -29,6 +29,7 @@ const EXPECTED_EXPOSED: &[(&str, &str, &[&str])] = &[
     ("", "on_destroyed", &["entity", "handler"]),
     ("", "on_all_destroyed", &["group", "handler"]),
     ("", "on_attacked", &["entity", "handler"]),
+    ("", "on_enquiry", &["entity", "handler"]),
     ("", "on_timer", &["after_secs", "handler"]),
     ("", "on_hailed", &["entity", "handler"]),
     ("", "on_flag_set", &["name", "handler"]),

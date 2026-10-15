@@ -106,6 +106,49 @@ fn on_attacked_builds_its_condition() {
 }
 
 #[test]
+fn on_enquiry_builds_closed_observer_aware_filters_and_rejects_malformed_maps() {
+    use crate::world::config::EnquiryPhase;
+    assert_builds(
+        r#"on_enquiry("depot", "h")"#,
+        TriggerCondition::OnEnquiry {
+            entity_name: "depot".into(),
+            observer_name: None,
+            system: None,
+            aim: None,
+            intrusive: None,
+            phase: EnquiryPhase::Completed,
+        },
+    );
+    assert_builds(
+        r#"on_enquiry("depot", #{observer:"scout", system:"science", aim:"anomaly", intrusive:true, phase:"started"}, "h")"#,
+        TriggerCondition::OnEnquiry {
+            entity_name: "depot".into(),
+            observer_name: Some("scout".into()),
+            system: Some(phoenix_model::identity::SystemId("science".into())),
+            aim: Some("anomaly".into()),
+            intrusive: Some(true),
+            phase: EnquiryPhase::Started,
+        },
+    );
+    for options in [
+        r#"#{aim:"all-secrets"}"#,
+        r#"#{phase:"requested"}"#,
+        r#"#{intrusive:"true"}"#,
+        r#"#{observer:3}"#,
+        r#"#{unknown:true}"#,
+    ] {
+        let compiled = compile_scripts(&[ScriptSource {
+            path: "enquiry.rhai".into(),
+            source: format!("on_enquiry(\"depot\", {options}, \"h\"); fn h(ctx) {{}}"),
+        }]);
+        assert!(
+            !compiled.findings.is_empty(),
+            "malformed filter accepted: {options}"
+        );
+    }
+}
+
+#[test]
 fn on_timer_builds_its_condition() {
     assert_builds(
         r#"on_timer(45, "h")"#,

@@ -1203,6 +1203,7 @@ fn trigger_condition_code(condition: &crate::world::config::TriggerCondition) ->
         C::OnDisabled { .. } => 13,
         C::OnAllNeutralized { .. } => 14,
         C::OnNeutralized { .. } => 15,
+        C::OnEnquiry { .. } => 16,
     }
 }
 
@@ -1268,6 +1269,20 @@ fn fold_scheduled_call(mut acc: u64, call: &crate::world::script::schedule::Sche
 /// [`fold_scenario_schedule`] for why the tag is written by hand.
 fn fold_world_event(mut acc: u64, event: &WorldEvent) -> u64 {
     match event {
+        WorldEvent::Enquiry {
+            target_uuid,
+            observer_uuid,
+            system,
+            aim,
+            intrusive,
+            phase,
+        } => {
+            acc = fold_u64(acc, 12);
+            acc = fold_str(fold_str(acc, target_uuid), observer_uuid);
+            acc = fold_str(fold_str(acc, &system.0), aim);
+            acc = fold_u64(acc, u64::from(*intrusive));
+            fold_str(acc, phase.as_str())
+        }
         WorldEvent::Disabled { uuid, disabled } => {
             acc = fold_u64(acc, 11);
             fold_u64(fold_str(acc, uuid), u64::from(*disabled))

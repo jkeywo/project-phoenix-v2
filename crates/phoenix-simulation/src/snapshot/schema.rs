@@ -1527,6 +1527,15 @@ pub struct WorldEventRecord {
     /// Reversible defeat entry/recovery for tag 11.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub disabled: bool,
+    /// Tag 12 carries one observer-aware paid enquiry boundary.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub system: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub aim: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub intrusive: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enquiry_phase: Option<crate::world::config::EnquiryPhase>,
     /// The event's primary name: an entity uuid, a region uuid, or a flag name.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub subject: String,

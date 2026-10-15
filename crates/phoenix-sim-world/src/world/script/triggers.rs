@@ -41,6 +41,9 @@ use crate::world::script::effects::RealLit;
 use crate::world::script::engine::{BuilderState, ScriptTrigger};
 use crate::world::script::registry::{host_fn, HostRegistry};
 
+#[path = "triggers_enquiry.rs"]
+mod enquiry;
+
 /// A handle to the trigger a registration fn just authored, returned so
 /// TRIGGER-LEVEL fields — the ones that are neither the condition nor the
 /// handler — can be chained onto it:
@@ -88,6 +91,7 @@ fn raise(message: String) -> Box<EvalAltResult> {
 /// clone of the shared [`BuilderState`] handle, so a top-level call attributes
 /// its trigger to whichever unit the loader is currently running.
 pub fn register_trigger_builders(engine: &mut HostRegistry, state: Arc<Mutex<BuilderState>>) {
+    enquiry::register(engine, state.clone());
     // 1. OnDestroyed { entity_name }
     let s = state.clone();
     host_fn!(

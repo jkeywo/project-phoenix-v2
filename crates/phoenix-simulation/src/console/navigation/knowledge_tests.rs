@@ -700,6 +700,31 @@ fn formation_boot() -> (App, Entity, Entity) {
     use crate::comms::server::{CommsInboxRes, CommsRuntime};
     use crate::world_id::InstallWorldIdMint;
     let (mut app, observer, bare_target) = rig_for("assets/entities/formation_cruiser.toml", false);
+    // The isolated owner rig does not install the complete plugin graph.
+    // Register the ordinary snapshot machinery schema without creating any
+    // equipment, work or observations. Its legacy all-optional tuple gate
+    // otherwise omits every blackboard when an unused weapon type is absent.
+    app.world_mut()
+        .register_component::<crate::console::weapons::beam::ActiveBeam>();
+    app.world_mut()
+        .register_component::<crate::console::weapons::beam::PhaserCooldown>();
+    app.world_mut()
+        .register_component::<crate::console::weapons::TorpedoSystemResource>();
+    app.world_mut().register_component::<EntityShipArcHull>();
+    app.world_mut()
+        .register_component::<crate::console::repair::server::ShipRepairTeams>();
+    app.world_mut()
+        .register_component::<crate::console::repair::server::RepairRequestQueue>();
+    app.world_mut()
+        .register_component::<crate::ship_plugin::RepairHumanAlerted>();
+    app.world_mut()
+        .register_component::<crate::server_app::ShipSystemBlackboards>();
+    app.world_mut()
+        .register_component::<crate::ai::server::ObjectiveCursors>();
+    app.world_mut()
+        .register_component::<crate::console::weapons::blaster::BlasterSystemResource>();
+    app.world_mut()
+        .register_component::<crate::ship::shields::ShipShields>();
     let accepted = crate::entities::include_resolve::load_entity_config(
         "assets/entities/formation_cruiser.toml",
     )
@@ -1068,6 +1093,30 @@ fn formation_selection_uses_actual_heard_acceptance_and_earned_measurement_with_
         &serde_json::to_vec(&crate::snapshot::capture(app.world())).unwrap(),
     )
     .unwrap();
+    let saved_owner = saved
+        .entities
+        .iter()
+        .find(|row| row.uuid == "observer")
+        .unwrap();
+    let saved_publications: std::collections::HashMap<_, _> = saved_owner
+        .blackboards
+        .iter()
+        .map(|(owner, board)| (SystemId(owner.clone()), board.clone()))
+        .collect();
+    let saved_config = app
+        .world()
+        .get::<crate::ship_plugin::ShipConfigComponent>(observer)
+        .unwrap();
+    let permitted = saved_config
+        .0
+        .observations_for_system(&nav, &saved_publications);
+    assert!(
+        permitted
+            .get(&SystemId("tactical-radar".into()))
+            .and_then(crate::science::contact_routing::observations)
+            .is_some_and(|records| records.iter().any(|record| record.contact_id == handle)),
+        "the genuine earned public alias must be present in the canonical candidate before restore"
+    );
     let (mut fresh, fresh_observer, _) = formation_boot();
     assert!(fresh
         .world()

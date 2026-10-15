@@ -7,6 +7,39 @@ use crate::core::messages::{SystemBlackboard, SystemControlPayload};
 use bevy::prelude::*;
 use phoenix_sim_gameplay::electronic::capture::{CaptureState, CapturedPayload};
 
+/// Complete unsupported commands through the same radio tick even when the
+/// actor has no Radio at all. Has<> reads presence, not mutable decoder state.
+pub(super) fn refuse_unsupported(
+    owners: &Query<(
+        &crate::core::messages::AdmittedCommands,
+        Option<&super::radio::RadioProfile>,
+        Has<ShipCommsCapture>,
+    )>,
+    mut outbox: Option<&mut crate::server_app::SimOutbox>,
+) {
+    let Some(outbox) = outbox.as_deref_mut() else {
+        return;
+    };
+    for (commands, radio, has_capture) in owners {
+        for command in &commands.0 {
+            if matches!(
+                command.payload,
+                SystemControlPayload::SelectCommsCapture { .. }
+            ) && !(has_capture
+                && radio.is_some_and(|profile| {
+                    profile.0.system == command.target && profile.0.capture.is_some()
+                }))
+            {
+                crate::command_admission::feedback::finish_outbox_action_feedback(
+                    command,
+                    outbox,
+                    crate::core::messages::ActionFeedbackOutcome::Refused,
+                );
+            }
+        }
+    }
+}
+
 #[derive(Component, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ShipCommsCapture(pub CaptureState);
 

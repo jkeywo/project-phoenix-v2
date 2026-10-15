@@ -4,6 +4,9 @@ use crate::world_id::InstallWorldIdMint;
 use bevy::ecs::system::RunSystemOnce;
 
 fn fixture(distance: f32, level: u8) -> (App, Entity, Entity) {
+    fixture_with_decoder(distance, level, Some(true))
+}
+fn fixture_with_decoder(distance: f32, level: u8, decoder: Option<bool>) -> (App, Entity, Entity) {
     let mut app = App::new();
     app.insert_resource(crate::sim_tick::SimTick(10))
         .insert_resource(Time::<Fixed>::from_hz(30.0))
@@ -43,6 +46,20 @@ fn fixture(distance: f32, level: u8) -> (App, Entity, Entity) {
         .as_mut()
         .unwrap()
         .ticks_per_level = 3;
+    match decoder {
+        Some(false) => {
+            receiver
+                .comms
+                .as_mut()
+                .unwrap()
+                .radio
+                .as_mut()
+                .unwrap()
+                .capture = None
+        }
+        None => receiver.comms.as_mut().unwrap().radio = None,
+        Some(true) => {}
+    }
     let source = crate::entities::spawner::spawn_entity(
         &mut app.world_mut().commands(),
         &source,
@@ -82,6 +99,84 @@ fn fixture(distance: f32, level: u8) -> (App, Entity, Entity) {
             feedback_correlation: None,
         });
     (app, source, receiver)
+}
+
+#[test]
+fn absent_decoder_or_radio_refuses_correlated_selection_without_creating_state_or_decode_work() {
+    use crate::core::messages::{ActionCorrelationId, ActionFeedbackOutcome, ServerMessage};
+    for decoder in [Some(false), None] {
+        let (mut app, source, receiver) = fixture_with_decoder(10.0, 1, decoder);
+        app.world_mut()
+            .get_mut::<AdmittedCommands>(source)
+            .unwrap()
+            .0
+            .clear();
+        assert!(app.world().get::<ShipCommsCapture>(receiver).is_none());
+        let initial = energy(&app, receiver);
+        let baseline = if decoder.is_some() {
+            let power = app
+                .world()
+                .get::<crate::ship::power::ShipPowerSystem>(receiver)
+                .unwrap();
+            let rate = power
+                .0
+                .config()
+                .consumers
+                .iter()
+                .find(|consumer| consumer.system.0 == "comms")
+                .unwrap()
+                .continuous_cost_per_sec;
+            f64::from(
+                rate * app
+                    .world()
+                    .resource::<Time<Fixed>>()
+                    .timestep()
+                    .as_secs_f32(),
+            )
+        } else {
+            0.0
+        };
+        let correlation = ActionCorrelationId::new("unsupported-capture").unwrap();
+        app.world_mut()
+            .get_mut::<AdmittedCommands>(receiver)
+            .unwrap()
+            .0
+            .push(AdmittedCommand {
+                target: SystemId("comms".into()),
+                payload: SystemControlPayload::SelectCommsCapture { capture: Some(1) },
+                response_token: Some("ordinary-holder".into()),
+                feedback_correlation: Some(correlation.clone()),
+            });
+        app.world_mut()
+            .run_system_once(super::super::radio::tick_radio)
+            .unwrap();
+        assert!(app.world().get::<ShipCommsCapture>(receiver).is_none());
+        let feedback: Vec<_> = app
+            .world()
+            .resource::<crate::server_app::SimOutbox>()
+            .iter()
+            .filter_map(|(_, message)| match message {
+                ServerMessage::ActionFeedback {
+                    correlation: actual,
+                    outcome,
+                } if actual == &correlation => Some(*outcome),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(feedback, vec![ActionFeedbackOutcome::Refused]);
+        if decoder.is_none() {
+            assert_eq!(energy(&app, receiver), initial);
+        }
+        assert_eq!(
+            app.world()
+                .get::<crate::ship::power::ShipPowerSystem>(receiver)
+                .unwrap()
+                .0
+                .emitted_work(&SystemId("comms".into())),
+            baseline,
+            "only ordinary paid radio listening may occur, never extra decoding work"
+        );
+    }
 }
 fn capture_view(
     app: &App,

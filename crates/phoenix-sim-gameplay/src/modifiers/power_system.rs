@@ -148,6 +148,9 @@ pub struct PowerSystem {
     last_reactor_energy_delta_per_sec: f32,
     last_intake_per_sec: BTreeMap<SystemId, f32>,
     last_work_fraction: BTreeMap<SystemId, f32>,
+    /// Derived receipts for this fixed interval; cleared before resource routing.
+    /// Observers measure actual expenditure, never persistent control intent.
+    work_emissions: BTreeMap<SystemId, f64>,
     strike_config: Option<StrikeReserveConfig>,
     strike_boost: Option<crate::modifiers::strike_reserve::StrikeBoost>,
 }
@@ -180,6 +183,7 @@ impl PowerSystem {
             weapons_restrained: false,
             last_reactor_energy_delta_per_sec: 0.0,
             last_work_fraction,
+            work_emissions: BTreeMap::new(),
             last_intake_per_sec,
             strike_config: None,
             strike_boost: None,
@@ -316,11 +320,14 @@ impl PowerSystem {
         system: &SystemId,
         energy: f32,
     ) -> Result<crate::resources::energy::EnergyGrant, String> {
-        self.network
-            .spend_continuous(&self.hardware, system, energy)
+        let grant = self
+            .network
+            .spend_continuous(&self.hardware, system, energy)?;
+        *self.work_emissions.entry(system.clone()).or_default() += f64::from(grant.granted);
+        Ok(grant)
     }
     pub fn try_spend_discrete(&mut self, system: &SystemId) -> Result<bool, String> {
-        self.network.try_spend_discrete(&self.hardware, system)
+        self.try_work_discrete_count(system, 1)
     }
 
     /// Grant actual work before advancing an actuator or producing its effect.
@@ -361,11 +368,16 @@ impl PowerSystem {
             .find(|consumer| &consumer.system == system)
             .ok_or("unknown energy consumer")?;
         let amount = consumer.discrete_cost * count as f32;
-        self.network
+        let paid = self
+            .network
             .consumers
             .get_mut(system)
             .ok_or("unknown consumer state")?
-            .try_spend_discrete(&consumer.reserve, amount)
+            .try_spend_discrete(&consumer.reserve, amount)?;
+        if paid {
+            *self.work_emissions.entry(system.clone()).or_default() += f64::from(amount);
+        }
+        Ok(paid)
     }
 
     pub fn try_work_discrete(&mut self, system: &SystemId) -> Result<bool, String> {
@@ -373,6 +385,9 @@ impl PowerSystem {
     }
     pub fn last_work_fraction(&self, system: &SystemId) -> Option<f32> {
         self.last_work_fraction.get(system).copied()
+    }
+    pub fn emitted_work(&self, system: &SystemId) -> f64 {
+        self.work_emissions.get(system).copied().unwrap_or(0.0)
     }
 
     /// A recovered physical delivery shares this interval's intake limit with
@@ -500,6 +515,7 @@ impl PowerSystem {
     }
     pub fn restore_continuation(&mut self, saved: &PowerState) -> Result<(), String> {
         self.validate_saved(saved)?;
+        self.work_emissions.clear();
         self.network = saved.network.clone();
         self.coolant_credit = saved.coolant_credit.clone();
         self.weapons_restrained = saved.weapons_restrained;
@@ -542,6 +558,7 @@ impl PowerSystem {
         effects: &crate::resources::energy_network::EnergyHardwareEffects,
         choose: &mut impl FnMut(usize) -> usize,
     ) -> Result<PowerTickResult, String> {
+        self.work_emissions.clear();
         if available_stock.values().any(|value| *value < 0) {
             return Err("coolant stocks cannot be negative".into());
         }

@@ -20,6 +20,7 @@ pub mod observation;
 pub mod damage;
 pub mod energy;
 pub mod equipment_recovery_ui;
+pub mod field;
 pub mod fitting;
 pub mod interior;
 pub mod job;
@@ -30,6 +31,7 @@ pub mod production;
 pub mod production_ui;
 pub mod recovery;
 pub mod recovery_ui;
+pub mod sensing;
 
 pub mod logistics_ui;
 pub mod umbilical;

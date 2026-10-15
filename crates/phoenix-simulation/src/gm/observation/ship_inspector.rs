@@ -294,6 +294,7 @@ pub fn projection<'a>(
                     "torpedoes",
                     "repair",
                     "scan",
+                    "sensing",
                     "tractor",
                     "dock",
                     "umbilical",

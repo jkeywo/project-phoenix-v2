@@ -839,11 +839,11 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 "ship-modifier-state",
             )
             .declare_state::<crate::science::server::ShipScanRecord>(
-                StateClass::DeferredFold,
+                StateClass::Folded,
                 "science-scan-state",
             )
-            // Debris contacts (issue #1347). `DeferredFold` for exactly
-            // `ShipScanRecord`'s reason, one consumer along: `sim_digest::
+            // Debris contacts (issue #1347) still use `DeferredFold`:
+            // `sim_digest::
             // world_digest` walks NO field of `DebrisThreat` — there is no
             // debris namespace in the fold — while `crates/phoenix-simulation/src/snapshot.rs`
             // (`capture_debris` / the `EntityState::debris` restore) carries the

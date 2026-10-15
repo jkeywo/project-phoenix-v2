@@ -23,3 +23,14 @@ colour = [0.65, 0.6, 0.48]
 
 [radar_appearance]
 icon = "asteroid"
+
+# Substantial terrain obstructs fictional sensor/Comms paths at physical bounds.
+[shape]
+type = "sphere"
+radius = 12.0
+
+[signal_material]
+sensor_absorption_per_unit = 0
+comms_absorption_per_unit = 0
+sensor_opaque = true
+comms_opaque = true

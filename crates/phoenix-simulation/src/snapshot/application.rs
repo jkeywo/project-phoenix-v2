@@ -1537,9 +1537,18 @@ pub(super) fn apply_entity_state_with(
         }
     }
     if let Some(scan) = &row.scan {
+        if !entity_mut.contains::<crate::science::ShipScanRecord>() {
+            entity_mut.insert(crate::science::ShipScanRecord::default());
+        }
         if let Some(mut record) = entity_mut.get_mut::<crate::science::ShipScanRecord>() {
             record.restore(scan);
         }
+    }
+    if let Some(field) = &row.region_field {
+        entity_mut.insert(field.clone());
+    }
+    if let Some(passive) = &row.passive {
+        entity_mut.insert(passive.clone());
     }
     if let Some(civilian) = &row.civilian {
         if let Some(mut traffic) = entity_mut.get_mut::<crate::civilian::CivilianTraffic>() {

@@ -30,7 +30,7 @@ use uuid::Uuid;
 /// an older client's level-zero control would otherwise suggest hold fire.
 /// Revision 11 carries typed local stores, recovery selections and visit-bound
 /// port service/order projections; earlier clients cannot operate those views.
-pub const PROTOCOL_VERSION: u32 = 12;
+pub const PROTOCOL_VERSION: u32 = 13;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).
@@ -1977,6 +1977,10 @@ pub enum RepairTarget {
 )]
 #[serde(tag = "type", content = "data")]
 pub enum SystemControlPayload {
+    SetPassiveEnabled {
+        enabled: bool,
+    },
+    CancelFocusedScan,
     /// Requests a physical fit; the target System owns the choice, Repair owns
     /// the subsequent team assignment. Neither verb installs an item instantly.
     RequestEquipment {
@@ -4579,6 +4583,7 @@ pub struct WeaponsBlackboard {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", content = "data")]
 pub enum SystemBlackboard {
+    Passive(crate::sensing::PassiveBlackboard),
     Recovery(crate::recovery_ui::RecoveryBlackboard),
     Production(crate::production_ui::ProductionBlackboard),
     Stock(crate::logistics_ui::SystemStockBlackboard),
@@ -5039,6 +5044,13 @@ pub struct UmbilicalBlackboard {
 /// rather than a system id for the reason `"operations"` is.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct ScanBlackboard {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<SystemId>,
+    /// Historical findings retain their original sample times and precision.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub history: Vec<ScanReadingSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focused: Option<FocusedScanSnapshot>,
     /// Whether this hull authored a `[scan]` table with at least one fidelity
     /// band. `false` is meaningful: the console says "no scan capability"
     /// rather than showing an empty readout the crew have to interpret.
@@ -5054,6 +5066,13 @@ pub struct ScanBlackboard {
     /// about the thing they just pointed at.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refusal: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct FocusedScanSnapshot {
+    pub subject: String,
+    pub progress: u16,
+    pub waiting: String,
 }
 
 /// One sensor reading of an external structure (issue #1032).

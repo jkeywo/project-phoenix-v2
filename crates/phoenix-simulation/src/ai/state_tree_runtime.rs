@@ -68,6 +68,11 @@ pub fn compile_ship_trees_with_energy(
                 &booleans,
                 &numbers,
             )
+        } else if system.kind == crate::ship::system_registry::PASSIVE_RECEIVER_KIND {
+            compile(
+                &definition,
+                &phoenix_sim_gameplay::science::sensing_ai::bindings(),
+            )
         } else if system.kind == crate::ship::system_registry::RECOVERY_KIND {
             compile(
                 &definition,

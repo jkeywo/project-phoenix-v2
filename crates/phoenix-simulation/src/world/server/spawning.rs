@@ -174,6 +174,10 @@ pub fn spawn_immediate_entities_internal(
                 continue;
             }
         };
+        if let Err(reason) = config.validate_field_at_origin(pos.to_array()) {
+            bevy::log::error!("spawn_world_entities: invalid field at resolved position: {reason}");
+            continue;
+        }
         let entity = crate::entities::spawner::spawn_entity(
             commands,
             &config,
@@ -237,6 +241,10 @@ pub fn spawn_immediate_entities_internal(
         let mut config = config;
         if entity_inst.name.is_some() {
             config.name = entity_inst.name.clone();
+        }
+        if let Err(reason) = config.validate_field_at_origin(pos.to_array()) {
+            bevy::log::error!("spawn_world_entities: named entity '{name}': {reason}");
+            continue;
         }
         let entity = crate::entities::spawner::spawn_entity(
             commands,

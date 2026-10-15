@@ -1072,6 +1072,48 @@ pub(crate) fn apply_dispatch_result(
             // `name_to_uuid`); the arithmetic and the flag edges happen in
             // `tick_infrastructure_condition`, which drains this queue in
             // `SimSet::Modifiers`.
+            ActionCmd::ReplaceRegionField { entity, profile } => {
+                if profile.validate().is_err() {
+                    continue;
+                }
+                let Some(target) = runtime
+                    .name_to_uuid
+                    .get(&entity)
+                    .and_then(|uuid| uuid_to_entity.get(uuid))
+                    .copied()
+                else {
+                    continue;
+                };
+                commands.queue(move |world: &mut World| {
+                    let tick = world
+                        .get_resource::<crate::sim_tick::SimTick>()
+                        .map_or(0, |tick| tick.0);
+                    let dt = world
+                        .get_resource::<Time<bevy::time::Fixed>>()
+                        .map(|time| time.timestep().as_secs_f32())
+                        .unwrap_or_else(|| {
+                            Time::<bevy::time::Fixed>::default()
+                                .timestep()
+                                .as_secs_f32()
+                        });
+                    let pose = world
+                        .get::<crate::regions::field::RegionFieldState>(target)
+                        .and_then(|state| state.sample_pose(tick, dt).ok());
+                    if let Some(pose) = pose {
+                        if let Ok(state) = crate::regions::field::RegionFieldState::new(
+                            profile,
+                            tick,
+                            pose.origin.to_array(),
+                        ) {
+                            let valid = world.get::<crate::entities::spawner::RegionShapeSection>(target)
+                                .is_some_and(|shape| state.validate_environment(&shape.0,
+                                    world.get::<crate::entities::spawner::RegionEffectsSection>(target)
+                                        .map_or(&[], |effects| effects.0.as_slice())).is_ok());
+                            if valid { world.entity_mut(target).insert(state); }
+                        }
+                    }
+                });
+            }
             ActionCmd::AdjustInfrastructureCondition { entity, delta } => {
                 let Some(uuid) = runtime.name_to_uuid.get(&entity).cloned() else {
                     bevy::log::warn!(

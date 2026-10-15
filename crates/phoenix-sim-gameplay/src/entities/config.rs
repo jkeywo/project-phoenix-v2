@@ -128,6 +128,12 @@ pub struct EntityConfig {
     pub asteroid_field: Option<AsteroidFieldConfig>,
     /// Region shape section — present for region entities.
     pub shape: Option<RegionShape>,
+    /// Analytic field parameters over the same authored Region geometry.
+    pub field: Option<phoenix_model::field::FieldConfig>,
+    /// Explicit substantial terrain signal properties; never inferred from mesh.
+    pub signal_material: Option<phoenix_model::field::SignalMaterialConfig>,
+    /// Independent supported instruments, bound to their actual Systems.
+    pub sensing: Option<phoenix_model::sensing::SensingConfig>,
     /// Region effects section — present for region entities with effects.
     pub effects: Option<RegionEffectsConfig>,
     /// Infrastructure condition + capacity (issue #1025). Present for authored
@@ -340,6 +346,20 @@ pub struct EntityConfig {
 }
 
 impl EntityConfig {
+    /// Admission checks the actual resolved position before queuing any entity.
+    pub fn validate_field_at_origin(&self, position: [f32; 3]) -> Result<(), String> {
+        let Some(profile) = &self.field else {
+            return Ok(());
+        };
+        let field = crate::regions::field::RegionFieldState::new(profile.clone(), 0, position)?;
+        field.validate_environment(
+            self.shape.as_ref().ok_or("spatial field requires shape")?,
+            &self
+                .effects
+                .as_ref()
+                .map_or_else(Vec::new, |effects| effects.to_kinds()),
+        )
+    }
     /// A stationary, ownerless phaser platform. Unlike a behaviour-driven NPC
     /// it has no helm or doctrine, but its AI-only Tactical systems need the
     /// shared combat substrate to acquire and fire.
@@ -867,8 +887,43 @@ impl EntityConfig {
             .map_err(SerdeError::custom)?;
         crate::resources::ports_profile::validate_entity_port(&config)
             .map_err(SerdeError::custom)?;
-        crate::resources::fitting::CompiledFitting::compile(&config)
-            .map_err(SerdeError::custom)?;
+        if config.field.is_some() || config.signal_material.is_some() {
+            config
+                .shape
+                .as_ref()
+                .ok_or_else(|| {
+                    SerdeError::custom("[field] and [signal_material] require an explicit [shape]")
+                })?
+                .validate()
+                .map_err(SerdeError::custom)?;
+        }
+        if let Some(field) = &config.field {
+            let accepted = crate::regions::field::RegionFieldState::new(field.clone(), 0, [0.0; 3])
+                .map_err(SerdeError::custom)?;
+            accepted
+                .validate_environment(
+                    config.shape.as_ref().expect("checked field shape"),
+                    &config
+                        .effects
+                        .as_ref()
+                        .map_or_else(Vec::new, |effects| effects.to_kinds()),
+                )
+                .map_err(SerdeError::custom)?;
+        }
+        if let Some(material) = &config.signal_material {
+            material.validate().map_err(SerdeError::custom)?;
+        }
+        if let Some(sensing) = &config.sensing {
+            crate::science::sensing::validate_sensing(sensing, &config)
+                .map_err(SerdeError::custom)?;
+        } else if config.ship_config.as_ref().is_some_and(|ship| {
+            ship.systems
+                .iter()
+                .any(|system| system.kind == crate::ship::system_registry::PASSIVE_RECEIVER_KIND)
+        }) {
+            return Err(SerdeError::custom("a fitted passive receiver requires its explicit [sensing.passive] instrument profile"));
+        }
+        crate::resources::fitting::CompiledFitting::compile(&config).map_err(SerdeError::custom)?;
         crate::resources::logistics_profile::compile_entity_logistics(&config)
             .map_err(SerdeError::custom)?;
 
@@ -1092,6 +1147,18 @@ impl EntityConfig {
                         &crate::resources::production_ai::bindings(),
                     )
                     .map_err(SerdeError::custom)?;
+                    continue;
+                }
+                if system.kind == crate::ship::system_registry::PASSIVE_RECEIVER_KIND {
+                    let authored = authored.ok_or_else(|| {
+                        SerdeError::custom(
+                            "Passive receiver requires an explicit config.ai state tree",
+                        )
+                    })?;
+                    let tree: crate::ai::state_tree::AiTreeConfig =
+                        authored.clone().try_into().map_err(SerdeError::custom)?;
+                    crate::ai::state_tree::compile(&tree, &crate::science::sensing_ai::bindings())
+                        .map_err(SerdeError::custom)?;
                     continue;
                 }
                 if system.kind == crate::ship::system_registry::LOGISTICS_KIND {

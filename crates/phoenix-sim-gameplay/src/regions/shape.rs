@@ -19,6 +19,29 @@ pub enum RegionShape {
 }
 
 impl RegionShape {
+    pub fn validate(&self) -> Result<(), String> {
+        let positive = |value: f32| value.is_finite() && value > 0.0;
+        let valid = match self {
+            Self::Sphere { radius } => positive(*radius),
+            Self::Box { half_extents, yaw } => {
+                yaw.is_finite() && half_extents.iter().all(|value| positive(*value))
+            }
+            Self::Torus {
+                inner_radius,
+                outer_radius,
+            } => {
+                inner_radius.is_finite()
+                    && *inner_radius >= 0.0
+                    && positive(*outer_radius)
+                    && outer_radius > inner_radius
+            }
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err("field geometry requires finite positive dimensions and an ordered annulus".into())
+        }
+    }
     pub fn contains(&self, point: glam::Vec3, origin: glam::Vec3) -> bool {
         let delta = point - origin;
         match self {

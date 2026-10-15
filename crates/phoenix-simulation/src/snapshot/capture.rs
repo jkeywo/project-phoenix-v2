@@ -1365,21 +1365,22 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
         return Vec::new();
     };
     let context = EntityCaptureContext::new(world);
-    let mut rows: Vec<EntityState> = query
-        .iter(world)
-        .map(
-            |(uuid, entity, physics, hull, alert, stances, control_sources)| {
-                let navigation = if context.navigation {
-                    capture_navigation_continuation(entity)
-                } else {
-                    Default::default()
-                };
-                let (weapons, repair, blackboards, patrol_cursors) = if context.machines {
-                    capture_weapons_and_repair(entity)
-                } else {
-                    Default::default()
-                };
-                EntityState {
+    let mut rows: Vec<EntityState> =
+        query
+            .iter(world)
+            .map(
+                |(uuid, entity, physics, hull, alert, stances, control_sources)| {
+                    let navigation = if context.navigation {
+                        capture_navigation_continuation(entity)
+                    } else {
+                        Default::default()
+                    };
+                    let (weapons, repair, blackboards, patrol_cursors) = if context.machines {
+                        capture_weapons_and_repair(entity)
+                    } else {
+                        Default::default()
+                    };
+                    EntityState {
                     mesh_crew: capture_mesh_crew(entity),
                     npc_doctrine: entity
                         .get::<crate::gm::operations::npc::NpcDoctrineState>()
@@ -1419,6 +1420,8 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                     port_provider: entity
                         .get::<crate::resources::ports_server::PortProviderState>()
                         .map(|owner| owner.0.clone()),
+                    region_field: entity.get::<crate::regions::field::RegionFieldState>().cloned(),
+                    passive: entity.get::<crate::science::passive::PassiveState>().cloned(),
                     fitting: entity
                         .get::<crate::resources::fitting_server::ShipFitting>()
                         .cloned(),
@@ -1518,9 +1521,9 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                         })
                         .unwrap_or_default(),
                 }
-            },
-        )
-        .collect();
+                },
+            )
+            .collect();
     rows.sort_by(|a, b| a.uuid.cmp(&b.uuid));
     rows
 }

@@ -24,6 +24,12 @@ pub enum FlagMutation {
 /// `Uuid`s. Nothing here names a Bevy `Entity`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ActionCmd<SpawnConfig> {
+    /// Causal replacement of supported Region parameters, never an arbitrary
+    /// entity/component write. The physical owner rechecks the actual target.
+    ReplaceRegionField {
+        entity: String,
+        profile: phoenix_model::field::FieldConfig,
+    },
     Addressed {
         recipients: crate::recipients::RecipientSelection,
         action: Box<TriggerAction>,
@@ -427,6 +433,9 @@ pub enum ActionCmd<SpawnConfig> {
 impl ActionCmd<std::convert::Infallible> {
     pub fn into_resolved<T>(self) -> ActionCmd<T> {
         match self {
+            Self::ReplaceRegionField { entity, profile } => {
+                ActionCmd::ReplaceRegionField { entity, profile }
+            }
             Self::Addressed {
                 recipients,
                 action,

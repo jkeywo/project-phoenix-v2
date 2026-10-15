@@ -467,6 +467,9 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("equipment-recovery", fold_equipment_recovery_namespace),
     ("physical-damage", fold_physical_damage_namespace),
     ("disablement-observation", fold_disablement_namespace),
+    ("spatial-fields", fold_spatial_fields_namespace),
+    ("recorded-scans", fold_recorded_scans_namespace),
+    ("passive-samples", fold_passive_samples_namespace),
 ];
 
 /// The running accumulator after each named stage of the fold.
@@ -2536,6 +2539,68 @@ fn fold_fitting_namespace(world: &World, acc: u64) -> u64 {
             let mut state = owner.clone();
             for work in state.work.values_mut() {
                 work.progress = f32::from_bits(canon_f32(work.progress));
+            }
+            Some(state)
+        },
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+fn fold_spatial_fields_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "spatial-fields",
+        |owner: &crate::regions::field::RegionFieldState| {
+            let mut state = owner.clone();
+            let canonical = |value| f32::from_bits(canon_f32(value));
+            state.origin = state.origin.map(canonical);
+            state.profile.strength = canonical(state.profile.strength);
+            state.profile.sensor_absorption_per_unit =
+                canonical(state.profile.sensor_absorption_per_unit);
+            state.profile.comms_absorption_per_unit =
+                canonical(state.profile.comms_absorption_per_unit);
+            if let Some(evolution) = &mut state.profile.evolution {
+                evolution.duration_secs = canonical(evolution.duration_secs);
+                evolution.translation = evolution.translation.map(canonical);
+                evolution.final_scale = canonical(evolution.final_scale);
+                evolution.final_strength = canonical(evolution.final_strength);
+            }
+            Some(state)
+        },
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+fn fold_recorded_scans_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "recorded-scans",
+        |owner: &crate::science::ShipScanRecord| {
+            let mut state = owner.save_state();
+            for work in state
+                .focused
+                .iter_mut()
+                .chain(state.unfinished.values_mut())
+            {
+                work.progress = f32::from_bits(canon_f32(work.progress));
+                work.work_secs = f32::from_bits(canon_f32(work.work_secs));
+            }
+            Some(state)
+        },
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+fn fold_passive_samples_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "passive-samples",
+        |owner: &crate::science::passive::PassiveState| {
+            let mut state = owner.clone();
+            for sample in &mut state.signals {
+                sample.bearing_rad = f32::from_bits(canon_f32(sample.bearing_rad));
+                sample.bearing_error_rad = f32::from_bits(canon_f32(sample.bearing_error_rad));
+                sample.strength = f32::from_bits(canon_f32(sample.strength));
             }
             Some(state)
         },

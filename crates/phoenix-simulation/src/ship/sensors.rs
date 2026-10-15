@@ -39,13 +39,13 @@ impl Plugin for ShipSensorsPlugin {
         // Admitted-command consumer (issue #833): `handle_sensors_messages`
         // reads the `sensors` system's admitted commands.
         app.register_admitted_consumer(
-            ConsumerMatcher::exact(
-                crate::ship::system_registry::SENSORS_KIND,
-                crate::ship::system_registry::SENSORS_SYSTEM_ID,
-            )
-            .with_feedback(
-                crate::command_admission::FeedbackAddress::MatcherSpelling,
-                &[Payload::SetScienceTarget, Payload::ScanTarget],
+            ConsumerMatcher::kind(crate::ship::system_registry::SENSORS_KIND).with_feedback(
+                crate::command_admission::FeedbackAddress::DeclaredKindOnly,
+                &[
+                    Payload::SetScienceTarget,
+                    Payload::ScanTarget,
+                    Payload::CancelFocusedScan,
+                ],
             ),
         );
         // The ONE shared AI decision cadence (issue #889), which also derives
@@ -149,7 +149,12 @@ pub fn handle_sensors_messages(
         control_sources,
     ) in ship_query.iter_mut()
     {
-        for cmd in admitted.for_target(crate::ship::system_registry::SENSORS_SYSTEM_ID) {
+        for cmd in admitted.0.iter().filter(|cmd| {
+            ship_config
+                .0
+                .system(&cmd.target)
+                .is_some_and(|system| system.kind == crate::ship::system_registry::SENSORS_KIND)
+        }) {
             let uuid = match &cmd.payload {
                 SystemControlPayload::SetScienceTarget { uuid } => uuid,
                 SystemControlPayload::ClearScienceTarget => {

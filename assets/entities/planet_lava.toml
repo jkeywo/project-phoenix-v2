@@ -46,3 +46,14 @@ scale = 1.03
 [planet.atmosphere]
 colour = [1.0, 0.35, 0.1]
 strength = 1.0
+
+# Substantial terrain obstructs fictional sensor/Comms paths at physical bounds.
+[shape]
+type = "sphere"
+radius = 22.5
+
+[signal_material]
+sensor_absorption_per_unit = 0
+comms_absorption_per_unit = 0
+sensor_opaque = true
+comms_opaque = true

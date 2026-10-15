@@ -702,6 +702,21 @@ pub fn register_effects(engine: &mut HostRegistry) {
         },
     );
     host_fn!(
+        engine, "replace_region_field", receiver = "effects", category = "effect",
+        params = ["entity", "profile"],
+        summary = "Replace a fitted Region field's closed parameters at its current logical position. Does not create geometry or change player transport.",
+        |sink: &mut EffectSink, entity: ImmutableString, profile: Map| -> Result<(), Box<EvalAltResult>> {
+            if !crate::gm_npc::bounded_id(&entity) {
+                return Err(raise("replace_region_field requires a bounded entity identity".into()));
+            }
+            let value = dynamic_to_toml(&Dynamic::from_map(profile)).map_err(raise)?;
+            let profile: phoenix_model::field::FieldConfig = value.try_into().map_err(|error: toml::de::Error| raise(error.to_string()))?;
+            profile.validate().map_err(raise)?;
+            sink.push(ActionCmd::ReplaceRegionField { entity: entity.to_string(), profile });
+            Ok(())
+        },
+    );
+    host_fn!(
         engine,
         "reset_trigger",
         receiver = "effects",

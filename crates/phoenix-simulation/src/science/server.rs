@@ -1,6 +1,6 @@
 //! Bevy adapter for the science scan (issue #1032).
 //!
-//! One component, two systems, and no decisions of its own. What a scan says is
+//! One observation owner, timed acquisition and permitted publications. What a scan says is
 //! [`super::scan`]'s to derive; everything here gathers the live inputs that
 //! pure sibling cannot reach — where the ship is, what the grid is holding,
 //! which hazard band it is sitting in, what the subject's condition track
@@ -22,8 +22,9 @@
 //!
 //! # Why this runs in `SimSet::Modifiers` rather than `SimSet::Input`
 //!
-//! A scan is instantaneous — there is no hold to open on one tick and advance
-//! on the next — and every input it takes is a *this tick* reading:
+//! A focused enquiry advances with actual paid work over several fixed ticks.
+//! It validates geometry and publication policy throughout, and records the
+//! measurement at completion. Its inputs are that tick's readings:
 //!
 //! * the ship's `Transform`, which `sync_ship_position` mirrors out of
 //!   `ShipPhysics` back in `SimSet::Physics`, exactly as the tractor tick
@@ -100,9 +101,8 @@ pub fn scan_blackboard_key() -> SystemId {
 /// gauge. A run that scanned the skyhook and a run that did not are different
 /// runs, exactly as #1031's evidence log is.
 ///
-/// One component rather than two because the three fields move together and are
-/// read together: the publisher wants all of them and a save has to restore all
-/// of them.
+/// Work, retained readings and the latest-screen projection share this owner;
+/// there is no separate mutable dossier behind the publication.
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 pub struct ShipScanRecord {
     /// The hull's authored `[scan]` table, as spawned.
@@ -115,6 +115,12 @@ pub struct ShipScanRecord {
     /// next scan that succeeds, so a refusal and a reading are never both
     /// current.
     pub refusal: Option<ScanRefusal>,
+    /// Retained readings belong to this same observation owner. `last` is its
+    /// compatibility screen projection and cannot introduce another sample.
+    pub history: Vec<ScanReading>,
+    pub focused: Option<super::focused::FocusedWork>,
+    pub unfinished: std::collections::BTreeMap<String, super::focused::FocusedWork>,
+    pub focused_config: Option<phoenix_model::sensing::FocusedConfig>,
 }
 
 /// The mutable part of a ship's scan record, as a save carries it.
@@ -137,6 +143,12 @@ pub struct ScanSaveState {
     /// Why the last scan returned nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refusal: Option<ScanRefusal>,
+    #[serde(default)]
+    pub history: Vec<ScanReading>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focused: Option<super::focused::FocusedWork>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub unfinished: std::collections::BTreeMap<String, super::focused::FocusedWork>,
 }
 
 impl ShipScanRecord {
@@ -145,6 +157,9 @@ impl ShipScanRecord {
         ScanSaveState {
             last: self.last.clone(),
             refusal: self.refusal,
+            history: self.history.clone(),
+            focused: self.focused.clone(),
+            unfinished: self.unfinished.clone(),
         }
     }
 
@@ -152,6 +167,9 @@ impl ShipScanRecord {
     pub fn restore(&mut self, state: &ScanSaveState) {
         self.last = state.last.clone();
         self.refusal = state.refusal;
+        self.history = state.history.clone();
+        self.focused = state.focused.clone();
+        self.unfinished = state.unfinished.clone();
     }
 }
 
@@ -161,6 +179,7 @@ pub struct SciencePlugin;
 
 impl Plugin for SciencePlugin {
     fn build(&self, app: &mut App) {
+        super::passive::register(app);
         app.add_systems(
             FixedUpdate,
             (
@@ -194,6 +213,8 @@ impl Plugin for SciencePlugin {
 #[allow(clippy::too_many_arguments)]
 pub fn tick_scans(
     tick: Option<Res<crate::sim_tick::SimTick>>,
+    time: Option<Res<Time>>,
+    paths: crate::regions::signal_path::RegionSignalQuery,
     mut runtime: Option<ResMut<WorldContentRuntime>>,
     membership: Option<Res<crate::regions::server::RegionMembership>>,
     mut ships: Query<
@@ -204,6 +225,8 @@ pub fn tick_scans(
             &AdmittedCommands,
             Option<&mut ShipPowerSystem>,
             Option<&mut ShipScanRecord>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
+            Option<&crate::ship_plugin::ShipSystemControlSources>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -247,7 +270,8 @@ pub fn tick_scans(
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
 ) {
-    let now_tick = tick.map(|t| t.0).unwrap_or(0);
+    let now_tick = tick.as_ref().map(|t| t.0).unwrap_or(0);
+    let dt = time.map_or(0.0, |time| time.delta_secs());
 
     // UUID order, not archetype order: two hosts must take the same ship's
     // scans in the same sequence, because each one overwrites that ship's
@@ -259,28 +283,49 @@ pub fn tick_scans(
     rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.index().cmp(&b.1.index())));
 
     for (operator_uuid, entity) in rows {
-        let Ok((entity, _, transform, admitted, mut power, record)) = ships.get_mut(entity) else {
+        let Ok((entity, _, transform, admitted, mut power, record, damage, sources)) =
+            ships.get_mut(entity)
+        else {
             continue;
         };
         // Carry the whole admitted command (issue #761), not just its target
         // uuid: the target still drives the reading and the task lifecycle, but
         // the command is what the correlated action-feedback is addressed to.
+        let owner = record
+            .as_ref()
+            .and_then(|record| record.focused_config.as_ref())
+            .map(|config| config.system.clone())
+            .unwrap_or_else(crate::ship::system_registry::sensors_system_id);
         let requested: Vec<AdmittedCommand> = admitted
-            .for_target(crate::ship::system_registry::SENSORS_SYSTEM_ID)
+            .for_target(&owner.0)
             .filter_map(|cmd| match &cmd.payload {
-                SystemControlPayload::ScanTarget { .. } => Some(cmd.clone()),
+                SystemControlPayload::ScanTarget { .. }
+                | SystemControlPayload::CancelFocusedScan => Some(cmd.clone()),
                 _ => None,
             })
             .collect();
-        if requested.is_empty() {
+        if requested.is_empty()
+            && record
+                .as_ref()
+                .is_none_or(|record| record.focused.is_none())
+        {
             continue;
         }
-        let scan_slot = TaskSlot::new(
-            operator_uuid.clone(),
-            crate::ship::system_registry::SENSORS_SYSTEM_ID,
-            TASK_VERB_SCAN,
-        );
+        let scan_slot = TaskSlot::new(operator_uuid.clone(), &owner.0, TASK_VERB_SCAN);
         let Some(mut record) = record else {
+            if requested
+                .iter()
+                .all(|cmd| matches!(cmd.payload, SystemControlPayload::CancelFocusedScan))
+            {
+                for cmd in &requested {
+                    crate::command_admission::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        ActionFeedbackOutcome::Applied,
+                    );
+                }
+                continue;
+            }
             // No `[scan]` table at all. Insert the record holding the refusal
             // rather than saying nothing; it lands a tick later, which no
             // console can see.
@@ -292,6 +337,14 @@ pub fn tick_scans(
             // ended (issue #1341) — a crew who asked a hull with no suite to
             // scan get an answer, and the timeline records the asking.
             for cmd in &requested {
+                if matches!(cmd.payload, SystemControlPayload::CancelFocusedScan) {
+                    crate::command_admission::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        ActionFeedbackOutcome::Applied,
+                    );
+                    continue;
+                }
                 let SystemControlPayload::ScanTarget { uuid: target_uuid } = &cmd.payload else {
                     continue;
                 };
@@ -309,10 +362,134 @@ pub fn tick_scans(
             }
             continue;
         };
+        let policy = record.focused_config.clone().unwrap_or_else(|| {
+            phoenix_model::sensing::FocusedConfig::legacy(
+                crate::ship::system_registry::sensors_system_id(),
+            )
+        });
+        record.unfinished.retain(|_, work| {
+            (now_tick.saturating_sub(work.last_valid_tick) as f64 * dt as f64)
+                <= policy.unfinished_retention_secs as f64
+        });
+        let mut started = false;
+        for cmd in &requested {
+            if matches!(cmd.payload, SystemControlPayload::CancelFocusedScan) {
+                if let Some(work) = record.focused.take() {
+                    if policy.unfinished_retention_secs > 0.0 {
+                        record.unfinished.insert(work.subject.clone(), work);
+                    }
+                    if let Some(queue) = lifecycle.as_deref_mut() {
+                        queue.0.push(TaskLifecycleRequest::End {
+                            slot: scan_slot.clone(),
+                            reason: TaskTerminalReason::Released,
+                        });
+                    }
+                }
+                crate::command_admission::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    ActionFeedbackOutcome::Applied,
+                );
+                continue;
+            }
+            let SystemControlPayload::ScanTarget { uuid } = &cmd.payload else {
+                continue;
+            };
+            if uuid.is_empty() || !subjects.iter().any(|(subject, ..)| &subject.0 == uuid) {
+                push_scan_lifecycle(
+                    lifecycle.as_deref_mut(),
+                    &scan_slot,
+                    uuid,
+                    TaskTerminalReason::NoSuchTarget,
+                );
+                crate::command_admission::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    ActionFeedbackOutcome::Refused,
+                );
+                continue;
+            }
+            if record
+                .focused
+                .as_ref()
+                .is_none_or(|work| &work.subject != uuid)
+            {
+                if let Some(queue) = lifecycle.as_deref_mut() {
+                    if record.focused.is_some() {
+                        queue.0.push(TaskLifecycleRequest::End {
+                            slot: scan_slot.clone(),
+                            reason: TaskTerminalReason::Restarted,
+                        });
+                    }
+                    queue.0.push(TaskLifecycleRequest::Start {
+                        slot: scan_slot.clone(),
+                        target: Some(uuid.clone()),
+                    });
+                }
+                if let Some(previous) = record
+                    .focused
+                    .take()
+                    .filter(|_| policy.unfinished_retention_secs > 0.0)
+                {
+                    record.unfinished.insert(previous.subject.clone(), previous);
+                }
+                while record.unfinished.len() > usize::from(policy.history_limit) {
+                    let oldest = record
+                        .unfinished
+                        .iter()
+                        .min_by_key(|(id, work)| (work.last_valid_tick, *id))
+                        .map(|(id, _)| id.clone())
+                        .expect("nonempty retained enquiries");
+                    record.unfinished.remove(&oldest);
+                }
+                let resumed = record.unfinished.remove(uuid);
+                record.focused = Some(resumed.unwrap_or_else(|| super::focused::FocusedWork {
+                    subject: uuid.clone(),
+                    progress: 0.0,
+                    work_secs: policy.work_secs,
+                    started_tick: now_tick,
+                    last_valid_tick: now_tick,
+                    last_tick: now_tick,
+                    waiting: String::new(),
+                }));
+                started = true;
+            }
+            crate::command_admission::finish_action_feedback(
+                cmd,
+                &mut outbound,
+                ActionFeedbackOutcome::Applied,
+            );
+        }
+        while record.unfinished.len() > usize::from(policy.history_limit) {
+            let oldest = record
+                .unfinished
+                .iter()
+                .min_by_key(|(id, work)| (work.last_valid_tick, *id))
+                .map(|(id, _)| id.clone())
+                .expect("bounded unfinished work");
+            record.unfinished.remove(&oldest);
+        }
+        let Some(work) = record.focused.as_ref() else {
+            continue;
+        };
+        if !started && tick.is_some() && work.last_tick == now_tick {
+            continue;
+        }
+        let continuation = AdmittedCommand {
+            target: policy.system.clone(),
+            payload: SystemControlPayload::ScanTarget {
+                uuid: work.subject.clone(),
+            },
+            response_token: None,
+            feedback_correlation: None,
+        };
+        if let Some(work) = &mut record.focused {
+            work.last_tick = now_tick;
+        }
         let effects = operator_region_effects(membership.as_deref(), &region_effects, entity);
         let ship_pos = transform.translation;
 
-        for cmd in &requested {
+        for cmd in [&continuation] {
             let SystemControlPayload::ScanTarget { uuid: target_uuid } = &cmd.payload else {
                 continue;
             };
@@ -333,17 +510,15 @@ pub fn tick_scans(
             else {
                 record.last = None;
                 record.refusal = Some(ScanRefusal::NoSuchTarget);
+                if let Some(work) = &mut record.focused {
+                    work.waiting = "source_unavailable".into();
+                    expire_focused_work(work, &policy, now_tick, dt);
+                }
                 crate::pwarn!(
                     log,
                     crate::logging::LogCat::Sensors,
                     entity = entity,
                     "scan refused: no entity in this world answers to '{target_uuid}'"
-                );
-                push_scan_lifecycle(
-                    lifecycle.as_deref_mut(),
-                    &scan_slot,
-                    target_uuid,
-                    TaskTerminalReason::NoSuchTarget,
                 );
                 crate::command_admission::finish_action_feedback(
                     cmd,
@@ -359,8 +534,19 @@ pub fn tick_scans(
                 mass: subject_mass(mass),
                 debris: debris_subject(debris, subject_transform, &subjects),
             };
+            let transmission = paths.transmission(
+                ship_pos,
+                subject_transform.translation,
+                crate::regions::signal_path::SignalClass::Sensors,
+            );
             let conditions = ScanConditions {
-                distance: ship_pos.distance(subject_transform.translation),
+                // Path loss reduces usable reach on the same fidelity ladder.
+                // An opaque path cannot be bypassed by unfaded endpoints.
+                distance: if transmission > 0.0 {
+                    ship_pos.distance(subject_transform.translation) / transmission
+                } else {
+                    f32::INFINITY
+                },
                 // No power grid means no power *constraint* — the ceiling is
                 // absent, not zero. The reading #1026 takes for a bare fixture,
                 // and for the same reason: failing a hull for a component it
@@ -370,21 +556,40 @@ pub fn tick_scans(
                 region_effects: effects.clone(),
             };
 
-            let reading =
-                derive(&record.config, &subject, &conditions, now_tick).and_then(|reading| {
-                    if power.as_deref_mut().is_some_and(|power| {
-                        power
-                            .0
-                            .try_work_discrete(&crate::ship::system_registry::sensors_system_id())
-                            .unwrap_or(false)
-                    }) {
-                        Ok(reading)
-                    } else {
-                        Err(ScanRefusal::Underpowered)
-                    }
-                });
+            let reading = derive(&record.config, &subject, &conditions, now_tick);
             match reading {
                 Ok(reading) => {
+                    let work = record.focused.as_mut().expect("active enquiry");
+                    let budget = dt.max(0.0).min((work.work_secs - work.progress).max(0.0));
+                    let factor = damage.map_or(1.0, |damage| {
+                        damage.factor(
+                            &policy.system,
+                            phoenix_model::damage::DamageBinding::Operation,
+                        )
+                    });
+                    let enabled =
+                        sources.is_none_or(|sources| !sources.0.is_offline(&policy.system));
+                    let paid = if budget > 0.0 && enabled && factor > 0.0 {
+                        power
+                            .as_deref_mut()
+                            .and_then(|power| {
+                                power.0.work_continuous(&policy.system, budget, 1.0).ok()
+                            })
+                            .map_or(0.0, |grant| grant.fraction * factor)
+                    } else {
+                        0.0
+                    };
+                    if paid > 0.0 {
+                        work.progress = (work.progress + budget * paid).min(work.work_secs);
+                        work.last_valid_tick = now_tick;
+                        work.waiting.clear();
+                    } else {
+                        work.waiting = "unpowered".into();
+                        expire_focused_work(work, &policy, now_tick, dt);
+                    }
+                    if work.progress < work.work_secs {
+                        continue;
+                    }
                     crate::pdebug!(
                         log,
                         crate::logging::LogCat::Sensors,
@@ -407,17 +612,17 @@ pub fn tick_scans(
                             assessment,
                         });
                     }
-                    record.last = Some(reading);
-                    record.refusal = None;
+                    record.remember(reading, usize::from(policy.history_limit));
+                    record.focused = None;
                     if let Some(authored_id) = authored_id {
                         mirror_scanned(runtime.as_deref_mut(), &authored_id.0, &log);
                     }
-                    push_scan_lifecycle(
-                        lifecycle.as_deref_mut(),
-                        &scan_slot,
-                        target_uuid,
-                        TaskTerminalReason::Completed,
-                    );
+                    if let Some(queue) = lifecycle.as_deref_mut() {
+                        queue.0.push(TaskLifecycleRequest::End {
+                            slot: scan_slot.clone(),
+                            reason: TaskTerminalReason::Completed,
+                        });
+                    }
                     crate::command_admission::finish_action_feedback(
                         cmd,
                         &mut outbound,
@@ -434,12 +639,22 @@ pub fn tick_scans(
                     );
                     record.last = None;
                     record.refusal = Some(refusal);
-                    push_scan_lifecycle(
-                        lifecycle.as_deref_mut(),
-                        &scan_slot,
-                        target_uuid,
-                        terminal_reason_for(refusal),
-                    );
+                    if let Some(work) = &mut record.focused {
+                        work.waiting = refusal.string_id().into();
+                        expire_focused_work(work, &policy, now_tick, dt);
+                    }
+                    if matches!(
+                        refusal,
+                        ScanRefusal::NotCapable | ScanRefusal::NoReadableCondition
+                    ) {
+                        record.focused = None;
+                        if let Some(queue) = lifecycle.as_deref_mut() {
+                            queue.0.push(TaskLifecycleRequest::End {
+                                slot: scan_slot.clone(),
+                                reason: terminal_reason_for(refusal),
+                            });
+                        }
+                    }
                     crate::command_admission::finish_action_feedback(
                         cmd,
                         &mut outbound,
@@ -451,14 +666,23 @@ pub fn tick_scans(
     }
 }
 
+fn expire_focused_work(
+    work: &mut super::focused::FocusedWork,
+    policy: &phoenix_model::sensing::FocusedConfig,
+    now: u64,
+    dt: f32,
+) {
+    if now.saturating_sub(work.last_valid_tick) as f64 * dt as f64
+        > policy.unfinished_retention_secs as f64
+    {
+        work.progress = 0.0;
+    }
+}
+
 /// Record one asked-for reading as a whole task lifecycle (issue #1341).
 ///
-/// A scan is INSTANTANEOUS — there is no hold to open on one tick and close on
-/// the next — so its start and its terminal moment land on the same fixed tick,
-/// in that order. They are still two events, because the lifecycle contract is
-/// what a later mechanic reuses and because "the crew asked" and "this is what
-/// came back" are two different facts about the run: a request that was refused
-/// is not the same as a request nobody made.
+/// Immediate refusals start and terminate on the same tick. Successful
+/// enquiries use the paid multi-tick lifecycle in `tick_scans` instead.
 ///
 /// Both are queued together here, so a scan can never leave a start unmatched.
 fn push_scan_lifecycle(
@@ -676,6 +900,11 @@ fn operator_region_effects(
     };
     let mut names: Vec<RegionEffectName> = regions
         .iter()
+        .filter(|region| {
+            membership
+                .and_then(|m| m.exposure.get(&(operator, **region)))
+                .is_none_or(|strength| *strength > 0.0)
+        })
         .filter_map(|region| region_effects.get(*region).ok())
         .flat_map(|effects| {
             effects
@@ -711,6 +940,39 @@ pub fn publish_scan_blackboard(
 ) {
     for (observer, record, mut blackboards) in ships.iter_mut() {
         let blackboard = SystemBlackboard::Scan(ScanBlackboard {
+            owner: (!record.config.bands.is_empty()).then(|| {
+                record
+                    .focused_config
+                    .as_ref()
+                    .map(|config| config.system.clone())
+                    .unwrap_or_else(crate::ship::system_registry::sensors_system_id)
+            }),
+            history: record
+                .history
+                .iter()
+                .filter(|reading| {
+                    observer
+                        .and_then(|observer| {
+                            runtime.as_ref().map(|runtime| {
+                                crate::gm::operations::contact::mode(
+                                    &runtime.contact_overrides,
+                                    &observer.0,
+                                    &reading.subject_uuid,
+                                )
+                            })
+                        })
+                        .unwrap_or_default()
+                        != crate::gm::operations::contact::ContactMode::Conceal
+                })
+                .map(crate::core::messages::scan_reading_snapshot_from_reading)
+                .collect(),
+            focused: record.focused.as_ref().map(|work| {
+                crate::core::messages::FocusedScanSnapshot {
+                    subject: work.subject.clone(),
+                    progress: ((work.progress / work.work_secs).clamp(0.0, 1.0) * 1000.0) as u16,
+                    waiting: work.waiting.clone(),
+                }
+            }),
             // A hull with no bands can be asked and refused, which the console
             // renders as "no scan capability" rather than as an empty box.
             capable: !record.config.bands.is_empty(),

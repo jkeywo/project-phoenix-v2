@@ -38,6 +38,12 @@ impl RestoreReport {
 /// what tell a host which world that is.
 pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
     let mut report = RestoreReport::default();
+    if let Err((uuid, reason)) = super::spatial_fields::validate_roster(world, snapshot) {
+        report
+            .gaps
+            .push(RestoreGap::ResourceStateInvalid { uuid, reason });
+        return report;
+    }
     if let Some(gap) = super::preflight::mission_clock_gap(world, snapshot) {
         report.gaps.push(gap);
         return report;
@@ -114,6 +120,12 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
     }
     restore_ai_world_snapshot(world, snapshot);
     restore_motion_plans(world, snapshot);
+    crate::regions::server::rebuild_region_projections(world);
+    {
+        use bevy::ecs::system::RunSystemOnce;
+        let _ = world.run_system_once(crate::science::server::publish_scan_blackboard);
+        let _ = world.run_system_once(crate::science::passive::publish);
+    }
 
     report
 }

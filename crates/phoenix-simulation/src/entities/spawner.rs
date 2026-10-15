@@ -282,10 +282,29 @@ impl SpawnSection for AsteroidFieldSpawn {
 struct RegionShapeSpawn;
 
 impl SpawnSection for RegionShapeSpawn {
-    fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
+    fn apply(&self, config: &EntityConfig, position: Vec3, cmds: &mut EntityCommands) {
         // Region shape section
         if let Some(shape) = &config.shape {
             cmds.insert(RegionShapeSection(shape.clone()));
+        }
+        if let Some(material) = &config.signal_material {
+            cmds.insert(material.clone());
+        }
+        if let Some(profile) = &config.field {
+            let profile = profile.clone();
+            let entity = cmds.id();
+            cmds.commands().queue(move |world: &mut World| {
+                let tick = world
+                    .get_resource::<crate::sim_tick::SimTick>()
+                    .map_or(0, |tick| tick.0);
+                let state = crate::regions::field::RegionFieldState::new(
+                    profile,
+                    tick,
+                    position.to_array(),
+                )
+                .expect("accepted field geometry and spawn origin");
+                world.entity_mut(entity).insert(state);
+            });
         }
     }
 }
@@ -742,6 +761,17 @@ impl SpawnSection for ScanSpawn {
         if let Some(scan) = &config.scan {
             cmds.insert(crate::science::ShipScanRecord {
                 config: scan.clone(),
+                focused_config: Some(
+                    config
+                        .sensing
+                        .as_ref()
+                        .and_then(|profile| profile.focused.clone())
+                        .unwrap_or_else(|| {
+                            phoenix_model::sensing::FocusedConfig::legacy(
+                                crate::ship::system_registry::sensors_system_id(),
+                            )
+                        }),
+                ),
                 ..Default::default()
             });
         }

@@ -35,11 +35,11 @@ Keyed receipts report actual movement, including zero; their queue is transient
 and must drain before a fold. No deferred capacity debit competes with an
 immediately changed magazine.
 
-Snapshot 50/rules 0.22 preserve stocks, claims, timed cargo and fractional flow carry.
+Snapshot 51/rules 0.23 preserve stocks, claims, timed cargo and fractional flow carry.
 Preflight validates tube identity, capacity, timers and claim relationships
 before writes. Resource digests include magazine/tube commitments and facility
 stocks. Other weapon effect state retains its existing deferred fold boundary.
-Services are rederived authored configuration. Protocol 12 carries the current
+Services are rederived authored configuration. Protocol 13 carries the current
 typed stock, logistics, production and recovery controls/readouts; transport and
 delivery classes remain unchanged.
 

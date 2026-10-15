@@ -32,3 +32,14 @@ latitude_segments = 64
 albedo = "assets/planets/moon/albedo.webp"
 normal = "assets/planets/moon/normal.webp"
 roughness = "assets/planets/moon/roughness.webp"
+
+# Substantial terrain obstructs fictional sensor/Comms paths at physical bounds.
+[shape]
+type = "sphere"
+radius = 9.0
+
+[signal_material]
+sensor_absorption_per_unit = 0
+comms_absorption_per_unit = 0
+sensor_opaque = true
+comms_opaque = true

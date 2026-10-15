@@ -55,6 +55,7 @@ impl ConsoleWorkingView {
 /// mismatched publications are unavailable rather than reinterpreted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ConsoleObservationKind {
+    Passive,
     Recovery,
     Production,
     Stock,
@@ -92,6 +93,7 @@ pub enum ConsoleObservationKind {
 
 impl ConsoleObservationKind {
     pub const NAMES: &[&str] = &[
+        "Passive",
         "Recovery",
         "Production",
         "Stock",
@@ -129,6 +131,7 @@ impl ConsoleObservationKind {
 
     pub fn of(value: &SystemBlackboard) -> Self {
         match value {
+            SystemBlackboard::Passive(..) => Self::Passive,
             SystemBlackboard::Recovery(..) => Self::Recovery,
             SystemBlackboard::Production(..) => Self::Production,
             SystemBlackboard::Stock(..) => Self::Stock,

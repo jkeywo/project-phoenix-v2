@@ -152,6 +152,12 @@ impl SpawnOrigin {
         if !name.is_empty() {
             config.name = Some(name.clone());
         }
+        if let Err(reason) = config.validate_field_at_origin(self.position) {
+            warnings.push(format!(
+                "spawn origin '{name}' has invalid field geometry: {reason}"
+            ));
+            return None;
+        }
         Some(config)
     }
 }

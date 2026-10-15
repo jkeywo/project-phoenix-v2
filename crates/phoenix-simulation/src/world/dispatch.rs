@@ -1146,6 +1146,11 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
                 }
             }
 
+            if let Err(reason) = config.validate_field_at_origin(resolved_position) {
+                out.override_failures
+                    .push(format!("SpawnEntity '{name}' refused: {reason}"));
+                return out;
+            }
             // 3. Only a spawn that will actually happen consumes a uuid.
             let uuid = (context.uuid_source)();
 

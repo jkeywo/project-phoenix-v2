@@ -363,6 +363,11 @@ pub struct EntityState {
     /// about.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scan: Option<crate::science::ScanSaveState>,
+    /// Canonical analytic field parameters and their causal logical anchor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region_field: Option<crate::regions::field::RegionFieldState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passive: Option<crate::science::passive::PassiveState>,
     /// The entity's civilian traffic state (issue #1028), whole.
     ///
     /// Stored whole for the same reason the condition track is: the parts have

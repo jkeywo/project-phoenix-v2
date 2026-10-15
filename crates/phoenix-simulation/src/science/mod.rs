@@ -15,6 +15,8 @@
 //! power and weather, stores what the pure half hands back, and publishes it on
 //! the ship's `scan` blackboard channel for `gui/destroyer/captain.html`.
 
+pub mod focused;
+pub mod passive;
 /// The pure, Bevy-free derivation: the authored `[scan]` vocabulary, the
 /// fidelity ladder, the refusal reasons, and the rule that there is no authored
 /// scan text.

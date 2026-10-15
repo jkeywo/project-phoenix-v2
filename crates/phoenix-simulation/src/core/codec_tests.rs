@@ -3314,6 +3314,7 @@ fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() 
         capable: true,
         reading: Some(reading),
         refusal: None,
+        ..Default::default()
     });
     let json = serde_json::to_string(&bb).unwrap();
     assert!(json.contains(r#""kind":"Scan""#), "got: {json}");
@@ -3324,6 +3325,7 @@ fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() 
         capable: true,
         reading: None,
         refusal: Some(crate::science::ScanRefusal::OutOfRange.string_id().into()),
+        ..Default::default()
     });
     let json = serde_json::to_string(&refused).unwrap();
     assert!(
@@ -6638,7 +6640,7 @@ fn catalogue_additions_preserve_v3_json_locks_hulls_and_utf8_wire_roundtrips() {
     }
     // The legacy v3 catalogue remains readable under the v5 join pin;
     // explicit Console identity changed the wire vocabulary, not this JSON shape.
-    assert_eq!(PROTOCOL_VERSION, 12);
+    assert_eq!(PROTOCOL_VERSION, 13);
 }
 
 /// The removal inverse's ingress (issue #1444).

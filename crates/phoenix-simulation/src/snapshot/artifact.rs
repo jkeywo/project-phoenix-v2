@@ -430,7 +430,7 @@ use super::*;
 /// `49` adds physical port visits, approved lot orders and paid transfer meters,
 /// and carries exact Duration mission age in this same unreleased batch.
 /// `50` adds actual portable equipment, physical refitting and intact recovery.
-pub const SNAPSHOT_FORMAT: u32 = 50;
+pub const SNAPSHOT_FORMAT: u32 = 51;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -519,7 +519,8 @@ pub const SNAPSHOT_FORMAT: u32 = 50;
 /// "0.21" adds finite visit-quota replenishment and actual-stock manual exchanges,
 /// and removes process-local floating cancellation from mission clocks.
 /// "0.22" adds conserved equipment changes without resetting fixed-slot reserves.
-pub const SIMULATION_RULES: &str = "0.22";
+/// "0.23" adds paid sensing continuation and causally anchored spatial fields.
+pub const SIMULATION_RULES: &str = "0.23";
 
 /// The authored data, computed rather than remembered.
 ///

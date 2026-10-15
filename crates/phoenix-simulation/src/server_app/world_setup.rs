@@ -280,6 +280,10 @@ pub(crate) fn spawn_anonymous_entities_internal(
             }
         };
 
+        if let Err(reason) = config.validate_field_at_origin(pos.to_array()) {
+            bevy::log::error!("setup_world: field at resolved position refused: {reason}");
+            continue;
+        }
         let spawned_entity = crate::entities::spawner::spawn_entity(
             commands,
             &config,

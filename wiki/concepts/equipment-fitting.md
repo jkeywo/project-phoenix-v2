@@ -37,8 +37,8 @@ refer to actual physical tasks; JobId is scoped by ship and owning System.
 
 Snapshot fitting preflight resolves candidate fitted definitions before restoring
 energy and other machinery. It checks complete-roster equipment identity, work,
-parts, receiving-space and physical claims before applying state. Snapshot 50,
-rules 0.22 and protocol 12 carry the fitting/recovery additions through existing
+parts, receiving-space and physical claims before applying state. Snapshot 51,
+rules 0.23 and protocol 13 carry fitting/recovery and sensing state through existing
 save and transport mechanisms.
 
 Workshop edits the closed slot/library/locker/assembly declarations through

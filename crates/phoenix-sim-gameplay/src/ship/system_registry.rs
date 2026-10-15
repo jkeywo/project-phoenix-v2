@@ -1015,6 +1015,7 @@ pub fn instance_publication_kinds(
         (LOGISTICS_KIND, Kind::Logistics),
         (FABRICATION_KIND, Kind::Production),
         (RECOVERY_KIND, Kind::Recovery),
+        (PASSIVE_RECEIVER_KIND, Kind::Passive),
     ]
     .into_iter()
     .map(|(kind, observation)| (kind.to_owned(), observation))

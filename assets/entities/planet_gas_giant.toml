@@ -79,3 +79,14 @@ rayleigh = [0.045, 0.065, 0.10]
 mie = [0.13, 0.10, 0.065]
 mie_anisotropy = 0.6
 skyglow_strength = 4
+
+# Substantial terrain obstructs fictional sensor/Comms paths at physical bounds.
+[shape]
+type = "sphere"
+radius = 75.0
+
+[signal_material]
+sensor_absorption_per_unit = 0
+comms_absorption_per_unit = 0
+sensor_opaque = true
+comms_opaque = true

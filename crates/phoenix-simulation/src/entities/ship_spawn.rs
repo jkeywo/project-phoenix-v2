@@ -90,6 +90,7 @@ pub(super) fn install(
     crate::resources::recovery_server::install(config, cmds);
     crate::resources::fitting_server::install(config, uuid, cmds);
     crate::resources::equipment_recovery_server::install(config, cmds);
+    crate::science::passive::install(config, cmds);
     insert_shield_tuning(config, cmds);
     install_weapons(config, cmds);
     install_torpedoes(config, cmds);

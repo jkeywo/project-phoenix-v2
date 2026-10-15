@@ -209,7 +209,14 @@ fn integrator_only_app() -> App {
     #[cfg(debug_assertions)]
     app.init_resource::<crate::ship::helm::HelmPhysicsFrame>()
         .add_systems(First, crate::ship::helm::tick_helm_physics_frame);
-    app.add_systems(Update, integrate_ship_physics);
+    app.add_systems(
+        Update,
+        (
+            crate::ship::energy_runtime::begin_work_interval,
+            integrate_ship_physics,
+        )
+            .chain(),
+    );
     app
 }
 
@@ -223,6 +230,17 @@ fn spawn_integrator_ship(
     steering: f32,
     lateral: f32,
 ) -> Entity {
+    // Even this isolated actuator fixture pays its normal finite local reserve.
+    // No reactor/stock tick or replenishment runs in integrator_only_app.
+    let authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_battleship.toml",
+    )
+    .expect("the integrator's real energy fixture composes");
+    let power = crate::modifiers::power_system::PowerSystem::from_energy(
+        authored.energy.expect("authored finite energy hardware"),
+        authored.ship_config.expect("authored actuator identities"),
+    )
+    .expect("the integrator's finite reserves match its actuator identities");
     let mut sources = ShipSystemControlSources::default();
     sources.0.set(
         crate::ship::system_registry::helm_thrust_system_id(),
@@ -236,6 +254,7 @@ fn spawn_integrator_ship(
         .world_mut()
         .spawn((
             Ship,
+            crate::ship::power::ShipPowerSystem(power),
             sources,
             ShipPhysics::default(),
             crate::ai::server::AiHighFidelity,
@@ -782,6 +801,15 @@ fn a_helm_power_shed_at_the_cap_bleeds_speed_down_over_several_ticks() {
         tick(&mut app);
     }
     let at_flank = physics_of(&mut app, ship).forward_speed;
+    assert!(
+        app.world()
+            .get::<crate::ship::power::ShipPowerSystem>(ship)
+            .unwrap()
+            .0
+            .emitted_work(&crate::ship::system_registry::helm_thrust_system_id())
+            > 0.0,
+        "reaching flank must consume the actual local actuator reserve"
+    );
     assert!(
         (at_flank - boosted_cap).abs() < 1e-3,
         "the ship must be sitting on its boosted cap before the shed; \

@@ -213,6 +213,7 @@ impl PortOrderState {
 
     /// The caller preflights independent actual supplies/costs/space and stages
     /// paid energy together with this state. Unit rate is the actual pipe rate.
+    #[allow(clippy::too_many_arguments)]
     pub fn advance<F>(
         &mut self,
         profile: &PortServiceConfig,

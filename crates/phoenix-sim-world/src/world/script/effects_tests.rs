@@ -122,6 +122,41 @@ fn complete_objective_drains_to_action_cmd() {
 }
 
 #[test]
+fn mission_port_order_has_explicit_typed_bounded_approval() {
+    let cmds = run(
+        r#"fn f(ctx) {
+        ctx.effects.approve_port_order("lead", "depot", 2,
+            [#{offer: "parts", store: "hold-parts", lots: 3}]);
+    }"#,
+        "f",
+    );
+    assert_eq!(
+        cmds,
+        vec![ActionCmd::ApprovePortOrder {
+            visitor: "lead".into(),
+            provider: "depot".into(),
+            visit: 2,
+            lines: vec![phoenix_model::ports::PortOrderLine {
+                offer: "parts".into(),
+                store: "hold-parts".into(),
+                lots: 3,
+            }],
+        }]
+    );
+    for (visit, lines) in [
+        ("0", "[#{offer: \"parts\", store: \"hold\", lots: 1}]"),
+        ("1", "[]"),
+        ("1", "[#{offer: \"parts\", store: \"hold\", lots: 0}]"),
+        ("1", "[#{offer: \"parts\", store: \"hold\", lots: \"2\"}]"),
+        ("1", "[#{offer: \"parts\", store: \"hold\", lots: 1, free: true}]"),
+        ("1", "[#{offer: \"parts\", store: \"hold\", lots: 1}, #{offer: \"parts\", store: \"other\", lots: 1}]"),
+    ] {
+        let source = format!("fn f(ctx) {{ ctx.effects.approve_port_order(\"lead\", \"depot\", {visit}, {lines}); }}");
+        assert!(run_result(&source, "f").is_err(), "accepted malformed approval: {source}");
+    }
+}
+
+#[test]
 fn game_over_emits_reason_then_transition_in_order() {
     let cmds = run(
         r#"fn end(ctx) { ctx.effects.game_over("hull breach"); }"#,

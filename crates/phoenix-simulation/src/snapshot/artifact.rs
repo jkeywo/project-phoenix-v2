@@ -461,7 +461,8 @@ use super::*;
 /// `74` retains original Transit scopes and the latest successful World arrival.
 /// `75` retains enabled intent for accepted fitted concealment equipment.
 /// `76` retains optional plan executions, original opportunity evidence and replies.
-pub const SNAPSHOT_FORMAT: u32 = 76;
+/// `77` retains requested officer destinations and shared physical escort jobs.
+pub const SNAPSHOT_FORMAT: u32 = 77;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -615,7 +616,9 @@ pub const SNAPSHOT_FORMAT: u32 = 76;
 /// ordinary Broad, Focused and Passive acquisition, without changing physical truth.
 /// "0.57" admits bounded optional maintenance through genuine heard decisions,
 /// finite shared execution and retained source, promise and release frontiers.
-pub const SIMULATION_RULES: &str = "0.57";
+/// "0.58" moves actual retained personnel through owned finite carried berths
+/// using existing exclusive teams, routes, Bay claims and ordinary Repair AI.
+pub const SIMULATION_RULES: &str = "0.58";
 
 /// The authored data, computed rather than remembered.
 ///

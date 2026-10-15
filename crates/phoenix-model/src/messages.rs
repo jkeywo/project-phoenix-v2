@@ -46,7 +46,8 @@ use uuid::Uuid;
 /// Revision 30 carries permitted authored World routes in Navigation.
 /// Revision 31 carries own physical concealment controls and current equipment status.
 /// Revision 32 carries own optional-work offer context and inspected opportunity history.
-pub const PROTOCOL_VERSION: u32 = 32;
+/// Revision 33 carries finite carried-personnel destinations and escort controls.
+pub const PROTOCOL_VERSION: u32 = 33;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).

@@ -1092,16 +1092,14 @@ pub(crate) fn build_torpedo_target_snapshot(
                 (t.translation.x, t.translation.y, t.translation.z, radius),
             );
         }
-        for (u, t, _) in entity_q.iter() {
+        for (u, t, physics) in entity_q.iter() {
             if virtual_uuids.contains(u.0.as_str()) || virtual_snapshot_uuids.contains(u.0.as_str())
             {
                 continue;
             }
             let radius = radius_by_uuid.get(u.0.as_str()).copied().unwrap_or(0.0);
-            map.insert(
-                u.0.clone(),
-                (t.translation.x, t.translation.y, t.translation.z, radius),
-            );
+            let position = physics.map_or(t.translation, |pose| Vec3::new(pose.x, pose.y, pose.z));
+            map.insert(u.0.clone(), (position.x, position.y, position.z, radius));
         }
         for e in world.0.entities.iter() {
             if virtual_uuids.contains(e.uuid.as_str())

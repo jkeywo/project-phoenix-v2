@@ -205,7 +205,7 @@ fn actual_seeker_respects_sensor_opaque_path_and_fixed_intent_equipment_absence(
 }
 
 #[test]
-fn actual_canonical_ship_pose_overrides_display_pose_for_seeker_range_and_sample() {
+fn actual_canonical_ship_pose_overrides_display_pose_for_seeker_and_physical_collision() {
     let (mut app, _, target) = host();
     app.world_mut()
         .entity_mut(target)
@@ -226,6 +226,10 @@ fn actual_canonical_ship_pose_overrides_display_pose_for_seeker_range_and_sample
         app.world().resource::<TorpedoTargetSnapshot>().guidance["flight"].position,
         [0.0, 3.0, -22.0]
     );
+    assert_eq!(
+        app.world().resource::<TorpedoTargetSnapshot>().targets,
+        vec![("subject".into(), 0.0, 3.0, -22.0, 1.0)]
+    );
     app.world_mut()
         .get_mut::<crate::ship::state::ShipPhysics>(target)
         .unwrap()
@@ -243,6 +247,11 @@ fn actual_canonical_ship_pose_overrides_display_pose_for_seeker_range_and_sample
             .guidance
             .is_empty(),
         "an in-range display pose cannot override out-of-range canonical physics"
+    );
+    assert_eq!(
+        app.world().resource::<TorpedoTargetSnapshot>().targets,
+        vec![("subject".into(), 0.0, 3.0, -90.0, 1.0)],
+        "physical collision remains independently available at the actual pose"
     );
 }
 

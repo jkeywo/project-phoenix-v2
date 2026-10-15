@@ -4,9 +4,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-use crate::core::messages::{
-    AdmittedCommands, SystemControlPayload as Control, SystemId, TeamSlot,
-};
+use crate::core::messages::{AdmittedCommands, SystemControlPayload as Control, SystemId};
 use crate::entities::spawner::EntityUuid;
 use crate::jobs::Job;
 use crate::resources::fitting::{CompiledFitting, EquipmentLocation};
@@ -127,22 +125,47 @@ fn known(world: &World, actor: Entity, retained: Option<&str>) -> BTreeSet<Strin
     )
 }
 
-fn locally_claimed(world: &World, source: Entity, system: &SystemId) -> bool {
+fn exact_component(
+    target: &phoenix_model::damage::RepairWorkTarget,
+    system: &SystemId,
+    component: &str,
+) -> bool {
+    matches!(target, phoenix_model::damage::RepairWorkTarget::Component { system: target_system, component: target_component }
+        if target_system == system && target_component == component)
+}
+
+fn locally_claimed(world: &World, source: Entity, system: &SystemId, component: &str) -> bool {
     let Some(teams) = world.get::<crate::console::repair::server::ShipRepairTeams>(source) else {
         return false;
     };
     let state = teams.0.save_state();
-    state.teams.iter().flatten().filter(|job| job.outcome.is_none()).any(|job| match &job.activity {
-        crate::jobs::repair::RepairActivity::Internal { phase, .. } => match phase {
-            TeamSlot::Travelling { system_id, .. } => system_id.as_ref() == Some(system),
-            TeamSlot::Repairing { system_id, priority_system_id, .. } => system_id.as_ref() == Some(system) || priority_system_id.as_ref() == Some(system),
-            TeamSlot::Returning { queued_system_id, .. } => queued_system_id.as_ref() == Some(system),
-            _ => false,
-        },
-        crate::jobs::repair::RepairActivity::Refit { target, .. } => target == system,
-        _ => false,
-    }) || state.physical_work.values().any(|work| work.system == *system || work.target.iter().chain(work.requested_target.iter()).any(|target|
-        matches!(target, phoenix_model::damage::RepairWorkTarget::Component { system: target, .. } if target == system)))
+    let active = |id| {
+        state
+            .teams
+            .iter()
+            .flatten()
+            .any(|job| job.id.0 == id && job.outcome.is_none())
+    };
+    state.teams.iter().flatten().any(|job| job.outcome.is_none()
+        && matches!(&job.activity, crate::jobs::repair::RepairActivity::Refit { target, .. } if target == system))
+        || state.physical_work.iter().any(|(id,work)| active(*id)
+            && work.target.iter().chain(work.requested_target.iter()).any(|target| exact_component(target, system, component)))
+}
+
+fn foreign_component_claimed(
+    world: &World,
+    source_uuid: &str,
+    system: &SystemId,
+    component: &str,
+) -> bool {
+    world.try_query::<&crate::console::repair::server::ShipRepairTeams>().is_some_and(|mut query|
+        query.iter(world).any(|teams| {
+            let state = teams.0.save_state();
+            state.external_physical_work.iter().any(|(id,work)| work.target_uuid == source_uuid
+                && work.target.as_ref().is_some_and(|target| exact_component(target, system, component))
+                && state.teams.iter().flatten().any(|job| job.id.0 == *id && job.outcome.is_none()
+                    && matches!(&job.activity, crate::jobs::repair::RepairActivity::External { target } if target == source_uuid)))
+        }))
 }
 
 fn available_space(
@@ -279,8 +302,13 @@ fn prepare(
         return Err("source_active".into());
     }
     if source_state.work.contains_key(&work.source_slot)
-        || locally_claimed(world, source, &slot.system)
-        || crate::resources::fitting_server::foreign_repair_claim(world, source, &slot.system)
+        || locally_claimed(world, source, &slot.system, &slot.operation_component)
+        || foreign_component_claimed(
+            world,
+            &work.target_uuid,
+            &slot.system,
+            &slot.operation_component,
+        )
     {
         return Err("physical_task_claimed".into());
     }

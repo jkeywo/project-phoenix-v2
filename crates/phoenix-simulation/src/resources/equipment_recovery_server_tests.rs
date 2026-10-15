@@ -287,7 +287,15 @@ fn unknown_active_full_and_repair_claimed_sources_refuse_before_any_payment_or_i
                     .get_mut::<crate::console::repair::server::ShipRepairTeams>(source)
                     .unwrap()
                     .0
-                    .dispatch(0, sid("phaser-fore"), "Fore".into());
+                    .dispatch_physical(
+                        0,
+                        sid("phaser-fore"),
+                        Some(phoenix_model::damage::RepairWorkTarget::Component {
+                            system: sid("phaser-fore"),
+                            component: "operation".into(),
+                        }),
+                        "Fore".into(),
+                    );
             }
         }
         let before = (
@@ -313,6 +321,56 @@ fn unknown_active_full_and_repair_claimed_sources_refuse_before_any_payment_or_i
             .job
             .is_none());
     }
+}
+
+#[test]
+fn distinct_component_repair_can_coexist_with_extraction_but_operation_claim_pauses_it() {
+    let (mut world, actor, source) = rig();
+    assert!(world
+        .get_mut::<crate::console::repair::server::ShipRepairTeams>(source)
+        .unwrap()
+        .0
+        .dispatch_physical(
+            0,
+            sid("phaser-fore"),
+            Some(phoenix_model::damage::RepairWorkTarget::Component {
+                system: sid("phaser-fore"),
+                component: "intake".into()
+            }),
+            "Fore intake".into()
+        ));
+    start_beam(&mut world, actor, source).unwrap();
+    advance(&mut world, actor, 1, 0.5);
+    let before = world.get::<ShipEquipmentRecovery>(actor).unwrap().clone();
+    assert!(before.job.as_ref().unwrap().activity.progress > 0.0);
+    let paid = power(&world, actor);
+    // Same actual team/job, now explicitly claiming the replaceable hardware.
+    assert!(world
+        .get_mut::<crate::console::repair::server::ShipRepairTeams>(source)
+        .unwrap()
+        .0
+        .dispatch_physical(
+            0,
+            sid("phaser-fore"),
+            Some(phoenix_model::damage::RepairWorkTarget::Component {
+                system: sid("phaser-fore"),
+                component: "operation".into()
+            }),
+            "Fore hardware".into()
+        ));
+    advance(&mut world, actor, 2, 1.0);
+    let after = world
+        .get::<ShipEquipmentRecovery>(actor)
+        .unwrap()
+        .job
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        after.activity.progress,
+        before.job.as_ref().unwrap().activity.progress
+    );
+    assert_eq!(after.activity.waiting, "physical_task_claimed");
+    assert_eq!(power(&world, actor), paid);
 }
 
 #[test]

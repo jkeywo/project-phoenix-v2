@@ -116,6 +116,9 @@ fn bindings(power: &PowerSystem) -> EnergyCoolantBindings {
     }
 }
 fn tick(power: &mut PowerSystem, stock: i64) -> PowerTickResult {
+    // This helper drives complete intervals. Integration itself also serves
+    // callers which have already paid Input work in the current interval.
+    power.begin_work_interval();
     power
         .tick_energy(
             1.0,
@@ -124,6 +127,74 @@ fn tick(power: &mut PowerSystem, stock: i64) -> PowerTickResult {
             &mut |_| 0,
         )
         .unwrap()
+}
+
+#[test]
+fn work_interval_preserves_input_receipts_through_integration_and_expires_them_explicitly() {
+    let mut power = PowerSystem::default();
+    let owner = power.config().consumers[0].system.clone();
+    let capacity = power.config().consumers[0].reserve.capacity;
+    power
+        .network_mut()
+        .consumers
+        .get_mut(&owner)
+        .unwrap()
+        .energy = capacity;
+    power.begin_work_interval();
+    assert!(power.try_work_discrete_amount(&owner, 0.25).unwrap());
+    let bindings = bindings(&power);
+    let stocks = BTreeMap::from([("fixture-coolant".into(), 10)]);
+    let mut equivalent = power.clone();
+    // Removing derived receipts cannot change any canonical energy outcome.
+    equivalent.begin_work_interval();
+    let actual = power
+        .tick_energy(0.25, &bindings, &stocks, &mut |_| 0)
+        .unwrap();
+    let expected = equivalent
+        .tick_energy(0.25, &bindings, &stocks, &mut |_| 0)
+        .unwrap();
+    assert_eq!(actual, expected);
+    assert_eq!(
+        power.capture_continuation(),
+        equivalent.capture_continuation()
+    );
+    assert_eq!(power.emitted_work(&owner), 0.25);
+    assert!(power.try_work_discrete_amount(&owner, 0.25).unwrap());
+    assert_eq!(power.emitted_work(&owner), 0.5);
+    let canonical = power.capture_continuation();
+    power.begin_work_interval();
+    assert_eq!(power.emitted_work(&owner), 0.0);
+    assert_eq!(power.capture_continuation(), canonical);
+    power
+        .tick_energy(0.25, &bindings, &stocks, &mut |_| 0)
+        .unwrap();
+    assert_eq!(
+        power.emitted_work(&owner),
+        0.0,
+        "intake is not paid machinery work"
+    );
+}
+
+#[test]
+fn restoring_energy_never_restores_or_preserves_paid_work_receipts() {
+    let mut power = PowerSystem::default();
+    let consumer = power.config().consumers[0].clone();
+    power
+        .network_mut()
+        .consumers
+        .get_mut(&consumer.system)
+        .unwrap()
+        .energy = consumer.reserve.capacity;
+    assert!(power
+        .try_work_discrete_amount(&consumer.system, 0.25)
+        .unwrap());
+    let saved = power.capture_continuation();
+    assert!(power.emitted_work(&consumer.system) > 0.0);
+    let json = serde_json::to_string(&saved).unwrap();
+    let decoded: PowerState = serde_json::from_str(&json).unwrap();
+    power.restore_continuation(&decoded).unwrap();
+    assert_eq!(power.emitted_work(&consumer.system), 0.0);
+    assert_eq!(power.capture_continuation(), saved);
 }
 
 #[test]

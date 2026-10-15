@@ -148,7 +148,7 @@ pub struct PowerSystem {
     last_reactor_energy_delta_per_sec: f32,
     last_intake_per_sec: BTreeMap<SystemId, f32>,
     last_work_fraction: BTreeMap<SystemId, f32>,
-    /// Derived receipts for this fixed interval; cleared before resource routing.
+    /// Derived receipts for this fixed interval; cleared before its Input work.
     /// Observers measure actual expenditure, never persistent control intent.
     work_emissions: BTreeMap<SystemId, f64>,
     strike_config: Option<StrikeReserveConfig>,
@@ -409,6 +409,14 @@ impl PowerSystem {
         self.work_emissions.get(system).copied().unwrap_or(0.0)
     }
 
+    /// Begin one complete work interval before its first machinery payment.
+    /// Energy integration may occur between Input and later work, so it must
+    /// not erase these derived receipts. Direct Gameplay drivers call this
+    /// explicitly; Simulation calls it once in FixedFirst for every ship.
+    pub fn begin_work_interval(&mut self) {
+        self.work_emissions.clear();
+    }
+
     /// A recovered physical delivery shares this interval's intake limit with
     /// reactor delivery and earlier recoveries. Canonical reserve/heat are the
     /// only credited state; failed or saturated deliveries consume no source.
@@ -599,6 +607,8 @@ impl PowerSystem {
         Ok(())
     }
 
+    /// Integrate incoming energy within the current work interval. This is
+    /// not a receipt boundary; call `begin_work_interval` before any work.
     pub fn tick_energy(
         &mut self,
         dt: f32,
@@ -623,7 +633,6 @@ impl PowerSystem {
         effects: &crate::resources::energy_network::EnergyHardwareEffects,
         choose: &mut impl FnMut(usize) -> usize,
     ) -> Result<PowerTickResult, String> {
-        self.work_emissions.clear();
         if available_stock.values().any(|value| *value < 0) {
             return Err("coolant stocks cannot be negative".into());
         }

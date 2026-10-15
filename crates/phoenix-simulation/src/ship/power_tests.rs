@@ -842,9 +842,22 @@ fn snapshot_roundtrip_restores_local_energy_intent_heat_cuts_coolant_and_continu
         ron::from_str(&ron::to_string(&snapshot).unwrap()).unwrap();
     let (mut resumed, restored_entity) = fixture();
     start(&mut resumed);
+    assert!(power(&resumed, restored_entity)
+        .config()
+        .consumers
+        .iter()
+        .any(|row| power(&resumed, restored_entity).emitted_work(&row.system) > 0.0));
     let report = crate::snapshot::restore(resumed.world_mut(), &stored);
     assert!(report.is_complete(), "{report:?}");
     assert_eq!(report.entities_restored, 1);
+    assert!(
+        power(&resumed, restored_entity)
+            .config()
+            .consumers
+            .iter()
+            .all(|row| power(&resumed, restored_entity).emitted_work(&row.system) == 0.0),
+        "whole-candidate restore clears bootstrap work instead of granting prepaid emissions"
+    );
     assert_eq!(state(&app, entity), state(&resumed, restored_entity));
     assert_eq!(
         app.world().get::<InfrastructureCondition>(entity),
@@ -863,6 +876,96 @@ fn snapshot_roundtrip_restores_local_energy_intent_heat_cuts_coolant_and_continu
                 .get::<InfrastructureCondition>(restored_entity)
         );
     }
+}
+
+#[test]
+fn fixed_interval_keeps_actual_input_identity_payment_through_physics_and_expires_next_step() {
+    use crate::science::identity::{IdentityEmissions, ShipIdentityEmitters};
+    use crate::ship::control_source::ControlSource;
+    use phoenix_sim_gameplay::ship::composition::CommandChannelValue;
+    #[derive(Resource, Default)]
+    struct Witness(Vec<(u64, f64, bool)>);
+    fn observe(
+        tick: Res<crate::sim_tick::SimTick>,
+        ships: Query<(&ShipPowerSystem, &IdentityEmissions)>,
+        mut witness: ResMut<Witness>,
+    ) {
+        let (power, emissions) = ships.single().unwrap();
+        witness.0.push((
+            tick.0,
+            power.0.emitted_work(&SystemId("identity-emitter".into())),
+            emissions.claim(tick.0).is_some(),
+        ));
+    }
+    let authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/identity_cruiser.toml",
+    )
+    .unwrap();
+    let identity = ShipIdentityEmitters::from_ship(authored.ship_config.as_ref().unwrap()).unwrap();
+    let damage = crate::ship::compartment_damage::ShipDamage::from_config(&authored)
+        .unwrap()
+        .unwrap();
+    let (mut app, entity) = app_with(authored);
+    crate::sim_tick::register_sim_tick(&mut app);
+    app.init_resource::<Witness>();
+    app.world_mut()
+        .entity_mut(entity)
+        .insert((identity, IdentityEmissions::default(), damage));
+    let owner = SystemId("identity-emitter".into());
+    app.world_mut()
+        .get_mut::<ShipSystemControlSources>(entity)
+        .unwrap()
+        .0
+        .set(owner.clone(), ControlSource::Human);
+    app.world_mut()
+        .get_mut::<ShipIdentityEmitters>(entity)
+        .unwrap()
+        .0
+        .get_mut(&owner)
+        .unwrap()
+        .set("enabled", CommandChannelValue::Boolean(true))
+        .unwrap();
+    app.add_systems(
+        FixedUpdate,
+        crate::science::identity::tick.in_set(crate::sim_sets::SimSet::Input),
+    );
+    app.add_systems(
+        FixedUpdate,
+        observe.in_set(crate::sim_sets::SimSet::Modifiers),
+    );
+    for _ in 0..8 {
+        tick(&mut app);
+        if !app.world().resource::<Witness>().0.is_empty() {
+            break;
+        }
+    }
+    let first = *app.world().resource::<Witness>().0.last().unwrap();
+    assert!(
+        first.1 > 0.0 && first.2,
+        "actual paid Input identity work survives the real Physics power tick"
+    );
+    app.world_mut()
+        .get_mut::<ShipIdentityEmitters>(entity)
+        .unwrap()
+        .0
+        .get_mut(&owner)
+        .unwrap()
+        .set("enabled", CommandChannelValue::Boolean(false))
+        .unwrap();
+    let prior = app.world().resource::<Witness>().0.len();
+    for _ in 0..8 {
+        tick(&mut app);
+        if app.world().resource::<Witness>().0.len() > prior {
+            break;
+        }
+    }
+    let next = *app.world().resource::<Witness>().0.last().unwrap();
+    assert_eq!(next.0, first.0 + 1);
+    assert_eq!(
+        (next.1, next.2),
+        (0.0, false),
+        "a quiet next interval cannot reuse the preceding identity payment"
+    );
 }
 
 #[test]

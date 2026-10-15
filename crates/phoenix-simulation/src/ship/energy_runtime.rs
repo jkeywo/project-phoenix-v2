@@ -8,6 +8,17 @@ use crate::resources::server::ResourceServices;
 use crate::resources::service::{resolve_endpoint, ResourceEndpoint};
 use crate::ship::power::{PowerBrownoutState, ShipPowerSystem};
 
+/// The existing fixed-loop boundary precedes every Input payment, including
+/// the first tick. Include stored/disabled entities so no prior receipt can
+/// survive an interval in which ordinary machinery does not run.
+pub(crate) fn begin_work_interval(
+    mut ships: Query<&mut ShipPowerSystem, Allow<bevy::ecs::entity_disabling::Disabled>>,
+) {
+    for mut power in &mut ships {
+        power.0.begin_work_interval();
+    }
+}
+
 pub fn coolant_bindings(
     power: &crate::modifiers::power_system::PowerSystem,
     services: &ResourceServices,

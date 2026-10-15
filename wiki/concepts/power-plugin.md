@@ -32,6 +32,16 @@ withdrawn fractional coolant remains in canonical continuation, not another stoc
 The independent `PowerFlowCuts` RNG stream keeps cuts reproducible without
 changing damage or Comms draws.
 
+`ShipPowerPlugin` clears the existing derived work-emission receipts in
+`FixedFirst`, after the tick-scoped mint sync and before all Input work.
+`tick_power_system` preserves those receipts through Physics, so later passive
+signature consumers include actual Input-paid equipment work in the same
+interval. The next `FixedFirst`, continuation restore and stored-energy
+processing clear receipts. Direct Gameplay drivers explicitly call
+`PowerSystem::begin_work_interval` before their first machinery payment;
+energy integration alone does not start a new interval. These receipts are
+neither saved state nor additional resource credit.
+
 `handle_power_messages` applies admitted reactor, group, priority, management-mode
 and fine-flow settings transactionally. Human and ordinary reactor AI use the
 same System-addressed commands. `ai_power_allocation` executes the authored

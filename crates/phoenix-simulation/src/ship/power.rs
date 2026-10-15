@@ -49,6 +49,13 @@ impl Plugin for ShipPowerPlugin {
                 crate::authoritative::StateClass::ClearedAtFold,
                 "digest-exclusion-classes",
             );
+        // SimTick advances in the preceding FixedLast. FixedFirst runs once
+        // per interval before every FixedUpdate/Input owner, independently of
+        // phase run conditions; Physics integration preserves these receipts.
+        app.add_systems(
+            FixedFirst,
+            super::energy_runtime::begin_work_interval.after(crate::world_id::sync_world_id_mint),
+        );
         app.add_systems(
             FixedUpdate,
             (

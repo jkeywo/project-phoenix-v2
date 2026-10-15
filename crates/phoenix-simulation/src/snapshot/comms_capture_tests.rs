@@ -185,3 +185,39 @@ fn absent_historical_source_and_absent_materializable_disabled_receiver_use_save
         .comms_capture = None;
     assert!(validate_roster(app.world(), &saved).is_err());
 }
+
+#[test]
+fn retained_source_security_is_checked_even_after_all_original_copies_are_cleared() {
+    let (app, _, receiver, mut saved) = fixture();
+    saved.comms.as_mut().unwrap().inbox.clear();
+    validate_roster(app.world(), &saved).unwrap();
+    let mut bad = serde_json::to_value(&saved).unwrap();
+    let row = bad["entities"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|row| row["uuid"] == "capture-listener")
+        .unwrap();
+    // Internally valid protected/unsupported header, with no forged paid work.
+    // Withholding its saved display isolates the retained equipment guard.
+    row["comms_capture"]["rows"][0]["payload"]["level"] = 3.into();
+    let board = row["blackboards"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|entry| entry[0] == "comms")
+        .unwrap();
+    board[1]["data"]["captured"] = serde_json::Value::Null;
+    let bad: PhoenixSnapshot = serde_json::from_value(bad).unwrap();
+    let row = bad
+        .entities
+        .iter()
+        .find(|row| row.uuid == "capture-listener")
+        .unwrap();
+    validate_row(app.world(), Some(receiver), row, saved.tick).unwrap();
+    let (_, reason) = validate_roster(app.world(), &bad).unwrap_err();
+    assert!(
+        reason.contains("security contradicts retained source equipment"),
+        "{reason}"
+    );
+}

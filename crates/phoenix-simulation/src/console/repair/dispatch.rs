@@ -302,51 +302,7 @@ pub(crate) fn resolve_physical_repair_target(
     config: &crate::ship::config::ShipConfig,
     damage: &crate::ship::compartment_damage::ShipDamage,
 ) -> Option<SystemId> {
-    // Resolving a visit uses authored homes, never hidden damage or parts.
-    let group = match target {
-        RepairTarget::Work(phoenix_model::damage::RepairWorkTarget::Component {
-            system,
-            component,
-        }) => {
-            damage
-                .definition
-                .component(&phoenix_model::damage::ComponentRef {
-                    system: system.clone(),
-                    component: component.clone(),
-                })?;
-            return Some(system.clone());
-        }
-        RepairTarget::Work(phoenix_model::damage::RepairWorkTarget::Compartment {
-            compartment,
-        }) => {
-            damage.definition.compartment(compartment)?;
-            return damage
-                .definition
-                .interior
-                .placements
-                .iter()
-                .find(|(_, room)| *room == compartment)
-                .map(|(system, _)| system.clone())
-                .or_else(|| damage.definition.components.keys().next().cloned());
-        }
-        RepairTarget::System(id) => {
-            return damage
-                .definition
-                .components
-                .contains_key(id)
-                .then(|| id.clone())
-        }
-        RepairTarget::Station(id) => crate::core::messages::RepairGroup::Station(id.clone()),
-        RepairTarget::Console(id) => crate::core::messages::RepairGroup::Console(id.clone()),
-        RepairTarget::Core => crate::core::messages::RepairGroup::Core,
-        RepairTarget::External => return None,
-    };
-    damage
-        .definition
-        .components
-        .keys()
-        .find(|id| crate::modifiers::repair_teams::repair_group(id, config) == group)
-        .cloned()
+    crate::jobs::activity_bindings::resolve_repair_visit(target, config, &damage.definition)
 }
 
 /// Handle `RecallRepairTeam` messages from the Repair console (issue #1385).

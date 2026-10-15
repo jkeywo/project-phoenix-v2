@@ -249,6 +249,17 @@ playtest durations; do not treat estimated attention values as measurements.
 
 ## 22D — Monitoring, repair and authoring
 
+The first accepted-source editor uses the existing World situation arrays and
+chronological Workshop history. Its equipment choices come from the real resolved
+actor templates and every offered launch hull, including normal World overrides.
+The backend shares the ordinary pure Repair visit resolver and immutable binding
+support check with runtime arming. Missing teams, goals/remedies outside the visit,
+or a delivery outside the approved main-to-local route refuse before Preview/Test;
+no resource levels or live damage are inspected to validate authored support.
+The existing privileged ScenarioState collector projects exact instance/job,
+pending versus acknowledged evidence, original causal ticks and Applied/Refused
+activation frontiers. This grants no gameplay authority or foreign phone feed.
+
 Observe completion, failure, refusal, capability changes and outside-actor work.
 Repair unfinished plans while preserving history, announced commitments and earned
 advantages. If no continuation is feasible, report why and use authored failure or

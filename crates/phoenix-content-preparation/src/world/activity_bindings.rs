@@ -1,0 +1,185 @@
+//! Resolve authored activity support through the same accepted equipment.
+use crate::{
+    entities::{config::EntityConfig, loader::TemplateLoader},
+    world::{
+        config::{WorldEntity, WorldEntitySpawnOn},
+        validate::{WorldFinding, WorldSource},
+    },
+};
+use phoenix_sim_gameplay::jobs::activity_bindings::{self, RepairBinding};
+use phoenix_sim_world::world::activities::ActivityRequest;
+
+fn resolve(row: &WorldEntity, loader: &dyn TemplateLoader) -> Result<EntityConfig, String> {
+    let base = loader
+        .load_template(&row.template_path)
+        .ok_or_else(|| format!("cannot resolve template {}", row.template_path))?;
+    row.overrides.as_ref().map_or(Ok(base.clone()), |value| {
+        crate::entities::loader::apply_overrides(&base, value)
+    })
+}
+fn candidates(
+    actor: &str,
+    source: &WorldSource,
+    loader: &dyn TemplateLoader,
+) -> Result<Vec<EntityConfig>, String> {
+    let slots = source.config.effective_ship_slots();
+    let mut ship_rows = Vec::new();
+    for row in source
+        .config
+        .entities
+        .iter()
+        .filter(|row| row.spawn_on == WorldEntitySpawnOn::GameStart)
+    {
+        let config = resolve(row, loader)?;
+        if config.tags.iter().any(|tag| tag == "ship") {
+            ship_rows.push(row);
+        }
+    }
+    let (row, slot) = if let Some(id) = actor.strip_prefix("slot:") {
+        let index = slots
+            .iter()
+            .position(|row| row.id == id)
+            .ok_or("activity requires a declared launch slot")?;
+        (
+            *ship_rows
+                .get(index)
+                .ok_or("activity launch slot has no actual GameStart ship row")?,
+            Some(&slots[index]),
+        )
+    } else {
+        let row = source
+            .config
+            .entities
+            .iter()
+            .find(|row| row.name.as_deref() == Some(actor))
+            .ok_or("activity requires a declared base-world actor")?;
+        let slot = ship_rows
+            .iter()
+            .position(|candidate| std::ptr::eq(*candidate, row))
+            .and_then(|index| slots.get(index));
+        (row, slot)
+    };
+    let mut configs = if slot.is_some() {
+        Vec::new()
+    } else {
+        vec![resolve(row, loader)?]
+    };
+    if let Some(slot) = slot {
+        for offer in &slot.ships {
+            let selected = loader
+                .load_template(&offer.template_path)
+                .ok_or_else(|| format!("cannot resolve launch hull {}", offer.template_path))?;
+            // Same override merge used by actual player_hull_config. A refused
+            // merge cannot silently validate a different untuned contract.
+            configs.push(
+                row.overrides
+                    .as_ref()
+                    .map_or(Ok(selected.clone()), |overrides| {
+                        crate::entities::loader::apply_overrides(&selected, overrides)
+                    })?,
+            );
+        }
+    }
+    if configs.is_empty() {
+        return Err("activity actor has no accepted hull choices".into());
+    }
+    Ok(configs)
+}
+
+fn supports(request: &ActivityRequest, config: &EntityConfig) -> Result<bool, String> {
+    match request {
+        ActivityRequest::Repair {
+            owner,
+            team,
+            request,
+            target,
+            goal,
+            ..
+        } => {
+            let Some(ship) = &config.ship_config else {
+                return Ok(false);
+            };
+            let Some(repair) = &config.repair else {
+                return Ok(false);
+            };
+            let (Some(interior), Some(damage)) = (&config.interior, &config.damage) else {
+                return Ok(false);
+            };
+            let definition =
+                phoenix_sim_gameplay::ship::compartment_damage::DamageDefinition::compile(
+                    interior, damage, ship,
+                )?;
+            Ok(activity_bindings::repair_supported(
+                RepairBinding {
+                    owner,
+                    team: *team,
+                    request,
+                    target,
+                    goal: *goal,
+                },
+                ship,
+                &definition,
+                &phoenix_sim_gameplay::ship::system_registry::repair_system_id(),
+                repair.repair_team_count as usize,
+            ))
+        }
+        ActivityRequest::Delivery {
+            owner,
+            source,
+            destination,
+            commodity,
+            amount,
+            ..
+        } => {
+            let Some(profile) =
+                phoenix_sim_gameplay::resources::logistics_profile::compile_entity_logistics(
+                    config,
+                )?
+            else {
+                return Ok(false);
+            };
+            Ok(activity_bindings::delivery_supported(
+                &profile,
+                owner,
+                source,
+                destination,
+                commodity,
+                *amount,
+            ))
+        }
+    }
+}
+
+pub(super) fn findings(source: &WorldSource, loader: &dyn TemplateLoader) -> Vec<WorldFinding> {
+    let mut findings = Vec::new();
+    for situation in &source.config.situations {
+        let result=candidates(situation.request.actor(),source,loader).and_then(|configs|{
+            for config in configs {if !supports(&situation.request,&config)? {return Err("request/goal is outside the actual Repair visit/team/remedy or approved delivery route on an offered hull".into());}}
+            Ok(())
+        });
+        if let Err(error) = result {
+            // A browser preload which cannot yet answer a template lookup is
+            // not evidence that the immutable equipment is absent. Its final
+            // exact-source accepted validation supplies an authoritative loader.
+            if !loader.absence_is_final() && error.starts_with("cannot resolve") {
+                continue;
+            }
+            findings.push(WorldFinding::error(
+                "unsupported-activity-binding",
+                &source.path,
+                source.toml,
+                &situation.id,
+                format!(
+                    "Activity {:?} for {:?}: {error}",
+                    situation.id,
+                    situation.request.actor()
+                ),
+            ));
+        }
+    }
+    findings
+}
+
+#[cfg(test)]
+#[path = "activity_bindings_tests.rs"]
+mod tests;

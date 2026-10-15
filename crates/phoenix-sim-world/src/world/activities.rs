@@ -11,13 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const MAX_SITUATIONS: usize = 32;
 pub const MAX_SCENARIO_STATES: usize = 32;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RepairGoal {
-    Structure,
-    Patch,
-    Full,
-}
+pub use phoenix_model::activity::RepairGoal;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]

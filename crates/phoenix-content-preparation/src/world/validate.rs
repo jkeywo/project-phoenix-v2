@@ -1754,6 +1754,7 @@ pub fn activation_findings(
     let mut seen = HashSet::new();
     findings.extend(validate_template_resolution_in(&src, templates, &mut seen));
     findings.extend(validate_ship_slot_capacity_in(&src, templates));
+    findings.extend(super::activity_bindings::findings(&src, templates));
     findings
 }
 
@@ -1793,6 +1794,7 @@ pub fn validate_composition_with_fragments(
     let mut findings = Vec::new();
 
     findings.extend(validate_ship_slot_capacity_in(root, template_loader));
+    findings.extend(super::activity_bindings::findings(root, template_loader));
 
     // Per-world identity (duplicate names).
     findings.extend(validate_entity_identity(

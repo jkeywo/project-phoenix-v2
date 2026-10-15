@@ -119,48 +119,25 @@ pub(crate) fn repair_binding_supported(
         team,
         request,
         target,
+        goal,
         ..
     } = binding
     else {
         return false;
     };
-    if owner != team_owner
-        || *team as usize >= team_count
-        || config
-            .system(owner)
-            .is_none_or(|system| system.kind != crate::ship::system_registry::REPAIR_KIND)
-        || matches!(request, phoenix_model::messages::RepairTarget::External)
-    {
-        return false;
-    }
-    let Some(selected) =
-        crate::console::repair::dispatch::resolve_physical_repair_target(request, config, damage)
-    else {
-        return false;
-    };
-    if let phoenix_model::messages::RepairTarget::Work(exact) = request {
-        return exact == target;
-    }
-    let room = match target {
-        phoenix_model::damage::RepairWorkTarget::Compartment { compartment } => damage
-            .definition
-            .compartment(compartment)
-            .map(|row| row.id.as_str()),
-        phoenix_model::damage::RepairWorkTarget::Component { system, component } => damage
-            .definition
-            .component_room(&phoenix_model::damage::ComponentRef {
-                system: system.clone(),
-                component: component.clone(),
-            }),
-    };
-    room.is_some_and(|room| {
-        damage
-            .definition
-            .interior
-            .placements
-            .get(&selected)
-            .is_some_and(|selected| selected == room)
-    })
+    crate::jobs::activity_bindings::repair_supported(
+        crate::jobs::activity_bindings::RepairBinding {
+            owner,
+            team: *team,
+            request,
+            target,
+            goal: *goal,
+        },
+        config,
+        &damage.definition,
+        team_owner,
+        team_count,
+    )
 }
 pub(crate) fn delivery_binding_supported(
     binding: &ActivityRequest,
@@ -177,21 +154,14 @@ pub(crate) fn delivery_binding_supported(
     else {
         return false;
     };
-    if owner != &profile.handling().system || *amount <= 0 || *amount > profile.handling().max_batch
-    {
-        return false;
-    }
-    profile
-        .store(source)
-        .ok()
-        .zip(profile.store(destination).ok())
-        .is_some_and(|(from, to)| {
-            from.role == phoenix_model::logistics::StoreRole::Main
-                && to.role == phoenix_model::logistics::StoreRole::Local
-                && to.source.as_deref() == Some(source)
-                && from.resource == *commodity
-                && to.resource == *commodity
-        })
+    crate::jobs::activity_bindings::delivery_supported(
+        profile,
+        owner,
+        source,
+        destination,
+        commodity,
+        *amount,
+    )
 }
 
 /// Candidate-only pending check reused by snapshot preflight. No live owner is

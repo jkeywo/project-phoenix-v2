@@ -31,6 +31,7 @@ pub mod entities {
     pub mod loader;
 }
 pub mod world {
+    mod activity_bindings;
     pub use phoenix_content::pack_asset_validation;
     pub use phoenix_sim_world::world::{config, script};
     pub mod load;

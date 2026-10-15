@@ -1,4 +1,5 @@
 //! Canonical named-team commitments, with repair as the first workflow consumer.
+pub mod activity_bindings;
 pub mod repair;
 mod repair_navigation;
 pub mod repair_workflow;

@@ -280,3 +280,22 @@ through the existing include resolver; do not introduce partial profile merging.
 These are provisional equipment choices, not a balance claim. Current measured
 association, ambiguity, paid acquisition and ordinary AI remain mandatory, and
 the real larger-salvo interception/conservation/continuation checks remain strict.
+
+### Physical saturation probe
+
+The precision instrument and separated tube origins can legitimately defend
+against the original four-round single-launcher load over two paid cycles. Keep
+that successful behaviour. The larger-load witness instead uses two independent
+ordinary Missile Cruisers, at separate physical positions and with distinct
+public identities. Each retains the same authored six finite rounds, paid
+loading, real observations, per-System AI and normal fire admission. No new
+observation, projectile, command or reserve is injected.
+
+Require concurrent actual flight from both producers, actual qualified PDC
+interception, and terminal payload damage to the protected ship. Attribute emitted
+rounds by each live flight's actual source and check each producer's magazine,
+tubes, hold and in-transit stock conservation separately. Keep the PDC bank's
+hardware, cadence, finite stock and zero-intake energy accounting unchanged.
+This quiet runtime probe changes no mission pacing, shipped balance threshold or
+single-source launcher-loss/complete JSON continuation witness. Execution and
+whole-increment acceptance remain pending until integration records them.

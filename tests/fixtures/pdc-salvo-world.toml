@@ -16,6 +16,14 @@ id = "pdc-launcher"
 name = "pdc-launcher"
 spawn_on = "game_start"
 transform = { position = [0, 0, -45], rotation = [0, 3.141592653589793, 0] }
+# Independent finite producer: more actual concurrent load, unchanged PDC bank.
+[[entity]]
+template_path = "tests/fixtures/pdc-salvo-launcher.toml"
+overrides = { name = "PDC probe launcher wing" }
+id = "pdc-launcher-wing"
+name = "pdc-launcher-wing"
+spawn_on = "game_start"
+transform = { position = [15, 0, -45], rotation = [0, 3.141592653589793, 0] }
 [script]
 setup = """
 on_world_loaded("opposed");

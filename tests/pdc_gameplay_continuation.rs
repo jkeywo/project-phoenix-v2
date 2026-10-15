@@ -13,7 +13,7 @@ use project_phoenix::{
         AdmittedCommands, ClientMessage, ServerMessage, StationId, SystemControlPayload as Control,
         SystemId,
     },
-    entities::spawner::EntityUuid,
+    entities::spawner::{EntityId, EntityName, EntityUuid},
     headless::{build_headless_app, HeadlessArgs},
     infrastructure::InfrastructureCondition,
     lobby::{server::InboundMessage, Sessions},
@@ -45,6 +45,9 @@ fn id(value: &str) -> SystemId {
 struct Trace {
     launcher: String,
     launched: BTreeSet<String>,
+    launched_by: BTreeMap<String, BTreeSet<String>>,
+    max_concurrent_flights: usize,
+    max_joint_flights: usize,
     bolts: BTreeSet<String>,
     qualified: BTreeSet<String>,
     interceptions: BTreeSet<String>,
@@ -74,6 +77,9 @@ impl std::fmt::Debug for Trace {
         f.debug_struct("Trace")
             .field("launcher", &self.launcher)
             .field("launched", &self.launched)
+            .field("launched_by", &self.launched_by)
+            .field("max_concurrent_flights", &self.max_concurrent_flights)
+            .field("max_joint_flights", &self.max_joint_flights)
             .field("bolts", &self.bolts)
             .field("qualified", &self.qualified)
             .field("interceptions", &self.interceptions)
@@ -164,6 +170,7 @@ fn observe_launcher_readiness(
 fn observe_pdc(
     tick: Res<SimTick>,
     outbox: Res<SimOutbox>,
+    providers: Query<&TorpedoSystemResource>,
     mut trace: ResMut<Trace>,
     own: Query<
         (
@@ -247,10 +254,34 @@ fn observe_pdc(
             .is_some_and(|row| row.automatic.is_some() && !row.has_explicit_order());
     trace.automatic_with_ship_primary |= automatic_with_ship_primary;
     trace.paid.insert(tick.0, power.0.emitted_work(&owner));
+    let concurrent: Vec<_> = providers
+        .iter()
+        .flat_map(|provider| provider.0.in_flight.iter())
+        .collect();
+    trace.max_concurrent_flights = trace.max_concurrent_flights.max(concurrent.len());
+    let simultaneous_sources: BTreeSet<_> = concurrent
+        .iter()
+        .filter_map(|round| round.source_uuid.as_deref())
+        .collect();
+    if simultaneous_sources.len() >= 2 {
+        trace.max_joint_flights = trace.max_joint_flights.max(concurrent.len());
+    }
     for (_, message) in outbox.iter() {
         match message {
             ServerMessage::TorpedoLaunched { uuid, .. } => {
                 trace.launched.insert(uuid.clone());
+                // Attribution comes from the actual emitted flight, never a
+                // synthetic source inferred from a public contact or tube name.
+                let round = providers
+                    .iter()
+                    .flat_map(|provider| provider.0.in_flight.iter())
+                    .find(|round| &round.uuid == uuid)
+                    .expect("real launch publication has its actual flight");
+                trace
+                    .launched_by
+                    .entry(round.source_uuid.clone().expect("actual launcher identity"))
+                    .or_default()
+                    .insert(uuid.clone());
             }
             ServerMessage::BlasterFired {
                 bank,
@@ -647,6 +678,37 @@ fn rounds(app: &App, own: Entity) -> i64 {
         + stock.capacity("hold-kinetic-rounds").unwrap()
         + freight
 }
+/// Count real source goods, including batches already removed from the hold.
+fn source_rounds(app: &App, source: Entity) -> i64 {
+    let world = app.world();
+    let profile = &world
+        .get::<project_phoenix::resources::logistics_server::CompiledShipLogistics>(source)
+        .unwrap()
+        .0;
+    let moving = &world
+        .get::<project_phoenix::resources::logistics_server::ShipLogistics>(source)
+        .unwrap()
+        .0;
+    let freight: i64 = moving
+        .batches
+        .values()
+        .filter(|batch| profile.store(&batch.source).unwrap().resource == "torpedoes")
+        .map(|batch| batch.amount)
+        .sum();
+    i64::from(
+        world
+            .get::<TorpedoSystemResource>(source)
+            .unwrap()
+            .0
+            .rounds_aboard(),
+    ) + world
+        .get::<InfrastructureCondition>(source)
+        .unwrap()
+        .0
+        .capacity("hold-ammunition")
+        .unwrap()
+        + freight
+}
 fn reserve(app: &App, own: Entity) -> f32 {
     app.world()
         .get::<ShipPowerSystem>(own)
@@ -897,12 +959,32 @@ fn ordinary_pdc_intercepts_and_survives_launcher_removal_with_exact_json_continu
 }
 
 #[test]
-fn actual_larger_salvo_exceeds_one_paid_two_barrel_cycle() {
-    let (mut app, own, _) = prepare(SALVO);
+fn actual_concurrent_two_ship_salvo_exceeds_finite_pdc_defence() {
+    let (mut app, own, primary) = prepare(SALVO);
+    let producers: BTreeMap<_, _> = app
+        .world_mut()
+        .query::<(Entity, &EntityId, &EntityUuid, &EntityName)>()
+        .iter(app.world())
+        .filter(|(_, id, _, _)| matches!(id.0.as_str(), "pdc-launcher" | "pdc-launcher-wing"))
+        .map(|(entity, _, uuid, name)| (uuid.0.clone(), (entity, name.0.clone())))
+        .collect();
+    assert_eq!(producers.len(), 2, "two independent actual producers");
+    assert!(producers.contains_key(&primary));
+    assert_eq!(
+        producers
+            .values()
+            .map(|(_, name)| name)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        2,
+        "actual public identities must be distinct"
+    );
     let before = app.world().resource::<Trace>().initial_rounds;
+    let before_energy = app.world().resource::<Trace>().initial_energy;
     for _ in 0..2400 {
         if !app.world().resource::<Trace>().interceptions.is_empty()
-            && app.world().resource::<Trace>().launched.len() >= 2
+            && app.world().resource::<Trace>().launched_by.len() == 2
+            && app.world().resource::<Trace>().launched.len() >= 4
             && flights(&mut app).is_empty()
         {
             break;
@@ -910,13 +992,34 @@ fn actual_larger_salvo_exceeds_one_paid_two_barrel_cycle() {
         app.update();
     }
     let trace = app.world().resource::<Trace>();
+    assert_eq!(
+        trace.launched_by.keys().collect::<BTreeSet<_>>(),
+        producers.keys().collect(),
+        "both ordinary producers must launch: {trace:?}"
+    );
+    for (uuid, (entity, name)) in &producers {
+        let emitted = trace.launched_by[uuid].len() as i64;
+        assert!(
+            emitted >= 2,
+            "two real tubes must emit from {name}: {trace:?}"
+        );
+        assert_eq!(
+            source_rounds(&app, *entity) + emitted,
+            6,
+            "{name}: actual magazine/tubes/hold/freight and emitted rounds conserve authored six"
+        );
+    }
     assert!(
-        trace.launched.len() >= 2,
-        "ordinary two-tube launch: {trace:?}"
+        trace.max_joint_flights >= 4,
+        "saturation requires concurrent physical load, not accumulated serial launches: {trace:?}"
     );
     assert!(
         !trace.interceptions.is_empty(),
         "useful actual PDC baseline: {trace:?}"
+    );
+    assert!(
+        trace.interceptions.is_subset(&trace.qualified),
+        "every interception requires an actual paid qualified handle: {trace:?}"
     );
     assert!(
         trace.interceptions.len() < trace.launched.len(),
@@ -924,6 +1027,15 @@ fn actual_larger_salvo_exceeds_one_paid_two_barrel_cycle() {
     );
     assert!(trace.ai_fire && trace.automatic_with_ship_primary);
     assert_eq!(rounds(&app, own), before - trace.bolts.len() as i64);
+    let energy_paid: f64 = trace.paid.values().sum();
+    let passive_loss: f64 = trace.passive_loss.values().sum();
+    assert!(energy_paid > 0.0 && passive_loss > 0.0);
+    assert!(
+        (f64::from(before_energy) - f64::from(reserve(&app, own)) - energy_paid - passive_loss)
+            .abs()
+            < 1e-5,
+        "actual reserve accounts for paid shots and actual passive drain: {trace:?}"
+    );
     assert!(
         trace.payload_damaged_own_hull,
         "saturation must reach actual terminal payload damage, not mere expiry: {trace:?}"

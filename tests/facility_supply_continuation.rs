@@ -169,6 +169,40 @@ fn control(app: &mut App, station: &str, owner: &str, payload: Control) {
     );
     steps(app, 4);
 }
+fn delegated(app: &App, own: Entity) -> bool {
+    let sources = &app.world().get::<ShipSystemControlSources>(own).unwrap().0;
+    [
+        "navigation",
+        "helm-thrust",
+        "helm-steering",
+        "dock",
+        "umbilical",
+    ]
+    .into_iter()
+    .all(|owner| {
+        sources.entries().any(|(id, _)| id == &sid(owner))
+            && sources.policy_for(&sid(owner)).operate_ai
+    })
+}
+fn release_operators(app: &mut App) {
+    // Captain hosts the human-seeking Navigation Console while occupied.
+    // Release that seat too: focusing a goal is not proof of delegated Nav.
+    for station in ["engineering", "helm", "captain"] {
+        send(app, station, ClientMessage::ReleaseStation);
+        steps(app, 4);
+    }
+    let own = local(app);
+    for _ in 0..120 {
+        if delegated(app, own) {
+            break;
+        }
+        app.update();
+    }
+    assert!(
+        delegated(app, own),
+        "ordinary vacancy must delegate all approach and handling Systems"
+    );
+}
 fn boot(world: &str) -> App {
     let mut app = build_headless_app(&HeadlessArgs {
         world_path: world.into(),
@@ -208,10 +242,7 @@ fn boot(world: &str) -> App {
             id: "supply-load".into(),
         },
     );
-    for station in ["engineering", "helm"] {
-        send(&mut app, station, ClientMessage::ReleaseStation);
-        steps(&mut app, 4);
-    }
+    release_operators(&mut app);
     app
 }
 fn quantity(app: &App, entity: Entity) -> i64 {
@@ -244,6 +275,35 @@ fn conserved(app: &App, own: Entity, source: Entity, receiver: Entity, initial: 
         "actual source, vessel, receiver and departed internal goods remain finite"
     );
 }
+/// Failure-only inspection. This is never a controller input or saved owner.
+fn supply_diagnostics(app: &App, own: Entity) -> String {
+    let own_uuid = &app.world().get::<EntityUuid>(own).unwrap().0;
+    let saved = capture(app.world());
+    let actors: Vec<_> = saved
+        .entities
+        .iter()
+        .filter(|row| &row.uuid == own_uuid || row.port_provider.is_some())
+        .map(|row| {
+            let boards: Vec<_> = row
+                .blackboards
+                .iter()
+                .filter(|(owner, _)| {
+                    matches!(
+                        owner.as_str(),
+                        "viewscreen" | "navigation" | "dock" | "umbilical" | "tactical-radar"
+                    )
+                })
+                .collect();
+            serde_json::json!({"uuid":row.uuid,"physics":row.physics,"control":row.control,
+            "waypoint":row.navigation_waypoint,"dock":row.dock,"umbilical":row.umbilical,
+            "dock_ai":row.ai_trees.as_ref().and_then(|trees|trees.0.get(&sid("dock"))),
+            "boards":boards,"port_provider":row.port_provider})
+        })
+        .collect();
+    let value = serde_json::json!({"tick":saved.tick,"captain_boosts":saved.captain_boosts,
+        "evidence":format!("{:?}",app.world().resource::<WorkEvidence>()),"actors":actors});
+    value.to_string().chars().take(24_000).collect()
+}
 fn loaded(app: &mut App) -> (Entity, Entity, String, Entity, String) {
     let own = local(app);
     let (source, source_uuid) = actor(app, "supply-source");
@@ -259,7 +319,8 @@ fn loaded(app: &mut App) -> (Entity, Entity, String, Entity, String) {
     assert_eq!(
         quantity(app, source),
         0,
-        "real source must pay all six loaded units"
+        "real source must pay all six loaded units; {}",
+        supply_diagnostics(app, own)
     );
     assert_eq!(quantity(app, own), 6);
     assert_eq!(
@@ -277,6 +338,7 @@ fn loaded(app: &mut App) -> (Entity, Entity, String, Entity, String) {
     (own, source, source_uuid, receiver, receiver_uuid)
 }
 fn depart(app: &mut App) {
+    claim(app, "captain");
     claim(app, "engineering");
     claim(app, "helm");
     control(app, "engineering", "umbilical", Control::StopTransfer);
@@ -303,10 +365,7 @@ fn depart(app: &mut App) {
             id: "supply-unload".into(),
         },
     );
-    for station in ["engineering", "helm"] {
-        send(app, station, ClientMessage::ReleaseStation);
-        steps(app, 4);
-    }
+    release_operators(app);
 }
 fn same(a: &App, b: &App, step: usize) {
     assert_eq!(

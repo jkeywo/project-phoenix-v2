@@ -1,5 +1,7 @@
 # Same actual powered facility equipment; bounded finite supply endpoint.
 includes = ["../../assets/entities/station_axiom.toml"]
+# Public fixed destination, not private live cargo/service knowledge.
+tags = ["charted"]
 name = "supply-receiver"
 [[infrastructure.capacity]]
 id = "alloy"

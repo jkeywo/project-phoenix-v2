@@ -56,3 +56,28 @@ not a second independent facility equipment design. Broader autonomous outside
 actor goal selection, workforce/Medical/security custody, systemic dependency
 networks, different-LocalShip peers, visual Workshop operation and 2/4/6/8-human
 workload remain separate incomplete exits.
+
+## First actual-host failure and corrected destination contract
+
+The first integrated host run reached gameplay but both journeys failed before
+loading: source alloy remained six. A separate cached headless diagnostic with
+only the ordinary load goal retained actual paid Science acquisition of the
+source while Tactical/Helm tracks were empty, Navigation had no waypoint, and
+Dock reported no available mate. The Cruiser Navigation Console receives Tactical
+radar; Science knowledge is deliberately separate. The initial uncharted port at
+80 units and the distant receiver therefore supplied no permitted approach.
+
+The reference now explicitly authors its fixed facilities as `charted`, using
+the existing public Navigation chart. All parent facility tags, equipment,
+positions, source/carry/receiver quantities and paid work remain unchanged. This
+does not grant private live stores or new unknown-ship knowledge. Failure-only
+bounded diagnostics now retain actual goals, control/waypoint/Dock/port state if
+another failure occurs. Fresh native execution remains pending; the cached
+binary could not rerun after newer Identity equipment entered its content tree.
+
+A separate authored-authority audit found that keeping Captain occupied also
+hosts the human-seeking Navigation Console at its ordinary human rating. The
+probe now releases Captain after focusing each leg, alongside Helm/Engineering,
+and asserts the actual fine-System AI authority before expecting delegated
+approach/handling. It reclaims Captain normally to change the goal. This changes
+only fixture controls; hosting and System authority are preserved unchanged.

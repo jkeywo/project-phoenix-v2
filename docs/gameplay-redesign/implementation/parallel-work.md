@@ -49,6 +49,14 @@ These are assignments of responsibility, not a promise of simultaneous use of al
 three lanes at every point. Use a free lane for review/validation or an independent
 ready slice; do not start a dependent slice to keep an agent busy.
 
+On resuming the 15 October pause, split independent local Personnel/facility work
+from the same lane's planner work so Security/team routing and treatment can
+progress while temporal planning is reviewed. Their physical-custody join still
+uses 19's single lifecycle. A separate validation worker owns the heavier actual
+PDC saturation probe; it cannot change weapon limits or the gameplay owners.
+These subtasks use isolated worktrees and the same single Cargo/integration owner.
+The completion dependencies and separate authored-mode exits below are unchanged.
+
 ## Completion dependencies versus early work
 
 The ledger's `depends_on` fields describe full increment completion prerequisites.

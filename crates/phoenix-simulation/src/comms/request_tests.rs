@@ -603,9 +603,9 @@ fn clearing_an_inbox_id_cannot_cancel_a_distinct_planned_reading_with_the_same_t
         .resource_mut::<CommsInboxRes>()
         .0
         .inject(message);
-    let key = super::server::PendingAiResponseKey::planned("source", id);
+    let key = crate::comms::server::PendingAiResponseKey::planned("source", id);
     let reading = CommsRequestReading::start(30, 10).unwrap();
-    let record = super::server::PendingAiResponse {
+    let record = crate::comms::server::PendingAiResponse {
         due_tick: reading.due_tick().unwrap(),
         response_fingerprint: 0,
         request_reading: Some(reading),

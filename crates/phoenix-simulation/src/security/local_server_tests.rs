@@ -66,7 +66,7 @@ fn actual_local_route_waits_for_closed_boundary_then_pays_work_and_returns_witho
         .world()
         .resource::<WorldContentRuntime>()
         .flags
-        .get_flag("local_weapons_secured"));
+        .flag("local_weapons_secured"));
     let saved = waiting.save_state();
     let decoded = serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
     app.world_mut()
@@ -96,7 +96,7 @@ fn actual_local_route_waits_for_closed_boundary_then_pays_work_and_returns_witho
         .world()
         .resource::<WorldContentRuntime>()
         .flags
-        .get_flag("local_weapons_secured"));
+        .flag("local_weapons_secured"));
     assert_eq!(
         blackboard(&app, operator).navigation,
         returned.teams.navigation.clone().unwrap()
@@ -135,17 +135,17 @@ fn ordinary_security_ai_selects_own_local_work_through_existing_admission() {
         .world()
         .resource::<WorldContentRuntime>()
         .flags
-        .get_flag("local_engineering_secured"));
+        .flag("local_engineering_secured"));
     assert!(app
         .world()
         .resource::<WorldContentRuntime>()
         .flags
-        .get_flag("local_bridge_assisted"));
+        .flag("local_bridge_assisted"));
     assert!(app
         .world()
         .resource::<WorldContentRuntime>()
         .flags
-        .get_flag("local_weapons_secured"));
+        .flag("local_weapons_secured"));
     assert!(teams(&app, operator)
         .teams
         .iter()

@@ -1233,6 +1233,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         deploy_duration_secs,
         withdraw_duration_secs,
         range,
+        local,
     );
     exhaustive_struct!(
         transporter_schema,

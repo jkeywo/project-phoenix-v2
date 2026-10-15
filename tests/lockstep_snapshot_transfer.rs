@@ -131,31 +131,31 @@ fn boot_to_restore_point(snapshot: &PhoenixSnapshot) -> App {
 
 /// The liveness guard: refuse a capture of a world at rest, or the agreement
 /// below is agreement about two hulls coasting.
-fn assert_capture_is_alive(payload: &PhoenixSnapshot) {
+fn assert_capture_is_alive(payload: &PhoenixSnapshot, world: &bevy::prelude::World) {
     assert!(!payload.entities.is_empty(), "the capture found no ships");
     let moving = payload.entities.iter().any(|e| {
         e.physics
             .is_some_and(|p| p[4] != 0.0 || p[6] != 0.0 || p[7] != 0.0)
     });
     assert!(moving, "no captured ship has any velocity");
+    let mut owners = world
+        .try_query::<(
+            &EntityUuid,
+            &project_phoenix::ship::compartment_damage::ShipDamage,
+        )>()
+        .expect("the running host registers its physical damage owner");
+    let definitions: std::collections::BTreeMap<_, _> = owners
+        .iter(world)
+        .map(|(uuid, damage)| (uuid.0.as_str(), &damage.definition))
+        .collect();
     let damaged = payload.entities.iter().any(|row| {
         let Some(damage) = &row.physical_damage else {
             return false;
         };
-        let config = row
-            .spawn
-            .as_ref()
-            .and_then(|origin| {
-                origin.resolve(
-                    &project_phoenix::entities::loader::WasmTemplateLoader,
-                    &mut Vec::new(),
-                )
-            })
-            .expect("captured physical damage has its accepted authored hull");
-        config
+        definitions
+            .get(row.uuid.as_str())
+            .expect("captured physical damage has its actual accepted owner")
             .interior
-            .as_ref()
-            .expect("physical damage has its authored compartment maxima")
             .compartments
             .iter()
             .any(|room| damage.compartments[&room.id].hp < f64::from(room.max_hp))
@@ -1626,7 +1626,7 @@ fn stalled_join_timeout_is_the_same_protocol_boundary_at_unequal_render_cadence(
 fn a_record_transfers_between_hosts_and_the_two_agree_after_restore() {
     let mut live = boot();
     step(&mut live, CAPTURE_AT);
-    assert_capture_is_alive(&capture(live.world()));
+    assert_capture_is_alive(&capture(live.world()), live.world());
 
     let (payload, captured_digest, frames) = capture_and_frame(&live, None);
     assert!(

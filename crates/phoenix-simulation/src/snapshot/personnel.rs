@@ -24,7 +24,7 @@ fn source_definition(
         config
     };
     phoenix_sim_gameplay::personnel::compile_entity(&config)?
-        .ok_or("retained source has no accepted personnel")
+        .ok_or_else(|| "retained source has no accepted personnel".to_owned())
 }
 fn validate_active(
     origin: &PersonnelOrigin,

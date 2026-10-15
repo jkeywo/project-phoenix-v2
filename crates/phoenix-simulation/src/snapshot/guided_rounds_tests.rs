@@ -436,6 +436,8 @@ fn held_guidance_requires_original_time_matching_intent_and_frozen_equipment() {
                         ship_uuid: "source".into(),
                         console: crate::core::messages::ConsoleId("science".into()),
                         system: crate::core::messages::SystemId("illumination".into()),
+                        samples: Vec::new(),
+                        observation: None,
                     }
             }
             _ => unreachable!(),

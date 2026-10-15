@@ -277,6 +277,8 @@ fn accepted_point_cannot_be_replaced_by_another_intent_older_sample_or_unfitted_
                     ship_uuid: "source".into(),
                     console: phoenix_model::identity::ConsoleId("science".into()),
                     system: phoenix_model::identity::SystemId("illumination".into()),
+                    samples: Vec::new(),
+                    observation: None,
                 }
             }
             _ => unreachable!(),
@@ -284,4 +286,49 @@ fn accepted_point_cannot_be_replaced_by_another_intent_older_sample_or_unfitted_
         assert!(!system.in_flight[0].accept_guidance(&bad));
         assert_eq!(system.in_flight[0].last_guidance.as_ref(), Some(&original));
     }
+}
+
+#[test]
+fn actual_receiver_retains_an_original_sample_with_later_forwarded_receipts() {
+    let mut system = loaded(1);
+    system.in_flight[0].profile.receiver =
+        Some(phoenix_model::guided_guidance::GuidanceReceiverProfile {
+            range: 100.0,
+            minimum_transmission: 0.1,
+            maximum_sample_age_secs: 2.0,
+        });
+    let received = GuidanceObservation {
+        target_uuid: "target".into(),
+        position: [4.0, 2.0, -20.0],
+        sampled_tick: 17,
+        source: GuidanceSource::Console {
+            ship_uuid: "source".into(),
+            console: phoenix_model::identity::ConsoleId("science".into()),
+            system: phoenix_model::identity::SystemId("illumination".into()),
+            samples: vec![phoenix_model::sensing_sharing::RadarSampleProvenance {
+                origin: phoenix_model::sensing_sharing::RadarSampleOrigin {
+                    source: "radar-origin-0123456789abcdef".into(),
+                    system: phoenix_model::identity::SystemId("broad".into()),
+                    contact: "5:broad:contact-1".into(),
+                },
+                sample_id: "original-sample".into(),
+                observed_tick: 17,
+                observer_position: Some([1.0, -2.0]),
+                velocity_error: 0.4,
+                drift_error_per_sec: 0.1,
+                received_tick: Some(22),
+            }],
+            observation: Some(phoenix_model::observation::ObservationMetadata {
+                observed_tick: Some(17),
+                received_tick: Some(23),
+                ..Default::default()
+            }),
+        },
+    };
+    received.validate(24).unwrap();
+    assert!(received.validate(21).is_err());
+    assert!(system.in_flight[0].accept_guidance(&received));
+    assert_eq!(system.in_flight[0].last_guidance.as_ref(), Some(&received));
+    system.in_flight[0].tick(0.1, None);
+    assert_eq!(system.in_flight[0].last_guidance.as_ref(), Some(&received));
 }

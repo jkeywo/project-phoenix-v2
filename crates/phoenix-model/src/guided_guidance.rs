@@ -1,5 +1,9 @@
 //! Closed equipment and measured inputs of the existing guided projectile owner.
-use crate::identity::{ConsoleId, SystemId};
+use crate::{
+    identity::{ConsoleId, SystemId},
+    observation::ObservationMetadata,
+    sensing_sharing::RadarSampleProvenance,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -54,7 +58,7 @@ impl GuidanceReceiverProfile {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum GuidanceSource {
     /// An actual measurement by this round's frozen seeker equipment.
@@ -64,6 +68,10 @@ pub enum GuidanceSource {
         ship_uuid: String,
         console: ConsoleId,
         system: SystemId,
+        /// Original measuring samples, including remote receipt history.
+        samples: Vec<RadarSampleProvenance>,
+        /// Existing report substitution/uncertainty, never a fresh receipt.
+        observation: Option<ObservationMetadata>,
     },
 }
 
@@ -79,8 +87,9 @@ pub struct GuidanceObservation {
 
 impl GuidanceObservation {
     pub fn validate(&self, now: u64) -> Result<(), String> {
-        let valid_id =
-            |id: &str| !id.is_empty() && id.len() <= 128 && !id.chars().any(char::is_control);
+        let valid_id = |id: &str| {
+            !id.trim().is_empty() && id.len() <= 128 && !id.chars().any(char::is_control)
+        };
         if !valid_id(&self.target_uuid)
             || !self.position.iter().all(|value| value.is_finite())
             || self.sampled_tick > now
@@ -91,11 +100,45 @@ impl GuidanceObservation {
             ship_uuid,
             console,
             system,
+            samples,
+            observation,
         } = &self.source
         {
             if !valid_id(ship_uuid) || !valid_id(&console.0) || !valid_id(&system.0) {
                 return Err(
                     "guidance observation is missing its original Console provenance".into(),
+                );
+            }
+            let valid_text = |id: &str| {
+                !id.trim().is_empty() && id.len() <= 1024 && !id.chars().any(char::is_control)
+            };
+            if samples.iter().any(|sample| {
+                !valid_text(&sample.origin.source)
+                    || !valid_id(&sample.origin.system.0)
+                    || !valid_text(&sample.origin.contact)
+                    || !valid_text(&sample.sample_id)
+                    || sample.observed_tick > self.sampled_tick
+                    || sample
+                        .received_tick
+                        .is_some_and(|received| received < sample.observed_tick || received > now)
+                    || sample
+                        .observer_position
+                        .is_some_and(|point| point.iter().any(|coordinate| !coordinate.is_finite()))
+                    || !sample.velocity_error.is_finite()
+                    || sample.velocity_error < 0.0
+                    || !sample.drift_error_per_sec.is_finite()
+                    || sample.drift_error_per_sec < 0.0
+            }) || observation.as_ref().is_some_and(|report| {
+                !report.is_valid()
+                    || report
+                        .observed_tick
+                        .is_some_and(|taken| taken > self.sampled_tick)
+                    || report.received_tick.is_some_and(|received| {
+                        received > now || report.observed_tick.is_some_and(|taken| received < taken)
+                    })
+            }) {
+                return Err(
+                    "guidance must retain finite, originally dated sample/report provenance".into(),
                 );
             }
         }

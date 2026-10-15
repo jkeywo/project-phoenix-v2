@@ -69,6 +69,24 @@ fn held_measurement_retains_original_sample_and_provenance_across_serialisation(
             ship_uuid: "source".into(),
             console: ConsoleId("science".into()),
             system: SystemId("focused-scanner".into()),
+            samples: vec![crate::sensing_sharing::RadarSampleProvenance {
+                origin: crate::sensing_sharing::RadarSampleOrigin {
+                    source: "radar-origin-0123456789abcdef".into(),
+                    system: SystemId("broad".into()),
+                    contact: "5:broad:contact-1".into(),
+                },
+                sample_id: "original-sample".into(),
+                observed_tick: 17,
+                observer_position: Some([1.0, -2.0]),
+                velocity_error: 0.4,
+                drift_error_per_sec: 0.1,
+                received_tick: Some(22),
+            }],
+            observation: Some(crate::observation::ObservationMetadata {
+                observed_tick: Some(17),
+                received_tick: Some(23),
+                ..Default::default()
+            }),
         },
     };
     observation.validate(99).unwrap();
@@ -76,6 +94,38 @@ fn held_measurement_retains_original_sample_and_provenance_across_serialisation(
         serde_json::from_slice(&serde_json::to_vec(&observation).unwrap()).unwrap();
     assert_eq!(restored, observation);
     assert_eq!(restored.sampled_tick, 17);
+    let GuidanceSource::Console {
+        samples,
+        observation,
+        ..
+    } = &restored.source
+    else {
+        panic!("original Console source lost");
+    };
+    assert_eq!(samples[0].observed_tick, 17);
+    assert_eq!(samples[0].received_tick, Some(22));
+    assert_eq!(observation.as_ref().unwrap().received_tick, Some(23));
+    for fault in 0..6 {
+        let mut invalid = restored.clone();
+        let GuidanceSource::Console {
+            console,
+            samples,
+            observation,
+            ..
+        } = &mut invalid.source
+        else {
+            unreachable!();
+        };
+        match fault {
+            0 => console.0 = "  ".into(),
+            1 => samples[0].observed_tick = 18,
+            2 => samples[0].received_tick = Some(100),
+            3 => samples[0].velocity_error = f32::NAN,
+            4 => observation.as_mut().unwrap().observed_tick = Some(18),
+            _ => observation.as_mut().unwrap().received_tick = Some(16),
+        }
+        assert!(invalid.validate(99).is_err(), "invalid provenance {fault}");
+    }
     assert!(restored.validate(16).is_err());
     let mut malformed = restored.clone();
     malformed.position[1] = f32::NAN;
@@ -85,6 +135,8 @@ fn held_measurement_retains_original_sample_and_provenance_across_serialisation(
         ship_uuid: "source".into(),
         console: ConsoleId(String::new()),
         system: SystemId("focused-scanner".into()),
+        samples: Vec::new(),
+        observation: None,
     };
     assert!(malformed.validate(99).is_err());
     let mut value = serde_json::to_value(restored).unwrap();

@@ -183,9 +183,12 @@ pub struct Torpedo {
 }
 
 impl Torpedo {
+    /// Structural/intent acceptance only: the physical producer or link must
+    /// validate the original sample and receipt frontier against its actual
+    /// logical tick first. A forwarded receipt can postdate its original sample.
     pub fn accept_guidance(&mut self, observation: &GuidanceObservation) -> bool {
         if self.target_uuid.as_deref() != Some(observation.target_uuid.as_str())
-            || observation.validate(observation.sampled_tick).is_err()
+            || observation.validate(u64::MAX).is_err()
             || self
                 .last_guidance
                 .as_ref()

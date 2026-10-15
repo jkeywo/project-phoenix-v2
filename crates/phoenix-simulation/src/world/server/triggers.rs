@@ -247,10 +247,10 @@ pub(crate) fn collect_world_events(
             }
         }
     }
-    if let (Some(tick), Some(base), Some(scripts)) = (
+    if let (Some(tick), Some(base), true) = (
         tick.as_deref(),
         base_world.as_deref(),
-        opportunity_scripts.as_deref_mut(),
+        opportunity_scripts.is_some(),
     ) {
         if let Some(source) = &base.compiled_opportunity_search {
             let mut actors = opportunity_actors.iter().collect::<Vec<_>>();
@@ -286,7 +286,9 @@ pub(crate) fn collect_world_events(
                         tick.0,
                         &inputs,
                     )? {
-                        scripts
+                        opportunity_scripts
+                            .as_deref_mut()
+                            .expect("script owner checked before discovery")
                             .pending_comms_opens
                             .push(crate::comms::content::OpenCommsRequest {
                                 opportunity: Some(reference.clone()),

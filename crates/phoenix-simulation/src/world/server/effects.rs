@@ -838,6 +838,30 @@ pub(crate) fn apply_dispatch_result(
                     );
                 });
             }
+            ActionCmd::ApprovePortOrder {
+                visitor,
+                provider,
+                visit,
+                lines,
+            } => {
+                let Some(visitor) = runtime.name_to_uuid.get(&visitor).cloned() else {
+                    bevy::log::warn!("{log_ctx}: port order visitor name was not found");
+                    continue;
+                };
+                let Some(provider) = runtime.name_to_uuid.get(&provider).cloned() else {
+                    bevy::log::warn!("{log_ctx}: port order provider name was not found");
+                    continue;
+                };
+                // The existing deferred World effect slot applies intent only.
+                // No admission token or transient command buffer is fabricated.
+                commands.queue(move |world: &mut World| {
+                    if let Err(reason) = crate::resources::ports_server::approve_port_order(
+                        world, &visitor, &provider, visit, lines,
+                    ) {
+                        bevy::log::warn!("Mission port order refused: {reason}");
+                    }
+                });
+            }
             cmd @ (ActionCmd::AddObjective { .. }
             | ActionCmd::CompleteObjective { .. }
             | ActionCmd::FailObjective { .. }) => {

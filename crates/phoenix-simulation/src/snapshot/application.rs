@@ -1220,6 +1220,12 @@ pub(super) fn apply_entity_state_with(
     restored_alert_tick: bevy::ecs::change_detection::Tick,
 ) {
     let mut entity_mut = world.entity_mut(entity);
+    if let (Some(mut provider), Some(state)) = (
+        entity_mut.get_mut::<crate::resources::ports_server::PortProviderState>(),
+        row.port_provider.as_ref(),
+    ) {
+        provider.0 = state.clone();
+    }
     if let (Some(mut recovery), Some(state)) = (
         entity_mut.get_mut::<crate::resources::recovery_server::ShipRecovery>(),
         row.recovery.as_ref(),

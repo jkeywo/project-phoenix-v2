@@ -16,6 +16,7 @@ pub(super) fn preflight_missing_entities(
                 .map(|(entity, uuid)| {
                     (
                         uuid.0.clone(),
+                        entity,
                         world
                             .get::<crate::ship::compartment_damage::ShipDamage>(entity)
                             .cloned(),
@@ -36,8 +37,9 @@ pub(super) fn preflight_missing_entities(
     let mut staging = World::new();
     // Only immutable authored shape/ownership is seeded. Saved stock and job
     // payloads remain the candidate state, never mutable staging simulation.
-    for (uuid, damage, teams, services) in &present {
+    for (uuid, live_entity, damage, teams, services) in &present {
         let mut entity = staging.spawn(EntityUuid(uuid.clone()));
+        super::ports::seed_shape(world, *live_entity, &mut entity);
         if let Some(damage) = damage {
             entity.insert(damage.clone());
         }
@@ -110,6 +112,11 @@ pub(super) fn preflight_missing_entities(
         report
             .gaps
             .push(RestoreGap::RepairJobsInvalid { uuid, reason });
+    }
+    if let Err((uuid, reason)) = super::ports::validate_candidate(&staging, snapshot) {
+        report
+            .gaps
+            .push(RestoreGap::ResourceStateInvalid { uuid, reason });
     }
     for (entity, row) in staged {
         if let Err(reason) = super::application::validate_entity_repair_jobs(&staging, entity, row)

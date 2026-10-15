@@ -4,9 +4,8 @@ import { parse, stringify } from 'smol-toml';
 import { damageFixture } from './damage-fixture.js';
 import { WorkshopDocument } from '../workshop-document.js';
 import { createStoreZip } from '../mod-pack-export.js';
-import { inspectRecovery, validateRecoveryTool, validateRecoverableSource, prepareRecoveryOperation, applyRecoveryOperation } from '../workshop-resource-recovery.js';
+import { inspectRecovery, validateRecoveryTool, validateRecoverableSource, prepareRecoveryOperation, applyRecoveryOperation, guardRecoveryReferences } from '../workshop-resource-recovery.js';
 import { resolveTemplate } from '../entity-includes.js';
-import { prepareResourceOperation } from '../workshop-resources.js';
 const path = 'assets/entities/test.toml', base = 'assets/entities/base.toml', deps = { base_files: {}, packs: [] };
 const make = text => new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: '[pack]\nformat=1\nid="test"\nname="Test"\nversion="1"\n' }, { path, text }]));
 const fixture = () => { const out = damageFixture(); out.schema.console_stock_publication_kind = 'Stock';
@@ -70,7 +69,8 @@ describe('accepted-source recovery declarations', () => {
     const { value } = fixture(); const source = { availability: 'always', resources: { scrap: { kind: 'capacity', id: 'scrap' } } };
     validateRecoverableSource(source, value); expect(() => validateRecoverableSource({ ...source, resources: { scrap: source.resources.scrap, ore: source.resources.scrap } }, value)).toThrow(/alias/);
     expect(() => validateRecoverableSource({ ...source, quantity: 10 }, value)).toThrow();
-    value.recoverable = source; const draft = make(stringify(value)); expect(() => prepareResourceOperation(draft, deps, { path, type: 'capacity-remove', id: 'scrap' })).toThrow();
+    value.recoverable = source; const proposed = structuredClone(value); proposed.infrastructure.capacity = proposed.infrastructure.capacity.filter(row => row.id !== 'scrap');
+    expect(() => guardRecoveryReferences(value, proposed)).toThrow(/Recovery first/);
   });
   it('authors finite actual sources and keeps new receiving stocks empty, original ammo unchanged and processing optional', () => {
     for (const hull of ['alliance_cruiser', 'dynasty_player_cruiser']) {

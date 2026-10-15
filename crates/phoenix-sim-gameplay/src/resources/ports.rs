@@ -14,6 +14,8 @@ pub struct PortVisit {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PortVisitState {
+    /// Tick zero is a real simulation step, distinct from an unvisited owner.
+    pub initialized: bool,
     pub last_tick: u64,
     pub visitors: BTreeMap<String, PortVisit>,
 }
@@ -28,23 +30,25 @@ impl PortVisitState {
         visitors: &BTreeSet<String>,
     ) -> Result<(), String> {
         self.validate(profile, tick.max(self.last_tick))?;
-        if tick < self.last_tick || visitors.iter().any(|id| !valid_uuid(id)) {
+        if (self.initialized && tick < self.last_tick) || visitors.iter().any(|id| !valid_uuid(id))
+        {
             return Err("port visit refresh requires current tick and actual visitor UUIDs".into());
         }
-        if tick == self.last_tick {
+        if self.initialized && tick == self.last_tick {
             if visitors != &self.visitors.keys().cloned().collect() {
                 return Err("port visit membership already refreshed for this tick".into());
             }
             return Ok(());
         }
         let mut next = self.clone();
+        next.initialized = true;
         next.last_tick = tick;
         next.visitors.retain(|id, _| visitors.contains(id));
         for id in visitors {
             next.visitors
                 .entry(id.clone())
                 .or_insert_with(|| PortVisit {
-                    visit: tick,
+                    visit: tick.max(1),
                     delivered: profile
                         .offers
                         .iter()
@@ -94,6 +98,9 @@ impl PortVisitState {
 
     pub fn validate(&self, profile: &PortServiceConfig, snapshot_tick: u64) -> Result<(), String> {
         profile.validate()?;
+        if !self.initialized && (self.last_tick != 0 || !self.visitors.is_empty()) {
+            return Err("uninitialized port provider cannot carry visits or a frontier".into());
+        }
         if self.last_tick > snapshot_tick {
             return Err("port provider frontier exceeds snapshot tick".into());
         }
@@ -101,7 +108,7 @@ impl PortVisitState {
         for (uuid, visit) in &self.visitors {
             if !valid_uuid(uuid)
                 || visit.visit == 0
-                || visit.visit > self.last_tick
+                || visit.visit > self.last_tick.max(1)
                 || visit.delivered.keys().collect::<BTreeSet<_>>() != keys
                 || profile.offers.iter().any(|offer| {
                     visit.delivered[&offer.id] < 0 || visit.delivered[&offer.id] > offer.quota
@@ -330,6 +337,11 @@ impl PortOrderState {
     pub fn validate(&self, profile: &PortServiceConfig, snapshot_tick: u64) -> Result<(), String> {
         profile.validate()?;
         self.validate_settlement()?;
+        if self.last_tick == 0
+            && (self.fraction != 0.0 || self.lines.iter().any(|line| line.delivered_lots != 0))
+        {
+            return Err("unstarted port order cannot contain paid work or delivered lots".into());
+        }
         if self.last_tick > snapshot_tick
             || !self.fraction.is_finite()
             || !(0.0..1.0).contains(&self.fraction)
@@ -341,7 +353,7 @@ impl PortOrderState {
             (Some(partner), Some(visit))
                 if valid_uuid(partner)
                     && visit > 0
-                    && visit <= snapshot_tick
+                    && visit <= snapshot_tick.max(1)
                     && !self.lines.is_empty() => {}
             _ => return Err("port order has an invalid partner, visit or selection".into()),
         }

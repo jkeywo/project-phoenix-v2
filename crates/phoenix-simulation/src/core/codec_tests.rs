@@ -12,6 +12,37 @@ fn assert_client_roundtrip(msg: ClientMessage) {
     }
 }
 
+#[test]
+fn port_controls_round_trip_with_actual_owner_visit_and_typed_lines() {
+    for payload in [
+        SystemControlPayload::SetTransferStore {
+            store: Some("hold-machinery-parts".into()),
+        },
+        SystemControlPayload::SetTransferStore { store: None },
+        SystemControlPayload::SetPortMaintenance { enabled: true },
+        SystemControlPayload::StartPortOrder {
+            partner_uuid: "22222222-2222-4222-8222-222222222222".into(),
+            visit: 17,
+            lines: vec![phoenix_model::ports::PortOrderLine {
+                offer: "parts-for-alloy".into(),
+                store: "hold-machinery-parts".into(),
+                lots: 2,
+            }],
+        },
+        SystemControlPayload::StopPortOrder,
+    ] {
+        assert_client_roundtrip(ClientMessage::ControlSystem {
+            target: SystemId("umbilical".into()),
+            payload: payload.clone(),
+        });
+        assert_client_roundtrip(ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("port-order-17").unwrap(),
+            target: SystemId("umbilical".into()),
+            payload,
+        });
+    }
+}
+
 fn assert_server_roundtrip(msg: ServerMessage) {
     for encoded in [
         JsonCodec.encode_server(&msg).unwrap(),
@@ -3104,7 +3135,7 @@ fn start_and_stop_transfer_control_system_round_trip() {
 /// variant round-trips, is additive on the wire, and an idle umbilical carries
 /// no absent-field noise.
 #[test]
-fn system_blackboard_umbilical_round_trips_and_is_additive() {
+fn system_blackboard_umbilical_round_trips_with_explicit_port_intent() {
     use crate::core::messages::{SystemBlackboard, UmbilicalBlackboard};
 
     // A running umbilical carries both ends' levels the console shows.
@@ -3118,6 +3149,7 @@ fn system_blackboard_umbilical_round_trips_and_is_additive() {
         operator_level: Some(80),
         partner_level: Some(20),
         refusal: None,
+        ..Default::default()
     });
     let encoded = serde_json::to_string(&running).unwrap();
     assert!(encoded.contains(r#""kind":"Umbilical""#), "got: {encoded}");
@@ -3144,11 +3176,13 @@ fn system_blackboard_umbilical_round_trips_and_is_additive() {
     let idle_decoded: SystemBlackboard = serde_json::from_str(&idle_json).unwrap();
     assert_eq!(idle_decoded, idle);
 
-    // …and every field is serde-default, so a bare payload decodes whole.
+    // Protocol 11 makes the standing port intent explicit; optional fields
+    // still default and this minimum current payload decodes whole.
     assert_eq!(
-        serde_json::from_str::<SystemBlackboard>(r#"{"kind":"Umbilical","data":{}}"#).unwrap(),
+        serde_json::from_str::<SystemBlackboard>(r#"{"kind":"Umbilical","data":{"port_maintenance":false}}"#).unwrap(),
         SystemBlackboard::Umbilical(UmbilicalBlackboard::default())
     );
+    assert!(serde_json::from_str::<SystemBlackboard>(r#"{"kind":"Umbilical","data":{}}"#).is_err());
 }
 
 /// The tractor blackboard (issue #1156): the `SystemBlackboard::Tractor`
@@ -6601,7 +6635,7 @@ fn catalogue_additions_preserve_v3_json_locks_hulls_and_utf8_wire_roundtrips() {
     }
     // The legacy v3 catalogue remains readable under the v5 join pin;
     // explicit Console identity changed the wire vocabulary, not this JSON shape.
-    assert_eq!(PROTOCOL_VERSION, 10);
+    assert_eq!(PROTOCOL_VERSION, 11);
 }
 
 /// The removal inverse's ingress (issue #1444).

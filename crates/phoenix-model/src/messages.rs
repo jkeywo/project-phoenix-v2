@@ -28,7 +28,9 @@ use uuid::Uuid;
 /// (AGENTS.md rule 11), exactly like `manifest::SUPPORTED_PACK_FORMAT`.
 /// Revision 7 separates incoming energy flow from explicit weapons restraint;
 /// an older client's level-zero control would otherwise suggest hold fire.
-pub const PROTOCOL_VERSION: u32 = 10;
+/// Revision 11 carries typed local stores, recovery selections and visit-bound
+/// port service/order projections; earlier clients cannot operate those views.
+pub const PROTOCOL_VERSION: u32 = 11;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).
@@ -2448,6 +2450,20 @@ pub enum SystemControlPayload {
     SetTransferDirection {
         direction: crate::umbilical::UmbilicalDirection,
     },
+    /// Bind an actual managed Main store; None retains the named-service path.
+    SetTransferStore {
+        store: Option<String>,
+    },
+    SetPortMaintenance {
+        enabled: bool,
+    },
+    /// Human or explicitly trusted mission approval, bound to a physical visit.
+    StartPortOrder {
+        partner_uuid: String,
+        visit: u64,
+        lines: Vec<crate::ports::PortOrderLine>,
+    },
+    StopPortOrder,
     /// Select a discovered rescue contact for the transporter (issue #1348).
     ///
     /// Targets the engineering-owned `transporter` system
@@ -4952,6 +4968,9 @@ pub struct DockBlackboard {
 /// could not start or was stopped.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct UmbilicalBlackboard {
+    pub selected_store: Option<String>,
+    pub port_maintenance: bool,
+    pub port: Option<crate::ports_ui::PortServiceView>,
     #[serde(default)]
     pub selected_resource: String,
     #[serde(default)]

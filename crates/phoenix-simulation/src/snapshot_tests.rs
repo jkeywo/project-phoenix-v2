@@ -75,6 +75,7 @@ fn reserved_ammunition_and_fractional_flow_resume_from_ron_without_reset() {
         selected_resource: "torpedoes".into(),
         running: true,
         carry: 0.75,
+        ..Default::default()
     };
     let flow: crate::umbilical::UmbilicalSaveState =
         ron::from_str(&ron::to_string(&flow).unwrap()).unwrap();

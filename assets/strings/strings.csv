@@ -5389,3 +5389,60 @@ workshop.recovery.save-source,Resource recovery,Save public manifest,Öffentlich
 workshop.recovery.duplicate-resource,Resource recovery,Each resource may appear once.,Jede Ressource darf nur einmal vorkommen.,Each resource may appear once.,machine
 workshop.recovery.refused,Resource recovery,Recovery change refused: {reason},Bergungsänderung abgelehnt: {reason},Recovery change refused: {reason},machine
 recovery.main-store,Resource recovery,{resource} main hold,{resource}-Hauptlager,{resource} main hold,machine
+port.title,Docked port services,Docked port services,Dienstleistungen am Liegeplatz,Docked port services,machine
+port.action.maintenance,Docked port services,Maintain approved port goals,Genehmigte Hafenziele halten,Maintain approved port goals,machine
+port.action.start,Docked port services,Start reviewed port order,Geprüften Hafenauftrag starten,Start reviewed port order,machine
+port.action.stop,Docked port services,Stop port order,Hafenauftrag stoppen,Stop port order,machine
+port.action.store,Docked port services,Choose transfer receiving store,Empfangslager wählen,Choose transfer receiving store,machine
+port.start,Docked port services,Start reviewed order,Geprüften Auftrag starten,Start reviewed order,machine
+port.stop,Docked port services,Stop remaining order,Restlichen Auftrag stoppen,Stop remaining order,machine
+port.reset-draft,Docked port services,Fill order from stock goals,Auftrag aus Bestandszielen füllen,Fill order from stock goals,machine
+port.transfer-store,Docked port services,Receiving stock endpoint,Empfangender Bestand,Receiving stock endpoint,machine
+port.named-service,Docked port services,Normal service connection,Normale Dienstverbindung,Normal service connection,machine
+port.receiving-store,Docked port services,Main receiving store,Empfangendes Hauptlager,Main receiving store,machine
+port.lots,Docked port services,Requested lots,Angeforderte Lose,Requested lots,machine
+port.pause-maintenance,Docked port services,Pause allied replenishment,Verbündeten Nachschub pausieren,Pause allied replenishment,machine
+port.maintain-goals,Docked port services,Maintain approved allied goals,Genehmigte Ziele bei Verbündeten halten,Maintain approved allied goals,machine
+port.free-policy,Docked port services,Approved allied stock goals use finite port stocks and ordinary transfer time.,Genehmigte verbündete Bestandsziele nutzen endliche Hafenbestände und normale Übertragungszeit.,Approved allied stock goals use finite port stocks and ordinary transfer time.,machine
+port.manual-policy,Docked port services,"Review the editable order, then start it explicitly. Editing spends no stock.",Den bearbeitbaren Auftrag prüfen und ausdrücklich starten. Bearbeiten verbraucht keinen Bestand.,"Review the editable order, then start it explicitly. Editing spends no stock.",machine
+port.no-provider,Docked port services,Dock with a provider offering authorised services.,An einem Anbieter mit genehmigten Dienstleistungen anlegen.,Dock with a provider offering authorised services.,machine
+port.offer-heading,Docked port services,{resource}: {amount} units per lot,{resource}: {amount} Einheiten pro Los,{resource}: {amount} units per lot,machine
+port.offer-summary,Docked port services,Visit quota {quota} lots; available {available}; cost per lot: {costs}.,Besuchskontingent {quota} Lose; verfügbar {available}; Kosten pro Los: {costs}.,Visit quota {quota} lots; available {available}; cost per lot: {costs}.,machine
+port.cost,Docked port services,{amount} {resource},{amount} {resource},{amount} {resource},machine
+port.free-cost,Docked port services,No exchange cost,Keine Tauschkosten,No exchange cost,machine
+port.delivered,Docked port services,{resource}: {delivered}/{requested} lots delivered.,{resource}: {delivered}/{requested} Lose geliefert.,{resource}: {delivered}/{requested} lots delivered.,machine
+port.ineligible,Docked port services,This visit is not authorised for these services.,Dieser Besuch ist für diese Dienstleistungen nicht berechtigt.,This visit is not authorised for these services.,machine
+entity.manual_trade_port.name,Docked port services,Manual exchange port,Hafen für manuellen Tausch,Manual exchange port,machine
+ports.blocked.undocked,Docked port services,No docked provider.,Kein angedockter Anbieter.,No docked provider.,machine
+ports.blocked.ineligible,Docked port services,Provider permission does not cover this visit.,Die Anbietergenehmigung gilt nicht für diesen Besuch.,Provider permission does not cover this visit.,machine
+ports.blocked.hostile,Docked port services,Hostile relationships prevent this service.,Feindliche Beziehungen verhindern diese Dienstleistung.,Hostile relationships prevent this service.,machine
+ports.blocked.unavailable,Docked port services,Port service is unavailable.,Hafendienstleistung nicht verfügbar.,Port service is unavailable.,machine
+ports.blocked.no_order,Docked port services,No approved order is running.,Kein genehmigter Auftrag läuft.,No approved order is running.,machine
+ports.blocked.stale_visit,Docked port services,The docked visit changed. Review a new order.,Der Liegeplatzbesuch hat sich geändert. Einen neuen Auftrag prüfen.,The docked visit changed. Review a new order.,machine
+ports.blocked.invalid_store,Docked port services,Choose a compatible main receiving store.,Ein kompatibles empfangendes Hauptlager wählen.,Choose a compatible main receiving store.,machine
+ports.blocked.no_demand,Docked port services,Approved stock goals are satisfied.,Genehmigte Bestandsziele sind erfüllt.,Approved stock goals are satisfied.,machine
+ports.blocked.no_stock,Docked port services,The provider cannot supply another lot.,Der Anbieter kann kein weiteres Los liefern.,The provider cannot supply another lot.,machine
+ports.blocked.no_room,Docked port services,Actual receiving storage has no room.,Im tatsächlichen Empfangslager ist kein Platz.,Actual receiving storage has no room.,machine
+ports.blocked.no_cost_stock,Docked port services,Protected stock leaves insufficient exchange materials.,Geschützter Bestand lässt nicht genug Tauschmaterial übrig.,Protected stock leaves insufficient exchange materials.,machine
+ports.blocked.quota_exhausted,Docked port services,This visit has used its approved quota.,Dieser Besuch hat sein genehmigtes Kontingent ausgeschöpft.,This visit has used its approved quota.,machine
+ports.blocked.unpowered,Docked port services,Transfer machinery has insufficient usable energy.,Die Übertragungsanlage hat nicht genug nutzbare Energie.,Transfer machinery has insufficient usable energy.,machine
+ports.blocked.disabled,Docked port services,Transfer machinery is unavailable.,Die Übertragungsanlage ist nicht verfügbar.,Transfer machinery is unavailable.,machine
+workshop.ports.title,Docked port services,Port services,Hafendienstleistungen,Port services,machine
+workshop.ports.hint,Docked port services,Author explicit provider permission and finite offers. Quotas count whole lots per visit; amounts and costs are resource units per lot.,Ausdrückliche Anbietergenehmigung und endliche Angebote festlegen. Kontingente zählen ganze Lose pro Besuch; Mengen und Kosten sind Ressourceneinheiten pro Los.,Author explicit provider permission and finite offers. Quotas count whole lots per visit; amounts and costs are resource units per lot.,machine
+workshop.ports.template,Docked port services,Provider entity,Anbieterentität,Provider entity,machine
+workshop.ports.materialise,Docked port services,Materialise inherited policy,Geerbte Richtlinie übernehmen,Materialise inherited policy,machine
+workshop.ports.policy,Docked port services,Service policy,Dienstleistungsrichtlinie,Service policy,machine
+workshop.ports.factions,Docked port services,Eligible faction UUIDs (comma separated),Berechtigte Fraktions-UUIDs (kommagetrennt),Eligible faction UUIDs (comma separated),machine
+workshop.ports.factions-hint,Docked port services,An empty faction list permits nobody. Manual offers always require an explicit order.,Eine leere Fraktionsliste berechtigt niemanden. Manuelle Angebote erfordern immer einen ausdrücklichen Auftrag.,An empty faction list permits nobody. Manual offers always require an explicit order.,machine
+workshop.ports.offer-id,Docked port services,Offer ID,Angebots-ID,Offer ID,machine
+workshop.ports.resource,Docked port services,Offered resource ID,Angebotene Ressourcen-ID,Offered resource ID,machine
+workshop.ports.unit-amount,Docked port services,Units per lot,Einheiten pro Los,Units per lot,machine
+workshop.ports.quota,Docked port services,Lots per visit (0 disables this offer including donations),Lose pro Besuch (0 deaktiviert das Angebot einschließlich Spenden),Lots per visit (0 disables this offer including donations),machine
+workshop.ports.cost-resource,Docked port services,Exchange resource ID,Tauschressourcen-ID,Exchange resource ID,machine
+workshop.ports.cost-amount,Docked port services,Exchange units per lot,Tauscheinheiten pro Los,Exchange units per lot,machine
+workshop.ports.add-cost,Docked port services,Add exchange cost,Tauschkosten hinzufügen,Add exchange cost,machine
+workshop.ports.remove-cost,Docked port services,Remove cost,Kosten entfernen,Remove cost,machine
+workshop.ports.remove-offer,Docked port services,Remove offer,Angebot entfernen,Remove offer,machine
+workshop.ports.add-offer,Docked port services,Add offer,Angebot hinzufügen,Add offer,machine
+workshop.ports.apply,Docked port services,Save port policy,Hafenrichtlinie speichern,Save port policy,machine
+workshop.ports.refused,Docked port services,Port change refused: {reason},Hafenänderung abgelehnt: {reason},Port change refused: {reason},machine

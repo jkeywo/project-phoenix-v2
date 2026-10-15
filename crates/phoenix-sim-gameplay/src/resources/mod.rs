@@ -8,6 +8,7 @@ pub mod logistics;
 pub mod logistics_ai;
 pub mod logistics_profile;
 pub mod ports;
+pub mod ports_profile;
 pub mod production;
 pub mod production_ai;
 pub mod production_profile;

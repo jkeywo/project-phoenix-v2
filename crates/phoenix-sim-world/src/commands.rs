@@ -41,6 +41,15 @@ pub enum ActionCmd<SpawnConfig> {
         uuid: String,
         id: String,
     },
+    /// Explicit mission approval, never emitted by a System AI or a client.
+    /// Names resolve at the ordinary World effect boundary; live port terms,
+    /// physical visit and actual stores are checked again before accepting intent.
+    ApprovePortOrder {
+        visitor: String,
+        provider: String,
+        visit: u64,
+        lines: Vec<phoenix_model::ports::PortOrderLine>,
+    },
     /// Add an objective with `targets` already resolved (explicit targets, or
     /// the trigger entity as fallback).
     AddObjective {
@@ -432,6 +441,17 @@ impl ActionCmd<std::convert::Infallible> {
                 ActionCmd::SetContactInformation { observer, change }
             }
             Self::SetNpcDoctrine { uuid, id } => ActionCmd::SetNpcDoctrine { uuid, id },
+            Self::ApprovePortOrder {
+                visitor,
+                provider,
+                visit,
+                lines,
+            } => ActionCmd::ApprovePortOrder {
+                visitor,
+                provider,
+                visit,
+                lines,
+            },
             Self::AddObjective {
                 id,
                 text,

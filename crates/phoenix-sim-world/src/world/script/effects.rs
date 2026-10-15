@@ -2,17 +2,18 @@
 //!
 //! Registered runtime host functions push onto a call-scoped [`EffectSink`],
 //! which drains into the **existing** dispatch boundary in `world::dispatch`.
-//! Script gets no new effect vocabulary: every host function here maps to
-//! something the declarative trigger front-end already produces, so the applier
-//! (`world::server`) grows no new arm.
+//! Most host functions reuse the declarative trigger vocabulary and its applier
+//! (`world::server`). Explicit mission port orders additionally carry typed
+//! approval intent to the same live validation used by the human port controls.
 //!
 //! The buffer holds [`BufferedEffect`]s, of which there are two shapes sharing
 //! ONE ordered `Vec` so a flag write, an immediate command effect, and a
 //! name-resolving effect all apply in the order the script authored them:
 //!
-//! * [`BufferedEffect::Cmd`] — a fully-resolved [`ActionCmd`] needing no dispatch
+//! * [`BufferedEffect::Cmd`] — a typed [`ActionCmd`] needing no dispatch
 //!   context (the M1 set: `complete_objective`, `game_over`, … — plus the flag
-//!   writes [`flags`] pushes). The applier applies it directly.
+//!   writes [`flags`] pushes). The applier applies it directly, resolving entity
+//!   names for those variants that carry them.
 //! * [`BufferedEffect::Action`] — a declarative [`TriggerAction`] still holding
 //!   entity NAMES, buffered for the applier to resolve through the SAME
 //!   `dispatch_action` the declarative evaluator runs (issue #984, M6). The three
@@ -661,6 +662,41 @@ pub fn register_effects(engine: &mut HostRegistry) {
             sink.push_action(TriggerAction::SetNpcDoctrine {
                 entity: entity.to_string(),
                 id: id.to_string(),
+            });
+            Ok(())
+        },
+    );
+    host_fn!(
+        engine, "approve_port_order", receiver = "effects", category = "effect",
+        params = ["visitor", "provider", "visit", "lines"],
+        summary = "Explicitly approve a bounded manual port order for this physical visit. Entity names, offer ids, receiving Main stores and positive whole lots are required. Live permission, stock and quota still apply; this does not create supplies or enable AI purchasing.",
+        |sink: &mut EffectSink, visitor: ImmutableString, provider: ImmutableString,
+         visit: rhai::INT, lines: Array| -> Result<(), Box<EvalAltResult>> {
+            if !crate::gm_npc::bounded_id(&visitor)
+                || !crate::gm_npc::bounded_id(&provider)
+                || visitor == provider || visit <= 0 || lines.is_empty() || lines.len() > 64 {
+                return Err(raise("port approval requires distinct bounded entities, a positive visit and 1..64 lines".into()));
+            }
+            let mut approved = Vec::with_capacity(lines.len());
+            let mut offers = std::collections::BTreeSet::new();
+            for line in lines {
+                let line = line.try_cast::<Map>().ok_or_else(|| raise("port order line must be a map".into()))?;
+                if line.len() != 3 || !line.contains_key("offer") || !line.contains_key("store") || !line.contains_key("lots") {
+                    return Err(raise("port order line requires exactly offer, store and lots".into()));
+                }
+                let offer = map_str(&line, "offer").ok_or_else(|| raise("port offer must be a string".into()))?;
+                let store = map_str(&line, "store").ok_or_else(|| raise("port store must be a string".into()))?;
+                let lots = line.get("lots").and_then(|v| v.clone().try_cast::<rhai::INT>())
+                    .ok_or_else(|| raise("port lots must be a positive integer".into()))?;
+                if !crate::gm_npc::bounded_id(&offer) || !crate::gm_npc::bounded_id(&store)
+                    || lots <= 0 || !offers.insert(offer.clone()) {
+                    return Err(raise("port lines require bounded ids, unique offers and positive lots".into()));
+                }
+                approved.push(phoenix_model::ports::PortOrderLine { offer, store, lots });
+            }
+            sink.push(ActionCmd::ApprovePortOrder {
+                visitor: visitor.to_string(), provider: provider.to_string(), visit: visit as u64,
+                lines: approved,
             });
             Ok(())
         },

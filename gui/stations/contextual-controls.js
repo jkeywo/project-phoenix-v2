@@ -1,3 +1,4 @@
+import '../components/ph-port-service-controls.js';
 import { familyView, familySystemId } from '../console-payload.js';
 import { t, wireText } from '../strings.js';
 import { UMBILICAL_RESOURCE_ACTION_ID, UMBILICAL_DIRECTION_ACTION_ID } from './engineering-actions.js';
@@ -167,6 +168,9 @@ export function renderUmbilicalPanel(s, doc, tr) {
     selector.disabled = !!um.umbilical_auto;
     selector.value = um.selected_resource || um.capacity || '';
   }
+  let port = panel.querySelector('ph-port-service-controls');
+  if (!port) { port = doc.createElement('ph-port-service-controls'); panel.append(port); }
+  port.state = { ...um, system_id: umbilicalSystemId };
   let direction = panel.querySelector('[data-transfer-direction]');
   if (!direction) {
     const label = doc.createElement('label'), caption = doc.createElement('span');

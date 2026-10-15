@@ -427,7 +427,8 @@ use super::*;
 /// 46: physical damage, retained impact profiles/samples, typed parts-backed
 /// repair stages and reversible actor defeat frontiers replace primary ship HP.
 /// `48` adds latched stock requests and finite recipe work-in-progress.
-pub const SNAPSHOT_FORMAT: u32 = 48;
+/// `49` adds physical port visits, approved lot orders and paid transfer meters.
+pub const SNAPSHOT_FORMAT: u32 = 49;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -513,7 +514,8 @@ pub const SNAPSHOT_FORMAT: u32 = 48;
 /// restoration and recoverable neutralization replace aggregate ship destruction.
 /// "0.19" adds timed cargo and conserved destination-space claims.
 /// "0.20" adds automatic local stock cycles and paid finite fabrication.
-pub const SIMULATION_RULES: &str = "0.20";
+/// "0.21" adds finite visit-quota replenishment and actual-stock manual exchanges.
+pub const SIMULATION_RULES: &str = "0.21";
 
 /// The authored data, computed rather than remembered.
 ///

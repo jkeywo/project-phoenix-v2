@@ -278,6 +278,7 @@ pub fn projection<'a>(
                     "production",
                     "recovery",
                     "recoverable",
+                    "port_service",
                     "hull",
                     "helm_console",
                     "helm_capability",

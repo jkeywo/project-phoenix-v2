@@ -326,6 +326,7 @@ fn restore_reseeds_running_and_clears_the_projections() {
         selected_resource: "reserve_fuel".into(),
         running: true,
         carry: 0.4,
+        ..Default::default()
     });
     assert!(u.running);
     assert_eq!(u.carry, 0.4);

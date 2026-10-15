@@ -12,7 +12,7 @@ name = "Aurora Skirmish (Future)"
 
 [pack.requires]
 content_id = "phoenix-base"
-content_epoch = 3
+content_epoch = 4
 
 [[scenario]]
 id = "aurora_skirmish"

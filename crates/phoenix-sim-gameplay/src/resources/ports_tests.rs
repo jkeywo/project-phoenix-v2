@@ -135,6 +135,58 @@ fn provider_invalid_refresh_or_quota_never_partially_commits() {
 }
 
 #[test]
+fn first_physical_visit_can_begin_at_tick_zero_without_reissuing_its_quota() {
+    let config = profile();
+    let visitors = BTreeSet::from([visitor(2)]);
+    let mut state = PortVisitState::default();
+    state.refresh(&config, 0, &visitors).unwrap();
+    assert!(state.initialized);
+    let visit = state.visitors[&visitor(2)].visit;
+    let mut approved = PortOrderState::default();
+    approved
+        .approve(
+            &config,
+            &visitor(9),
+            visit,
+            vec![PortOrderLine {
+                offer: "parts".into(),
+                store: "hold-parts".into(),
+                lots: 1,
+            }],
+        )
+        .unwrap();
+    approved.validate(&config, 0).unwrap();
+    assert_eq!(
+        approved
+            .advance(
+                &config,
+                &SystemId("umbilical".into()),
+                0,
+                1.0,
+                5.0,
+                1,
+                |_, _| panic!("bootstrap frontier must not charge work before tick one")
+            )
+            .unwrap(),
+        0
+    );
+    state
+        .record_delivery(&config, &visitor(2), visit, "parts", 1)
+        .unwrap();
+    let before = state.clone();
+    state.refresh(&config, 0, &visitors).unwrap();
+    assert_eq!(state, before);
+    assert!(state.refresh(&config, 0, &BTreeSet::new()).is_err());
+    assert_eq!(state, before);
+    state.refresh(&config, 1, &visitors).unwrap();
+    assert_eq!(state.visitors[&visitor(2)].visit, visit);
+    assert_eq!(state.visitors[&visitor(2)].delivered["parts"], 1);
+    state.refresh(&config, 2, &BTreeSet::new()).unwrap();
+    state.refresh(&config, 3, &visitors).unwrap();
+    assert_ne!(state.visitors[&visitor(2)].visit, visit);
+}
+
+#[test]
 fn lot_work_uses_actual_units_paid_fraction_and_exact_immutable_receipts() {
     let mut state = order();
     assert_eq!(advance(&mut state, 1, 1.0, 3, 0.5), 0);
@@ -315,6 +367,12 @@ fn malformed_approval_is_atomic_and_positive_costs_do_not_create_authority() {
     let json = serde_json::to_value(&state).unwrap();
     assert!(json.get("stock").is_none());
     assert!(json.get("authority").is_none());
+    let mut invented = order();
+    invented.lines[0].delivered_lots = 1;
+    assert!(
+        invented.validate(&profile(), 3).is_err(),
+        "no execution/receipt frontier can never have delivered goods"
+    );
 }
 
 #[test]

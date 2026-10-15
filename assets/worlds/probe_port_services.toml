@@ -1,0 +1,29 @@
+# Quiet free/explicit-manual port probe. No deadlines or mission pacing.
+[global]
+seed = 1215
+ai_helm_tick_hz = 30
+
+[player_spawn]
+position = [ 0, 0, 0 ]
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+spawn_on = "game_start"
+
+[entity.transform]
+position = [ 0, 0, 0 ]
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+id = "free-port"
+
+[entity.transform]
+position = [ 100, 0, 0 ]
+
+[[entity]]
+template_path = "assets/entities/manual_trade_port.toml"
+id = "manual-port"
+
+[entity.transform]
+position = [ -100, 0, 0 ]

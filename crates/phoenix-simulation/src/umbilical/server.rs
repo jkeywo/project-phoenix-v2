@@ -64,6 +64,12 @@ use crate::umbilical::flow::{
 /// out.
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct TransferUmbilical {
+    pub selected_store: Option<String>,
+    pub port_maintenance: bool,
+    pub port_order: crate::resources::ports::PortOrderState,
+    pub port_flow: Option<crate::resources::ports::PortOrderState>,
+    /// Derived terms and permission for this physically coupled provider.
+    pub port_view: Option<phoenix_model::ports_ui::PortServiceView>,
     pub selected_direction: UmbilicalDirection,
     pub selected_resource: String,
     /// The authored flow terms — capacity id, rate, direction, minimum power
@@ -107,6 +113,11 @@ impl TransferUmbilical {
     /// group.
     pub fn new(config: UmbilicalConfig, power_group: PowerGroupId) -> Self {
         Self {
+            selected_store: None,
+            port_maintenance: false,
+            port_order: Default::default(),
+            port_flow: None,
+            port_view: None,
             selected_direction: config.direction,
             selected_resource: config.capacity.clone(),
             config,
@@ -127,6 +138,10 @@ impl TransferUmbilical {
     /// recomputed on the first resumed tick.
     pub fn save_state(&self) -> UmbilicalSaveState {
         UmbilicalSaveState {
+            selected_store: self.selected_store.clone(),
+            port_maintenance: self.port_maintenance,
+            port_order: self.port_order.clone(),
+            port_flow: self.port_flow.clone(),
             selected_direction: self.selected_direction,
             selected_resource: self.selected_resource.clone(),
             running: self.running,
@@ -139,6 +154,11 @@ impl TransferUmbilical {
     /// fresh spawn. Fractional carry is restored. Last refusal and level projections are
     /// rederived by the next tick from the resumed world.
     pub fn restore(&mut self, save: &UmbilicalSaveState) {
+        self.selected_store = save.selected_store.clone();
+        self.port_maintenance = save.port_maintenance;
+        self.port_order = save.port_order.clone();
+        self.port_flow = save.port_flow.clone();
+        self.port_view = None;
         self.selected_direction = save.selected_direction;
         self.running = save.running;
         self.selected_resource = save.selected_resource.clone();
@@ -158,6 +178,10 @@ impl TransferUmbilical {
 /// ship restores byte-identically and folds the same number.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct UmbilicalSaveState {
+    pub selected_store: Option<String>,
+    pub port_maintenance: bool,
+    pub port_order: crate::resources::ports::PortOrderState,
+    pub port_flow: Option<crate::resources::ports::PortOrderState>,
     pub selected_direction: UmbilicalDirection,
     pub selected_resource: String,
     #[serde(default)]
@@ -209,6 +233,10 @@ impl Plugin for UmbilicalPlugin {
                     crate::core::messages::SystemControlPayloadDiscriminants::StopTransfer,
                     crate::core::messages::SystemControlPayloadDiscriminants::SetTransferResource,
                     crate::core::messages::SystemControlPayloadDiscriminants::SetTransferDirection,
+                    crate::core::messages::SystemControlPayloadDiscriminants::SetTransferStore,
+                    crate::core::messages::SystemControlPayloadDiscriminants::SetPortMaintenance,
+                    crate::core::messages::SystemControlPayloadDiscriminants::StartPortOrder,
+                    crate::core::messages::SystemControlPayloadDiscriminants::StopPortOrder,
                 ],
             ),
         )
@@ -236,7 +264,7 @@ impl Plugin for UmbilicalPlugin {
                     .in_set(crate::sim_sets::FixedStep::TickUmbilical)
                     .in_set(crate::sim_sets::SimSet::Modifiers)
                     .after(crate::dock::server::tick_dock)
-                    .before(crate::infrastructure::tick_infrastructure_condition),
+                    .after(crate::infrastructure::tick_infrastructure_condition),
                 finish_umbilical_action_feedback
                     .in_set(crate::sim_sets::FixedStep::FinishUmbilicalActionFeedback)
                     .in_set(crate::sim_sets::SimSet::Modifiers)
@@ -261,23 +289,144 @@ impl Plugin for UmbilicalPlugin {
 /// AI through the same `validate_and_admit` seam) and stripped the source, so
 /// nothing here asks who sent the command (AGENTS.md rule 6).
 pub fn handle_umbilical_commands(
+    factions: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
+    providers: Query<(
+        &EntityUuid,
+        &crate::resources::ports_server::CompiledPortService,
+        &crate::resources::ports_server::PortProviderState,
+        Option<&crate::entities::spawner::FactionComponent>,
+    )>,
     mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     mut ships: Query<(
         Entity,
         &crate::core::messages::AdmittedCommands,
         &mut TransferUmbilical,
         Option<&EntityUuid>,
+        Option<&DockControl>,
+        Option<&crate::resources::logistics_server::CompiledShipLogistics>,
+        Option<&crate::entities::spawner::FactionComponent>,
     )>,
     mut pending: Option<ResMut<Messages<PendingUmbilicalActionFeedback>>>,
     mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
 ) {
-    for (entity, admitted, mut umbilical, uuid) in ships.iter_mut() {
+    for (entity, admitted, mut umbilical, uuid, dock, stores, faction) in ships.iter_mut() {
         for cmd in admitted.for_target(UMBILICAL_SYSTEM_ID) {
             match &cmd.payload {
+                SystemControlPayload::SetTransferStore { store } => {
+                    let permitted = !umbilical.running
+                        && store.as_ref().is_none_or(|id| {
+                            stores.is_some_and(|profile| {
+                                profile.0.config().stores.iter().any(|entry| {
+                                    &entry.id == id
+                                        && entry.role == phoenix_model::logistics::StoreRole::Main
+                                        && entry.resource == umbilical.selected_resource
+                                })
+                            })
+                        });
+                    if permitted {
+                        umbilical.selected_store = store.clone();
+                        umbilical.carry = 0.0;
+                        umbilical.port_flow = None;
+                    }
+                    crate::command_admission::finish_admitted_action_feedback(
+                        &mut outbound,
+                        cmd,
+                        if permitted {
+                            crate::core::messages::ActionFeedbackOutcome::Applied
+                        } else {
+                            crate::core::messages::ActionFeedbackOutcome::Refused
+                        },
+                    );
+                }
+                SystemControlPayload::SetPortMaintenance { enabled } => {
+                    if umbilical.port_maintenance != *enabled {
+                        umbilical.port_flow = None;
+                    }
+                    umbilical.port_maintenance = *enabled;
+                    crate::command_admission::finish_admitted_action_feedback(
+                        &mut outbound,
+                        cmd,
+                        crate::core::messages::ActionFeedbackOutcome::Applied,
+                    );
+                }
+                SystemControlPayload::StartPortOrder {
+                    partner_uuid,
+                    visit,
+                    lines,
+                } => {
+                    let candidate = providers.iter().find(|(id, ..)| id.0 == *partner_uuid);
+                    let permitted = !umbilical.running
+                        && dock.and_then(DockControl::docked_partner)
+                            == Some(partner_uuid.as_str())
+                        && umbilical.port_view.as_ref().is_some_and(|view| {
+                            view.eligible
+                                && view.partner_uuid == *partner_uuid
+                                && view.visit == *visit
+                        });
+                    let next = candidate.and_then(|(_, profile, ledger, provider_faction)| {
+                        let (Some(faction), Some(provider_faction), Some(uuid)) =
+                            (faction, provider_faction, uuid)
+                        else {
+                            return None;
+                        };
+                        if !permitted
+                            || !profile.0.eligible_factions.contains(&faction.0)
+                            || factions.as_ref().is_some_and(|registry| {
+                                crate::ai::faction::is_enemy(
+                                    Some(faction.0),
+                                    Some(provider_faction.0),
+                                    &registry.0,
+                                ) || crate::ai::faction::is_enemy(
+                                    Some(provider_faction.0),
+                                    Some(faction.0),
+                                    &registry.0,
+                                )
+                            })
+                        {
+                            return None;
+                        }
+                        crate::resources::ports_server::approved_order(
+                            &profile.0,
+                            &ledger.0,
+                            &uuid.0,
+                            partner_uuid,
+                            *visit,
+                            lines.clone(),
+                            stores,
+                            &umbilical.port_order,
+                        )
+                        .ok()
+                    });
+                    let approved = next.is_some();
+                    if let Some(next) = next {
+                        umbilical.port_order = next;
+                        umbilical.running = true;
+                        umbilical.carry = 0.0;
+                    }
+                    crate::command_admission::finish_admitted_action_feedback(
+                        &mut outbound,
+                        cmd,
+                        if approved {
+                            crate::core::messages::ActionFeedbackOutcome::Applied
+                        } else {
+                            crate::core::messages::ActionFeedbackOutcome::Refused
+                        },
+                    );
+                }
+                SystemControlPayload::StopPortOrder => {
+                    umbilical.port_order.stop();
+                    umbilical.running = false;
+                    crate::command_admission::finish_admitted_action_feedback(
+                        &mut outbound,
+                        cmd,
+                        crate::core::messages::ActionFeedbackOutcome::Applied,
+                    );
+                }
                 SystemControlPayload::SetTransferDirection { direction } => {
                     let permitted = !umbilical.running;
                     if permitted && umbilical.selected_direction != *direction {
                         umbilical.selected_direction = *direction;
+                        umbilical.port_flow = None;
                         umbilical.carry = 0.0;
                         umbilical.last_refusal = None;
                         umbilical.operator_level = None;
@@ -297,6 +446,8 @@ pub fn handle_umbilical_commands(
                     let permitted = umbilical.config.permits_resource(resource);
                     if permitted && umbilical.selected_resource != *resource {
                         umbilical.selected_resource = resource.clone();
+                        umbilical.selected_store = None;
+                        umbilical.port_flow = None;
                         umbilical.carry = 0.0;
                         umbilical.last_refusal = None;
                     }
@@ -311,6 +462,28 @@ pub fn handle_umbilical_commands(
                     );
                 }
                 SystemControlPayload::StartTransfer => {
+                    let manual = dock
+                        .and_then(DockControl::docked_partner)
+                        .and_then(|partner| providers.iter().find(|(id, ..)| id.0 == partner))
+                        .filter(|(_, profile, ..)| {
+                            profile.0.policy == phoenix_model::ports::PortServicePolicy::ManualOffer
+                        });
+                    if manual.is_some_and(|(provider, _, ledger, _)| {
+                        !umbilical.port_order.active
+                            || umbilical.port_order.partner.as_deref() != Some(provider.0.as_str())
+                            || !uuid.is_some_and(|uuid| {
+                                ledger.0.visitors.get(&uuid.0).is_some_and(|visit| {
+                                    Some(visit.visit) == umbilical.port_order.visit
+                                })
+                            })
+                    }) {
+                        crate::command_admission::finish_admitted_action_feedback(
+                            &mut outbound,
+                            cmd,
+                            crate::core::messages::ActionFeedbackOutcome::Refused,
+                        );
+                        continue;
+                    }
                     if !umbilical.running {
                         umbilical.running = true;
                         // Clear a stale refusal on a fresh start; the tick will
@@ -467,6 +640,35 @@ pub fn operate_umbilical_ai(
         if !sources.0.policy_for(&umbilical_system_id()).operate_ai {
             continue;
         }
+        // The same individual Umbilical AI may maintain observed Main goals
+        // at a free allied port. It never originates manual trade approval.
+        let port = config
+            .and_then(|config| {
+                config
+                    .0
+                    .observations_for_system(&umbilical_system_id(), &blackboards.0)
+                    .get(&umbilical_system_id())
+            })
+            .and_then(|board| match board {
+                SystemBlackboard::Umbilical(view) => view.port.as_ref(),
+                _ => None,
+            });
+        if port.is_some_and(|port| {
+            port.policy == phoenix_model::ports::PortServicePolicy::FreeAlliedReplenishment
+                && port.eligible
+                && !port.stores.is_empty()
+        }) && !umbilical.port_maintenance
+        {
+            emit_ai_command(
+                uuid,
+                umbilical_system_id(),
+                SystemControlPayload::SetPortMaintenance { enabled: true },
+                sources,
+                &sessions,
+                config,
+                &mut admitted,
+            );
+        }
         let transfer_active = match config.and_then(|config| {
             config
                 .0
@@ -594,6 +796,7 @@ pub fn tick_umbilical(
             &DockControl,
             Option<&EntitySystemHull>,
             Option<&ShipDamage>,
+            Option<&crate::resources::logistics_server::CompiledShipLogistics>,
         )>,
         // Every entity's capacity ledger, to resolve both docked ends.
         Query<(
@@ -613,7 +816,8 @@ pub fn tick_umbilical(
     let rows: Vec<OperatorRow> = set
         .p0()
         .iter()
-        .map(|(entity, uuid, umbilical, dock, hull, damage)| {
+        .filter(|(_, _, tool, ..)| tool.port_view.is_none())
+        .map(|(entity, uuid, umbilical, dock, hull, damage, stores)| {
             let power_level = u8::MAX;
             let disabled = operation_disabled(damage, hull, &umbilical_system_id());
             OperatorRow {
@@ -631,6 +835,20 @@ pub fn tick_umbilical(
                     // Other authored choices use their exact named service.
                     if config.capacity != umbilical.config.capacity {
                         config.link = Default::default();
+                    }
+                    if let Some(store) = umbilical.selected_store.as_ref().and_then(|id| {
+                        stores.and_then(|profile| {
+                            profile.0.config().stores.iter().find(|store| {
+                                store.id == *id
+                                    && store.role == phoenix_model::logistics::StoreRole::Main
+                                    && store.resource == config.capacity
+                            })
+                        })
+                    }) {
+                        config.link = crate::resources::service::ResourceLink {
+                            service: None,
+                            provider: Some(store.endpoint.clone()),
+                        };
                     }
                     config
                 },
@@ -945,6 +1163,9 @@ pub fn publish_umbilical_blackboard(
     let key = umbilical_system_id();
     for (umbilical, mut blackboards) in ships.iter_mut() {
         let blackboard = SystemBlackboard::Umbilical(UmbilicalBlackboard {
+            selected_store: umbilical.selected_store.clone(),
+            port_maintenance: umbilical.port_maintenance,
+            port: umbilical.port_view.clone(),
             selected_resource: umbilical.selected_resource.clone(),
             allowed_resources: umbilical.config.resource_choices(),
             capacity: umbilical.config.capacity.clone(),

@@ -1,6 +1,6 @@
 # Committed mod-pack fixture (issue #986): a v1 pack authored against a
 # different content epoch than the host provides. The host rejects it with
-# `pack-content-mismatch` (requires.content_epoch = 1, base epoch = 3).
+# `pack-content-mismatch` (requires.content_epoch = 1, base epoch = 4).
 #
 # Regenerate with `node scripts/build-mod-pack-fixtures.mjs` (gated by `--check`).
 

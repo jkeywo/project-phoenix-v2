@@ -26,6 +26,13 @@ pub fn command_policy(
     target: &crate::core::messages::SystemId,
     payload: &SystemControlPayload,
 ) -> crate::ship::control_source::ControlTickPolicy {
+    if matches!(payload, SystemControlPayload::StartPortOrder { .. }) {
+        // Manual trade approval is a human decision. Ordinary AI may execute
+        // the resulting order, but cannot originate or enlarge its authority.
+        let mut policy = sources.policy_for(target);
+        policy.operate_ai = false;
+        return policy;
+    }
     // A stock target is an administrative request, not powered machinery work.
     // The resource owner still validates the exact fitted store after admission.
     if is_repair_crew_order(config, target, payload)

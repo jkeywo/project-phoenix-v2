@@ -2403,6 +2403,8 @@ export function buildUmbilicalConsoleState(state, systemIds = []) {
   const bb = entry?.data || {};
   return {
     system_id: entry?.systemId ?? systemIds[0] ?? null,
+    port_maintenance: !!bb.port_maintenance, selected_store: bb.selected_store ?? null, port: bb.port ?? null,
+    umbilical_controllable: systemIds.includes(entry?.systemId) && state.controlSources?.[entry?.systemId] === 'Human',
     capacity: bb.capacity ?? null,
     selected_resource: bb.selected_resource ?? bb.capacity ?? null,
     allowed_resources: bb.allowed_resources ?? [],

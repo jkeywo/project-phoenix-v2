@@ -681,3 +681,80 @@ label = "production.alloy"
 [resource_services.alloy]
 kind = "capacity"
 id = "alloy"
+
+[port_service]
+policy = "free_allied_replenishment"
+eligible_factions = [ "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa" ]
+
+[[port_service.offer]]
+id = "coolant"
+resource = "coolant"
+unit_amount = 1
+quota = 1000
+cost = []
+
+[[port_service.offer]]
+id = "machinery-parts"
+resource = "machinery_parts"
+unit_amount = 1
+quota = 200
+cost = []
+
+[[port_service.offer]]
+id = "structural-parts"
+resource = "structural_parts"
+unit_amount = 1
+quota = 100
+cost = []
+
+[[port_service.offer]]
+id = "alloy"
+resource = "alloy"
+unit_amount = 1
+quota = 24
+cost = []
+
+[[port_service.offer]]
+id = "reserve-fuel"
+resource = "reserve_fuel"
+unit_amount = 1
+quota = 10000
+cost = []
+
+[[port_service.offer]]
+id = "torpedoes"
+resource = "torpedoes"
+unit_amount = 1
+quota = 100
+cost = []
+
+# Passive berth only; the visiting ship uses its ordinary Dock System.
+[dock]
+range = 200
+engage_distance = 400
+approach_speed = 60
+mate_tolerance = 4
+undock_clear_distance = 120
+min_power_level = 2
+
+# Legacy fuel transfer remains a real finite endpoint, initially empty.
+[[infrastructure.capacity]]
+id = "reserve_fuel"
+amount = 0
+ceiling = 10000
+label = "console.umbilical.reserve_fuel"
+
+[resource_services.reserve_fuel]
+kind = "capacity"
+id = "reserve_fuel"
+
+# Explicit finite facility ammunition; visiting ships still transfer actual stock.
+[[infrastructure.capacity]]
+id = "torpedoes"
+amount = 1000
+ceiling = 1000
+label = "coordination.weapon_family.torpedoes"
+
+[resource_services.torpedoes]
+kind = "capacity"
+id = "torpedoes"

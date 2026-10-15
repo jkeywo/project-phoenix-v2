@@ -111,6 +111,16 @@ launcher-loss, guidance, complete-host, balance, performance or human exits.
 
 ## Remaining exit work
 
+The first composed physical-carrier selection ran 17 native tests: 12 passed,
+5 failed (`increment15-physical-carrier-native-tests.log`). All five physical PDC
+cases passed, including real collider shapes, moving crossing, unknown blockers
+and finite paid salvo saturation. Carrier despawn/replacement and mixed component
+registration-order cases also passed. Sequential replacement exposed a real copied
+flight duplication; four restoration comparisons exposed incomplete bare-host
+initialisation and remain under investigation. Preserve the exact continuation
+assertions and record affected retries separately. This is not a passing carrier
+exit or complete combat journey.
+
 Complete and verify guided-flight/pending-burst continuation, independent flight
 after launcher loss, observed interception and saturation, guidance/link loss,
 independent Science illumination, payload observations and acquired approach

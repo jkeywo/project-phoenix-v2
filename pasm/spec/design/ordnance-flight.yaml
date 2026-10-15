@@ -24,6 +24,7 @@ entities:
     core:
       status: implemented
       confidence: confirmed
+      origin: ai
       title: Weapon Flight Carrier Identity
       summary: "A folded zero-sized entity marker distinguishes a nonspatial continued flight owner from an operable ship. Actual physical flight remains in the existing TorpedoSystemResource or BlasterSystemResource."
     architecture:
@@ -39,6 +40,7 @@ entities:
     core:
       status: implemented
       confidence: confirmed
+      origin: ai
       title: Weapon Flight Restore Write Guard
       summary: "Transient exclusive restore context prevents discarded bootstrap flight vectors from becoming extra carriers. It has no saved or folded value and is restored after the roster replacement."
     architecture:

@@ -159,7 +159,39 @@ fn assert_same(live: &App, resumed: &App, step: usize) {
     );
     let left = serde_json::to_value(capture(live.world())).unwrap();
     let right = serde_json::to_value(capture(resumed.world())).unwrap();
-    assert!(left == right, "complete snapshot at {step}");
+    assert!(
+        left == right,
+        "complete snapshot at {step}: {}",
+        difference(&left, &right, "$").unwrap_or_default()
+    );
+}
+fn difference(left: &serde_json::Value, right: &serde_json::Value, path: &str) -> Option<String> {
+    use serde_json::Value;
+    if left == right {
+        return None;
+    }
+    match (left, right) {
+        (Value::Object(a), Value::Object(b)) => {
+            for key in a.keys().chain(b.keys()).collect::<BTreeSet<_>>() {
+                if let Some(diff) = difference(
+                    a.get(key).unwrap_or(&Value::Null),
+                    b.get(key).unwrap_or(&Value::Null),
+                    &format!("{path}.{key}"),
+                ) {
+                    return Some(diff);
+                }
+            }
+        }
+        (Value::Array(a), Value::Array(b)) if a.len() == b.len() => {
+            for (index, (a, b)) in a.iter().zip(b).enumerate() {
+                if let Some(diff) = difference(a, b, &format!("{path}[{index}]")) {
+                    return Some(diff);
+                }
+            }
+        }
+        _ => {}
+    }
+    Some(format!("{path}: live={left}, restored={right}"))
 }
 fn facility_ready() -> (App, Entity, String) {
     let mut app = build(false);

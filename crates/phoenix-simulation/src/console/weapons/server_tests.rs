@@ -10087,6 +10087,7 @@ fn npc_torpedo_ai_never_decides_from_the_player_ships_tubes() {
         .world_mut()
         .spawn((
             crate::server_app::Ship,
+            crate::entities::spawner::EntityUuid("armed-npc".into()),
             crate::ship::components::load_ship_config_from_disk(),
             npc_sources(),
             crate::ship_plugin::ActiveStationRatings::default(),
@@ -10125,6 +10126,7 @@ fn npc_torpedo_ai_never_decides_from_the_player_ships_tubes() {
         .world_mut()
         .spawn((
             crate::server_app::Ship,
+            crate::entities::spawner::EntityUuid("bare-npc".into()),
             crate::ship::components::load_ship_config_from_disk(),
             npc_sources(),
             crate::ship_plugin::ActiveStationRatings::default(),
@@ -11543,7 +11545,8 @@ fn spawn_shielded_target(app: &mut App, uuid: &str, x: f32, z: f32) -> Entity {
         shields.facings.iter().any(|f| f.hp > 0),
         "precondition: the default shield config must start with HP up"
     );
-    app.world_mut()
+    let entity = app
+        .world_mut()
         .spawn((
             crate::entities::spawner::EntityUuid(uuid.into()),
             crate::entities::spawner::EntitySystemHull(
@@ -11555,7 +11558,11 @@ fn spawn_shielded_target(app: &mut App, uuid: &str, x: f32, z: f32) -> Entity {
             crate::ship::shields::ShipShields(shields, 0.5),
             Transform::from_xyz(x, 0.0, z),
         ))
-        .id()
+        .id();
+    // Shield strength only protects while the actual arc can pay upkeep.
+    // Use the existing finite fixture hardware rather than a free shield.
+    attach_fixture_weapon_energy(app, entity);
+    entity
 }
 
 fn set_tactical_station_rating(app: &mut App, rating: &str) {

@@ -173,6 +173,10 @@ id = "lance"
 facing_deg = 0
 range = 320
 
+[weapons_console.blaster_banks.impact]
+damage_type = "physical"
+penetration = 20
+
 [[weapons_console.blaster_banks.ai.rule]]
 priority = 0
 channel = "blaster_fire"

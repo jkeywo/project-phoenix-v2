@@ -198,3 +198,62 @@ fresh-JSON updates across discovery/offer/acceptance/physical checkpoints. Measu
 search cost separately from human workload. Full 23, captured-vessel search, concurrent
 admission/pacing, planetary scope, catalogue coverage and human 2/4/6/8 acceptance
 remain open until their actual consumers and evidence land.
+
+
+Generated Promise IDs use the reserved `opportunity.<source>.<ordinal>` namespace.
+Authoring validation rejects literal script attempts to record it and runtime
+script admission rejects computed attempts before buffering ledger changes;
+raising discards the whole call. Only the World collector records such a Promise
+from an exact validated proposal tuple in its atomic admission. Existing unrelated
+script Promise IDs and authored keep/break consequences retain their semantics.
+
+Ordinary AI must receive accepted future work and its unsatisfied prerequisites
+through its own Console before the autonomous Delivery-to-Repair consumer closes.
+That informational intent must prevent other ordinary teams from independently
+consuming the same planned work, without reserving a Job or resources early.
+Human override remains normal admission; inapplicable frozen work needs an explicit
+blocked/cancelled/externally-changed result, never retroactive credit. The first
+implementation/proof may use Human-issued released work and ordinary AI continuation;
+full autonomous execution and override settlement remain an open follow-on slice.
+
+## Initial maintenance consumer checkpoint
+
+The first implementation uses the accepted `opportunity_search` source and real
+imported Repair/Delivery primitives, finite own maintenance projection, frozen
+optional records, ordinary offered Comms and atomic existing Promise/Situation
+admission. The existing Scenario inspection explains the retained observations,
+search steps, decisions and release clocks. Workshop edits the accepted World and
+operator-library documents through its existing history, Preview and Test path;
+this slice does not add a separate visual opportunity form.
+
+`tests/optional_maintenance_continuation.rs` authors an owner-level physical
+incident and consumes existing local parts to create a genuine missing-resource
+case. It waits for an ordinary System report, answers the exact own-Comms offer,
+issues only released delivery/repair through normal Human admission, then delegates
+actual partial paid work and compares complete fresh-JSON state/digests for 1200
+updates. A separate decline creates no promise or jobs. Frozen source, report clock,
+namespace and missing-leaf mutations must refuse without writes. These native tests
+are authored and pending the integration owner's run; source review is separate.
+The incident is not a weapon/GM or authored-encounter acceptance result.
+
+Targeted executed JavaScript evidence: Scenario activity inspection 5 tests pass;
+strict string validation reports 6271 IDs, zero errors/warnings. Native compilation,
+actual host execution, compatibility epochs and integrated gates remain with the
+integration owner. Future-AI prerequisite intent and Human-override outcomes remain
+open before autonomous delivery and repair can be claimed. Continuing modes, pacing,
+capture chains, planetary/catalogue coverage and human crew acceptance remain open.
+
+
+### Offer presentation failure closure
+
+An Offered record must have exactly one immutable pending-open or active dialogue
+binding at a capture frontier. Deferral for the existing script budget retains the
+same pending open. A validated internal root that finally fails to load/resolve,
+refuses, returns invalid shape or produces no dialogue records a closed
+source-unavailable outcome at its actual tick; it fabricates no Human decision and
+creates no Promise. Its buffered effects are discarded. This retained outcome
+unblocks later bounded discovery and explains why this exact offer is unavailable.
+A bound on_pick must return the closed Accept/Decline decision: a missing decision
+or absent node refuses before effects or response selection, leaving the actual
+offer answerable. Historical preflight checks exact source/ref/actor/clocks and
+reserved promise absence, including an empty optional-record history.

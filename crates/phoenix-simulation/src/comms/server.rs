@@ -769,8 +769,12 @@ pub(crate) fn information_endpoint_available(
     controls: &crate::ship_plugin::ShipSystemControlSources,
     modifiers: Option<&crate::modifiers::ShipModifiers>,
 ) -> bool {
-    if modifiers
-        .is_some_and(|modifiers| modifiers.has_flag(&crate::core::messages::FlagKind::CommsJammed))
+    if phoenix_sim_gameplay::regions::interference::endpoint_factor(
+        modifiers.is_some_and(|modifiers| {
+            modifiers.has_flag(&crate::core::messages::FlagKind::CommsJammed)
+        }),
+        0.0,
+    ) == 0.0
     {
         return false;
     }

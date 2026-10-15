@@ -316,3 +316,49 @@ fn radio_inbox_and_paid_reserves_continue_after_json_and_malformed_copies_do_not
 
 #[path = "request_tests.rs"]
 mod request_tests;
+
+#[test]
+fn existing_environmental_jam_keeps_exact_radio_denial_payment_and_recovery() {
+    use crate::core::messages::{FlagKind, ModifierSource};
+    for jam_source in [false, true] {
+        let (mut app, source, receiver) = fixture(10.0);
+        let jammed = if jam_source { source } else { receiver };
+        let owner = SystemId("comms".into());
+        let energy = |world: &World| {
+            world
+                .get::<ShipPowerSystem>(jammed)
+                .unwrap()
+                .0
+                .network()
+                .consumers[&owner]
+                .energy
+        };
+        let before = energy(app.world());
+        let natural = ModifierSource::RegionEffect {
+            uuid: uuid::Uuid::from_u128(17001),
+        };
+        app.world_mut()
+            .get_mut::<crate::modifiers::ShipModifiers>(jammed)
+            .unwrap()
+            .add_flag(natural.clone(), FlagKind::CommsJammed);
+        app.world_mut().run_system_once(tick_radio).unwrap();
+        assert_eq!(
+            energy(app.world()),
+            before,
+            "legacy denied endpoint does no listening or transmission work"
+        );
+        assert_eq!(messages(&app, "source").len(), usize::from(!jam_source));
+        assert!(messages(&app, "receiver").is_empty());
+        app.world_mut()
+            .get_mut::<crate::modifiers::ShipModifiers>(jammed)
+            .unwrap()
+            .remove_flag(natural, FlagKind::CommsJammed);
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+        app.world_mut().run_system_once(tick_radio).unwrap();
+        assert_eq!(messages(&app, "receiver").len(), 1);
+        assert!(
+            energy(app.world()) < before,
+            "recovery resumes ordinary paid operation"
+        );
+    }
+}

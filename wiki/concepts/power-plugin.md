@@ -15,6 +15,11 @@ Incoming flow fills reserves; actual machinery spends them. Fullness-dependent
 loss, gross charging/depletion heat and thermal trip/recovery live in that owner.
 There is no allocation-to-speed/damage multiplier or ship-wide exhaustion lock.
 
+Battery-only equipment uses the same network with explicitly zero sustainable
+generation. Positive intake capacity cannot supply energy without actual incoming
+flow. [battery_probe.toml](../../assets/entities/battery_probe.toml) exercises finite ordinary sensing and
+retained history through exhaustion, without a separate deployable power owner.
+
 Gameplay's `resources/energy_network.rs` resolves nested flow/cooling budgets,
 manual whole-flow cuts, restoration holds and Minimal priority allocation. Rank
 zero is first; shared resources respect ancestor rank before fine sibling rank.

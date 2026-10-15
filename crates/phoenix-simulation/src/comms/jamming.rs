@@ -523,12 +523,21 @@ pub(crate) fn register(app: &mut App) {
         app.add_plugins(crate::weapons::mounts::MountsPlugin);
     }
     crate::ai::cadence::register_ai_cadence(app);
-    for payload in [Payload::SetJammingTarget, Payload::SetJammingEnabled] {
+    for (payload, feedback) in [
+        (
+            Payload::SetJammingTarget,
+            &[Payload::SetJammingTarget] as &'static [_],
+        ),
+        (
+            Payload::SetJammingEnabled,
+            &[Payload::SetJammingEnabled] as &'static [_],
+        ),
+    ] {
         app.register_admitted_consumer(
             ConsumerMatcher::kind_payload(crate::ship::system_registry::JAMMING_KIND, payload)
                 .with_feedback(
                     crate::command_admission::FeedbackAddress::DeclaredKindOnly,
-                    &[payload],
+                    feedback,
                 ),
         );
     }

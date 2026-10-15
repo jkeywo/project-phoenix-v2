@@ -443,7 +443,8 @@ use super::*;
 // 58 includes emitter command channels and frozen receiver illumination opt-in.
 // 59 retains typed Comms requests, actual-ship response ownership and partial reading.
 // 60 retains real activity outcomes/situations and explicit bootstrap slot provenance.
-pub const SNAPSHOT_FORMAT: u32 = 60;
+// 61 retains independent jammer command intent; paid current influence is derived.
+pub const SNAPSHOT_FORMAT: u32 = 61;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -563,7 +564,9 @@ pub const SNAPSHOT_FORMAT: u32 = 60;
 /// owner, matching the retained transform and runtime-spawn convention.
 /// "0.39" compares acquired shield rays against their published position
 /// uncertainty, retaining current/fresh/evidence-only weapon decisions.
-pub const SIMULATION_RULES: &str = "0.39";
+/// "0.40" settles paid jammer influence before Input hails and shares that
+/// actual current-step result with radio, receipts and observation links.
+pub const SIMULATION_RULES: &str = "0.40";
 
 /// The authored data, computed rather than remembered.
 ///

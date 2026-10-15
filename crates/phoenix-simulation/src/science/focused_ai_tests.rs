@@ -19,7 +19,9 @@ fn rig(shared: bool, withhold: bool) -> (App, Entity, String) {
             .find(|console| console.id.0 == "engineering")
             .unwrap()
             .feeds
-            .retain(|feed| feed.kind != phoenix_model::console::ConsoleObservationKind::SensorRadar);
+            .retain(|feed| {
+                feed.kind != phoenix_model::console::ConsoleObservationKind::SensorRadar
+            });
     }
     if withhold {
         let ai = config
@@ -128,7 +130,7 @@ fn extra_focused_controller_uses_only_its_permitted_picture_and_never_steps_boun
             assert_eq!(commands.len(), 1);
             assert_eq!(commands[0].target, owner);
             assert!(
-                matches!(&commands[0].payload,SystemControlPayload::ScanTarget{uuid} if uuid==&alias)
+                matches!(&commands[0].payload,SystemControlPayload::ScanTarget{uuid, .. } if uuid==&alias)
             );
         } else {
             assert!(commands.is_empty(),"co-hosting or a private current association cannot grant missing Console observations");

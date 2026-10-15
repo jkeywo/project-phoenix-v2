@@ -1361,7 +1361,7 @@ describe('scan_target', () => {
     expect(send).toHaveBeenCalledWith('ControlSystemCorrelated', {
       correlation: 'scan-1',
       target: 'focus-array',
-      payload: { type: 'ScanTarget', data: { uuid: 'depot-1' } },
+      payload: { type: 'ScanTarget', data: { uuid: 'depot-1', aim:'general', intrusive:false } },
     });
   });
 
@@ -1376,7 +1376,7 @@ describe('scan_target', () => {
     ACTION_MAP.scan_target({ action: 'scan_target', control_system_id: 'focus-array', uuid: 'depot-1' }, send);
     expect(send).toHaveBeenCalledWith('ControlSystem', {
       target: 'focus-array',
-      payload: { type: 'ScanTarget', data: { uuid: 'depot-1' } },
+      payload: { type: 'ScanTarget', data: { uuid: 'depot-1', aim:'general', intrusive:false } },
     });
   });
 });

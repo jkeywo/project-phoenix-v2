@@ -1,5 +1,71 @@
 use super::*;
 
+#[test]
+fn environmental_question_does_not_invent_structural_or_bulk_answers_and_keeps_range_gates() {
+    use phoenix_model::focused_enquiry::*;
+    let mut subject = depot(0.9);
+    subject.condition = None;
+    let quantities = vec![ScanQuantity {
+        kind: ScanQuantityKind::FieldExposure,
+        label: "component.scan.quantity.field_exposure".into(),
+        value: ScanQuantityValue::Scalar {
+            value: 0.4,
+            step: 0.1,
+        },
+    }];
+    let reading = derive_enquiry(
+        &suite(),
+        &subject,
+        &at(100.0),
+        FocusedAim::Environment,
+        false,
+        quantities.clone(),
+        17,
+    )
+    .unwrap();
+    assert_eq!(reading.condition_fraction, None);
+    assert_eq!(reading.condition_step, None);
+    assert_eq!(reading.mass, None);
+    assert_eq!(reading.quantities, quantities);
+    assert!(reading.flags.is_empty() && reading.capacities.is_empty() && reading.debris.is_none());
+    assert_eq!(
+        derive_enquiry(
+            &suite(),
+            &subject,
+            &at(10000.0),
+            FocusedAim::Environment,
+            false,
+            quantities.clone(),
+            18
+        ),
+        Err(ScanRefusal::OutOfRange)
+    );
+    assert_eq!(
+        derive_enquiry(
+            &suite(),
+            &subject,
+            &at(100.0),
+            FocusedAim::General,
+            true,
+            quantities.clone(),
+            18
+        ),
+        Err(ScanRefusal::NoReadableCondition)
+    );
+    assert_eq!(
+        derive_enquiry(
+            &suite(),
+            &subject,
+            &at(100.0),
+            FocusedAim::Resources,
+            true,
+            quantities,
+            18
+        ),
+        Err(ScanRefusal::NoReadableCondition)
+    );
+}
+
 /// The mirror flag's spelling is a **contract with scenario authors** —
 /// `falling_skyway.toml` and `probe_scandiff.toml` write
 /// `on_flag_set("scan.depot_ladder_b.taken", …)` against it — so it is
@@ -102,10 +168,11 @@ fn moving_the_subjects_condition_moves_the_reading_with_no_other_input_changed()
     let before = derive(&config, &depot(0.82), &at(100.0), 10).expect("a reading");
     let after = derive(&config, &depot(0.31), &at(100.0), 20).expect("a reading");
 
-    assert_eq!(before.condition_fraction, 0.82);
-    assert_eq!(after.condition_fraction, 0.31);
+    assert_eq!(before.condition_fraction.unwrap(), 0.82);
+    assert_eq!(after.condition_fraction.unwrap(), 0.31);
     assert_ne!(
-        before.condition_fraction, after.condition_fraction,
+        before.condition_fraction.unwrap(),
+        after.condition_fraction.unwrap(),
         "the readout is a derivation of the track, not a string chosen for it"
     );
     assert_eq!(
@@ -125,12 +192,13 @@ fn a_distant_scan_reads_coarser_than_a_close_one_off_the_authored_bands() {
     let far = derive(&config, &depot(0.37), &at(2_400.0), 1).expect("a reading");
 
     assert_eq!(close.band, "detailed");
-    assert_eq!(close.condition_fraction, 0.37);
+    assert_eq!(close.condition_fraction.unwrap(), 0.37);
     assert_eq!(close.capacities.len(), 1);
 
     assert_eq!(far.band, "coarse");
     assert_eq!(
-        far.condition_fraction, 0.25,
+        far.condition_fraction.unwrap(),
+        0.25,
         "0.37 rounded to the coarse band's authored quarter-steps"
     );
     assert!(
@@ -143,7 +211,11 @@ fn a_distant_scan_reads_coarser_than_a_close_one_off_the_authored_bands() {
         1,
         "…while the flags it DOES author still come through"
     );
-    assert_eq!(far.condition_step, 0.25, "and it says how precise it is");
+    assert_eq!(
+        far.condition_step.unwrap(),
+        0.25,
+        "and it says how precise it is"
+    );
 }
 
 /// Issue #1154: mass is content identity, not a live measurement, so
@@ -156,9 +228,10 @@ fn mass_rides_through_the_reading_unrounded_at_every_fidelity() {
     let close = derive(&config, &depot(0.37), &at(400.0), 1).expect("a reading");
     let far = derive(&config, &depot(0.37), &at(2_400.0), 1).expect("a reading");
 
-    assert_eq!(close.mass, 180_000.0);
+    assert_eq!(close.mass.unwrap(), 180_000.0);
     assert_eq!(
-        far.mass, 180_000.0,
+        far.mass.unwrap(),
+        180_000.0,
         "mass does not get coarser with range the way condition_fraction does"
     );
 }
@@ -225,7 +298,8 @@ fn the_bulk_class_is_the_same_answer_from_any_band() {
     let far = derive(&config, &depot(0.37), &at(2_400.0), 1).expect("a reading");
     assert_eq!(close.mass_class, far.mass_class);
     assert_ne!(
-        close.condition_step, far.condition_step,
+        close.condition_step.unwrap(),
+        far.condition_step.unwrap(),
         "…while the fidelity that DOES coarsen still did"
     );
 }
@@ -437,7 +511,7 @@ fn standing_in_an_authored_interference_effect_drops_the_reading_a_band() {
         reading.band, "coarse",
         "inside the fog the close-range scan reads out at the next band down"
     );
-    assert_eq!(reading.condition_fraction, 0.25);
+    assert_eq!(reading.condition_fraction.unwrap(), 0.25);
 
     let mut irrelevant = at(100.0);
     irrelevant.region_effects = vec![RegionEffectName::SlowZone];

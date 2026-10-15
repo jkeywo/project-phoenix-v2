@@ -2210,7 +2210,7 @@ describe('buildSensorsConsoleState', () => {
     const s = buildSensorsConsoleState({
       blackboards: { 'scan/7:sensors': { owner:'sensors', capable: true, reading, refusal: null } },
     });
-    expect(s.scans).toEqual([{ system_id: 'sensors', controllable: false, history: [], focused: null, observation_tick: null, capable: true, reading, refusal: null }]);
+    expect(s.scans).toEqual([{ system_id: 'sensors', controllable: false, history: [], focused: null, default_aim:'general', aims:[], observation_tick: null, capable: true, reading, refusal: null }]);
   });
 
   it('reports a hull with no scan channel as having no survey suite', () => {

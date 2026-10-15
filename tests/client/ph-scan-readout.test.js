@@ -176,7 +176,7 @@ describe('PhScanReadout', () => {
     button(el).click();
     expect(window.activateSemanticAction).toHaveBeenCalledWith('sensors.scan', {
       source: 'control',
-      detail: { uuid: '00000000-0000-8000-8000-000000000042', system_id: 'focus-array' },
+      detail: { uuid: '00000000-0000-8000-8000-000000000042', system_id: 'focus-array', aim:'general', intrusive:false },
     });
   });
 
@@ -365,5 +365,34 @@ describe('conditional recorded-reading forecasts', () => {
     expect(el.shadowRoot.querySelector('.forecast')).toBeNull();
     el.state = panelState({ scans: [{ system_id: 'different-instrument', capable: true, reading: DETAILED }] });
     expect(el.shadowRoot.querySelector('.forecast')).toBeNull();
+  });
+});
+
+describe('focused questions and permitted quantities', () => {
+  it('shows an environmental reading without inventing condition or mass', () => {
+    const el=setup();
+    el.state=panelState({scans:[{system_id:'focus-array',capable:true,controllable:true,reading:{...DETAILED,
+      aim:'environment',condition_fraction:null,condition_step:null,mass:null,flags:[],capacities:[],
+      quantities:[{kind:'field_exposure',label:'component.scan.quantity.field_exposure',value:{kind:'scalar',value:{value:0.25,step:0.1}}}],
+    }}]});
+    expect(rows(el)).toEqual([[t('component.scan.quantity.field_exposure'),'0.25±0.05']]);
+    expect(el.shadowRoot.textContent).not.toContain('250000');
+  });
+  it('keeps question selection on the actual owner and only offers supported intrusive work', () => {
+    const el=setup(); window.activateSemanticAction=vi.fn();
+    const scan={system_id:'focus-array',capable:true,controllable:true,default_aim:'environment',aims:[
+      {aim:'general',intrusive:false},{aim:'environment',intrusive:false},{aim:'resources',intrusive:true},
+    ]};
+    el.state=panelState({scans:[scan]});
+    const aim=el.shadowRoot.getElementById('aim');
+    expect(aim.value).toBe('environment');
+    expect(el.shadowRoot.getElementById('intrusive-label').hidden).toBe(true);
+    aim.value='resources'; aim.dispatchEvent(new Event('change'));
+    const intrusive=el.shadowRoot.getElementById('intrusive'); intrusive.checked=true;
+    button(el).click();
+    expect(window.activateSemanticAction).toHaveBeenLastCalledWith('sensors.scan',expect.objectContaining({detail:{uuid:DETAILED.subject_uuid,system_id:'focus-array',aim:'resources',intrusive:true}}));
+    el.state=panelState({scans:[{...scan,controllable:false}]}); button(el).click();
+    expect(window.activateSemanticAction).toHaveBeenCalledTimes(1);
+    expect(aim.disabled).toBe(true);
   });
 });

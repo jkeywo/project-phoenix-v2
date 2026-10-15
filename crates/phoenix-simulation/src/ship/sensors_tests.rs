@@ -952,6 +952,8 @@ fn scan_suite(max_range: f32) -> crate::science::server::ShipScanRecord {
             },
             policy: phoenix_model::sensing::FocusedConfig {
                 reading_ticks: 0,
+                default_aim: Default::default(),
+                aims: Vec::new(),
                 system: SystemId("sensors".into()),
                 work_secs: 1.0,
                 history_limit: 32,
@@ -1390,7 +1392,9 @@ fn ai_sensors_emits_admitted_scan_and_retries_without_a_range_precheck() {
     assert_eq!(
         admitted_sensors_payloads(&mut app),
         vec![SystemControlPayload::ScanTarget {
-            uuid: named_uuid.into()
+            uuid: named_uuid.into(),
+            aim: Default::default(),
+            intrusive: false
         }],
         "EntityName fallback must resolve and admission must retain the exact human ScanTarget"
     );
@@ -1416,7 +1420,9 @@ fn ai_sensors_emits_admitted_scan_and_retries_without_a_range_precheck() {
     assert_eq!(
         admitted_sensors_payloads(&mut app).last(),
         Some(&SystemControlPayload::ScanTarget {
-            uuid: raw_uuid.into()
+            uuid: raw_uuid.into(),
+            aim: Default::default(),
+            intrusive: false
         })
     );
 }
@@ -2610,7 +2616,7 @@ fn spawn_debris_at(
 fn scanned_this_tick(app: &mut App, uuid: &str) -> bool {
     admitted_sensors_payloads(app)
         .iter()
-        .any(|p| matches!(p, SystemControlPayload::ScanTarget { uuid: u } if u == uuid))
+        .any(|p| matches!(p, SystemControlPayload::ScanTarget { uuid: u, .. } if u == uuid))
 }
 
 #[test]
@@ -2767,7 +2773,7 @@ fn backfilled_sensors_leaves_a_struck_hazard_alone() {
 fn scans_asked_for(app: &mut App, uuid: &str) -> usize {
     admitted_sensors_payloads(app)
         .iter()
-        .filter(|p| matches!(p, SystemControlPayload::ScanTarget { uuid: u } if u == uuid))
+        .filter(|p| matches!(p, SystemControlPayload::ScanTarget { uuid: u, .. } if u == uuid))
         .count()
 }
 

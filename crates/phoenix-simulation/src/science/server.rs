@@ -80,7 +80,7 @@ use crate::infrastructure::InfrastructureCondition;
 use crate::logging::LogFilterConfig;
 use crate::regions::effects::RegionEffectName;
 use crate::science::scan::{
-    derive, scanned_flag, ScanConditions, ScanConfig, ScanReading, ScanRefusal, ScanSubject,
+    scanned_flag, ScanConditions, ScanConfig, ScanReading, ScanRefusal, ScanSubject,
 };
 use crate::ship::power::ShipPowerSystem;
 use crate::world::content::WorldEvent;
@@ -198,6 +198,11 @@ pub struct SciencePlugin;
 
 impl Plugin for SciencePlugin {
     fn build(&self, app: &mut App) {
+        use crate::authoritative::{DeclareState, StateClass};
+        app.declare_state::<super::enquiry::EnquirySubject>(
+            StateClass::Derived,
+            "focused-subject-observation-policy",
+        );
         super::focused_ai::register(app);
         super::passive::register(app);
         super::broad::register(app);
@@ -239,6 +244,7 @@ pub fn tick_scans(
     time: Option<Res<Time>>,
     fixed: Option<Res<Time<Fixed>>>,
     paths: crate::regions::signal_path::RegionSignalQuery,
+    enquiries: super::enquiry::EnquiryScene,
     mut runtime: Option<ResMut<WorldContentRuntime>>,
     membership: Option<Res<crate::regions::server::RegionMembership>>,
     mut ships: Query<
@@ -341,7 +347,7 @@ pub fn tick_scans(
                     &mut outbound,
                     ActionFeedbackOutcome::Refused,
                 );
-                if let SystemControlPayload::ScanTarget { uuid } = &command.payload {
+                if let SystemControlPayload::ScanTarget { uuid, .. } = &command.payload {
                     push_scan_lifecycle(
                         lifecycle.as_deref_mut(),
                         &TaskSlot::new(operator_uuid.clone(), &command.target.0, TASK_VERB_SCAN),
@@ -385,7 +391,7 @@ pub fn tick_scans(
                 if matches!(cmd.payload, SystemControlPayload::CancelFocusedScan) {
                     if let Some(work) = record.focused.take() {
                         if policy.unfinished_retention_secs > 0.0 {
-                            record.unfinished.insert(work.subject.clone(), work);
+                            record.unfinished.insert(work.key(), work);
                         }
                         if let Some(queue) = lifecycle.as_deref_mut() {
                             queue.0.push(TaskLifecycleRequest::End {
@@ -401,7 +407,22 @@ pub fn tick_scans(
                     );
                     continue;
                 }
-                let SystemControlPayload::ScanTarget { uuid } = &cmd.payload else {
+                let SystemControlPayload::ScanTarget {
+                    uuid,
+                    aim,
+                    intrusive,
+                } = &cmd.payload
+                else {
+                    continue;
+                };
+                let Some((work_secs, _)) = policy.aim_cost(*aim, *intrusive) else {
+                    crate::command_admission::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        ActionFeedbackOutcome::Refused,
+                    );
+                    record.refusal = Some(ScanRefusal::NotCapable);
+                    record.last = None;
                     continue;
                 };
                 let presentation_id = uuid.clone();
@@ -428,7 +449,10 @@ pub fn tick_scans(
                 };
                 let uuid = &actual;
                 if record.focused.as_ref().is_none_or(|work| {
-                    &work.subject != uuid || work.presentation_id != presentation_id
+                    &work.subject != uuid
+                        || work.presentation_id != presentation_id
+                        || work.aim != *aim
+                        || work.intrusive != *intrusive
                 }) {
                     if let Some(queue) = lifecycle.as_deref_mut() {
                         if record.focused.is_some() {
@@ -447,7 +471,7 @@ pub fn tick_scans(
                         .take()
                         .filter(|_| policy.unfinished_retention_secs > 0.0)
                     {
-                        record.unfinished.insert(previous.subject.clone(), previous);
+                        record.unfinished.insert(previous.key(), previous);
                     }
                     while record.unfinished.len() > usize::from(policy.history_limit) {
                         let oldest = record
@@ -458,12 +482,19 @@ pub fn tick_scans(
                             .expect("nonempty retained enquiries");
                         record.unfinished.remove(&oldest);
                     }
-                    let resumed = record.unfinished.remove(uuid);
+                    let resumed = record
+                        .unfinished
+                        .remove(&super::focused::FocusedWork::key_for(
+                            uuid, *aim, *intrusive,
+                        ));
                     record.focused = Some(resumed.unwrap_or_else(|| super::focused::FocusedWork {
+                        aim: *aim,
+                        intrusive: *intrusive,
+                        paid_started_tick: None,
                         subject: uuid.clone(),
                         presentation_id: presentation_id.clone(),
                         progress: 0.0,
-                        work_secs: policy.work_secs,
+                        work_secs,
                         started_tick: now_tick,
                         last_valid_tick: now_tick,
                         last_tick: now_tick,
@@ -499,6 +530,8 @@ pub fn tick_scans(
                 target: policy.system.clone(),
                 payload: SystemControlPayload::ScanTarget {
                     uuid: work.subject.clone(),
+                    aim: work.aim,
+                    intrusive: work.intrusive,
                 },
                 response_token: None,
                 feedback_correlation: None,
@@ -510,7 +543,10 @@ pub fn tick_scans(
             let ship_pos = transform.translation;
 
             for cmd in [&continuation] {
-                let SystemControlPayload::ScanTarget { uuid: target_uuid } = &cmd.payload else {
+                let SystemControlPayload::ScanTarget {
+                    uuid: target_uuid, ..
+                } = &cmd.payload
+                else {
                     continue;
                 };
                 let permitted = record.focused.as_ref().and_then(|work| {
@@ -587,7 +623,40 @@ pub fn tick_scans(
                     region_effects: effects.clone(),
                 };
 
-                let reading = derive(&record.config, &subject, &conditions, now_tick);
+                let work = record.focused.as_ref().expect("active enquiry");
+                let observed = config.zip(boards).and_then(|(config, boards)| {
+                    let view = config.0.observations_for_system(owner, &boards.0);
+                    let mut keys: Vec<_> = boards.0.keys().collect();
+                    keys.sort();
+                    keys.into_iter()
+                        .filter_map(|key| view.get(key))
+                        .filter_map(super::contact_routing::observations)
+                        .flatten()
+                        .find(|track| {
+                            track.contact_id == work.presentation_id
+                                && !track.predicted
+                                && track.selectable
+                        })
+                        .map(|track| Vec3::new(track.position[0], 0.0, track.position[1]))
+                });
+                let quantities = enquiries.sample(
+                    target_uuid,
+                    work.aim,
+                    work.intrusive,
+                    ship_pos,
+                    observed,
+                    now_tick,
+                    dt,
+                );
+                let reading = phoenix_sim_gameplay::science::scan::derive_enquiry(
+                    &record.config,
+                    &subject,
+                    &conditions,
+                    work.aim,
+                    work.intrusive,
+                    quantities,
+                    now_tick,
+                );
                 match reading {
                     Ok(mut reading) => {
                         let work = record.focused.as_mut().expect("active enquiry");
@@ -608,13 +677,17 @@ pub fn tick_scans(
                             power
                                 .as_deref_mut()
                                 .and_then(|power| {
-                                    power.0.work_continuous(&policy.system, budget, 1.0).ok()
+                                    let (_, cost) = policy.aim_cost(work.aim, work.intrusive)?;
+                                    power.0.work_continuous(&policy.system, budget, cost).ok()
                                 })
                                 .map_or(0.0, |grant| grant.fraction * factor)
                         } else {
                             0.0
                         };
                         if paid > 0.0 {
+                            if work.paid_started_tick.is_none() {
+                                work.paid_started_tick = Some(now_tick);
+                            }
                             work.progress = (work.progress + budget * paid).min(work.work_secs);
                             work.last_valid_tick = now_tick;
                             work.waiting.clear();
@@ -981,6 +1054,25 @@ pub fn publish_scan_blackboard(
     for (observer, records, mut blackboards) in ships.iter_mut() {
         for (owner, record) in &records.0 {
             let blackboard = SystemBlackboard::Scan(ScanBlackboard {
+                default_aim: record.policy.default_aim,
+                aims: {
+                    let mut aims = record.policy.aims.clone();
+                    if !aims
+                        .iter()
+                        .any(|row| row.aim == phoenix_model::focused_enquiry::FocusedAim::General)
+                    {
+                        aims.insert(
+                            0,
+                            phoenix_model::focused_enquiry::FocusedAimConfig {
+                                aim: Default::default(),
+                                work_multiplier: 1.0,
+                                resource_multiplier: 1.0,
+                                intrusive: false,
+                            },
+                        );
+                    }
+                    aims
+                },
                 owner: Some(owner.clone()),
                 history: record
                     .history
@@ -1003,6 +1095,8 @@ pub fn publish_scan_blackboard(
                     .collect(),
                 focused: record.focused.as_ref().map(|work| {
                     crate::core::messages::FocusedScanSnapshot {
+                        aim: work.aim,
+                        intrusive: work.intrusive,
                         subject: work.presentation_id.clone(),
                         progress: ((work.progress / work.work_secs).clamp(0.0, 1.0) * 1000.0)
                             as u16,

@@ -217,6 +217,17 @@ describe('Sensors authority-preserving adapters', () => {
     expect(sendAction).toHaveBeenCalledTimes(1);
   });
 
+  it('refuses unsupported questions, forged intrusive modes and another instrument owner', () => {
+    const sendAction=vi.fn();
+    const registry=sensorRegistry({getState:()=>keyedState({sensors:{target_uuid:'selected',blips:[{uuid:'selected'}],scans:[{system_id:'focus-array',capable:true,controllable:true,aims:[{aim:'environment',intrusive:false}]}]}}),sendAction});
+    for (const detail of [{aim:'resources'},{aim:'environment',intrusive:true},{aim:'environment',system_id:'other'}]) {
+      expect(activate(registry,SENSORS_SCAN_ACTION_ID,'science',detail)).toMatchObject({handled:false});
+    }
+    expect(sendAction).not.toHaveBeenCalled();
+    expect(activate(registry,SENSORS_SCAN_ACTION_ID,'science',{aim:'environment'})).toMatchObject({handled:true});
+    expect(sendAction).toHaveBeenCalledWith('scan_target',expect.objectContaining({uuid:'selected',control_system_id:'focus-array',aim:'environment',intrusive:false}));
+  });
+
   it('withholds controls when the actual focused owner is delegated', () => {
     const sendAction = vi.fn();
     const registry = sensorRegistry({

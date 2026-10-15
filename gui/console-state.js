@@ -1968,6 +1968,8 @@ function scansPayload(state, systemIds = []) {
       reading: bb.reading ?? null,
       history: Array.isArray(bb.history) ? bb.history : [],
       focused: bb.focused ?? null,
+      default_aim: bb.default_aim ?? 'general',
+      aims: Array.isArray(bb.aims) ? bb.aims : [],
       refusal: bb.refusal ?? null,
     };
   });

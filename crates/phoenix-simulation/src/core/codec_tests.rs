@@ -2727,6 +2727,8 @@ fn scan_target_control_system_round_trips() {
         target: SystemId(crate::ship::system_registry::SENSORS_SYSTEM_ID.into()),
         payload: SystemControlPayload::ScanTarget {
             uuid: "00000000-0000-8000-8000-000000000042".into(),
+            aim: Default::default(),
+            intrusive: false,
         },
     };
     assert_client_roundtrip(msg.clone());
@@ -2734,7 +2736,7 @@ fn scan_target_control_system_round_trips() {
     let encoded = JsonCodec.encode_client(&msg).unwrap();
     assert_eq!(
         encoded,
-        r#"{"type":"ControlSystem","data":{"target":"sensors","payload":{"type":"ScanTarget","data":{"uuid":"00000000-0000-8000-8000-000000000042"}}}}"#,
+        r#"{"type":"ControlSystem","data":{"target":"sensors","payload":{"type":"ScanTarget","data":{"uuid":"00000000-0000-8000-8000-000000000042","aim":"general","intrusive":false}}}}"#,
         "ScanTarget wire shape must stay pinned"
     );
 }
@@ -3271,6 +3273,9 @@ fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() 
     use std::collections::BTreeSet;
 
     let reading = ScanReadingSnapshot {
+        aim: Default::default(),
+        intrusive: false,
+        quantities: Vec::new(),
         forecast: None,
         observation: None,
         subject_uuid: "00000000-0000-8000-8000-000000000042".into(),
@@ -3278,9 +3283,9 @@ fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() 
         band: "detailed".into(),
         band_label: "entity.alliance_destroyer.scan.band.detailed.label".into(),
         taken_at_tick: 900,
-        condition_fraction: 0.31,
-        condition_step: 0.01,
-        mass: 250_000.0,
+        condition_fraction: Some(0.31),
+        condition_step: Some(0.01),
+        mass: Some(250_000.0),
         mass_class: String::new(),
         mass_class_label: String::new(),
         debris: None,
@@ -3298,6 +3303,9 @@ fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() 
             .map(String::as_str)
             .collect::<BTreeSet<&str>>(),
         BTreeSet::from([
+            "aim",
+            "intrusive",
+            "quantities",
             "subject_uuid",
             "subject_name",
             "band",
@@ -3376,6 +3384,9 @@ fn a_debris_reading_carries_a_projection_and_still_no_prose() {
     use std::collections::BTreeSet;
 
     let reading = ScanReadingSnapshot {
+        aim: Default::default(),
+        intrusive: false,
+        quantities: Vec::new(),
         forecast: None,
         observation: None,
         subject_uuid: "00000000-0000-8000-8000-000000000077".into(),
@@ -3383,9 +3394,9 @@ fn a_debris_reading_carries_a_projection_and_still_no_prose() {
         band: "detailed".into(),
         band_label: "entity.alliance_destroyer.scan.band.detailed.label".into(),
         taken_at_tick: 1200,
-        condition_fraction: 1.0,
-        condition_step: 0.01,
-        mass: 4_200.0,
+        condition_fraction: Some(1.0),
+        condition_step: Some(0.01),
+        mass: Some(4_200.0),
         mass_class: "medium".into(),
         mass_class_label: "entity.alliance_destroyer.scan.mass_class.medium.label".into(),
         debris: Some(crate::debris::DebrisAssessment {

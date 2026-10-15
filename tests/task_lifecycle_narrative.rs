@@ -163,6 +163,8 @@ fn ask_for_scan(app: &mut App, uuid: &str) {
         project_phoenix::ship::system_registry::sensors_system_id(),
         SystemControlPayload::ScanTarget {
             uuid: uuid.to_string(),
+            aim: Default::default(),
+            intrusive: false,
         },
     );
 }

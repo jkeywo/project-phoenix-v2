@@ -154,6 +154,8 @@ fn instrument_profile() -> SensingConfig {
         },
         focused: vec![FocusedConfig {
             reading_ticks: 0,
+            default_aim: Default::default(),
+            aims: Vec::new(),
             system: crate::core::messages::SystemId("sensors".into()),
             work_secs: 2.0,
             history_limit: 64,

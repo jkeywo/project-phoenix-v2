@@ -115,6 +115,8 @@ export class PhScanReadout extends PhElement {
   <div class="heading" id="heading"></div>
   <label id="instrument-label" for="instrument"><span id="instrument-text"></span><select id="instrument"></select></label>
   <label id="history-label" for="history"><span id="history-text"></span><select id="history"></select></label>
+  <label id="aim-label" for="aim"><span id="aim-text"></span><select id="aim"></select></label>
+  <label id="intrusive-label" hidden><input id="intrusive" type="checkbox"><span id="intrusive-text"></span></label>
   <div id="progress" role="status"></div>
   <button id="cancel" type="button" hidden></button>
   <div id="body"></div>
@@ -133,6 +135,10 @@ export class PhScanReadout extends PhElement {
     });
     this.$('instrument').addEventListener('keydown', event => event.stopPropagation());
     this.$('history-text').textContent = t('component.scan.history');
+    this.$('aim-text').textContent = t('component.scan.aim');
+    this.$('intrusive-text').textContent = t('component.scan.intrusive');
+    this.$('aim').addEventListener('change', () => { this.$('intrusive').checked = false; this.render(this.state); });
+    this.$('aim').addEventListener('keydown', event => event.stopPropagation());
     this.$('cancel').textContent = t('component.scan.cancel');
     this.$('history').addEventListener('change', () => this.render(this.state));
     this.$('history').addEventListener('keydown', event => event.stopPropagation());
@@ -152,7 +158,10 @@ export class PhScanReadout extends PhElement {
     const scan = this.selectedScan || {};
     const uuid = (this.state && this.state.target_uuid) || null;
     if (!scan.capable || !scan.controllable || !scan.system_id || !uuid) return null;
-    return { action: 'scan_target', uuid, control_system_id: scan.system_id };
+    const aim = this.$('aim')?.value || scan.default_aim || 'general';
+    const supported = (scan.aims?.length ? scan.aims : [{ aim:'general',intrusive:false }]).find(row => row.aim === aim);
+    if (!supported) return null;
+    return { action: 'scan_target', uuid, control_system_id: scan.system_id, aim, intrusive: !!supported.intrusive && !!this.$('intrusive')?.checked };
   }
 
   get selectedScan() {
@@ -167,7 +176,7 @@ export class PhScanReadout extends PhElement {
     if (!action || typeof activate !== 'function') return;
     activate(SENSORS_SCAN_ACTION_ID, {
       source: 'control',
-      detail: { uuid: action.uuid, system_id: action.control_system_id },
+      detail: { uuid: action.uuid, system_id: action.control_system_id, aim: action.aim, intrusive: action.intrusive },
     });
   }
 
@@ -199,6 +208,18 @@ export class PhScanReadout extends PhElement {
     picker.value = choices.has(selected) ? selected : 'latest'; this.$('history-label').hidden = !history.size;
     const reading = history.get(picker.value) || scan.reading || null;
     const focused = scan.focused;
+    const aimSelect = this.$('aim');
+    const aims = (scan.aims?.length ? scan.aims : [{ aim:'general',intrusive:false }]).filter(row=>['general','environment','resources','anomaly'].includes(row.aim));
+    const oldAim = this._aimInstrument === scan.system_id ? aimSelect.value : scan.default_aim;
+    this._aimInstrument = scan.system_id;
+    for (const option of [...aimSelect.options]) if (!aims.some(row => row.aim===option.value)) option.remove();
+    for (const row of aims) if (![...aimSelect.options].some(option=>option.value===row.aim)) {
+      const option=this.ownerDocument.createElement('option'); option.value=row.aim; option.textContent=t('component.scan.aim.'+row.aim); aimSelect.append(option);
+    }
+    aimSelect.value = aims.some(row=>row.aim===oldAim) ? oldAim : aims[0]?.aim || '';
+    aimSelect.disabled = !scan.controllable;
+    this.$('intrusive-label').hidden = !aims.find(row=>row.aim===aimSelect.value)?.intrusive;
+    this.$('intrusive').disabled = !scan.controllable;
     this.$('progress').textContent = focused ? t('component.scan.progress', { progress: Math.round(Math.max(0, Math.min(1000, Number(focused.progress) || 0)) / 10) })
       + (focused.waiting ? ' · ' + t(['unpowered', 'source_unavailable'].includes(focused.waiting) ? 'component.scan.waiting.' + focused.waiting : focused.waiting) : '') : '';
     this.$('cancel').hidden = !focused || !scan.controllable; this.$('cancel').disabled = !scan.system_id;
@@ -244,7 +265,7 @@ export class PhScanReadout extends PhElement {
       // the operational flags, then the capacities, in the order the server
       // derived them. Nothing here re-sorts: the order is the subject's own
       // authored order, so two consoles read the same sheet.
-      rows.appendChild(this.#row(
+      if (Number.isFinite(reading.condition_fraction) && Number.isFinite(reading.condition_step)) rows.appendChild(this.#row(
         t('component.scan.condition'),
         formatCondition(reading.condition_fraction, reading.condition_step),
         false,
@@ -259,7 +280,7 @@ export class PhScanReadout extends PhElement {
       // what this suite calls a number that size. A hull authoring no
       // `[[scan.mass_class]]` ladder sends no class and the line reads exactly
       // as it did before that table existed.
-      rows.appendChild(this.#row(
+      if (Number.isFinite(reading.mass)) rows.appendChild(this.#row(
         t('component.scan.mass'),
         reading.mass_class_label
           ? `${reading.mass} ${t(reading.mass_class_label)}`
@@ -308,6 +329,17 @@ export class PhScanReadout extends PhElement {
         const [label, amount] = entry;
         rows.appendChild(this.#row(t(label), String(amount), false));
       }
+      for (const quantity of reading.quantities || []) {
+        if (!quantity || !['field_exposure','capacity','effect_signature'].includes(quantity.kind)) continue;
+        const value=quantity.value;
+        if (value?.kind==='scalar' && Number.isFinite(value.value?.value) && Number.isFinite(value.value?.step)) {
+          rows.append(this.#row(wireText(quantity.label),String(value.value.value),false,`±${value.value.step/2}`));
+        } else if (value?.kind==='count' && Number.isFinite(value.value)) {
+          rows.append(this.#row(wireText(quantity.label),String(value.value),false));
+        } else if (value?.kind==='flag' && typeof value.value==='boolean') {
+          rows.append(this.#row(wireText(quantity.label),t(value.value ? 'component.scan.flag.held' : 'component.scan.flag.down'),!value.value));
+        }
+      }
       body.appendChild(rows);
       const forecast = reading.forecast;
       if (forecast && Array.isArray(forecast.ranges) && Array.isArray(forecast.sample_ticks)) {
@@ -320,7 +352,7 @@ export class PhScanReadout extends PhElement {
         for (const range of forecast.ranges) {
           if (!Number.isFinite(range.lower) || !Number.isFinite(range.upper)) continue;
           const isCondition = range.quantity?.kind === 'condition';
-          if (!isCondition && range.quantity?.kind !== 'capacity') continue;
+          if (!isCondition && !['capacity','observed'].includes(range.quantity?.kind)) continue;
           const value = isCondition
             ? `${Math.floor(range.lower * 1000) / 10}–${Math.ceil(range.upper * 1000) / 10}%`
             : `${Math.floor(range.lower)}–${Math.ceil(range.upper)}`;

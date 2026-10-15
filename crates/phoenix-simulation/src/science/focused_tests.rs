@@ -89,7 +89,11 @@ fn request_for(app: &mut App, entity: Entity, owner: &str) {
         .0
         .push(AdmittedCommand {
             target: SystemId(owner.into()),
-            payload: SystemControlPayload::ScanTarget { uuid: contact },
+            payload: SystemControlPayload::ScanTarget {
+                uuid: contact,
+                aim: Default::default(),
+                intrusive: false,
+            },
             response_token: None,
             feedback_correlation: None,
         });
@@ -309,6 +313,8 @@ fn focused_only_scope_cannot_admit_a_guessed_physical_actor() {
             target: SystemId("sensors".into()),
             payload: SystemControlPayload::ScanTarget {
                 uuid: "00000000-0000-0000-0000-000000000142".into(),
+                aim: Default::default(),
+                intrusive: false,
             },
             response_token: None,
             feedback_correlation: None,

@@ -2402,6 +2402,10 @@ pub enum SystemControlPayload {
         /// The subject entity's UUID — the same identifier `SetScienceTarget`
         /// carries, and the one the client already holds from its radar blips.
         uuid: String,
+        #[serde(default)]
+        aim: crate::focused_enquiry::FocusedAim,
+        #[serde(default)]
+        intrusive: bool,
     },
     /// Engage the tractor beam against the ship's current lock (issue #1156).
     ///
@@ -5066,6 +5070,10 @@ pub struct UmbilicalBlackboard {
 /// rather than a system id for the reason `"operations"` is.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct ScanBlackboard {
+    #[serde(default)]
+    pub default_aim: crate::focused_enquiry::FocusedAim,
+    #[serde(default)]
+    pub aims: Vec<crate::focused_enquiry::FocusedAimConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<SystemId>,
     /// Historical findings retain their original sample times and precision.
@@ -5092,6 +5100,8 @@ pub struct ScanBlackboard {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct FocusedScanSnapshot {
+    pub aim: crate::focused_enquiry::FocusedAim,
+    pub intrusive: bool,
     pub subject: String,
     pub progress: u16,
     pub waiting: String,
@@ -5109,6 +5119,12 @@ pub struct FocusedScanSnapshot {
 /// [`crate::science::scan`] for the derivation and the argument.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct ScanReadingSnapshot {
+    #[serde(default)]
+    pub aim: crate::focused_enquiry::FocusedAim,
+    #[serde(default)]
+    pub intrusive: bool,
+    #[serde(default)]
+    pub quantities: Vec<crate::focused_enquiry::ScanQuantity>,
     /// Derived only from this instrument's retained readings and authored horizon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forecast: Option<crate::sensing_forecast::ScanForecast>,
@@ -5129,17 +5145,16 @@ pub struct ScanReadingSnapshot {
     pub taken_at_tick: u64,
     /// Condition as a fraction of the subject's authored ceiling, rounded to
     /// the answering band's step. The client renders the percentage.
-    pub condition_fraction: f32,
+    pub condition_fraction: Option<f32>,
     /// The step it was rounded to, so the console can show how precise the
     /// reading is rather than implying a precision the band never had.
-    pub condition_step: f32,
+    pub condition_step: Option<f32>,
     /// The subject's authored mass (issue #1154), in the game's own mass
     /// unit, verbatim — content identity, not a live measurement, so it does
     /// not coarsen with the band the way `condition_fraction` does.
-    /// `#[serde(default)]` so a payload written before this field existed
-    /// still decodes, at `0.0`.
+    /// None when this enquiry did not acquire bulk information.
     #[serde(default)]
-    pub mass: f32,
+    pub mass: Option<f32>,
     /// The machine code of the bulk class that answered for `mass` (issue
     /// #1347), or ABSENT when the scanning suite authors no
     /// `[[scan.mass_class]]` ladder — which is every hull shipped before it, so

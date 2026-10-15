@@ -1,11 +1,47 @@
 use super::*;
 
+#[test]
+fn environmental_trends_use_only_compatible_held_questions_and_do_not_require_condition() {
+    use phoenix_model::focused_enquiry::*;
+    let sample = |tick, value| ScanReadingSnapshot {
+        subject_uuid: "held-contact".into(),
+        aim: FocusedAim::Environment,
+        taken_at_tick: tick,
+        quantities: vec![ScanQuantity {
+            kind: ScanQuantityKind::FieldExposure,
+            label: "component.scan.quantity.field_exposure".into(),
+            value: ScanQuantityValue::Scalar { value, step: 0.1 },
+        }],
+        ..Default::default()
+    };
+    let old = sample(10, 0.2);
+    let current = sample(20, 0.4);
+    let forecast = derive(std::slice::from_ref(&old), &current, &policy(), 1.0).unwrap();
+    assert!(forecast
+        .ranges
+        .iter()
+        .all(|range| matches!(range.quantity, ForecastQuantity::Observed { .. })));
+    assert!(forecast.ranges[0].lower < 0.6 && forecast.ranges[0].upper > 0.6);
+    forecast
+        .validate(20, None, &[], &current.quantities)
+        .unwrap();
+    let mut other = old.clone();
+    other.intrusive = true;
+    assert!(derive(&[other], &current, &policy(), 1.0).is_none());
+    let mut conflicting = old.clone();
+    conflicting.quantities[0].value = ScanQuantityValue::Scalar {
+        value: 0.8,
+        step: 0.1,
+    };
+    assert!(derive(&[old, conflicting], &current, &policy(), 1.0).is_none());
+}
+
 fn reading(tick: u64, value: f32, step: f32) -> ScanReadingSnapshot {
     ScanReadingSnapshot {
         subject_uuid: "observed-contact".into(),
         taken_at_tick: tick,
-        condition_fraction: value,
-        condition_step: step,
+        condition_fraction: Some(value),
+        condition_step: Some(step),
         ..Default::default()
     }
 }

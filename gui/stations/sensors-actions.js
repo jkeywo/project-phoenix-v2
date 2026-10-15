@@ -192,7 +192,10 @@ export function registerSensorScienceActions(registry, options = {}) {
     const scans=view?.scans || [], scan=detail?.system_id ? scans.find(row=>row.system_id===detail.system_id) : scans.length===1 ? scans[0] : null;
     if (!view || view.target_track?.predicted || !scan?.capable || !scan.controllable || !scan.system_id || !uuid
         || (requested != null && requested !== uuid)) return false;
-    return send(actionId, correlation, inputMs, 'scan_target', { uuid, control_system_id: scan.system_id });
+    const aim=detail?.aim ?? scan.default_aim ?? 'general', intrusive=detail?.intrusive ?? false;
+    const supported=(scan.aims?.length ? scan.aims : [{aim:'general',intrusive:false}]).find(row=>row.aim===aim);
+    if (!supported || typeof intrusive!=='boolean' || (intrusive && !supported.intrusive)) return false;
+    return send(actionId, correlation, inputMs, 'scan_target', { uuid, control_system_id: scan.system_id, aim, intrusive });
   });
   registry.register(SENSORS_CANCEL_SCAN_ACTION, ({ actionId, correlation, inputMs, detail } = {}) => {
     const scans = sensorsActionView(getState())?.scans || [];

@@ -22,6 +22,7 @@ pub mod energy;
 pub mod equipment_recovery_ui;
 pub mod field;
 pub mod fitting;
+pub mod focused_enquiry;
 pub mod interior;
 pub mod job;
 pub mod logistics;

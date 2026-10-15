@@ -195,7 +195,11 @@ pub(crate) fn operate(
             let payload = if acquiring && result.intents.get("cancel") == Some(&true) {
                 Some(SystemControlPayload::CancelFocusedScan)
             } else if result.intents.get("enquire") == Some(&true) {
-                target.map(|uuid| SystemControlPayload::ScanTarget { uuid })
+                target.map(|uuid| SystemControlPayload::ScanTarget {
+                    uuid,
+                    aim: scan.default_aim,
+                    intrusive: false,
+                })
             } else {
                 None
             };

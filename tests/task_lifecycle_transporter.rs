@@ -186,6 +186,8 @@ fn a_scan_reveals_civilians_and_the_transporter_recovers_them() {
         SystemId(SENSORS_SYSTEM_ID.into()),
         SystemControlPayload::ScanTarget {
             uuid: lighter_uuid.clone(),
+            aim: Default::default(),
+            intrusive: false,
         },
     );
     // Give the scan flag its one-tick bridge and the discovery beat a tick.

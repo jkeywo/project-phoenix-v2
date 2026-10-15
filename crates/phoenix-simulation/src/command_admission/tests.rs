@@ -175,6 +175,8 @@ fn correlated_action_feedback_allowlist_is_exact_by_target_and_payload() {
     };
     let scan = SystemControlPayload::ScanTarget {
         uuid: "target".into(),
+        aim: Default::default(),
+        intrusive: false,
     };
     let start_impulse = SystemControlPayload::StartImpulseCharge;
     let cancel_impulse = SystemControlPayload::CancelImpulse;

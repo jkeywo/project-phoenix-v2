@@ -1631,8 +1631,15 @@ pub fn operate_sensors_ai(
             {
                 emit_ai_command(
                     entity_uuid,
-                    consumer,
-                    SystemControlPayload::ScanTarget { uuid },
+                    consumer.clone(),
+                    SystemControlPayload::ScanTarget {
+                        uuid,
+                        aim: scan_record
+                            .and_then(|record| record.0.get(&consumer))
+                            .map(|record| record.policy.default_aim)
+                            .unwrap_or_default(),
+                        intrusive: false,
+                    },
                     sources,
                     &sessions,
                     ship_config_comp,
@@ -1689,7 +1696,11 @@ pub fn operate_sensors_ai(
                     emit_ai_command(
                         entity_uuid,
                         crate::ship::system_registry::sensors_system_id(),
-                        crate::core::messages::SystemControlPayload::ScanTarget { uuid },
+                        crate::core::messages::SystemControlPayload::ScanTarget {
+                            uuid,
+                            aim: Default::default(),
+                            intrusive: false,
+                        },
                         sources,
                         &sessions,
                         ship_config_comp,
@@ -1992,6 +2003,8 @@ pub fn operate_sensors_ai(
                     crate::ship::system_registry::sensors_system_id(),
                     crate::core::messages::SystemControlPayload::ScanTarget {
                         uuid: target.to_string(),
+                        aim: Default::default(),
+                        intrusive: false,
                     },
                     sources,
                     &sessions,

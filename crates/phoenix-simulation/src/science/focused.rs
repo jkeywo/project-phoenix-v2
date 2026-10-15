@@ -8,6 +8,9 @@ use std::collections::BTreeSet;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FocusedWork {
+    pub aim: phoenix_model::focused_enquiry::FocusedAim,
+    pub intrusive: bool,
+    pub paid_started_tick: Option<u64>,
     pub subject: String,
     pub presentation_id: String,
     pub progress: f32,
@@ -17,22 +20,46 @@ pub struct FocusedWork {
     pub last_tick: u64,
     pub waiting: String,
 }
+impl FocusedWork {
+    pub fn key(&self) -> String {
+        Self::key_for(&self.subject, self.aim, self.intrusive)
+    }
+    pub fn key_for(
+        subject: &str,
+        aim: phoenix_model::focused_enquiry::FocusedAim,
+        intrusive: bool,
+    ) -> String {
+        format!(
+            "{}:{}:{}:{}",
+            subject.len(),
+            subject,
+            aim.as_str(),
+            intrusive
+        )
+    }
+}
 
 impl FocusedScanRecord {
     pub(crate) fn validate_state(&self, saved: &FocusedSaveState, tick: u64) -> Result<(), String> {
         let policy = &self.policy;
-        validate(
-            saved,
-            usize::from(policy.history_limit),
-            policy.work_secs,
-            tick,
-        )?;
+        validate(saved, usize::from(policy.history_limit), tick)?;
+        for work in saved.focused.iter().chain(saved.unfinished.values()) {
+            if policy
+                .aim_cost(work.aim, work.intrusive)
+                .is_none_or(|(secs, _)| secs != work.work_secs)
+            {
+                return Err("focused work names an unsupported equipment question".into());
+            }
+        }
         if saved.history.iter().any(|reading| {
-            !self.config.bands.iter().any(|band| {
-                band.id == reading.band
-                    && band.label == reading.band_label
-                    && band.condition_step == reading.condition_step
-            })
+            policy.aim_cost(reading.aim, reading.intrusive).is_none()
+                || !self.config.bands.iter().any(|band| {
+                    band.id == reading.band
+                        && band.label == reading.band_label
+                        && reading
+                            .condition_step
+                            .is_none_or(|step| band.condition_step == step)
+                })
         }) {
             return Err("recorded scan names an unsupported instrument fidelity".into());
         }
@@ -78,12 +105,7 @@ impl FocusedScanRecord {
     }
 }
 
-pub(crate) fn validate(
-    saved: &FocusedSaveState,
-    limit: usize,
-    work_secs: f32,
-    tick: u64,
-) -> Result<(), String> {
+pub(crate) fn validate(saved: &FocusedSaveState, limit: usize, tick: u64) -> Result<(), String> {
     if saved.history.len() > limit || saved.last.is_some() && saved.refusal.is_some() {
         return Err("scan history or latest projection exceeds its accepted profile".into());
     }
@@ -97,18 +119,18 @@ pub(crate) fn validate(
             || reading.taken_at_tick > tick
             || reading.taken_at_tick < previous
             || !samples.insert((reading.subject_uuid.clone(), reading.taken_at_tick))
-            || !reading.condition_fraction.is_finite()
-            || !(0.0..=1.0).contains(&reading.condition_fraction)
-            || !reading.condition_step.is_finite()
-            || reading.condition_step <= 0.0
-            || !reading.mass.is_finite()
-            || reading.mass <= 0.0
+            || !valid_reading_shape(reading)
         {
             return Err("invalid recorded scan sample frontier".into());
         }
         previous = reading.taken_at_tick;
         if let Some(forecast) = &reading.forecast {
-            forecast.validate(reading.taken_at_tick, &reading.capacities)?;
+            forecast.validate(
+                reading.taken_at_tick,
+                reading.condition_fraction,
+                &reading.capacities,
+                &reading.quantities,
+            )?;
         }
     }
     if saved
@@ -122,11 +144,11 @@ pub(crate) fn validate(
         || saved
             .unfinished
             .iter()
-            .any(|(key, work)| key != &work.subject)
+            .any(|(key, work)| key != &work.key())
         || saved
             .focused
             .as_ref()
-            .is_some_and(|work| saved.unfinished.contains_key(&work.subject))
+            .is_some_and(|work| saved.unfinished.contains_key(&work.key()))
     {
         return Err("focused enquiry ownership or retained-work bound is invalid".into());
     }
@@ -135,17 +157,58 @@ pub(crate) fn validate(
             || work.presentation_id.is_empty()
             || work.presentation_id.len() > 512
             || work.presentation_id.chars().any(char::is_control)
-            || work.work_secs != work_secs
+            || !work.work_secs.is_finite()
+            || work.work_secs <= 0.0
             || !work.progress.is_finite()
-            || !(0.0..=work_secs).contains(&work.progress)
+            || !(0.0..=work.work_secs).contains(&work.progress)
             || work.started_tick > work.last_valid_tick
             || work.last_valid_tick > work.last_tick
             || work.last_tick > tick
+            || work
+                .paid_started_tick
+                .is_some_and(|paid| paid < work.started_tick || paid > work.last_valid_tick)
+            || (work.progress > 0.0 && work.paid_started_tick.is_none())
         {
             return Err("focused scan continuation disagrees with accepted work".into());
         }
     }
     Ok(())
+}
+
+fn valid_reading_shape(reading: &ScanReading) -> bool {
+    use phoenix_model::focused_enquiry::{FocusedAim, ScanQuantityKind};
+    if reading.aim == FocusedAim::General {
+        return reading.quantities.is_empty()
+            && reading
+                .condition_fraction
+                .is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value))
+            && reading
+                .condition_step
+                .is_some_and(|value| value.is_finite() && value > 0.0)
+            && reading
+                .mass
+                .is_some_and(|value| value.is_finite() && value > 0.0);
+    }
+    let mut keys = BTreeSet::new();
+    reading.condition_fraction.is_none()
+        && reading.condition_step.is_none()
+        && reading.mass.is_none()
+        && reading.flags.is_empty()
+        && reading.capacities.is_empty()
+        && reading.debris.is_none()
+        && reading.mass_class.is_empty()
+        && reading.mass_class_label.is_empty()
+        && !reading.quantities.is_empty()
+        && reading.quantities.iter().all(|row| {
+            row.validate().is_ok()
+                && keys.insert((row.kind, &row.label))
+                && matches!(
+                    (reading.aim, row.kind),
+                    (FocusedAim::Environment, ScanQuantityKind::FieldExposure)
+                        | (FocusedAim::Resources, ScanQuantityKind::Capacity)
+                        | (FocusedAim::Anomaly, ScanQuantityKind::EffectSignature)
+                )
+        })
 }
 
 #[cfg(test)]

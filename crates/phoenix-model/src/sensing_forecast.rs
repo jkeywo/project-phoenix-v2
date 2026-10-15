@@ -19,7 +19,13 @@ impl ScanForecastPolicy {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ForecastQuantity {
     Condition,
-    Capacity { label: String },
+    Capacity {
+        label: String,
+    },
+    Observed {
+        measurement: crate::focused_enquiry::ScanQuantityKind,
+        label: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -42,7 +48,13 @@ pub struct ScanForecast {
     pub ranges: Vec<ForecastRange>,
 }
 impl ScanForecast {
-    pub fn validate(&self, sample_tick: u64, capacities: &[(String, i64)]) -> Result<(), String> {
+    pub fn validate(
+        &self,
+        sample_tick: u64,
+        condition: Option<f32>,
+        capacities: &[(String, i64)],
+        observed: &[crate::focused_enquiry::ScanQuantity],
+    ) -> Result<(), String> {
         if self.sample_ticks[0] >= self.sample_ticks[1]
             || self.sample_ticks[1] != sample_tick
             || !self.sample_interval_secs.is_finite()
@@ -58,7 +70,8 @@ impl ScanForecast {
                     "component.scan.forecast.quantisation",
                 ]
             || self.ranges.is_empty()
-            || self.ranges.len() > capacities.len() + 1
+            || self.ranges.len()
+                > capacities.len() + usize::from(condition.is_some()) + observed.len()
         {
             return Err("invalid recorded forecast frontier or assumptions".into());
         }
@@ -69,7 +82,7 @@ impl ScanForecast {
             }
             let key = match &range.quantity {
                 ForecastQuantity::Condition => {
-                    if range.lower < 0.0 || range.upper > 1.0 {
+                    if condition.is_none() || range.lower < 0.0 || range.upper > 1.0 {
                         return Err("invalid recorded condition forecast".into());
                     }
                     (0, String::new())
@@ -80,12 +93,36 @@ impl ScanForecast {
                     }
                     (1, label.clone())
                 }
+                ForecastQuantity::Observed {
+                    measurement: kind,
+                    label,
+                } => {
+                    let matching: Vec<_> = observed
+                        .iter()
+                        .filter(|row| row.kind == *kind && row.label == *label)
+                        .collect();
+                    if matching.len() != 1
+                        || matching[0].validate().is_err()
+                        || matches!(
+                            matching[0].value,
+                            crate::focused_enquiry::ScanQuantityValue::Flag(_)
+                        )
+                        || (*kind == crate::focused_enquiry::ScanQuantityKind::FieldExposure
+                            && range.lower < 0.0)
+                    {
+                        return Err(
+                            "forecast references an unobserved or nonnumeric enquiry quantity"
+                                .into(),
+                        );
+                    }
+                    (2 + *kind as u8, label.clone())
+                }
             };
             if !quantities.insert(key) {
                 return Err("duplicate recorded forecast quantity".into());
             }
         }
-        if !quantities.contains(&(0, String::new())) {
+        if condition.is_some() && !quantities.contains(&(0, String::new())) {
             return Err("missing condition forecast".into());
         }
         Ok(())

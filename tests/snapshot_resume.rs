@@ -6906,7 +6906,11 @@ fn take_a_reading(app: &mut bevy::prelude::App) {
             token: "ai:scan-resume-probe".into(),
             msg: ClientMessage::ControlSystem {
                 target: project_phoenix::ship::system_registry::sensors_system_id(),
-                payload: SystemControlPayload::ScanTarget { uuid: depot },
+                payload: SystemControlPayload::ScanTarget {
+                    uuid: depot,
+                    aim: Default::default(),
+                    intrusive: false,
+                },
             },
         });
     step(app, 2);
@@ -6953,7 +6957,7 @@ fn the_resumed_world_keeps_the_reading_the_crew_took() {
          restored value is a specific one rather than whatever a default would give"
     );
     assert!(
-        reading.condition_fraction > 0.0,
+        reading.condition_fraction.unwrap() > 0.0,
         "precondition: it read a real, non-zero condition off the depot's track"
     );
     assert!(record.refusal.is_none());
@@ -7094,7 +7098,11 @@ fn read_the_mass(app: &mut bevy::prelude::App) {
             token: "ai:debris-resume-probe".into(),
             msg: ClientMessage::ControlSystem {
                 target: project_phoenix::ship::system_registry::sensors_system_id(),
-                payload: SystemControlPayload::ScanTarget { uuid: mass },
+                payload: SystemControlPayload::ScanTarget {
+                    uuid: mass,
+                    aim: Default::default(),
+                    intrusive: false,
+                },
             },
         });
     step(app, 3);

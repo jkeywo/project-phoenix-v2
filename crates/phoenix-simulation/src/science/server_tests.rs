@@ -202,7 +202,11 @@ fn ask_for_scan(app: &mut App, ship: Entity, uuid: &str) {
         .0
         .push(crate::core::messages::AdmittedCommand {
             target: SystemId(crate::ship::system_registry::SENSORS_SYSTEM_ID.to_string()),
-            payload: SystemControlPayload::ScanTarget { uuid: handle },
+            payload: SystemControlPayload::ScanTarget {
+                uuid: handle,
+                aim: Default::default(),
+                intrusive: false,
+            },
             response_token: None,
             feedback_correlation: None,
         });
@@ -222,7 +226,11 @@ fn ask_for_correlated_scan(
         .0
         .push(crate::core::messages::AdmittedCommand {
             target: SystemId(crate::ship::system_registry::SENSORS_SYSTEM_ID.to_string()),
-            payload: SystemControlPayload::ScanTarget { uuid: handle },
+            payload: SystemControlPayload::ScanTarget {
+                uuid: handle,
+                aim: Default::default(),
+                intrusive: false,
+            },
             response_token: Some(token.to_string()),
             feedback_correlation: Some(
                 crate::core::messages::ActionCorrelationId::new(correlation)
@@ -303,9 +311,9 @@ fn an_admitted_scan_command_reads_the_targets_live_condition_track() {
     assert_eq!(reading.subject_name, "world.probe.entity.depot.name");
     assert_eq!(reading.band, "detailed");
     assert!(
-        (reading.condition_fraction - 0.62).abs() < 1e-6,
+        (reading.condition_fraction.unwrap() - 0.62).abs() < 1e-6,
         "62 of 100 points, read at whole-percent fidelity: {}",
-        reading.condition_fraction
+        reading.condition_fraction.unwrap()
     );
     assert_eq!(
         reading.flags,
@@ -353,7 +361,7 @@ fn a_scan_reading_reports_the_subjects_authored_mass() {
     step(&mut app);
 
     let reading = record(&app, ship).last.expect("a reading came back");
-    assert_eq!(reading.mass, DEPOT_MASS);
+    assert_eq!(reading.mass.unwrap(), DEPOT_MASS);
 }
 
 /// A subject spawned without an `EntityMass` component (every real hull has
@@ -376,8 +384,14 @@ fn a_subject_with_no_entity_mass_component_falls_back_to_the_documented_default(
     step(&mut app);
 
     let reading = record(&app, ship).last.expect("a reading came back");
-    assert_eq!(reading.mass, crate::entities::config::DEFAULT_ENTITY_MASS);
-    assert!(reading.mass > 0.0, "the fallback must never be zero");
+    assert_eq!(
+        reading.mass.unwrap(),
+        crate::entities::config::DEFAULT_ENTITY_MASS
+    );
+    assert!(
+        reading.mass.unwrap() > 0.0,
+        "the fallback must never be zero"
+    );
 }
 
 /// **AC2 through the ECS.** The SAME command, on a depot whose condition
@@ -406,11 +420,11 @@ fn mutating_the_subjects_condition_changes_what_the_next_scan_says() {
     let after = record(&app, ship).last.expect("a second reading");
 
     assert!(
-        (before.condition_fraction - 0.62).abs() < 1e-6
-            && (after.condition_fraction - 0.32).abs() < 1e-6,
+        (before.condition_fraction.unwrap() - 0.62).abs() < 1e-6
+            && (after.condition_fraction.unwrap() - 0.32).abs() < 1e-6,
         "the two readings are {} and {} — the readout is the track",
-        before.condition_fraction,
-        after.condition_fraction
+        before.condition_fraction.unwrap(),
+        after.condition_fraction.unwrap()
     );
     assert_eq!(
         after.flags,
@@ -430,7 +444,8 @@ fn the_same_scan_from_further_out_comes_back_at_a_coarser_band() {
     let reading = record(&app, ship).last.expect("a reading");
     assert_eq!(reading.band, "coarse");
     assert_eq!(
-        reading.condition_fraction, 0.5,
+        reading.condition_fraction.unwrap(),
+        0.5,
         "0.62 to the nearest quarter"
     );
     assert!(
@@ -621,7 +636,7 @@ fn the_reading_is_published_under_the_scan_blackboard_channel() {
     );
     assert_eq!(reading.band_label, "world.probe.band.detailed.label");
     assert_eq!(reading.subject_name, "world.probe.entity.depot.name");
-    assert_eq!(reading.condition_step, 0.01);
+    assert_eq!(reading.condition_step.unwrap(), 0.01);
 }
 
 #[test]
@@ -927,7 +942,7 @@ fn held_scan_metadata_keeps_its_sample_and_precision_after_the_clock_advances() 
         metadata.uncertainty,
         ObservationUncertainty::Quantized {
             field: "condition_fraction".into(),
-            step: reading.condition_step
+            step: reading.condition_step.unwrap()
         }
     );
 }

@@ -49,6 +49,34 @@ pub struct FocusedConfig {
     pub unfinished_retention_secs: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forecast: Option<crate::sensing_forecast::ScanForecastPolicy>,
+    #[serde(default)]
+    pub default_aim: crate::focused_enquiry::FocusedAim,
+    #[serde(default)]
+    pub aims: Vec<crate::focused_enquiry::FocusedAimConfig>,
+}
+impl FocusedConfig {
+    /// The unchanged General enquiry is always available. Additional questions
+    /// and intrusive operation require explicit equipment support.
+    pub fn aim_cost(
+        &self,
+        aim: crate::focused_enquiry::FocusedAim,
+        intrusive: bool,
+    ) -> Option<(f32, f32)> {
+        let config = self.aims.iter().find(|config| config.aim == aim);
+        if intrusive && config.is_none_or(|config| !config.intrusive) {
+            return None;
+        }
+        match config {
+            Some(config) => Some((
+                self.work_secs * config.work_multiplier,
+                config.resource_multiplier,
+            )),
+            None if aim == crate::focused_enquiry::FocusedAim::General => {
+                Some((self.work_secs, 1.0))
+            }
+            None => None,
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -143,6 +171,21 @@ impl SensingConfig {
             return Err("sensing profile must declare at least one independent instrument".into());
         }
         for config in &self.focused {
+            let mut aims = std::collections::BTreeSet::new();
+            for aim in &config.aims {
+                if !aims.insert(aim.aim)
+                    || !positive(aim.work_multiplier)
+                    || !positive(aim.resource_multiplier)
+                    || !positive(config.work_secs * aim.work_multiplier)
+                {
+                    return Err("focused aims require distinct questions and finite positive work/resource multipliers".into());
+                }
+            }
+            if config.default_aim != crate::focused_enquiry::FocusedAim::General
+                && !aims.contains(&config.default_aim)
+            {
+                return Err("focused default aim must be supported by its equipment".into());
+            }
             if let Some(policy) = &config.forecast {
                 policy.validate()?;
             }

@@ -326,7 +326,7 @@ fn positive(app: &App, ships: &[Entity], targets: &[Entity]) -> usize {
         assert_eq!(c[0].len(), 1);
         assert!(matches!(c[0][0].payload, P::SetRedAlert { active: true }));
         assert_eq!(c[1].len(), 2);
-        assert!(matches!(&c[1][0].payload,P::ScanTarget{uuid}if uuid==target));
+        assert!(matches!(&c[1][0].payload,P::ScanTarget{uuid, .. }if uuid==target));
         assert!(matches!(&c[1][1].payload,P::SetScienceTarget{uuid}if uuid==target));
         let p = w.resource::<probes::Probes>();
         checks += probes::interleavings(&p.prefix[u], &c);
@@ -341,8 +341,8 @@ fn positive(app: &App, ships: &[Entity], targets: &[Entity]) -> usize {
         assert_eq!(&reading.subject_uuid, target);
         assert_eq!(reading.taken_at_tick, w.resource::<SimTick>().0 - 1);
         assert_eq!(reading.band, "detailed");
-        assert!(reading.condition_fraction > 0.0);
-        assert_eq!(reading.mass, 180000.0);
+        assert!(reading.condition_fraction.unwrap() > 0.0);
+        assert_eq!(reading.mass.unwrap(), 180000.0);
         assert!(w.get::<InfrastructureCondition>(t).is_some());
         let authored_id = &w.get::<EntityId>(t).unwrap().0;
         assert!(

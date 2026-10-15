@@ -134,6 +134,8 @@ pub struct EntityConfig {
     pub signal_material: Option<phoenix_model::field::SignalMaterialConfig>,
     /// Independent supported instruments, bound to their actual Systems.
     pub sensing: Option<phoenix_model::sensing::SensingConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enquiry_observation: Option<phoenix_model::focused_enquiry::EnquiryObservationConfig>,
     /// Region effects section — present for region entities with effects.
     pub effects: Option<RegionEffectsConfig>,
     /// Infrastructure condition + capacity (issue #1025). Present for authored
@@ -912,6 +914,29 @@ impl EntityConfig {
         }
         if let Some(material) = &config.signal_material {
             material.validate().map_err(SerdeError::custom)?;
+        }
+        if let Some(policy) = &config.enquiry_observation {
+            policy.validate().map_err(SerdeError::custom)?;
+            for row in &policy.property {
+                use phoenix_model::focused_enquiry::EnquiryProperty;
+                let supported = match &row.property {
+                    EnquiryProperty::FieldExposure | EnquiryProperty::EffectSignature { .. } => {
+                        config.shape.is_some()
+                    }
+                    EnquiryProperty::Capacity { capacity } => config
+                        .infrastructure
+                        .as_ref()
+                        .is_some_and(|infrastructure| {
+                            infrastructure.capacities.iter().any(|row| {
+                                &row.id == capacity
+                                    && row.label.as_ref().is_some_and(|label| !label.is_empty())
+                            })
+                        }),
+                };
+                if !supported {
+                    return Err(SerdeError::custom("enquiry property must name actual local field/effect geometry or labelled infrastructure capacity"));
+                }
+            }
         }
         if let Some(sensing) = &config.sensing {
             crate::science::sensing::validate_sensing(sensing, &config)

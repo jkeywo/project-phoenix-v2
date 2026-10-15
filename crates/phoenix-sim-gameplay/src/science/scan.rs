@@ -500,6 +500,9 @@ impl ScanRefusal {
 /// Every string is a `strings.csv` id; no English crosses the wire.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ScanReading {
+    pub aim: phoenix_model::focused_enquiry::FocusedAim,
+    pub intrusive: bool,
+    pub quantities: Vec<phoenix_model::focused_enquiry::ScanQuantity>,
     /// Issued once with this reading, retained with its original assumptions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forecast: Option<phoenix_model::sensing_forecast::ScanForecast>,
@@ -521,19 +524,17 @@ pub struct ScanReading {
     /// **rounded to the answering band's step**. The whole fidelity model, in
     /// one number: the underlying value is the live track's, and the coarseness
     /// is the band's.
-    pub condition_fraction: f32,
+    pub condition_fraction: Option<f32>,
     /// The step it was rounded to, so the console can say how precise this is
     /// rather than implying a precision the band never had.
-    pub condition_step: f32,
+    pub condition_step: Option<f32>,
     /// The subject's authored mass (issue #1154), in the game's own mass
     /// unit, verbatim — the fidelity ladder never coarsens it, unlike
     /// `condition_fraction`, because it is content identity rather than a
     /// live measurement: the same number regardless of which band answered.
-    /// `#[serde(default)]` so a save written before this field existed still
-    /// deserialises (at `0.0`, on a reading taken before #1154) rather than
-    /// refusing to load.
+    /// None for enquiries that did not acquire bulk information.
     #[serde(default)]
-    pub mass: f32,
+    pub mass: Option<f32>,
     /// The machine code of the bulk class that answered for
     /// [`mass`](Self::mass) (issue #1347), or empty when the suite authors no
     /// `[[scan.mass_class]]` ladder — which is every hull shipped before it.
@@ -660,6 +661,45 @@ pub fn derive(
     let Some(condition) = subject.condition.as_ref() else {
         return Err(ScanRefusal::NoReadableCondition);
     };
+    let band = answering_band(config, conditions)?;
+
+    // The bulk class and debris assessment retain their existing General path.
+    let mass_class = config.mass_class_for(subject.mass);
+
+    Ok(ScanReading {
+        aim: Default::default(),
+        intrusive: false,
+        quantities: Vec::new(),
+        forecast: None,
+        contact_id: None,
+        subject_uuid: subject.uuid.clone(),
+        subject_name: subject.name.clone(),
+        band: band.id.clone(),
+        band_label: band.label.clone(),
+        taken_at_tick: now_tick,
+        condition_fraction: Some(quantise(condition.condition_fraction, band.condition_step)),
+        condition_step: Some(band.condition_step),
+        mass: Some(subject.mass),
+        mass_class: mass_class.map(|c| c.id.clone()).unwrap_or_default(),
+        mass_class_label: mass_class.map(|c| c.label.clone()).unwrap_or_default(),
+        debris: subject.debris.as_ref().map(crate::debris::assess),
+        flags: if band.report_thresholds {
+            condition.flags.clone()
+        } else {
+            Vec::new()
+        },
+        capacities: if band.report_capacities {
+            condition.capacities.clone()
+        } else {
+            Vec::new()
+        },
+    })
+}
+
+fn answering_band<'a>(
+    config: &'a ScanConfig,
+    conditions: &ScanConditions,
+) -> Result<&'a ScanBandConfig, ScanRefusal> {
     if conditions.power_locked || conditions.power_level < config.min_power_level {
         return Err(ScanRefusal::Underpowered);
     }
@@ -675,35 +715,50 @@ pub fn derive(
         return Err(ScanRefusal::Blinded);
     };
 
-    // The bulk class and the debris projection (issue #1347). Both are folded
-    // AFTER every gate above, so a refused scan reports neither: a crew who were
-    // told "out of range" have not learned what the rock is aimed at.
-    let mass_class = config.mass_class_for(subject.mass);
+    Ok(band)
+}
 
+/// Derive an answer exclusively from explicitly permitted acquired quantities.
+/// Non-General answers contain no fabricated structural condition or mass.
+pub fn derive_enquiry(
+    config: &ScanConfig,
+    subject: &ScanSubject,
+    conditions: &ScanConditions,
+    aim: phoenix_model::focused_enquiry::FocusedAim,
+    intrusive: bool,
+    quantities: Vec<phoenix_model::focused_enquiry::ScanQuantity>,
+    now_tick: u64,
+) -> Result<ScanReading, ScanRefusal> {
+    use phoenix_model::focused_enquiry::{FocusedAim, ScanQuantityKind};
+    if aim == FocusedAim::General {
+        let mut reading = derive(config, subject, conditions, now_tick)?;
+        reading.intrusive = intrusive;
+        return Ok(reading);
+    }
+    if quantities.is_empty()
+        || quantities.iter().any(|row| {
+            row.validate().is_err()
+                || !matches!(
+                    (aim, row.kind),
+                    (FocusedAim::Environment, ScanQuantityKind::FieldExposure)
+                        | (FocusedAim::Resources, ScanQuantityKind::Capacity)
+                        | (FocusedAim::Anomaly, ScanQuantityKind::EffectSignature)
+                )
+        })
+    {
+        return Err(ScanRefusal::NoReadableCondition);
+    }
+    let band = answering_band(config, conditions)?;
     Ok(ScanReading {
-        forecast: None,
-        contact_id: None,
+        aim,
+        intrusive,
+        quantities,
         subject_uuid: subject.uuid.clone(),
         subject_name: subject.name.clone(),
         band: band.id.clone(),
         band_label: band.label.clone(),
         taken_at_tick: now_tick,
-        condition_fraction: quantise(condition.condition_fraction, band.condition_step),
-        condition_step: band.condition_step,
-        mass: subject.mass,
-        mass_class: mass_class.map(|c| c.id.clone()).unwrap_or_default(),
-        mass_class_label: mass_class.map(|c| c.label.clone()).unwrap_or_default(),
-        debris: subject.debris.as_ref().map(crate::debris::assess),
-        flags: if band.report_thresholds {
-            condition.flags.clone()
-        } else {
-            Vec::new()
-        },
-        capacities: if band.report_capacities {
-            condition.capacities.clone()
-        } else {
-            Vec::new()
-        },
+        ..Default::default()
     })
 }
 

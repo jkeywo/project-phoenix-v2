@@ -18,6 +18,7 @@
 pub mod approaches;
 pub mod broad;
 pub mod contact_routing;
+pub(crate) mod enquiry;
 pub mod focused;
 mod focused_ai;
 pub mod passive;

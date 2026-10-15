@@ -460,7 +460,8 @@ use super::*;
 /// `73` requires the single retained personnel roster, including removed origins.
 /// `74` retains original Transit scopes and the latest successful World arrival.
 /// `75` retains enabled intent for accepted fitted concealment equipment.
-pub const SNAPSHOT_FORMAT: u32 = 75;
+/// `76` retains optional plan executions, original opportunity evidence and replies.
+pub const SNAPSHOT_FORMAT: u32 = 76;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -612,7 +613,9 @@ pub const SNAPSHOT_FORMAT: u32 = 75;
 /// interval so later observations include both Input and Physics operation.
 /// "0.56" measures paid concealment and actual operating signatures through
 /// ordinary Broad, Focused and Passive acquisition, without changing physical truth.
-pub const SIMULATION_RULES: &str = "0.56";
+/// "0.57" admits bounded optional maintenance through genuine heard decisions,
+/// finite shared execution and retained source, promise and release frontiers.
+pub const SIMULATION_RULES: &str = "0.57";
 
 /// The authored data, computed rather than remembered.
 ///

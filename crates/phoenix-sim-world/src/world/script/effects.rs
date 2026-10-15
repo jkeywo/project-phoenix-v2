@@ -2,8 +2,7 @@
 //!
 //! Registered runtime host functions push onto a call-scoped [`EffectSink`],
 //! which drains into the **existing** dispatch boundary in `world::dispatch`.
-//! Most host functions map to
-//! something the declarative trigger front-end already produces, so the applier
+//! Most host functions reuse the declarative trigger vocabulary and its applier
 //! (`world::server`). Explicit mission port orders additionally carry typed
 //! approval intent to the same live validation used by the human port controls.
 //!
@@ -11,9 +10,10 @@
 //! ONE ordered `Vec` so a flag write, an immediate command effect, and a
 //! name-resolving effect all apply in the order the script authored them:
 //!
-//! * [`BufferedEffect::Cmd`] — a fully-resolved [`ActionCmd`] needing no dispatch
+//! * [`BufferedEffect::Cmd`] — a typed [`ActionCmd`] needing no dispatch
 //!   context (the M1 set: `complete_objective`, `game_over`, … — plus the flag
-//!   writes [`flags`] pushes). The applier applies it directly.
+//!   writes [`flags`] pushes). The applier applies it directly, resolving entity
+//!   names for those variants that carry them.
 //! * [`BufferedEffect::Action`] — a declarative [`TriggerAction`] still holding
 //!   entity NAMES, buffered for the applier to resolve through the SAME
 //!   `dispatch_action` the declarative evaluator runs (issue #984, M6). The three

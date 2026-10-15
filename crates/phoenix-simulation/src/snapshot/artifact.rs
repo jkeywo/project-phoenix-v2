@@ -448,7 +448,9 @@ use super::*;
 // 63 retains immutable HTN method choice and original primitive release ticks.
 /// `64` retains original bounded capability-refusal explanations on PlanChoice.
 /// `65` retains actual onboard signal-protection command intent.
-pub const SNAPSHOT_FORMAT: u32 = 65;
+/// `66` retains canonical crew presence, dated temporal decisions, actual probe
+/// custody/Bay work and complete shared Security jobs, including consumed IDs.
+pub const SNAPSHOT_FORMAT: u32 = 66;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -580,7 +582,9 @@ pub const SNAPSHOT_FORMAT: u32 = 65;
 /// and recognises validated physical flight carriers on delayed rebuild.
 /// "0.45" applies paid equipment interference and allocated protection to exact
 /// actual Comms, Broad, Focused and Passive receiver owners.
-pub const SIMULATION_RULES: &str = "0.45";
+/// "0.46" uses actual compatible paid relay routes, dated crew-bound scheduling,
+/// canonical stored probe lifecycles and complete shared Security commitments.
+pub const SIMULATION_RULES: &str = "0.46";
 
 /// The authored data, computed rather than remembered.
 ///

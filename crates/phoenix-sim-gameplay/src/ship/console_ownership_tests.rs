@@ -288,3 +288,25 @@ fn instance_publication_cannot_replace_an_incompatible_reserved_board() {
     let error = ShipConfig::from_toml(&collision, &["phaser_bank"]).unwrap_err();
     assert!(error.to_string().contains("reserved publication key"));
 }
+
+#[test]
+fn supported_navigation_and_radar_instance_feeds_round_trip_with_actual_ids() {
+    for (kind, publication) in [
+        ("navigation", "Navigation"),
+        ("sensor_radar", "SensorRadar"),
+        ("tactical_radar", "TacticalRadar"),
+    ] {
+        let authored = SHIP
+            .replace("phaser_bank", kind)
+            .replace("PhaserBank", publication)
+            .replace("phaser-left", "custom-instrument");
+        let config = ShipConfig::from_toml(&authored, &[kind]).unwrap();
+        let encoded = toml::to_string(&config).unwrap();
+        let restored = ShipConfig::from_toml(&encoded, &[kind]).unwrap();
+        assert_eq!(restored, config);
+        assert_eq!(restored.consoles[0].feeds[0].source.0, "custom-instrument");
+        assert_eq!(restored.systems[0].id.0, "custom-instrument");
+        let wrong_kind = authored.replace(&format!("kind = \"{publication}\""), "kind = \"Dock\"");
+        assert!(ShipConfig::from_toml(&wrong_kind, &[kind]).is_err());
+    }
+}

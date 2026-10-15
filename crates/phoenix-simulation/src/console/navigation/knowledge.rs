@@ -28,7 +28,7 @@ pub(crate) fn register(app: &mut App) {
 }
 
 #[derive(SystemParam)]
-pub(crate) struct Environment<'w, 's> {
+pub struct Environment<'w, 's> {
     world: Option<Res<'w, crate::lobby::WorldResource>>,
     runtime: Option<Res<'w, crate::world::server::WorldContentRuntime>>,
     scopes: Query<

@@ -1006,6 +1006,9 @@ pub fn instance_publication_kinds(
     use phoenix_model::console::ConsoleObservationKind as Kind;
     [
         (HELM_RADAR_KIND, Kind::Helm),
+        (NAVIGATION_KIND, Kind::Navigation),
+        (SENSOR_RADAR_KIND, Kind::SensorRadar),
+        (TACTICAL_RADAR_KIND, Kind::TacticalRadar),
         (PHASER_BANK_KIND, Kind::PhaserBank),
         (TORPEDO_TUBE_KIND, Kind::TorpedoTube),
         (SHIELD_ARC_KIND, Kind::ShieldArc),

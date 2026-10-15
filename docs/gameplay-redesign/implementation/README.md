@@ -21,6 +21,13 @@ The architecture direction is recorded in [mission planning decisions](../archit
 
 ## Working contract
 
+On 15 October 2026 the user extended active implementation through increment 24,
+including the approved mission-planning changes above. Continue committing each
+increment, with later validation and fixes on isolated agent worktrees as already
+authorised. This extends the delivery scope; it does not mark unfinished increments
+or outstanding playable, performance and human acceptance as passed. Preserve
+networking and knowledge-limited individual System AI throughout.
+
 Implement capabilities in dependency order. Each changed capability includes authored
 configuration, runtime, human controls, ordinary individual System AI, Workshop
 support and integration with deterministic state, snapshots and restore.

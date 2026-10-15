@@ -554,10 +554,7 @@ fn actual_physical_removal_fails_bound_job_once_without_refunding_work() {
 #[test]
 fn canonical_capture_keeps_stored_identity_reserves_and_whole_custody_graph() {
     let (mut app, parent, child) = fixture(true);
-    app.world_mut()
-        .get_mut::<crate::sim_tick::SimTick>()
-        .unwrap()
-        .0 = 10;
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 10;
     let snapshot = crate::snapshot::capture(app.world());
     let row = snapshot
         .entities

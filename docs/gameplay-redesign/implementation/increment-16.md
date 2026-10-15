@@ -213,6 +213,12 @@ Host slots remain derived legacy routing context. A human-held Comms System
 stands the same AI down; handoff resumes the retained inbox and reading frontier.
 No text parsing, independent polling controller or alternate remote authority is
 introduced. Supported request facts enter the current response policy.
+Request reading uses explicit positive authored `request_reading_ticks` and a
+request-only remaining/last-tick frontier inside the existing pending response
+entry. Mechanical elapsed-tick advancement counts only eligible AI-controlled
+intervals, pauses under Human/Offline and preserves partial progress on handoff.
+It makes no choice and creates no second timer map or controller. The existing
+weighted dialogue delay branch and its draw order remain unchanged.
 
 Complete-candidate and single-row validation bind request identity, source,
 recipient, reporting source, immutable content, local progress and original clock

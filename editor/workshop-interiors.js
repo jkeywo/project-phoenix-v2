@@ -1,3 +1,4 @@
+import { guardSecurityReferences } from './workshop-security.js';
 import { guardTransitReferences } from './workshop-transit.js';
 import { guardPortServiceReferences } from './workshop-ports.js';
 import { guardPersonnelReferences } from './workshop-personnel.js';
@@ -103,6 +104,7 @@ export function prepareInteriorOperation(draft, dependencies, operation) {
   validateInterior(interior, inspection.systems, teamCount);
   guardPortServiceReferences(inspection.resolved.value, { ...inspection.resolved.value, interior });
   guardPersonnelReferences(inspection.resolved.value, { ...inspection.resolved.value, interior });
+  guardSecurityReferences(inspection.resolved.value, { ...inspection.resolved.value, interior });
   guardFittingReferences(inspection.resolved.value, { ...inspection.resolved.value, interior });
   guardSensingReferences(inspection.resolved.value, { ...inspection.resolved.value, interior });
   guardLogisticsLayout(inspection.resolved.value, interior);

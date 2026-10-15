@@ -2,7 +2,7 @@
 title: Repair Runtime
 type: concept
 tags: [repair, damage, teams, blackboard, ai, external-repair, semantic-actions, feedback]
-sources: [crates/phoenix-sim-gameplay/src/jobs/security.rs, crates/phoenix-simulation/src/security/server.rs, crates/phoenix-simulation/src/snapshot/security.rs, gui/job-work-list.js, crates/phoenix-model/src/personnel.rs, crates/phoenix-sim-gameplay/src/personnel.rs, crates/phoenix-simulation/src/console/repair/personnel.rs, crates/phoenix-simulation/src/snapshot/personnel.rs, editor/workshop-personnel.js, gui/workshop-personnel-panel.js, crates/phoenix-sim-gameplay/src/jobs/repair_external_physical.rs, crates/phoenix-sim-gameplay/src/jobs/repair_physical.rs, crates/phoenix-model/src/job.rs, crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/jobs/repair_workflow.rs, gui/job-work-list.js, crates/phoenix-simulation/src/console/repair/reports.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/command_admission/mod.rs, gui/components/ph-repair-teams.js, gui/stations/engineering-actions.js, gui/action-map.js]
+sources: [crates/phoenix-sim-gameplay/src/security/local.rs, editor/workshop-security.js, gui/workshop-security-panel.js, crates/phoenix-sim-gameplay/src/jobs/security.rs, crates/phoenix-simulation/src/security/server.rs, crates/phoenix-simulation/src/snapshot/security.rs, gui/job-work-list.js, crates/phoenix-model/src/personnel.rs, crates/phoenix-sim-gameplay/src/personnel.rs, crates/phoenix-simulation/src/console/repair/personnel.rs, crates/phoenix-simulation/src/snapshot/personnel.rs, editor/workshop-personnel.js, gui/workshop-personnel-panel.js, crates/phoenix-sim-gameplay/src/jobs/repair_external_physical.rs, crates/phoenix-sim-gameplay/src/jobs/repair_physical.rs, crates/phoenix-model/src/job.rs, crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/jobs/repair_workflow.rs, gui/job-work-list.js, crates/phoenix-simulation/src/console/repair/reports.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/command_admission/mod.rs, gui/components/ph-repair-teams.js, gui/stations/engineering-actions.js, gui/action-map.js]
 updated: 2026-10-15
 ---
 
@@ -170,6 +170,16 @@ renderer. That projection grants no control.
 Snapshots retain complete Security Jobs and used mint history, even once every
 team returns. `snapshot/security.rs` validates accepted owner/count, IDs, finite
 phases and result/return joins before global or per-entity writes. The Security
-digest includes these same Jobs and canonical phase floats. Local compartment
-routing and Medical remain subsequent consumers; external Security retains its
-existing crossing model pending the actual craft/custody join.
+digest includes these same Jobs and canonical phase floats. Optional `security.local` profiles use the existing InteriorGraph and one saved
+cursor per actual finite team. The same command/ordinary AI owner resolves own
+compartment targets; paid work begins only on site, and recall or machinery loss
+returns the same cursor instead of teleporting it. Access waits for Security's
+committed crossings and Security respects actual closed/requested boundaries.
+The existing panel shows actual room/crossing/blockage; local travel has no false
+phase timer. The structured Workshop Security panel edits these same accepted
+homes/actions through history, validation and Preview/Test.
+
+`security_cruiser.toml` is an optional reference with three authored one-shot
+local tasks and unchanged inherited team count, hardware and topology. A local
+profile offers local work only. External-only profiles retain their crossing
+model pending the actual craft/custody join. Medical remains subsequent work.

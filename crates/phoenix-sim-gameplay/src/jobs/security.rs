@@ -33,6 +33,9 @@ pub struct SecurityActivity {
 #[serde(deny_unknown_fields)]
 pub struct SecurityJobs {
     pub jobs: TeamJobs<SecurityActivity>,
+    /// The sole physical route owner for explicitly local profiles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub navigation: Option<Vec<phoenix_model::interior::RouteCursor>>,
     /// Readout only, re-derived from actual machinery availability each tick.
     #[serde(skip)]
     unavailable: bool,
@@ -42,6 +45,7 @@ impl SecurityJobs {
     pub fn new(count: usize, owner: SystemId) -> Self {
         Self {
             jobs: TeamJobs::new(count, owner),
+            navigation: None,
             unavailable: false,
         }
     }
@@ -162,7 +166,12 @@ impl SecurityJobs {
                     target_system: None,
                     target_entity: team.target.clone(),
                     outcome: job.outcome,
-                    paused: job.paused,
+                    paused: job.paused
+                        || self
+                            .navigation
+                            .as_ref()
+                            .and_then(|rows| rows.get(index))
+                            .is_some_and(|cursor| cursor.blocked),
                     workflow_error: job.workflow_error,
                     target_work: None,
                     work_progress: None,
@@ -181,11 +190,22 @@ impl SecurityJobs {
             &crate::ship::system_registry::security_system_id(),
             tick,
         )?;
+        if config.local.is_some() != self.navigation.is_some() {
+            return Err("Security route owner disagrees with accepted local/external mode".into());
+        }
         for job in self.jobs.teams.iter().flatten() {
             let team = &job.activity.team;
             let duration = match team.state {
-                SecurityTeamState::Deploying => Some(config.deploy_duration_secs),
-                SecurityTeamState::Withdrawing => Some(config.withdraw_duration_secs),
+                SecurityTeamState::Deploying => Some(if config.local.is_some() {
+                    0.0
+                } else {
+                    config.deploy_duration_secs
+                }),
+                SecurityTeamState::Withdrawing => Some(if config.local.is_some() {
+                    0.0
+                } else {
+                    config.withdraw_duration_secs
+                }),
                 _ => None,
             };
             if duration.is_some_and(|duration| team.phase_duration != duration) {

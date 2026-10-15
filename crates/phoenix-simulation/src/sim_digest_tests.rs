@@ -37,6 +37,7 @@ fn optional_namespace_fixture() -> World {
         spawn_tender(&mut world, &id, Some((seq as u8, "ally")));
         spawn_umbilical(&mut world, &id, true);
         let mut security = ShipSecurityTeams::new(crate::security::SecurityConfig {
+            local: None,
             team_count: 2,
             deploy_duration_secs: 1.0,
             withdraw_duration_secs: 2.0,
@@ -149,6 +150,7 @@ fn optional_namespace_selectors_skip_idle_rows_but_keep_disengaged_coupling() {
         EntityUuid("idle".into()),
         ShipStationStances::default(),
         ShipSecurityTeams::new(crate::security::SecurityConfig {
+            local: None,
             team_count: 2,
             deploy_duration_secs: 1.0,
             withdraw_duration_secs: 2.0,

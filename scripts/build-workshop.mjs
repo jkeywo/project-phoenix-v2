@@ -18,7 +18,7 @@ const editorModules = [
   'workshop-damage', 'workshop-damage-model',
   'workshop-document', 'workshop-asset-job', 'workshop-acceptance', 'workshop-runtime', 'workshop-recovery', 'workshop-provider', 'workshop-launch', 'workshop-billboard-capture', 'workshop-lod-generation', 'workshop-test', 'workshop-sound-cues', 'mod-actions', 'mod-pack-workspace', 'mod-pack-export',
   'ordered-form', 'workshop-migration', 'workshop-diff', 'workshop-definitions', 'workshop-composition', 'workshop-entity', 'workshop-resources', 'workshop-logistics', 'workshop-production', 'workshop-fields', 'workshop-fitting', 'workshop-sensing', 'workshop-helm-projection', 'workshop-helm-movement', 'workshop-transit', 'workshop-resource-recovery', 'workshop-ports', 'workshop-stock-bindings', 'workshop-weapons', 'workshop-weapon-model', 'workshop-weapon-groups', 'workshop-energy', 'workshop-energy-ai', 'workshop-energy-model', 'workshop-generated-systems', 'workshop-shields', 'workshop-shield-ai', 'workshop-interiors',
-  'workshop-personnel',
+  'workshop-personnel', 'workshop-security',
   'workshop-comms-radio',
   'workshop-guided-profile',
   'workshop-presets', 'workshop-scripts', 'workshop-activities', 'workshop-planning', 'workshop-script-references', 'workshop-objective-snippet', 'workshop-localisation', 'workshop-slot-authoring', 'script-editor', 'script-editor-view',

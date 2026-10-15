@@ -1663,6 +1663,8 @@ impl EntityConfig {
             }
         }
 
+        crate::security::local::compile_entity(&config).map_err(SerdeError::custom)?;
+
         // Validation: a [security_target] table has to offer work a team could
         // actually be sent to do (issue #1346) — at least one action, each with a
         // positive duration, a risk inside the band the console renders, and no

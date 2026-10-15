@@ -8,6 +8,7 @@ fn validate_row(
     row: &EntityState,
     config: Option<&crate::security::SecurityConfig>,
     targets: &BTreeMap<String, Option<crate::security::SecurityTargetConfig>>,
+    local: Option<&phoenix_sim_gameplay::security::local::CompiledLocalSecurity>,
     tick: u64,
 ) -> Result<(), String> {
     let Some(state) = &row.security else {
@@ -15,6 +16,11 @@ fn validate_row(
     };
     let config = config.ok_or("Security jobs have no accepted finite team owner")?;
     state.validate_config(config, tick)?;
+    if let Some(local) = local {
+        local.validate_navigation(state)?;
+    } else if config.local.is_some() {
+        return Err("missing actual accepted local Security geometry".into());
+    }
     for job in state.jobs.teams.iter().flatten() {
         let team = &job.activity.team;
         if !team.is_committed() {
@@ -23,15 +29,28 @@ fn validate_row(
         let Some(target) = team.target.as_ref() else {
             continue;
         };
-        // Missing targets are legitimate interruption/return continuations. They
-        // cannot emit a completion: the ordinary tick withdraws before work.
-        let Some(target) = targets.get(target) else {
-            continue;
+        let offered = if let Some(local) = local {
+            local
+                .target(target)
+                .and_then(|target| {
+                    team.action.and_then(|action| {
+                        target
+                            .actions
+                            .iter()
+                            .find(|offered| offered.action == action)
+                    })
+                })
+                .ok_or("local Security commitment has no actual accepted action")?
+        } else {
+            // Removed targets continue into ordinary interruption/return, never completion.
+            let Some(target) = targets.get(target) else {
+                continue;
+            };
+            target
+                .as_ref()
+                .and_then(|profile| team.action.and_then(|action| profile.action(action)))
+                .ok_or("Security commitment has no matching accepted target action")?
         };
-        let offered = target
-            .as_ref()
-            .and_then(|profile| team.action.and_then(|action| profile.action(action)))
-            .ok_or("Security commitment has no matching accepted target action")?;
         if team.risk != offered.risk
             || (team.state == crate::security::SecurityTeamState::Working
                 && team.phase_duration != offered.duration_secs)
@@ -59,7 +78,7 @@ pub(super) fn validate_roster(
     let mut targets = BTreeMap::new();
     for row in &snapshot.entities {
         let live = entity_for(world, &row.uuid);
-        let (profile, target) = if let Some(entity) = live {
+        let (profile, target, local) = if let Some(entity) = live {
             (
                 world
                     .get::<crate::security::ShipSecurityTeams>(entity)
@@ -67,6 +86,9 @@ pub(super) fn validate_roster(
                 world
                     .get::<crate::security::SecurityTargetActions>(entity)
                     .map(|target| target.0.clone()),
+                world
+                    .get::<crate::security::ShipSecurityTeams>(entity)
+                    .and_then(|teams| teams.local.clone()),
             )
         } else if let Some(origin) = &row.spawn {
             let config = origin
@@ -80,18 +102,29 @@ pub(super) fn validate_roster(
                         "cannot resolve Security equipment for restore".into(),
                     )
                 })?;
-            (config.security.clone(), config.security_target.clone())
+            let local = phoenix_sim_gameplay::security::local::compile_entity(&config)
+                .map_err(|reason| (row.uuid.clone(), reason))?;
+            (
+                config.security.clone(),
+                config.security_target.clone(),
+                local,
+            )
         } else {
-            (None, None)
+            (None, None, None)
         };
-        profiles.insert(row.uuid.clone(), profile);
+        profiles.insert(row.uuid.clone(), (profile, local));
         targets.insert(row.uuid.clone(), target);
     }
     for row in &snapshot.entities {
         validate_row(
             row,
-            profiles.get(&row.uuid).and_then(Option::as_ref),
+            profiles
+                .get(&row.uuid)
+                .and_then(|(config, _)| config.as_ref()),
             &targets,
+            profiles
+                .get(&row.uuid)
+                .and_then(|(_, local)| local.as_ref()),
             snapshot.tick,
         )
         .map_err(|reason| (row.uuid.clone(), reason))?;
@@ -115,6 +148,9 @@ pub(super) fn validate_live(
             .get::<crate::security::ShipSecurityTeams>(entity)
             .map(|teams| &teams.config),
         &targets,
+        world
+            .get::<crate::security::ShipSecurityTeams>(entity)
+            .and_then(|teams| teams.local.as_ref()),
         tick,
     )
 }

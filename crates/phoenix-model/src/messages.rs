@@ -4990,6 +4990,11 @@ pub struct SecurityBlackboard {
     /// Permitted shared commitments; these rows grant no machinery authority.
     #[serde(default)]
     pub jobs: Vec<crate::job::JobWorkItem>,
+    /// Actual own local team cursors; absent for retained external-only profiles.
+    #[serde(default)]
+    pub navigation: Vec<crate::interior::RouteCursor>,
+    #[serde(default)]
+    pub compartments: std::collections::BTreeMap<String, String>,
     /// Every entity in the world that offers Security work, in uuid order, with
     /// the actions each of them offers.
     #[serde(default)]

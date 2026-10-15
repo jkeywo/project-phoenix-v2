@@ -89,6 +89,7 @@ fn shared_work_list_distinguishes_completed_work_from_released_team() {
 #[test]
 fn operator_crossing_terms_are_checked_against_actual_configuration() {
     let config = crate::security::teams::SecurityConfig {
+        local: None,
         team_count: 2,
         deploy_duration_secs: 2.0,
         withdraw_duration_secs: 3.0,

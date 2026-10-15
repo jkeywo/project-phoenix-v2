@@ -1,3 +1,4 @@
+import { guardSecurityReferences } from './workshop-security.js';
 import { guardTransitReferences } from './workshop-transit.js';
 import { guardPortServiceReferences } from './workshop-ports.js';
 import { guardPersonnelReferences } from './workshop-personnel.js';
@@ -472,6 +473,7 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
     guardLogisticsSystemRemoval(inspection.composition.resolved.value, operation.id);
   if (effectiveValue.interior) guardLogisticsLayout(effectiveValue, effectiveValue.interior);
   guardPersonnelReferences(inspection.composition.resolved.value, effectiveValue);
+  guardSecurityReferences(inspection.composition.resolved.value, effectiveValue);
   guardPortServiceReferences(inspection.composition.resolved.value, effectiveValue);
   guardWeaponGroupReferences(inspection.composition.resolved.value, effectiveValue);
   guardHelmMovementReferences(inspection.composition.resolved.value, effectiveValue);

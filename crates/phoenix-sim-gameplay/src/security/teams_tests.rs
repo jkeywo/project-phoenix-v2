@@ -556,6 +556,7 @@ fn the_reservation_does_not_hold_a_team_for_work_already_under_way() {
 
 fn config() -> SecurityConfig {
     SecurityConfig {
+        local: None,
         team_count: 2,
         deploy_duration_secs: 6.0,
         withdraw_duration_secs: 4.0,

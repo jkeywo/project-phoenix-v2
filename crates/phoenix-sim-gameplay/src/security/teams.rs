@@ -166,6 +166,13 @@ pub struct SecurityConfig {
     /// ([`SecurityRefusal::OutOfRange`]); drifting past it once a team is over
     /// there brings the team home.
     pub range: f32,
+    /// Explicitly local-only work; omitted profiles retain external crossing.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "phoenix_model::guided_guidance::deserialize_optional_profile"
+    )]
+    pub local: Option<super::local::LocalSecurityConfig>,
 }
 
 impl SecurityConfig {

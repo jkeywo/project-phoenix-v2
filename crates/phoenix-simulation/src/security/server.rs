@@ -78,6 +78,8 @@ fn team_slot(operator: &str, team_idx: u8) -> TaskSlot {
 pub struct ShipSecurityTeams {
     /// The authored terms — team count, crossing times, reach.
     pub config: SecurityConfig,
+    /// Immutable accepted local geometry and work, never another movement owner.
+    pub local: Option<phoenix_sim_gameplay::security::local::CompiledLocalSecurity>,
     /// Every team, in authored index order. `teams.len() == config.team_count`.
     pub teams: phoenix_sim_gameplay::jobs::security::SecurityJobs,
     /// Why the last dispatch could not form, or why a live assignment was ended
@@ -96,6 +98,7 @@ impl ShipSecurityTeams {
         );
         Self {
             config,
+            local: None,
             teams,
             last_refusal: None,
         }
@@ -124,11 +127,24 @@ impl ShipSecurityTeams {
     pub fn save_state(&self) -> SecuritySaveState {
         self.teams.saved()
     }
+    pub fn reset_idle(&mut self) {
+        self.teams = phoenix_sim_gameplay::jobs::security::SecurityJobs::new(
+            self.config.team_count as usize,
+            security_system_id(),
+        );
+        self.teams.navigation = self.local.as_ref().map(|local| local.initial_navigation());
+        self.last_refusal = None;
+    }
     pub fn restore(&mut self, save: &SecuritySaveState) -> Result<(), String> {
         self.restore_at(save, u64::MAX)
     }
     pub fn restore_at(&mut self, save: &SecuritySaveState, tick: u64) -> Result<(), String> {
         save.validate_config(&self.config, tick)?;
+        if let Some(local) = &self.local {
+            local.validate_navigation(save)?;
+        } else if self.config.local.is_some() {
+            return Err("missing accepted local Security geometry".into());
+        }
         self.teams = save.saved();
         self.last_refusal = None;
         Ok(())
@@ -208,6 +224,7 @@ impl Plugin for SecurityPlugin {
 
 /// One dispatchable target, read once per tick into plain values so the borrow of
 /// the world is released before the verdicts and the write.
+#[derive(Clone)]
 struct TargetRow {
     uuid: String,
     name: Option<String>,
@@ -255,6 +272,39 @@ enum Request {
     Recall {
         team_idx: u8,
     },
+}
+
+/// Local targets are scoped by actual commanding actor ownership, never World UUIDs.
+fn operator_target_rows(
+    rows: &[TargetRow],
+    security: &ShipSecurityTeams,
+    position: Vec3,
+) -> Vec<TargetRow> {
+    if security.config.local.is_none() {
+        return rows.to_vec();
+    }
+    let Some(local) = &security.local else {
+        return Vec::new();
+    };
+    local
+        .config
+        .targets
+        .iter()
+        .map(|target| TargetRow {
+            uuid: phoenix_sim_gameplay::security::local::address(&target.compartment),
+            name: local
+                .graph
+                .config
+                .compartments
+                .iter()
+                .find(|room| room.id == target.compartment)
+                .map(|room| room.label.clone()),
+            position,
+            config: SecurityTargetConfig {
+                actions: target.actions.clone(),
+            },
+        })
+        .collect()
 }
 
 /// Take this tick's `DispatchSecurityTeam` / `RecallSecurityTeam` commands and
@@ -333,6 +383,7 @@ pub fn handle_security_commands(
         let Ok((_, _, _, _, _, _, mut security)) = operators.get_mut(entity) else {
             continue;
         };
+        let rows = operator_target_rows(&rows, &security, operator_pos);
         for request in requests {
             match request {
                 Request::Dispatch {
@@ -358,7 +409,11 @@ pub fn handle_security_commands(
                     );
                     match (verdict, offered, action) {
                         (Ok(()), Some(offered), Some(action)) => {
-                            let crossing = security.config.deploy_duration_secs;
+                            let crossing = if security.local.is_some() {
+                                0.0
+                            } else {
+                                security.config.deploy_duration_secs
+                            };
                             if !security.teams.deploy(
                                 team_idx as usize,
                                 target.clone(),
@@ -390,7 +445,11 @@ pub fn handle_security_commands(
                     }
                 }
                 Request::Recall { team_idx } => {
-                    let withdraw = security.config.withdraw_duration_secs;
+                    let withdraw = if security.local.is_some() {
+                        0.0
+                    } else {
+                        security.config.withdraw_duration_secs
+                    };
                     let Some(team) = security.teams.get(team_idx as usize) else {
                         security.last_refusal = Some(SecurityRefusal::NoSuchTeam);
                         continue;
@@ -454,6 +513,7 @@ enum TeamTransition {
     Home,
     Unavailable,
     Restore,
+    LocalHandled,
 }
 
 /// Advance every Security team through its assignment (issue #1346).
@@ -475,6 +535,7 @@ enum TeamTransition {
 #[allow(clippy::type_complexity)]
 pub fn tick_security_teams(
     physical_q: Query<&ShipDamage>,
+    access_q: Query<&crate::ship::access::InteriorAccess>,
     mut power_q: Query<&mut crate::ship::power::ShipPowerSystem>,
     time: Option<Res<Time>>,
     mut runtime: Option<ResMut<WorldContentRuntime>>,
@@ -504,6 +565,7 @@ pub fn tick_security_teams(
     // lifecycle reports are identical on two hosts.
     let mut decided: Vec<Transition> = Vec::new();
     let mut work_steps = std::collections::BTreeMap::new();
+    let mut local_updates = std::collections::BTreeMap::new();
     {
         let mut operator_rows: Vec<(String, Entity, Vec3, bool, ShipSecurityTeams)> = operators
             .iter()
@@ -520,6 +582,72 @@ pub fn tick_security_teams(
         operator_rows.sort_by(|a, b| a.0.cmp(&b.0));
 
         for (operator_uuid, entity, operator_pos, disabled, security) in &operator_rows {
+            if let Some(local) = &security.local {
+                let blocked = if let Ok(access) = access_q.get(*entity) {
+                    access.blocked_connections(&local.graph.config)
+                } else if local
+                    .graph
+                    .config
+                    .connections
+                    .iter()
+                    .any(|link| link.boundary.is_some())
+                {
+                    local
+                        .graph
+                        .config
+                        .connections
+                        .iter()
+                        .map(|link| link.id.clone())
+                        .collect()
+                } else {
+                    std::collections::BTreeSet::new()
+                };
+                let mut funded = vec![0.0; security.teams.len()];
+                if !*disabled && local.validate_navigation(&security.teams).is_ok() {
+                    for (index, team) in security.teams.iter().enumerate() {
+                        if team.state != SecurityTeamState::Working {
+                            continue;
+                        }
+                        let requested = dt.min((team.phase_duration - team.elapsed).max(0.0));
+                        let fraction = power_q.get_mut(*entity).ok().map_or(0.0, |mut power| {
+                            power
+                                .0
+                                .work_continuous(&security_system_id(), requested, 1.0)
+                                .map_or(0.0, |grant| grant.fraction)
+                        });
+                        funded[index] = requested
+                            * fraction
+                            * physical_q.get(*entity).map_or(1.0, |damage| {
+                                damage.factor(
+                                    &security_system_id(),
+                                    phoenix_model::damage::DamageBinding::Operation,
+                                )
+                            });
+                    }
+                }
+                let mut next = security.teams.clone();
+                for result in phoenix_sim_gameplay::security::local::tick(
+                    local, &mut next, dt, &funded, &blocked, *disabled,
+                ) {
+                    decided.push(Transition {
+                        operator: operator_uuid.clone(),
+                        team_idx: result.team_idx as u8,
+                        terminal: Some(if result.completed {
+                            TaskTerminalReason::Completed
+                        } else {
+                            TaskTerminalReason::Disabled
+                        }),
+                        outcome: result.outcome,
+                        next: TeamTransition::LocalHandled,
+                        refusal: (!result.completed).then_some(SecurityRefusal::Disabled),
+                    });
+                }
+                local_updates.insert(operator_uuid.clone(), next);
+                continue;
+            }
+            if security.config.local.is_some() {
+                continue;
+            }
             for (index, team) in security.teams.iter().enumerate() {
                 let team_idx = index as u8;
                 // A knocked-out System takes every team off the board; one that
@@ -666,6 +794,16 @@ pub fn tick_security_teams(
 
     // Advance every committed clock and apply the decided transitions.
     for (_, uuid, _, hull, damage, mut security) in operators.iter_mut() {
+        if let Some(next) = local_updates.remove(&uuid.0) {
+            security.teams = next;
+            if decided
+                .iter()
+                .any(|transition| transition.operator == uuid.0 && transition.refusal.is_some())
+            {
+                security.last_refusal = Some(SecurityRefusal::Disabled);
+            }
+            continue;
+        }
         let withdraw = security.config.withdraw_duration_secs;
         security
             .teams
@@ -704,7 +842,7 @@ pub fn tick_security_teams(
                     security.teams.home(index);
                     security.teams.set_unavailable(true);
                 }
-                TeamTransition::Restore => {}
+                TeamTransition::Restore | TeamTransition::LocalHandled => {}
             }
             if let Some(refusal) = transition.refusal {
                 security.last_refusal = Some(refusal);
@@ -970,8 +1108,9 @@ pub fn operate_security_ai(
             _ => Vec::new(),
         };
 
+        let own_rows = operator_target_rows(&rows, security, transform.translation);
         let candidates = build_candidates(
-            &rows,
+            &own_rows,
             transform.translation,
             security.config.range,
             &ordered_targets,
@@ -1136,6 +1275,7 @@ pub fn publish_security_blackboard(
     let key = security_system_id();
     let rows = target_rows(&targets);
     for (transform, security, mut blackboards) in ships.iter_mut() {
+        let rows = operator_target_rows(&rows, security, transform.translation);
         let teams = security
             .teams
             .iter()
@@ -1180,6 +1320,20 @@ pub fn publish_security_blackboard(
             range: security.config.range,
             teams,
             jobs: security.teams.work_list(),
+            navigation: security.teams.navigation.clone().unwrap_or_default(),
+            compartments: security
+                .local
+                .as_ref()
+                .map(|local| {
+                    local
+                        .graph
+                        .config
+                        .compartments
+                        .iter()
+                        .map(|room| (room.id.clone(), room.label.clone()))
+                        .collect()
+                })
+                .unwrap_or_default(),
             targets: target_options,
             refusal: security.last_refusal.map(|r| r.string_id().to_string()),
         });

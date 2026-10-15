@@ -256,3 +256,24 @@ Workshop edits these same profile values through accepted document history,
 validation and Test; local authoring is not complete until that workflow exists.
 This tracer does not establish hazard simulation, medical care, boarding or a full
 increment20 exit. Native hosted continuation and human acceptance remain separate.
+
+The physical local source checkpoint installs this consumer on optional
+`security_cruiser.toml`: two existing finite teams, three authored one-shot
+compartment tasks, inherited real energy and topology, one actual weapons access
+boundary. Existing layouts and external-only profiles remain unchanged. The
+structured Workshop Security panel supports accepted inherited materialisation,
+home/action/risk/duration editing, explicit `local = false`, history/reload,
+Preview/Test and cross-editor reference refusal. The player panel shows actual
+compartment/crossing/blocked state, without a fictitious travel-progress timer.
+
+Worker source validation: 10 client files pass 486 tests (14.14s); after the final
+access-gated reference addition, the two affected files pass 18 tests (3.62s).
+The actual Workshop build, layer/import check, strict 6,220-entry String Table
+check and redesign ledger check pass. Independent source review passes the local
+runtime/persistence/authority and authoring/GUI diff. Native owner/adapter/whole
+snapshot tests and the new joined-host tracer remain unexecuted in this worker:
+only the root integrator holds Cargo. The tracer requests ordinary joined Human
+controls, actual seals, blocked/funded work, malformed no-write candidates,
+fresh blocked/working JSON continuations of 360 steps and normal AFK Backfill
+handoff. Authored assertions are pending evidence, not passing acceptance.
+Medical, real external custody and full increment20 remain open.

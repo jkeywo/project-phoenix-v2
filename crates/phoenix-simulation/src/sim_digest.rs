@@ -2349,6 +2349,13 @@ fn fold_security_namespace(world: &World, acc: u64) -> u64 {
         |security: &ShipSecurityTeams| {
             security.teams.has_history().then(|| {
                 let mut state = security.save_state();
+                for cursor in state.navigation.iter_mut().flatten() {
+                    if let phoenix_model::interior::RouteLocation::Crossing { elapsed, .. } =
+                        &mut cursor.location
+                    {
+                        *elapsed = f32::from_bits(canon_f32(*elapsed));
+                    }
+                }
                 for job in state.jobs.teams.iter_mut().flatten() {
                     let team = &mut job.activity.team;
                     team.risk = f32::from_bits(canon_f32(team.risk));

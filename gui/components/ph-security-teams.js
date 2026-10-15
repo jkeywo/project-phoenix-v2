@@ -176,8 +176,18 @@ export class PhSecurityTeams extends PhElement {
         : '';
       card.appendChild(assignment);
 
+      const navigation = bb?.navigation?.[team.teamIdx];
+      if (navigation) {
+        const where = navigation.location || {}, position = document.createElement('div');
+        position.className = 'assignment';
+        const room = id => bb.compartments?.[id] ? t(bb.compartments[id]) : id || '';
+        const place = where.kind === 'crossing' ? `${room(where.from)} → ${room(where.to)}` : room(where.compartment);
+        position.textContent = t(navigation.blocked ? 'interior.map.blocked' : 'interior.map.location', { n: String(team.teamIdx + 1), place });
+        card.append(position);
+      }
       const wrap = document.createElement('div');
       wrap.className = 'progress-wrap';
+      wrap.hidden = !!navigation && team.state !== 'working';
       const fill = document.createElement('div');
       fill.className = `progress-fill ${team.state}`;
       fill.style.width = `${Math.round(Math.max(0, Math.min(1, team.progress)) * 100)}%`;

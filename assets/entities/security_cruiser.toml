@@ -1,0 +1,34 @@
+# Optional increment20 physical local Security reference. Existing Cruiser
+# equipment, team count, power and actual topology are unchanged.
+includes = ["alliance_cruiser.toml"]
+name = "entity.security_cruiser.name"
+
+[security.local]
+team_homes = ["bridge", "bridge"]
+
+[[security.local.target]]
+compartment = "engineering"
+[[security.local.target.action]]
+action = "secure_contain"
+duration_secs = 6.0
+risk = 0.0
+priority = "life_safety"
+outcome_flag = "local_engineering_secured"
+
+[[security.local.target]]
+compartment = "bridge"
+[[security.local.target.action]]
+action = "assist_evacuation"
+duration_secs = 4.0
+risk = 0.0
+priority = "evacuation_underway"
+outcome_flag = "local_bridge_assisted"
+
+[[security.local.target]]
+compartment = "weapons"
+[[security.local.target.action]]
+action = "secure_contain"
+duration_secs = 6.0
+risk = 0.0
+priority = "optional"
+outcome_flag = "local_weapons_secured"

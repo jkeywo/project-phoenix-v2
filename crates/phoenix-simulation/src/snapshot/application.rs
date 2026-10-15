@@ -1638,7 +1638,7 @@ pub(super) fn apply_entity_state_with(
                 .restore_at(security, tick)
                 .expect("preflighted Security commitments");
         } else {
-            *teams = crate::security::ShipSecurityTeams::new(teams.config.clone());
+            teams.reset_idle();
         }
     }
     if let Some(scan) = &row.scan {

@@ -1,3 +1,4 @@
+import { guardSecurityReferences } from './workshop-security.js';
 import { guardPortServiceReferences } from './workshop-ports.js';
 import { guardPersonnelReferences } from './workshop-personnel.js';
 import { guardSensingReferences } from './workshop-sensing.js';
@@ -144,6 +145,7 @@ export function prepareDamageOperation(draft, dependencies, operation) {
   guardSensingReferences(inspection.resolved.value, inspectDamage({ paths: () => draft.paths(), isBinary: path => draft.isBinary(path), read: path => path === operation.path ? after : draft.read(path) }, dependencies, operation.path).resolved.value);
   guardPortServiceReferences(inspection.resolved.value, value);
   guardPersonnelReferences(inspection.resolved.value, value);
+  guardSecurityReferences(inspection.resolved.value, value);
   validateDamage(value.damage, authoredAndGeneratedSystems(value), value);
   parse(after);
   return { changes: [{ path: operation.path, before, after }] };

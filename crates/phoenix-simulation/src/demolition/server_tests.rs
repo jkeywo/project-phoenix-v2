@@ -39,6 +39,7 @@ fn demo_config(stabilization_required: bool) -> DemolitionConfig {
 
 fn security_config() -> SecurityConfig {
     SecurityConfig {
+        local: None,
         team_count: 1,
         deploy_duration_secs: 2.0,
         withdraw_duration_secs: 2.0,

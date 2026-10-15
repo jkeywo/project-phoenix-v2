@@ -712,7 +712,12 @@ impl SpawnSection for SecuritySpawn {
         // component, so nothing about the teams themselves needs it here.
         // `EntityConfig` validation already guaranteed the paired system exists.
         if let Some(security) = &config.security {
-            cmds.insert(crate::security::ShipSecurityTeams::new(security.clone()));
+            let local = phoenix_sim_gameplay::security::local::compile_entity(config)
+                .expect("accepted local Security geometry");
+            let mut muster = crate::security::ShipSecurityTeams::new(security.clone());
+            muster.teams.navigation = local.as_ref().map(|local| local.initial_navigation());
+            muster.local = local;
+            cmds.insert(muster);
             // A hull that musters Security teams is the one that fires the charges
             // they place (issue #1350): `DetonateCharges` goes to the `security`
             // system, so the demolition refusal projection rides the same hull.

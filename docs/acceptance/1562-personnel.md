@@ -54,3 +54,23 @@ writes. The combined two-test Repair/Personnel executable passes in 10.36 second
 This is actual host continuation evidence for the first local consumer. It does
 not supply the remaining Medical/Security/external operations, different-peer,
 physical-device, performance or full increment 20 acceptance.
+
+## Physical local Security source checkpoint
+
+The shared Security Job migration is extended by optional local-only compartment
+work through the same InteriorGraph, RouteCursor and actual Access interlock.
+No separate movement timer or personnel pool is introduced. The optional Security
+Cruiser keeps inherited hardware/topology and musters the existing two teams.
+Its existing Tactical panel shows actual locations/blockage and read-only shared
+Jobs; Workshop edits the accepted homes/actions with normal history and Test.
+
+Independent read-only source review: PASS. Worker client validation: 486 tests in
+10 files (14.14s), followed by the final two affected files, 18 tests (3.62s),
+after adding the actual access-gated reference task. Workshop build, layer/import
+check, strict strings (6,220 entries; zero errors) and ledger check pass. No Cargo
+commands run in this worktree. New pure/adapter/snapshot cases and
+`tests/security_gameplay_continuation.rs` are authored but **native execution is
+pending**. The full-host tracer includes actual joined controls, seven malformed
+no-write candidates, blocked and working fresh-JSON 360-step comparisons, paid
+Security work and ordinary AFK Backfill/Human return. No physical browser/native,
+multiplayer, full station workload or increment20 exit is claimed.

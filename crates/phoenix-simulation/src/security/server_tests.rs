@@ -20,6 +20,7 @@ const CONTAINED: &str = "compartment_contained";
 
 fn config() -> SecurityConfig {
     SecurityConfig {
+        local: None,
         team_count: 2,
         deploy_duration_secs: 2.0,
         withdraw_duration_secs: 2.0,
@@ -50,6 +51,20 @@ fn target_config() -> SecurityTargetConfig {
             },
         ],
     }
+}
+
+fn actual_security_power() -> crate::ship::power::ShipPowerSystem {
+    let content = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_destroyer.toml",
+    )
+    .unwrap();
+    crate::ship::power::ShipPowerSystem(
+        crate::modifiers::power_system::PowerSystem::from_energy(
+            content.energy.unwrap(),
+            content.ship_config.unwrap(),
+        )
+        .unwrap(),
+    )
 }
 
 /// A bare app carrying the command handler, the team clock and the publisher,
@@ -84,6 +99,7 @@ fn app_with(target_at: Option<Vec3>) -> (App, Entity) {
             Transform::from_translation(Vec3::ZERO),
             AdmittedCommands::default(),
             ShipSecurityTeams::new(config()),
+            actual_security_power(),
             crate::server_app::ShipSystemBlackboards::default(),
         ))
         .id();
@@ -758,6 +774,7 @@ fn spawn_ai_operator(app: &mut App, targets: &[(&str, Vec3, SecurityTargetConfig
             Transform::from_translation(Vec3::ZERO),
             AdmittedCommands::default(),
             ShipSecurityTeams::new(config()),
+            actual_security_power(),
             security_ai_scope(),
             crate::server_app::ShipSystemBlackboards::default(),
             crate::ship_plugin::ShipSystemControlSources(sources),
@@ -1560,3 +1577,6 @@ fn the_host_marker_tracks_teams_independently() {
     claimed.release(1);
     assert!(claimed.holds(0) && !claimed.holds(1));
 }
+
+#[path = "local_server_tests.rs"]
+mod local;

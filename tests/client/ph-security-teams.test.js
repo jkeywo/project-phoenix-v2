@@ -205,4 +205,14 @@ describe('PhSecurityTeams', () => {
     expect(list.textContent).toContain(t('job.outcome.cancelled'));
   });
 
+  it('shows actual local route location and blocked waiting without a fictitious crossing bar', () => {
+    const el = setup();
+    el.state = { ...BLACKBOARD, teams: [{ state: 'deploying', progress: 1 }],
+      navigation: [{ location: { kind: 'crossing', from: 'bridge', to: 'engineering', elapsed: 1 }, blocked: true }],
+      compartments: { bridge: 'interior.room.bridge.label', engineering: 'interior.room.engineering.label' } };
+    const card = el.shadowRoot.querySelector('#teams .card');
+    expect(card.textContent).toContain(t('interior.map.blocked', { n: '1', place: `${t('interior.room.bridge.label')} → ${t('interior.room.engineering.label')}` }));
+    expect(card.querySelector('.progress-wrap').hidden).toBe(true);
+  });
+
 });

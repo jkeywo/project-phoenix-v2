@@ -663,6 +663,9 @@ pub struct TorpedoesConfig {
     /// `fact(target_facing_shields) <= 0` launch gate is buying.
     #[serde(default = "default_torpedo_damage_shields")]
     pub damage_shields: i32,
+    /// Finite physical interception durability, frozen into actual launches.
+    #[serde(default = "default_torpedo_durability")]
+    pub durability: f32,
     #[serde(default = "default_torpedo_speed")]
     pub speed: f32,
     /// Maximum turn rate in **degrees per second** (homing).
@@ -737,6 +740,9 @@ fn default_torpedo_damage_hull() -> i32 {
 fn default_torpedo_damage_shields() -> i32 {
     5
 }
+fn default_torpedo_durability() -> f32 {
+    1.0
+}
 fn default_torpedo_speed() -> f32 {
     15.0
 }
@@ -760,6 +766,7 @@ impl Default for TorpedoesConfig {
             initial_count: None,
             damage_hull: default_torpedo_damage_hull(),
             damage_shields: default_torpedo_damage_shields(),
+            durability: default_torpedo_durability(),
             speed: default_torpedo_speed(),
             turn_rate_deg_per_sec: default_torpedo_turn_rate_deg_per_sec(),
             lifespan: default_torpedo_lifespan(),
@@ -776,6 +783,20 @@ impl Default for TorpedoesConfig {
 
 impl TorpedoesConfig {
     pub fn validate_initial_stock(&self) -> Result<(), String> {
+        // Reject unsupported physics at the accepted source boundary, before
+        // any actual launch can create an uncontinuable frozen profile.
+        let runtime = self.to_runtime();
+        if self.tubes.is_empty() {
+            runtime
+                .round_profile(phoenix_model::damage::DamageProfile::default())
+                .validate()?;
+        }
+        for tube in &self.tubes {
+            runtime.round_profile(tube.impact).validate()?;
+        }
+        if !self.burst_interval_secs.is_finite() || self.burst_interval_secs <= 0.0 {
+            return Err("torpedo burst cadence must be finite and positive".into());
+        }
         if self
             .initial_count
             .is_some_and(|initial| initial > self.count)
@@ -792,6 +813,7 @@ impl TorpedoesConfig {
             initial_count: self.initial_count,
             damage_hull: self.damage_hull,
             damage_shields: self.damage_shields,
+            durability: self.durability,
             speed: self.speed,
             turn_rate: self.turn_rate_deg_per_sec.to_radians(),
             lifespan: self.lifespan,

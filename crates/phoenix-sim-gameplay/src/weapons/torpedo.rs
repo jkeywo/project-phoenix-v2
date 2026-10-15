@@ -16,6 +16,7 @@
 use crate::resources::{reserve_requirements, ResourceRequirement, Stock};
 use crate::simmath;
 use crate::weapons::pattern::BarrelPattern;
+pub use phoenix_model::guided_round::GuidedRoundProfile;
 use std::f32::consts::PI;
 
 /// String identifier for a torpedo tube (matches the `id` field in TOML).
@@ -55,6 +56,8 @@ pub struct TorpedoConfig {
     /// screen; a hull that authors `0` here is declaring that a round spent into
     /// one is a round wasted.
     pub damage_shields: i32,
+    /// Physical interception durability carried by each launched round.
+    pub durability: f32,
     /// Travel speed in world units per second.
     pub speed: f32,
     /// Maximum turn rate in radians per second (homing).
@@ -97,6 +100,7 @@ impl Default for TorpedoConfig {
             initial_count: None,
             damage_hull: 50,
             damage_shields: 5,
+            durability: 1.0,
             speed: 15.0,
             turn_rate: PI / 4.0,
             lifespan: 20.0,
@@ -111,9 +115,29 @@ impl Default for TorpedoConfig {
 
 // ── In-flight torpedo ──────────────────────────────────────────────────────
 
+impl TorpedoConfig {
+    pub fn round_profile(
+        &self,
+        impact: phoenix_model::damage::DamageProfile,
+    ) -> GuidedRoundProfile {
+        GuidedRoundProfile {
+            speed: self.speed,
+            turn_rate: self.turn_rate,
+            lifespan: self.lifespan,
+            detonation_radius: self.detonation_radius,
+            damage_hull: self.damage_hull,
+            damage_shields: self.damage_shields,
+            shield_pierce: self.shield_pierce,
+            impact,
+            durability: self.durability,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Torpedo {
-    pub impact: phoenix_model::damage::DamageProfile,
+    pub profile: GuidedRoundProfile,
+    pub durability_remaining: f32,
     pub strike_damage_bonus: f32,
     pub uuid: String,
     pub x: f32,
@@ -141,22 +165,17 @@ pub struct Torpedo {
     /// attribute damage per-tube. The tube is out of scope by detonation
     /// time, and `TorpedoConfig` is ship-wide, so this has to ride along.
     pub tube_id: String,
-    /// Snapshot of the firing tube's `shield_pierce` at launch time, so
-    /// detonation logic can split `damage_shields` between absorbed and
-    /// pierced portions without re-resolving the source config. Clamped
-    /// to `[0.0, 1.0]` at apply time.
-    pub shield_pierce: f32,
 }
 
 impl Torpedo {
-    pub fn tick(&mut self, dt: f32, target_pos: Option<(f32, f32, f32)>, config: &TorpedoConfig) {
+    pub fn tick(&mut self, dt: f32, target_pos: Option<(f32, f32, f32)>) {
         if self.target_uuid.is_some() {
             if let Some((tx, ty, tz)) = target_pos {
                 let dx = tx - self.x;
                 let dz = tz - self.z;
                 let desired = simmath::atan2(dx, -dz);
                 let delta = angle_diff(desired, self.heading);
-                let max_turn = config.turn_rate * dt;
+                let max_turn = self.profile.turn_rate * dt;
                 self.heading += delta.clamp(-max_turn, max_turn);
                 // Vertical steering (issue #768): rotate the climb pitch toward
                 // the target's elevation, rate-limited by the SAME turn_rate
@@ -179,9 +198,9 @@ impl Torpedo {
         // put (issue #768, AC3).
         let cos_p = simmath::cos(self.pitch);
         let sin_p = simmath::sin(self.pitch);
-        self.x += sin_h * cos_p * config.speed * dt;
-        self.z -= cos_h * cos_p * config.speed * dt;
-        self.y += sin_p * config.speed * dt;
+        self.x += sin_h * cos_p * self.profile.speed * dt;
+        self.z -= cos_h * cos_p * self.profile.speed * dt;
+        self.y += sin_p * self.profile.speed * dt;
         self.lifespan_remaining = (self.lifespan_remaining - dt).max(0.0);
     }
 
@@ -456,7 +475,9 @@ pub struct TorpedoTickResult {
 /// the pure-module `tick` can drive the burst without Bevy.
 #[derive(Clone, Debug, Default)]
 pub struct TubeBurstState {
-    pub impact: phoenix_model::damage::DamageProfile,
+    pub profile: GuidedRoundProfile,
+    /// Original emission cadence; current equipment cannot retime this volley.
+    pub burst_interval_secs: f32,
     pub tube_id: String,
     /// Torpedoes remaining to be fired in the current burst (0 = idle).
     pub pending: u32,
@@ -952,9 +973,7 @@ impl TorpedoSystem {
         target_uuid: Option<String>,
         source_uuid: Option<String>,
     ) -> LaunchResult {
-        let lifespan = self.config.lifespan;
         let burst_interval = self.config.burst_interval_secs;
-        let shield_pierce = self.config.shield_pierce;
         let Some(idx) = self.tubes.iter().position(|t| t.id == tube_id) else {
             return LaunchResult::UnknownTube;
         };
@@ -967,6 +986,7 @@ impl TorpedoSystem {
             return LaunchResult::TubeNotLoaded;
         }
         let count = self.tubes[idx].loaded_count;
+        let profile = self.config.round_profile(self.tubes[idx].impact);
         // Resolve the tube's barrel firing sequence up-front (origin map only —
         // never affects `count`).
         let sequence = self.tubes[idx].barrel_sequence();
@@ -994,7 +1014,8 @@ impl TorpedoSystem {
         self.tubes[idx].active_barrels = vec![barrel0];
         self.tubes[idx].pattern_step = step0;
         self.in_flight.push(Torpedo {
-            impact: self.tubes[idx].impact,
+            profile,
+            durability_remaining: profile.durability,
             strike_damage_bonus: 0.0,
             uuid: uuid.clone(),
             x: origin_x,
@@ -1002,11 +1023,10 @@ impl TorpedoSystem {
             z: origin_z,
             heading: launch_heading,
             pitch: 0.0,
-            lifespan_remaining: lifespan,
+            lifespan_remaining: profile.lifespan,
             target_uuid: target_uuid.clone(),
             source_uuid: source_uuid.clone(),
             tube_id: tube_id.to_string(),
-            shield_pierce,
         });
 
         let count_remaining = count - 1;
@@ -1014,7 +1034,8 @@ impl TorpedoSystem {
         if count_remaining > 0 {
             self.burst_states.retain(|b| b.tube_id != tube_id);
             self.burst_states.push(TubeBurstState {
-                impact: self.tubes[idx].impact,
+                profile,
+                burst_interval_secs: burst_interval,
                 tube_id: tube_id.to_string(),
                 pending: count_remaining,
                 timer: burst_interval,
@@ -1156,9 +1177,6 @@ impl TorpedoSystem {
         }
 
         // ── Burst-fire timer ──────────────────────────────────────────────
-        let lifespan = self.config.lifespan;
-        let shield_pierce = self.config.shield_pierce;
-        let burst_interval = self.config.burst_interval_secs;
         // Collect burst launches to avoid split borrows.
         let mut burst_torpedoes: Vec<Torpedo> = Vec::new();
         let mut burst_events: Vec<(String, String, f32, f32, f32, f32)> = Vec::new();
@@ -1196,7 +1214,8 @@ impl TorpedoSystem {
                 burst.next_shot_index += 1;
                 pattern_updates.push((burst.tube_id.clone(), barrel, step));
                 burst_torpedoes.push(Torpedo {
-                    impact: burst.impact,
+                    profile: burst.profile,
+                    durability_remaining: burst.profile.durability,
                     strike_damage_bonus: 0.0,
                     uuid: uuid.clone(),
                     x: origin_x,
@@ -1204,11 +1223,10 @@ impl TorpedoSystem {
                     z: origin_z,
                     heading: burst.launch_heading,
                     pitch: 0.0,
-                    lifespan_remaining: lifespan,
+                    lifespan_remaining: burst.profile.lifespan,
                     target_uuid: burst.target_uuid.clone(),
                     source_uuid: burst.source_uuid.clone(),
                     tube_id: burst.tube_id.clone(),
-                    shield_pierce,
                 });
                 burst_events.push((
                     burst.tube_id.clone(),
@@ -1220,7 +1238,7 @@ impl TorpedoSystem {
                 ));
                 burst.pending -= 1;
                 if burst.pending > 0 {
-                    burst.timer = burst_interval;
+                    burst.timer = burst.burst_interval_secs;
                 } else {
                     completed_bursts.push(i);
                 }
@@ -1242,20 +1260,42 @@ impl TorpedoSystem {
         }
 
         // ── In-flight torpedo movement ────────────────────────────────────
-        let config = &self.config;
         for t in &mut self.in_flight {
             let pos = t
                 .target_uuid
                 .as_ref()
                 .and_then(|id| target_positions.get(id))
                 .copied();
-            t.tick(dt, pos, config);
+            t.tick(dt, pos);
             if t.is_expired() {
                 result.expired.push(t.uuid.clone());
             }
         }
         self.in_flight.retain(|t| !t.is_expired());
         result
+    }
+
+    /// Resolve a paid physical interception against the actual vector owner.
+    /// Returns remaining durability, or None for an already absent round.
+    /// Intercepted rounds are removed once, without detonating their payload.
+    pub fn apply_interception(&mut self, uuid: &str, damage: f32) -> Result<Option<f32>, String> {
+        if !damage.is_finite() || damage <= 0.0 {
+            return Err("interception damage must be finite and positive".into());
+        }
+        let Some(index) = self.in_flight.iter().position(|round| round.uuid == uuid) else {
+            return Ok(None);
+        };
+        let round = &self.in_flight[index];
+        round
+            .profile
+            .validate_active(round.lifespan_remaining, round.durability_remaining)?;
+        let remaining = (round.durability_remaining - damage).max(0.0);
+        if remaining == 0.0 {
+            self.in_flight.remove(index);
+        } else {
+            self.in_flight[index].durability_remaining = remaining;
+        }
+        Ok(Some(remaining))
     }
 
     pub fn handle_collision(&mut self, torpedo_uuid: &str) -> Option<i32> {
@@ -1278,14 +1318,14 @@ impl TorpedoSystem {
             }
         };
         Some(TorpedoDetonation {
-            impact: removed.impact,
+            impact: removed.profile.impact,
             incoming: [
                 simmath::sin(removed.heading),
                 -simmath::cos(removed.heading),
             ],
-            damage_hull: damage(self.config.damage_hull),
-            damage_shields: damage(self.config.damage_shields),
-            shield_pierce: removed.shield_pierce,
+            damage_hull: damage(removed.profile.damage_hull),
+            damage_shields: damage(removed.profile.damage_shields),
+            shield_pierce: removed.profile.shield_pierce,
             source_uuid: removed.source_uuid,
             tube_id: removed.tube_id,
             impact_x: removed.x,
@@ -1394,7 +1434,6 @@ impl TorpedoSystem {
         &self,
         targets: &[(String, f32, f32, f32, f32)],
     ) -> Vec<(String, String)> {
-        let det = self.config.detonation_radius;
         let mut hits = Vec::new();
         for torpedo in &self.in_flight {
             let mut best: Option<(f32, &String)> = None;
@@ -1406,7 +1445,7 @@ impl TorpedoSystem {
                 let dy = ty - torpedo.y;
                 let dz = tz - torpedo.z;
                 let dist_sq = dx * dx + dy * dy + dz * dz;
-                let threshold = det + radius;
+                let threshold = torpedo.profile.detonation_radius + radius;
                 if dist_sq <= threshold * threshold
                     && best.map(|(d, _)| dist_sq < d).unwrap_or(true)
                 {
@@ -1434,3 +1473,7 @@ mod tests;
 #[cfg(test)]
 #[path = "torpedo_logistics_tests.rs"]
 mod logistics_tests;
+
+#[cfg(test)]
+#[path = "torpedo_frozen_tests.rs"]
+mod frozen_tests;

@@ -53,6 +53,8 @@ struct Trace {
     ai_automatic: bool,
     automatic_with_ship_primary: bool,
     paid: BTreeMap<u64, f64>,
+    passive_loss: BTreeMap<u64, f64>,
+    before_power: Option<(u64, f32)>,
     initial_rounds: i64,
     initial_energy: f32,
     before_payload_hp: Option<f64>,
@@ -84,6 +86,7 @@ impl std::fmt::Debug for Trace {
             )
             .field("observed_payment_ticks", &self.paid.len())
             .field("paid_work", &self.paid.values().sum::<f64>())
+            .field("passive_loss", &self.passive_loss.values().sum::<f64>())
             .field("initial_rounds", &self.initial_rounds)
             .field("initial_energy", &self.initial_energy)
             .field("before_payload_hp", &self.before_payload_hp)
@@ -280,6 +283,47 @@ fn observe_terminal_damage(own: Query<&ShipDamage, With<LocalShip>>, mut trace: 
         trace.payload_damaged_own_hull |= damage.structural_totals().0 < before;
     }
 }
+/// Observe the existing Power owner's actual debit, rather than simulating its
+/// fullness-dependent passive drain again. This bank has zero continuous cost;
+/// its zero-intake command is checked before and after the real Power interval.
+fn observe_before_power(
+    tick: Res<SimTick>,
+    own: Query<&ShipPowerSystem, With<LocalShip>>,
+    mut trace: ResMut<Trace>,
+) {
+    if trace.initial_rounds == 0 {
+        return;
+    }
+    let power = &own.single().unwrap().0;
+    assert_eq!(power.network().fine_flows.get(&id(BANK)), Some(&0.0));
+    assert_eq!(
+        power
+            .config()
+            .consumers
+            .iter()
+            .find(|row| row.system == id(BANK))
+            .unwrap()
+            .continuous_cost_per_sec,
+        0.0
+    );
+    trace.before_power = Some((tick.0, power.network().consumers[&id(BANK)].energy));
+}
+fn observe_after_power(
+    tick: Res<SimTick>,
+    own: Query<&ShipPowerSystem, With<LocalShip>>,
+    mut trace: ResMut<Trace>,
+) {
+    let Some((before_tick, before)) = trace.before_power.filter(|(at, _)| *at == tick.0) else {
+        return;
+    };
+    let power = &own.single().unwrap().0;
+    assert_eq!(power.last_intake_per_sec(&id(BANK)), Some(0.0));
+    let after = power.network().consumers[&id(BANK)].energy;
+    assert!(after <= before, "zero-intake reserve cannot refill");
+    trace
+        .passive_loss
+        .insert(before_tick, f64::from(before) - f64::from(after));
+}
 fn steps(app: &mut App, count: usize) {
     for _ in 0..count {
         app.update();
@@ -393,6 +437,19 @@ fn boot(world: &str) -> (App, Entity) {
         observe_pdc
             .after_ignore_deferred(FixedStep::HandleBlasterHits)
             .before_ignore_deferred(FixedStep::TickTorpedoLifecycle),
+    );
+    app.add_systems(
+        FixedUpdate,
+        (
+            observe_before_power
+                .in_set(project_phoenix::sim_sets::SimSet::Physics)
+                .after_ignore_deferred(FixedStep::HandlePowerMessages)
+                .before_ignore_deferred(FixedStep::TickPowerSystem),
+            observe_after_power
+                .in_set(project_phoenix::sim_sets::SimSet::Physics)
+                .after_ignore_deferred(FixedStep::TickPowerSystem)
+                .before_ignore_deferred(FixedStep::TickCommsRadio),
+        ),
     );
     app.add_systems(
         FixedUpdate,
@@ -820,10 +877,16 @@ fn ordinary_pdc_intercepts_and_survives_launcher_removal_with_exact_json_continu
     assert!(emitted > 0 && emitted <= before_rounds);
     assert_eq!(rounds(&live, own), before_rounds - emitted);
     let energy_paid: f64 = trace.paid.values().sum();
+    let passive_loss: f64 = trace.passive_loss.values().sum();
     assert!(energy_paid > 0.0);
     assert!(
-        (f64::from(before_energy - reserve(&live, own)) - energy_paid).abs() < 1e-5,
-        "no refill or unpaid shots: actual reserve and work receipts must agree"
+        passive_loss > 0.0,
+        "retain real authored fullness-dependent drain"
+    );
+    assert!(
+        (f64::from(before_energy) - f64::from(reserve(&live, own)) - energy_paid - passive_loss).abs() < 1e-5,
+        "actual reserve must account for paid shots and actual passive drain: start={before_energy}, end={}, paid={energy_paid}, passive={passive_loss}",
+        reserve(&live, own)
     );
     assert_eq!(rounds(&live, own), rounds(&resumed, restored));
     assert_eq!(reserve(&live, own), reserve(&resumed, restored));

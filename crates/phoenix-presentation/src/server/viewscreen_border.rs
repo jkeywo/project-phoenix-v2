@@ -878,7 +878,7 @@ fn recompute_hud_state(
     hull_q: Query<
         (
             Option<&crate::entities::spawner::EntitySystemHull>,
-            Option<&phoenix_sim_gameplay::ship::physical_damage::ShipDamage>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
         ),
         With<crate::server_app::LocalShip>,
     >,
@@ -985,7 +985,7 @@ fn push_game_over_hud_state(
     hull_q: Query<
         (
             Option<&crate::entities::spawner::EntitySystemHull>,
-            Option<&phoenix_sim_gameplay::ship::physical_damage::ShipDamage>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
         ),
         With<crate::server_app::LocalShip>,
     >,

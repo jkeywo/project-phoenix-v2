@@ -18,6 +18,16 @@ function fixture() {
   return { draft, runtime, panel, source };
 }
 describe('Workshop port permission and lot terms', () => {
+  it('keeps the actual producer binding through edits and explicitly chooses legacy through accepted history', async () => {
+    const { draft, runtime, panel, source } = fixture(); await settle();
+    expect(control('producer').value).toBe('dock');
+    const select = control('producer'); select.focus(); panel.refresh(); expect(control('producer')).toBe(select); expect(document.activeElement).toBe(select);
+    control('quota-0').value = '2'; control('apply').click(); await settle();
+    expect(parse(draft.read(path)).port_service.system).toBe('dock');
+    control('producer').value = ''; control('apply').click(); await settle();
+    expect(parse(draft.read(path)).port_service.system).toBeUndefined(); expect(runtime.validate).toHaveBeenCalledTimes(2);
+    draft.undo(); panel.refresh(); expect(control('producer').value).toBe('dock'); draft.undo(); expect(draft.read(path)).toBe(source); panel.dispose();
+  });
   it('saves explicit quotas and deny-all membership through accepted source/history', async () => {
     const { draft, runtime, panel, source } = fixture(); await settle();
     for (const input of panel.node.querySelectorAll('input,select')) expect(panel.node.querySelector(`label[for="${input.id}"]`)).not.toBeNull();

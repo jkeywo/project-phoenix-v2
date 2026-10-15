@@ -11,6 +11,26 @@ const resolve = file => resolveTemplate(file, { read: name => fs.existsSync(name
 const make = source => new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: '[pack]\nformat=1\nid="test"\nname="Test"\nversion="1"\n' }, { path, text: source }]));
 const fixture = () => resolve('assets/entities/station_axiom.toml');
 describe('authorised finite provider source authoring', () => {
+  it('binds only existing paid physical Dock equipment and preserves explicit legacy omission', () => {
+    const value = fixture(); expect(value.port_service.system).toBe('dock'); validatePortService(value.port_service, value);
+    for (const mutate of [v => v.port_service.system = 'missing', v => v.port_service.system = null,
+      v => v.system.find(row => row.id === 'dock').component = [],
+      v => v.system.find(row => row.id === 'dock').damage_component = [],
+      v => v.system.find(row => row.id === 'dock').console = 'absent',
+      v => v.energy.consumer.find(row => row.system === 'dock').continuous_cost_per_sec = 0,
+      v => delete v.interior.placements.dock]) {
+      const candidate = structuredClone(value); mutate(candidate); expect(() => validatePortService(candidate.port_service, candidate)).toThrow();
+    }
+    const legacy = structuredClone(value.port_service); delete legacy.system; validatePortService(legacy, value);
+    const source = stringify(value), draft = make(source), after = preparePortServiceOperation(draft, deps, { path, value: legacy }).changes[0].after;
+    expect(parse(after).port_service.system).toBeUndefined(); expect(parse(after).infrastructure).toEqual(value.infrastructure);
+    const manual = resolve('assets/entities/manual_trade_port.toml'); expect(manual.port_service.system).toBe('dock'); validatePortService(manual.port_service, manual);
+  });
+  it('refuses a header-like multiline string without touching unrelated source', () => {
+    const value = fixture(), draft = make('description="""\n[port_service]\nsecret=1\n"""\n' + stringify(value));
+    expect(() => preparePortServiceOperation(draft, deps, { path, value: value.port_service })).toThrow();
+    expect(draft.snapshot().history.undo).toHaveLength(0);
+  });
   it('edits explicit lot quotas through accepted source/history/export and leaves rejected drafts untouched', async () => {
     const value = fixture(), source = '# header\n' + stringify(value) + '\n# tail\n', draft = make(source), profile = structuredClone(value.port_service); profile.offer[0].quota = 3;
     const runtime = { validate: vi.fn(async () => ({ accepted: true })) };
@@ -64,7 +84,8 @@ describe('authorised finite provider source authoring', () => {
     for (const resource of ['reserve_fuel', 'torpedoes']) expect(skyway.infrastructure.capacity.find(row => row.id === resource)).toEqual(value.infrastructure.capacity.find(row => row.id === resource));
   });
   it('authors clear mated poses and identical source/recreated berth points without changing LODs or model scale', () => {
-    const station = fixture(), ship = resolve('assets/entities/alliance_cruiser.toml'); expect(station.dock).toBeTruthy();
+    const station = fixture(), ship = resolve('assets/entities/alliance_cruiser.toml');
+    expect(station.system.find(row => row.id === station.port_service.system)?.component.some(row => row.kind === 'dock_mating')).toBe(true);
     const rig = parse(fs.readFileSync('assets/models/alliance_starbase_recreated.model.toml', 'utf8'));
     const source = parse(fs.readFileSync('assets/models/alliance_starbase.model.toml', 'utf8'));
     const own = parse(fs.readFileSync('assets/models/alliance_cruiser_recreated.model.toml', 'utf8'));

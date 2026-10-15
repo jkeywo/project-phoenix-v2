@@ -27,6 +27,8 @@ pub struct PortTransfer {
     pub offer: String,
     pub destination: ResourceEndpoint,
     pub store: Option<String>,
+    /// Legacy: completed work offer. Equipment-bound provider: upper limit for
+    /// the current next work step, paid atomically by the settlement owner.
     pub lots: i64,
     pub tick: u64,
     pub ordered: bool,
@@ -605,6 +607,24 @@ fn prepare(world: &mut World) {
                         });
                     if disabled {
                         blocked = Some("ports.blocked.disabled");
+                    } else if profile.system.is_some() {
+                        if limit > 0 {
+                            request = Some(PortTransfer {
+                                operator: uuid.clone(),
+                                provider: partner_uuid.clone(),
+                                visit,
+                                offer: offer_id,
+                                destination,
+                                store,
+                                lots: limit,
+                                tick,
+                                ordered,
+                                inbound,
+                                maintain_goal: !ordered && tool.port_maintenance,
+                            });
+                        } else {
+                            blocked = Some("ports.blocked.no_stock");
+                        }
                     } else if let Some(ref mut power) = power {
                         let mut plan = if ordered {
                             tool.port_order.clone()
@@ -739,6 +759,14 @@ fn settle(world: &mut World) {
         (&a.operator, &a.provider, &a.offer).cmp(&(&b.operator, &b.provider, &b.offer))
     });
     for request in requests {
+        if entity_for(world, &request.provider)
+            .and_then(|entity| world.get::<CompiledPortService>(entity))
+            .is_some_and(|profile| profile.0.system.is_some())
+        {
+            let result = super::ports_equipment::settle(world, &request);
+            super::ports_equipment::update_view(world, &request, result.err());
+            continue;
+        }
         let moved = crate::resources::server::settle_port_exchange(world, &request).unwrap_or(0);
         if let Some(entity) = entity_for(world, &request.operator) {
             let mut tool = world.get_mut::<TransferUmbilical>(entity).unwrap();

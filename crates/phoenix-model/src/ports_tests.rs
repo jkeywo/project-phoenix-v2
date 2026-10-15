@@ -1,7 +1,27 @@
 use super::*;
 
+#[test]
+fn optional_actual_producer_is_closed_and_legacy_omission_stays_omitted() {
+    let mut profile = service();
+    assert!(!serde_json::to_value(&profile)
+        .unwrap()
+        .as_object()
+        .unwrap()
+        .contains_key("system"));
+    profile.system = Some(crate::identity::SystemId("dock".into()));
+    let value = serde_json::to_value(&profile).unwrap();
+    assert_eq!(value["system"], "dock");
+    assert_eq!(
+        serde_json::from_value::<PortServiceConfig>(value).unwrap(),
+        profile
+    );
+    profile.system = Some(crate::identity::SystemId("".into()));
+    assert!(profile.validate().is_err());
+}
+
 fn service() -> PortServiceConfig {
     PortServiceConfig {
+        system: None,
         policy: PortServicePolicy::ManualOffer,
         eligible_factions: vec![Uuid::from_u128(1)],
         offers: vec![PortOfferConfig {

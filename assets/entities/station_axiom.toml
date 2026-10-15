@@ -715,6 +715,8 @@ kind = "capacity"
 id = "alloy"
 
 [port_service]
+# Existing common Dock machinery now also performs actual replenishment work.
+system = "dock"
 policy = "free_allied_replenishment"
 eligible_factions = [ "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa" ]
 

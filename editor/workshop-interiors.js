@@ -1,3 +1,4 @@
+import { guardPortServiceReferences } from './workshop-ports.js';
 import { guardPersonnelReferences } from './workshop-personnel.js';
 import { guardSensingReferences } from './workshop-sensing.js';
 import { guardFittingReferences } from './workshop-fitting.js';
@@ -99,6 +100,7 @@ export function prepareInteriorOperation(draft, dependencies, operation) {
   const teamCount = operation.teamCount ?? inspection.teamCount;
   if (!Number.isSafeInteger(teamCount) || teamCount < 0) throw new Error('Choose a non-negative whole repair team count.');
   validateInterior(interior, inspection.systems, teamCount);
+  guardPortServiceReferences(inspection.resolved.value, { ...inspection.resolved.value, interior });
   guardPersonnelReferences(inspection.resolved.value, { ...inspection.resolved.value, interior });
   guardFittingReferences(inspection.resolved.value, { ...inspection.resolved.value, interior });
   guardSensingReferences(inspection.resolved.value, { ...inspection.resolved.value, interior });

@@ -13,6 +13,9 @@ pub enum PortServicePolicy {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PortServiceConfig {
+    /// Optional actual provider Dock. Omission retains legacy passive ports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system: Option<crate::identity::SystemId>,
     pub policy: PortServicePolicy,
     /// Explicit membership permission. Empty is deny-all, never everyone.
     pub eligible_factions: Vec<Uuid>,
@@ -54,6 +57,13 @@ pub struct PortOrderLine {
 
 impl PortServiceConfig {
     pub fn validate(&self) -> Result<(), String> {
+        if self
+            .system
+            .as_ref()
+            .is_some_and(|system| system.0.trim().is_empty())
+        {
+            return Err("port equipment binding cannot be empty".into());
+        }
         if self.eligible_factions.iter().collect::<BTreeSet<_>>().len()
             != self.eligible_factions.len()
         {

@@ -4,6 +4,9 @@ use crate::core::messages::SystemId;
 use crate::resources::logistics_server::tests::{fixture_with, send};
 use crate::ship::control_source::ControlSource;
 
+#[path = "ports_equipment_tests.rs"]
+mod equipment_tests;
+
 const VISITOR: &str = "00000000-0000-0000-0000-000000000002";
 const PROVIDER: &str = "00000000-0000-0000-0000-000000000003";
 
@@ -96,6 +99,7 @@ fn rig_with(
         .0
         .enabled = false;
     let profile = PortServiceConfig {
+        system: None,
         policy,
         eligible_factions: vec![faction],
         offers: vec![phoenix_model::ports::PortOfferConfig {

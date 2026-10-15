@@ -57,6 +57,33 @@ missions over these same actions; 21 does not create another planner/galaxy exec
 
 ## Physical service and dependency contract
 
+### First equipment-bound replenishment consumer
+
+The first foundation adds optional `port_service.system` referencing an actual
+composed Dock System. A configured producer must have its owning Console,
+physical placement and Operation component, and a local energy consumer with
+positive continuous work cost. Axiom and its existing manual-trade provider
+bind their actual Dock; an omitted binding retains legacy replenishment and is
+not evidence that every facility has common equipment.
+
+Each next work step stages the visitor Umbilical and provider Dock energy plus
+the actual finite stock/quota/capacity exchange in stable visitor UUID order.
+Preview clones are transaction-local only. Neither endpoint pays a rejected
+final plan. The existing PortOrder fraction and actual receipt remain the sole
+work frontier; there is no second facility progress timer, queue or crew pool.
+Zero Operation, explicit Offline or unavailable funding pauses real work;
+partial Operation/funding bounds delivered work. A delivered receipt exists
+only after actual stock commits. Interruption feedback identifies the known
+coupled service's availability without disclosing foreign reserve values or
+private component detail.
+
+Preserve actual stock quantities/ceilings, terms/quotas, rigs and physical
+conditions. Axiom already has common Dock/refit machinery, so no competing
+coarse condition needs removal there. The transfer depot's independent scenario
+condition and workforce/disposition register remain unchanged. This consumer
+does not deliver shipments/dependency networks, physical workforce, outside
+actors, full21 acceptance or unfinished20 Medical/Security/external work.
+
 Author each service's actual producer System/equipment, compatible consumed inputs,
 outputs/stores, required workers/access and supported interruption behaviour.
 Energy/Stock/teams remain their actual owners. The next indivisible work step claims

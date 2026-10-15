@@ -2,7 +2,7 @@
 title: Resource Stores and Service Links
 type: concept
 tags: [resources, inventory, torpedoes, infrastructure, umbilical, workshop, continuation]
-sources: [crates/phoenix-sim-gameplay/src/resources/stock.rs, crates/phoenix-sim-gameplay/src/resources/service.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-sim-gameplay/src/infrastructure/condition.rs, crates/phoenix-simulation/src/resources/server.rs, crates/phoenix-simulation/src/umbilical/server.rs, crates/phoenix-simulation/src/infrastructure/server.rs, crates/phoenix-simulation/src/snapshot/preflight.rs, crates/phoenix-simulation/src/sim_digest.rs, editor/workshop-resources.js, gui/workshop-resource-panel.js, crates/phoenix-model/src/logistics.rs, crates/phoenix-sim-gameplay/src/resources/logistics.rs, crates/phoenix-sim-gameplay/src/resources/logistics_state.rs, crates/phoenix-simulation/src/resources/logistics_server.rs, editor/workshop-logistics.js, gui/components/ph-logistics-controls.js, crates/phoenix-model/src/production.rs, crates/phoenix-model/src/recovery.rs, crates/phoenix-sim-gameplay/src/resources/production.rs, crates/phoenix-sim-gameplay/src/resources/recovery.rs, crates/phoenix-simulation/src/resources/production_server.rs, crates/phoenix-simulation/src/resources/recovery_server.rs, editor/workshop-production.js, editor/workshop-resource-recovery.js, crates/phoenix-model/src/ports.rs, crates/phoenix-sim-gameplay/src/resources/ports.rs, crates/phoenix-simulation/src/resources/ports_server.rs, crates/phoenix-simulation/src/snapshot/ports.rs, editor/workshop-ports.js]
+sources: [crates/phoenix-simulation/src/resources/ports_equipment.rs, crates/phoenix-sim-gameplay/src/resources/stock.rs, crates/phoenix-sim-gameplay/src/resources/service.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-sim-gameplay/src/infrastructure/condition.rs, crates/phoenix-simulation/src/resources/server.rs, crates/phoenix-simulation/src/umbilical/server.rs, crates/phoenix-simulation/src/infrastructure/server.rs, crates/phoenix-simulation/src/snapshot/preflight.rs, crates/phoenix-simulation/src/sim_digest.rs, editor/workshop-resources.js, gui/workshop-resource-panel.js, crates/phoenix-model/src/logistics.rs, crates/phoenix-sim-gameplay/src/resources/logistics.rs, crates/phoenix-sim-gameplay/src/resources/logistics_state.rs, crates/phoenix-simulation/src/resources/logistics_server.rs, editor/workshop-logistics.js, gui/components/ph-logistics-controls.js, crates/phoenix-model/src/production.rs, crates/phoenix-model/src/recovery.rs, crates/phoenix-sim-gameplay/src/resources/production.rs, crates/phoenix-sim-gameplay/src/resources/recovery.rs, crates/phoenix-simulation/src/resources/production_server.rs, crates/phoenix-simulation/src/resources/recovery_server.rs, editor/workshop-production.js, editor/workshop-resource-recovery.js, crates/phoenix-model/src/ports.rs, crates/phoenix-sim-gameplay/src/resources/ports.rs, crates/phoenix-simulation/src/resources/ports_server.rs, crates/phoenix-simulation/src/snapshot/ports.rs, editor/workshop-ports.js]
 updated: 2026-10-15
 ---
 
@@ -116,3 +116,18 @@ paid; disabled tools pause. Snapshot preflight checks the complete candidate
 Dock/provider/order roster before writes, and pending port exchanges must drain
 before capture or fold. Workshop edits terms through its existing source/history
 workflow; the Umbilical screen holds editable, visit-bound manual orders.
+
+An optional `port_service.system` binds the provider's actual composed Dock.
+Axiom and the existing manual-trade provider use it. `ports_equipment.rs`
+stages both endpoint Power owners and the same PortOrder fraction/receipt
+against the current finite exchange in stable visitor UUID order. Unavailable
+Operation/control, insufficient funding or rejected stock/headroom produces no
+debit. Partial paid work remains in the existing order; actual delivered lots
+are recorded only after stock commits. Restored equipment/power and existing
+Dock/visit state are consulted directly, without a second service-availability
+cache or provider progress clock. Public feedback describes the known coupled
+service's availability without publishing foreign reserve/component detail.
+Workshop's existing port form preserves the actual producer binding and offers
+an explicit legacy passive choice. Omitted bindings retain the legacy path;
+this facility foundation does not establish physical workforce, shipments or
+the complete outside-actor network.

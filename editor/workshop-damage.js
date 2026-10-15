@@ -1,3 +1,4 @@
+import { guardPortServiceReferences } from './workshop-ports.js';
 import { guardPersonnelReferences } from './workshop-personnel.js';
 import { guardSensingReferences } from './workshop-sensing.js';
 import { guardFittingReferences } from './workshop-fitting.js';
@@ -141,6 +142,7 @@ export function prepareDamageOperation(draft, dependencies, operation) {
   } else throw new Error('Unsupported damage authoring operation.');
   guardFittingReferences(inspection.resolved.value, inspectDamage({ paths: () => draft.paths(), isBinary: path => draft.isBinary(path), read: path => path === operation.path ? after : draft.read(path) }, dependencies, operation.path).resolved.value);
   guardSensingReferences(inspection.resolved.value, inspectDamage({ paths: () => draft.paths(), isBinary: path => draft.isBinary(path), read: path => path === operation.path ? after : draft.read(path) }, dependencies, operation.path).resolved.value);
+  guardPortServiceReferences(inspection.resolved.value, value);
   guardPersonnelReferences(inspection.resolved.value, value);
   validateDamage(value.damage, authoredAndGeneratedSystems(value), value);
   parse(after);

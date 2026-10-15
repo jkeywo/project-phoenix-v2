@@ -1,3 +1,4 @@
+import { guardPortServiceReferences } from './workshop-ports.js';
 import { guardSensingReferences } from './workshop-sensing.js';
 import { guardCommsRadioReferences } from './workshop-comms-radio.js';
 import { guardFittingReferences } from './workshop-fitting.js';
@@ -45,6 +46,7 @@ export function prepareEnergyOperation(draft, dependencies, operation) {
     for (const system of inspection.resolved.value.system || []) if (system.kind === 'power_reactor' && !system.config?.ai?.tree?.length)
       after = writeStateTrees(after, system, configuredPowerTree(energy), { materialise: operation.materialise === true });
   }
+  guardPortServiceReferences(inspection.resolved.value, { ...inspection.resolved.value, energy });
   guardFittingReferences(inspection.resolved.value, { ...inspection.resolved.value, energy });
   guardSensingReferences(inspection.resolved.value, { ...inspection.resolved.value, energy });
   guardCommsRadioReferences(inspection.resolved.value, { ...inspection.resolved.value, energy });

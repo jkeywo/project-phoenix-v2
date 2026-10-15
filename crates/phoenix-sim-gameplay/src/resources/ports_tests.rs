@@ -2,6 +2,7 @@ use super::*;
 
 fn profile() -> PortServiceConfig {
     PortServiceConfig {
+        system: None,
         policy: PortServicePolicy::ManualOffer,
         eligible_factions: vec![uuid::Uuid::from_u128(1)],
         offers: vec![PortOfferConfig {

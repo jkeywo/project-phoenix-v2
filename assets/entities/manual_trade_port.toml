@@ -9,6 +9,7 @@ ceiling = 10000
 label = "production.alloy"
 
 [port_service]
+system = "dock"
 policy = "manual_offer"
 eligible_factions = [ "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa" ]
 

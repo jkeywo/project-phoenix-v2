@@ -1,6 +1,7 @@
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
 import { acceptWorkshopChanges } from './workshop-acceptance.js';
+import { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
 const closed = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every(key => keys.includes(key));
 const factionKey = value => typeof value === 'string' ? value.replace(/^urn:uuid:/i, '').replace(/^\{(.*)\}$/, '$1').replaceAll('-', '').toLowerCase() : '';
 const positive = value => Number.isSafeInteger(value) && value > 0;
@@ -18,13 +19,25 @@ function endpointExists(value, resource, claimed) {
 }
 export function inspectPortServices(draft, dependencies, path) {
   const inspection = inspectEntityComposition(draft, dependencies, path);
-  return { ...inspection, port: structuredClone(inspection.resolved.value.port_service || null) };
+  return { ...inspection, port: structuredClone(inspection.resolved.value.port_service || null), systems: authoredAndGeneratedSystems(inspection.resolved.value) };
 }
 export function validatePortService(profile, value) {
-  if (!closed(profile, ['policy', 'eligible_factions', 'offer']) || !['free_allied_replenishment', 'manual_offer'].includes(profile.policy)
+  if (!closed(profile, ['system', 'policy', 'eligible_factions', 'offer']) || !['free_allied_replenishment', 'manual_offer'].includes(profile.policy)
     || !Array.isArray(profile.eligible_factions) || profile.eligible_factions.some(id => !/^[0-9a-f]{32}$/.test(factionKey(id)))
     || new Set(profile.eligible_factions.map(factionKey)).size !== profile.eligible_factions.length || (!Array.isArray(profile.offer) || !profile.offer.length))
     throw new Error('Choose a closed port policy, explicit eligible factions and finite offers. Empty factions deny all visitors.');
+  if (profile.system !== undefined) {
+    const system = authoredAndGeneratedSystems(value).find(row => row.id === profile.system && row.kind === 'dock');
+    const mating = system?.component?.find(row => row.kind === 'dock_mating');
+    const room = value.interior?.placements?.[profile.system];
+    const cost = value.energy?.consumer?.find(row => row.system === profile.system)?.continuous_cost_per_sec;
+    if (!named(profile.system) || !system || !value.console?.some(row => row.id === system.console)
+      || !mating || !system.component.some(row => row.id === mating.power_input && row.kind === 'power_input')
+      || !system.damage_component?.some(row => row.binding === 'operation') || !value.damage
+      || !value.interior?.compartment?.some(row => row.id === room)
+      || typeof cost !== 'number' || !Number.isFinite(Math.fround(cost)) || Math.fround(cost) <= 0)
+      throw new Error('Bind actual Dock equipment with its Console, physical Operation condition and positive local-energy work cost.');
+  }
   const ids = new Set(), offeredResources = new Set(), claimedEndpoints = new Map();
   for (const offer of profile.offer) {
     if (!closed(offer, ['id', 'resource', 'quota', 'unit_amount', 'cost']) || !named(offer.id)
@@ -41,6 +54,9 @@ export function validatePortService(profile, value) {
     }
     if (profile.policy === 'free_allied_replenishment' && offer.cost?.length) throw new Error('Free allied replenishment cannot contain exchange costs.');
   }
+}
+export function guardPortServiceReferences(_before, after) {
+  if (after.port_service) validatePortService(after.port_service, after);
 }
 export function guardPortServices(value, proposed) {
   if (value.port_service) try { validatePortService(value.port_service, proposed); }
@@ -67,7 +83,13 @@ export function preparePortServiceOperation(draft, dependencies, operation) {
   if (!operation.materialise && inspection.fields.some(row => (row.path === 'port_service' || row.path.startsWith('port_service.')) && row.owner !== operation.path))
     throw new Error('Explicitly materialise inherited port services before editing.');
   validatePortService(operation.value, inspection.resolved.value);
-  return { changes: [{ path: operation.path, before, after: replacePortServiceSource(before, operation.value) }] };
+  const after = replacePortServiceSource(before, operation.value), parsed = parse(after);
+  const ordered = value => Array.isArray(value) ? value.map(ordered) : value && typeof value === 'object'
+    ? Object.fromEntries(Object.keys(value).sort().map(key => [key, ordered(value[key])])) : value;
+  const without = value => { const copy = structuredClone(value); delete copy.port_service; return JSON.stringify(ordered(copy)); };
+  if (JSON.stringify(ordered(parsed.port_service)) !== JSON.stringify(ordered(operation.value)) || without(parse(before)) !== without(parsed))
+    throw new Error('Expand port services into ordinary tables before editing; unrelated source must remain unchanged.');
+  return { changes: [{ path: operation.path, before, after }] };
 }
 export async function applyPortServiceOperation({ draft, provider, runtime, dependencies, operation, current = () => true }) {
   const selected = structuredClone(operation);

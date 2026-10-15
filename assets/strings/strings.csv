@@ -6037,3 +6037,7 @@ workshop.guided.receiver-maximum_sample_age_secs,Shared guided equipment authori
 component.boost.work_fraction,Last actual condition-scaled boost physics grant. {pct} is percent,Last applied boost: {pct}%,Zuletzt angewandter Schub: {pct}%,Last applied boost: {pct}%,machine
 component.boost.reserve,Actual local Boost reserve fraction. {pct} is percent,BOOST RESERVE {pct}%,BOOST-RESERVE {pct}%,BOOST RESERVE {pct}%,machine
 component.boost.engaged_waiting,Engagement retained but no applied boost work,BOOST ENGAGED - WAITING,BOOST AKTIVIERT - WARTET,BOOST ENGAGED - WAITING,machine
+ports.blocked.service_unavailable,Known coupled service unavailable,[Facility service unavailable],[Stationsdienst nicht verfuegbar],[Facility service unavailable],machine
+workshop.ports.producer,Actual powered port producer,[Provider Dock System],[Dock-System des Anbieters],[Provider Dock System],machine
+workshop.ports.producer-legacy,Explicit legacy passive port selection,[Legacy passive service],[Bisheriger passiver Dienst],[Legacy passive service],machine
+workshop.ports.producer-hint,Physical port work explanation,[A bound Dock pays for actual transfer work and pauses when unavailable. Existing stocks and terms remain authoritative.],[Ein gebundenes Dock bezahlt echte Transferarbeit und pausiert bei Ausfall. Vorhandene Bestaende und Bedingungen bleiben massgeblich.],[A bound Dock pays for actual transfer work and pauses when unavailable. Existing stocks and terms remain authoritative.],machine

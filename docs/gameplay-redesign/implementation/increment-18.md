@@ -126,6 +126,87 @@ map. Physical placement/collision may inspect actual bounds solely to resolve th
 arrival; disclose only supported outcomes. Reject nonfinite/unrepresentable geometry,
 not with a new arbitrary player-input puzzle or universal receiving beacon.
 
+## Adopted first LocalJump consumer
+
+The first supported transit slice is an optional `TransitDrive` component on an
+actual individual System, with an explicit finite LocalJump profile. It does not
+convert Impulse, host teleport or every existing hull into a jump drive. The
+existing Navigation waypoint remains the sole course source. The drive's Console
+must explicitly receive that same typed Navigation publication; a normal Human or
+AI Begin reads only that permitted own course and freezes its accepted point and
+original course generation/date. No live foreign target lookup, global waypoint
+permission or privileged AI route is introduced. Changing Navigation later does
+not redirect preparation already accepted by the drive.
+
+Normal admitted Begin arms preparation; preparation advances only through the
+installed drive's current source, Operation and actual paid continuous work.
+Unavailable equipment holds its accepted work and goal. The same ordinary
+individual System AI uses a closed authored tree over an explicit permitted
+transit request/directive, its permitted course, local capability and own phase,
+and emits the same admitted Begin/Cancel actions. Mere course availability never
+orders a jump. Each request uses the existing objective id plus an explicit
+revision. A bounded handled-request frontier stays inside the same drive state;
+reserve its capacity before admitting a new distinct request, never evict a handled
+key, and refuse reuse/change of an accepted id/revision. Two standing objectives
+must not alternate completed jumps. Preserve old revisions through restore without
+re-execution; this is own order receipt evidence, not World mission progression.
+The ordinary Begin payload may carry this optional exact permitted request key but
+no position; without a key it remains a deliberate manual jump from the permitted
+own course. AI emits only a fresh visible key after the existing per-System text
+reading delay; authored `reading_ticks` reuses the same TreeRuntime continuation,
+not another timer or planner. Frontier capacity is a technical validation bound,
+not a message-capacity gameplay task or an extra operator job. It has no second planner or
+motion authority. Repeated Begin while active is refused without payment, and
+Cancel is allowed only before commitment. Human takeover/delegation does not itself
+rewind, cancel or complete accepted onboard preparation.
+
+The canonical phase/destination owner distinguishes Idle, Preparing, Committed
+and the completed arrival frontier. A ready preparation automatically attempts
+commitment. Freeze the accepted drive profile and fuel requirement for this order;
+later equipment/profile changes cannot reduce its required work or alter an
+already selected arrival. A failed commitment retains an allowed waiting phase
+with a truthful reason, without double spending or repeating scatter.
+Fuel is a real finite commodity in the existing actual Local store
+bound to this System through Logistics/Capacity. Stage the existing Stock claim
+and actual discrete Power debit atomically; on shortage or refused work neither
+resource commits. Successful commitment consumes both once and fixes the arrival
+result once. Cancellation discards preparation without refunding already performed
+work; committed travel cannot be cancelled through the pre-commit Cancel action.
+No second fuel counter, generic inventory, reservation registry or duration
+controller is added. The optional reference hull must include finite fuel and a
+real supported Stock delivery/replenishment journey, not just an inexhaustible test
+balance or a hidden refill on Begin.
+
+One arrival owner writes the existing `ShipPhysics` pose and resets local velocity
+once. The accepted origin and destination, original acceptance tick, paid work,
+commit/arrival frontier and selected deterministic result continue exactly through
+restore and LOD; no bootstrap may repeat fuel debit, scatter or arrival effects.
+Preparation/commitment status and controls must state what can still be cancelled.
+The arrival placement is the existing physical owner, not another continuously
+running motion integrator or a host-only teleport exception.
+
+Arrival accuracy uses a stable drive/order-keyed scatter, then stable physical
+outward gravity displacement. Gravity requires an explicit finite authored
+arrival policy on actual World/body content; a star/planet visual, displayed size
+or mass alone grants no gravity behaviour. The physical placement solver may read
+those actual bodies solely for arrival resolution and reports only the supported
+own result. Validate finite representable geometry and stable body ordering;
+ordinary propulsion and static orbital bodies remain unchanged. Publish the
+supported own arrival forecast and actual displacement through normal views;
+refuse nonrepresentable/no-valid-placement results without guaranteeing collision
+clearance. A formation later
+uses one reference-point scatter/gravity translation for all participating offsets
+and the selected best participating drive stats, while every ship still commits
+its own working equipment, authority and resources.
+
+Inter-system destination/content-binding transitions and formation request/readiness
+joins extend this same phase/destination contract later. They remain open after a
+LocalJump checkpoint. This first slice still requires accepted Workshop fields,
+normal AI/Human controls, truthful status/HUD, actual paid/fuel conservation,
+interruption/repeated-order/no-write cases, and active fresh-JSON 360-step complete
+capture/digest continuation. Source or LocalJump owner tests do not close those
+later capabilities or the full increment 18 acceptance requirements.
+
 ## Ordered slices and authoring
 
 1. Migrate actual Cruiser speed/heading/direct controls and ordinary AI onto one

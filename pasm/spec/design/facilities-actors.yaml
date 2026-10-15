@@ -1,0 +1,37 @@
+entities:
+  - decision: redesign-facilities-common-physical-services
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Facility Services Use Common Actual Equipment and Resources
+      summary: "Increment 21 migrates real facilities onto common shields/Systems/components, energy, damage/repair, finite stocks and servicing. Concrete dependency edges propagate actual service failure/recovery instead of a generic facility-health penalty or independent scenario resource mirror."
+      rationale:
+        - "Selected G033–44/G089/G108/G112; detailed contracts live in docs/gameplay-redesign/implementation/increment-21.md. Foundations may follow 15 initial integration/targeted checks under approved parallel-work; full completion retains 13/18/20 verified prerequisites. Preparation changes no runtime/acceptance status."
+        - "[ai] Begin with actual Axiom Dock/refit/finite supplies, preserve service behaviour first, then prove another real facility. Existing Infrastructure Capacity Stock, energy, logistics, production, ports, fitting and damage owners stay authoritative. Remove only a migrated competing coarse damage authority; retain legitimate stock/threshold projections and independent mission facts."
+        - "[ai] Each supported service binds actual producer/input/output/access/work; stage the next indivisible required set together. Stable dependency/event settlement rejects unsupported instantaneous cycles and duplicate crossing effects. No recursive free production, authorable physical schedule or secret remote stock/status query."
+  - decision: redesign-facilities-workforce-and-physical-delivery
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Workers and Deliveries Retain Actual Location and Custody
+      summary: "Facility workers use 20's same underlying finite team/custody model; availability and willingness constrain actual work. Every active-sector inter-location delivery uses a physical vessel with real source/cargo/receiver capacity and receipt, including routine trade. No independent worker population or transit stock mirror."
+      rationale:
+        - "[ai] Shared 20 identities/competencies/condition/physical routes govern workforce; strike/consent does not despawn people or damage machines. Machinery foundations may proceed without claiming the workforce join. 16 links carry requests/receipts, 18 supplies movement, and 19 is needed only for actual carried/deployed craft rather than all transport."
+        - "[ai] Stock leaves its actual source on committed loading/dispatch and reaches compatible destination only on actual receipt. Full space, loss/diversion and damaged service retain actual cargo/location/phase and appropriate claims. Off-sector abstraction cannot erase an active physical leg. No whole-galaxy economy or price engine is selected."
+  - decision: redesign-facilities-bounded-actors-and-known-consequences
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Outside Actors Resolve Needs Through Real Work and Known Outcomes
+      summary: "Bounded outside actors use ordinary individual System AI and actual supplies/services/teams to cooperate, refuse or change needs. Existing Objective-instance membership and fixed completion credit remain authoritative. Coarse territorial consequences arise from bridge work, not a player-managed colony investment game."
+      rationale:
+        - "[ai] World owns authored goals/situations/known relations and Objective consequences; Gameplay executes machinery, Session participation, Simulation joins, and 22 later plans over the same activities. 21 adds no alternate mission planner, omniscient fleet controller or automatic replacement chore when allies help."
+        - "G040–44 retain known actor/faction interactions, authored/PCG terms, behavioural surrender and pursuit evidence. No universal morality/obligation/risk layer, hidden destination knowledge, magical capture or retroactive completion credit. 20 owns actual operational capture/personnel. Particular construction mechanics remain unselected absent an adopted consumer."
+  - decision: redesign-facilities-authoring-and-continuation
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Facility and Actor Foundations Have Separate Verified Exits
+      summary: "Accepted Workshop definitions expose actual service/dependency/worker/traffic/goal bindings and reject unsupported references/cycles. Canonical work, shipment, custody and outcome owners are captured once; whole-candidate conservation/claim/location/credit/clock preflight precedes writes. Foundations never claim workforce, full 21 or 22 completion."
+      rationale:
+        - "[ai] Two actual facilities, finite physical deliveries, real workforce, interrupted services and independently credited actor work require Human/ordinary AI proof, fresh JSON restore with at least 360 complete captures/digests, different-LocalShip peers and malformed no-write candidates. Shipped scenarios, actual browser/native authoring, performance and 2/4/6/8-human workload acceptance remain separate."

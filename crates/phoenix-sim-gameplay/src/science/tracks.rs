@@ -1,5 +1,6 @@
 //! One lifecycle for paid broad observations and their retained predictions.
 //! Actual source IDs remain private routing keys, never association evidence.
+use phoenix_model::observation::{ObservationMetadata, ObservationSource, ObservationSubject};
 pub use phoenix_model::sensing_tracks::{
     SensorTrackSnapshot, TrackAssessment, TrackIdentity, TrackStage,
 };
@@ -12,6 +13,9 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Debug)]
 pub struct BroadMeasurement {
     pub source: String,
+    /// Present only for already-permitted substituted reports. Receipt and
+    /// sample times remain distinct from the instrument's processing tick.
+    pub observation: Option<ObservationMetadata>,
     pub selectable: bool,
     pub position: [f32; 2],
     pub support: f32,
@@ -23,6 +27,8 @@ pub struct BroadMeasurement {
 #[serde(deny_unknown_fields)]
 pub struct BroadTrack {
     pub contact_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<ObservationMetadata>,
     pub selectable: bool,
     pub observed_tick: u64,
     pub position: [f32; 2],
@@ -131,10 +137,29 @@ impl BroadTrackState {
                 })
                 || track.supported_secs < f64::from(profile.identity_secs)
                     && track.identity.is_some()
+                    && track.observation.is_none()
                 || track.supported_secs < f64::from(profile.classification_secs)
                     && track.classification.is_some()
                 || track.supported_secs < f64::from(profile.assessment_secs)
                     && track.assessment.is_some()
+                || track.observation.as_ref().is_some_and(|observation| {
+                    !report_metadata_valid(observation, tick)
+                        || observation.observed_tick != Some(track.observed_tick)
+                        || observation.provenance.system.as_ref() != Some(&self.owner)
+                        || observation.subject != (ObservationSubject::Entity { uuid: id.clone() })
+                        || track.classification.is_some()
+                        || track.assessment.is_some()
+                        || track
+                            .identity
+                            .as_ref()
+                            .is_some_and(|identity| identity.faction.is_some())
+                        || track.supported_secs != 0.0
+                        || track.refresh_secs != 0.0
+                        || track.velocity.is_some()
+                        || track.velocity_error != 0.0
+                        || track.identity_tick
+                            != track.identity.as_ref().map(|_| track.observed_tick)
+                })
             {
                 return Err("invalid retained broad measurement or finding frontier".into());
             }
@@ -168,6 +193,16 @@ impl BroadTrackState {
                 || !sample.position.iter().all(|value| value.is_finite())
                 || !sample.support.is_finite()
                 || !(0.0..=1.0).contains(&sample.support)
+                || sample.observation.as_ref().is_some_and(|observation| {
+                    !report_metadata_valid(observation, tick)
+                        || observation.provenance.system.as_ref() != Some(&self.owner)
+                        || sample.classification.is_some()
+                        || sample.assessment.is_some()
+                        || sample
+                            .identity
+                            .as_ref()
+                            .is_some_and(|identity| identity.faction.is_some())
+                })
             {
                 return Err("invalid or duplicate broad measurement".into());
             }
@@ -191,8 +226,8 @@ impl BroadTrackState {
         // New anonymous identities follow measured geometry, not a hidden
         // UUID ordering. Private routing breaks only indistinguishable ties.
         samples.sort_by(|a, b| {
-            let a_position = measured_position(a.position, profile.position_error);
-            let b_position = measured_position(b.position, profile.position_error);
+            let a_position = sample_position(a, profile.position_error);
+            let b_position = sample_position(b, profile.position_error);
             a_position[0]
                 .total_cmp(&b_position[0])
                 .then_with(|| a_position[1].total_cmp(&b_position[1]))
@@ -206,8 +241,8 @@ impl BroadTrackState {
                 samples.iter().any(|b| {
                     a.source != b.source
                         && distance(
-                            measured_position(a.position, profile.position_error),
-                            measured_position(b.position, profile.position_error),
+                            sample_position(a, profile.position_error),
+                            sample_position(b, profile.position_error),
                         ) <= f64::from(profile.position_error) * 2.0
                 })
             })
@@ -223,7 +258,7 @@ impl BroadTrackState {
                 .iter()
                 .filter(|sample| !next.current.contains_key(&sample.source))
                 .map(|sample| {
-                    let position = measured_position(sample.position, profile.position_error);
+                    let position = sample_position(sample, profile.position_error);
                     let candidates = next
                         .tracks
                         .iter()
@@ -277,6 +312,7 @@ impl BroadTrackState {
                         id.clone(),
                         BroadTrack {
                             contact_id: id.clone(),
+                            observation: None,
                             selectable: sample.selectable,
                             observed_tick: tick,
                             position: measured_position(sample.position, profile.position_error),
@@ -303,6 +339,47 @@ impl BroadTrackState {
                 continue;
             };
             let track = next.tracks.get_mut(id).expect("checked association");
+            if let Some(observation) = &sample.observation {
+                let mut observation = observation.clone();
+                observation.subject = ObservationSubject::Entity { uuid: id.clone() };
+                // Reprocessing a held report buys no new identity evidence,
+                // renews no clock, and cannot learn current velocity or facts.
+                if track.observation.as_ref() != Some(&observation) {
+                    track.position = sample.position;
+                    track.observed_tick = observation.observed_tick.expect("validated report time");
+                    track.velocity = None;
+                    track.velocity_error = 0.0;
+                    track.supported_secs = 0.0;
+                    track.refresh_secs = 0.0;
+                    track.identity.clone_from(&sample.identity);
+                    track.identity_tick = track.identity.as_ref().map(|_| track.observed_tick);
+                    track.classification = None;
+                    track.classification_tick = None;
+                    track.assessment = None;
+                    track.assessment_tick = None;
+                    track.observation = Some(observation);
+                }
+                track.selectable = sample.selectable;
+                continue;
+            }
+            if track.observation.is_some() {
+                if !due {
+                    continue;
+                }
+                // A real new measurement must reacquire its own findings; it
+                // does not inherit permissions from a substituted report.
+                track.observation = None;
+                track.supported_secs = 0.0;
+                track.refresh_secs = 0.0;
+                track.identity = None;
+                track.identity_tick = None;
+                // A displaced reported point and a fresh physical return are
+                // not two measurements of a physical velocity.
+                track.position = sample_position(sample, profile.position_error);
+                track.observed_tick = tick;
+                track.velocity = None;
+                track.velocity_error = 0.0;
+            }
             track.supported_secs = (track.supported_secs
                 + f64::from(fixed_dt) * f64::from(paid_fraction) * f64::from(sample.support))
             .min(f64::from(profile.assessment_secs));
@@ -374,6 +451,7 @@ impl BroadTrackState {
                 let age = (tick - track.observed_tick) as f64 * f64::from(fixed_dt);
                 SensorTrackSnapshot {
                     contact_id: track.contact_id.clone(),
+                    observation: track.observation.clone(),
                     selectable: track.selectable && current.contains(&track.contact_id),
                     observed_tick: track.observed_tick,
                     position,
@@ -381,7 +459,13 @@ impl BroadTrackState {
                     position_error: bounded_float(
                         f64::from(error) + age * f64::from(profile.drift_error_per_sec),
                     ),
-                    stage: if track.supported_secs >= f64::from(profile.assessment_secs) {
+                    stage: if track.observation.is_some() {
+                        if track.identity.is_some() {
+                            TrackStage::Identified
+                        } else {
+                            TrackStage::Return
+                        }
+                    } else if track.supported_secs >= f64::from(profile.assessment_secs) {
                         TrackStage::Assessed
                     } else if track.supported_secs >= f64::from(profile.classification_secs) {
                         TrackStage::Classified
@@ -400,6 +484,27 @@ impl BroadTrackState {
                 }
             })
             .collect())
+    }
+}
+fn report_metadata_valid(observation: &ObservationMetadata, tick: u64) -> bool {
+    observation.is_valid()
+        && observation.provenance.kind == ObservationSource::SensorsReport
+        && !observation.provenance.label.is_empty()
+        && observation
+            .observed_tick
+            .is_some_and(|observed| observed <= tick)
+        && observation.received_tick.is_none_or(|received| {
+            observation
+                .observed_tick
+                .is_some_and(|observed| observed <= received)
+                && received <= tick
+        })
+}
+fn sample_position(sample: &BroadMeasurement, error: f32) -> [f32; 2] {
+    if sample.observation.is_some() {
+        sample.position
+    } else {
+        measured_position(sample.position, error)
     }
 }
 fn profile_valid(profile: &BroadConfig, fixed_dt: f32) -> Result<(), String> {

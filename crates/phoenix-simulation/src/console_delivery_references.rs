@@ -284,7 +284,19 @@ impl ReferenceProjection {
                     .collect();
                 board.contact_reports = std::mem::take(&mut board.contact_reports)
                     .into_iter()
-                    .filter_map(|(source, value)| key(&source).map(|id| (id, value)))
+                    .filter_map(|(source, mut value)| {
+                        key(&source).map(|id| {
+                            if let Some(report) = &mut value {
+                                if let Some(observation) = &mut report.observation {
+                                    observation.subject =
+                                        phoenix_model::observation::ObservationSubject::Entity {
+                                            uuid: id.clone(),
+                                        };
+                                }
+                            }
+                            (id, value)
+                        })
+                    })
                     .collect();
             }
             SystemBlackboard::SensorRadar(board) => {

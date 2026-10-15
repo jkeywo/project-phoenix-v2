@@ -1,4 +1,138 @@
 use super::*;
+fn reported(profile: &BroadConfig, observed: u64) -> BroadMeasurement {
+    use phoenix_model::observation::*;
+    BroadMeasurement {
+        source: "private-report-actor".into(),
+        observation: Some(
+            ObservationMetadata::at(
+                observed,
+                ObservationSubject::Unknown,
+                ObservationProvenance {
+                    kind: ObservationSource::SensorsReport,
+                    system: Some(profile.system.clone()),
+                    label: "console.sensors.report_source".into(),
+                },
+                ObservationUncertainty::Quantized {
+                    field: "position".into(),
+                    step: 10.0,
+                },
+            )
+            .received(observed + 2),
+        ),
+        selectable: true,
+        position: [123.0, 456.0],
+        support: 1.0,
+        identity: Some(TrackIdentity {
+            name: "Reported label".into(),
+            faction: None,
+        }),
+        classification: None,
+        assessment: None,
+    }
+}
+#[test]
+fn held_reports_keep_original_sample_and_permissions_without_new_work_or_private_identity() {
+    let p = profile();
+    let mut state = BroadTrackState::new(&p);
+    let sample = reported(&p, 2);
+    state.advance(&p, 4, 0.5, 1.0, &[sample.clone()]).unwrap();
+    let id = state.contact_for_source(&sample.source).unwrap().to_owned();
+    let before = state.tracks[&id].clone();
+    assert_eq!(before.observed_tick, 2);
+    assert_eq!(before.position, sample.position);
+    assert_eq!(before.supported_secs, 0.0);
+    assert!(before.velocity.is_none());
+    for tick in 5..10 {
+        state
+            .advance(&p, tick, 0.5, 1.0, &[sample.clone()])
+            .unwrap();
+    }
+    assert_eq!(state.tracks[&id], before);
+    let picture = state.projection(&p, 9, 0.5).unwrap();
+    assert_eq!(picture[0].stage, TrackStage::Identified);
+    assert_eq!(
+        picture[0].observation.as_ref().unwrap().subject,
+        ObservationSubject::Entity { uuid: id.clone() }
+    );
+    assert_eq!(
+        picture[0].observation.as_ref().unwrap().received_tick,
+        Some(4)
+    );
+    let public = serde_json::to_string(&picture).unwrap();
+    assert!(!public.contains(&sample.source));
+    assert!(picture[0].classification.is_none() && picture[0].assessment.is_none());
+    let mut resumed: BroadTrackState =
+        serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+    state.advance(&p, 10, 0.5, 1.0, &[]).unwrap();
+    resumed.advance(&p, 10, 0.5, 1.0, &[]).unwrap();
+    assert_eq!(state, resumed);
+    assert!(state.resolve_current(&id).is_none());
+}
+#[test]
+fn report_future_metadata_and_hidden_facts_refuse_transactionally() {
+    let p = profile();
+    let mut state = BroadTrackState::new(&p);
+    let before = state.clone();
+    for mode in 0..4 {
+        let mut sample = reported(&p, 2);
+        match mode {
+            0 => sample.observation.as_mut().unwrap().observed_tick = Some(6),
+            1 => sample.observation.as_mut().unwrap().received_tick = Some(7),
+            2 => sample.identity.as_mut().unwrap().faction = Some("private-faction".into()),
+            _ => {
+                sample.assessment = Some(TrackAssessment {
+                    alert: Some(true),
+                    weapons_restrained: None,
+                    disabled: None,
+                })
+            }
+        };
+        assert!(state.advance(&p, 4, 0.5, 1.0, &[sample]).is_err());
+        assert_eq!(state, before);
+    }
+}
+#[test]
+fn newer_report_replaces_only_reported_fields_and_zero_grant_cannot_refresh_it() {
+    let p = profile();
+    let mut state = BroadTrackState::new(&p);
+    let first = reported(&p, 2);
+    state.advance(&p, 4, 0.5, 1.0, &[first.clone()]).unwrap();
+    let id = state.contact_for_source(&first.source).unwrap().to_owned();
+    let mut second = reported(&p, 3);
+    second.position = [200.0, 300.0];
+    second.identity = None;
+    second.selectable = false;
+    state.advance(&p, 5, 0.5, 0.0, &[second.clone()]).unwrap();
+    assert_eq!(state.tracks[&id].observed_tick, 2);
+    state.advance(&p, 6, 0.5, 1.0, &[second]).unwrap();
+    let track = state
+        .tracks
+        .values()
+        .find(|track| track.observed_tick == 3)
+        .unwrap();
+    assert_eq!(track.position, [200.0, 300.0]);
+    assert!(track.identity.is_none() && track.velocity.is_none());
+    assert!(!track.selectable);
+    assert_eq!(track.supported_secs, 0.0);
+}
+#[test]
+fn return_to_physical_measurement_does_not_infer_motion_from_a_displaced_report() {
+    let p = profile();
+    let mut state = BroadTrackState::new(&p);
+    let report = reported(&p, 2);
+    state.advance(&p, 4, 0.5, 1.0, &[report.clone()]).unwrap();
+    let id = state.contact_for_source(&report.source).unwrap().to_owned();
+    let physical = sample(&report.source, -1000.0);
+    state.advance(&p, 5, 0.5, 1.0, &[physical]).unwrap();
+    let track = &state.tracks[&id];
+    assert!(track.observation.is_none() && track.velocity.is_none());
+    assert!(track.identity.is_none());
+    assert_eq!(track.observed_tick, 5);
+    assert_eq!(
+        track.position,
+        measured_position([-1000.0, 0.0], p.position_error)
+    );
+}
 #[test]
 fn independent_instruments_cannot_alias_contact_ids_or_refresh_each_others_work() {
     let mut first = profile();
@@ -48,6 +182,7 @@ fn profile() -> BroadConfig {
 }
 fn sample(source: &str, x: f32) -> BroadMeasurement {
     BroadMeasurement {
+        observation: None,
         selectable: true,
         source: source.into(),
         position: [x, 0.0],

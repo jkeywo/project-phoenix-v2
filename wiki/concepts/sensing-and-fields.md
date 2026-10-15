@@ -45,6 +45,14 @@ ticks and predicts lost positions using observed motion. Public contact IDs incl
 their instrument owner; current actuator routing stays private and expires with
 measured support. Co-hosting instruments does not merge their knowledge.
 
+An observer's substituted Sensors reports enter that same instrument-owned track
+lifecycle. They retain the reported position, permitted label and original sample
+metadata; repeated receipt does not renew their age or acquire current physical
+facts. Public metadata names the instrument's contact handle, while the actual
+actor remains only a private current actuator route. Other radar instruments do
+not inherit the Sensors report, and explicit synthetic ghosts remain separate
+reported evidence without an actor route.
+
 Workshop edits the whole sensing profile through accepted source/history, with
 separate add/edit/remove rows for each role. Explicit `sensing.control` bindings
 identify the singular Combat Lock and Science Designation machinery owners,

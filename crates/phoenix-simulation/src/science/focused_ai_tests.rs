@@ -74,6 +74,7 @@ fn rig(shared: bool, withhold: bool) -> (App, Entity, String) {
                 0.1,
                 1.0,
                 &[super::super::broad::BroadMeasurement {
+                    observation: None,
                     source: "private-not-a-live-world-entity".into(),
                     selectable: true,
                     position: [5.0, 0.0],

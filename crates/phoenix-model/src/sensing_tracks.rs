@@ -27,6 +27,10 @@ pub struct TrackAssessment {
 #[serde(deny_unknown_fields)]
 pub struct SensorTrackSnapshot {
     pub contact_id: String,
+    /// A substituted report retains its original sample time and public source.
+    /// Its subject is this instrument's contact handle, never a routing UUID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<crate::observation::ObservationMetadata>,
     /// The observing instrument permits acquisition of this return. This is
     /// independent of whether its identity or classification is known yet.
     pub selectable: bool,

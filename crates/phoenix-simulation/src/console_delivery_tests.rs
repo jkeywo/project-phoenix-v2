@@ -188,6 +188,7 @@ fn observe(app: &mut App, owner: &str, tick: u64, paid: f32) -> String {
         .unwrap();
     let state = states.0.get_mut(&owner).unwrap();
     let samples = [BroadMeasurement {
+        observation: None,
         source: "hidden".into(),
         selectable: true,
         position: [20.0, -40.0],
@@ -606,6 +607,30 @@ fn typed_sensors_maps_use_permitted_aliases_and_keep_explicit_synthetic_evidence
         )]
         .into_iter()
         .collect(),
+        contact_reports: [(
+            "hidden".into(),
+            Some(phoenix_model::wire::SensorReport {
+                observation: Some(phoenix_model::observation::ObservationMetadata::at(
+                    0,
+                    phoenix_model::observation::ObservationSubject::Entity {
+                        uuid: "hidden".into(),
+                    },
+                    phoenix_model::observation::ObservationProvenance {
+                        kind: phoenix_model::observation::ObservationSource::SensorsReport,
+                        system: None,
+                        label: "console.sensors.report_source".into(),
+                    },
+                    Default::default(),
+                )),
+                observed_tick: 0,
+                age_ticks: 3,
+                source: "console.sensors.report_source".into(),
+                name: "Reported label".into(),
+                position_mm: [1000, 0, 2000],
+            }),
+        )]
+        .into_iter()
+        .collect(),
         ..Default::default()
     };
     app.world_mut()
@@ -629,6 +654,13 @@ fn typed_sensors_maps_use_permitted_aliases_and_keep_explicit_synthetic_evidence
     assert_eq!(board.contact_classifications[ghost], "Reported class");
     assert!(board.contact_overrides.is_empty());
     assert_eq!(board.contact_ghosts[0].position, Some([1.0, 0.0, 2.0]));
+    let report = board.contact_reports[&contact].as_ref().unwrap();
+    assert_eq!(report.age_ticks, 3);
+    assert_eq!(report.position_mm, [1000, 0, 2000]);
+    assert_eq!(
+        report.observation.as_ref().unwrap().subject,
+        phoenix_model::observation::ObservationSubject::Entity { uuid: contact }
+    );
 }
 
 #[test]

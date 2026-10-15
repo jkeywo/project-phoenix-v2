@@ -100,6 +100,7 @@ pub(crate) fn tick(
         Option<&ShipPowerSystem>,
         Option<&ShipRedAlert>,
         Option<&crate::ship::disablement::DisablementObservation>,
+        Option<&crate::entities::spawner::EntityTarget>,
     )>,
     mut observers: Query<(
         &EntityUuid,
@@ -187,33 +188,55 @@ pub(crate) fn tick(
                         power,
                         alert,
                         disabled,
+                        target,
                     ) in &scene
                     {
-                        if id.0 == observer.0
-                            || !tags.is_some_and(|tags| {
-                                tags.0.iter().any(|tag| {
-                                    radar
-                                        .shows
-                                        .iter()
-                                        .any(|allowed| allowed.as_str() == tag.as_str())
-                                })
-                            })
-                        {
+                        if id.0 == observer.0 {
                             continue;
                         }
-                        let concealed = runtime.as_ref().is_some_and(|runtime| {
+                        let report = runtime.as_ref().and_then(|runtime| {
+                            runtime
+                                .contact_information
+                                .reports
+                                .get(&observer.0)?
+                                .get(&id.0)
+                        });
+                        let mode = runtime.as_ref().map_or(Default::default(), |runtime| {
                             crate::gm::operations::contact::mode(
                                 &runtime.contact_overrides,
                                 &observer.0,
                                 &id.0,
-                            ) == crate::gm::operations::contact::ContactMode::Conceal
-                                || crate::gm::operations::information::reports::contains(
-                                    &runtime.contact_information.reports,
-                                    &observer.0,
-                                    &id.0,
-                                )
+                            )
                         });
-                        if concealed {
+                        if mode == crate::gm::operations::contact::ContactMode::Conceal {
+                            continue;
+                        }
+                        // GM reports are an observer's Sensors picture. Another
+                        // independently fitted instrument does not inherit it.
+                        if ship_config.0.system(system).is_some_and(|system| {
+                            system.kind == crate::ship::system_registry::SENSOR_RADAR_KIND
+                        }) {
+                            if let Some(report) = report {
+                                if let Some(measurement) = reported_measurement(
+                                    system,
+                                    &id.0,
+                                    report,
+                                    target,
+                                    &radar.selects,
+                                ) {
+                                    measurements.push(measurement);
+                                }
+                                continue;
+                            }
+                        }
+                        if !tags.is_some_and(|tags| {
+                            tags.0.iter().any(|tag| {
+                                radar
+                                    .shows
+                                    .iter()
+                                    .any(|allowed| allowed.as_str() == tag.as_str())
+                            })
+                        }) {
                             continue;
                         }
                         let position = physical_position(physics, transform);
@@ -241,15 +264,32 @@ pub(crate) fn tick(
                             })
                             .unwrap_or("contact")
                         };
+                        // Classification changes interpretation of an already
+                        // detected return; it never supplies detection itself.
+                        let supplied_identity = runtime.as_ref().and_then(|runtime| {
+                            runtime.contact_classifications.get(&observer.0)?.get(&id.0)
+                        });
+                        let identity_name = supplied_identity
+                            .map(|identity| identity.label.as_str())
+                            .or_else(|| name.map(|name| name.0.as_str()))
+                            .filter(|name| !name.is_empty());
                         measurements.push(BroadMeasurement {
                             source: id.0.clone(),
+                            observation: None,
+                            selectable: target.is_some_and(|target| {
+                                crate::entities::tags::matches_any(
+                                    &crate::entities::tags::parse_tags(&target.0.tags),
+                                    &radar.selects,
+                                )
+                            }),
                             position: [position.x, position.z],
                             support,
-                            identity: name.filter(|name| !name.0.is_empty()).map(|name| {
-                                TrackIdentity {
-                                    name: name.0.clone(),
-                                    faction: faction.map(|faction| faction.0.to_string()),
-                                }
+                            identity: identity_name.map(|name| TrackIdentity {
+                                name: name.to_owned(),
+                                faction: supplied_identity
+                                    .is_none()
+                                    .then(|| faction.map(|faction| faction.0.to_string()))
+                                    .flatten(),
                             }),
                             classification: Some(classification.into()),
                             assessment: Some(TrackAssessment {
@@ -273,6 +313,54 @@ pub(crate) fn tick(
                 .expect("compiled broad profile and fixed physical observation must validate");
         }
     }
+}
+fn reported_measurement(
+    owner: &SystemId,
+    source: &str,
+    state: &crate::gm::operations::information::reports::ReportState,
+    target: Option<&crate::entities::spawner::EntityTarget>,
+    selects: &[crate::entities::tags::EntityTag],
+) -> Option<BroadMeasurement> {
+    use phoenix_model::observation::*;
+    let sample = state.presented.as_ref()?;
+    Some(BroadMeasurement {
+        source: source.to_owned(),
+        observation: Some(ObservationMetadata::at(
+            sample.observed_tick,
+            ObservationSubject::Unknown,
+            ObservationProvenance {
+                kind: ObservationSource::SensorsReport,
+                system: Some(owner.clone()),
+                label: "console.sensors.report_source".into(),
+            },
+            if state.policy.position_step_mm > 0 {
+                ObservationUncertainty::Quantized {
+                    field: "position".into(),
+                    step: state.policy.position_step_mm as f32 / 1000.0,
+                }
+            } else {
+                ObservationUncertainty::Unspecified
+            },
+        )),
+        selectable: target.is_some_and(|target| {
+            crate::entities::tags::matches_any(
+                &crate::entities::tags::parse_tags(&target.0.tags),
+                selects,
+            )
+        }),
+        position: [
+            sample.position_mm[0] as f32 / 1000.0,
+            sample.position_mm[2] as f32 / 1000.0,
+        ],
+        support: 1.0,
+        identity: (!state.policy.hide_identity && sample.name != "console.sensors.basic_contact")
+            .then(|| TrackIdentity {
+                name: sample.name.clone(),
+                faction: None,
+            }),
+        classification: None,
+        assessment: None,
+    })
 }
 fn physical_position(physics: Option<&ShipPhysics>, transform: &Transform) -> Vec3 {
     physics.map_or(transform.translation, |physics| {

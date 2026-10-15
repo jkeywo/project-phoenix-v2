@@ -223,6 +223,14 @@ Host slots remain derived legacy routing context. A human-held Comms System
 stands the same AI down; handoff resumes the retained inbox and reading frontier.
 No text parsing, independent polling controller or alternate remote authority is
 introduced. Supported request facts enter the current response policy.
+The heard typed `ReportStatus` copy supplies the closed
+`request_report_status` fact to that existing policy. Shipped response policies
+explicitly choose Report only from this known request, actual read completion
+and own Comms availability. They do not require or fabricate current remote
+`sender_in_range` for generic requests. The legacy plot rule and weighted branch
+keep their existing facts, precedence and RNG sweep; the new fact is absent
+there. Custom policies can explicitly Report/Decline or retain the request.
+
 Request reading uses explicit positive authored `request_reading_ticks` and a
 request-only remaining/last-tick frontier inside the existing pending response
 entry. Mechanical elapsed-tick advancement counts only eligible AI-controlled

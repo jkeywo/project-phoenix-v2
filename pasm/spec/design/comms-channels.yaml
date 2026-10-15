@@ -65,3 +65,13 @@ entities:
         - "G040 permits actor trust alongside faction context without omniscient information spread. G041 reserves formal commitments for authored/PCG side-mission content; S068 shows terms/evidence/status without universal automatic at-risk judgements. G042 requires behavioural compliance; broader personnel capture and transit/pursuit consumers join 20/18/23."
         - "[ai] Save canonical pending envelopes, audience/order frontiers, decisions/receipts, captured evidence, paid decoding/reading, keys and dated trust events in their actual owners. Rebuild derived reach/routes before first restored command. Validate complete candidate owner, capability, sequence, scope and clock bindings before any write; no second communication or personnel inventory."
         - "[ai] Every slice includes accepted authoring/history/includes/Preview/Test, human and ordinary AI operation, deterministic snapshots/digest and no-write malformed-state tests. Actual paid work and pending receipt/order continuation require fresh JSON bootstrap comparison for at least 360 fixed steps plus different-LocalShip peer proof. Physical media/device, gameplay/performance and 2/4/6/8-human workload acceptance remain separate; initial implementation never claims a verified exit."
+
+  - decision: redesign-comms-status-request-authored-response
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Ordinary Response Policy Recognises Heard Status Requests
+      summary: "A permitted heard typed ReportStatus supplies request_report_status to the existing Comms response policy. Actual read completion and own availability admit its authored Report choice without manufacturing unknown reverse reachability."
+      rationale:
+        - "[ai] Adopted after the real owner test exposed the inherited plot policy's sender_in_range guard: generic request decisions deliberately do not observe that remote viability fact. Shipped baseline and independent overrides add an explicit higher-priority request/read/own-availability rule on the SAME ordinary controller and normal RespondToMessage admission."
+        - "Legacy plot/text fact seeding, response rule and weighted fleet RNG sweep remain unchanged; request_report_status is absent for that branch. The new known fact comes from actual permitted immutable typed content, not raw text, a remote actuator or a live roster query. Existing elapsed-reading, local decision and independently paid returned-outcome contracts remain authoritative."

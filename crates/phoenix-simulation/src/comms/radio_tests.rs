@@ -362,3 +362,136 @@ fn existing_environmental_jam_keeps_exact_radio_denial_payment_and_recovery() {
         );
     }
 }
+
+#[test]
+fn actual_paid_relay_restores_blocked_text_route_and_loss_does_not_change_sender_facts() {
+    let mut sender_facts = Vec::new();
+    for fault in 0..3 {
+        let (mut app, source, _) = fixture(350.0);
+        let config = crate::entities::include_resolve::load_entity_config(
+            "assets/entities/relay_cruiser.toml",
+        )
+        .unwrap();
+        let relay = crate::entities::spawner::spawn_entity(
+            &mut app.world_mut().commands(),
+            &config,
+            Vec3::new(175.0, 0.0, 0.0),
+            "relay".into(),
+            None,
+        );
+        app.world_mut().flush();
+        if let Some(mut pose) = app.world_mut().get_mut::<ShipPhysics>(relay) {
+            pose.x = 175.0;
+            pose.z = 0.0;
+        }
+        let owner = SystemId("comms".into());
+        if fault == 1 {
+            app.world_mut()
+                .get_mut::<ShipSystemControlSources>(relay)
+                .unwrap()
+                .0
+                .set_gm_disabled(owner.clone(), true);
+        }
+        if fault == 2 {
+            app.world_mut()
+                .get_mut::<ShipPowerSystem>(relay)
+                .unwrap()
+                .0
+                .network_mut()
+                .consumers
+                .get_mut(&owner)
+                .unwrap()
+                .energy = 0.0;
+        }
+        let before = app
+            .world()
+            .get::<ShipPowerSystem>(relay)
+            .unwrap()
+            .0
+            .network()
+            .consumers[&owner]
+            .energy;
+        app.world_mut().run_system_once(tick_radio).unwrap();
+        let sent = messages(&app, "source");
+        assert_eq!(sent.len(), 1);
+        let received = messages(&app, "receiver");
+        assert_eq!(received.len(), usize::from(fault == 0), "fault{fault}");
+        if let Some(heard) = received.first() {
+            assert_eq!(heard.sender_uuid, "source");
+            assert_eq!(heard.body, sent[0].body);
+            assert_eq!(
+                heard.transmission.as_ref().unwrap().origin_id,
+                sent[0].transmission.as_ref().unwrap().origin_id
+            );
+            assert_eq!(heard.transmission.as_ref().unwrap().emitted_tick, 10);
+            assert!(
+                app.world()
+                    .get::<ShipPowerSystem>(relay)
+                    .unwrap()
+                    .0
+                    .network()
+                    .consumers[&owner]
+                    .energy
+                    < before
+            );
+        }
+        sender_facts.push((
+            sent,
+            app.world()
+                .get::<ShipPowerSystem>(source)
+                .unwrap()
+                .0
+                .network()
+                .consumers[&owner]
+                .energy,
+        ));
+    }
+    assert_eq!(sender_facts[0], sender_facts[1]);
+    assert_eq!(sender_facts[0], sender_facts[2]);
+}
+
+#[test]
+fn protected_relay_requires_actual_matching_channel_and_held_key() {
+    for compatible in [false, true] {
+        let (mut app, source, _) = fixture(2100.0);
+        let config = crate::entities::include_resolve::load_entity_config(
+            "assets/entities/relay_cruiser.toml",
+        )
+        .unwrap();
+        let relay = crate::entities::spawner::spawn_entity(
+            &mut app.world_mut().commands(),
+            &config,
+            Vec3::new(1050.0, 0.0, 0.0),
+            "relay".into(),
+            None,
+        );
+        app.world_mut().flush();
+        if let Some(mut pose) = app.world_mut().get_mut::<ShipPhysics>(relay) {
+            pose.x = 1050.0;
+            pose.z = 0.0;
+        }
+        if !compatible {
+            let mut profile = app.world_mut().get_mut::<RadioProfile>(relay).unwrap();
+            profile.0.keys = vec!["different-key".into()];
+            profile
+                .0
+                .channels
+                .iter_mut()
+                .find(|row| row.id == "fleet")
+                .unwrap()
+                .key = Some("different-key".into());
+        }
+        app.world_mut()
+            .get_mut::<AdmittedCommands>(source)
+            .unwrap()
+            .0[0]
+            .payload = SystemControlPayload::SendCommsText {
+            channel: "fleet".into(),
+            audience: CommsAudience::All,
+            body: "Protected source message".into(),
+        };
+        app.world_mut().run_system_once(tick_radio).unwrap();
+        assert_eq!(messages(&app, "source").len(), 1);
+        assert_eq!(messages(&app, "receiver").len(), usize::from(compatible));
+    }
+}

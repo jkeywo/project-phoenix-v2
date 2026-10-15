@@ -288,6 +288,14 @@ must prove blocked direct reach restored by an actual relay, relay power/conditi
 loss, incompatible protection, cycles and deterministic equal-hop selection.
 Actual host continuation/media and different-LocalShip evidence remain separate.
 
+Relay source checkpoint: the shared radio/returned-outcome consumer, optional
+reference profile and accepted structured Workshop checkbox are implemented.
+Targeted Vitest: 17 tests in three files passed (24.84s); strict strings: 6,148
+entries, zero errors/warnings; layer rules and diff check passed. Independent
+read-only runtime review by the craft lane passed. Native compilation, actual
+three-endpoint tests and host continuation are pending integrator execution;
+this is not a playable exit or balance acceptance.
+
 ## Ordered implementation and parallel seams
 
 1. **Shared threads and equipment links.** Preserve actual current hails/dialogue;

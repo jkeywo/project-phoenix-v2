@@ -361,6 +361,7 @@ export const COMPONENT_SCHEMA = {
           { key: 'id', type: 'string' },
           { key: 'range', type: 'number' },
           { key: 'work_units', type: 'number', default: 1 },
+          { key: 'relay', type: 'boolean', default: false, optional: true },
           { key: 'key', type: 'string', optional: true },
         ] },
       ] },

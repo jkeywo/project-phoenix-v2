@@ -6214,3 +6214,5 @@ settings.debug.scenario.planning.interval,Privileged Scenario plan inspection,[F
 settings.debug.scenario.planning.overdue,Privileged Scenario plan inspection,[Overdue at tick],,,
 settings.debug.scenario.planning.operator,Privileged Scenario plan inspection,[Original owner participation],,,
 settings.debug.scenario.planning.workload,Privileged Scenario plan inspection,[Station / minute / attention permille nanoseconds],,,
+workshop.comms_radio.relay,Workshop radio channel authoring,Forward compatible traffic,,,
+entity.relay_cruiser.name,Entity name,Alliance Relay Cruiser,,,

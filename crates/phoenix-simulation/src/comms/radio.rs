@@ -290,7 +290,6 @@ pub(crate) fn tick_radio(
             if !applied {
                 continue;
             }
-            let profile = profile.unwrap();
             let new_id = || {
                 crate::world_id::mint_live_id_with(
                     mint.as_deref(),
@@ -319,27 +318,7 @@ pub(crate) fn tick_radio(
                 {
                     continue;
                 }
-                let Some(receiving) = receiver
-                    .radio
-                    .channels
-                    .iter()
-                    .find(|candidate| candidate.id == *channel && candidate.key == profile.key)
-                else {
-                    continue;
-                };
-                if !super::server::signal_comms_in_range(
-                    &paths,
-                    super::server::SignalEndpoint {
-                        point: source.point,
-                        range: profile.range * source.listening,
-                        receiver: Some((&source.uuid, &source.radio.system)),
-                    },
-                    super::server::SignalEndpoint {
-                        point: receiver.point,
-                        range: receiving.range * receiver.listening,
-                        receiver: Some((&receiver.uuid, &receiver.radio.system)),
-                    },
-                ) {
+                if !route_available(&endpoints, source, receiver, channel, &paths) {
                     continue;
                 }
                 let mut heard = metadata.clone();
@@ -371,6 +350,10 @@ pub(crate) fn tick_radio(
         },
     );
 }
+
+#[path = "radio_route.rs"]
+mod route;
+pub(super) use route::available as route_available;
 
 pub(crate) fn register(app: &mut App) {
     use crate::authoritative::{DeclareState, StateClass};

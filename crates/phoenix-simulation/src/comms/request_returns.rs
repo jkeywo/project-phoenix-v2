@@ -144,35 +144,7 @@ pub(super) fn settle(
         if inbox.0.iter().any(|message| message.id == copy_id) {
             continue;
         }
-        let Some(transmitting) = source
-            .radio
-            .channels
-            .iter()
-            .find(|channel| channel.id == wire.channel)
-        else {
-            continue;
-        };
-        let Some(receiving) = receiver
-            .radio
-            .channels
-            .iter()
-            .find(|channel| channel.id == wire.channel && channel.key == transmitting.key)
-        else {
-            continue;
-        };
-        if !super::server::signal_comms_in_range(
-            paths,
-            super::server::SignalEndpoint {
-                point: source.point,
-                range: transmitting.range * source.listening,
-                receiver: Some((&source.uuid, &source.radio.system)),
-            },
-            super::server::SignalEndpoint {
-                point: receiver.point,
-                range: receiving.range * receiver.listening,
-                receiver: Some((&receiver.uuid, &receiver.radio.system)),
-            },
-        ) {
+        if !super::radio::route_available(endpoints, source, receiver, &wire.channel, paths) {
             continue;
         }
         let mut heard = wire.clone();

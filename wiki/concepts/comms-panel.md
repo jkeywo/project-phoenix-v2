@@ -2,7 +2,7 @@
 title: Comms Panel
 type: concept
 tags: [comms, client, inbox, hails, priority, localisation, input, feedback]
-sources: [crates/phoenix-model/src/comms_request.rs, crates/phoenix-simulation/src/comms/requests.rs, crates/phoenix-simulation/src/comms/request_returns.rs, crates/phoenix-simulation/src/snapshot/comms_requests.rs, gui/comms-requests.js, gui/components/ph-comms-text-composer.js, editor/workshop-comms-radio.js, gui/workshop-comms-radio-panel.js, gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/world/server/mod.rs, tests/publisher_ordering.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm/operations/comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
+sources: [crates/phoenix-simulation/src/comms/radio_route.rs, assets/entities/relay_cruiser.toml, crates/phoenix-model/src/comms_request.rs, crates/phoenix-simulation/src/comms/requests.rs, crates/phoenix-simulation/src/comms/request_returns.rs, crates/phoenix-simulation/src/snapshot/comms_requests.rs, gui/comms-requests.js, gui/components/ph-comms-text-composer.js, editor/workshop-comms-radio.js, gui/workshop-comms-radio-panel.js, gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/world/server/mod.rs, tests/publisher_ordering.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm/operations/comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
 updated: 2026-10-15
 ---
 
@@ -15,7 +15,7 @@ provide structured channel and held-key rows on the existing Workshop surface.
 They bind the actual canonical Comms System, owning Console, finite endpoint
 reach and positive continuous/discrete energy costs. Each channel has a unique
 id, endpoint-bounded range, positive whole work units and optional held-key
-binding. Removing a key leaves a protected channel invalid until its author
+binding, plus optional relay forwarding. Removing a key leaves a protected channel invalid until its author
 explicitly changes that channel.
 
 Edits use the normal accepted draft/history transaction, explicit inherited
@@ -23,6 +23,17 @@ materialisation and existing Preview/Test entry points. The bounded writer
 preserves other Comms settings and comments and checks parsed equivalence
 before accepting a candidate. These authoring checks remain separate from
 native radio runtime and human acceptance evidence.
+
+`comms/radio_route.rs` derives direct-first shortest-hop delivery through actual
+currently paid radios whose matching channel opts into forwarding. Stable UUID
+order breaks equal-hop ties and visited identities prevent cycles. Every hop
+uses the same actual endpoint range, fields, terrain, jammer and exact receiver
+protection. This first protected relay requires its held matching key.
+`relay_cruiser.toml` is an optional materialised radio reference with unchanged
+base energy. Forwarding neither changes the original sender/audience nor gives a
+relay an unaddressed inbox copy. No route membership is published or persisted.
+One-shot text/request emission and sustained returned outcomes share the route;
+returned retries retain the existing single discrete emission/payment frontier.
 
 Runtime messages keep canonical `priority`. Legacy `is_urgent` is derived at the wire boundary and at its historical digest fold position; deserialization promotes legacy urgency only when no priority was supplied.
 

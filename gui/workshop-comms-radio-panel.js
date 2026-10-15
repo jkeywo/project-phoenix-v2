@@ -20,11 +20,12 @@ export function mountWorkshopCommsRadio({ root, provider, runtime, draft: getDra
   }
   function addRow(kind, value) {
     const section = el('fieldset'), index = serial++, rows = kind === 'channel' ? channelRows : keyRows;
-    const fields = kind === 'channel' ? ['id', 'range', 'work_units', 'key'] : ['identity'];
+    const fields = kind === 'channel' ? ['id', 'range', 'work_units', 'key', 'relay'] : ['identity'];
     const row = { section, fields: {} }; rows.push(row);
     for (const field of fields) {
       const numeric = ['range', 'work_units'].includes(field);
-      const control = input(kind + '-' + field + '-' + index, value[field] ?? '', numeric ? 'number' : 'text');
+      const control = input(kind + '-' + field + '-' + index, value[field] ?? '', numeric ? 'number' : field === 'relay' ? 'checkbox' : 'text');
+      if (field === 'relay') control.checked = value.relay === true;
       if (numeric) control.min = field === 'range' ? '0' : '1'; if (field === 'work_units') { control.step = '1'; control.max = '4294967295'; }
       row.fields[field] = control; section.append(label(control, field));
     }
@@ -61,6 +62,7 @@ export function mountWorkshopCommsRadio({ root, provider, runtime, draft: getDra
     const value = { system: 'comms', ...(requestReading.value.trim() ? { request_reading_ticks: requestReading.valueAsNumber } : {}), keys: keyRows.map(row => row.fields.identity.value), channel: channelRows.map(row => ({
       id: row.fields.id.value, range: row.fields.range.valueAsNumber, work_units: row.fields.work_units.valueAsNumber,
       ...(row.fields.key.value ? { key: row.fields.key.value } : {}),
+      ...(row.fields.relay.checked ? { relay: true } : {}),
     })) };
     const capturedDraft = getDraft(), token = ++generation, operation = { path: template.value, materialise: materialise.checked, value };
     const current = () => !disposed && token === generation && getDraft() === capturedDraft;

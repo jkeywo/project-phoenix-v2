@@ -62,3 +62,15 @@ it('edits authored request reading ticks and refuses a same-revision document sw
   expect(old.read(path)).toBe(beforeOld); expect(f.draft().read(path)).toBe(beforeNew);
   expect(control('request-reading').value).toBe('12'); f.panel.dispose();
 });
+
+it('edits relay forwarding as an explicit channel capability with undo and reload', async () => {
+  const f=fixture(); await settle(); control('add-channel').click();
+  field('channel','id').value='open';field('channel','range').value='80';field('channel','work_units').value='1';
+  expect(field('channel','relay').checked).toBe(false);field('channel','relay').checked=true;
+  control('save').click();await settle();
+  expect(parse(f.draft().read(path)).comms.radio.channel[0].relay).toBe(true);
+  f.draft().undo();f.panel.refresh();expect(control('channels').children.length).toBe(0);
+  f.draft().redo();f.panel.refresh();expect(field('channel','relay').checked).toBe(true);
+  field('channel','relay').checked=false;control('save').click();await settle();
+  expect(parse(f.draft().read(path)).comms.radio.channel[0].relay).toBeUndefined();f.panel.dispose();
+});

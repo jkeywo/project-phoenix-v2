@@ -8,6 +8,9 @@ pub struct CommsChannelConfig {
     pub id: String,
     pub range: f32,
     pub work_units: u32,
+    /// Forward compatible traffic through this actual paid radio channel.
+    #[serde(default)]
+    pub relay: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
 }

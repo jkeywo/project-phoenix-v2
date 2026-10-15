@@ -18,7 +18,7 @@ it('validates exact equipment, finite endpoint-bounded channels, paid work and a
     p => p.channel = [], p => p.channel.push(p.channel[0]), p => p.channel[0].id = 'BAD',
     p => p.channel[0].range = 101, p => p.channel[0].range = 1e-46, p => p.channel[0].range = Infinity,
     p => p.channel[0].work_units = 0, p => p.channel[0].work_units = 1.5, p => p.channel[0].work_units = 4294967296,
-    p => p.channel[1].key = 'not-held']) {
+    p => p.channel[0].relay = 'yes', p => p.channel[1].key = 'not-held']) {
     const value = profile(); mutate(value); expect(() => validateCommsRadio(value, entity())).toThrow();
   }
   for (const mutate of [e => e.system[0].console = 'missing', e => e.system[0].kind = 'sensors', e => e.energy.consumer = [],
@@ -66,4 +66,13 @@ it('guards removal of the actual owner or its paid consumer', () => {
   expect(() => guardCommsRadioReferences(before, after)).toThrow(/installed Comms/);
   after.system = before.system; after.energy.consumer[0].discrete_cost = 0;
   expect(() => guardCommsRadioReferences(before, after)).toThrow(/positive/);
+});
+
+it('accepts explicit relay channel capability through the same history transaction', async () => {
+  const source = stringify(entity()), draft = make(source), value = profile();
+  value.channel[0].relay = true;
+  await applyCommsRadioOperation({ draft, runtime: { validate: async () => ({ accepted: true }) }, dependencies: deps, operation: { path, value } });
+  expect(inspectCommsRadio(new WorkshopDocument(draft.archive()), deps, path).radio.channel[0].relay).toBe(true);
+  draft.undo(); expect(draft.read(path)).toBe(source); draft.redo();
+  expect(parse(draft.read(path)).comms.radio.channel[0].relay).toBe(true);
 });

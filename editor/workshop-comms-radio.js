@@ -24,8 +24,9 @@ export function validateCommsRadio(radio, entity) {
   const keys = radio.keys === undefined ? [] : radio.keys, ids = new Set();
   if (keys.some(key => !identity(key)) || new Set(keys).size !== keys.length) throw new Error('Held protection keys require distinct bounded identities.');
   for (const channel of radio.channel) {
-    if (!closed(channel, ['id', 'range', 'work_units', 'key']) || typeof channel.id !== 'string'
+    if (!closed(channel, ['id', 'range', 'work_units', 'key', 'relay']) || typeof channel.id !== 'string'
       || !/^[a-z0-9-]+$/.test(channel.id) || bytes(channel.id) > 128 || ids.has(channel.id)
+      || (channel.relay !== undefined && typeof channel.relay !== 'boolean')
       || !positive(channel.range) || Math.fround(channel.range) > Math.fround(entity.comms.range)
       || !Number.isSafeInteger(channel.work_units) || channel.work_units <= 0 || channel.work_units > 0xffffffff
       || (channel.key !== undefined && (!identity(channel.key) || !keys.includes(channel.key))))

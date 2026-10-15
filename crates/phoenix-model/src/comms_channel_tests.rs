@@ -9,6 +9,7 @@ fn radio() -> CommsRadioConfig {
             id: "protected".into(),
             range: 100.0,
             work_units: 4,
+            relay: false,
             key: Some("fleet".into()),
         }],
     }

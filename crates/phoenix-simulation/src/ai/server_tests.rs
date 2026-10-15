@@ -4129,8 +4129,11 @@ fn low_lod_npc_patrol_route_wraps_around_and_returns_to_first_waypoint() {
 
     // Having wrapped, it is heading back toward wp0 (-x) → bearing = -π/2.
     let physics = app.world().get::<ShipPhysics>(npc).unwrap();
+    let heading_error = (physics.yaw + std::f32::consts::FRAC_PI_2 + std::f32::consts::PI)
+        .rem_euclid(std::f32::consts::TAU)
+        - std::f32::consts::PI;
     assert!(
-        (physics.yaw + std::f32::consts::FRAC_PI_2).abs() < 0.01,
+        heading_error.abs() < 0.01,
         "after wraparound the ship should steer back toward wp0 (-π/2), got {}",
         physics.yaw,
     );
@@ -4334,8 +4337,11 @@ fn looping_route_entirely_inside_arrival_radius_announces_once_then_holds_statio
         "nothing was arrived at 2000 units out"
     );
     let physics = app.world().get::<ShipPhysics>(npc).unwrap();
+    let heading_error = (physics.yaw + std::f32::consts::FRAC_PI_2 + std::f32::consts::PI)
+        .rem_euclid(std::f32::consts::TAU)
+        - std::f32::consts::PI;
     assert!(
-        (physics.yaw + std::f32::consts::FRAC_PI_2).abs() < 0.01,
+        heading_error.abs() < 0.01,
         "the resumed route must steer back toward wp0 (-π/2), got {}",
         physics.yaw,
     );

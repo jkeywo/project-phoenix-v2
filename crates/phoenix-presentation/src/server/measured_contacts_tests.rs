@@ -21,6 +21,7 @@ pub(crate) fn config() -> ShipConfig {
 pub(crate) fn track(contact: &str) -> SensorTrackSnapshot {
     SensorTrackSnapshot {
         references: Vec::new(),
+        samples: Vec::new(),
         contact_id: contact.into(),
         observation: None,
         selectable: true,

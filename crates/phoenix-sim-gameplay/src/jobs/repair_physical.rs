@@ -50,6 +50,10 @@ impl RepairTeams {
         target: Option<RepairWorkTarget>,
         label: String,
     ) -> bool {
+        if self.is_refit_team(team) || self.refit_claims_system(&system)
+            || target.as_ref().is_some_and(|target| matches!(target, RepairWorkTarget::Component { system, .. } if self.refit_claims_system(system))) {
+            return false;
+        }
         let current = self
             .state
             .jobs
@@ -131,7 +135,8 @@ impl RepairTeams {
                 .flatten()
                 .find(|job| job.id.0 == *id)
                 .ok_or("physical work has no team assignment")?;
-            if job.outcome.is_some()
+            if !matches!(job.activity, RepairActivity::Internal { .. })
+                || job.outcome.is_some()
                 || !work.progress.is_finite()
                 || work.progress < 0.0
                 || (work.progress > 0.0 && !work.reserved)
@@ -243,6 +248,11 @@ impl RepairTeams {
         };
         let mut physical_slots = phases.slots().to_vec();
         for (index, (slot, team)) in physical_slots.iter_mut().zip(navigation).enumerate() {
+            if self.state.jobs.teams[index].as_ref().is_some_and(|job| {
+                matches!(job.activity, RepairActivity::Refit { .. }) && job.outcome.is_none()
+            }) {
+                continue;
+            }
             use crate::ship::interior::TeamLocation;
             if !enabled[index] {
                 if let TeamLocation::Crossing { to, .. } = team.location.clone() {
@@ -312,6 +322,20 @@ impl RepairTeams {
             .filter_map(|w| w.target.clone())
             .collect();
         claimed.extend(foreign_claims.iter().cloned());
+        // Fitting owns the replaceable hardware; another on-site repair team
+        // may work in the room, but cannot diagnose or repair that hardware.
+        for (system, components) in &definition.components {
+            if self.refit_claims_system(system) {
+                claimed.extend(
+                    components
+                        .keys()
+                        .map(|component| RepairWorkTarget::Component {
+                            system: system.clone(),
+                            component: component.clone(),
+                        }),
+                );
+            }
+        }
         for (team, slot) in slots.iter_mut().enumerate() {
             let Some(job) = self.state.jobs.teams[team]
                 .as_ref()

@@ -11,10 +11,14 @@ pub(super) fn prepare(
     dt: f32,
     enabled: &mut [bool],
     blocked: &BTreeSet<String>,
+    skipped: &BTreeSet<usize>,
 ) {
     let mut slots = phases.slots().to_vec();
     guard_slots(graph, teams, &mut slots);
     for (index, (slot, team)) in slots.iter_mut().zip(teams).enumerate() {
+        if skipped.contains(&index) {
+            continue;
+        }
         if !enabled.get(index).copied().unwrap_or(false) {
             // Pause at a safe endpoint, never inside a committed crossing where
             // the access interlock would otherwise wait indefinitely.

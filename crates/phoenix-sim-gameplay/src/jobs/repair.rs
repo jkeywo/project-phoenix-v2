@@ -15,11 +15,25 @@ pub use physical::{PhysicalRepairWork, RepairStockAction};
 #[path = "repair_external_physical.rs"]
 mod external_physical;
 pub use external_physical::ExternalPhysicalRepairWork;
+#[path = "repair_refit.rs"]
+mod refit;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum RepairActivity {
-    Internal { phase: TeamSlot, cancelled: bool },
-    External { target: String },
+    Internal {
+        phase: TeamSlot,
+        cancelled: bool,
+    },
+    External {
+        target: String,
+    },
+    /// Physical fitting commitment; machinery stages belong to the fitting owner.
+    Refit {
+        request: u64,
+        target: SystemId,
+        phase: TeamSlot,
+        cancelled: bool,
+    },
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RepairJobState {
@@ -105,7 +119,7 @@ impl RepairTeams {
             .iter()
             .map(|job| match job {
                 Some(Job {
-                    activity: RepairActivity::Internal { phase, .. },
+                    activity: RepairActivity::Internal { phase, .. } | RepairActivity::Refit { phase, .. },
                     outcome: None,
                     ..
                 }) => phase.clone(),
@@ -123,6 +137,30 @@ impl RepairTeams {
     }
     fn commit_phases(&mut self, phases: &RepairPhases) {
         for (team, phase) in phases.slots().iter().enumerate() {
+            // The retained percentage-repair executor may select a sweep
+            // destination. A fitting commitment excludes that next task too.
+            let guarded = match phase {
+                TeamSlot::Travelling {
+                    system_id: Some(id),
+                    display_name,
+                    ..
+                }
+                | TeamSlot::Repairing {
+                    system_id: Some(id),
+                    display_name,
+                    ..
+                } if self.refit_claims_system(id) && !self.is_refit_team(team) => {
+                    Some(TeamSlot::Returning {
+                        remaining: self.timings.travel_duration,
+                        system_id: Some(id.clone()),
+                        display_name: display_name.clone(),
+                        queued_system_id: None,
+                        queued_display_name: None,
+                    })
+                }
+                _ => None,
+            };
+            let phase = guarded.as_ref().unwrap_or(phase);
             if let Some(job) = self.state.teams[team].as_mut() {
                 if job.outcome.is_none() {
                     if let RepairActivity::Internal {
@@ -167,6 +205,7 @@ impl RepairTeams {
         self.state.clone()
     }
     pub fn restore_state(&mut self, state: &RepairJobState) -> Result<(), String> {
+        self.validate_refit_work(state)?;
         self.validate_physical_work(state)?;
         self.validate_external_physical_shape(state)?;
         match (&self.layout, &state.navigation) {
@@ -251,7 +290,7 @@ impl RepairTeams {
                         external += 1;
                     }
                 }
-                RepairActivity::Internal { phase, .. } => {
+                RepairActivity::Internal { phase, .. } | RepairActivity::Refit { phase, .. } => {
                     if let Some(layout) = &self.layout {
                         let known = |id: &SystemId| layout.compartment_for_system(id).is_some();
                         let valid = match phase {
@@ -331,11 +370,20 @@ impl RepairTeams {
         self.refresh();
     }
     pub fn on_site_systems(&self) -> impl Iterator<Item = &SystemId> {
-        self.readout.iter().filter_map(|slot| match slot {
-            TeamSlot::Repairing {
-                system_id: Some(id),
+        self.state.teams.iter().filter_map(|entry| match entry {
+            Some(Job {
+                activity:
+                    RepairActivity::Internal {
+                        phase:
+                            TeamSlot::Repairing {
+                                system_id: Some(id),
+                                ..
+                            },
+                        ..
+                    },
+                outcome: None,
                 ..
-            } => Some(id),
+            }) => Some(id),
             _ => None,
         })
     }
@@ -346,7 +394,7 @@ impl RepairTeams {
         self.phases()
             .free_team_indices(abroad)
             .into_iter()
-            .filter(|team| self.external_team() != Some(*team))
+            .filter(|team| self.external_team() != Some(*team) && !self.is_refit_team(*team))
             .collect()
     }
     pub fn free_team_indices_reserving(&self, abroad: Option<usize>, reserved: u8) -> Vec<usize> {
@@ -355,10 +403,16 @@ impl RepairTeams {
         free
     }
     pub fn is_committed_to_operation(&self, team: usize, abroad: Option<usize>) -> bool {
-        self.external_team() == Some(team) || self.phases().is_committed_to_operation(team, abroad)
+        self.is_refit_team(team)
+            || self.external_team() == Some(team)
+            || self.phases().is_committed_to_operation(team, abroad)
     }
     pub fn dispatch(&mut self, team: usize, target: SystemId, label: String) {
-        if team >= self.state.teams.len() || self.external_team() == Some(team) {
+        if team >= self.state.teams.len()
+            || self.external_team() == Some(team)
+            || self.is_refit_team(team)
+            || self.refit_claims_system(&target)
+        {
             return;
         }
         let mut phases = self.phases();
@@ -408,6 +462,9 @@ impl RepairTeams {
         self.commit_phases(&phases);
     }
     pub fn recall(&mut self, team: usize) -> bool {
+        if self.is_refit_team(team) {
+            return self.return_refit(team, true);
+        }
         let mut phases = self.phases();
         let mut changed = phases.recall(team);
         if !changed {
@@ -445,6 +502,9 @@ impl RepairTeams {
         changed
     }
     pub fn set_priority(&mut self, team: usize, priority: u8) -> bool {
+        if self.is_refit_team(team) {
+            return false;
+        }
         let mut p = self.phases();
         let result = p.set_priority(team, priority);
         self.commit_phases(&p);
@@ -459,8 +519,13 @@ impl RepairTeams {
         hull: &SystemHull,
         config: &ShipConfig,
     ) -> Option<usize> {
+        if self.refit_claims_system(target) {
+            return None;
+        }
         let mut p = self.phases();
-        let result = p.prioritise_system(target, hull, config);
+        let result = p
+            .prioritise_system(target, hull, config)
+            .filter(|team| !self.is_refit_team(*team));
         self.commit_phases(&p);
         result
     }
@@ -502,6 +567,9 @@ impl RepairTeams {
             })
             .collect();
         let mut phases = self.phases();
+        let skipped: BTreeSet<_> = (0..self.state.teams.len())
+            .filter(|team| self.is_refit_team(*team))
+            .collect();
         if let (Some(layout), Some(navigation)) = (&self.layout, &mut self.state.navigation) {
             super::repair_navigation::prepare(
                 layout,
@@ -510,6 +578,7 @@ impl RepairTeams {
                 dt,
                 &mut enabled,
                 blocked,
+                &skipped,
             );
         }
         let work: Vec<_> = phases
@@ -643,7 +712,8 @@ impl RepairTeams {
                     RepairActivity::External { target } => {
                         (JobPhase::External, None, Some(target.clone()))
                     }
-                    RepairActivity::Internal { phase, .. } => match phase {
+                    RepairActivity::Internal { phase, .. }
+                    | RepairActivity::Refit { phase, .. } => match phase {
                         TeamSlot::Travelling { system_id, .. } => {
                             (JobPhase::Travelling, system_id.clone(), None)
                         }
@@ -723,9 +793,13 @@ impl RepairTeams {
     }
 }
 fn facts(activity: &RepairActivity) -> BTreeMap<String, bool> {
-    let internal = matches!(activity, RepairActivity::Internal { .. });
+    let internal = matches!(
+        activity,
+        RepairActivity::Internal { .. } | RepairActivity::Refit { .. }
+    );
     let (travelling, repairing, returning, target) = match activity {
-        RepairActivity::Internal { phase, .. } => match phase {
+        RepairActivity::Internal { phase, .. } | RepairActivity::Refit { phase, .. } => match phase
+        {
             TeamSlot::Travelling { system_id, .. } => (true, false, false, system_id.is_some()),
             TeamSlot::Repairing { system_id, .. } => (false, true, false, system_id.is_some()),
             TeamSlot::Returning { system_id, .. } => (false, false, true, system_id.is_some()),
@@ -762,6 +836,16 @@ fn evaluate(program: &Program, job: &mut Job<RepairActivity>) -> bool {
                     ..
                 },
             cancelled,
+        }
+        | RepairActivity::Refit {
+            phase:
+                TeamSlot::Returning {
+                    queued_system_id,
+                    queued_display_name,
+                    ..
+                },
+            cancelled,
+            ..
         } = &mut job.activity
         {
             // Cleanup never executes repair or starts the queued redirect.
@@ -780,12 +864,24 @@ fn evaluate(program: &Program, job: &mut Job<RepairActivity>) -> bool {
         RepairActivity::Internal {
             phase: TeamSlot::Travelling { .. },
             ..
+        }
+        | RepairActivity::Refit {
+            phase: TeamSlot::Travelling { .. },
+            ..
         } => "advance_travel",
         RepairActivity::Internal {
             phase: TeamSlot::Repairing { .. },
             ..
+        }
+        | RepairActivity::Refit {
+            phase: TeamSlot::Repairing { .. },
+            ..
         } => "apply_repair",
         RepairActivity::Internal {
+            phase: TeamSlot::Returning { .. },
+            ..
+        }
+        | RepairActivity::Refit {
             phase: TeamSlot::Returning { .. },
             ..
         } => "advance_return",

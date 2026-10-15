@@ -1,8 +1,9 @@
 use super::*;
 use crate::science::scan::ScanBandConfig;
+use bevy::ecs::system::RunSystemOnce;
 
 const SHIP: &str = "ship-1";
-/// The depot's minted UUID — what a command and a reading join on.
+/// The depot's private physical route; admitted commands use its observed alias.
 const DEPOT: &str = "depot-1";
 /// The depot's authored `[[entity]] id` — deliberately NOT its UUID, so the
 /// mirror-flag tests below fail if the key ever slips back onto the UUID no
@@ -64,6 +65,21 @@ fn depot_condition(condition: f32) -> InfrastructureCondition {
         ..InfrastructureConfig::default()
     }))
 }
+fn observable_subject(
+    tag: &str,
+) -> (
+    crate::entities::spawner::EntityTagsSection,
+    crate::entities::spawner::EntityTarget,
+) {
+    (
+        crate::entities::spawner::EntityTagsSection(vec![tag.into()]),
+        crate::entities::spawner::EntityTarget(crate::entities::target::TargetSection {
+            tags: vec![tag.into()],
+            threat_level: Default::default(),
+            description: None,
+        }),
+    )
+}
 
 /// A minimal app: the two systems, one scanning ship at the origin and one
 /// depot 200 units away.
@@ -80,13 +96,32 @@ fn app_with(config: ScanConfig, condition: f32, depot_x: f32) -> (App, Entity) {
         "assets/entities/alliance_cruiser.toml",
     )
     .unwrap();
+    // The independent observation rig extends beyond the unchanged focused
+    // bands, so observation does not erase the focused OutOfRange refusal.
+    // Its explicit 100ms cadence matches this fixture's fixed step; enquiry
+    // timing/range/fidelity still comes from the actual ScanConfig above.
+    authored
+        .sensors_console
+        .as_mut()
+        .unwrap()
+        .long_range_radar
+        .range = config
+        .bands
+        .iter()
+        .map(|band| band.max_range)
+        .fold(0.0, f32::max)
+        * 2.0;
     authored.scan = Some(config);
     let sensing = authored.sensing.as_mut().unwrap();
-    sensing.broad.clear(); // This fixture owns focused hardware only, so its ordinary requests are direct references.
+    sensing
+        .broad
+        .retain(|profile| profile.system.0 == "sensor-radar");
+    sensing.broad[0].sample_interval_secs = 0.1;
     sensing.focused[0].work_secs = 0.1;
     let mut time = Time::<()>::default();
     time.advance_by(std::time::Duration::from_millis(100));
     app.insert_resource(time)
+        .insert_resource(Time::<Fixed>::from_seconds(0.1))
         .insert_resource(crate::sim_tick::SimTick(0));
     let ship = crate::entities::spawner::spawn_entity(
         &mut app.world_mut().commands(),
@@ -98,6 +133,7 @@ fn app_with(config: ScanConfig, condition: f32, depot_x: f32) -> (App, Entity) {
     app.world_mut().flush();
     app.world_mut().spawn((
         EntityUuid(DEPOT.to_string()),
+        observable_subject("station"),
         crate::entities::spawner::EntityId(DEPOT_ID.to_string()),
         Transform::from_xyz(depot_x, 0.0, 0.0),
         EntityName("world.probe.entity.depot.name".to_string()),
@@ -107,16 +143,66 @@ fn app_with(config: ScanConfig, condition: f32, depot_x: f32) -> (App, Entity) {
     (app, ship)
 }
 
+/// Set up a real paid current observation without stepping the focused owner.
+/// The command boundary then sees only the instrument-issued contact handle.
+fn observed_handle(app: &mut App, ship: Entity, source: &str) -> String {
+    let radar = SystemId("sensor-radar".into());
+    let tick = app.world().resource::<crate::sim_tick::SimTick>().0;
+    let due = app
+        .world()
+        .get::<crate::science::broad::BroadTracks>(ship)
+        .unwrap()
+        .0[&radar]
+        .last_tick
+        != Some(tick);
+    if due {
+        let paid = app
+            .world_mut()
+            .get_mut::<crate::ship::power::ShipPowerSystem>(ship)
+            .unwrap()
+            .0
+            .work_continuous(&radar, 0.1, 1.0)
+            .unwrap()
+            .fraction;
+        assert!(
+            paid > 0.0,
+            "finite actual radar reserve funds this fixture's observation"
+        );
+        app.world_mut()
+            .run_system_once(crate::science::broad::tick)
+            .unwrap();
+        app.world_mut()
+            .run_system_once(crate::ship::sensors::publish_sensor_radar_blackboard)
+            .unwrap();
+    }
+    let handle = app
+        .world()
+        .get::<crate::science::broad::BroadTracks>(ship)
+        .unwrap()
+        .0[&radar]
+        .contact_for_source(source)
+        .map(str::to_owned);
+    let exists = app
+        .world_mut()
+        .query::<&EntityUuid>()
+        .iter(app.world())
+        .any(|id| id.0 == source);
+    if exists {
+        handle.expect("the real fixture target must have an actual permitted measured return")
+    } else {
+        "12:sensor-radar:contact-999999".into()
+    }
+}
+
 fn ask_for_scan(app: &mut App, ship: Entity, uuid: &str) {
+    let handle = observed_handle(app, ship, uuid);
     app.world_mut()
         .get_mut::<AdmittedCommands>(ship)
         .expect("the ship has an admitted set")
         .0
         .push(crate::core::messages::AdmittedCommand {
             target: SystemId(crate::ship::system_registry::SENSORS_SYSTEM_ID.to_string()),
-            payload: SystemControlPayload::ScanTarget {
-                uuid: uuid.to_string(),
-            },
+            payload: SystemControlPayload::ScanTarget { uuid: handle },
             response_token: None,
             feedback_correlation: None,
         });
@@ -129,15 +215,14 @@ fn ask_for_correlated_scan(
     token: &str,
     correlation: &str,
 ) {
+    let handle = observed_handle(app, ship, uuid);
     app.world_mut()
         .get_mut::<AdmittedCommands>(ship)
         .expect("the ship has an admitted set")
         .0
         .push(crate::core::messages::AdmittedCommand {
             target: SystemId(crate::ship::system_registry::SENSORS_SYSTEM_ID.to_string()),
-            payload: SystemControlPayload::ScanTarget {
-                uuid: uuid.to_string(),
-            },
+            payload: SystemControlPayload::ScanTarget { uuid: handle },
             response_token: Some(token.to_string()),
             feedback_correlation: Some(
                 crate::core::messages::ActionCorrelationId::new(correlation)
@@ -175,6 +260,10 @@ fn record(app: &App, ship: Entity) -> FocusedScanRecord {
 
 fn step(app: &mut App) {
     app.update();
+    let mut admitted = app.world_mut().query::<&mut AdmittedCommands>();
+    for mut commands in admitted.iter_mut(app.world_mut()) {
+        commands.0.clear();
+    }
     app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 += 1;
 }
 fn scan_key() -> SystemId {
@@ -209,6 +298,8 @@ fn an_admitted_scan_command_reads_the_targets_live_condition_track() {
 
     let reading = record(&app, ship).last.expect("a reading came back");
     assert_eq!(reading.subject_uuid, DEPOT);
+    assert_ne!(reading.contact_id.as_deref(), Some(DEPOT));
+    assert!(reading.contact_id.is_some());
     assert_eq!(reading.subject_name, "world.probe.entity.depot.name");
     assert_eq!(reading.band, "detailed");
     assert!(
@@ -224,6 +315,32 @@ fn an_admitted_scan_command_reads_the_targets_live_condition_track() {
         reading.capacities,
         vec![("world.probe.capacity.berths.label".to_string(), 4)]
     );
+}
+
+#[test]
+fn same_tick_requests_share_one_paid_observation_and_do_not_replay_after_apply() {
+    let (mut app, ship) = app_with(suite(), 62.0, 200.0);
+    ask_for_scan(&mut app, ship, DEPOT);
+    let paid = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(ship)
+        .unwrap()
+        .0
+        .capture_continuation();
+    ask_for_scan(&mut app, ship, DEPOT);
+    assert_eq!(
+        app.world()
+            .get::<crate::ship::power::ShipPowerSystem>(ship)
+            .unwrap()
+            .0
+            .capture_continuation(),
+        paid
+    );
+    step(&mut app);
+    let first = record(&app, ship).save_state();
+    assert_eq!(first.history.len(), 1);
+    step(&mut app);
+    assert_eq!(record(&app, ship).save_state(), first);
 }
 
 /// Issue #1154: the reading carries the subject's authored mass, off its
@@ -322,6 +439,32 @@ fn the_same_scan_from_further_out_comes_back_at_a_coarser_band() {
     );
 }
 
+#[test]
+fn an_observed_contact_beyond_the_focused_bands_is_refused_as_out_of_range() {
+    let (mut app, ship) = app_with(suite(), 62.0, 3500.0);
+    ask_for_scan(&mut app, ship, DEPOT);
+    let before = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(ship)
+        .unwrap()
+        .0
+        .capture_continuation();
+    step(&mut app);
+    let record = record(&app, ship);
+    assert_eq!(record.refusal, Some(ScanRefusal::OutOfRange));
+    assert!(record.last.is_none());
+    assert!(queued_flag_sets(&app).is_empty());
+    assert_eq!(
+        app.world()
+            .get::<crate::ship::power::ShipPowerSystem>(ship)
+            .unwrap()
+            .0
+            .capture_continuation(),
+        before,
+        "a correctly observed but unreachable focused target buys no enquiry work"
+    );
+}
+
 /// **AC1's refusal half, through the ECS.** A target with no condition
 /// track at all is refused, and the refusal — not a stale reading — is what
 /// the console gets.
@@ -332,6 +475,7 @@ fn scanning_something_with_no_condition_track_is_refused_with_a_reason() {
         .world_mut()
         .spawn((
             EntityUuid("rock-9".to_string()),
+            observable_subject("asteroid"),
             Transform::from_xyz(50.0, 0.0, 0.0),
         ))
         .id();
@@ -395,6 +539,7 @@ fn a_structure_the_scenario_keeps_off_the_wire_cannot_be_scanned() {
     let (mut app, ship) = app_with(suite(), 62.0, 200.0);
     app.world_mut().spawn((
         EntityUuid("sealed-1".to_string()),
+        observable_subject("station"),
         Transform::from_xyz(100.0, 0.0, 0.0),
         EntityName("world.probe.entity.sealed.name".to_string()),
         InfrastructureCondition(InfrastructureState::from_config(&InfrastructureConfig {
@@ -465,6 +610,15 @@ fn the_reading_is_published_under_the_scan_blackboard_channel() {
     assert!(bb.capable);
     assert!(bb.refusal.is_none());
     let reading = bb.reading.expect("the reading is on the wire");
+    assert_ne!(reading.subject_uuid, DEPOT);
+    assert_eq!(
+        app.world()
+            .get::<crate::science::broad::BroadTracks>(ship)
+            .unwrap()
+            .0[&SystemId("sensor-radar".into())]
+            .resolve_current(&reading.subject_uuid),
+        Some(DEPOT)
+    );
     assert_eq!(reading.band_label, "world.probe.band.detailed.label");
     assert_eq!(reading.subject_name, "world.probe.entity.depot.name");
     assert_eq!(reading.condition_step, 0.01);
@@ -539,6 +693,7 @@ fn a_structure_with_no_authored_id_is_scannable_and_mirrors_nothing() {
     let (mut app, ship) = app_with(suite(), 62.0, 200.0);
     app.world_mut().spawn((
         EntityUuid("anonymous-1".to_string()),
+        observable_subject("station"),
         Transform::from_xyz(150.0, 0.0, 0.0),
         EntityName("world.probe.entity.anonymous.name".to_string()),
         depot_condition(44.0),
@@ -563,6 +718,7 @@ fn re_scanning_raises_nothing_twice_and_scanning_elsewhere_unlearns_nothing() {
     let (mut app, ship) = app_with(suite(), 62.0, 200.0);
     app.world_mut().spawn((
         EntityUuid("depot-2".to_string()),
+        observable_subject("station"),
         crate::entities::spawner::EntityId("ladder_depot".to_string()),
         Transform::from_xyz(120.0, 0.0, 0.0),
         EntityName("world.probe.entity.other.name".to_string()),
@@ -599,6 +755,7 @@ fn a_refused_scan_raises_no_flag_for_the_thing_it_could_not_read() {
     let (mut app, ship) = app_with(suite(), 62.0, 200.0);
     app.world_mut().spawn((
         EntityUuid("sealed-1".to_string()),
+        observable_subject("station"),
         crate::entities::spawner::EntityId("sealed_depot".to_string()),
         Transform::from_xyz(100.0, 0.0, 0.0),
         EntityName("world.probe.entity.sealed.name".to_string()),

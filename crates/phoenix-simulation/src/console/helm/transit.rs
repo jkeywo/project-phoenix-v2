@@ -243,6 +243,16 @@ impl ShipTransitDrives {
             let system = ship.system(owner).ok_or("missing actual drive")?;
             crate::ship::composition::validate_composition(system)?;
             state.validate(tick)?;
+            if let Some(order) = state.phase.order() {
+                let binding = transit_composition(&system.components)
+                    .ok_or("saved Transit owner has no accepted drive component")?;
+                if order.profile.config != *binding.config {
+                    return Err(
+                        "saved Transit profile differs from accepted installed drive configuration"
+                            .into(),
+                    );
+                }
+            }
         }
         Ok(())
     }

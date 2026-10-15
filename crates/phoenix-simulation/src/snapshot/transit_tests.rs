@@ -274,3 +274,77 @@ fn single_row_replacement_uses_its_exact_recipe_instead_of_borrowing_live_drive(
         assert_eq!(crate::sim_digest::world_digest(&world), digest);
     }
 }
+
+#[test]
+fn preparing_frozen_profile_and_cost_forgeries_refuse_without_touching_live_resources() {
+    let (mut world, actor) = fixture();
+    let saved = full_capture(&world);
+    let digest = crate::sim_digest::world_digest(&world);
+    for fault in 0..7 {
+        let mut candidate = saved.clone();
+        let state = candidate.entities[0]
+            .transit
+            .as_mut()
+            .unwrap()
+            .0
+            .get_mut(&owner())
+            .unwrap();
+        let TransitPhase::Preparing { order, .. } = &mut state.phase else {
+            panic!("actual paid preparing fixture")
+        };
+        match fault {
+            0 => order.profile.config.gravity_response = 0.25,
+            1 => order.profile.config.max_distance += 1.0,
+            2 => order.profile.config.preparation_work_secs += 1.0,
+            3 => order.profile.config.fuel.amount += 1,
+            4 => order.profile.preparation_energy_per_sec *= 0.5,
+            5 => order.profile.commit_energy *= 0.5,
+            _ => order.profile.config.scatter_radius += 1.0,
+        }
+        assert!(
+            validate_roster(&world, &candidate).is_err(),
+            "profile fault {fault}"
+        );
+        assert!(
+            !super::super::restore(&mut world, &candidate).is_complete(),
+            "profile fault {fault}"
+        );
+        assert_eq!(full_capture(&world), saved);
+        assert_eq!(crate::sim_digest::world_digest(&world), digest);
+        super::super::application::apply_entity_state(
+            &mut world,
+            actor,
+            &candidate.entities[0],
+            candidate.tick,
+        );
+        assert_eq!(
+            full_capture(&world),
+            saved,
+            "single-row profile fault {fault}"
+        );
+    }
+    // A different accepted installed component cannot inherit this old frozen profile.
+    let mut different = world
+        .get::<crate::ship_plugin::ShipConfigComponent>(actor)
+        .unwrap()
+        .0
+        .clone();
+    let system = different
+        .systems
+        .iter_mut()
+        .find(|system| system.id == owner())
+        .unwrap();
+    for component in &mut system.components {
+        if let crate::ship::composition::SystemComponentConfig::TransitDrive { config, .. } =
+            component
+        {
+            config.gravity_response = 0.5;
+        }
+    }
+    assert!(saved.entities[0]
+        .transit
+        .as_ref()
+        .unwrap()
+        .validate(&different, saved.tick)
+        .is_err());
+}

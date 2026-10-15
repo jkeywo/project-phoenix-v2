@@ -35,7 +35,7 @@ pub(super) fn validate_entity(
     }
 }
 
-fn definitions(
+pub(super) fn definitions(
     world: &World,
     row: &EntityState,
 ) -> Result<

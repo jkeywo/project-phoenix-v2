@@ -5,6 +5,7 @@ use crate::console::helm::transit::ShipTransitDrives;
 fn validate_row(
     world: &World,
     row: &EntityState,
+    live: Option<Entity>,
     ship: Option<&crate::ship::config::ShipConfig>,
     tick: u64,
 ) -> Result<(), String> {
@@ -25,8 +26,20 @@ fn validate_row(
             if row.physics.is_none() {
                 return Err("Transit requires its actual saved ShipPhysics owner".into());
             }
+            let costs = accepted_costs(world, live, row)?;
             for (owner, state) in &saved.0 {
                 if let Some(order) = state.phase.order() {
+                    if costs.get(owner)
+                        != Some(&(
+                            order.profile.preparation_energy_per_sec,
+                            order.profile.commit_energy,
+                        ))
+                    {
+                        return Err(
+                            "saved Transit work costs differ from accepted actual Power consumer"
+                                .into(),
+                        );
+                    }
                     let (last, worked) = match state.phase {
                         phoenix_sim_gameplay::ship::transit::TransitPhase::Committed {
                             commit_tick,
@@ -95,7 +108,7 @@ pub(super) fn validate_roster(
                     .find_map(|(entity, id)| (id.0 == row.uuid).then_some(entity))
             });
         let ship = accepted_ship(world, live, row).map_err(|reason| (row.uuid.clone(), reason))?;
-        validate_row(world, row, ship.as_ref(), snapshot.tick)
+        validate_row(world, row, live, ship.as_ref(), snapshot.tick)
             .map_err(|reason| (row.uuid.clone(), reason))?;
     }
     Ok(())
@@ -108,7 +121,76 @@ pub(super) fn validate_live(
     tick: u64,
 ) -> Result<(), String> {
     let ship = accepted_ship(world, Some(entity), row)?;
-    validate_row(world, row, ship.as_ref(), tick)
+    validate_row(world, row, Some(entity), ship.as_ref(), tick)
+}
+
+/// Immutable equipment costs only; current reserves, flow and damage remain live state.
+fn accepted_costs(
+    world: &World,
+    live: Option<Entity>,
+    row: &EntityState,
+) -> Result<std::collections::BTreeMap<SystemId, (f32, f32)>, String> {
+    if row.fitting.is_some() {
+        let (profile, _) = super::fitting::definitions(world, row)?;
+        let profile =
+            profile.ok_or("saved Transit fitting has no accepted equipment definition")?;
+        let power = super::fitting::fitted_power(
+            &profile,
+            row.fitting.as_ref().expect("selected fitting"),
+            row,
+        )?;
+        return Ok(power
+            .0
+            .config()
+            .consumers
+            .iter()
+            .map(|consumer| {
+                (
+                    consumer.system.clone(),
+                    (consumer.continuous_cost_per_sec, consumer.discrete_cost),
+                )
+            })
+            .collect());
+    }
+    if let Some(origin) = &row.spawn {
+        let mut warnings = Vec::new();
+        let source = origin
+            .resolve(&crate::entities::loader::WasmTemplateLoader, &mut warnings)
+            .ok_or("cannot resolve accepted Transit Power recipe")?;
+        if !warnings.is_empty() {
+            return Err("accepted Transit Power recipe did not apply exactly".into());
+        }
+        let energy = source
+            .energy
+            .as_ref()
+            .ok_or("accepted Transit equipment has no Power profile")?;
+        Ok(energy
+            .consumers
+            .iter()
+            .map(|consumer| {
+                (
+                    consumer.system.clone(),
+                    (consumer.continuous_cost_per_sec, consumer.discrete_cost),
+                )
+            })
+            .collect())
+    } else {
+        let power = live
+            .and_then(|entity| world.get::<crate::ship::power::ShipPowerSystem>(entity))
+            .ok_or("actual accepted Transit Power owner is missing")?;
+        Ok(power
+            .0
+            .config()
+            .consumers
+            .iter()
+            .map(|consumer| {
+                (
+                    consumer.system.clone(),
+                    (consumer.continuous_cost_per_sec, consumer.discrete_cost),
+                )
+            })
+            .collect())
+    }
 }
 
 fn accepted_ship(

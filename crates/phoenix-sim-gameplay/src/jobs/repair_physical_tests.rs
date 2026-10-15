@@ -220,7 +220,7 @@ fn json_personnel_and_active_remedy_resume_exactly_for_360_real_work_steps() {
     );
     let saved = serde_json::to_vec(&(live.save_state(), &personnel, &damage, &stock)).unwrap();
     let (jobs, resumed_personnel, mut resumed_damage, mut resumed_stock): (
-        super::super::repair::RepairJobState,
+        crate::jobs::repair::RepairJobState,
         PersonnelState,
         DamageState,
         InfrastructureState,

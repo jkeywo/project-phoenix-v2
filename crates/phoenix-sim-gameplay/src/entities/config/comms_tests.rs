@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn all_shipped_seat_counts_bind_real_paid_radio_equipment() {
     for hull in ["courier", "destroyer", "cruiser", "battleship"] {
-        let source = crate::entities::include_resolve::resolve_from_disk(&format!(
+        let source = crate::test_fixtures::resolve_from_disk(&format!(
             "assets/entities/alliance_{hull}.toml"
         ))
         .unwrap();

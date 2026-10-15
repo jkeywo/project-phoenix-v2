@@ -178,5 +178,19 @@
     "broad_correction": "5985c80e honors explicit Missile selection grant in actual paid Broad producer and canonical missile classification. Default no-grant remains unselectable; native regression passes, no hidden launcher/guidance/UUID disclosure. Fresh actual-host run pending.",
     "in_progress": "Fresh4target headless host batch .phoenix/planner-broad-full-host.log at fb255fc4; no result claimed yet.",
     "limit": "No full increment exit, physical devices, multi-LocalShip acceptance, performance/balance/workload acceptance or final integrated gates. No push."
+  },
+  "latest_parallel_join": {
+    "source": "ddc410ed (runtime); later00563a0f changes adopted probe contracts only; protocol23/snapshot65/rules0.45",
+    "runtime": "Reviewed real protection allocation/payment/capture plus Comms, Broad, Focused and Passive receiver joins6c49a920; normal own Human/AI actuationc9e88ed9; deterministic rating-to-protection-to-interference orderddc410ed. Protection UI/Workshop and native gameplay evidence pending.",
+    "planner": "Original bounded choice explanationsae55828f and actual accepted-source Workshop/privileged graph inspectionaaa1eff0 integrated. Source reviews passed; no physical job dispatcher or additional knowledge grant.",
+    "compile": "Renderer-free Simulation test check passed56.63s before controller (.phoenix/protection-planning-integrated-check.log), then29.36s after controller (.phoenix/protection-controller-integrated-check.log).",
+    "world_owner": "4 planner tests passed,575filtered,0.01s; .phoenix/imported-planner-world-owner.log. Exact imported typed closure, alternatives, invalid recursion, atomic release/history and original bounded explanation JSON.",
+    "content_owner": "5 tests passed,311filtered,0.30s; .phoenix/planner-craft-owner-tests-retry.log. Imported domain capability/import2 and actual Transit source validation3. Initial compile found two fixture loaders missing required absence_is_final;52daad98 corrects authoritative fixture semantics.",
+    "craft_model": "Initial Model1pass/1fail exposed internally tagged unit variant accepting extra custody fields.56c242b6 preserves deployed wire shape with a closed struct variant; retry2pass,72filtered; .phoenix/craft-closed-model-retry.log. Physical Bay consumer remains open.",
+    "authoring": "27 tests passed across5 integrated planner/activities/Scenario/Scripts/Transit files,5.84s; .phoenix/planning-transit-authoring-integrated.log. Merged Workshop bundle passes; .phoenix/planning-protection-workshop-build.log.",
+    "prior_full_host": "Fresh runtimefb255fc4:4pass/3fail across7tests (Activity2/1, Jam1/0, localJump1/0, PDC0/2),6m08compile; .phoenix/planner-broad-full-host.log. Jam7.88s and localJump50.79s pass. Imported HTN completes360 comparisons then fails energy witness; ebf456b2 now observes actual fixed intervals including command-helper ticks. PDCsingle reaches real AI targeting/firing and launcher-loss survival but lacks strict existing-roster readiness for its runtime carrier;8d2d95b7 uses validated delayed rebuild. Larger salvo still has no qualified missile handle/firing;163778ed adds read-only track continuity diagnostics. Corrections not yet native-proven.",
+    "design": "PASM validate1134entities/614informationalfindings StatusOK, scan0, traceability246rows0. Logs .phoenix/planner-integrated-{pasm,scan,traceability}.log. Development scan recordedbbff5bb4 and includes local worktree copies(36090files/197packages); not a final pinned clean-tree gate. Wiki74pages/72indexed/2094refs/0findings; .phoenix/planner-world-wiki-lint.log before latest authoring article.",
+    "running": "Fresh4target headless retry atddc410ed: .phoenix/protection-planner-full-host-retry.log; no result yet.",
+    "remaining": "No increment exits. Remaining16-24 runtime scope, authoring/playable joins, physical devices/multiplayer, workload/balance/performance and final integration gates remain required. No push."
   }
 }

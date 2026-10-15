@@ -595,3 +595,43 @@ Independent integration-review source review passed. A read-only resolved-source
 check passed 12 fixture range/profile/group-parent assertions. Rust is formatted;
 native execution awaits the root's central hooks and owner Cargo batch. There is
 no executed full-host or increment17 exit claim from this source handoff.
+
+## Adopted next S027 consumer: advisory emission intent
+
+Extend the existing Command capability with an ordinary authored Normal or
+LowEmission intent. The owner is the ship data's actual Command System and
+Console; no Captain, seat ID or new global controller is prescribed. Its Human
+controls use the existing System admission path. Missing optional authored
+support retains existing behaviour.
+
+Publish the selected intent through explicit existing own Console knowledge
+bindings. Co-hosting does not convey it. An ordinary per-System controller can
+receive the `low_emission` fact only through its own permitted view, together
+with its already-supported alert and mission context. Its authored normal policy
+chooses how to respond; it gains no new sensors, foreign awareness or ability to
+control another System. Prove a real authored low-emission policy using existing
+machinery owners rather than an unused flag.
+
+While LowEmission is selected, the same Human machinery controls show advisory
+high-emission markers derived from their actual own operating measurements and
+the shared signature causes. Authored thresholds may tune this presentation;
+they promise no signature ceiling or detection outcome. A warning never disables
+a control, requires an override, clamps output or rejects a Human command. The
+operator can deliberately perform high-emission work; actual paid consequences
+still follow the normal physical signature and concealment mechanisms.
+
+Keep intent and observed consequences distinct. Actual reactor generation,
+propulsion, active sensing, weapons, communications and auxiliary work provide
+measurement facts. Selected intent or desired allocation cannot fabricate a
+quiet physical ship, and no observer census/success field is exposed. Existing
+AI remains responsible for one actual System using its own knowledge.
+
+Capture, digest, restore and reconnect the canonical Command intent through its
+existing owner; current measured presentation is derived and cleared with its
+ordinary interval. Workshop edits the actual supported Command/profile/threshold
+and explicit feed data through accepted history/Preview/Test. Root coordinates
+central payload, publication, snapshot and shell joins. Before closing this
+consumer, prove advisory Human high-work operation, ordinary authored AI response
+and urgency context, Console isolation, actual signature consequences, authoring
+and complete fresh-JSON continuation/no-write checks. No S027 runtime is claimed
+by this contract; the actual concealment host proof has priority first.

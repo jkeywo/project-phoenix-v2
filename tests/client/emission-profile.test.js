@@ -12,7 +12,7 @@ it('projects only the exact permitted owner and treats advice as measured inform
   expect(emissionIntentPayload(view(),'elsewhere',true)).toBeNull();
   expect(emissionIntentPayload(view(),'orders',false).controllable).toBe(false);
   expect(emissionIntentPayload({...view(),intent:'invisible'},'orders',true)).toBeNull();
-  const measured={observed_tick:7,rate:3,cause:'comms',advisory_rate:0.25,high:true};
+  const measured={observed_tick:7,rate:'3',cause:'comms',advisory_rate:'0.25',high:true};
   expect(emissionAdvisoryPayload({...measured,observer_uuid:'private'})).toEqual(measured);
   for(const bad of [{rate:NaN},{observed_tick:-1},{cause:'undetectable'},{advisory_rate:0}])expect(emissionAdvisoryPayload({...measured,...bad})).toBeNull();
 });

@@ -178,9 +178,9 @@ pub(crate) fn advisory(
     }
     Some(EmissionAdvisoryView {
         observed_tick: tick,
-        rate: rate.min(f64::from(f32::MAX)) as f32,
+        rate: rate.min(f64::from(f32::MAX)).to_string(),
         cause,
-        advisory_rate: profile.advisory_rate,
+        advisory_rate: profile.advisory_rate.to_string(),
         high: rate > f64::from(profile.advisory_rate),
     })
 }

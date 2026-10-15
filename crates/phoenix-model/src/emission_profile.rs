@@ -36,13 +36,14 @@ pub struct EmissionIntentView {
 }
 
 /// One actual machinery owner's current measurement, never a foreign listener.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EmissionAdvisoryView {
     pub observed_tick: u64,
-    pub rate: f32,
+    /// Finite measured presentation, matching other Eq common status details.
+    pub rate: String,
     pub cause: PassiveSignature,
-    pub advisory_rate: f32,
+    pub advisory_rate: String,
     pub high: bool,
 }
 

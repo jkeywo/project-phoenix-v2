@@ -60,7 +60,7 @@
     "retry_log": ".phoenix/pdc-producer-helm-retry.log"
   },
   "pending": [
-    "Execute corrected Comms, Helm radar and activity cases; run authored NPC pose regressions",
+    "Rebuilt full-host PDC, Helm, Comms and finite-probe continuations; new activity-support owner tests",
     "Real headless-host PDC and joined-crew Helm continuation probes",
     "Full-host illumination and radio journeys",
     "Remaining runtime scope in increments 16 through 24",
@@ -107,5 +107,34 @@
     "result": "passed; 1126 entities, 614 informational findings, Status OK",
     "log": ".phoenix/parallel-requests-activities-pasm.log",
     "limitation": "Development validation during ongoing lane integration; not the final pinned gate"
+  },
+  "targeted_native_retry": {
+    "source": "c94de029 runtime; executable built before subsequent activity-support and finite-battery changes",
+    "command": "cargo test -p phoenix-simulation --lib --no-default-features -- request_tests console::helm::server::tests console::repair::server::activity_tests logistics_server::tests::activities world_setup_authored_pose scenario_activity",
+    "result": "30 passed, 0 failed, 4642 filtered out; 0.42 seconds",
+    "log": ".phoenix/parallel-native-retry.log",
+    "limitation": "The two incorrect heading filter spellings matched no cases; heading tests were explicitly run separately below. This retry is not a passing rerun of the complete 403-case selection."
+  },
+  "authored_heading": {
+    "command": "phoenix_simulation-d920f9d6624e4bd2.exe authored_pose_tests",
+    "result": "2 passed, 0 failed, 4670 filtered out; 0.35 seconds",
+    "log": ".phoenix/authored-heading-owner-tests.log"
+  },
+  "finite_battery": {
+    "source": "a28bb93a",
+    "owner": "3 passed; cargo test -p phoenix-sim-gameplay --lib -- battery_only; .phoenix/battery-energy-owner-tests.log",
+    "workshop": "45 passed across four affected files; .phoenix/battery-authoring-client-corrected.log",
+    "limitation": "Actual-host continuation pending. Deployment/recovery is not implemented by this prerequisite."
+  },
+  "latest_wiki": {
+    "result": "73 pages, 71 indexed, 2066 references, no findings",
+    "log": ".phoenix/parallel-lanes-wiki-current.log"
+  },
+  "activity_authoring": {
+    "source": "1ec203f8,1f7dd0c5,47b4981f",
+    "client": "58 passed across two integrated files; .phoenix/activity-authoring-integrated-client.log",
+    "bundle": "Workshop Authoring build passed; .phoenix/activity-authoring-integrated-build.log",
+    "strings": "6105 strings, zero errors/warnings; .phoenix/activity-authoring-integrated-strings.log",
+    "limitation": "New shared support native tests and full-host physical lifecycle demonstration remain pending"
   }
 }

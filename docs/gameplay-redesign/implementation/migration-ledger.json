@@ -303,7 +303,7 @@
     {
       "id": 19,
       "title": "Ordinary deployables and carried craft",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         16,
         17,

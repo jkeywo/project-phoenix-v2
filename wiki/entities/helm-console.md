@@ -2,7 +2,7 @@
 title: Helm Console
 type: entity
 tags: [console, helm, input, ship, physics, radar, impulse, boost, dock]
-sources: [gui/transit.js, gui/components/ph-transit-drives.js, gui/stations/transit-actions.js, gui/battleship/helm.html, gui/cruiser/helm.html, gui/destroyer/helm.html, gui/stations/helm-console.js, gui/console-state.js, gui/components/ph-helm-radar.js, gui/components/ph-helm-joystick.js, gui/stations/helm-actions.js, gui/gamepad-input.js, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-sim-gameplay/src/ship/helm_admission.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/ship/physics.rs, crates/phoenix-sim-gameplay/src/ship/impulse.rs, crates/phoenix-sim-gameplay/src/ship/boost.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-sim-gameplay/src/modifiers/coordination.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/entities/spawner.rs, assets/entities/alliance_destroyer.toml, assets/entities/alliance_cruiser.toml]
+sources: [editor/workshop-transit.js, gui/workshop-transit-panel.js, gui/transit.js, gui/components/ph-transit-drives.js, gui/stations/transit-actions.js, gui/battleship/helm.html, gui/cruiser/helm.html, gui/destroyer/helm.html, gui/stations/helm-console.js, gui/console-state.js, gui/components/ph-helm-radar.js, gui/components/ph-helm-joystick.js, gui/stations/helm-actions.js, gui/gamepad-input.js, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-sim-gameplay/src/ship/helm_admission.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/ship/physics.rs, crates/phoenix-sim-gameplay/src/ship/impulse.rs, crates/phoenix-sim-gameplay/src/ship/boost.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-sim-gameplay/src/modifiers/coordination.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/entities/spawner.rs, assets/entities/alliance_destroyer.toml, assets/entities/alliance_cruiser.toml]
 updated: 2026-10-15
 ---
 
@@ -128,6 +128,13 @@ the actual drive freezes its permitted Navigation course. Cancel is available
 only before commitment. Controls require that exact System's current Human
 ownership, including on a read-only feed. No private gravity inputs or future
 placement recipe enter the phone view.
+
+The dedicated Workshop Transit form edits installed drive policy, exact Navigation
+and Local fuel bindings through accepted source/history. It requires explicit
+materialisation of inherited equipment, preserves other equipment and comments,
+and provides the existing Preview/Test route. Its separate fixed-body gravity
+controls accept a finite exclusion radius or an explicit false disable. The
+actual backend validates which World placements may supply that policy.
 
 ## Related
 

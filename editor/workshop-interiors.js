@@ -1,3 +1,4 @@
+import { guardTransitReferences } from './workshop-transit.js';
 import { guardPortServiceReferences } from './workshop-ports.js';
 import { guardPersonnelReferences } from './workshop-personnel.js';
 import { guardSensingReferences } from './workshop-sensing.js';
@@ -107,6 +108,7 @@ export function prepareInteriorOperation(draft, dependencies, operation) {
   guardLogisticsLayout(inspection.resolved.value, interior);
   guardProductionReferences(inspection.resolved.value, { ...inspection.resolved.value, interior });
   guardRecoveryReferences(inspection.resolved.value, { ...inspection.resolved.value, interior });
+  guardTransitReferences(inspection.resolved.value, { ...inspection.resolved.value, interior });
   let after = replaceInteriorSource(before, interior);
   if (teamCount !== inspection.teamCount) {
     if (!inspection.resolved.value.repair) throw new Error('Configure the Repair capability before changing its team count.');

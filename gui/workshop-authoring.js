@@ -1,3 +1,4 @@
+import { mountWorkshopTransit } from './workshop-transit-panel.js';
 import { mountWorkshopWeaponGroups } from './workshop-weapon-groups-panel.js';
 import { mountWorkshopHelmProjection } from './workshop-helm-projection-panel.js';
 import { mountWorkshopHelmMovement } from './workshop-helm-movement-panel.js';
@@ -226,6 +227,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let weaponGroupsPanel = null;
   let helmProjectionPanel = null;
   let helmMovementPanel = null;
+  let transitPanel = null;
   let commsRadioPanel = null;
   let resourceRecoveryPanel = null;
   let personnelPanel = null;
@@ -327,6 +329,9 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   helmProjectionPanel = mountWorkshopHelmProjection({ root, attach: false, provider, runtime, draft: () => draft,
     ...operations.panel(), preview: previewTemplate, test: testTemplate,
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  transitPanel = mountWorkshopTransit({ root, attach: false, provider, runtime, draft: () => draft,
+    ...operations.panel(), preview: previewTemplate, test: testTemplate,
+    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   helmMovementPanel = mountWorkshopHelmMovement({ root, attach: false, provider, runtime, draft: () => draft,
     ...operations.panel(), preview: previewTemplate, test: testTemplate,
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
@@ -380,7 +385,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     dependencies: () => catalogueDependencies, t: translate,
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   const compositionTools = el('div', null, { class: 'workshop-composition-tools' });
-  compositionTools.append(personnelPanel.node, weaponGroupsPanel.node, fieldsPanel.node, compositionPanel.node, spatialPanel.node, helmProjectionPanel.node, helmMovementPanel.node, commsRadioPanel.node, sensingPanel.node, shipAuthoringPanel.node, resourcePanel.node, logisticsPanel.node, productionPanel.node, fittingPanel.node, resourceRecoveryPanel.node, portPanel.node, weaponPanel.node, energyPanel.node, shieldPanel.node, interiorPanel.node, damagePanel.node, slotAuthoringPanel.node);
+  compositionTools.append(personnelPanel.node, weaponGroupsPanel.node, fieldsPanel.node, compositionPanel.node, spatialPanel.node, helmProjectionPanel.node, helmMovementPanel.node, transitPanel.node, commsRadioPanel.node, sensingPanel.node, shipAuthoringPanel.node, resourcePanel.node, logisticsPanel.node, productionPanel.node, fittingPanel.node, resourceRecoveryPanel.node, portPanel.node, weaponPanel.node, energyPanel.node, shieldPanel.node, interiorPanel.node, damagePanel.node, slotAuthoringPanel.node);
   layoutMount = mountWorkshopLayout({
     root, surface: layout,
     panels: { files: filesPanel, source: sourcePanel, inspector, add: addPanel, recovery: recoveryPanel,
@@ -567,6 +572,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     weaponGroupsPanel?.refresh({ hidden: testing });
     helmProjectionPanel?.refresh({ hidden: testing });
     helmMovementPanel?.refresh({ hidden: testing });
+    transitPanel?.refresh({ hidden: testing });
     commsRadioPanel?.refresh({ hidden: testing });
     resourceRecoveryPanel?.refresh({ hidden: testing });
     personnelPanel?.refresh({ hidden: testing });
@@ -1235,6 +1241,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     weaponGroupsPanel?.dispose();
     helmProjectionPanel?.dispose();
     helmMovementPanel?.dispose();
+    transitPanel?.dispose();
     commsRadioPanel?.dispose();
     resourceRecoveryPanel?.dispose();
     personnelPanel?.dispose();

@@ -112,7 +112,7 @@ export function writeSystemComposition(source, id, operation, effective) {
     body = body.slice(0, header.start - first.start) + body.slice(Math.min(stop, end) - first.start);
   }
   const nl = source.includes('\r\n') ? '\r\n' : '\n';
-  const serialized = stringify({ system: [{ component: components, channel: channels }] })
+  const serialized = stringify({ system: [{ component: components, ...(channels.length ? { channel: channels } : {}) }] })
     .replace(/^\[\[system\]\]\r?\n/, '').trim().replace(/\n/g, nl);
   return source.slice(0, first.start) + body.trimEnd() + nl + nl + serialized + nl + nl + source.slice(end);
 }

@@ -1,3 +1,4 @@
+import { guardTransitReferences } from './workshop-transit.js';
 import { guardRecoveryReferences } from './workshop-resource-recovery.js';
 import { guardProductionReferences } from './workshop-production.js';
 import { parse, stringify } from 'smol-toml';
@@ -153,6 +154,7 @@ export function prepareLogisticsOperation(draft, dependencies, operation, schema
   const value = inspectLogistics(candidate, dependencies, operation.path).resolved.value;
   guardProductionReferences(inspection.resolved.value, value);
   guardRecoveryReferences(inspection.resolved.value, value);
+  guardTransitReferences(inspection.resolved.value, value);
   const nextStockSources = new Set(stockPublicationSources(value, schema));
   source = pruneStockFeedsSource(source, value, new Set([...priorStockSources].filter(key => !nextStockSources.has(key))), operation.materialise);
   for (const feed of requiredStockFeeds(value, schema)) {

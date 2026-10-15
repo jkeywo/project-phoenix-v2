@@ -1,3 +1,4 @@
+import { guardTransitReferences } from './workshop-transit.js';
 import { guardPortServiceReferences } from './workshop-ports.js';
 import { guardSensingReferences } from './workshop-sensing.js';
 import { guardCommsRadioReferences } from './workshop-comms-radio.js';
@@ -50,6 +51,7 @@ export function prepareEnergyOperation(draft, dependencies, operation) {
   guardFittingReferences(inspection.resolved.value, { ...inspection.resolved.value, energy });
   guardSensingReferences(inspection.resolved.value, { ...inspection.resolved.value, energy });
   guardCommsRadioReferences(inspection.resolved.value, { ...inspection.resolved.value, energy });
+  guardTransitReferences(inspection.resolved.value, { ...inspection.resolved.value, energy });
   parse(after);
   return { changes: [{ path: operation.path, before, after }] };
 }

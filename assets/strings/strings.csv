@@ -6141,3 +6141,20 @@ helm.transit.wait.unavailable,Local transit controls,Equipment unavailable,Equip
 helm.transit.wait.unfunded,Local transit controls,Waiting for fuel or power,Waiting for fuel or power,Waiting for fuel or power,source
 helm.transit.wait.out_of_range,Local transit controls,Accepted course out of range,Accepted course out of range,Accepted course out of range,source
 helm.transit.wait.no_placement,Local transit controls,No supported arrival placement,No supported arrival placement,No supported arrival placement,source
+workshop.transit.title,LocalJump accepted authoring,LocalJump equipment,LocalJump equipment,LocalJump equipment,source
+workshop.transit.hint,LocalJump accepted authoring,"Edit an installed drive and its actual Navigation, Power and finite fuel bindings. Begin prepares then automatically commits; this form adds no free hardware or fuel.","Edit an installed drive and its actual Navigation, Power and finite fuel bindings. Begin prepares then automatically commits; this form adds no free hardware or fuel.","Edit an installed drive and its actual Navigation, Power and finite fuel bindings. Begin prepares then automatically commits; this form adds no free hardware or fuel.",source
+workshop.transit.template,LocalJump accepted authoring,Entity template,Entity template,Entity template,source
+workshop.transit.owner,LocalJump accepted authoring,Installed Transit System,Installed Transit System,Installed Transit System,source
+workshop.transit.navigation,LocalJump accepted authoring,Permitted Navigation source,Permitted Navigation source,Permitted Navigation source,source
+workshop.transit.fuel,LocalJump accepted authoring,Owned Local fuel store,Owned Local fuel store,Owned Local fuel store,source
+workshop.transit.preparation_work_secs,LocalJump accepted authoring,Preparation work seconds,Preparation work seconds,Preparation work seconds,source
+workshop.transit.max_distance,LocalJump accepted authoring,Maximum local distance,Maximum local distance,Maximum local distance,source
+workshop.transit.scatter_radius,LocalJump accepted authoring,Scatter radius,Scatter radius,Scatter radius,source
+workshop.transit.amount,LocalJump accepted authoring,Fuel units per jump,Fuel units per jump,Fuel units per jump,source
+workshop.transit.reading_ticks,LocalJump accepted authoring,AI reading ticks,AI reading ticks,AI reading ticks,source
+workshop.transit.materialise,LocalJump accepted authoring,Materialise inherited settings explicitly,Materialise inherited settings explicitly,Materialise inherited settings explicitly,source
+workshop.transit.save,LocalJump accepted authoring,Save drive policy,Save drive policy,Save drive policy,source
+workshop.transit.gravity,LocalJump accepted authoring,Enable fixed-body arrival gravity,Enable fixed-body arrival gravity,Enable fixed-body arrival gravity,source
+workshop.transit.radius,LocalJump accepted authoring,Exclusion radius,Exclusion radius,Exclusion radius,source
+workshop.transit.save_gravity,LocalJump accepted authoring,Save fixed-body gravity,Save fixed-body gravity,Save fixed-body gravity,source
+workshop.transit.refused,LocalJump accepted authoring,Transit edit refused: {reason},Transit edit refused: {reason},Transit edit refused: {reason},source

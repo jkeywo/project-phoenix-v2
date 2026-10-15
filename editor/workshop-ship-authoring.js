@@ -1,3 +1,4 @@
+import { guardTransitReferences } from './workshop-transit.js';
 import { guardPortServiceReferences } from './workshop-ports.js';
 import { guardPersonnelReferences } from './workshop-personnel.js';
 import { guardWeaponGroupReferences } from './workshop-weapon-groups.js';
@@ -470,6 +471,7 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
   guardPortServiceReferences(inspection.composition.resolved.value, effectiveValue);
   guardWeaponGroupReferences(inspection.composition.resolved.value, effectiveValue);
   guardHelmMovementReferences(inspection.composition.resolved.value, effectiveValue);
+  guardTransitReferences(inspection.composition.resolved.value, effectiveValue);
   guardCommsRadioReferences(inspection.composition.resolved.value, effectiveValue);
   guardFittingReferences(inspection.composition.resolved.value, effectiveValue);
   guardSensingReferences(inspection.composition.resolved.value, effectiveValue);

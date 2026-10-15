@@ -195,6 +195,12 @@ request. Pending returned claims remain on the receiver's existing inbox copy an
 can be retried automatically when the real link becomes viable, preserving one
 claim identity and never repeating the original local decision or report. Clearing
 a local conversation is an explicit local dismissal, not an unseen remote cancel.
+Request copies retain a local dismissed flag on the same canonical inbox record;
+Clear hides eligible rows without creating read/decision/completion facts,
+cancelling work or discarding pending returns. Actual lineage remains until session
+end in this persistent slice. A new returned stage is a new visible outcome row
+and does not silently un-dismiss the old request. Ordinary text/plot Clear is
+unchanged; there is no separate archive or expiry/garbage-collection success.
 Technical record bounds are validation limits, not message-capacity accounting.
 
 Extend the existing response AI and pending-response reading map to actual ship

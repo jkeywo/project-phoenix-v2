@@ -3,6 +3,12 @@
 # Hard dependency: the band-D supply/demand power redesign (see design/power.yaml
 # power-supply-demand-model and roadmap-broken-tithe-foundation) — the soft budget
 # IS the power economy, so this feature cannot precede it.
+# Increment 13 reconciliation: equipment-fitting-and-refitting.yaml records the
+# adopted G072-75/G104 overrides. Historical proposed entries below are retained
+# as design history, not additional runtime requirements: starbase-only/frozen
+# fits, global exhaustion/overpower, Band F mount deferral and the unconfirmed
+# Battleship tracer are superseded. Claimant/default composition, supported
+# content composition, soft sustainability and measured sidegrades are retained.
 entities:
   - role: loadout-customiser
     core:

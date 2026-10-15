@@ -1,0 +1,75 @@
+entities:
+  - decision: fitting-compatible-materiel-and-fixed-hull-layout
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Compatible Equipment Changes Preserve Authored Hull Geometry
+      summary: "G072–75 select compatible field equipment changes with real equipment, parts, team access and time; major refits require a suitable facility. Most mounts admit a narrow family, with explicit broader supported interfaces where authored. Physical type/size/interface compatibility governs legality; runtime energy, heat, coolant and stocks govern sustainability without a new abstract fitting currency. Hull rooms and routes remain authored."
+      rationale:
+        - "Selected in docs/gameplay-redesign/system-review.md. Existing weapons MountConfig describes firing geometry, not equipment-slot compatibility. Equipment definitions compile into actual capability owners, without a second live weapon/battery or arbitrary ECS component replacement."
+        - "Supersedes historical ship-customisation loadout-frozen-at-spawn/starbase-only restrictions and Band F deferral of typed mounts. Increment 8 supersedes the old global exhaustion/overpower budget; retain legal-but-unsustainable fits and authored sidegrades with measured evidence."
+
+  - decision: fitting-fixed-system-adapters-and-safe-continuation
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Begin With Stable System Graphs and Explicit Hardware State Transitions
+      summary: "Increment 13 begins with two same-family beam choices on an existing Cruiser System. A fixed slot binds its System, Console, room and energy group; supported adapters preserve this graph. The first reactor profiles preserve capacity and require facility work. No fit grants authored initial energy, coolant, ammunition, condition or parts."
+      rationale:
+        - "[ai] Adopted conservative integration judgment after inspecting System-addressed admission, Console feeds, local energy, physical damage, stock claims and private AI. Ordinary fit changes do not move rooms, replace System kinds or rewrite ownership. Unsupported changes fail explicitly. Optional empty mounts require a real adapter."
+        - "[ai] Fixed-slot heat, reserve, intake/cooling links, operator intent, unrelated execution and launch payloads retain their existing owners; the first adapters identify replaceable Operation hardware explicitly and add no per-item EnergyState. Quiesce active machinery through its lifecycle before removal. Changed private AI programs need an explicit validated migration/reset limited to that System; no general takeover reset. Unsupported hardware-state migration refuses; capacity changes need a physical safe transition rather than silent clamping."
+        - "[ai] Compile effective fitted definitions for the entire candidate roster, including missing entities, before restore validates any energy/damage/stock/AI/work or writes live state. Fold fitted identity and item/job continuation using existing snapshot and multiplayer mechanisms."
+
+  - decision: fitting-one-equipment-owner-and-shared-team-work
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Actual Assemblies Move Through Existing Physical Work
+      summary: "A portable assembly has one identity, definition, supported condition and actual location: installed, in compatible finite storage or held by an identified physical job. Refit work reuses RepairTeams, routes, access, typed parts, stage claims and manual work with paid tool acceleration. Fungible Stock remains its existing owner; equipment identity is not mirrored as a Stock count."
+      rationale:
+        - "[ai] Preparation, removal and installation are explicit atomic stages. Secure replacement and receiving space before removal; cancellation retains removed equipment, consumed stages and real location, releasing only unconsumed claims. Blocked return cannot teleport, erase or duplicate equipment. Shared repair/refit/recovery claims exclude competing work."
+        - "[ai] Installed condition has one owner in ShipDamage. Removal transfers its supported condition payload into the actual stored/in-work assembly; installation transfers that assembly's condition into ShipDamage. A healthy real replacement need not inherit the old assembly's faults, while blueprint selection or reinstalling the same item cannot cleanse them. There is no competing installed-item condition copy."
+        - "[ai] The beam tracer is field-installable through authored requirements; reactor replacement is the initial major facility refit, using actual facility capability/coupling and permission. No new crew pool, fitting controller, instant starbase command or generic component inventory is introduced."
+
+  - decision: fitting-console-intent-and-repair-execution-authority
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Equipment Owners Request Fits and Repair Owners Execute Work
+      summary: "In play the target System's current authorised Console operator selects desired equipment through normal admission, including visiting hosting. Repair receives a permitted typed request and its sole ordinary controller assigns physical teams. A request or shared planner grants neither cross-System control nor private equipment/stock knowledge."
+      rationale:
+        - "[ai] Closed ordinary System AI may choose supported approved fits under scenario policy; it does not run beside a Human planner. Repair uses its current controller and crew-order policy, preserving GM, catastrophe, ownership and tenure constraints even when powered tools are unavailable."
+        - "[ai] Pre-launch favourites belong to the claimant of each owning Console's authored home Station, not its visiting host. Unclaimed sections use complete defaults. Shared equipment retains one owning Console and home Station; visible summaries do not create another fitting authority."
+
+  - decision: fitting-intact-survivor-recovery
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Recover Actual Surviving Equipment Into Its Installation Owner
+      summary: "G046's intact equipment recovery, retained from increment 12 for its first fitting consumer, removes a supported actual surviving assembly from its source into the same finite equipment/work ownership used for installation. Material recovery stays the existing finite resource mechanism."
+      rationale:
+        - "No anonymous kill loot or mandatory item for every damage component. Preserve supported recovered condition and actual source loss; a source manifest does not reveal private fault/dose/reserve state. Range, eligibility, access, work and receiving space remain real execution constraints."
+
+  - decision: fitting-personal-favourites-and-assumption-labelled-plans
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Personal Favourites Compose With Claimants and Real Availability
+      summary: "G104 selects optional per-hull Station and whole-ship favourites plus compare/save/share/rehearse tools. Whole-ship plans seed defaults; subsequent imports preserve explicit claimant choices. Plans use the same compatibility compiler and actual refit rules, granting no equipment, instant installation or account unlock. Ready-to-play defaults remain complete."
+      rationale:
+        - "G074 selects authored reactor sidegrades and sustainability forecasts. Label active-system/duty-cycle/initial-stock/reactor/cooling assumptions, expose sustained/burst/thermal consequences, and keep physical legality separate from expected endurance."
+        - "[ai] Reuse Workshop supported templates, exact-source materialisation, accepted history, Preview and disposable Test; no extension code, freeform reactor builder or second simulation evaluator. Local personal preferences remain separate from the resolved authoritative fit and versioned shared content."
+
+  - decision: fitting-incremental-playable-exit
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Fit Through Real Consumers With Complete Continuation and Authoring
+      summary: "Increment 13 implements fixed Cruiser beam choices, finite spare/team installation, facility reactor profiles and intact salvage, then personal favourite composition/rehearsal. Every capability includes admitted human operation, ordinary AI, permitted reports, Workshop support and deterministic continuation. Documentation adoption alone neither starts the runtime ledger nor establishes the playable exit."
+      rationale:
+        - "[ai] docs/gameplay-redesign/implementation/increment-13.md defines the source owners, migration boundaries, ordered work and required positive/refusal/whole-roster no-write/multiplayer evidence. Existing shipped hulls, scenarios, seat counts, native displays and network classes remain supported."
+        - "[ai] Validate default parity and intentional sidegrade balance/activity against current thresholds. Browser/native human acceptance is separate from automated proof. Earlier pinned validation remains required under the authorised initial-commit implementation pipeline."

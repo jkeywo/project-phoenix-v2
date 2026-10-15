@@ -164,6 +164,61 @@ including where the recipient already acted. Transport acknowledgements, local
 timeouts and host-private job state cannot substitute. Receipt replay never repeats
 acceptance or completion effects. Group displays retain per-recipient outcomes.
 
+## Adopted first request: Report Status
+
+The first closed generic request is `ReportStatus`, delivered through the actual
+paid radio path. It has one real receiver: the addressed ship's ordinary Comms
+System. It does not issue course, weapons, repairs or other specialist commands.
+Those request kinds require their own receiving consumers in later slices.
+
+Immutable transmitted content distinguishes text, a Report Status request and a
+returned outcome. A receiver's existing inbox copy separately retains its local
+read, decision and completion progress. There is no second request inbox or a
+second controller. Fixed Report/Decline response options use the existing admitted
+`RespondToMessage` path alongside unchanged plot responses. Read means an actual
+human read action or completion of the ordinary AI's authored reading delay;
+receipt alone cannot mark a request read or accepted. Reporting exposes only facts
+permitted to that Comms Console. An alert condition is not implicitly shared.
+
+Local paid emission establishes sent only. Automatic mechanical delivery receipts
+and subsequent read, decision and completion claims return through independently
+viable paid links. Each claim preserves its original event tick and references a
+request actually heard by that reporting source. A Report decision may produce
+its factual report in the same local step, while acceptance and completion remain
+distinct records. A viable link or paid return emission is not remote acceptance.
+No return path leaves the sender's remote outcome unresolved; missing recipients,
+unsupported actions, link loss or timeouts cannot manufacture a refusal oracle.
+
+This first request is persistent, has no automatic retry or time-based expiry,
+and does not supersede another request. Each deliberate send is a new causal
+request. Pending returned claims remain on the receiver's existing inbox copy and
+can be retried automatically when the real link becomes viable, preserving one
+claim identity and never repeating the original local decision or report. Clearing
+a local conversation is an explicit local dismissal, not an unseen remote cancel.
+Technical record bounds are validation limits, not message-capacity accounting.
+
+Extend the existing response AI and pending-response reading map to actual ship
+UUID ownership. Preserve the legacy fleet-slot sweep and its decision/draw order;
+process additional non-roster actors afterwards in deterministic UUID order.
+Host slots remain derived legacy routing context. A human-held Comms System
+stands the same AI down; handoff resumes the retained inbox and reading frontier.
+No text parsing, independent polling controller or alternate remote authority is
+introduced. Supported request facts enter the current response policy.
+
+Complete-candidate and single-row validation bind request identity, source,
+recipient, reporting source, immutable content, local progress and original clock
+frontiers before any write. Returned claims cannot predate the events they report,
+claim stages that did not occur locally, or refer to an unrelated request. Preserve
+ordinary inbox/plot continuation and existing deterministic ID/delivery rules.
+
+The authored proof must include actual paid request/reverse delivery, elapsed AI
+reading followed by an admitted response, a human Report/Decline path, asymmetric
+return loss with identical local sender facts, and concurrent plot dialogue. Fresh
+JSON restore must preserve pending reading and return work for at least 360 steps
+with exact complete captures/digests; malformed cross-request/stage/clock claims
+must leave the live host unchanged. Different-LocalShip peers must agree. Source
+review and owner tests alone do not establish this playable exit.
+
 ## Ordered implementation and parallel seams
 
 1. **Shared threads and equipment links.** Preserve actual current hails/dialogue;

@@ -17,10 +17,12 @@ fn finite_illumination_equipment_and_exact_generic_channels_roundtrip() {
         CommandChannelConfig {
             name: "active".into(),
             kind: CommandChannelKind::Boolean,
+            initial: None,
         },
         CommandChannelConfig {
             name: "subject".into(),
             kind: CommandChannelKind::EntityTarget,
+            initial: None,
         },
     ];
     let mut channels = SystemCommandChannels::from_definitions(&definitions);

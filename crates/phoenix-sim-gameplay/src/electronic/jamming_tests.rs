@@ -88,7 +88,9 @@ fn actual_jamming_composition_shares_typed_intent_input_and_single_optional_moun
     assert_eq!(binding.enabled_channel, "active");
     assert_eq!(
         bindings(binding.enabled_channel, binding.target_channel).channels,
-        ["active".to_owned(), "subject".to_owned()].into_iter().collect()
+        ["active".to_owned(), "subject".to_owned()]
+            .into_iter()
+            .collect()
     );
     let restored = toml::from_str::<crate::ship::config::SystemInstanceConfig>(
         &toml::to_string(&system).unwrap(),

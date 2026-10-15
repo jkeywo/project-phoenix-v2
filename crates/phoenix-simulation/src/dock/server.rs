@@ -131,10 +131,12 @@ impl DockControl {
                 CommandChannelConfig {
                     name: "enabled".into(),
                     kind: CommandChannelKind::Boolean,
+                    initial: None,
                 },
                 CommandChannelConfig {
                     name: "target".into(),
                     kind: CommandChannelKind::EntityTarget,
+                    initial: None,
                 },
             ]),
             enabled_channel: "enabled".into(),

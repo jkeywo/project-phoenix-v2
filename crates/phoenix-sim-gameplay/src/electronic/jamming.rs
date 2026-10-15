@@ -7,6 +7,15 @@ use crate::{
 use phoenix_model::field::FieldFalloff;
 use serde::{Deserialize, Serialize};
 
+/// One supported receiver effect, sharing the same physical emitter owner.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JammingEffect {
+    #[default]
+    Comms,
+    Sensors,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JammingConfig {

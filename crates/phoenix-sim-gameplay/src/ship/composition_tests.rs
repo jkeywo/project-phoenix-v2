@@ -103,6 +103,7 @@ fn mounted_weapon_and_receiver_share_one_supported_turret_and_existing_owner_int
     system.channels.push(CommandChannelConfig {
         name: "unused-target".into(),
         kind: CommandChannelKind::EntityTarget,
+        initial: None,
     });
     assert!(validate_composition(&system).is_err());
     system = good.clone();
@@ -252,4 +253,78 @@ id = "idle"
     )
     .unwrap();
     EntityConfig::from_toml(&toml::to_string(&renamed).unwrap()).unwrap();
+}
+
+#[test]
+fn typed_authored_initial_values_create_only_the_canonical_intent_and_do_not_rewrite_saved_intent()
+{
+    let mut system = dock();
+    for channel in &mut system.channels {
+        channel.initial = Some(match channel.kind {
+            CommandChannelKind::Boolean => CommandChannelValue::Boolean(true),
+            CommandChannelKind::EntityTarget => {
+                CommandChannelValue::EntityTarget(Some("known-berth".into()))
+            }
+            CommandChannelKind::SystemPriority => unreachable!(),
+        });
+    }
+    validate_composition(&system).unwrap();
+    let source = toml::to_string(&system).unwrap();
+    let decoded: SystemInstanceConfig = toml::from_str(&source).unwrap();
+    assert_eq!(decoded, system);
+    let mut intent = SystemCommandChannels::from_definitions(&decoded.channels);
+    assert!(intent.boolean("enabled"));
+    assert_eq!(intent.target("target"), Some("known-berth"));
+    intent
+        .set("enabled", CommandChannelValue::Boolean(false))
+        .unwrap();
+    let saved = serde_json::to_vec(&intent).unwrap();
+    let restored: SystemCommandChannels = serde_json::from_slice(&saved).unwrap();
+    assert_eq!(restored, intent);
+    assert!(!restored.boolean("enabled"));
+    assert!(SystemCommandChannels::from_definitions(&decoded.channels).boolean("enabled"));
+    let mut malformed = system.clone();
+    malformed.channels[0].initial = Some(match malformed.channels[0].kind {
+        CommandChannelKind::Boolean => CommandChannelValue::EntityTarget(None),
+        _ => CommandChannelValue::Boolean(false),
+    });
+    assert!(validate_composition(&malformed).is_err());
+    assert!(serde_json::from_value::<CommandChannelValue>(
+        serde_json::json!({"kind":"boolean","value":true,"ignored":true})
+    )
+    .is_err());
+}
+#[test]
+fn system_priority_channel_is_bounded_typed_and_transactional() {
+    use crate::core::messages::SystemId;
+    let priorities = vec![SystemId("comms".into()), SystemId("sensors".into())];
+    let definition = CommandChannelConfig {
+        name: "priorities".into(),
+        kind: CommandChannelKind::SystemPriority,
+        initial: Some(CommandChannelValue::SystemPriority(priorities.clone())),
+    };
+    definition.validate().unwrap();
+    assert_eq!(
+        toml::from_str::<CommandChannelConfig>(&toml::to_string(&definition).unwrap()).unwrap(),
+        definition
+    );
+    let mut intent = SystemCommandChannels::from_definitions(&[definition]);
+    assert_eq!(intent.priorities("priorities"), priorities);
+    let before = intent.clone();
+    for value in [
+        CommandChannelValue::Boolean(true),
+        CommandChannelValue::SystemPriority(vec![SystemId("comms".into()); 2]),
+        CommandChannelValue::SystemPriority(vec![SystemId("comms".into()); 65]),
+    ] {
+        assert!(intent.set("priorities", value).is_err());
+        assert_eq!(intent, before);
+    }
+    let plain = CommandChannelConfig {
+        name: "priorities".into(),
+        kind: CommandChannelKind::SystemPriority,
+        initial: None,
+    };
+    assert!(SystemCommandChannels::from_definitions(&[plain])
+        .priorities("priorities")
+        .is_empty());
 }

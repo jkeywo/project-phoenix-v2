@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub enum CommandChannelKind {
     Boolean,
     EntityTarget,
+    SystemPriority,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -15,6 +16,8 @@ pub enum CommandChannelKind {
 pub struct CommandChannelConfig {
     pub name: String,
     pub kind: CommandChannelKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial: Option<CommandChannelValue>,
 }
 
 /// Shared closed output vocabulary for the two actual independently targeted
@@ -96,10 +99,71 @@ impl SystemComponentConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum CommandChannelValue {
     Boolean(bool),
     EntityTarget(Option<String>),
+    SystemPriority(Vec<crate::core::messages::SystemId>),
+}
+/// Technical bound on one intent record, not equipment or message capacity.
+pub const MAX_SYSTEM_PRIORITIES: usize = 64;
+pub fn validate_system_priorities(
+    values: &[crate::core::messages::SystemId],
+) -> Result<(), String> {
+    let mut seen = BTreeSet::new();
+    if values.len() > MAX_SYSTEM_PRIORITIES
+        || values
+            .iter()
+            .any(|id| id.0.trim().is_empty() || !seen.insert(id))
+    {
+        return Err(
+            "System priorities require a bounded distinct list of actual System IDs".into(),
+        );
+    }
+    Ok(())
+}
+impl CommandChannelValue {
+    pub fn kind(&self) -> CommandChannelKind {
+        match self {
+            Self::Boolean(_) => CommandChannelKind::Boolean,
+            Self::EntityTarget(_) => CommandChannelKind::EntityTarget,
+            Self::SystemPriority(_) => CommandChannelKind::SystemPriority,
+        }
+    }
+    pub fn validate(&self) -> Result<(), String> {
+        match self {
+            Self::Boolean(_) => Ok(()),
+            Self::SystemPriority(values) => validate_system_priorities(values),
+            Self::EntityTarget(target)
+                if target.as_ref().is_none_or(|value| {
+                    !value.trim().is_empty()
+                        && value.len() <= 128
+                        && !value.chars().any(char::is_control)
+                }) =>
+            {
+                Ok(())
+            }
+            Self::EntityTarget(_) => {
+                Err("entity_target requires a bounded nonempty reference or None".into())
+            }
+        }
+    }
+}
+impl CommandChannelConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(value) = &self.initial {
+            if value.kind() != self.kind {
+                return Err("channel initial value has the wrong declared kind".into());
+            }
+            value.validate()?;
+        }
+        Ok(())
+    }
 }
 
 /// One canonical intent store per composed System; components read the same values.
@@ -113,12 +177,15 @@ impl SystemCommandChannels {
                 .map(|d| {
                     (
                         d.name.clone(),
-                        match d.kind {
+                        d.initial.clone().unwrap_or_else(|| match d.kind {
                             CommandChannelKind::Boolean => CommandChannelValue::Boolean(false),
                             CommandChannelKind::EntityTarget => {
                                 CommandChannelValue::EntityTarget(None)
                             }
-                        },
+                            CommandChannelKind::SystemPriority => {
+                                CommandChannelValue::SystemPriority(Vec::new())
+                            }
+                        }),
                     )
                 })
                 .collect(),
@@ -133,7 +200,16 @@ impl SystemCommandChannels {
             _ => None,
         }
     }
+    pub fn priorities(&self, name: &str) -> &[crate::core::messages::SystemId] {
+        match self.0.get(name) {
+            Some(CommandChannelValue::SystemPriority(values)) => values,
+            _ => &[],
+        }
+    }
     pub fn set(&mut self, name: &str, value: CommandChannelValue) -> Result<(), String> {
+        if let CommandChannelValue::SystemPriority(values) = &value {
+            validate_system_priorities(values)?;
+        }
         let previous = self
             .0
             .get_mut(name)
@@ -374,6 +450,9 @@ fn validate_turret(system: &super::config::SystemInstanceConfig) -> Result<(), S
 }
 
 pub fn validate_composition(system: &super::config::SystemInstanceConfig) -> Result<(), String> {
+    for channel in &system.channels {
+        channel.validate()?;
+    }
     if system.kind == super::system_registry::JAMMING_KIND {
         return validate_jamming(system);
     }

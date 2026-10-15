@@ -755,10 +755,12 @@ fn composed_channels_drive_existing_commands_and_survive_restore() {
         CommandChannelConfig {
             name: "hold".into(),
             kind: CommandChannelKind::Boolean,
+            initial: None,
         },
         CommandChannelConfig {
             name: "berth".into(),
             kind: CommandChannelKind::EntityTarget,
+            initial: None,
         },
     ];
     system.components = vec![

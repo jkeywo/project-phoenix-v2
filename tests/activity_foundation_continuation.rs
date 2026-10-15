@@ -787,7 +787,7 @@ fn actual_officer_posting_improves_paid_repair_and_preserves_custody_through_jso
 /// Gunner demand and Engineering Backfill handoff. Initial damage uses the same
 /// explicit Damage owner seam as the 22A probe above, without forged facts/jobs.
 #[test]
-fn imported_alternative_partial_order_runs_actual_human_and_ai_jobs_with_360_host_resume() {
+fn imported_alternative_partial_order_runs_actual_human_and_ai_jobs_with_1200_host_resume() {
     const HTN_WORLD: &str = "tests/fixtures/maintenance-htn-host-world.toml";
     let (mut live, actor) = boot_world(HTN_WORLD);
     claim(&mut live, "tactical", "htn-gunner");
@@ -899,7 +899,13 @@ fn imported_alternative_partial_order_runs_actual_human_and_ai_jobs_with_360_hos
     let mut recalled = BTreeSet::new();
     let mut demand_sent = false;
     let mut paid_delivery = false;
-    for step in 0..360 {
+    // Bridge travel alone crosses two authored 2.5-second links before its
+    // two-second remedy. The former six-second continuation ended before that
+    // team could achieve its goal, so the explicit Gunner request never ran.
+    // Compare twenty simulated seconds, including real return and delivery work;
+    // keep every physical outcome, energy, stock and once-only credit assertion.
+    const CONTINUATION_STEPS: usize = 1200;
+    for step in 0..CONTINUATION_STEPS {
         assert_same(&live, &resumed, step);
         assert_eq!(
             rounds(&live, actor),
@@ -972,7 +978,7 @@ fn imported_alternative_partial_order_runs_actual_human_and_ai_jobs_with_360_hos
         live.update();
         resumed.update();
     }
-    assert_same(&live, &resumed, 360);
+    assert_same(&live, &resumed, CONTINUATION_STEPS);
     if !paid_delivery
         && live
             .world()
@@ -1007,6 +1013,7 @@ fn imported_alternative_partial_order_runs_actual_human_and_ai_jobs_with_360_hos
             .get::<project_phoenix::ai::state_tree_runtime::ShipAiTreeRuntime>(actor)
             .and_then(|trees| trees.0.get(owner));
         let diagnostic = serde_json::json!({
+            "actual_repair": actor_row.repair,
             "tick": snapshot.tick,
             "demand_sent": demand_sent,
             "owner": owner,
@@ -1018,7 +1025,10 @@ fn imported_alternative_partial_order_runs_actual_human_and_ai_jobs_with_360_hos
             "goals": logistics.goals,
             "replenishing": logistics.replenishing,
             "jobs": actor_row.logistics,
-            "power": actor_row.power,
+            "power": {
+                "repair_work": live.world().get::<ShipPowerSystem>(actor).unwrap().0.emitted_work(&id("repair")),
+                "delivery_work": live.world().get::<ShipPowerSystem>(actor).unwrap().0.emitted_work(owner),
+            },
             "permitted_logistics": permitted.get(owner),
             "tree": tree,
             "situations": runtime(&live).situations,

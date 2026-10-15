@@ -98,3 +98,10 @@ it('changed or blocked work remains informational after release and never become
   const panel=widget.shadowRoot.querySelector('#planned-intents');expect(panel.hidden).toBe(false);expect(panel.textContent).toContain('no repair job credited');expect(panel.querySelector('button')).toBeNull();
   for(const disposition of [{...row.disposition,kind:'teleported'},{...row.disposition,tick:9},{...row.disposition,kind:'parts_unavailable',consequence_applied:true}])expect(plannedRepairIntents([{...row,disposition}])).toEqual([]);
 });
+
+it('future intent accepts full source-scoped identity and valid repeated predecessor conditions',()=>{
+  const row={...future(),id:`htn/${'s'.repeat(64)}/${'n'.repeat(1024)}`,prerequisites:Array.from({length:32},(_,index)=>[{id:`predecessor/${index}`,condition:{kind:'accepted'},satisfied:true},{id:`predecessor/${index}`,condition:{kind:'achieved'},satisfied:false}]).flat()};
+  expect(plannedRepairIntents([row])).toEqual([row]);
+  row.prerequisites.push({id:'predecessor/0',condition:{kind:'accepted'},satisfied:true});
+  expect(plannedRepairIntents([row])).toEqual([]);
+});

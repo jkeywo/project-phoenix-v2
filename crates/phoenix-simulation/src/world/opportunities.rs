@@ -455,20 +455,21 @@ pub(crate) fn validate_history(
                             );
                         };
                         if let Some(work) = &reading.other_work {
-                            let target_room = match &work.target_work {
+                            let target_room = match &work.requested_work {
                                 Some(phoenix_model::damage::RepairWorkTarget::Compartment {
                                     compartment,
                                 }) => Some(compartment),
                                 Some(phoenix_model::damage::RepairWorkTarget::Component {
-                                    system,
                                     ..
-                                }) => layout.placements.get(system),
-                                None => work
+                                }) => None,
+                                None if work.sweeps_structure => work
                                     .target_system
                                     .as_ref()
                                     .and_then(|system| layout.placements.get(system)),
+                                None => None,
                             };
-                            if work.owner != source.config.repair_owner
+                            if work.sweeps_structure && work.requested_work.is_some()
+                                || work.owner != source.config.repair_owner
                                 || target_room != Some(compartment)
                                 || work.team_idx
                                     >= recipe

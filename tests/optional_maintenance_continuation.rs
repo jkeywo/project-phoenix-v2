@@ -885,6 +885,16 @@ fn human_override_restores_future_target_without_retroactive_job_credit_and_runs
             ),
         },
     );
+    let override_job = live
+        .world()
+        .get::<ShipRepairTeams>(actor)
+        .unwrap()
+        .0
+        .job_state()
+        .teams[1]
+        .as_ref()
+        .expect("actual manual override assignment")
+        .id;
     assert!(runtime(&live)
         .situations
         .instances
@@ -923,6 +933,25 @@ fn human_override_restores_future_target_without_retroactive_job_credit_and_runs
         send(&mut live, token, ClientMessage::ReleaseStation);
     }
     steps(&mut live, 2);
+    let team_state = live
+        .world()
+        .get::<ShipRepairTeams>(actor)
+        .unwrap()
+        .0
+        .job_state();
+    assert_eq!(
+        team_state.teams[1].as_ref().unwrap().id,
+        override_job,
+        "handoff preserves the same actual Job"
+    );
+    assert!(
+        team_state
+            .physical_work
+            .get(&override_job.0)
+            .is_some_and(|work| work.reserved && work.progress > 0.0 && work.progress < 2.0),
+        "fresh JSON starts from this same paid partial override after delegation"
+    );
+
     let saved = Some(capture(live.world()));
     let saved: PhoenixSnapshot = serde_json::from_slice(
         &serde_json::to_vec(&saved.expect("unbound Human override reaches real paid partial work"))

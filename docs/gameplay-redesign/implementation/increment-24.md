@@ -261,8 +261,8 @@ reserved promise absence, including an empty optional-record history.
 
 ## Accepted prerequisite intent and explicit changed work
 
-This bounded runtime is implemented on the worker branch; native execution and
-independent disposition review remain pending. It extends the same generated
+This bounded runtime is implemented on the worker branch; native execution remains pending. Independent source review covers the
+complete bounded disposition joins. It extends the same generated
 maintenance child and introduces no physical executor.
 
 ### Permitted intent and ordinary priority
@@ -354,7 +354,7 @@ budget. No Situation or Job is invented, and the callback alone chooses any
 Promise resolution. Actual earlier physical work and callbacks must still settle
 before subsequent admission. A refused consequence cannot establish settlement.
 
-Source-only projection review passed independently. Ten targeted client tests
+Source-only projection review passed independently. Eleven targeted client tests
 pass, including multi-graph bounds, readonly status and no premature dispatch;
 strict string validation is rerun at handoff. New native owner tests cover exact
 footprints, real ordinary-AI dispatch to unrelated work, bounded blocked/cleared
@@ -364,8 +364,8 @@ Delivery and Repair after delegation, and a Human's other-team manual override
 followed by delegation. Each captures actual paid partial work, restores fresh
 JSON and compares 1200 complete state/digest updates; malformed cause/target/tick
 candidates must refuse before writes. These native tests are authored, not yet
-executed by this worker. Full disposition source review and integration-owner
-native evidence remain required. This is not a 2/6-player acceptance result.
+executed by this worker. Independent disposition source review passed after the footprint and signed-zero
+corrections; integration-owner native evidence remains required. This is not a 2/6-player acceptance result.
 
 A retained published disposition must agree exactly with canonical frozen node
 history. The candidate guards establish structural/provenance/clock consistency;
@@ -373,3 +373,13 @@ they do not authenticate arbitrary coordinated replacement of every saved fact.
 No second action ledger is added for that purpose. Comms forwarding of these
 Repair statuses, richer visual opportunity authoring, broader plan repair and
 pacing remain separate work, as do the remaining full 23/24 playable exits.
+
+
+Review corrections keep the actual work footprint precise: ordinary work lists
+project their existing requested repair target and a generic physical-sweep flag.
+An absent exact target alone never makes Refit, Treatment or transfer a structural
+sweep. Component-only repair remains independent. These fields are derived from
+existing assignment/activity state, not another owner. Canonical disposition
+folding normalizes signed zero while preserving exact HP/clock differences.
+The post-delegation override checkpoint explicitly retains the same actual Job
+and paid partial progress before fresh-JSON capture.

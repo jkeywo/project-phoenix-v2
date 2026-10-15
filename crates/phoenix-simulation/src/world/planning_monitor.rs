@@ -115,20 +115,11 @@ fn reading(
                         | phoenix_model::job::JobPhase::Working
                 )
         })
-        .filter(|work| match &work.target_work {
-            Some(RepairWorkTarget::Compartment {
-                compartment: target,
-            }) => target == compartment,
-            Some(RepairWorkTarget::Component { system, .. }) => board
+        .filter(|work| {
+            board
                 .interior
                 .as_ref()
-                .is_some_and(|layout| layout.placements.get(system) == Some(compartment)),
-            None => work.target_system.as_ref().is_some_and(|system| {
-                board
-                    .interior
-                    .as_ref()
-                    .is_some_and(|layout| layout.placements.get(system) == Some(compartment))
-            }),
+                .is_some_and(|layout| competes_with_structure(work, compartment, layout))
         })
         .min_by_key(|work| work.id)
         .cloned();
@@ -169,6 +160,27 @@ fn reading(
         other_work,
         reason,
     })
+}
+
+/// Exact component orders do not restore room structure. Generic visits can
+/// sweep structure; their original resolved System names that actual footprint.
+fn competes_with_structure(
+    work: &phoenix_model::job::JobWorkItem,
+    compartment: &str,
+    layout: &phoenix_model::interior::InteriorConfig,
+) -> bool {
+    match &work.requested_work {
+        Some(RepairWorkTarget::Compartment {
+            compartment: target,
+        }) => target == compartment,
+        Some(RepairWorkTarget::Component { .. }) => false,
+        None => {
+            work.sweeps_structure
+                && work.target_system.as_ref().is_some_and(|system| {
+                    layout.placements.get(system).map(String::as_str) == Some(compartment)
+                })
+        }
+    }
 }
 pub(crate) fn observe(
     runtime: &mut WorldContentRuntime,
@@ -317,4 +329,56 @@ pub(crate) fn withheld_instances(
                 .map(|(node, _)| format!("{}/{node}", choice.execution.namespace(&choice.id)))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod footprint_tests {
+    use super::*;
+    #[test]
+    fn exact_component_work_does_not_block_structure_but_travelling_sweep_does() {
+        let recipe = crate::entities::include_resolve::load_entity_config(
+            "assets/entities/alliance_cruiser.toml",
+        )
+        .unwrap();
+        let layout = recipe.interior.as_ref().unwrap();
+        let (system, room) = layout.placements.iter().next().unwrap();
+        let mut job = phoenix_model::job::JobWorkItem {
+            id: phoenix_model::job::JobId(1),
+            owner: phoenix_model::identity::SystemId("repair".into()),
+            team_idx: 0,
+            phase: phoenix_model::job::JobPhase::Travelling,
+            target_system: Some(system.clone()),
+            target_entity: None,
+            outcome: None,
+            paused: false,
+            workflow_error: false,
+            target_work: None,
+            requested_work: None,
+            sweeps_structure: true,
+            work_progress: None,
+            waiting_parts: false,
+        };
+        assert!(
+            competes_with_structure(&job, room, layout),
+            "generic visit has a real sweeping footprint before arrival"
+        );
+        job.sweeps_structure = false;
+        assert!(
+            !competes_with_structure(&job, room, layout),
+            "same-room Refit/Treatment/transfer is not a structural repair visit"
+        );
+        job.requested_work = Some(RepairWorkTarget::Component {
+            system: system.clone(),
+            component: "operation".into(),
+        });
+        assert!(
+            !competes_with_structure(&job, room, layout),
+            "targeted component repair is independent work"
+        );
+        job.requested_work = Some(RepairWorkTarget::Compartment {
+            compartment: room.clone(),
+        });
+        assert!(competes_with_structure(&job, room, layout));
+        assert!(!competes_with_structure(&job, "different-room", layout));
+    }
 }

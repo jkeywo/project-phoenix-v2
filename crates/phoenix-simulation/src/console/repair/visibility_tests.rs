@@ -1253,6 +1253,8 @@ fn issued_jobs_survive_permitted_projection_without_revealing_target_damage() {
     let mut bb = bb_with_queue(vec![]);
     bb.jobs.push(phoenix_model::job::JobWorkItem {
         target_work: None,
+        requested_work: None,
+        sweeps_structure: false,
         waiting_parts: false,
         work_progress: None,
         id: phoenix_model::job::JobId(7),

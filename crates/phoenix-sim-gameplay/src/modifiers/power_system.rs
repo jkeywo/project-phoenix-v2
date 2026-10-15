@@ -188,6 +188,58 @@ impl PowerSystem {
     pub fn config(&self) -> &EnergyConfigSection {
         &self.hardware
     }
+    /// Replace supported hardware tuning without re-seeding any physical state.
+    /// Slot topology, buffers and service links belong to the hull. Fitting can
+    /// change operating costs/output, but cannot create charge or lose coolant.
+    pub fn reconfigure_energy(&mut self, hardware: EnergyConfigSection) -> Result<(), String> {
+        if [
+            hardware.reactor.sustainable_output_per_sec,
+            hardware.reactor.max_output_per_sec,
+            hardware.reactor.ramp_per_sec,
+            hardware.reactor.reserve.charge_heat_per_unit,
+            hardware.reactor.reserve.discharge_heat_per_unit,
+        ]
+        .iter()
+        .any(|value| !value.is_finite() || *value < 0.0)
+            || hardware.reactor.sustainable_output_per_sec <= 0.0
+            || hardware.reactor.sustainable_output_per_sec > hardware.reactor.max_output_per_sec
+            || hardware.consumers.iter().any(|consumer| {
+                !consumer.continuous_cost_per_sec.is_finite()
+                    || consumer.continuous_cost_per_sec < 0.0
+            })
+        {
+            return Err("refit operating coefficients must be finite and physically valid".into());
+        }
+        let mut fixed = hardware.clone();
+        fixed.reactor.sustainable_output_per_sec = self.hardware.reactor.sustainable_output_per_sec;
+        fixed.reactor.max_output_per_sec = self.hardware.reactor.max_output_per_sec;
+        fixed.reactor.ramp_per_sec = self.hardware.reactor.ramp_per_sec;
+        fixed.reactor.reserve.charge_heat_per_unit =
+            self.hardware.reactor.reserve.charge_heat_per_unit;
+        fixed.reactor.reserve.discharge_heat_per_unit =
+            self.hardware.reactor.reserve.discharge_heat_per_unit;
+        for consumer in &mut fixed.consumers {
+            let old = self
+                .hardware
+                .consumers
+                .iter()
+                .find(|old| old.system == consumer.system)
+                .ok_or("refit cannot add an energy consumer")?;
+            consumer.continuous_cost_per_sec = old.continuous_cost_per_sec;
+        }
+        if &fixed != self.hardware.as_ref() {
+            return Err(
+                "refit cannot change fixed buffers, links, initial state or allocation topology"
+                    .into(),
+            );
+        }
+        let saved = self.capture_continuation();
+        let mut candidate = self.clone();
+        candidate.hardware = std::sync::Arc::new(hardware);
+        candidate.validate_saved(&saved)?;
+        *self = candidate;
+        Ok(())
+    }
     pub fn ship_config(&self) -> &ShipConfig {
         &self.ship
     }

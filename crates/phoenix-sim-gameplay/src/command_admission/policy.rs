@@ -17,6 +17,8 @@ pub fn is_repair_crew_order(
                 | SystemControlPayload::SetRepairTargetPriority { .. }
                 | SystemControlPayload::DispatchExternalRepair
                 | SystemControlPayload::RecallExternalRepair
+                | SystemControlPayload::DispatchRefit { .. }
+                | SystemControlPayload::CancelRefit { .. }
         )
 }
 
@@ -37,7 +39,11 @@ pub fn command_policy(
     // The resource owner still validates the exact fitted store after admission.
     if is_repair_crew_order(config, target, payload)
         || (config.system(target).is_some()
-            && matches!(payload, SystemControlPayload::SetStockTarget { .. }))
+            && matches!(
+                payload,
+                SystemControlPayload::SetStockTarget { .. }
+                    | SystemControlPayload::RequestEquipment { .. }
+            ))
     {
         sources.crew_order_policy_for(target)
     } else {

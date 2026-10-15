@@ -343,6 +343,8 @@ pub(crate) fn handle_fire_phaser(
             // not a ship with dead guns.
             Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&mut crate::ship::power::ShipPowerSystem>,
+            Option<&crate::resources::fitting_server::CompiledShipFitting>,
+            Option<&crate::resources::fitting_server::ShipFitting>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -389,6 +391,8 @@ pub(crate) fn handle_fire_phaser(
             combat_config_opt,
             ship_config_opt,
             mut power_opt,
+            fitting_profile,
+            fitting_state,
         )) = ship_q.get_mut(entity)
         else {
             continue;
@@ -397,6 +401,19 @@ pub(crate) fn handle_fire_phaser(
             let SystemControlPayload::FirePhaser = &cmd.payload else {
                 continue;
             };
+            if fitting_profile
+                .zip(fitting_state)
+                .is_some_and(|(profile, state)| {
+                    crate::resources::fitting_server::unavailable(profile, state, &cmd.target)
+                })
+            {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::Offline),
+                );
+                continue;
+            }
 
             // Resolve the bank id from the target SystemId by running the
             // canonical forward mapping over each authored bank and comparing.

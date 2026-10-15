@@ -1218,6 +1218,7 @@ pub(super) fn apply_entity_state_with(
     restored_at: f32,
     restored_alert_tick: bevy::ecs::change_detection::Tick,
 ) {
+    super::fitting::apply(world, entity, row);
     let mut entity_mut = world.entity_mut(entity);
     if let (Some(mut provider), Some(state)) = (
         entity_mut.get_mut::<crate::resources::ports_server::PortProviderState>(),

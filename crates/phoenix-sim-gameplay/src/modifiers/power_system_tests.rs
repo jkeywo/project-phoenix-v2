@@ -4,6 +4,26 @@ fn group(id: &str) -> PowerGroupId {
     PowerGroupId(id.into())
 }
 #[test]
+fn fitting_reconfiguration_preserves_every_continuation_and_refuses_buffer_or_link_changes() {
+    let mut power = PowerSystem::default();
+    tick(&mut power, 10);
+    let before = power.capture_continuation();
+    let mut hardware = power.config().clone();
+    hardware.reactor.ramp_per_sec *= 1.1;
+    hardware.reactor.reserve.charge_heat_per_unit *= 0.9;
+    power.reconfigure_energy(hardware).unwrap();
+    assert_eq!(before, power.capture_continuation());
+    let preserved = power.clone();
+    let mut illegal = power.config().clone();
+    illegal.reactor.reserve.capacity += 1.0;
+    assert!(power.reconfigure_energy(illegal).is_err());
+    assert_eq!(power, preserved);
+    let mut illegal = power.config().clone();
+    illegal.reactor.reserve.charge_heat_per_unit = f32::NAN;
+    assert!(power.reconfigure_energy(illegal).is_err());
+    assert_eq!(power, preserved);
+}
+#[test]
 fn fractional_coolant_credit_survives_json_continuation_bit_for_bit() {
     let mut state = PowerState::default();
     // Observed in a real seeded duel. The non-roundtrip JSON parser changes

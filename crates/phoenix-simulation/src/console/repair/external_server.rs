@@ -662,8 +662,59 @@ pub fn apply_external_repair(
     // Claims are reconstructed from the SAME saved jobs, including target-local
     // teams. There is no mutable global claim registry or shared crew pool.
     let mut claims: BTreeMap<(String, RepairWorkTarget), BTreeSet<(String, u64)>> = BTreeMap::new();
+    let refit_components: BTreeMap<_, Vec<_>> = set
+        .p1()
+        .iter()
+        .flat_map(|(_, uuid, damage, _)| {
+            damage
+                .as_ref()
+                .into_iter()
+                .flat_map(move |damage| {
+                    damage
+                        .definition
+                        .components
+                        .iter()
+                        .map(move |(system, components)| {
+                            (
+                                (uuid.0.clone(), system.clone()),
+                                components
+                                    .keys()
+                                    .map(|component| RepairWorkTarget::Component {
+                                        system: system.clone(),
+                                        component: component.clone(),
+                                    })
+                                    .collect(),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
     for (source, teams) in set.p2().iter() {
         let saved = teams.0.save_state();
+        for job in saved
+            .teams
+            .iter()
+            .flatten()
+            .filter(|job| job.outcome.is_none())
+        {
+            if let crate::jobs::repair::RepairActivity::Refit { target, phase, .. } = &job.activity
+            {
+                if !matches!(phase, crate::core::messages::TeamSlot::Returning { .. }) {
+                    for component in refit_components
+                        .get(&(source.0.clone(), target.clone()))
+                        .into_iter()
+                        .flatten()
+                    {
+                        claims
+                            .entry((source.0.clone(), component.clone()))
+                            .or_default()
+                            .insert((source.0.clone(), job.id.0));
+                    }
+                }
+            }
+        }
         for (id, work) in &saved.physical_work {
             let active = saved
                 .teams

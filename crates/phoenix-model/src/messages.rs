@@ -1972,6 +1972,19 @@ pub enum RepairTarget {
 )]
 #[serde(tag = "type", content = "data")]
 pub enum SystemControlPayload {
+    /// Requests a physical fit; the target System owns the choice, Repair owns
+    /// the subsequent team assignment. Neither verb installs an item instantly.
+    RequestEquipment {
+        slot: String,
+        equipment: String,
+    },
+    DispatchRefit {
+        team_idx: u32,
+        slot: String,
+    },
+    CancelRefit {
+        slot: String,
+    },
     SetRecoveryEnabled {
         enabled: bool,
     },

@@ -21,6 +21,7 @@ pub enum StatusReasonCode {
     Overheated,
     IntakeCut,
     NoDockMarkers,
+    EquipmentRemoved,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,6 +38,33 @@ pub struct SystemStatus {
     pub reasons: Vec<StatusReason>,
     /// Authored/effective operator mode remains separate from availability.
     pub delegated: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fitting: Vec<FittingSlotView>,
+}
+
+/// Permitted fitting facts only: no private component dose or AI memory.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FittingSlotView {
+    pub slot: String,
+    pub system: crate::messages::SystemId,
+    pub installed: Option<String>,
+    pub desired: Option<String>,
+    pub choices: Vec<FittingChoiceView>,
+    pub phase: String,
+    pub progress: u16,
+    pub can_request: bool,
+    pub can_dispatch: bool,
+    pub free_teams: Vec<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FittingChoiceView {
+    pub equipment: String,
+    pub available: u32,
+    pub facility_required: bool,
+    /// Numeric facts; each receiving device localizes the labelled forecast.
+    pub family: String,
+    pub statistics: std::collections::BTreeMap<String, String>,
 }
 
 impl SystemStatus {
@@ -69,6 +97,7 @@ impl SystemStatus {
                 })
                 .collect(),
             delegated,
+            fitting: Vec::new(),
         };
         if offline && !matches!(damage, Some(DamageTier::Disabled | DamageTier::Destroyed)) {
             status.unavailable(StatusReasonCode::Offline, None);

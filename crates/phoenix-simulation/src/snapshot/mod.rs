@@ -339,6 +339,7 @@ use application::restore_npc_frequency_matches;
 use application::restore_run_scope;
 use application::validate_entity_repair_jobs;
 
+mod fitting;
 mod ports;
 mod preflight;
 pub(crate) use ports::assert_settled as assert_ports_settled;

@@ -392,6 +392,8 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         cinematic_camera: _,
         shield_arcs: _,
         resource_services: _,
+        fitting: _,
+        refit_facility: _,
     } = crate::entities::config::EntityConfig::default();
     // These patterns are intentionally separate from the maximal active
     // hull union above. The union proves that shipped combinations map to

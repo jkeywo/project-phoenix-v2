@@ -7,7 +7,10 @@ pub fn validate_entity_port(config: &EntityConfig) -> Result<(), String> {
         return Ok(());
     };
     profile.validate()?;
-    if config.dock.is_none() {
+    let composed_dock = config.ship_config.as_ref().is_some_and(|ship| ship.systems.iter().any(|system|
+        system.kind == crate::ship::system_registry::DOCK_KIND
+            && crate::ship::composition::dock_composition(&system.components).is_some()));
+    if config.dock.is_none() && !composed_dock {
         return Err("Port services require an actual docking capability".into());
     }
     let mut identities = std::collections::BTreeMap::new();

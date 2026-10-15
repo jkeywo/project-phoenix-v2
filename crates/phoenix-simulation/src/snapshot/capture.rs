@@ -1419,6 +1419,9 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                     port_provider: entity
                         .get::<crate::resources::ports_server::PortProviderState>()
                         .map(|owner| owner.0.clone()),
+                    fitting: entity
+                        .get::<crate::resources::fitting_server::ShipFitting>()
+                        .cloned(),
                     recovery: entity
                         .get::<crate::resources::recovery_server::ShipRecovery>()
                         .map(|owner| {

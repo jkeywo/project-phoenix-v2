@@ -42,6 +42,12 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
         report.gaps.push(gap);
         return report;
     }
+    if let Err((uuid, reason)) = super::fitting::validate_roster(world, snapshot) {
+        report
+            .gaps
+            .push(RestoreGap::ResourceStateInvalid { uuid, reason });
+        return report;
+    }
 
     // Layer ASTs and handlers are derived state, and trigger progress is stored
     // by index. Refuse the whole overwrite while the fresh bootstrap still has

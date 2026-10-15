@@ -98,6 +98,8 @@ pub fn tick_power_system(
         Option<&crate::ship_plugin::ShipSystemControlSources>,
         Option<&mut PowerBrownoutState>,
         Option<&crate::ship::compartment_damage::ShipDamage>,
+        Option<&crate::resources::fitting_server::CompiledShipFitting>,
+        Option<&crate::resources::fitting_server::ShipFitting>,
     )>,
 ) {
     let mut order: Vec<_> = ships
@@ -106,8 +108,18 @@ pub fn tick_power_system(
         .collect();
     order.sort_by(|a, b| a.0.cmp(&b.0));
     for (_, entity) in order {
-        let Ok((_, uuid, mut power, services, infrastructure, sources, brownout, physical)) =
-            ships.get_mut(entity)
+        let Ok((
+            _,
+            uuid,
+            mut power,
+            services,
+            infrastructure,
+            sources,
+            brownout,
+            physical,
+            fitting_profile,
+            fitting_state,
+        )) = ships.get_mut(entity)
         else {
             continue;
         };
@@ -146,7 +158,24 @@ pub fn tick_power_system(
             .map(|(id, _)| id.clone())
             .collect();
         let mut candidate = power.0.clone();
-        let effects = hardware_effects(&candidate, physical, sources);
+        let mut effects = hardware_effects(&candidate, physical, sources);
+        if fitting_profile
+            .zip(fitting_state)
+            .is_some_and(|(profile, state)| {
+                candidate
+                    .ship_config()
+                    .systems
+                    .iter()
+                    .filter(|system| {
+                        system.kind == crate::ship::system_registry::POWER_REACTOR_KIND
+                    })
+                    .any(|system| {
+                        crate::resources::fitting_server::unavailable(profile, state, &system.id)
+                    })
+            })
+        {
+            effects.reactor_operation = 0.0;
+        }
         let result = crate::sim_rng::with_live_stream(rng.as_deref(), |generator| {
             candidate.tick_energy_with_effects(
                 time.delta_secs(),

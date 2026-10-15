@@ -917,9 +917,23 @@ fn build_system_status(
         Option<&crate::ship::power::ShipPowerSystem>,
         Option<&crate::dock::server::DockMarkers>,
         Option<&crate::ship::shields::ShipShields>,
+        Option<&crate::resources::fitting_server::CompiledShipFitting>,
+        Option<&crate::resources::fitting_server::ShipFitting>,
+        Option<&crate::console::repair::server::ShipRepairTeams>,
     ), With<LocalShip>>();
-    let Some((config, sources, hull, damage, dock, power, markers, shields)) =
-        query.iter(world).next()
+    let Some((
+        config,
+        sources,
+        hull,
+        damage,
+        dock,
+        power,
+        markers,
+        shields,
+        fitting_profile,
+        fitting_state,
+        teams,
+    )) = query.iter(world).next()
     else {
         return Default::default();
     };
@@ -933,6 +947,16 @@ fn build_system_status(
         markers,
     );
     super::system_status::apply_shields(&mut status, shields);
+    if let Some((profile, state)) = fitting_profile.zip(fitting_state) {
+        crate::resources::fitting_server::project(
+            profile,
+            state,
+            &config.0,
+            &sources.0,
+            teams,
+            &mut status,
+        );
+    }
     let owners = config
         .0
         .systems

@@ -463,6 +463,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("production", fold_production_namespace),
     ("recovery", fold_recovery_namespace),
     ("ports", fold_ports_namespace),
+    ("fitting", fold_fitting_namespace),
     ("physical-damage", fold_physical_damage_namespace),
     ("disablement-observation", fold_disablement_namespace),
 ];
@@ -2495,8 +2496,8 @@ fn fold_internal_repair_namespace(world: &World, acc: u64) -> u64 {
                 }
             }
             for job in state.teams.iter_mut().flatten() {
-                if let crate::jobs::repair::RepairActivity::Internal { phase, .. } =
-                    &mut job.activity
+                if let crate::jobs::repair::RepairActivity::Internal { phase, .. }
+                | crate::jobs::repair::RepairActivity::Refit { phase, .. } = &mut job.activity
                 {
                     match phase {
                         crate::core::messages::TeamSlot::Travelling { elapsed, .. } => {
@@ -2522,6 +2523,21 @@ fn fold_production_namespace(world: &World, acc: u64) -> u64 {
         acc,
         "production",
         |owner: &crate::resources::production_server::ShipProduction| Some(owner.0.clone()),
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+fn fold_fitting_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "fitting",
+        |owner: &crate::resources::fitting_server::ShipFitting| {
+            let mut state = owner.clone();
+            for work in state.work.values_mut() {
+                work.progress = f32::from_bits(canon_f32(work.progress));
+            }
+            Some(state)
+        },
         |acc, state| fold_serde(acc, &state),
     )
 }

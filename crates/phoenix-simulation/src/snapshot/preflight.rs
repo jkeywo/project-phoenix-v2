@@ -448,6 +448,7 @@ pub(super) fn validate_entity_resources(
     entity: Entity,
     row: &EntityState,
 ) -> Result<(), String> {
+    super::fitting::validate_entity(world, entity, row)?;
     let saved_shields = row
         .weapons
         .as_ref()
@@ -473,6 +474,16 @@ pub(super) fn validate_entity_resources(
         &row.power,
     ) {
         (Some(live), Some(saved)) => {
+            let fitted;
+            let live = if let (Some(profile), Some(state)) = (
+                world.get::<crate::resources::fitting_server::CompiledShipFitting>(entity),
+                &row.fitting,
+            ) {
+                fitted = super::fitting::fitted_power(&profile.0, state, row)?;
+                &fitted
+            } else {
+                live
+            };
             let ids = row
                 .infrastructure
                 .as_ref()
@@ -518,7 +529,9 @@ pub(super) fn validate_entity_resources(
                         || saved.ceiling != authored.ceiling
                         || saved.label != authored.label
                         || saved.stock.reserved.keys().any(|claim| {
-                            !claim.starts_with("repair/") && !claim.starts_with("external-repair/")
+                            !claim.starts_with("repair/")
+                                && !claim.starts_with("external-repair/")
+                                && !claim.starts_with("refit/")
                         })
                 })
         {
@@ -759,6 +772,7 @@ pub(super) fn validate_cross_entity_repairs(
                     .filter(|work| &work.target_uuid == target && roster.contains(target))
                     .and_then(|work| work.target.clone())
                     .map(|work| (target.clone(), work)),
+                crate::jobs::repair::RepairActivity::Refit { .. } => None,
             };
             if let Some(key) = work {
                 if claimed.insert(key, (row.uuid.clone(), job.id.0)).is_some() {

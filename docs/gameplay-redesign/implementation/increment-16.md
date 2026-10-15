@@ -475,6 +475,13 @@ receipt success. All copies/returns retain the exact source sequence. Full
 candidate validation rejects mismatched, duplicate or out-of-order source
 lineage before writes. ReportStatus has no Formation sequence.
 
+Durable Contact FormUp delivery reuses the canonical retained sent request and
+same continuously paid radio/relay service. It has no World mission binding;
+its closed FormUp sequence/source lineage is validated separately from planned
+ReportStatus retention. Manual ReportStatus and text remain one-shot, and a
+request cannot masquerade as either retention kind. Canonical copies deduplicate
+by original origin/recipient; source-visible state never claims hidden receipt.
+
 The first formation suggestion is explicitly durable: it remains selectable
 until a newer FormUp from that same source has actually been accepted by this
 receiver, or a local participant declines/breaks away through its own controls.

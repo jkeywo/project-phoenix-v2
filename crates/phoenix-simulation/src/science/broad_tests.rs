@@ -819,3 +819,90 @@ fn every_alliance_hull_is_an_actual_selectable_ship_and_missing_target_still_den
         );
     }
 }
+
+#[test]
+fn paid_physical_transponder_changes_only_acquired_identity_and_preserves_real_alias_aim() {
+    use bevy::ecs::system::RunSystemOnce;
+    let (mut app, observer, old, profile) = rig();
+    app.world_mut().despawn(old);
+    let config = crate::science::identity::tests::config();
+    let target = crate::entities::spawner::spawn_entity(
+        &mut app.world_mut().commands(),
+        &config,
+        Vec3::new(20.0, 0.0, 0.0),
+        "private-physical-identity-source".into(),
+        None,
+    );
+    app.world_mut().flush();
+    app.world_mut()
+        .entity_mut(target)
+        .insert(EntityName("True vessel".into()));
+    crate::science::identity::tests::enable(app.world_mut(), target, true);
+    for step in 0..12 {
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = step;
+        app.world_mut()
+            .run_system_once(crate::science::identity::tick)
+            .unwrap();
+        fund(&mut app, observer, &profile, 1.0);
+        app.update();
+    }
+    let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
+    let picture = state.projection(&profile, 11, 0.5).unwrap();
+    assert_eq!(picture.len(), 1);
+    let contact = &picture[0];
+    assert_eq!(contact.identity.as_ref().unwrap().name, "Transit courier");
+    assert!(contact.identity.as_ref().unwrap().faction.is_none());
+    assert!(contact.identity.as_ref().unwrap().references.is_empty());
+    assert_eq!(contact.classification.as_deref(), Some("ship"));
+    assert!(contact.selectable);
+    assert_eq!(
+        state.resolve_current(&contact.contact_id),
+        Some("private-physical-identity-source")
+    );
+    assert_ne!(contact.contact_id, "private-physical-identity-source");
+    let held = contact.clone();
+    let alias = contact.contact_id.clone();
+    let public = serde_json::to_string(&picture).unwrap();
+    assert!(
+        !public.contains("private-physical-identity-source") && !public.contains("True vessel")
+    );
+    assert_eq!(
+        app.world().get::<EntityName>(target).unwrap().0,
+        "True vessel"
+    );
+    assert_eq!(app.world().get::<ShipPhysics>(target).unwrap().x, 20.0);
+    crate::science::identity::tests::enable(app.world_mut(), target, false);
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 12;
+    app.world_mut()
+        .run_system_once(crate::science::identity::tick)
+        .unwrap();
+    fund(&mut app, observer, &profile, 1.0);
+    app.update();
+    let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
+    let updated = state.projection(&profile, 12, 0.5).unwrap();
+    assert_eq!(
+        updated[0].contact_id, alias,
+        "normal refresh retains the same earned physical contact"
+    );
+    assert_eq!(
+        held.identity.as_ref().unwrap().name,
+        "Transit courier",
+        "older held evidence is not rewritten"
+    );
+    let last_observed_tick = updated[0].observed_tick;
+    // A paid emitter never supplies detection for an out-of-coverage body.
+    crate::science::identity::tests::enable(app.world_mut(), target, true);
+    app.world_mut().get_mut::<ShipPhysics>(target).unwrap().x = 100000.0;
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 13;
+    app.world_mut()
+        .run_system_once(crate::science::identity::tick)
+        .unwrap();
+    fund(&mut app, observer, &profile, 1.0);
+    app.update();
+    let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
+    assert!(state.current.is_empty());
+    assert_eq!(
+        state.projection(&profile, 13, 0.5).unwrap()[0].observed_tick,
+        last_observed_tick
+    );
+}

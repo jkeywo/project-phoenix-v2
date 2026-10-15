@@ -3,6 +3,12 @@ title: Electronic Equipment
 type: concept
 tags: [comms, observations, equipment, simulation]
 sources:
+  - crates/phoenix-sim-gameplay/src/electronic/identity.rs
+  - crates/phoenix-simulation/src/science/identity.rs
+  - crates/phoenix-simulation/src/science/broad.rs
+  - gui/components/identity-controls.js
+  - editor/workshop-identity.js
+  - assets/entities/identity_cruiser.toml
   - crates/phoenix-sim-gameplay/src/electronic/jamming.rs
   - crates/phoenix-sim-gameplay/src/ship/composition.rs
   - crates/phoenix-simulation/src/comms/jamming.rs
@@ -61,3 +67,20 @@ uses the actual component schema, shared Boolean host vocabulary and accepted
 composition/history transaction. `jamming_cruiser.toml` is the finite reference.
 This code path does not establish the remaining electronic protection, spoof,
 access, sensor interference, cloak or decoy consumers.
+
+The composed `identity-emitter` has one Boolean enabled channel, one actual
+PowerInput, real Operation/placement and one ordinary state-tree controller.
+`ShipIdentityEmitters` is its canonical intent; `IdentityEmissions` contains only
+fully paid current-tick claims. Missing or partly funded equipment makes no
+claim, and restore clears derived claims. Stable System order selects the first
+active configured claim; no observer-specific controller exists.
+
+Broad applies that literal callsign and optional faction claim only after its
+normal physical acquisition succeeds. The actual body, source association,
+observer-local aim alias, geometry, classification and real actor name/faction
+are unchanged. False identity samples gain no real dossier references. Explicit
+observer reports retain their priority, and held history and independently
+received Comms evidence are not rewritten. Own shared equipment details expose
+intent and paid activity without a deception-success or observer-attribution bit.
+The optional `identity_cruiser.toml` uses finite existing reactor output and
+ordinary allocation; it adds no crew seat.

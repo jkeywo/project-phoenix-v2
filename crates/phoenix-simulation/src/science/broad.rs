@@ -146,6 +146,7 @@ pub(crate) fn tick(
         Option<&crate::ship::disablement::DisablementObservation>,
         Option<&crate::entities::spawner::EntityTarget>,
         Option<&crate::ship::shields::ShipShields>,
+        Option<&super::identity::IdentityEmissions>,
     )>,
     mut observers: Query<(
         &EntityUuid,
@@ -296,6 +297,7 @@ pub(crate) fn tick(
                         disabled,
                         target,
                         shields,
+                        identity_emissions,
                     ) in &scene
                     {
                         let Some(id) = id
@@ -381,8 +383,18 @@ pub(crate) fn tick(
                         let supplied_identity = runtime.as_ref().and_then(|runtime| {
                             runtime.contact_classifications.get(&observer.0)?.get(id)
                         });
+                        // A physical transponder changes only this ordinary
+                        // identity sample, after actual acquisition. An explicit
+                        // observer report retains its existing priority.
+                        let identity_claim = supplied_identity
+                            .is_none()
+                            .then(|| {
+                                identity_emissions.and_then(|emissions| emissions.claim(tick.0))
+                            })
+                            .flatten();
                         let identity_name = supplied_identity
                             .map(|identity| identity.label.as_str())
+                            .or_else(|| identity_claim.map(|claim| claim.callsign.as_str()))
                             .or_else(|| name.map(|name| name.0.as_str()))
                             .filter(|name| !name.is_empty());
                         measurements.push(BroadMeasurement {
@@ -411,9 +423,9 @@ pub(crate) fn tick(
                                 name: name.to_owned(),
                                 faction: supplied_identity
                                     .is_none()
-                                    .then(|| faction.map(|faction| faction.0.to_string()))
+                                    .then(|| identity_claim.map_or_else(||faction.map(|faction|faction.0.to_string()),|claim|claim.faction.clone()))
                                     .flatten(),
-                                references: world_config.as_ref().map_or_else(Vec::new, |world| {
+                                references: if identity_claim.is_some() {Vec::new()} else {world_config.as_ref().map_or_else(Vec::new, |world| {
                                     let view =
                                         ship_config.0.observations_for_system(system, &boards.0);
                                     let Some(crate::core::messages::SystemBlackboard::Viewscreen(
@@ -430,7 +442,7 @@ pub(crate) fn tick(
                                             objective.snapshot.targets.iter().map(String::as_str)
                                         }),
                                     )
-                                }),
+                                })},
                             }),
                             classification: Some(classification.into()),
                             assessment: Some(TrackAssessment {

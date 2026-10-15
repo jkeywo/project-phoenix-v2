@@ -1447,6 +1447,44 @@ impl EntityConfig {
                     })?;
                     continue;
                 }
+                if system.kind == crate::ship::system_registry::IDENTITY_EMITTER_KIND {
+                    if config.damage.is_none()
+                        || config
+                            .interior
+                            .as_ref()
+                            .is_none_or(|interior| !interior.placements.contains_key(&system.id))
+                        || !system.damage_components.iter().any(|component| {
+                            component.binding == phoenix_model::damage::DamageBinding::Operation
+                        })
+                    {
+                        return Err(SerdeError::custom("identity emitter requires actual interior placement and canonical Operation damage owner"));
+                    }
+                    crate::electronic::identity::validate_equipment(&config, system)
+                        .map_err(SerdeError::custom)?;
+                    let authored = authored.ok_or_else(|| SerdeError::custom(format!("Identity emitter System '{}' requires an explicit supported config.ai state tree",system.id.0)))?;
+                    let tree: crate::ai::state_tree::AiTreeConfig =
+                        authored.clone().try_into().map_err(|error| {
+                            SerdeError::custom(format!(
+                                "System '{}' config.ai: {error}",
+                                system.id.0
+                            ))
+                        })?;
+                    let binding =
+                        crate::ship::composition::identity_composition(&system.components)
+                            .ok_or_else(|| {
+                                SerdeError::custom(
+                            "identity emitter state tree requires supported identity composition",
+                        )
+                            })?;
+                    crate::ai::state_tree::compile(
+                        &tree,
+                        &crate::electronic::identity::bindings(binding.enabled_channel),
+                    )
+                    .map_err(|error| {
+                        SerdeError::custom(format!("System '{}' config.ai: {error}", system.id.0))
+                    })?;
+                    continue;
+                }
                 if system.kind == crate::ship::system_registry::SIGNAL_PROTECTION_KIND {
                     if config.damage.is_none()
                         || config

@@ -228,6 +228,21 @@ pub fn ship_schema() -> WorkshopShipSchema {
                 .collect(),
             ),
             (
+                "identity_emitter".into(),
+                [
+                    ("enabled_channel", "boolean_channel"),
+                    ("power_input", "power_input_component"),
+                    ("config.callsign", "string"),
+                    ("config.faction", "optional_string"),
+                ]
+                .into_iter()
+                .map(|(name, kind)| WorkshopComponentField {
+                    name: name.into(),
+                    kind: kind.into(),
+                })
+                .collect(),
+            ),
+            (
                 "signal_protection".into(),
                 [
                     ("enabled_channel", "boolean_channel"),
@@ -328,6 +343,7 @@ pub fn ship_schema() -> WorkshopShipSchema {
                 crate::ship::system_registry::CRAFT_BAY_KIND.into(),
                 crate::ship::system_registry::ILLUMINATION_KIND.into(),
                 crate::ship::system_registry::JAMMING_KIND.into(),
+                crate::ship::system_registry::IDENTITY_EMITTER_KIND.into(),
                 crate::ship::system_registry::DOCK_KIND.into(),
                 crate::ship::system_registry::POWER_REACTOR_KIND.into(),
                 crate::ship::system_registry::SHIELD_ARC_KIND.into(),
@@ -341,6 +357,12 @@ pub fn ship_schema() -> WorkshopShipSchema {
             ],
             shield_recovery_bindings,
             hosts: BTreeMap::from([
+                (
+                    crate::ship::system_registry::IDENTITY_EMITTER_KIND.into(),
+                    crate::ai::state_tree::schema_metadata(
+                        &phoenix_sim_gameplay::electronic::identity::bindings("enabled"),
+                    ),
+                ),
                 (
                     crate::ship::system_registry::SIGNAL_PROTECTION_KIND.into(),
                     crate::ai::state_tree::schema_metadata(

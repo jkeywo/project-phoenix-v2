@@ -391,3 +391,24 @@ ordinary AI operation, observer isolation, no fake identity/reference leak,
 physical aim unchanged, contradictory retained evidence, Workshop composition
 and a fresh JSON full-host 360-step continuation with malformed no-write cases.
 No runtime or completion evidence is claimed by this contract.
+
+
+### Physical transponder source handoff
+
+The first bounded identity consumer now has actual composed equipment, canonical
+enabled intent, ordinary AI/admitted controls, current fully paid emissions and
+acquired-only Broad identity substitution. Workshop edits the real closed
+profile and its actual Boolean host binding. Shared equipment details expose
+own paid activity; structured source history, physical aim and actor truth stay
+with their existing owners. Candidate leaf validation uses accepted recipes and
+includes Disabled actors. A missing half of the fitted profile/state pair refuses
+emission before payment.
+
+Focused JavaScript checks: 9 tests in identity controls, Workshop identity and
+existing protection controls passed (1.83s). Strict strings: 6,280, zero errors or
+warnings. Layer dependency check passed. Owned Rust has formatted source tests
+for actual work/partial funding/offline, real Broad acquisition/alias continuity,
+JSON restore with no prepaid derived claim, and malformed no-write candidates;
+these are unexecuted until the integration owner joins the central declarations,
+spawn, status projection, persistence and digest hooks. Full-host human/AI and
+360-step continuation evidence is pending. This slice is not an increment 17 exit.

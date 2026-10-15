@@ -1,5 +1,5 @@
 import { t } from './strings.js';
-import { turretKinds, initialTurret, initialIllumination, initialJamming, initialProtection, initialBay } from '../editor/workshop-system-composition.js';
+import { turretKinds, initialTurret, initialIllumination, initialJamming, initialProtection, initialIdentity, initialBay } from '../editor/workshop-system-composition.js';
 
 /** A local composition draft. Only Apply crosses the accepted source/history gate. */
 export function mountSystemComponents({ root, apply }) {
@@ -27,7 +27,7 @@ export function mountSystemComponents({ root, apply }) {
     }
     commit.disabled ||= !owner?.id;
   };
-  const initial = system => system?.kind === 'signal-protection' && !system?.component?.length ? initialProtection() : system?.kind === 'craft-bay' && !system?.component?.length ? initialBay() : ['illumination','jamming'].includes(system?.kind) && !system?.component?.length ? (system.kind==='jamming'?initialJamming():initialIllumination()) : ({ components: structuredClone(system?.component?.length ? system.component : system?.kind === 'access-gate'
+  const initial = system => system?.kind === 'identity-emitter' && !system?.component?.length ? initialIdentity() : system?.kind === 'signal-protection' && !system?.component?.length ? initialProtection() : system?.kind === 'craft-bay' && !system?.component?.length ? initialBay() : ['illumination','jamming'].includes(system?.kind) && !system?.component?.length ? (system.kind==='jamming'?initialJamming():initialIllumination()) : ({ components: structuredClone(system?.component?.length ? system.component : system?.kind === 'access-gate'
     ? [{ id: 'hatch', kind: 'access_boundary', sealed_channel: 'sealed', transition_secs: 1 }] : turretKinds.includes(system?.kind) ? initialTurret() : []),
     channels: structuredClone(system?.channel?.length ? system.channel : system?.kind === 'access-gate'
       ? [{ name: 'sealed', kind: 'boolean' }] : system?.kind === 'dock' ? [{ name: 'enabled', kind: 'boolean' }, { name: 'target', kind: 'entity_target' }] : []) });
@@ -48,7 +48,8 @@ export function mountSystemComponents({ root, apply }) {
         if (field.kind === 'json') {
           try {target[parts.at(-1)] = JSON.parse(input.value); input.setCustomValidity('');}
           catch {input.setCustomValidity('Enter valid JSON.');}
-        } else target[parts.at(-1)] = field.kind === 'boolean' ? input.checked : numeric ? Number(input.value) : input.value;
+        } else if (field.kind === 'optional_string' && !input.value.trim()) delete target[parts.at(-1)];
+        else target[parts.at(-1)] = field.kind === 'boolean' ? input.checked : numeric ? Number(input.value) : input.value;
       };
       const name = node('label', null, { for: input.id }); name.textContent = `${field.name} (${field.kind})`;
       fields.append(name, input);
@@ -100,9 +101,9 @@ export function mountSystemComponents({ root, apply }) {
     schema = currentSchema; owner = system;
     const next = JSON.stringify([system?.id, system?.kind, system?.component, system?.channel, currentSchema?.component_fields]);
     if (next !== fingerprint) { fingerprint = next; draft = initial(system); materialise.checked = false;
-      const allowed = system?.kind === 'signal-protection' ? ['signal_protection', 'power_input'] : system?.kind === 'craft-bay' ? ['craft_bay', 'power_input'] : ['illumination','jamming'].includes(system?.kind) ? [`${system.kind}_emitter`, 'power_input', 'turret'] : system?.kind === 'access-gate' ? ['access_boundary'] : turretKinds.includes(system?.kind) ? ['turret', 'power_input'] : ['dock_mating', 'power_input'];
+      const allowed = system?.kind === 'identity-emitter' ? ['identity_emitter','power_input'] : system?.kind === 'signal-protection' ? ['signal_protection', 'power_input'] : system?.kind === 'craft-bay' ? ['craft_bay', 'power_input'] : ['illumination','jamming'].includes(system?.kind) ? [`${system.kind}_emitter`, 'power_input', 'turret'] : system?.kind === 'access-gate' ? ['access_boundary'] : turretKinds.includes(system?.kind) ? ['turret', 'power_input'] : ['dock_mating', 'power_input'];
       kind.replaceChildren(...Object.keys(schema?.component_fields || {}).filter(key => allowed.includes(key)).map(option)); paint(); }
-    section.disabled = disabled || !['dock', 'access-gate', 'illumination', 'jamming', 'signal-protection', 'craft-bay', ...turretKinds].includes(system?.kind);
+    section.disabled = disabled || !['dock', 'access-gate', 'illumination', 'jamming', 'identity-emitter', 'signal-protection', 'craft-bay', ...turretKinds].includes(system?.kind);
     editability();
   } };
 }

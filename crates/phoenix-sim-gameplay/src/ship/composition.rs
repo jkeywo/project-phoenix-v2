@@ -64,6 +64,12 @@ pub enum SystemComponentConfig {
     PowerInput {
         id: String,
     },
+    IdentityEmitter {
+        id: String,
+        enabled_channel: String,
+        power_input: String,
+        config: crate::electronic::identity::IdentityEmitterConfig,
+    },
     SignalProtection {
         id: String,
         enabled_channel: String,
@@ -105,6 +111,7 @@ impl SystemComponentConfig {
             | Self::IlluminationEmitter { id, .. }
             | Self::JammingEmitter { id, .. }
             | Self::SignalProtection { id, .. }
+            | Self::IdentityEmitter { id, .. }
             | Self::PowerInput { id }
             | Self::Turret { id, .. }
             | Self::AccessBoundary { id, .. } => id,
@@ -290,6 +297,42 @@ pub fn illumination_composition(
         }),
         _ => None,
     })
+}
+pub struct IdentityComposition<'a> {
+    pub enabled_channel: &'a str,
+    pub power_input: &'a str,
+    pub config: &'a crate::electronic::identity::IdentityEmitterConfig,
+}
+pub fn identity_composition(
+    components: &[SystemComponentConfig],
+) -> Option<IdentityComposition<'_>> {
+    components.iter().find_map(|component| match component {
+        SystemComponentConfig::IdentityEmitter {
+            enabled_channel,
+            power_input,
+            config,
+            ..
+        } => Some(IdentityComposition {
+            enabled_channel,
+            power_input,
+            config,
+        }),
+        _ => None,
+    })
+}
+fn validate_identity(system: &super::config::SystemInstanceConfig) -> Result<(), String> {
+    let binding = identity_composition(&system.components)
+        .ok_or("identity emitter requires its supported component")?;
+    binding.config.validate()?;
+    let mut ids = BTreeSet::new();
+    if system.components.len()!=2 || system.power_group.is_none() || system.channels.len()!=1
+        || system.channels[0].name!=binding.enabled_channel || system.channels[0].kind!=CommandChannelKind::Boolean
+        || !valid_id(binding.enabled_channel)
+        || system.components.iter().any(|component|!valid_id(component.id()) || !ids.insert(component.id()))
+        || !system.components.iter().any(|component|matches!(component,SystemComponentConfig::PowerInput{id} if id==binding.power_input)) {
+        return Err("identity emitter requires one distinct actual power_input, a power group and its exact Boolean enabled channel".into());
+    }
+    Ok(())
 }
 pub struct ProtectionComposition<'a> {
     pub enabled_channel: &'a str,
@@ -566,6 +609,9 @@ pub fn validate_composition(system: &super::config::SystemInstanceConfig) -> Res
             return Err("Craft Bay requires one actual bounded owner, distinct craft_bay/power_input, a power group and no unused channels".into());
         }
         return Ok(());
+    }
+    if system.kind == super::system_registry::IDENTITY_EMITTER_KIND {
+        return validate_identity(system);
     }
     if system.kind == super::system_registry::SIGNAL_PROTECTION_KIND {
         return validate_protection(system);

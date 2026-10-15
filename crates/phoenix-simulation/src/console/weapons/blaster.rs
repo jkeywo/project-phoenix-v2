@@ -25,18 +25,28 @@ fn resolve_barrel_origins(
     config: &crate::weapons::blaster::BlasterBankConfig,
     markers: Option<&ModelMarkers>,
     transform: &Transform,
-    centre: (f32, f32),
-) -> Vec<Option<(f32, f32)>> {
+    physics: &ShipPhysics,
+) -> Vec<Option<[f32; 3]>> {
+    // Match sync_ship_position now, rather than using the previous scene pose.
+    let transform = Transform {
+        translation: Vec3::new(physics.x, physics.y, physics.z),
+        rotation: Quat::from_euler(EulerRot::YXZ, -physics.yaw, 0.0, physics.roll),
+        scale: transform.scale,
+    };
+    let centre = [physics.x, physics.y, physics.z];
     let resolve = |name: &str| {
         markers?
-            .resolve_world_position(transform, name)
+            .resolve_world_position(&transform, name)
             .filter(|point| point.is_finite())
-            .map(|point| (point.x, point.z))
+            .map(|point| point.to_array())
     };
     if config.barrels.is_empty() {
         vec![match config.marker.as_deref() {
             Some(name) => resolve(name),
-            None => (centre.0.is_finite() && centre.1.is_finite()).then_some(centre),
+            None => centre
+                .iter()
+                .all(|value| value.is_finite())
+                .then_some(centre),
         }]
     } else {
         config.barrels.iter().map(|name| resolve(name)).collect()
@@ -46,6 +56,10 @@ fn resolve_barrel_origins(
 #[cfg(test)]
 #[path = "barrel_origin_tests.rs"]
 mod barrel_origin_tests;
+
+#[cfg(test)]
+#[path = "blaster_measured_launch_tests.rs"]
+mod measured_launch_tests;
 
 use crate::server_app::{AsteroidUuid, GameOverReason, SimOutbox};
 use crate::ship::state::ShipPhysics;
@@ -194,9 +208,15 @@ pub(crate) fn handle_fire_blaster(
             // combat lock — the same surface `tick_blaster_auto_fire` reads. A
             // cancel needs no target/arc.
             if is_charge_start {
-                let Some(aim) = aims.resolve(ship_entity, &cmd.target, |route| {
-                    live_entity_xz(route, &asteroid_q, &entity_q).map(|(x, z)| [x, z])
-                }) else {
+                let Some(bank) = blaster_res.0.iter().find(|bank| bank.config.id == bank_id) else {
+                    continue;
+                };
+                let Some(aim) = aims.resolve_allowed(
+                    ship_entity,
+                    &cmd.target,
+                    bank.config.targets.as_deref(),
+                    |route| live_entity_xz(route, &asteroid_q, &entity_q).map(|(x, z)| [x, z]),
+                ) else {
                     super::finish_action_feedback(
                         cmd,
                         &mut outbound,
@@ -204,23 +224,14 @@ pub(crate) fn handle_fire_blaster(
                     );
                     continue;
                 };
-                let bank_arc_ok = blaster_res
-                    .0
-                    .iter()
-                    .find(|b| b.config.id == bank_id)
-                    .map(|bank| {
-                        aim.allows(bank.config.targets.as_deref())
-                            && aims
-                                .geometry(
-                                    ship_entity,
-                                    &cmd.target,
-                                    &bank.config.mount(),
-                                    &aim,
-                                    physics,
-                                )
-                                .in_arc
-                    })
-                    .unwrap_or(false);
+                let geometry = aims.geometry(
+                    ship_entity,
+                    &cmd.target,
+                    &bank.config.mount(),
+                    &aim,
+                    physics,
+                );
+                let bank_arc_ok = geometry.in_arc && geometry.in_range;
                 if !bank_arc_ok {
                     super::finish_action_feedback(
                         cmd,
@@ -581,6 +592,7 @@ pub(crate) fn tick_blaster_system(
                 Option<&mut crate::ship::power::ShipPowerSystem>,
                 Option<&mut crate::infrastructure::InfrastructureCondition>,
                 Option<&crate::resources::logistics_server::CompiledShipLogistics>,
+                Option<&ShipSystemControlSources>,
             ),
             With<crate::server_app::Ship>,
         >,
@@ -663,6 +675,7 @@ pub(crate) fn tick_blaster_system(
             mut power_opt,
             mut inventory_opt,
             logistics_opt,
+            sources_opt,
         )) = ship_q.get_mut(shooter)
         else {
             continue;
@@ -686,9 +699,12 @@ pub(crate) fn tick_blaster_system(
             let bank_id = bank.config.id.clone();
             let bank_system = crate::ship::system_registry::blaster_bank_system_id(&bank_id);
             let aim = bank_system.as_ref().and_then(|owner| {
-                aim_and_runtime.p0().resolve(shooter, owner, |route| {
-                    live_entity_xz(route, &asteroid_q, &entity_q).map(|(x, z)| [x, z])
-                })
+                aim_and_runtime.p0().resolve_allowed(
+                    shooter,
+                    owner,
+                    bank.config.targets.as_deref(),
+                    |route| live_entity_xz(route, &asteroid_q, &entity_q).map(|(x, z)| [x, z]),
+                )
             });
             let launch_geometry = aim.as_ref().zip(bank_system.as_ref()).map(|(aim, owner)| {
                 aim_and_runtime
@@ -698,10 +714,18 @@ pub(crate) fn tick_blaster_system(
             let target_allowed = aim
                 .as_ref()
                 .is_some_and(|aim| aim.allows(bank.config.targets.as_deref()));
-            let target_point = aim
-                .as_ref()
-                .map(|aim| aim.position)
-                .unwrap_or([physics.x, physics.z]);
+            let target_point = aim.as_ref().and_then(|aim| aim.point_3d(physics.y));
+            let measured = aim.as_ref().is_some_and(|aim| aim.measured);
+            let velocity_3d = aim.as_ref().map_or([0.0; 3], |aim| aim.velocity_3d());
+            let online = match sources_opt {
+                Some(sources) => bank_system.as_ref().is_some_and(|owner| {
+                    system_is_registered(sources, owner) && {
+                        let policy = sources.0.policy_for(owner);
+                        policy.accept_human_input || policy.operate_ai
+                    }
+                }),
+                None => _ship_config_opt.is_none(),
+            };
             // Unknown observed motion means direct aim, not a World velocity
             // lookup. Legacy, unconfigured equipment retains its old lead.
             let target_velocity = aim
@@ -719,7 +743,7 @@ pub(crate) fn tick_blaster_system(
                     damage.factor(system, phoenix_model::damage::DamageBinding::Operation)
                 })
             });
-            let charge_dt = if bank.volley.charging && operation_factor > 0.0 {
+            let charge_dt = if bank.volley.charging && online && operation_factor > 0.0 {
                 let charge_work_dt =
                     dt.min((bank.config.charge_time_secs - bank.volley.charge_elapsed).max(0.0));
                 bank_system
@@ -743,59 +767,74 @@ pub(crate) fn tick_blaster_system(
             #[cfg(feature = "server")]
             let screenshake_magnitude = bank.config.screenshake_magnitude;
 
-            let barrel_origins = resolve_barrel_origins(
-                &bank.config,
-                markers_opt,
-                transform,
-                (physics.x, physics.z),
-            );
+            let barrel_origins =
+                resolve_barrel_origins(&bank.config, markers_opt, transform, &physics);
 
             let round_feed = bank.config.rounds.clone();
-            let events = bank.tick_with_origins(
-                dt,
-                charge_dt,
-                &barrel_origins,
-                physics.yaw,
-                target_point[0],
-                target_point[1],
-                target_velocity[0],
-                target_velocity[1],
-                &source_uuid,
-                &mut |barrel| {
-                    target_allowed
-                        && launch_geometry
-                            .as_ref()
-                            .is_some_and(|geometry| geometry.in_arc && geometry.in_range)
-                        && operation_factor > 0.0
-                        && bank_system.as_ref().is_some_and(|system| {
-                            let flags = super::round_work::pay_barrel(
-                                system,
-                                round_feed.as_ref(),
-                                barrel,
-                                power_opt.as_deref_mut(),
-                                inventory_opt.as_deref_mut(),
-                                logistics_opt,
-                                &pending_debits,
-                            );
-                            if let Some(flags) = flags {
-                                stock_flags.push((source_uuid.clone(), flags));
-                                true
-                            } else {
-                                false
-                            }
-                        })
-                },
-                // Was OS randomness, then a draw off the seeded RNG stream —
-                // both of which gave two instances different ids for the same
-                // shot, and those ids key the in-flight/hit bookkeeping. Now a
-                // tick-scoped mint (issue #907).
-                &mut || {
-                    crate::world_id::mint_live_id_with(
-                        id_mint.as_deref(),
-                        crate::world_id::IdNamespace::Projectile,
-                    )
-                },
-            );
+            let mut admit_launch = |barrel| {
+                online
+                    && target_allowed
+                    && target_point.is_some()
+                    && launch_geometry
+                        .as_ref()
+                        .is_some_and(|geometry| geometry.in_arc && geometry.in_range)
+                    && operation_factor > 0.0
+                    && bank_system.as_ref().is_some_and(|system| {
+                        let flags = super::round_work::pay_barrel(
+                            system,
+                            round_feed.as_ref(),
+                            barrel,
+                            power_opt.as_deref_mut(),
+                            inventory_opt.as_deref_mut(),
+                            logistics_opt,
+                            &pending_debits,
+                        );
+                        if let Some(flags) = flags {
+                            stock_flags.push((source_uuid.clone(), flags));
+                            true
+                        } else {
+                            false
+                        }
+                    })
+            };
+            let mut next_uuid = || {
+                crate::world_id::mint_live_id_with(
+                    id_mint.as_deref(),
+                    crate::world_id::IdNamespace::Projectile,
+                )
+            };
+            let point = target_point.unwrap_or([physics.x, physics.y, physics.z]);
+            let events = if measured {
+                bank.tick_with_origins_3d(
+                    dt,
+                    charge_dt,
+                    &barrel_origins,
+                    physics.yaw,
+                    point,
+                    velocity_3d,
+                    &source_uuid,
+                    &mut admit_launch,
+                    &mut next_uuid,
+                )
+            } else {
+                let planar_origins: Vec<_> = barrel_origins
+                    .iter()
+                    .map(|origin| origin.map(|[x, _, z]| (x, z)))
+                    .collect();
+                bank.tick_with_origins(
+                    dt,
+                    charge_dt,
+                    &planar_origins,
+                    physics.yaw,
+                    point[0],
+                    point[2],
+                    target_velocity[0],
+                    target_velocity[1],
+                    &source_uuid,
+                    &mut admit_launch,
+                    &mut next_uuid,
+                )
+            };
             for ev in &events {
                 let multiplier = operation_factor
                     * power_opt.as_deref_mut().map_or(1.0, |p| {
@@ -824,9 +863,10 @@ pub(crate) fn tick_blaster_system(
                     //   = −(sin(h)·sin(yaw) + cos(h)·cos(yaw))
                     //   = −cos(h − yaw)
                     let yaw = physics.yaw;
-                    if let Ok([vx, vz]) =
-                        crate::weapons::operation::recoil_delta(ev.heading, recoil_impulse)
-                    {
+                    if let Ok([vx, vz]) = crate::weapons::operation::recoil_delta(
+                        ev.heading,
+                        recoil_impulse * simmath::cos(ev.pitch),
+                    ) {
                         physics.forward_speed += vx * simmath::sin(yaw) - vz * simmath::cos(yaw);
                         physics.lateral_speed += vx * simmath::cos(yaw) + vz * simmath::sin(yaw);
                     }

@@ -9,10 +9,10 @@ use bevy::ecs::system::RunSystemOnce;
 use std::collections::BTreeMap;
 
 fn fixture() -> (World, Entity, String) {
-    let authored = crate::entities::include_resolve::load_entity_config(
-        "assets/entities/alliance_cruiser.toml",
-    )
-    .unwrap();
+    fixture_from("assets/entities/alliance_cruiser.toml")
+}
+fn fixture_from(path: &str) -> (World, Entity, String) {
+    let authored = crate::entities::include_resolve::load_entity_config(path).unwrap();
     let profile = BroadProfile::from_config(&authored).unwrap().unwrap();
     let instrument = SystemId("tactical-radar".into());
     let mut tracks = BroadTracks::new(&profile);
@@ -313,7 +313,13 @@ fn actual_core_fine_and_reconnect_target_filters_use_only_held_classification() 
         else {
             unreachable!();
         };
-        board.tracks.as_mut().unwrap()[0].classification = classification.map(str::to_owned);
+        let reading = &mut board.tracks.as_mut().unwrap()[0];
+        reading.classification = classification.map(str::to_owned);
+        reading.elevation = Some(phoenix_model::sensing_tracks::ObservedElevation {
+            height: 0.0,
+            error: 0.5,
+            velocity: None,
+        });
         drop(boards);
         let (core, fine, reconnect) = published(&mut world, entity);
         let bank = core.banks.iter().find(|bank| bank.id == "fore").unwrap();
@@ -361,6 +367,149 @@ fn omitted_policy_does_not_turn_a_nonordinary_route_into_ready_geometry() {
     assert!(!fine.fire_ready);
     let bank = core.banks.iter().find(|bank| bank.id == "fore").unwrap();
     assert_eq!(bank.readiness.target_range, None);
+    assert_eq!(
+        bank.readiness,
+        reconnect
+            .banks
+            .iter()
+            .find(|bank| bank.id == "fore")
+            .unwrap()
+            .readiness
+    );
+}
+
+#[test]
+fn measured_height_range_and_missing_height_agree_in_core_fine_and_reconnect() {
+    let (mut world, entity, _) = fixture();
+    let owner = SystemId("phaser-fore".into());
+    aim_at_held_measurement(&mut world, entity, &owner);
+    world
+        .get_mut::<PhaserCombatConfigResource>(entity)
+        .unwrap()
+        .0
+        .banks
+        .iter_mut()
+        .find(|bank| bank.id == "fore")
+        .unwrap()
+        .targets = Some(vec![phoenix_model::tags::EntityTag::Missile]);
+    for (height, expected) in [(Some(10.0), true), (Some(1000.0), false), (None, false)] {
+        let mut boards = world.get_mut::<ShipSystemBlackboards>(entity).unwrap();
+        let SystemBlackboard::TacticalRadar(board) = boards
+            .0
+            .get_mut(&SystemId("tactical-radar".into()))
+            .unwrap()
+        else {
+            unreachable!()
+        };
+        let reading = &mut board.tracks.as_mut().unwrap()[0];
+        reading.classification = Some("torpedo".into());
+        reading.elevation = height.map(|height| phoenix_model::sensing_tracks::ObservedElevation {
+            height,
+            error: 0.5,
+            velocity: None,
+        });
+        drop(boards);
+        let (core, fine, reconnect) = published(&mut world, entity);
+        let bank = core.banks.iter().find(|bank| bank.id == "fore").unwrap();
+        assert_eq!(bank.fire_ready, expected);
+        assert_eq!(fine.fire_ready, expected);
+        assert_eq!(
+            bank.readiness,
+            reconnect
+                .banks
+                .iter()
+                .find(|bank| bank.id == "fore")
+                .unwrap()
+                .readiness
+        );
+        if height == Some(1000.0) {
+            assert!(bank.readiness.target_range.unwrap() >= 1000.0);
+        }
+        if height.is_none() {
+            assert_eq!(bank.readiness.target_range, None);
+        }
+    }
+}
+
+#[test]
+fn blaster_core_and_reconnect_use_eligible_fallback_but_never_override_hold_or_lost_evidence() {
+    let (mut world, entity, alias) = fixture_from("assets/entities/pdc_cruiser.toml");
+    let owner = SystemId("blaster-side".into());
+    world
+        .get_mut::<super::super::super::assignments::ShipWeaponTargets>(entity)
+        .unwrap()
+        .0
+        .set_automatic(owner.clone(), Some(alias.clone()));
+    {
+        let mut boards = world.get_mut::<ShipSystemBlackboards>(entity).unwrap();
+        let SystemBlackboard::Viewscreen(board) = boards
+            .0
+            .get_mut(&crate::ship::system_registry::viewscreen_system_id())
+            .unwrap()
+        else {
+            unreachable!()
+        };
+        board.combat_lock = Some("unavailable-primary".into());
+    }
+    // An unavailable primary can use the retained fallback once the permitted
+    // classified record supplies height. Explicit Hold still wins.
+    for (height, hold, expected) in [
+        (Some(5.0), false, true),
+        (None, false, false),
+        (Some(5.0), true, false),
+    ] {
+        let mut boards = world.get_mut::<ShipSystemBlackboards>(entity).unwrap();
+        let SystemBlackboard::TacticalRadar(board) = boards
+            .0
+            .get_mut(&SystemId("tactical-radar".into()))
+            .unwrap()
+        else {
+            unreachable!()
+        };
+        let reading = &mut board.tracks.as_mut().unwrap()[0];
+        reading.classification = Some("torpedo".into());
+        reading.elevation = height.map(|height| phoenix_model::sensing_tracks::ObservedElevation {
+            height,
+            error: 0.5,
+            velocity: None,
+        });
+        drop(boards);
+        if hold {
+            world
+                .get_mut::<super::super::super::assignments::ShipWeaponTargets>(entity)
+                .unwrap()
+                .0
+                .set_individual(owner.clone(), None);
+        }
+        let (core, _, reconnect) = published(&mut world, entity);
+        let bank = core.blasters.iter().find(|bank| bank.id == "side").unwrap();
+        assert_eq!(bank.fire_ready, expected);
+        assert_eq!(
+            bank.readiness,
+            reconnect
+                .blasters
+                .iter()
+                .find(|bank| bank.id == "side")
+                .unwrap()
+                .readiness
+        );
+    }
+}
+
+#[test]
+fn actual_offline_policy_is_not_ready_despite_retained_valid_target() {
+    let (mut world, entity, _) = fixture();
+    let owner = SystemId("phaser-fore".into());
+    aim_at_held_measurement(&mut world, entity, &owner);
+    assert!(published(&mut world, entity).1.fire_ready);
+    world
+        .get_mut::<ShipSystemControlSources>(entity)
+        .unwrap()
+        .0
+        .set(owner, crate::ship::control_source::ControlSource::Offline);
+    let (core, fine, reconnect) = published(&mut world, entity);
+    let bank = core.banks.iter().find(|bank| bank.id == "fore").unwrap();
+    assert!(!bank.fire_ready && !fine.fire_ready);
     assert_eq!(
         bank.readiness,
         reconnect

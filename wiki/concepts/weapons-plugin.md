@@ -156,7 +156,9 @@ The optional `pdc_cruiser` uses the existing finite Broadside battery, paid loca
 rounds and ordinary per-bank control. Its explicit Missile filter and radar
 selection policy require an acquired current classified contact, including its
 dated elevation; the fixed full-coverage mount does not claim finite pitch
-traversal. Straight bolts keep XYZ, pitch, physical payload, speed and visual
+traversal. All current Turret mechanics constrain azimuth only; a permitted
+vertical lead has no separately configured pitch actuator. Full XYZ range still
+gates emission and readiness. Straight bolts keep XYZ, pitch, physical payload, speed and visual
 scale on the emitted record. The same emission loop has planar and measured XYZ
 adapters; `advance_flight_only` needs no surviving launcher configuration.
 

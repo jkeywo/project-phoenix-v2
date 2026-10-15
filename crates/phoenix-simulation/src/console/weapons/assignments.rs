@@ -52,6 +52,206 @@ impl WeaponAim {
     }
 }
 
+/// The same immutable owner view is used by executors and publishers. The
+/// caller may prove ordinary physical identity, but cannot supply target facts.
+pub(crate) struct WeaponAimContext<'a> {
+    pub config: Option<&'a crate::ship_plugin::ShipConfigComponent>,
+    pub boards: &'a ShipSystemBlackboards,
+    pub broad: Option<&'a BroadTracks>,
+    pub controls: Option<&'a SensingControls>,
+    pub assignments: Option<&'a ShipWeaponTargets>,
+    pub profiles: Option<&'a crate::weapons::mounts::MountProfiles>,
+    pub mounts: Option<&'a crate::weapons::mounts::ShipMounts>,
+    pub observer: Option<&'a crate::entities::spawner::EntityUuid>,
+    pub runtime: Option<&'a crate::world::server::WorldContentRuntime>,
+}
+
+impl WeaponAimContext<'_> {
+    pub fn resolve(
+        &self,
+        owner: &SystemId,
+        legacy: impl Fn(&str) -> Option<[f32; 2]>,
+        ordinary: &impl Fn(&str) -> bool,
+    ) -> Option<WeaponAim> {
+        let Self {
+            boards,
+            config,
+            broad,
+            controls,
+            assignments,
+            ..
+        } = *self;
+        let Some(config) = config else {
+            let Some(SystemBlackboard::Viewscreen(board)) = boards
+                .0
+                .get(&crate::ship::system_registry::viewscreen_system_id())
+            else {
+                return None;
+            };
+            return self.resolve_reference(owner, board.combat_lock.as_deref()?, legacy, ordinary);
+        };
+        let contact =
+            effective_weapon_contact(&config.0, owner, boards, broad, controls, assignments)?;
+        self.resolve_reference(owner, &contact, legacy, ordinary)
+    }
+
+    pub fn resolve_allowed(
+        &self,
+        owner: &SystemId,
+        filter: Option<&[phoenix_model::tags::EntityTag]>,
+        legacy: impl Fn(&str) -> Option<[f32; 2]>,
+        ordinary: &impl Fn(&str) -> bool,
+    ) -> Option<WeaponAim> {
+        let resolved = self
+            .resolve(owner, &legacy, ordinary)
+            .filter(|aim| aim.allows(filter));
+        let assignment = self.assignments.and_then(|state| state.0 .0.get(owner));
+        if resolved.is_some() || assignment.is_some_and(|state| state.has_explicit_order()) {
+            return resolved;
+        }
+        self.resolve_reference(owner, assignment?.automatic.as_deref()?, legacy, ordinary)
+            .filter(|aim| aim.allows(filter))
+    }
+
+    pub fn resolve_reference(
+        &self,
+        owner: &SystemId,
+        contact: &str,
+        legacy: impl Fn(&str) -> Option<[f32; 2]>,
+        ordinary: &impl Fn(&str) -> bool,
+    ) -> Option<WeaponAim> {
+        let Self {
+            boards,
+            config,
+            broad,
+            controls,
+            observer,
+            ..
+        } = *self;
+        let Some(config) = config else {
+            if crate::science::contact_routing::measured_machinery(broad, controls) {
+                return None;
+            }
+            return Some(WeaponAim {
+                route: contact.to_owned(),
+                position: legacy(contact)?,
+                velocity: None,
+                elevation: None,
+                measured: false,
+                tags: Vec::new(),
+                ordinary_domain: true,
+            });
+        };
+        let route = crate::science::contact_routing::resolve_machinery(
+            Some(&config.0),
+            Some(boards),
+            broad,
+            controls,
+            owner,
+            contact,
+        )?;
+        if self.runtime.is_some_and(|runtime| {
+            observer.is_none_or(|observer| {
+                crate::gm::operations::contact::mode(
+                    &runtime.contact_overrides,
+                    &observer.0,
+                    &route,
+                ) == crate::gm::operations::contact::ContactMode::Conceal
+            })
+        }) {
+            return None;
+        }
+        let measured = crate::science::contact_routing::measured_machinery(broad, controls);
+        let elevation = if measured {
+            crate::weapons::mounts::measured_elevation(&config.0, boards, broad?, owner, contact)
+        } else {
+            None
+        };
+        let position = if measured {
+            crate::weapons::mounts::measured_point(&config.0, boards, broad?, owner, contact)?
+        } else {
+            legacy(&route)?
+        };
+        let velocity = if measured {
+            let view = config.0.observations_for_system(owner, &boards.0);
+            boards
+                .0
+                .keys()
+                .filter_map(|key| view.get(key))
+                .filter_map(crate::science::contact_routing::observations)
+                .flatten()
+                .find(|track| track.contact_id == contact && track.selectable && !track.predicted)
+                .and_then(|track| track.velocity)
+                .filter(|velocity| velocity.iter().all(|value| value.is_finite()))
+        } else {
+            None
+        };
+        let tags = if measured {
+            let view = config.0.observations_for_system(owner, &boards.0);
+            let mut classifications = boards
+                .0
+                .keys()
+                .filter_map(|key| view.get(key))
+                .filter_map(crate::science::contact_routing::observations)
+                .flatten()
+                .filter(|track| track.contact_id == contact && track.selectable && !track.predicted)
+                .filter_map(|track| track.classification.as_deref());
+            match classifications.next() {
+                Some(first) if classifications.all(|other| other == first) => {
+                    phoenix_model::tags::EntityTag::from_str(first)
+                        .into_iter()
+                        .collect()
+                }
+                _ => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
+        // Routing has already proven this exact permitted actuator. Inspect
+        // domain membership only; no hidden pose, health or target enters aim.
+        let ordinary_domain = !measured || ordinary(&route);
+        position
+            .iter()
+            .all(|value| value.is_finite())
+            .then_some(WeaponAim {
+                route,
+                position,
+                velocity,
+                elevation,
+                measured,
+                tags,
+                ordinary_domain,
+            })
+    }
+
+    pub fn geometry(
+        &self,
+        owner: &SystemId,
+        mount: &crate::weapons::mount::MountConfig,
+        aim: &WeaponAim,
+        physics: &crate::ship::state::ShipPhysics,
+    ) -> crate::core::messages::WeaponTargetGeometry {
+        let mut geometry = crate::weapons::mounts::geometry(
+            self.profiles,
+            self.mounts,
+            owner,
+            mount,
+            aim.position,
+            [physics.x, physics.z],
+            physics.yaw,
+        );
+        if let Some(elevation) = aim.elevation {
+            let distance = ((f64::from(aim.position[0]) - f64::from(physics.x)).powi(2)
+                + (f64::from(aim.position[1]) - f64::from(physics.z)).powi(2)
+                + (f64::from(elevation.height) - f64::from(physics.y)).powi(2))
+            .sqrt();
+            geometry.in_range = distance.is_finite() && distance <= f64::from(mount.range);
+            geometry.range = distance.min(f64::from(f32::MAX)) as f32;
+        }
+        geometry
+    }
+}
+
 /// Borrow actual owner intent, publications and physical mount state together.
 /// The legacy scene closure is never called for fitted observation equipment.
 #[derive(bevy::ecs::system::SystemParam)]
@@ -200,20 +400,8 @@ impl WeaponAimInputs<'_, '_> {
         owner: &SystemId,
         legacy: impl Fn(&str) -> Option<[f32; 2]>,
     ) -> Option<WeaponAim> {
-        let (boards, config, broad, controls, assignments, _, _, _) =
-            self.scopes.get(entity).ok()?;
-        let Some(config) = config else {
-            let Some(SystemBlackboard::Viewscreen(board)) = boards
-                .0
-                .get(&crate::ship::system_registry::viewscreen_system_id())
-            else {
-                return None;
-            };
-            return self.resolve_reference(entity, owner, board.combat_lock.as_deref()?, legacy);
-        };
-        let contact =
-            effective_weapon_contact(&config.0, owner, boards, broad, controls, assignments)?;
-        self.resolve_reference(entity, owner, &contact, legacy)
+        self.context(entity)?
+            .resolve(owner, legacy, &|route| self.ordinary_route(route))
     }
 
     pub fn has_target_intent(&self, entity: Entity, owner: &SystemId) -> bool {
@@ -244,20 +432,8 @@ impl WeaponAimInputs<'_, '_> {
         filter: Option<&[phoenix_model::tags::EntityTag]>,
         legacy: impl Fn(&str) -> Option<[f32; 2]>,
     ) -> Option<WeaponAim> {
-        let resolved = self
-            .resolve(entity, owner, &legacy)
-            .filter(|aim| aim.allows(filter));
-        let assignment = self
-            .scopes
-            .get(entity)
-            .ok()
-            .and_then(|row| row.4)
-            .and_then(|state| state.0 .0.get(owner));
-        if resolved.is_some() || assignment.is_some_and(|state| state.has_explicit_order()) {
-            return resolved;
-        }
-        self.resolve_reference(entity, owner, assignment?.automatic.as_deref()?, legacy)
-            .filter(|aim| aim.allows(filter))
+        self.context(entity)?
+            .resolve_allowed(owner, filter, legacy, &|route| self.ordinary_route(route))
     }
 
     pub fn has_explicit_order(&self, entity: Entity, owner: &SystemId) -> bool {
@@ -373,6 +549,28 @@ impl WeaponAimInputs<'_, '_> {
             .map(|(contact, _)| contact)
     }
 
+    fn context(&self, entity: Entity) -> Option<WeaponAimContext<'_>> {
+        let (boards, config, broad, controls, assignments, profiles, mounts, observer) =
+            self.scopes.get(entity).ok()?;
+        Some(WeaponAimContext {
+            config,
+            boards,
+            broad,
+            controls,
+            assignments,
+            profiles,
+            mounts,
+            observer,
+            runtime: self.runtime.as_deref(),
+        })
+    }
+
+    fn ordinary_route(&self, route: &str) -> bool {
+        self.ordinary.iter().any(|(entity, rock)| {
+            entity.is_some_and(|id| id.0 == route) || rock.is_some_and(|id| id.0 == route)
+        })
+    }
+
     pub fn resolve_reference(
         &self,
         entity: Entity,
@@ -380,104 +578,8 @@ impl WeaponAimInputs<'_, '_> {
         contact: &str,
         legacy: impl Fn(&str) -> Option<[f32; 2]>,
     ) -> Option<WeaponAim> {
-        let (boards, config, broad, controls, _, _, _, observer) = self.scopes.get(entity).ok()?;
-        let Some(config) = config else {
-            if crate::science::contact_routing::measured_machinery(broad, controls) {
-                return None;
-            }
-            return Some(WeaponAim {
-                route: contact.to_owned(),
-                position: legacy(contact)?,
-                velocity: None,
-                elevation: None,
-                measured: false,
-                tags: Vec::new(),
-                ordinary_domain: true,
-            });
-        };
-        let route = crate::science::contact_routing::resolve_machinery(
-            Some(&config.0),
-            Some(boards),
-            broad,
-            controls,
-            owner,
-            contact,
-        )?;
-        if self.runtime.as_deref().is_some_and(|runtime| {
-            observer.is_none_or(|observer| {
-                crate::gm::operations::contact::mode(
-                    &runtime.contact_overrides,
-                    &observer.0,
-                    &route,
-                ) == crate::gm::operations::contact::ContactMode::Conceal
-            })
-        }) {
-            return None;
-        }
-        let measured = crate::science::contact_routing::measured_machinery(broad, controls);
-        let elevation = if measured {
-            crate::weapons::mounts::measured_elevation(&config.0, boards, broad?, owner, contact)
-        } else {
-            None
-        };
-        let position = if measured {
-            crate::weapons::mounts::measured_point(&config.0, boards, broad?, owner, contact)?
-        } else {
-            legacy(&route)?
-        };
-        let velocity = if measured {
-            let view = config.0.observations_for_system(owner, &boards.0);
-            boards
-                .0
-                .keys()
-                .filter_map(|key| view.get(key))
-                .filter_map(crate::science::contact_routing::observations)
-                .flatten()
-                .find(|track| track.contact_id == contact && track.selectable && !track.predicted)
-                .and_then(|track| track.velocity)
-                .filter(|velocity| velocity.iter().all(|value| value.is_finite()))
-        } else {
-            None
-        };
-        let tags = if measured {
-            let view = config.0.observations_for_system(owner, &boards.0);
-            let mut classifications = boards
-                .0
-                .keys()
-                .filter_map(|key| view.get(key))
-                .filter_map(crate::science::contact_routing::observations)
-                .flatten()
-                .filter(|track| track.contact_id == contact && track.selectable && !track.predicted)
-                .filter_map(|track| track.classification.as_deref());
-            match classifications.next() {
-                Some(first) if classifications.all(|other| other == first) => {
-                    phoenix_model::tags::EntityTag::from_str(first)
-                        .into_iter()
-                        .collect()
-                }
-                _ => Vec::new(),
-            }
-        } else {
-            Vec::new()
-        };
-        // Routing has already proven this exact permitted actuator. Inspect
-        // domain membership only; no hidden pose, health or target enters aim.
-        let ordinary_domain = !measured
-            || self.ordinary.iter().any(|(entity, rock)| {
-                entity.is_some_and(|id| id.0 == route) || rock.is_some_and(|id| id.0 == route)
-            });
-        position
-            .iter()
-            .all(|value| value.is_finite())
-            .then_some(WeaponAim {
-                route,
-                position,
-                velocity,
-                elevation,
-                measured,
-                tags,
-                ordinary_domain,
-            })
+        self.context(entity)?
+            .resolve_reference(owner, contact, legacy, &|route| self.ordinary_route(route))
     }
 
     pub fn geometry(
@@ -488,25 +590,20 @@ impl WeaponAimInputs<'_, '_> {
         aim: &WeaponAim,
         physics: &crate::ship::state::ShipPhysics,
     ) -> crate::core::messages::WeaponTargetGeometry {
-        let state = self.scopes.get(entity).ok();
-        let mut geometry = crate::weapons::mounts::geometry(
-            state.and_then(|row| row.5),
-            state.and_then(|row| row.6),
-            owner,
-            mount,
-            aim.position,
-            [physics.x, physics.z],
-            physics.yaw,
-        );
-        if let Some(elevation) = aim.elevation {
-            let distance = ((f64::from(aim.position[0]) - f64::from(physics.x)).powi(2)
-                + (f64::from(aim.position[1]) - f64::from(physics.z)).powi(2)
-                + (f64::from(elevation.height) - f64::from(physics.y)).powi(2))
-            .sqrt();
-            geometry.in_range = distance.is_finite() && distance <= f64::from(mount.range);
-            geometry.range = distance.min(f64::from(f32::MAX)) as f32;
+        // Bare fixtures without boards still use the fixed physical mount.
+        if let Some(context) = self.context(entity) {
+            context.geometry(owner, mount, aim, physics)
+        } else {
+            crate::weapons::mounts::geometry(
+                None,
+                None,
+                owner,
+                mount,
+                aim.position,
+                [physics.x, physics.z],
+                physics.yaw,
+            )
         }
-        geometry
     }
 }
 

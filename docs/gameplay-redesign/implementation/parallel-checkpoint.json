@@ -1,6 +1,103 @@
 {
   "date": "2026-10-15",
   "status": "partial",
+  "current_summary": {
+    "source": "aa857479",
+    "per_increment_report": "README.md#per-increment-progress--15-october-2026",
+    "closed_increments": [
+      0
+    ],
+    "initial_automated_exits": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "remaining_scope": "All physical-device and human acceptance; integrated exits for 8–24; unfinished runtime and authored modes listed per increment in README.md.",
+    "integrated_since_last_host_batch": "Sector transit and Workshop routes; complete fixed-interval work receipts; shared signatures and paid concealment; bounded optional maintenance execution; physical carried-personnel escort with exact destination-request admission; measured formation Navigation. Full-host proof sources are integrated, not yet executed.",
+    "content_authoring_retry": {
+      "command": "cargo test -p phoenix-content-preparation --lib --no-default-features -- authoring::composition::tests",
+      "result": "15 passed, 1 failed. New route consumers pass. Catalogue fixture correction integrated as a75687f5; rerun is included in the current four-owner batch.",
+      "log": ".phoenix/resumed-route-append-owner-retry.log"
+    },
+    "simulation_owner_retry": {
+      "source": "4b278710",
+      "result": "291 passed, 5 failed after correcting the missing PassiveSignature test import. Reviewed fixture corrections for the five failures are integrated but not yet executed.",
+      "log": ".phoenix/resumed-sector-roster-energy-simulation-owner-retry.log",
+      "corrections": [
+        "a75687f5 (separate Content catalogue fixture)",
+        "fe49438a (complete actual Power hull construction)",
+        "e91e78b1 (real optional Jamming effect insertion)",
+        "8453abcf (normal Personnel run resources and real publication baseline)"
+      ]
+    },
+    "push": "Not performed. Full integration gate and outstanding acceptance have not passed.",
+    "compatibility": {
+      "protocol": 35,
+      "snapshot": 78,
+      "rules": "0.60"
+    },
+    "current_four_owner_native": {
+      "source": "3f783eec",
+      "status": "completed with failures; corrections are being integrated, not yet native verified",
+      "owners": [
+        "phoenix-content-preparation",
+        "phoenix-sim-gameplay",
+        "phoenix-sim-world",
+        "phoenix-simulation"
+      ],
+      "results": {
+        "phoenix-content-preparation": {
+          "passed": 15,
+          "failed": 2
+        },
+        "phoenix-sim-gameplay": {
+          "passed": 29,
+          "failed": 0
+        },
+        "phoenix-sim-world": {
+          "passed": 11,
+          "failed": 0
+        },
+        "phoenix-simulation": {
+          "passed": 319,
+          "failed": 29
+        }
+      },
+      "log": ".phoenix/resumed-four-owner-integrated-native-retry.log",
+      "corrections": "240299b3 restores actual base Science rating assignments on the optional cloak hull. aa857479 installs the normal Power fixture clock and retains old RepairActivity Postcard ordinals. Further fixture corrections pending."
+    },
+    "target_compilation": {
+      "source": "283a78a4; predates the latest exact-dispatch and Formation Navigation changes",
+      "result": "Five selected full-host targets compile in 8.65s; one existing headless-only native-audio dead-code warning remains.",
+      "log": ".phoenix/resumed-five-new-host-target-check-retry.log"
+    },
+    "client": {
+      "source": "3f783eec plus exact action-map inventory correction committed aa857479",
+      "result": "13 affected files initially 193 passed, 1 failed (new Formation command missing from exact inventory). Corrected inventory focused retry passed all 123 tests in that file; not a green original batch. Strict strings6386 clean; dependency layers passed.",
+      "logs": [
+        ".phoenix/resumed-integrated-thirteen-client.log",
+        ".phoenix/resumed-formation-action-inventory-retry.log"
+      ]
+    },
+    "asset_only_retries": [
+      {
+        "binary_source": "3f783eec",
+        "content_source": "240299b3",
+        "result": "Cloak filters: 9 passed, 1 failed; remaining fault intended an incomplete fitting pair but still retained the ordinary compiled fitting. Assertions retained.",
+        "log": ".phoenix/resumed-cloak-asset-only-native-retry.log"
+      },
+      {
+        "binary_source": "3f783eec",
+        "content_source": "240299b3",
+        "result": "Scripted Comms filters: 26 passed, 3 failed. Two bare fixture mesh-crew owner omissions and one intentional debug script panic remain under correction.",
+        "log": ".phoenix/resumed-comms-cloak-asset-only-native-retry.log"
+      }
+    ]
+  },
   "scope": "Integrated communication, movement, illumination, local personnel and equipment-bound facility checkpoints; no increment exit",
   "source": "873ca2d9 plus authored illumination power-group correction ba716438; later fixture corrections are not part of this executable",
   "compile": {

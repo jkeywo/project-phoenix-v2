@@ -13,7 +13,11 @@ Only increment 0 is formally closed. Increments 1–7 have recorded automated
 exits; physical-device and human-workload acceptance remain open. Later initial
 commits are implementation checkpoints, not verified increment exits. The latest
 focused host results cover 21 tests across 13 targets after a clearance fixture
-correction; they do not replace the full integrated gate.
+correction; they do not replace the full integrated gate. The latest four-owner native run passed 374 tests and failed 31. An optional
+cloak hull definition caused many failures; its correction cleared nine cloak
+tests and 26 scripted Comms tests in focused retries, with further failures
+remaining. Power continuation, fixture and digest corrections are in progress.
+These results do not establish a passing integrated exit.
 
 | Increment | Implementation state | Material remaining work |
 |---|---|---|
@@ -34,14 +38,14 @@ correction; they do not replace the full integrated gate.
 | 14 — Sensing/environment | Substantial implementation | Knowledge, presentation, balance and full acceptance. |
 | 15 — Layered combat | Substantial implementation | Broader combat/balance/workload coverage and full acceptance. |
 | 16 — Comms/orders | Channels, requests and relay operational | Human media, decoding, remaining operations and acceptance. |
-| 17 — Electronic operations | Jamming/protection/identity operational | Concealment in progress; low-emission advice and disruption remain. |
-| 18 — Movement/transit | Local jumps verified; sector code integrated | Sector native proof, formations, remaining assistance and acceptance. |
+| 17 — Electronic operations | Jamming/protection/identity operational | Concealment code/proofs integrated but native unverified; low-emission advice and disruption remain. |
+| 18 — Movement/transit | Local jumps verified; sector code integrated | Sector/formation native proof, Helm follow controls, remaining assistance and acceptance. |
 | 19 — Craft/deployables | Physical probe handling verified | Other craft/deployables, sorties, remote operation and acceptance. |
-| 20 — Personnel | Officers, care and retained roster operational | Transfer in progress; boarding/away/rescue/capture and acceptance. |
+| 20 — Personnel | Officers, care and retained roster operational | Transfer code/proofs integrated but native unverified; boarding/away/rescue/capture and acceptance. |
 | 21 — Facilities/actors | Finite ports and physical supply verified | Workforce, broader objectives/dependencies and acceptance. |
 | 22 — Authored HTN execution | Working scheduling/activity core | Broader operator/scenario coverage and full integration. |
 | 23 — Continuing modes | Accepted-commitment foundation | Patrol, War and Sandbox are not delivered. |
-| 24 — Discovery/Director | Maintenance opportunity consumer in isolated development | Admission/physical-work proof, broader generation/pacing and final audits. |
+| 24 — Discovery/Director | Bounded maintenance opportunity code/proofs integrated | Native admission/physical-work proof, autonomous prerequisite handling, broader generation/pacing and final audits. |
 
 Current source pins, failures and retries are recorded in
 [the integration checkpoint](parallel-checkpoint.json). Parallel worktree code is

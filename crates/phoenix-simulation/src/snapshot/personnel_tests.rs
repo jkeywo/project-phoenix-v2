@@ -4,12 +4,38 @@ use phoenix_sim_gameplay::personnel::PersonnelState;
 #[path = "activity_snapshot_tests.rs"]
 mod activities;
 
+// These owner fixtures bypass App plugins. Install the normal run resources
+// whose absence is deliberately distinct in the canonical digest; whole restore
+// always installs their captured values. No personnel outcome is manufactured.
+fn install_fixture_run_scope(world: &mut World) {
+    world.init_resource::<crate::gm::actions::action::SimulationPaused>();
+    world.init_resource::<crate::gm::actions::action::GmActionJournal>();
+    world.init_resource::<crate::gm::operations::puppet::StationPuppets>();
+    world.init_resource::<crate::gm::operations::puppet::PendingGmStationCommands>();
+    world.init_resource::<crate::core::report::MissionReport>();
+}
+fn publish_fixture_observations(world: &mut World) {
+    use bevy::ecs::system::RunSystemOnce;
+    // Actual observation read-model owners, matching whole restore's rebuild.
+    // They buy no scan/receiver work and mutate no authoritative observations.
+    world
+        .run_system_once(crate::science::server::publish_scan_blackboard)
+        .unwrap();
+    world
+        .run_system_once(crate::science::passive::publish)
+        .unwrap();
+    world
+        .run_system_once(crate::ship::sensors::publish_sensor_radar_blackboard)
+        .unwrap();
+}
+
 fn fixture() -> (World, Entity, PhoenixSnapshot) {
     let config = crate::entities::include_resolve::load_entity_config(
         "assets/entities/personnel_cruiser.toml",
     )
     .unwrap();
     let mut world = World::new();
+    install_fixture_run_scope(&mut world);
     crate::console::repair::personnel::register_hooks(&mut world);
     world.register_component::<EntitySystemHull>();
     world.register_component::<EntityShipArcHull>();
@@ -46,6 +72,7 @@ fn fixture() -> (World, Entity, PhoenixSnapshot) {
             18,
         )
         .unwrap();
+    publish_fixture_observations(&mut world);
     let saved = capture(&world);
     assert_eq!(saved.personnel.origins.len(), 1);
     assert!(saved.entities[0].repair.as_ref().unwrap().jobs.is_some());
@@ -164,6 +191,7 @@ fn actual_medical_candidate_rejects_forged_site_terms_condition_and_exclusive_te
     )
     .unwrap();
     let mut world = World::new();
+    install_fixture_run_scope(&mut world);
     world.register_component::<EntitySystemHull>();
     world.register_component::<EntityShipArcHull>();
     world.register_component::<crate::console::repair::server::RepairRequestQueue>();
@@ -192,6 +220,7 @@ fn actual_medical_candidate_rejects_forged_site_terms_condition_and_exclusive_te
         .0
         .claim_treatment(&profile, &personnel, "repair-chief", 1)
         .unwrap();
+    publish_fixture_observations(&mut world);
     let saved: PhoenixSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&capture(&world)).unwrap()).unwrap();
     validate_roster(&world, &saved).unwrap();

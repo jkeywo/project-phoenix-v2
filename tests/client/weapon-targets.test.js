@@ -14,6 +14,22 @@ const state = () => ({ weapon_targets: { rows: [
   { system: 'beam-c', controllable: true, assignment: { individual: null, group: null } },
 ], contacts: [{ id: 'one', name: 'Known' }], groups: [{ id: 'pair', label: 'weapon.group.main_beams', members: ['beam-a', 'tube-b', 'beam-c'] }] } });
 describe('weapon target assignments', () => {
+  it('keeps unavailable display references distinct from explicit hold without exposing old identifiers', () => {
+    const raw = { a: { individual: { mode: 'unavailable' }, group: { group: 'pair', target: { mode: 'unavailable' } } },
+      b: { individual: { mode: 'hold' }, group: { group: 'pair', target: { mode: 'target', contact: 'one' } } } };
+    const view = weaponTargetsPayload({ systemKinds: { a: 'phaser_bank', b: 'phaser_bank' }, controlSources: { a: 'Human', b: 'Human' } }, ['a', 'b'], raw, []);
+    expect(view.rows[0].assignment).toEqual({ individual: { mode: 'unavailable' }, group: { group: 'pair', target: null, unavailable: true } });
+    expect(view.rows[1].assignment).toEqual({ individual: { mode: 'hold' }, group: { group: 'pair', target: 'one', unavailable: false } });
+    expect(raw.a.individual.mode).toBe('unavailable');
+    const controls = mountWeaponTargetControls(document); document.body.append(controls.node);
+    controls.update({ ...view, groups: [{ id: 'pair', label: 'weapon.group.main_beams', members: ['a', 'b'] }] });
+    const a = document.querySelector('[data-assignment-key="a"] span:nth-child(2)').textContent;
+    const b = document.querySelector('[data-assignment-key="b"] span:nth-child(2)').textContent;
+    expect(a).toContain('Selected contact unavailable');
+    expect(a).not.toContain('Hold fire');
+    expect(b).toContain('Hold fire');
+  });
+
   afterEach(() => { delete window.activateSemanticAction; document.body.replaceChildren(); });
   it('projects only exact owned Human machinery as controllable without granting a group', () => {
     const view = weaponTargetsPayload({ systemKinds: { a: 'phaser_bank', b: 'torpedo_tube', radar: 'tactical_radar' }, controlSources: { a: 'Human', b: 'Human' } }, ['a'], { b: { individual: { mode: 'hold' } } },

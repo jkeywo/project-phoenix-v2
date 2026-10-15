@@ -4538,6 +4538,8 @@ pub struct ShieldOperationBlackboard {
 /// the ship blackboard (issue #560).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct WeaponsBlackboard {
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub assignments: std::collections::BTreeMap<SystemId, crate::weapon_targets_view::WeaponTargetAssignmentView>,
     #[serde(default)]
     pub weapons_restrained: bool,
     #[serde(default)]

@@ -19,6 +19,7 @@ pub(super) struct ReferenceProjection {
     measured: bool,
     contexts: BTreeMap<ConsoleId, Vec<KnownContact>>,
     publishers: BTreeMap<SystemId, ConsoleId>,
+    weapon_members: BTreeMap<ConsoleId, BTreeSet<SystemId>>,
     receipt: BTreeMap<String, BTreeSet<SystemId>>,
     tactical: Option<SystemId>,
     bound_combat: Option<SystemId>,
@@ -76,6 +77,26 @@ impl ReferenceProjection {
                 continue;
             }
             let view = config.observations_for_system(&system.id, boards);
+            result.weapon_members.insert(
+                console.id.clone(),
+                config
+                    .systems
+                    .iter()
+                    .filter(|member| {
+                        matches!(
+                            member.kind.as_str(),
+                            PHASER_BANK_KIND | BLASTER_BANK_KIND | TORPEDO_TUBE_KIND
+                        ) && (member.console.as_ref() == Some(&console.id)
+                            || boards.get(&member.id).is_some_and(|board| {
+                                console
+                                    .feeds
+                                    .iter()
+                                    .any(|feed| feed.accepts(&member.id, board))
+                            }))
+                    })
+                    .map(|member| member.id.clone())
+                    .collect(),
+            );
             let mut known = Vec::new();
             if let (Some(profiles), Some(tracks)) = (profiles, tracks) {
                 for (owner, instrument) in &profiles.0 {
@@ -247,6 +268,34 @@ impl ReferenceProjection {
                 board.last_attacker_uuid = alias(board.last_attacker_uuid.as_deref(), None);
             }
             SystemBlackboard::Weapons(board) => {
+                use phoenix_model::weapon_targets_view::WeaponTargetReference;
+                let members = self
+                    .publishers
+                    .get(source)
+                    .and_then(|console| self.weapon_members.get(console));
+                board
+                    .assignments
+                    .retain(|owner, _| members.is_some_and(|members| members.contains(owner)));
+                for assignment in board.assignments.values_mut() {
+                    let project = |target: &mut WeaponTargetReference| {
+                        if let WeaponTargetReference::Target { contact } = target {
+                            // Explicit public handles keep provenance; a private UUID
+                            // or stale/forged handle is never silently retargeted.
+                            *target = self
+                                .resolve(source, Some(contact), None)
+                                .filter(|known| known.id == *contact)
+                                .map_or(WeaponTargetReference::Unavailable, |known| {
+                                    WeaponTargetReference::Target { contact: known.id }
+                                });
+                        }
+                    };
+                    if let Some(group) = &mut assignment.group {
+                        project(&mut group.target);
+                    }
+                    if let Some(individual) = &mut assignment.individual {
+                        project(individual);
+                    }
+                }
                 let target = self.resolve(
                     source,
                     board.target_uuid.as_deref(),

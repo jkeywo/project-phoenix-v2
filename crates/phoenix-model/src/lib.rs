@@ -45,3 +45,5 @@ pub mod logistics_ui;
 pub mod turret;
 pub mod umbilical;
 pub mod weapon_operation;
+
+pub mod weapon_targets_view;

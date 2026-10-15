@@ -1545,3 +1545,5 @@ fn legacy_navigation_projection_preserves_its_anchor() {
     projection.navigation(&SystemId("navigation".into()), &mut board, |_| false);
     assert_eq!(board, original);
 }
+#[path = "console_delivery_weapon_targets_tests.rs"]
+mod weapon_assignment_views;

@@ -5864,3 +5864,5 @@ workshop.weapon.round_amount,Weapon round feed,Rounds per barrel,Munition je Roh
 entity.broadside_cruiser.name,Optional finite-round battery hull,Broadside Cruiser,Breitseitenkreuzer,Broadside Cruiser,machine
 weapon.side-battery.label,Finite round weapon bank,Side battery,Seitenbatterie,Side battery,machine
 weapon.kinetic-rounds.label,Finite local ammunition,Kinetic rounds,Kinetische Munition,Kinetic rounds,machine
+
+weapons.assignments.unavailable,Withheld weapon assignment reference,Selected contact unavailable,Gewaehlter Kontakt nicht verfuegbar,Selected contact unavailable,machine

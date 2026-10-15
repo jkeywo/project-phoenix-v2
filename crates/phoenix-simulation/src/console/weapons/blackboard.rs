@@ -902,6 +902,7 @@ pub(crate) fn publish_weapons_core_blackboard(
             Has<crate::server_app::LocalShip>,
             Option<&crate::ship::power::ShipPowerSystem>,
             Option<&crate::ship::power::PowerConfigResource>,
+            Option<&super::assignments::ShipWeaponTargets>,
             (
                 Option<&crate::ship_plugin::ShipConfigComponent>,
                 Option<&crate::science::broad::BroadTracks>,
@@ -931,6 +932,7 @@ pub(crate) fn publish_weapons_core_blackboard(
         is_local,
         power,
         power_config,
+        assignments,
         (config, broad_tracks, sensing_controls),
     ) in ship_q.iter_mut()
     {
@@ -1084,6 +1086,9 @@ pub(crate) fn publish_weapons_core_blackboard(
             .unwrap_or_default();
 
         let bb = WeaponsBlackboard {
+            assignments: assignments.map(|state| state.0.0.iter().map(|(owner, intent)|
+                (owner.clone(), phoenix_model::weapon_targets_view::WeaponTargetAssignmentView::from(intent)))
+                .collect()).unwrap_or_default(),
             weapons_restrained: power.is_some_and(|power| power.0.weapons_restrained()),
             weapons_restraint_auto: control_sources.is_some_and(|sources| {
                 sources

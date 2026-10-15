@@ -63,8 +63,8 @@ export function mountWeaponTargetControls(doc) {
       const individual = row.assignment?.individual, group = row.assignment?.group;
       const target = individual?.mode === 'target' ? individual.contact : !individual ? group?.target : null;
       const name = view.contacts?.find(contact => contact.id === target)?.name || t('weapons.assignments.held_contact');
-      const base = group ? t('weapons.assignments.group_base', { group: t(view.groups.find(row => row.id === group.group)?.label || group.group), target: group.target ? (view.contacts?.find(contact => contact.id === group.target)?.name || t('weapons.assignments.held_contact')) : t('weapons.assignments.hold') }) : t('weapons.assignments.primary');
-      const selected = individual?.mode === 'hold' ? t('weapons.assignments.hold') : individual?.mode === 'target' ? name : null;
+      const base = group ? t('weapons.assignments.group_base', { group: t(view.groups.find(row => row.id === group.group)?.label || group.group), target: group.unavailable ? t('weapons.assignments.unavailable') : group.target ? (view.contacts?.find(contact => contact.id === group.target)?.name || t('weapons.assignments.held_contact')) : t('weapons.assignments.hold') }) : t('weapons.assignments.primary');
+      const selected = individual?.mode === 'hold' ? t('weapons.assignments.hold') : individual?.mode === 'target' ? name : individual?.mode === 'unavailable' ? t('weapons.assignments.unavailable') : null;
       control.status.textContent = (!row.controllable ? t(row.auto ? 'console.common.auto' : 'weapons.assignments.read_only') + ' / ' : '')
         + (selected ? t('weapons.assignments.override', { target: selected }) + ' / ' + base : base);
       for (const button of control.buttons) button.disabled = !row.controllable;

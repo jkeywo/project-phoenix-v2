@@ -13,6 +13,7 @@ pub mod core {
 }
 pub mod ai;
 pub mod console;
+pub mod electronic;
 pub mod entities;
 pub mod jobs;
 pub mod modifiers;

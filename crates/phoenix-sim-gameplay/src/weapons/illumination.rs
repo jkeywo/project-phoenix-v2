@@ -59,17 +59,7 @@ pub fn validate_channels(
 /// Boolean target output means use the one permitted request resolved by this
 /// host. Workshop trees cannot construct private identities or arbitrary code.
 pub fn bindings(enabled: &str, target: &str) -> SupportedBindings {
-    SupportedBindings {
-        facts: [
-            "enabled",
-            "has_target",
-            "target_available",
-            "request_available",
-        ]
-        .map(str::to_owned)
-        .into(),
-        channels: [enabled.to_owned(), target.to_owned()].into(),
-    }
+    crate::ship::composition::enabled_target_bindings(enabled, target)
 }
 
 #[cfg(test)]

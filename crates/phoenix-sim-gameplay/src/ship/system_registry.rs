@@ -179,6 +179,7 @@ pub const DOCK_SYSTEM_ID: &str = "dock";
 pub const DOCK_KIND: &str = "dock";
 /// Independent mounted Science illumination.
 pub const ILLUMINATION_KIND: &str = "illumination";
+pub const JAMMING_KIND: &str = "jamming";
 pub const ACCESS_GATE_KIND: &str = "access-gate";
 pub const FABRICATION_KIND: &str = crate::resources::production::FABRICATION_KIND;
 pub const RECOVERY_KIND: &str = crate::resources::recovery::RECOVERY_KIND;
@@ -546,6 +547,7 @@ impl SystemKindRegistry {
         // Dock is rendered by Helm regardless of either instance/station id.
         registry.register_commandable(DOCK_KIND, ConsoleFamily::Helm)?;
         registry.register_commandable(ILLUMINATION_KIND, ConsoleFamily::Sensors)?;
+        registry.register_commandable(JAMMING_KIND, ConsoleFamily::Comms)?;
         registry.register_commandable(ACCESS_GATE_KIND, ConsoleFamily::Access)?;
         registry.register_commandable(LOGISTICS_KIND, ConsoleFamily::Logistics)?;
         registry.register_commandable(FABRICATION_KIND, ConsoleFamily::Production)?;

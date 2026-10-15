@@ -56,6 +56,51 @@ impl MountConfig {
     }
 }
 
+/// Shared finite three-dimensional cone. Zero distance is inside coverage;
+/// this is physical geometry only and grants no target knowledge or authority.
+#[allow(clippy::too_many_arguments)]
+pub fn contains_3d(
+    origin: [f32; 3],
+    heading: f32,
+    pitch: f32,
+    target: [f32; 3],
+    range: f32,
+    fire_arc_deg: f32,
+) -> bool {
+    if !origin
+        .iter()
+        .chain(target.iter())
+        .all(|value| value.is_finite())
+        || !heading.is_finite()
+        || !pitch.is_finite()
+        || !range.is_finite()
+        || range <= 0.0
+        || !fire_arc_deg.is_finite()
+        || !(0.0 < fire_arc_deg && fire_arc_deg <= 360.0)
+    {
+        return false;
+    }
+    let delta = glam::DVec3::from_array(target.map(f64::from))
+        - glam::DVec3::from_array(origin.map(f64::from));
+    let distance = delta.length();
+    if distance > f64::from(range) {
+        return false;
+    }
+    if distance > 0.0 && fire_arc_deg < 360.0 {
+        let forward = glam::DVec3::new(
+            f64::from(simmath::sin(heading)) * f64::from(simmath::cos(pitch)),
+            f64::from(simmath::sin(pitch)),
+            -f64::from(simmath::cos(heading)) * f64::from(simmath::cos(pitch)),
+        )
+        .normalize();
+        let threshold = f64::from(simmath::cos(fire_arc_deg.to_radians() * 0.5));
+        if forward.dot(delta / distance) < threshold {
+            return false;
+        }
+    }
+    true
+}
+
 /// A resolved payload at the moment of impact, after the strategy's own
 /// fractional accumulation or strike modifier. No duplicate projectile state.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

@@ -17,6 +17,25 @@ pub struct CommandChannelConfig {
     pub kind: CommandChannelKind,
 }
 
+/// Shared closed output vocabulary for the two actual independently targeted
+/// emitters. It contains no target IDs or global target selection.
+pub fn enabled_target_bindings(
+    enabled: &str,
+    target: &str,
+) -> crate::ai::state_tree::SupportedBindings {
+    crate::ai::state_tree::SupportedBindings {
+        facts: [
+            "enabled",
+            "has_target",
+            "target_available",
+            "request_available",
+        ]
+        .map(str::to_owned)
+        .into(),
+        channels: [enabled.to_owned(), target.to_owned()].into(),
+    }
+}
+
 /// The supported palette grows with real migrated consumers, not arbitrary scripts.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -30,6 +49,13 @@ pub enum SystemComponentConfig {
     },
     PowerInput {
         id: String,
+    },
+    JammingEmitter {
+        id: String,
+        enabled_channel: String,
+        target_channel: String,
+        power_input: String,
+        config: crate::electronic::jamming::JammingConfig,
     },
     IlluminationEmitter {
         id: String,
@@ -54,6 +80,7 @@ impl SystemComponentConfig {
         match self {
             Self::DockMating { id, .. }
             | Self::IlluminationEmitter { id, .. }
+            | Self::JammingEmitter { id, .. }
             | Self::PowerInput { id }
             | Self::Turret { id, .. }
             | Self::AccessBoundary { id, .. } => id,
@@ -167,10 +194,66 @@ pub fn illumination_composition(
         _ => None,
     })
 }
+pub struct JammingComposition<'a> {
+    pub component_id: &'a str,
+    pub enabled_channel: &'a str,
+    pub target_channel: &'a str,
+    pub power_input: &'a str,
+    pub config: &'a crate::electronic::jamming::JammingConfig,
+}
+pub fn jamming_composition(components: &[SystemComponentConfig]) -> Option<JammingComposition<'_>> {
+    components.iter().find_map(|component| match component {
+        SystemComponentConfig::JammingEmitter {
+            id,
+            enabled_channel,
+            target_channel,
+            power_input,
+            config,
+        } => Some(JammingComposition {
+            component_id: id,
+            enabled_channel,
+            target_channel,
+            power_input,
+            config,
+        }),
+        _ => None,
+    })
+}
+fn validate_jamming(system: &super::config::SystemInstanceConfig) -> Result<(), String> {
+    let binding = jamming_composition(&system.components)
+        .ok_or("jamming requires one supported emitter component")?;
+    binding.config.validate()?;
+    validate_mounted_emitter(
+        system,
+        binding.component_id,
+        binding.enabled_channel,
+        binding.target_channel,
+        binding.power_input,
+        "jamming",
+    )
+}
 fn validate_illumination(system: &super::config::SystemInstanceConfig) -> Result<(), String> {
     let binding = illumination_composition(&system.components)
         .ok_or("illumination requires one supported emitter component")?;
     binding.config.validate()?;
+    validate_mounted_emitter(
+        system,
+        binding.component_id,
+        binding.enabled_channel,
+        binding.target_channel,
+        binding.power_input,
+        "illumination",
+    )
+}
+/// Both actual emitters share the same exact typed intent and input/turret wiring.
+fn validate_mounted_emitter(
+    system: &super::config::SystemInstanceConfig,
+    component_id: &str,
+    enabled_channel: &str,
+    target_channel: &str,
+    power_input: &str,
+    label: &str,
+) -> Result<(), String> {
     let mut ids = BTreeSet::new();
     if system.power_group.is_none()
         || system
@@ -178,9 +261,9 @@ fn validate_illumination(system: &super::config::SystemInstanceConfig) -> Result
             .iter()
             .any(|component| !valid_id(component.id()) || !ids.insert(component.id()))
     {
-        return Err(
-            "illumination requires unique component identities and an actual power group".into(),
-        );
+        return Err(format!(
+            "{label} requires unique component identities and an actual power group"
+        ));
     }
     let mut channels = BTreeMap::new();
     for channel in &system.channels {
@@ -189,42 +272,43 @@ fn validate_illumination(system: &super::config::SystemInstanceConfig) -> Result
                 .insert(channel.name.as_str(), &channel.kind)
                 .is_some()
         {
-            return Err("illumination requires unique valid generic channels".into());
+            return Err(format!("{label} requires unique valid generic channels"));
         }
     }
     if channels.len() != 2
-        || channels.get(binding.enabled_channel) != Some(&&CommandChannelKind::Boolean)
-        || channels.get(binding.target_channel) != Some(&&CommandChannelKind::EntityTarget)
+        || channels.get(enabled_channel) != Some(&&CommandChannelKind::Boolean)
+        || channels.get(target_channel) != Some(&&CommandChannelKind::EntityTarget)
     {
-        return Err("illumination requires its exact declared enabled/target channels".into());
+        return Err(format!(
+            "{label} requires its exact declared enabled/target channels"
+        ));
     }
     let mut emitters = 0;
     let mut inputs = 0;
     let mut turrets = 0;
     for component in &system.components {
         match component {
-            SystemComponentConfig::IlluminationEmitter { .. } => emitters += 1,
-            SystemComponentConfig::PowerInput { id } if id == binding.power_input => inputs += 1,
+            component if component.id() == component_id => emitters += 1,
+            SystemComponentConfig::PowerInput { id } if id == power_input => inputs += 1,
             SystemComponentConfig::Turret {
-                power_input,
+                power_input: input,
                 config,
                 ..
-            } if power_input == binding.power_input => {
+            } if input == power_input => {
                 config.validate()?;
                 turrets += 1;
             }
             _ => {
-                return Err(
-                    "illumination contains an unused or incorrectly connected component".into(),
-                )
+                return Err(format!(
+                    "{label} contains an unused or incorrectly connected component"
+                ))
             }
         }
     }
     if emitters != 1 || inputs != 1 || turrets > 1 {
-        return Err(
-            "illumination supports one emitter, one power input and at most one shared turret"
-                .into(),
-        );
+        return Err(format!(
+            "{label} supports one emitter, one power input and at most one shared turret"
+        ));
     }
     Ok(())
 }
@@ -283,6 +367,9 @@ fn validate_turret(system: &super::config::SystemInstanceConfig) -> Result<(), S
 }
 
 pub fn validate_composition(system: &super::config::SystemInstanceConfig) -> Result<(), String> {
+    if system.kind == super::system_registry::JAMMING_KIND {
+        return validate_jamming(system);
+    }
     if system.kind == super::system_registry::ILLUMINATION_KIND {
         return validate_illumination(system);
     }

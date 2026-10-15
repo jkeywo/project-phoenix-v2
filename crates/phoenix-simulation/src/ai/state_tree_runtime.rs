@@ -110,6 +110,17 @@ pub fn compile_ship_trees_with_energy(
                     binding.target_channel,
                 ),
             )
+        } else if system.kind == crate::ship::system_registry::JAMMING_KIND {
+            let binding =
+                phoenix_sim_gameplay::ship::composition::jamming_composition(&system.components)
+                    .ok_or("jamming state tree requires emitter composition")?;
+            compile(
+                &definition,
+                &phoenix_sim_gameplay::electronic::jamming::bindings(
+                    binding.enabled_channel,
+                    binding.target_channel,
+                ),
+            )
         } else if system.kind == crate::ship::system_registry::ACCESS_GATE_KIND {
             let [phoenix_sim_gameplay::ship::composition::SystemComponentConfig::AccessBoundary {
                 sealed_channel,

@@ -1,5 +1,4 @@
 //! Finite measured guidance inputs; physical collision candidates are unrelated.
-use crate::simmath;
 use phoenix_model::guided_guidance::{
     GuidanceObservation, GuidanceReceiverProfile, GuidanceSource, SeekerProfile,
 };
@@ -30,23 +29,15 @@ pub fn seeker_observation(
     {
         return None;
     }
-    let delta = glam::DVec3::from_array(target_position.map(f64::from))
-        - glam::DVec3::from_array(round_position.map(f64::from));
-    let distance = delta.length();
-    if distance > f64::from(profile.range) {
+    if !super::mount::contains_3d(
+        round_position,
+        heading,
+        pitch,
+        target_position,
+        profile.range,
+        profile.fire_arc_deg,
+    ) {
         return None;
-    }
-    if distance > 0.0 && profile.fire_arc_deg < 360.0 {
-        let forward = glam::DVec3::new(
-            f64::from(simmath::sin(heading)) * f64::from(simmath::cos(pitch)),
-            f64::from(simmath::sin(pitch)),
-            -f64::from(simmath::cos(heading)) * f64::from(simmath::cos(pitch)),
-        )
-        .normalize();
-        let threshold = f64::from(simmath::cos(profile.fire_arc_deg.to_radians() * 0.5));
-        if forward.dot(delta / distance) < threshold {
-            return None;
-        }
     }
     let result = GuidanceObservation {
         target_uuid: target_uuid.into(),

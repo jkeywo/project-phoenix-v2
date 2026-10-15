@@ -90,6 +90,7 @@ pub fn requires_energy_profile(kind: &str) -> bool {
             | TRACTOR_KIND
             | DOCK_KIND
             | ILLUMINATION_KIND
+            | JAMMING_KIND
             | UMBILICAL_KIND
             | TRANSPORTER_KIND
             | SECURITY_KIND
@@ -276,11 +277,15 @@ impl EnergyConfigSection {
             )?;
             finite_nonnegative(&owner, "discrete_cost", consumer.discrete_cost)?;
             if ship.system(&consumer.system).is_some_and(|system| {
-                system.kind == crate::ship::system_registry::ILLUMINATION_KIND
+                matches!(
+                    system.kind.as_str(),
+                    crate::ship::system_registry::ILLUMINATION_KIND
+                        | crate::ship::system_registry::JAMMING_KIND
+                )
             }) && consumer.continuous_cost_per_sec <= 0.0
             {
                 return Err(format!(
-                    "{owner} illumination requires positive continuous work cost"
+                    "{owner} emitter requires positive continuous work cost"
                 ));
             }
             if consumer.discrete_cost > consumer.reserve.capacity {

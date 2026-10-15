@@ -3,7 +3,6 @@
 use super::*;
 use crate::core::messages::*;
 use crate::entities::config::EntityConfig;
-use crate::entities::spawner::EntityUuid;
 use crate::infrastructure::{CapacityAdjustment, InfrastructureCondition};
 use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Target};
 use crate::modifiers::power_system::{PowerState, PowerSystem};
@@ -31,7 +30,6 @@ fn hull() -> EntityConfig {
 }
 fn app_with(config: EntityConfig) -> (App, Entity) {
     let ship = config.ship_config.clone().unwrap();
-    let power = PowerSystem::from_energy(config.energy.clone().unwrap(), ship.clone()).unwrap();
     let mut app = App::new();
     app.add_plugins((
         LobbyPlugin,
@@ -80,28 +78,33 @@ fn app_with(config: EntityConfig) -> (App, Entity) {
             })
             .collect(),
     );
-    let entity = app
-        .world_mut()
-        .spawn((
-            Ship,
-            LocalShip,
-            EntityUuid("energy-ship".into()),
-            ShipPowerSystem(power),
-            ShipConfigComponent(ship),
-            hosts,
-            ConsoleWorkingViews::default(),
-            ShipSystemBlackboards::default(),
-            ShipSystemControlSources::default(),
-            ActiveStationRatings::default(),
-            AdmittedCommands::default(),
-            CoordinationQueue::default(),
-            PowerBrownoutState::default(),
-            ResourceServices(config.resource_services.clone()),
-            InfrastructureCondition(crate::infrastructure::InfrastructureState::from_config(
-                config.infrastructure.as_ref().unwrap(),
-            )),
-        ))
-        .id();
+    // Use the ordinary accepted hull constructor: whole-candidate restore
+    // validates every fitted capability, not only the energy owner under test.
+    let entity = crate::entities::spawner::spawn_entity(
+        &mut app.world_mut().commands(),
+        &config,
+        Vec3::ZERO,
+        "energy-ship".into(),
+        None,
+    );
+    app.world_mut().flush();
+    app.world_mut().entity_mut(entity).insert((
+        Ship,
+        LocalShip,
+        ShipConfigComponent(ship),
+        hosts,
+        ConsoleWorkingViews::default(),
+        ShipSystemBlackboards::default(),
+        ShipSystemControlSources::default(),
+        ActiveStationRatings::default(),
+        AdmittedCommands::default(),
+        CoordinationQueue::default(),
+        PowerBrownoutState::default(),
+        ResourceServices(config.resource_services.clone()),
+        InfrastructureCondition(crate::infrastructure::InfrastructureState::from_config(
+            config.infrastructure.as_ref().unwrap(),
+        )),
+    ));
     // Preserve the ordinary capture registration gate without constructing a
     // separate save-only Power projection.
     app.world_mut()

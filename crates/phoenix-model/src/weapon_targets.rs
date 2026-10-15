@@ -32,6 +32,9 @@ pub struct WeaponTargetAssignment {
     pub group: Option<WeaponGroupAssignment>,
     /// Absence follows the base assignment. Explicit Hold survives JSON.
     pub individual: Option<WeaponIndividualAssignment>,
+    /// A public current-contact fallback. It never overrides an explicit order
+    /// or a primary target already admitted as eligible by the owning weapon.
+    pub automatic: Option<String>,
 }
 
 impl WeaponTargetAssignment {
@@ -39,14 +42,22 @@ impl WeaponTargetAssignment {
         match &self.individual {
             Some(WeaponIndividualAssignment::Hold) => None,
             Some(WeaponIndividualAssignment::Target { contact }) => Some(contact),
-            None => self
-                .group
-                .as_ref()
-                .map_or(primary, |group| group.target.as_deref()),
+            None => self.group.as_ref().map_or_else(
+                || primary.or(self.automatic.as_deref()),
+                |group| group.target.as_deref(),
+            ),
         }
     }
 
     pub fn follows_primary(&self) -> bool {
-        self.individual.is_none() && self.group.is_none()
+        !self.has_explicit_order()
+    }
+
+    pub fn has_explicit_order(&self) -> bool {
+        self.individual.is_some() || self.group.is_some()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        !self.has_explicit_order() && self.automatic.is_none()
     }
 }

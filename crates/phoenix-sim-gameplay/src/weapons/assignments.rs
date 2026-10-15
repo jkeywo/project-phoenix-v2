@@ -29,17 +29,34 @@ impl WeaponTargetAssignments {
         self.0.entry(owner).or_default().group = Some(WeaponGroupAssignment { group, target });
     }
 
+    pub fn set_automatic(&mut self, owner: SystemId, target: Option<String>) {
+        if let Some(contact) = target {
+            self.0.entry(owner).or_default().automatic = Some(contact);
+        } else if let Some(assignment) = self.0.get_mut(&owner) {
+            assignment.automatic = None;
+            if assignment.is_empty() {
+                self.0.remove(&owner);
+            }
+        }
+    }
+
     pub fn follow_group(&mut self, owner: &SystemId) {
         if let Some(assignment) = self.0.get_mut(owner) {
             assignment.individual = None;
-            if assignment.follows_primary() {
+            if assignment.is_empty() {
                 self.0.remove(owner);
             }
         }
     }
 
     pub fn follow_primary(&mut self, owner: &SystemId) {
-        self.0.remove(owner);
+        if let Some(assignment) = self.0.get_mut(owner) {
+            assignment.individual = None;
+            assignment.group = None;
+            if assignment.is_empty() {
+                self.0.remove(owner);
+            }
+        }
     }
 }
 

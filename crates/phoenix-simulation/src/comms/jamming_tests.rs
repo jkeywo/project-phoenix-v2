@@ -329,3 +329,44 @@ fn stationary_or_missing_physical_prerequisites_settle_empty_instead_of_jamming_
         }
     }
 }
+
+#[test]
+fn shared_actual_signal_gate_scales_each_endpoint_once_and_recovers_after_stop() {
+    let (mut world, source, _, contact) = fixture();
+    prepare(&mut world, source, &contact);
+    world.run_system_once(tick).unwrap();
+    let reaches = |world: &mut World, range: f32| {
+        world
+            .run_system_once(
+                move |paths: crate::regions::signal_path::RegionSignalQuery| {
+                    super::super::server::signal_comms_in_range(
+                        &paths,
+                        Vec3::ZERO,
+                        Vec3::new(0.0, 0.0, -100.0),
+                        range,
+                        400.0,
+                    )
+                },
+            )
+            .unwrap()
+    };
+    assert!(
+        reaches(&mut world, 501.0),
+        "one factor per endpoint leaves both physical reaches above100"
+    );
+    assert!(
+        !reaches(&mut world, 499.0),
+        "jammer's own receiver is also exposed"
+    );
+    command(
+        &mut world,
+        source,
+        Control::SetJammingEnabled { enabled: false },
+    );
+    world.resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+    world.run_system_once(tick).unwrap();
+    assert!(
+        reaches(&mut world, 101.0),
+        "same signal owner recovers after an actual stop boundary"
+    );
+}

@@ -9,3 +9,7 @@ pub struct JammingControlsView {
     pub controllable: bool,
     pub targets: Vec<crate::guided_orders::GuidanceTargetOption>,
 }
+
+#[cfg(test)]
+#[path = "jamming_ui_tests.rs"]
+mod tests;

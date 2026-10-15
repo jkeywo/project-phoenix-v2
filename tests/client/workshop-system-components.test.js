@@ -102,3 +102,13 @@ it('edits explicit moving Dock capability with a boolean control rather than tex
   control.checked=false; control.dispatchEvent(new Event('input')); expect(editor.value().components[1].config.moves_body).toBe(false);
   document.body.innerHTML = "";
 });
+
+it('stages independent jammer evidence/strength/falloff fields through one composition transaction',()=>{
+ document.body.innerHTML='<main></main>';const apply=vi.fn(),editor=mountSystemComponents({root:document.querySelector('main'),apply});
+ const jamming={component_fields:{power_input:[],jamming_emitter:[{name:'enabled_channel',kind:'boolean_channel'},{name:'target_channel',kind:'entity_target_channel'},{name:'power_input',kind:'power_input_component'},...['strength','maximum_sample_age_secs'].map(name=>({name:'config.'+name,kind:'number'})),{name:'config.falloff',kind:'text'}],turret:[]}};
+ editor.refresh({id:'comms-jam',kind:'jamming',local:true,power_group:'radio'},jamming,false);
+ expect(document.querySelector('fieldset').disabled).toBe(false);expect(editor.value().components.map(row=>row.kind)).toEqual(['power_input','jamming_emitter']);
+ change(el('channels').querySelector('[aria-label="boolean"]'),'radiating');el('list').value='1';el('list').dispatchEvent(new Event('change'));
+ expect(el('field-enabled_channel').value).toBe('radiating');change(el('field-config-strength'),'2.5');change(el('field-config-maximum_sample_age_secs'),'1.5');change(el('field-config-falloff'),'smooth');
+ expect(apply).not.toHaveBeenCalled();el('apply').click();expect(apply.mock.calls[0][0]()).toMatchObject({id:'comms-jam',components:[{kind:'power_input'},{kind:'jamming_emitter',enabled_channel:'radiating',config:{strength:2.5,maximum_sample_age_secs:1.5,falloff:'smooth'}}]});
+});

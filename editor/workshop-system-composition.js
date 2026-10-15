@@ -12,29 +12,44 @@ export const initialIllumination = () => ({
   components: [{kind:'power_input',id:'input'}, {kind:'illumination_emitter',id:'emitter',power_input:'input',enabled_channel:'enabled',target_channel:'target',config:{mount:{facing_deg:0,fire_arc_deg:60,range:200},link_range:200,minimum_transmission:0.1,reading_ticks:30}}],
   channels: [{name:'enabled',kind:'boolean'},{name:'target',kind:'entity_target'}],
 });
+export const initialJamming = () => ({
+  components: [{kind:'power_input',id:'input'}, {kind:'jamming_emitter',id:'emitter',power_input:'input',enabled_channel:'enabled',target_channel:'target',config:{mount:{facing_deg:0,fire_arc_deg:60,range:200},falloff:'linear',strength:4,maximum_sample_age_secs:2,reading_ticks:30}}],
+  channels: [{name:'enabled',kind:'boolean'},{name:'target',kind:'entity_target'}],
+});
+const finiteEmitterNumber=value=>typeof value==='number'&&Number.isFinite(Math.fround(value));
+const positiveEmitterNumber=value=>finiteEmitterNumber(value)&&Math.fround(value)>0;
 export function validateIlluminationComposition(system, components, channels) {
   if(system.kind!=='illumination')return;
-  const emitter=components.find(row=>row.kind==='illumination_emitter'), config=emitter?.config, mount=config?.mount;
-  const finite=value=>typeof value==='number'&&Number.isFinite(Math.fround(value));
+  validateMountedEmitter(system,components,channels,'illumination_emitter',config=>
+    Object.keys(config).every(key=>['mount','link_range','minimum_transmission','reading_ticks'].includes(key))
+    && positiveEmitterNumber(config.link_range)&&positiveEmitterNumber(config.minimum_transmission)&&config.minimum_transmission<=1);
+}
+export function validateJammingComposition(system, components, channels) {
+  if(system.kind!=='jamming')return;
+  validateMountedEmitter(system,components,channels,'jamming_emitter',config=>
+    Object.keys(config).every(key=>['mount','falloff','strength','maximum_sample_age_secs','reading_ticks'].includes(key))
+    && ['step','linear','smooth'].includes(config.falloff)&&positiveEmitterNumber(config.strength)&&positiveEmitterNumber(config.maximum_sample_age_secs));
+}
+function validateMountedEmitter(system,components,channels,emitterKind,validProfile) {
+  const emitter=components.find(row=>row.kind===emitterKind), config=emitter?.config, mount=config?.mount;
   const id=value=>typeof value==='string'&&/^[a-z0-9-]+$/.test(value);
-  if(!system.power_group || !emitter || channels.length!==2 || components.filter(row=>row.kind==='illumination_emitter').length!==1
+  if(!system.power_group || !emitter || channels.length!==2 || components.filter(row=>row.kind===emitterKind).length!==1
     || !components.every(row=>id(row.id)) || new Set(components.map(row=>row.id)).size!==components.length
     || components.filter(row=>row.kind==='power_input'&&row.id===emitter.power_input).length!==1
-    || components.some(row=>!['illumination_emitter','power_input','turret'].includes(row.kind))
+    || components.some(row=>![emitterKind,'power_input','turret'].includes(row.kind))
     || components.filter(row=>row.kind==='power_input').length!==1 || components.filter(row=>row.kind==='turret').length>1
     || channels.some(row=>!id(row.name)) || new Set(channels.map(row=>row.name)).size!==2
     || !channels.some(row=>row.name===emitter.enabled_channel&&row.kind==='boolean')
     || !channels.some(row=>row.name===emitter.target_channel&&row.kind==='entity_target')
-    || !mount || !config || Object.keys(config).some(key=>!['mount','link_range','minimum_transmission','reading_ticks'].includes(key))
+    || !mount || !config || !validProfile(config)
     || Object.keys(mount).some(key=>!['facing_deg','fire_arc_deg','range'].includes(key))
-    || ![mount.facing_deg,mount.fire_arc_deg,mount.range,config.link_range,config.minimum_transmission].every(finite)
-    || Math.abs(mount.facing_deg)>180 || Math.fround(mount.fire_arc_deg)<=0 || mount.fire_arc_deg>360 || Math.fround(mount.range)<=0 || Math.fround(config.link_range)<=0
-    || Math.fround(config.minimum_transmission)<=0 || config.minimum_transmission>1 || !Number.isInteger(config.reading_ticks) || config.reading_ticks<0 || config.reading_ticks>4294967295
+    || ![mount.facing_deg,mount.fire_arc_deg,mount.range].every(finiteEmitterNumber)
+    || Math.abs(mount.facing_deg)>180 || Math.fround(mount.fire_arc_deg)<=0 || mount.fire_arc_deg>360 || Math.fround(mount.range)<=0
+    || !Number.isInteger(config.reading_ticks) || config.reading_ticks<0 || config.reading_ticks>4294967295
     || Object.keys(emitter).some(key=>!['id','kind','enabled_channel','target_channel','power_input','config'].includes(key))
     || components.some(row=>row.kind==='power_input'&&Object.keys(row).some(key=>!['id','kind'].includes(key))))
-    throw new Error('Illumination requires one finite emitter, one actual power input and exactly its enabled/target channels.');
-  const turrets=components.filter(row=>row.kind==='turret');
-  if(turrets.length)validateTurretComposition({...system,kind:'phaser_bank'},components.filter(row=>row.kind!=='illumination_emitter'),[]);
+    throw new Error('Use one finite emitter, one actual power input and exactly its enabled/target channels.');
+  if(components.some(row=>row.kind==='turret'))validateTurretComposition({...system,kind:'phaser_bank'},components.filter(row=>row.kind!==emitterKind),[]);
 }
 
 export function validateTurretComposition(system, components, channels) {

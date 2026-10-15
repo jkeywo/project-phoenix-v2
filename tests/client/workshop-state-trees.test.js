@@ -159,3 +159,9 @@ describe('closed shield arc state-tree Workshop controls',()=>{
     action('apply');await expect(pending).rejects.toThrow();expect(draft.read(path)).toBe(after);
   });
 });
+
+it('uses only the actual jammer channels and supported shared Boolean host facts',()=>{
+ const owner={kind:'jamming',component:[{kind:'jamming_emitter',enabled_channel:'radiating',target_channel:'bearing'}]};
+ const schema={hosts:{jamming:{facts:['enabled','has_target','target_available','request_available'],channels:['enabled','target']}}};
+ expect(systemTreeVocabulary(owner,schema)).toMatchObject({facts:schema.hosts.jamming.facts,channels:['radiating','bearing']});
+});

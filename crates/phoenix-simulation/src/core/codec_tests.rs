@@ -6862,3 +6862,25 @@ fn system_observation_metadata_survives_ron_blackboard_encoding() {
     let decoded: SystemBlackboard = ron::from_str(&stored).unwrap();
     assert_eq!(decoded, board);
 }
+
+#[test]
+fn independently_owned_jammer_controls_use_the_same_typed_and_correlated_codec() {
+    for payload in [
+        SystemControlPayload::SetJammingEnabled { enabled: true },
+        SystemControlPayload::SetJammingEnabled { enabled: false },
+        SystemControlPayload::SetJammingTarget {
+            target_uuid: Some("observed-handle".into()),
+        },
+        SystemControlPayload::SetJammingTarget { target_uuid: None },
+    ] {
+        assert_client_roundtrip(ClientMessage::ControlSystem {
+            target: SystemId("comms-jamming".into()),
+            payload: payload.clone(),
+        });
+        assert_client_roundtrip(ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("jammer-order").unwrap(),
+            target: SystemId("comms-jamming".into()),
+            payload,
+        });
+    }
+}

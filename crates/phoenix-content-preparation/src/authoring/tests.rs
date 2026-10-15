@@ -970,3 +970,39 @@ fn shield_tree_palette_tracks_closed_runtime_bindings_and_physical_target_prefix
     );
     assert!(schema.hosts["shield_arc"].numeric_channels.is_empty());
 }
+
+#[test]
+fn jamming_palette_uses_actual_closed_profile_and_shared_bound_tree_host() {
+    let schema = super::ship_schema();
+    assert!(schema.directive_kinds.iter().any(|kind| kind == "Jam"));
+    assert!(schema
+        .ai_state_tree
+        .system_kinds
+        .iter()
+        .any(|kind| kind == "jamming"));
+    assert_eq!(
+        schema.ai_state_tree.hosts["jamming"],
+        crate::ai::state_tree::schema_metadata(
+            &phoenix_sim_gameplay::ship::composition::enabled_target_bindings("enabled", "target")
+        )
+    );
+    let names: Vec<_> = schema.component_fields["jamming_emitter"]
+        .iter()
+        .map(|field| field.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            "enabled_channel",
+            "target_channel",
+            "power_input",
+            "config.mount.facing_deg",
+            "config.mount.fire_arc_deg",
+            "config.mount.range",
+            "config.falloff",
+            "config.strength",
+            "config.maximum_sample_age_secs",
+            "config.reading_ticks"
+        ]
+    );
+}

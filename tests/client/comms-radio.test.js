@@ -55,3 +55,11 @@ describe('radio text command and local draft', () => {
     el.state = {...state(), comms_auto:true}; expect(el.shadowRoot.getElementById('controls').disabled).toBe(true);
   });
 });
+
+it('shows only the received own interference notice and clears it when unavailable',()=>{
+ const el=setup(),notice=el.shadowRoot.getElementById('interference');
+ expect(notice.hidden).toBe(true);el.state={...state(),receiver_interference:true};
+ expect(notice.hidden).toBe(false);expect(notice.textContent).toBe(t('jamming.receiver_interference'));
+ for(const receiver_interference of [false,null,undefined]){el.state={...state(),receiver_interference};expect(notice.hidden).toBe(true);}
+ expect(el.shadowRoot.textContent).not.toContain('jam-source');
+});

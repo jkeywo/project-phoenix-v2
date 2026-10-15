@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import { parse } from 'smol-toml';
-import { writeSystemComposition, initialTurret, validateTurretComposition, validateDockMovement } from '../workshop-system-composition.js';
+import { writeSystemComposition, initialTurret, validateTurretComposition, validateDockMovement, initialJamming, validateJammingComposition } from '../workshop-system-composition.js';
 import { mergeComposeFragments, resolveTemplate } from '../entity-includes.js';
 
 const source = `# untouched header
@@ -108,4 +108,22 @@ it('keeps actual mobile Dock body movement explicit while Axiom remains a statio
   for (const name of ['station_axiom','manual_trade_port']) {
     const hull=resolve(`assets/entities/${name}.toml`); expect(hull.system.find(row=>row.id==='dock').component.find(row=>row.kind==='dock_mating').config.moves_body,name).toBe(false);
   }
+});
+
+it('validates the same finite jammer profile and exact channel/power/mount composition',()=>{
+ const owner={id:'interference',kind:'jamming',power_group:'radio'},draft=initialJamming();
+ expect(()=>validateJammingComposition(owner,draft.components,draft.channels)).not.toThrow();
+ for(const change of [
+  value=>value.components[1].config.strength=0,
+  value=>value.components[1].config.maximum_sample_age_secs=Infinity,
+  value=>value.components[1].config.falloff='secret',
+  value=>value.components[1].config.victims=[],
+  value=>value.components[1].config.mount.range=1e100,
+  value=>value.channels[1].kind='boolean',
+  value=>value.components[1].power_input='missing',
+ ]){const malformed=structuredClone(draft);change(malformed);expect(()=>validateJammingComposition(owner,malformed.components,malformed.channels)).toThrow();}
+ const next=structuredClone(draft);next.components[1].config.strength=2.5;next.components[1].config.falloff='smooth';
+ const source='[[system]]\nid="interference"\nkind="jamming"\npower_group="radio"\n';
+ const written=writeSystemComposition(source,owner.id,next,owner);const actual=parse(written).system[0];
+ expect(actual.component[1].config).toEqual(next.components[1].config);expect(actual.channel).toEqual(next.channels);
 });

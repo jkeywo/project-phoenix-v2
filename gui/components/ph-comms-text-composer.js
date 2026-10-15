@@ -7,6 +7,7 @@ import {COMMS_SEND_TEXT_ACTION_ID, COMMS_SEND_REQUEST_ACTION_ID} from '../statio
 export class PhCommsTextComposer extends PhElement {
   template() {
     return `<style>:host{display:block}fieldset{border:1px solid var(--edge);margin:0;padding:6px;display:flex;gap:6px;flex-wrap:wrap}label{display:flex;gap:4px;align-items:center}textarea{flex:1 1 100%;min-height:44px;max-height:100px;resize:vertical}select{max-width:180px}button{min-height:44px}</style>
+      <p id="interference" role="status" hidden>${t('jamming.receiver_interference')}</p>
       <fieldset id="controls"><legend>${t('comms.radio.title')}</legend>
       <label>${t('comms.radio.channel')}<select id="channel"></select></label>
       <label>${t('comms.radio.audience')}<select id="audience"></select></label>
@@ -56,6 +57,7 @@ export class PhCommsTextComposer extends PhElement {
   }
   render(state) {
     if (!state) return;
+    this.$('interference').hidden = state.receiver_interference !== true;
     this.options(this.channel, (state.channels || []).map(channel => [channel.id, channel.id]));
     this.options(this.audience, [
       ['fleet', t('comms.radio.fleet')], ['all', t('comms.radio.all')],

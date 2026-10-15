@@ -12,7 +12,7 @@ import { scanPublicationSource } from '../gui/scan-source.js';
 import { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
 export { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
 import { writeStateTrees, writeRepairWorkflow, rebindStateTreeChannel } from './workshop-state-trees.js';
-import { writeSystemComposition, validateTurretComposition, validateIlluminationComposition, validateDockMovement } from './workshop-system-composition.js';
+import { writeSystemComposition, validateTurretComposition, validateIlluminationComposition, validateJammingComposition, validateDockMovement } from './workshop-system-composition.js';
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
 import { acceptWorkshopChanges } from './workshop-acceptance.js';
@@ -267,12 +267,13 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
     if (!system.local && !operation.materialise) throw new Error('Materialise the containing System before editing its components.');
     validateTurretComposition(system, operation.components || [], operation.channels || []);
     validateIlluminationComposition(system, operation.components || [], operation.channels || []);
+    validateJammingComposition(system, operation.components || [], operation.channels || []);
     validateDockMovement(operation.components || []);
     const local = system.local ? before : append(before, { system: [{ id: system.id }] });
     after = writeSystemComposition(local, operation.id, operation, system);
     let rebound=system.config?.ai;
-    const oldEmitter=system.component?.find(row=>row.kind==='illumination_emitter');
-    const newEmitter=operation.components?.find(row=>row.kind==='illumination_emitter');
+    const oldEmitter=system.component?.find(row=>['illumination_emitter','jamming_emitter'].includes(row.kind));
+    const newEmitter=operation.components?.find(row=>['illumination_emitter','jamming_emitter'].includes(row.kind));
     const pairs=oldEmitter&&newEmitter
       ? [[oldEmitter.enabled_channel,newEmitter.enabled_channel],[oldEmitter.target_channel,newEmitter.target_channel]]
       : [[system.component?.find(row=>row.kind==='dock_mating')?.enabled_channel || system.component?.find(row=>row.kind==='access_boundary')?.sealed_channel,

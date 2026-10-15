@@ -13,6 +13,11 @@ fn install_fixture_run_scope(world: &mut World) {
     world.init_resource::<crate::gm::operations::puppet::StationPuppets>();
     world.init_resource::<crate::gm::operations::puppet::PendingGmStationCommands>();
     world.init_resource::<crate::core::report::MissionReport>();
+    // Restore runs the actual Tactical/AI read-model publishers, whose Query
+    // initialization registers AsteroidUuid even in a rock-free World. The
+    // digest deliberately distinguishes an unregistered asteroid namespace
+    // from a registered empty one; ordinary hosts always register this type.
+    world.register_component::<crate::server_app::AsteroidUuid>();
 }
 fn publish_fixture_observations(world: &mut World) {
     use bevy::ecs::system::RunSystemOnce;
@@ -334,6 +339,13 @@ fn ordinary_removal_retains_terminal_identity_and_full_restore_does_not_reroll_i
     assert!(report.is_complete(), "{report:?}");
     assert!(fresh.get_entity(original).is_err());
     assert_eq!(capture(&fresh), decoded);
+    let original_stages = crate::sim_digest::digest_stages(&world);
+    assert_eq!(
+        crate::sim_digest::first_divergent_scope(&fresh, &original_stages),
+        None,
+        "matching complete state must agree at every canonical fold stage; live={original_stages:?}, restored={:?}",
+        crate::sim_digest::digest_stages(&fresh)
+    );
     assert_eq!(
         crate::sim_digest::world_digest(&fresh),
         crate::sim_digest::world_digest(&world)

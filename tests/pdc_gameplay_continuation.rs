@@ -61,6 +61,10 @@ struct Trace {
     launcher_readiness: [u64; 3],
     first_aiming_opportunity: Option<(u64, [f32; 3])>,
     first_protection_reading: Option<(u64, [f32; 3])>,
+    missile_track_ids: BTreeSet<String>,
+    missile_refresh_max: f64,
+    missile_supported_max: f64,
+    max_current_missiles: usize,
 }
 
 impl std::fmt::Debug for Trace {
@@ -87,6 +91,10 @@ impl std::fmt::Debug for Trace {
             .field("launcher_readiness", &self.launcher_readiness)
             .field("first_aiming_opportunity", &self.first_aiming_opportunity)
             .field("first_protection_reading", &self.first_protection_reading)
+            .field("missile_track_ids", &self.missile_track_ids.len())
+            .field("missile_refresh_max", &self.missile_refresh_max)
+            .field("missile_supported_max", &self.missile_supported_max)
+            .field("max_current_missiles", &self.max_current_missiles)
             .finish()
     }
 }
@@ -176,6 +184,20 @@ fn observe_pdc(
     };
     trace.before_payload_hp = Some(damage.structural_totals().0);
     let owner = id(BANK);
+    if let Some(radar) = tracks.0.get(&id("tactical-radar")) {
+        let current: Vec<_> = radar
+            .current
+            .iter()
+            .filter(|(source, _)| trace.launched.contains(*source))
+            .filter_map(|(_, contact)| radar.tracks.get(contact))
+            .collect();
+        trace.max_current_missiles = trace.max_current_missiles.max(current.len());
+        for track in current {
+            trace.missile_track_ids.insert(track.contact_id.clone());
+            trace.missile_refresh_max = trace.missile_refresh_max.max(track.refresh_secs);
+            trace.missile_supported_max = trace.missile_supported_max.max(track.supported_secs);
+        }
+    }
     let view = config.0.observations_for_system(&owner, &boards.0);
     for record in boards
         .0

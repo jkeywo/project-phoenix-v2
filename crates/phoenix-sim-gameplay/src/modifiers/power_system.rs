@@ -553,6 +553,52 @@ impl PowerSystem {
         self.restore_continuation(saved)
     }
 
+    /// Passive aging of the same physical reserves while a probe is carried.
+    /// No generator, routing, coolant draw, work or operator-intent rewrite.
+    /// The existing Simulation energy tick selects this mode once per interval.
+    pub fn tick_stored_energy(&mut self, dt: f32) -> Result<(), String> {
+        if !dt.is_finite() || dt < 0.0 {
+            return Err("stored energy interval must be finite and nonnegative".into());
+        }
+        let mut next = self.clone();
+        let before = next.battery_charge();
+        let passive = || crate::resources::energy::EnergyStep {
+            dt,
+            offered_energy: 0.0,
+            demands: &[],
+            cooling_rate: 0.0,
+            coolant_available: 0.0,
+        };
+        next.network
+            .reactor
+            .step(&next.hardware.reactor.reserve, passive())?;
+        for consumer in &next.hardware.consumers {
+            next.network
+                .consumers
+                .get_mut(&consumer.system)
+                .ok_or("stored energy lost an actual consumer reserve")?
+                .step(&consumer.reserve, passive())?;
+        }
+        next.network.output_actual_per_sec = 0.0;
+        for group in next.network.groups.values_mut() {
+            group.effective_flow_per_sec = 0.0;
+            group.effective_cooling_per_sec = 0.0;
+        }
+        next.last_intake_per_sec
+            .values_mut()
+            .for_each(|value| *value = 0.0);
+        next.last_work_fraction
+            .values_mut()
+            .for_each(|value| *value = 0.0);
+        next.work_emissions.clear();
+        if dt > 0.0 {
+            next.last_reactor_energy_delta_per_sec = (next.battery_charge() - before) / dt;
+        }
+        next.validate_saved(&next.capture_continuation())?;
+        *self = next;
+        Ok(())
+    }
+
     pub fn tick_energy(
         &mut self,
         dt: f32,
@@ -984,3 +1030,7 @@ pub use phoenix_sim_contracts::power::*;
 #[cfg(test)]
 #[path = "power_system_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "power_stored_tests.rs"]
+mod stored_tests;

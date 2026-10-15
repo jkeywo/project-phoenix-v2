@@ -1,4 +1,5 @@
 use super::*;
+use phoenix_model::sensing::PassiveSignature;
 
 #[test]
 fn emp_blocks_actual_paid_receiver_then_expires_without_erasing_intent_or_battery() {

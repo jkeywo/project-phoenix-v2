@@ -1,0 +1,43 @@
+entities:
+  - decision: redesign-comms-shared-human-ai-channels
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Human and AI Crews Use Shared Equipment-Backed Channels
+      summary: "Increment16 adopts concurrent persistent plot and generic Comms threads, contextual requests for every supported ship, human text and selected human audio/video focus. Ordinary individual System AI uses the same admitted action path and permitted information; AI voices and a second communication transport are excluded."
+      rationale:
+        - "Selected G022 refinement, G024, G040–44, G109 and S065–69/S101; detailed implementation and evidence requirements live in docs/gameplay-redesign/implementation/increment-16.md. Preparation changes no implementation/acceptance status. Runtime entry follows the approved parallel-work contract after15 initial integrated implementation and targeted checks; full completion retains14/15 verified prerequisites."
+        - "[ai] Extend current inbox/dialogue, endpoint/range, addressed-recipient and World-script owners. Preserve existing hail/reply/script routes first. Multiple threads do not create duplicate inboxes or multiple controllers for one actual Comms System. One per-System tree consumes supported facts and emits ordinary commands."
+        - "[ai] Cruiser Comms retains conversation and signal interpretation; Engineering retains stocks/service priorities and Tactical physical commitments. Reference layouts are authored, not hard-coded roles. Keep existing human-seeking/protected choices and no Captain private map.17 adds Comms jamming/disruption and Science electronic protection separately."
+  - decision: redesign-comms-physical-links-and-captured-evidence
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Actual Links Carry Dated Evidence Without Message Quotas
+      summary: "Channel delivery uses actual endpoint/System capability, power, condition, compatible security, reach and existing field/terrain path sampling. Equipment-backed relays select deterministic viable routes. Copies preserve origin, audience, time, provenance and uncertainty; there is no message-capacity pool or congestion game."
+      rationale:
+        - "AD70–71 supply in-world path attenuation/occlusion; AD74 rejects throughput budgets, traffic quotas and bandwidth-rationing activities. Technical payload validation and finite listening/search coverage are distinct from message-volume accounting. Phoenix topology, signalling, delivery classes and authority remain unchanged."
+        - "[ai] Reuse one causal transmission identity through retries/relays and apply each effect once. Actual routing IDs remain private where not legitimately disclosed. Relay reception does not grant protected plaintext or upgrade a received claim into independent observation. Synthetic authored narrative/GM messages do not create physical emitters or a general bypass."
+        - "S066 acquires systemic supported traffic plus authored transmissions under finite listening/search coverage and priorities; public chatter is automatic. S067 decodes only captured material using actual supported capability, held keys and paid work. Waiting cannot defeat every protection; keys cannot recover never-received traffic. Enemy human text uses these same gameplay rules; audio/video interception is not silently granted."
+        - "Human media uses a selected conversation over supported existing Phoenix connections, local microphone/camera consent and actual gameplay eligibility. No saved streams, automatic permission replay, AI voices, new broker or second authority. Review any necessary media envelope before implementation."
+  - decision: redesign-comms-request-intent-and-returned-receipts
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Requests Retain Local Authority and Return Distinct Outcomes
+      summary: "Generic requests address individual contacts or fixed own-fleet/faction/all audiences. Each recipient independently interprets and accepts/refuses using ordinary authority, willingness, objectives, knowledge and feasibility. Delivery, reading, acceptance and physical completion are distinct dated facts returned through viable links."
+      rationale:
+        - "AD72 gives supported structured requests authored expiry/persistence, issuing sequence and supersession scope. Newer intent replaces older only where known; duplicate or reordered stale effects cannot reapply. Undelivered expiry and unseen cancellation cannot stop already accepted onboard work. Durable mission intent can remain explicitly persistent."
+        - "AD73 returns delivery and accepted/refused receipts automatically, without an acknowledgement chore or accepting for a human. Missing return communication leaves the sender uncertain even if actual work occurred. Transport acknowledgements and sender timeouts are not remote gameplay receipts; completion requires actual consumer reports/observations."
+        - "[ai] Freeze resolved audience membership on send and retain separate per-recipient envelopes/outcomes. Fixed groups do not reveal hidden recipient readiness or confer fleet actuator control. Closed request definitions must bind a real ordinary receiving consumer before exposure; no free-text parsing into machinery or unused request framework."
+        - "[ai] Reading/interpretation uses authored semantic ticks and existing per-System reading/tree continuation, independently of network delivery. Existing jobs/resources/access execute accepted local intent; Comms does not reserve every future resource, seize specialist controls or create a replacement AI planner."
+  - decision: redesign-comms-relationships-and-continuation
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Known Relationships and Complete Continuation Preserve Consequences
+      summary: "Comms records attributed known interactions, content-specific terms and supported outcomes. Generic talk is not a universal formal contract or morality score. Surrender changes supported intent with observable behavioural compliance, never magical capture, despawn or enforced actuator immunity."
+      rationale:
+        - "G040 permits actor trust alongside faction context without omniscient information spread. G041 reserves formal commitments for authored/PCG side-mission content; S068 shows terms/evidence/status without universal automatic at-risk judgements. G042 requires behavioural compliance; broader personnel capture and transit/pursuit consumers join20/18/23."
+        - "[ai] Save canonical pending envelopes, audience/order frontiers, decisions/receipts, captured evidence, paid decoding/reading, keys and dated trust events in their actual owners. Rebuild derived reach/routes before first restored command. Validate complete candidate owner, capability, sequence, scope and clock bindings before any write; no second communication or personnel inventory."
+        - "[ai] Every slice includes accepted authoring/history/includes/Preview/Test, human and ordinary AI operation, deterministic snapshots/digest and no-write malformed-state tests. Actual paid work and pending receipt/order continuation require fresh JSON bootstrap comparison for at least360 fixed steps plus different-LocalShip peer proof. Physical media/device, gameplay/performance and2/4/6/8-human workload acceptance remain separate; initial implementation never claims a verified exit."

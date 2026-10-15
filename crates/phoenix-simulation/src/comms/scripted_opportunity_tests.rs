@@ -65,7 +65,7 @@ fn actual_final_root_failures_keep_typed_source_outcome_and_commit_no_buffered_e
         (4,"fn offer(ctx) {#{message:\"Available\",responses:[]}}",OpportunitySourceFailure::MissingUnit),
         (5,"fn offer(ctx) {ctx.flags.forbidden=1;#{message:\"Unavailable\",opportunity_decision:\"accept\",responses:[]}}",OpportunitySourceFailure::Refused),
         (6,"fn offer(ctx) {ctx.flags.forbidden=1;#{message:\"No choices\",responses:[]}}",OpportunitySourceFailure::Shape),
-        (7,"fn offer(ctx) {ctx.flags.forbidden=1;#{message:\"No callable choice\",responses:[#{text:\"Choose\",on_pick:\"absent\"}]}}",OpportunitySourceFailure::Unresolved),
+        (7,"fn offer(ctx) {ctx.flags.forbidden=1;let choice=\"absent\";#{message:\"No callable choice\",responses:[#{text:\"Choose\",on_pick:choice}]}}",OpportunitySourceFailure::Unresolved),
     ] {
         // Existing decision 10 deliberately panics on script runtime errors in
         // development. Release reaches the fail-closed SourceUnavailable branch;

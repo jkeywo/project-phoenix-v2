@@ -10,7 +10,9 @@ use crate::{
     ship_plugin::{ShipConfigComponent, ShipSystemControlSources},
 };
 use bevy::prelude::*;
-use phoenix_model::comms_request::{CommsRadioContent, CommsRequestDecision, CommsStatusReport};
+use phoenix_model::comms_request::{
+    CommsRadioContent, CommsRequestDecision, CommsStatusReport, GenericCommsRequest,
+};
 
 pub(crate) fn is_request(message: &CommsMessage) -> bool {
     message.transmission.as_ref().is_some_and(|transmission| {
@@ -52,10 +54,10 @@ pub(crate) fn response_facts(
         message.transmission.as_ref().map(|wire| &wire.content)
     {
         facts.set_fact(
-            if request.is_formation() {
-                fid::REQUEST_FORM_UP
-            } else {
-                fid::REQUEST_REPORT_STATUS
+            match request {
+                GenericCommsRequest::FormUp { .. } => fid::REQUEST_FORM_UP,
+                GenericCommsRequest::MediaCall { .. } => fid::REQUEST_MEDIA_CALL,
+                GenericCommsRequest::ReportStatus => fid::REQUEST_REPORT_STATUS,
             },
             1.0,
         );
@@ -185,7 +187,7 @@ pub(crate) fn respond(
         return false;
     }
     let choice = match index {
-        0 if request.is_formation() => CommsRequestDecision::Accept,
+        0 if request.is_formation() || request.is_media() => CommsRequestDecision::Accept,
         0 => CommsRequestDecision::Report,
         1 => CommsRequestDecision::Decline,
         _ => return false,

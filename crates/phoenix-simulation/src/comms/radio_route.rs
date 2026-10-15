@@ -100,6 +100,7 @@ mod tests {
             name: id.into(),
             point: Vec3::ZERO,
             radio: CommsRadioConfig {
+                media: None,
                 system: SystemId("comms".into()),
                 request_reading_ticks: 30,
                 keys: vec!["fleet-key".into()],

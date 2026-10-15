@@ -560,6 +560,7 @@ pub const SENDER_IN_RANGE: FactId = FactId("sender_in_range");
 pub const COMMS_AVAILABLE: FactId = FactId("comms_available");
 pub const REQUEST_REPORT_STATUS: FactId = FactId("request_report_status");
 pub const REQUEST_FORM_UP: FactId = FactId("request_form_up");
+pub const REQUEST_MEDIA_CALL: FactId = FactId("request_media_call");
 pub const POWER_RATING: FactId = FactId("power_rating");
 pub const CONTACT_COUNT: FactId = FactId("contact_count");
 // Weapon banks / tubes
@@ -688,6 +689,7 @@ pub const FACT_CATALOGUE: &[FactId] = &[
     SENDER_IN_RANGE,
     REQUEST_REPORT_STATUS,
     REQUEST_FORM_UP,
+    REQUEST_MEDIA_CALL,
     COMMS_AVAILABLE,
     POWER_RATING,
     CONTACT_COUNT,
@@ -996,6 +998,13 @@ const COMMS_RESPONSE_FACTS: &[FactDescriptor] = &[
         "comms",
         "1.0 for the currently permitted genuinely heard typed FormUp suggestion",
         "absent for ReportStatus, ordinary plot/text and hidden requests",
+        "comms::requests::response_facts",
+    ),
+    ship(
+        REQUEST_MEDIA_CALL,
+        "comms",
+        "1.0 for the currently permitted genuinely heard human media call",
+        "absent for other requests or ordinary text; no device capability is inferred",
         "comms::requests::response_facts",
     ),
     ship(

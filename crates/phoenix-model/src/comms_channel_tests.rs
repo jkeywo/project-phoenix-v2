@@ -2,6 +2,7 @@ use super::*;
 
 fn radio() -> CommsRadioConfig {
     CommsRadioConfig {
+        media: None,
         system: SystemId("comms".into()),
         request_reading_ticks: 30,
         keys: vec!["fleet".into()],

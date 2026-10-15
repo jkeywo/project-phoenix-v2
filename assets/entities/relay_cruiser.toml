@@ -3,6 +3,7 @@ includes = ["alliance_cruiser.toml"]
 name = "entity.relay_cruiser.name"
 
 [comms.radio]
+media = "audio_video"
 system = "comms"
 request_reading_ticks = 30
 keys = ["alliance-fleet"]

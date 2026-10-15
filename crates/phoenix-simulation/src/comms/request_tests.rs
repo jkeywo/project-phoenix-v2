@@ -3,6 +3,159 @@ use super::*;
 use crate::console::comms::server::{operate_comms_response_ai, publish_comms_blackboard};
 use phoenix_model::comms_request::*;
 
+#[test]
+fn actual_paid_media_requires_returned_accept_both_selected_intents_and_current_carriers() {
+    use crate::comms::media_control::{
+        accepted_call, apply_media_call_commands, PaidMediaCarriers,
+    };
+    use phoenix_model::comms_media::MediaMode;
+    let (mut app, source, receiver) = fixture(10.0);
+    app.init_resource::<PaidMediaCarriers>();
+    let mut command = app
+        .world_mut()
+        .get_mut::<AdmittedCommands>(source)
+        .unwrap()
+        .0
+        .pop()
+        .unwrap();
+    // Establish the target using an actually heard paid introduction, rather
+    // than injecting a contact, route, observation or remote token.
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(receiver)
+        .unwrap()
+        .0
+        .push(command.clone());
+    app.world_mut().run_system_once(tick_radio).unwrap();
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(receiver)
+        .unwrap()
+        .0
+        .clear();
+    command.payload = SystemControlPayload::SendCommsRequest {
+        channel: "public".into(),
+        audience: CommsAudience::Contact {
+            target_uuid: "receiver".into(),
+        },
+        request: GenericCommsRequest::MediaCall {
+            mode: MediaMode::Audio,
+        },
+        planned_request: None,
+    };
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(source)
+        .unwrap()
+        .0
+        .push(command.clone());
+    app.world_mut().run_system_once(tick_radio).unwrap();
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(source)
+        .unwrap()
+        .0
+        .clear();
+    app.world_mut()
+        .run_system_once(publish_comms_blackboard)
+        .unwrap();
+    let heard = messages(&app, "receiver")
+        .into_iter()
+        .find(crate::comms::requests::is_request)
+        .unwrap();
+    let origin = heard.transmission.as_ref().unwrap().origin_id.clone();
+    assert!(decide(&mut app, receiver, &heard.id, 0));
+    assert!(accepted_call(
+        app.world().resource::<CommsInboxRes>(),
+        "receiver",
+        &origin,
+        10
+    )
+    .is_some());
+    assert!(accepted_call(
+        app.world().resource::<CommsInboxRes>(),
+        "source",
+        &origin,
+        10
+    )
+    .is_none());
+    // This owner-boundary test moves the physical fixture to withhold its real
+    // reverse path. It does not claim a player-flown host journey.
+    app.world_mut().get_mut::<ShipPhysics>(source).unwrap().x = 10000.0;
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 11;
+    app.world_mut().run_system_once(tick_radio).unwrap();
+    assert!(accepted_call(
+        app.world().resource::<CommsInboxRes>(),
+        "source",
+        &origin,
+        11
+    )
+    .is_none());
+    app.world_mut().get_mut::<ShipPhysics>(source).unwrap().x = 0.0;
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 12;
+    app.world_mut().run_system_once(tick_radio).unwrap();
+    assert!(accepted_call(
+        app.world().resource::<CommsInboxRes>(),
+        "source",
+        &origin,
+        12
+    )
+    .is_some());
+    assert!(
+        app.world()
+            .resource::<PaidMediaCarriers>()
+            .call("source", "receiver", 12)
+            .is_none(),
+        "historical acceptance alone never selects or opens a carrier"
+    );
+    for (entity, now) in [(source, 13), (receiver, 14)] {
+        command.payload = SystemControlPayload::SetCommsMediaCall {
+            origin_id: Some(origin.clone()),
+        };
+        app.world_mut()
+            .get_mut::<AdmittedCommands>(entity)
+            .unwrap()
+            .0
+            .push(command.clone());
+        app.world_mut()
+            .run_system_once(apply_media_call_commands)
+            .unwrap();
+        app.world_mut()
+            .get_mut::<AdmittedCommands>(entity)
+            .unwrap()
+            .0
+            .clear();
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = now;
+        app.world_mut().run_system_once(tick_radio).unwrap();
+        assert_eq!(
+            app.world()
+                .resource::<PaidMediaCarriers>()
+                .call("source", "receiver", now)
+                .is_some(),
+            entity == receiver,
+            "one selected endpoint cannot open a conversation"
+        );
+    }
+    let carriers = app.world().resource::<PaidMediaCarriers>();
+    assert!(carriers.call("source", "receiver", 14).is_some());
+    assert!(
+        carriers.call("source", "receiver", 15).is_none(),
+        "sample expires on the actual fixed clock"
+    );
+    app.world_mut()
+        .get_mut::<ShipPowerSystem>(receiver)
+        .unwrap()
+        .0
+        .network_mut()
+        .consumers
+        .get_mut(&SystemId("comms".into()))
+        .unwrap()
+        .energy = 0.0;
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 15;
+    app.world_mut().run_system_once(tick_radio).unwrap();
+    assert!(app
+        .world()
+        .resource::<PaidMediaCarriers>()
+        .call("source", "receiver", 15)
+        .is_none());
+}
+
 fn request_fixture() -> (App, Entity, Entity, String) {
     let (mut app, source, receiver) = fixture(10.0);
     crate::ai::host::register_ai_host_env(&mut app);

@@ -19,6 +19,9 @@ pub struct CommsChannelConfig {
 #[serde(deny_unknown_fields)]
 pub struct CommsRadioConfig {
     pub system: SystemId,
+    /// Explicit actual equipment capability; absent equipment cannot carry media.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<crate::comms_media::MediaMode>,
     #[serde(default = "default_request_reading_ticks")]
     pub request_reading_ticks: u32,
     #[serde(default)]
@@ -73,6 +76,11 @@ pub struct CommsTransmission {
 
 impl CommsTransmission {
     pub fn validate(&self, now: u64) -> Result<(), &'static str> {
+        if matches!(&self.content, crate::comms_request::CommsRadioContent::Request { request } if request.is_media())
+            && !matches!(self.audience, CommsAudience::Contact { .. })
+        {
+            return Err("human media call requires one explicit Contact recipient");
+        }
         match &self.content {
             crate::comms_request::CommsRadioContent::Request { request } => {
                 request.validate_sequence(self.formation_sequence)?

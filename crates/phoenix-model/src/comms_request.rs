@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub enum GenericCommsRequest {
     ReportStatus,
     FormUp { slot: [i32; 2] },
+    MediaCall { mode: crate::comms_media::MediaMode },
 }
 /// Technical finite slot bound, exactly representable by the motion owner's f32.
 pub const MAX_FORMATION_SLOT: i32 = 1_000_000;
@@ -23,16 +24,26 @@ impl GenericCommsRequest {
     pub fn is_formation(&self) -> bool {
         matches!(self, Self::FormUp { .. })
     }
+    pub fn is_media(&self) -> bool {
+        matches!(self, Self::MediaCall { .. })
+    }
     pub fn body(&self) -> &'static str {
         match self {
             Self::ReportStatus => REPORT_STATUS_BODY,
             Self::FormUp { .. } => FORM_UP_BODY,
+            Self::MediaCall {
+                mode: crate::comms_media::MediaMode::Audio,
+            } => MEDIA_AUDIO_BODY,
+            Self::MediaCall {
+                mode: crate::comms_media::MediaMode::AudioVideo,
+            } => MEDIA_VIDEO_BODY,
         }
     }
     pub fn positive_response(&self) -> &'static str {
         match self {
             Self::ReportStatus => REPORT_RESPONSE,
             Self::FormUp { .. } => ACCEPT_RESPONSE,
+            Self::MediaCall { .. } => MEDIA_ACCEPT_RESPONSE,
         }
     }
     pub fn validate_sequence(&self, sequence: Option<u64>) -> Result<(), &'static str> {
@@ -47,7 +58,7 @@ impl GenericCommsRequest {
             match (self, decision.choice) {
                 (_, CommsRequestDecision::Decline)
                 | (Self::ReportStatus, CommsRequestDecision::Report)
-                | (Self::FormUp { .. }, CommsRequestDecision::Accept) => {}
+                | (Self::FormUp { .. } | Self::MediaCall { .. }, CommsRequestDecision::Accept) => {}
                 _ => return Err("request decision does not belong to this closed action"),
             }
         }
@@ -333,6 +344,9 @@ impl CommsRadioContent {
 
 pub const REPORT_STATUS_BODY: &str = "comms.request.report_status";
 pub const FORM_UP_BODY: &str = "comms.request.form_up";
+pub const MEDIA_AUDIO_BODY: &str = "comms.request.media_audio";
+pub const MEDIA_VIDEO_BODY: &str = "comms.request.media_video";
+pub const MEDIA_ACCEPT_RESPONSE: &str = "comms.request.accept_media";
 pub const ACCEPT_RESPONSE: &str = "comms.request.accept_coordination";
 pub const OUTCOME_BODY: &str = "comms.request.returned_outcome";
 pub const REPORT_RESPONSE: &str = "comms.request.report";

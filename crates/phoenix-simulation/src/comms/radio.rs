@@ -159,6 +159,8 @@ pub(crate) fn tick_radio(
     mut outbox: Option<ResMut<crate::server_app::SimOutbox>>,
     mut world_runtime: Option<ResMut<crate::world::server::WorldContentRuntime>>,
     base: Option<Res<crate::world::config::WorldConfig>>,
+    intents: Query<&super::media_control::ShipCommsMediaIntent>,
+    mut media: Option<ResMut<super::media_control::PaidMediaCarriers>>,
 ) {
     let mut ordered: Vec<_> = sources
         .iter()
@@ -316,6 +318,18 @@ pub(crate) fn tick_radio(
             let request_valid = match &content {
                 phoenix_model::comms_request::CommsRadioContent::Request { request } => {
                     request.validate().is_ok()
+                        && match request {
+                            phoenix_model::comms_request::GenericCommsRequest::MediaCall {
+                                mode,
+                            } => {
+                                matches!(audience, CommsAudience::Contact { .. })
+                                    && source
+                                        .radio
+                                        .media
+                                        .is_some_and(|capability| capability.supports(*mode))
+                            }
+                            _ => true,
+                        }
                         && (!formation
                             || formation_sequence.is_some()
                                 && matches!(audience, CommsAudience::Contact { .. }))
@@ -430,6 +444,13 @@ pub(crate) fn tick_radio(
             )
         },
     );
+    if let Some(cache) = media.as_deref_mut() {
+        // Read the SAME endpoints whose ordinary carrier work was paid above.
+        // No frame callback, extra payment, route publication or saved cache.
+        super::media_control::derive_paid_carriers(
+            cache, &endpoints, &intents, &inbox, &paths, tick.0,
+        );
+    }
 }
 
 #[path = "request_delivery.rs"]

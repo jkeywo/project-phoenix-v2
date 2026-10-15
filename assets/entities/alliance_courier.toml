@@ -242,6 +242,7 @@ range = 1000
 
 # Authored first text channels; lower-work public traffic has shorter reach.
 [comms.radio]
+media = "audio_video"
 request_reading_ticks = 30
 system = "comms"
 keys = ["alliance-fleet"]

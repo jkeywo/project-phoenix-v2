@@ -203,3 +203,13 @@ entities:
       rationale:
         - "[ai] Integrator approved before runtime. Simulation rebuilds the context at the existing admitted Helm control boundary; Gameplay verifies its logical tick before the one physical integrator consumes it. Missing, stale, paused or generation-mismatched context yields a neutral or ordinary braking request under real actuator limits and inertia. Restoration never reuses a pre-restore grant/context."
         - "[ai] Human Helm explicitly selects each own axis through the existing HUD. Manual axis/mode commands replace following normally. Ordinary individual AI may select the same retained demand only when its normal cleared Navigation travel is the chosen plan, preserving combat, docking and avoidance priorities. No hidden leader pose or heading enters the context."
+
+  - decision: helm-explicit-navigation-feed-follow
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Explicit Navigation Feeds Share Their Earned Dated Motion
+      summary: "An explicitly permitted Navigation publication shares its earned dated Formation motion with Helm; each actual axis chooses whether to follow through its existing retained intent and paid integrator."
+      rationale:
+        - "[ai] Approved before the consuming boundary correction: same canonical intent and semantic generation, neither published nor canonical course paused, and the original published sample within its actual producing instrument's configured freshness. Another instrument's separate alias must not be rediscovered; no private leader pose or heading is consulted. A newer source observation cannot renew the age of an older shared sample."
+        - "[ai] Current-tick inputs are derived and cleared at restore. The existing held AI motion plan retains only its selected semantic generation through its existing continuation. Ordinary travel verbs may request following; authored combat/pass, docking, bearing and hazard decisions retain priority. Manual input replaces only that axis's retained demand."

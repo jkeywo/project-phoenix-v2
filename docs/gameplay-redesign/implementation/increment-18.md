@@ -596,3 +596,25 @@ malformed no-write candidates and ordinary Comms dismissal. Its native execution
 remains integrator-owned. Human Helm follow demand, completed physical formation
 movement, full-host JSON continuation and device acceptance remain open; this
 source checkpoint does not close increment 18.
+
+
+### Explicit Helm following checkpoint — 2026-10-16
+
+The existing actual thrust, steering and lateral intents can retain a selected
+Navigation generation. The explicit HUD action follows only a permitted typed
+Navigation course, with its original earned position/velocity sample and actual
+configured age bound. It shares no private routing identity or leader heading.
+Current-tick inputs are derived; missing, stale, withdrawn or unpaid Navigation
+holds ordinary braking/neutral actuation under the existing paid limits and
+inertia. Manual input replaces that axis's intent. Ordinary per-System AI can
+request the same demand only through its normal travel verbs; combat/pass,
+docking, hazard and Weapons-bearing decisions retain their ordinary precedence.
+The existing cadence-held motion plan carries its generation in its existing
+snapshot row and an empty-when-unused UUID-sorted digest contribution.
+
+Targeted client tests cover current authority, stale HUD activation, closed wire
+payloads and cancelling following. Pure and owner Rust witnesses are authored
+for dated current inputs, manual breakaway, real paid movement, fresh restore,
+future-generation no-write refusal and AI verb precedence. Native execution and
+physical multiplayer/browser acceptance remain pending; this checkpoint does
+not close increment 18 or claim a completed fleet formation scenario.

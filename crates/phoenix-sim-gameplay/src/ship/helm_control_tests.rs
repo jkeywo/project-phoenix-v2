@@ -35,7 +35,7 @@ fn fractional_requests_preserve_existing_motion_but_direct_neutral_keeps_momentu
     let mut state = HelmControlState::new(&p);
     state.set_thrust(&p.thrust, 0.5).unwrap();
     state.set_steering(&p.steering, 0.25).unwrap();
-    let resolved = state.resolve(&p, actual(), 0.125, &cfg).unwrap();
+    let resolved = state.resolve(&p, actual(), 0.125, &cfg, None).unwrap();
     let original = compute_physics(actual(), input(0.5, 0.25), 0.125, &cfg);
     let resolved = compute_physics_with_drive(
         actual(),
@@ -56,7 +56,7 @@ fn fractional_requests_preserve_existing_motion_but_direct_neutral_keeps_momentu
             &ShipPhysicsConfig::default(),
         )
         .unwrap();
-    let resolved = state.resolve(&p, actual(), 0.125, &cfg).unwrap();
+    let resolved = state.resolve(&p, actual(), 0.125, &cfg, None).unwrap();
     let coasting = compute_physics_with_drive(
         actual(),
         input(resolved.thrust, 0.0),
@@ -127,7 +127,7 @@ fn desired_speed_braking_is_a_force_request_and_zero_funding_cannot_brake() {
     let cfg = ShipPhysicsConfig::default();
     let mut state = HelmControlState::new(&p);
     state.set_speed(&p.thrust, 0.0).unwrap();
-    let resolved = state.resolve(&p, actual(), 0.125, &cfg).unwrap();
+    let resolved = state.resolve(&p, actual(), 0.125, &cfg, None).unwrap();
     assert_eq!(resolved.drive, LongitudinalDriveMode::Force);
     assert!(resolved.thrust < 0.0);
     let paid = compute_physics_with_drive(
@@ -199,7 +199,7 @@ fn extreme_finite_force_and_assisted_servo_keep_bounded_velocity() {
 
     let mut state = HelmControlState::new(&p);
     state.set_speed(&p.thrust, -f32::MAX).unwrap();
-    let resolved = state.resolve(&p, actual, 2.0, &cfg).unwrap();
+    let resolved = state.resolve(&p, actual, 2.0, &cfg, None).unwrap();
     assert_eq!(resolved.thrust, -1.0, "overflow cannot disable the servo");
     let result = compute_physics_with_drive(
         actual,
@@ -308,7 +308,7 @@ fn direct_turn_changes_body_basis_without_rotating_world_momentum_or_claiming_la
         .set_mode(&p.steering, HelmControlMode::Direct, actual, &cfg)
         .unwrap();
     state.set_steering(&p.steering, 1.0).unwrap();
-    let request = state.resolve(&p, actual, 1.0, &cfg).unwrap();
+    let request = state.resolve(&p, actual, 1.0, &cfg, None).unwrap();
     let result = compute_physics_with_controls(
         actual,
         input(request.thrust, request.steering),
@@ -367,4 +367,140 @@ fn actual_cruiser_profile_requires_its_distinct_paid_physical_axis_owners() {
             "unsupported profile {fault}"
         );
     }
+}
+
+#[test]
+fn formation_axes_use_only_current_generation_context_and_manual_inputs_replace_individually() {
+    let p = profile();
+    let cfg = ShipPhysicsConfig::default();
+    let mut state = HelmControlState::new(&p);
+    state
+        .follow_navigation(&p.thrust, Some(7), actual())
+        .unwrap();
+    state
+        .follow_navigation(&p.steering, Some(7), actual())
+        .unwrap();
+    let inputs = HelmNavigationInputs {
+        tick: Some(10),
+        axes: [
+            (
+                p.thrust.clone(),
+                NavigationMotion {
+                    generation: 7,
+                    position: [0.0, -1000.0],
+                    velocity: [0.0, -5.0],
+                },
+            ),
+            (
+                p.steering.clone(),
+                NavigationMotion {
+                    generation: 7,
+                    position: [0.0, -1000.0],
+                    velocity: [0.0, -5.0],
+                },
+            ),
+        ]
+        .into(),
+    };
+    assert!(inputs.current(Some(11)).is_none());
+    assert!(inputs.current(None).is_none());
+    let paid_request = state
+        .resolve(&p, actual(), 0.125, &cfg, inputs.current(Some(10)))
+        .unwrap();
+    assert!(paid_request.thrust > 0.0);
+    assert_eq!(paid_request.steering, 0.0);
+    let missing = state.resolve(&p, actual(), 0.125, &cfg, None).unwrap();
+    assert!(
+        missing.thrust < 0.0,
+        "a lost measurement asks the ordinary paid servo to brake, without rewriting inertia"
+    );
+    let mut newer = inputs.clone();
+    for motion in newer.axes.values_mut() {
+        motion.generation = 8;
+    }
+    assert_eq!(
+        state
+            .resolve(&p, actual(), 0.125, &cfg, Some(&newer))
+            .unwrap(),
+        missing
+    );
+    let encoded = serde_json::to_vec(&state).unwrap();
+    let restored: HelmControlState = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(restored, state);
+    restored.validate(&p, 10).unwrap();
+    state.set_thrust(&p.thrust, 0.4).unwrap();
+    assert!(
+        matches!(state.axes[&p.thrust],AxisIntent::Thrust(ThrustIntent::Assisted{demand:SpeedDemand::Fraction{value}}) if value==0.4)
+    );
+    assert!(matches!(
+        state.axes[&p.steering],
+        AxisIntent::Steering(SteeringIntent::Assisted {
+            demand: SteeringDemand::Navigation { generation: 7 }
+        })
+    ));
+    state.set_steering(&p.steering, -0.5).unwrap();
+    assert_eq!(
+        state
+            .resolve(&p, actual(), 0.125, &cfg, None)
+            .unwrap()
+            .steering,
+        -0.5
+    );
+}
+
+#[test]
+fn formation_lateral_and_heading_use_world_slot_without_hidden_heading_or_nonfinite_output() {
+    let mut p = profile();
+    p.lateral = Some(SystemId("side".into()));
+    let mut cfg = ShipPhysicsConfig::default();
+    cfg.max_lateral_speed = 20.0;
+    let mut state = HelmControlState::new(&p);
+    for owner in [&p.thrust, &p.steering, p.lateral.as_ref().unwrap()] {
+        state.follow_navigation(owner, Some(1), actual()).unwrap();
+    }
+    let inputs = HelmNavigationInputs {
+        tick: Some(2),
+        axes: state
+            .axes
+            .keys()
+            .map(|owner| {
+                (
+                    owner.clone(),
+                    NavigationMotion {
+                        generation: 1,
+                        position: [1000.0, 0.0],
+                        velocity: [0.0, 0.0],
+                    },
+                )
+            })
+            .collect(),
+    };
+    let request = state
+        .resolve(&p, actual(), 0.125, &cfg, Some(&inputs))
+        .unwrap();
+    assert!(request.steering > 0.0);
+    assert!(request.lateral.unwrap().0 > 0.0);
+    assert!(
+        request.thrust < 0.0,
+        "thrust alone cannot invent a leader-facing frame"
+    );
+    let before = state.clone();
+    assert!(state
+        .follow_navigation(&p.thrust, Some(0), actual())
+        .is_err());
+    assert_eq!(state, before);
+    let mut malformed = inputs;
+    for motion in malformed.axes.values_mut() {
+        motion.velocity[0] = f32::INFINITY;
+    }
+    let safe = state
+        .resolve(&p, actual(), 0.125, &cfg, Some(&malformed))
+        .unwrap();
+    assert!(safe.thrust.is_finite());
+    assert_eq!(safe.steering, 0.0);
+    assert_eq!(safe.lateral.unwrap().0, 0.0);
+    state.follow_navigation(&p.thrust, None, actual()).unwrap();
+    assert!(
+        matches!(state.axes[&p.thrust],AxisIntent::Thrust(ThrustIntent::Assisted{demand:SpeedDemand::Absolute{speed}}) if speed==actual().forward_speed)
+    );
 }

@@ -77,6 +77,13 @@ impl HelmAxisHost for LateralAxis {
             _ => return None,
         }
         let sf = cx.frame?;
+        if cx.movement.is_some() {
+            if let Some(generation) = cx.plan.and_then(|plan| plan.navigation_generation) {
+                return Some(SystemControlPayload::SetFollowNavigation {
+                    generation: Some(generation),
+                });
+            }
+        }
         let lateral = if !sf.has_objective {
             // No objectives → zero the dodge rather than latch the last one,
             // matching what the monolith did for the axis.
@@ -147,6 +154,7 @@ pub fn ai_helm_lateral_thrust(
             continue;
         };
         let cx = HelmAxisCtx {
+            movement: movement,
             // The Lateral query carries no `ShipPhysics` — its dodge reads the
             // plan's hazard surface, not the pose (see `HelmAxisCtx::physics`).
             physics: None,

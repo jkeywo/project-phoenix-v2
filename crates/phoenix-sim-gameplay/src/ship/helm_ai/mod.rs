@@ -337,6 +337,8 @@ pub fn resolve_helm_channel<'a>(
 /// union of what the six axes need, never a widened query. `seed` and `act` read
 /// only the fields their axis populates.
 pub struct HelmAxisCtx<'a> {
+    /// Existing configured direct/assisted axis machinery, never a controller.
+    pub movement: Option<&'a crate::ship::helm_control::CompiledHelmControl>,
     /// The ship's live physics (pose, forward speed, vertical offset `y`).
     /// `None` only for the Lateral axis, whose query carries no `ShipPhysics`
     /// (its dodge reads the plan's hazard surface, never the pose) — keeping the
@@ -936,3 +938,6 @@ pub fn ai_policy_state_tick(
         *runtime.pass = surface;
     }
 }
+
+#[cfg(test)]
+mod navigation_tests;

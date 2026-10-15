@@ -63,6 +63,9 @@ pub struct HazardAssessment {
 /// One ship's full plan for this tick.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ShipMotionPlan {
+    /// Cleared Navigation was the selected ordinary travel, with no docking,
+    /// doctrine pass or hazard override. Individual axis policy still decides.
+    pub navigation_generation: Option<u64>,
     pub motion: DesiredMotion,
     pub hazard: HazardAssessment,
     /// True when a docking close manoeuvre (issue #742) authored this tick's
@@ -555,6 +558,13 @@ pub fn helm_motion_planner(
         plan.ships.insert(
             entity,
             ShipMotionPlan {
+                navigation_generation: sf.navigation_generation.filter(|_| {
+                    sf.nav_waypoint.is_some()
+                        && !pass.active
+                        && !docking_active
+                        && hazard.urgency == 0.0
+                        && hazard.hazard_forces == Vec3::ZERO
+                }),
                 motion,
                 hazard,
                 docking_active,

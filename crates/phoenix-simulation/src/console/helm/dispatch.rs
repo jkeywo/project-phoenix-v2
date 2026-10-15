@@ -36,6 +36,7 @@ pub fn register_helm_dispatch(app: &mut bevy::prelude::App) {
                 crate::ship::system_registry::HELM_THRUST_SYSTEM_ID,
             ),
             &[
+                Payload::SetFollowNavigation,
                 Payload::SetHelmMode,
                 Payload::SetDesiredSpeed,
                 Payload::SetMatchSpeed,
@@ -47,7 +48,11 @@ pub fn register_helm_dispatch(app: &mut bevy::prelude::App) {
             crate::command_admission::FeedbackAddress::DeclaredKindOrCanonical(
                 crate::ship::system_registry::HELM_STEERING_SYSTEM_ID,
             ),
-            &[Payload::SetHelmMode, Payload::SetDesiredHeading],
+            &[
+                Payload::SetHelmMode,
+                Payload::SetDesiredHeading,
+                Payload::SetFollowNavigation,
+            ],
         ),
     )
     .register_admitted_consumer(
@@ -63,7 +68,7 @@ pub fn register_helm_dispatch(app: &mut bevy::prelude::App) {
             crate::command_admission::FeedbackAddress::DeclaredKindOrCanonical(
                 crate::ship::system_registry::LATERAL_THRUST_SYSTEM_ID,
             ),
-            &[Payload::SetHelmMode],
+            &[Payload::SetHelmMode, Payload::SetFollowNavigation],
         ),
     )
     .register_admitted_consumer(ConsumerMatcher::kind(

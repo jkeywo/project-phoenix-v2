@@ -32,6 +32,9 @@ pub struct HelmAiShipFrame {
     /// The Navigation waypoint this ship is cleared to fly
     /// (`cleared_nav_waypoint`), if any.
     pub nav_waypoint: Option<[f32; 2]>,
+    /// Genuine cleared Formation revision; final axis admission independently
+    /// rechecks its own permitted Navigation and measured motion.
+    pub navigation_generation: Option<u64>,
     /// The entity that cleared waypoint is ANCHORED to, when it is anchored to
     /// one (`cleared_nav_waypoint_anchor`) — i.e. *what* the destination is,
     /// not merely where it currently sits. `None` for a `Free` waypoint, which

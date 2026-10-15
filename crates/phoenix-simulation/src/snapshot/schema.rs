@@ -2117,6 +2117,10 @@ pub struct MotionPlanState {
     pub moving_hazard_threat: f32,
     /// `ShipMotionPlan::docking_active`.
     pub docking_active: bool,
+    /// Semantic course used when this held plan was produced; a later course
+    /// invalidates it at the existing axis resolver without rewriting the plan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub navigation_generation: Option<u64>,
 }
 
 /// Token-free authority frontier for an already-running mesh participant.

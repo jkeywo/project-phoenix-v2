@@ -30,6 +30,10 @@ impl Plugin for HelmPlugin {
             StateClass::Derived,
             "helm-movement-profile",
         );
+        app.declare_state::<phoenix_sim_gameplay::ship::helm_control::HelmNavigationInputs>(
+            StateClass::Derived,
+            "helm-current-navigation-inputs",
+        );
         app.add_message::<DeliveredCoordination>()
             .add_systems(
                 FixedUpdate,
@@ -37,6 +41,7 @@ impl Plugin for HelmPlugin {
                     .in_set(crate::sim_sets::FixedStep::ApplyHelmMovementControls)
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(crate::ship_plugin::process_helm_inputs)
+                    .after(crate::sim_sets::FixedStep::HandleNavigationWaypoint)
                     .before(crate::ship_plugin::integrate_ship_physics),
             )
             .add_systems(
@@ -210,6 +215,7 @@ pub(crate) fn publish_helm_blackboard(
                     Option<&phoenix_sim_gameplay::ship::helm_control::CompiledHelmControl>,
                     Option<&phoenix_sim_gameplay::ship::helm_control::HelmControlState>,
                     Option<&ShipConfigComponent>,
+                    Option<&phoenix_sim_gameplay::ship::helm_control::HelmNavigationInputs>,
                 ),
             ),
         ),
@@ -241,7 +247,7 @@ pub(crate) fn publish_helm_blackboard(
             thrust_input,
             lateral_input,
             (broad_profile, broad_state, uuid),
-            (movement_profile, movement_state, ship_config),
+            (movement_profile, movement_state, ship_config, navigation_inputs),
         ),
     ) in ship_q.iter_mut()
     {
@@ -399,7 +405,15 @@ pub(crate) fn publish_helm_blackboard(
                 },
                 _ => false,
             };
+            let navigation_inputs =
+                navigation_inputs.and_then(|input| input.current(tick.as_ref().map(|tick| tick.0)));
+            let navigation_generation = navigation_inputs
+                .and_then(|input| input.axes.values().next().map(|motion| motion.generation));
+            let navigation_axes = navigation_inputs
+                .map_or_else(Vec::new, |input| input.axes.keys().cloned().collect());
             Some(HelmMovementView {
+                navigation_generation,
+                navigation_axes,
                 thrust: HelmAxisView {
                     system: profile.thrust.clone(),
                     intent: thrust.clone(),

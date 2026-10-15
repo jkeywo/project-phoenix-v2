@@ -121,6 +121,7 @@ pub(super) fn restore_motion_plans(world: &mut World, snapshot: &PhoenixSnapshot
                         moving_hazard_threat: row.moving_hazard_threat,
                     },
                     docking_active: row.docking_active,
+                    navigation_generation: row.navigation_generation,
                 },
             );
         }
@@ -1571,6 +1572,10 @@ pub(super) fn apply_entity_state_with(
         {
             actuation.0 = 0.0;
         }
+    }
+    if entity_mut.contains::<phoenix_sim_gameplay::ship::helm_control::HelmNavigationInputs>() {
+        entity_mut
+            .insert(phoenix_sim_gameplay::ship::helm_control::HelmNavigationInputs::default());
     }
     if let Some(waypoint) = &row.navigation_waypoint {
         apply_navigation_waypoint(&mut entity_mut, waypoint);

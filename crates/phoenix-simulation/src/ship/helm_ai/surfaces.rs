@@ -509,7 +509,16 @@ pub(crate) fn build_helm_ai_surfaces_frame(
         });
         let waypoint = has_navigation.then_some(surfaces.waypoint).flatten();
         let scored = helm_ai_scored_objectives(blackboards);
-        let has_objective = has_helm_objective(&scored);
+        let navigation_generation = waypoint
+            .filter(|waypoint| {
+                matches!(
+                    waypoint.mode(),
+                    Some(crate::console::navigation::WaypointMode::Formation { .. })
+                )
+            })
+            .filter(|waypoint| cleared_nav_waypoint(Some(waypoint), surfaces.clearance).is_some())
+            .map(|waypoint| waypoint.generation());
+        let has_objective = has_helm_objective(&scored) || navigation_generation.is_some();
         if !has_objective {
             // The axis systems still need the entry (to zero their axis /
             // stand impulse down correctly), but none of them reads a view
@@ -644,6 +653,7 @@ pub(crate) fn build_helm_ai_surfaces_frame(
                 current_contact_routes,
                 observed_velocities,
                 nav_waypoint: cleared_nav_waypoint(waypoint, surfaces.clearance),
+                navigation_generation,
                 nav_waypoint_anchor,
                 forward_speed: physics.forward_speed,
                 hostile_arc_exposure,

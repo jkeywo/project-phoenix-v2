@@ -2749,6 +2749,11 @@ pub enum SystemControlPayload {
         target: String,
     },
     /// Change only the addressed actual thrust or steering owner's mode.
+    /// Own axis follows only the selected published Navigation generation.
+    /// None ends following; normal manual controls also replace the request.
+    SetFollowNavigation {
+        generation: Option<u64>,
+    },
     SetHelmMode {
         mode: crate::helm_control::HelmControlMode,
     },

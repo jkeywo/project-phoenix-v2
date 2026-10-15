@@ -185,6 +185,7 @@ pub fn ai_helm_boost(
         };
         let Some(owner) = owner else { continue };
         let cx = HelmAxisCtx {
+            movement: None,
             physics: Some(physics),
             max_speed: physics_cfg.map(|c| c.0.max_speed).unwrap_or(0.0),
             plan: plan.ships.get(&entity),

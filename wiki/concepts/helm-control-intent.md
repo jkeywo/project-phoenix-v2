@@ -2,8 +2,8 @@
 title: Helm Runtime
 type: concept
 tags: [helm, ai, impulse, boost, steering]
-sources: [crates/phoenix-simulation/src/console/helm/transit_worlds.rs, crates/phoenix-simulation/src/console/helm/transit.rs, crates/phoenix-simulation/src/snapshot/transit.rs, crates/phoenix-sim-gameplay/src/ship/transit.rs, crates/phoenix-simulation/src/ship/continuation.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/snapshot/mod.rs, tests/snapshot_resume.rs, tests/lockstep_six_peer.rs, crates/phoenix-sim-gameplay/src/ship/helm_admission.rs, crates/phoenix-sim-gameplay/src/ship/helm.rs, crates/phoenix-sim-gameplay/src/ai/core.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/console/helm/server.rs, gui/action-map.js, gui/console-state.js]
-updated: 2026-10-15
+sources: [crates/phoenix-simulation/src/console/helm/navigation.rs, crates/phoenix-simulation/src/console/helm/control.rs, crates/phoenix-simulation/src/console/navigation/knowledge.rs, crates/phoenix-sim-gameplay/src/ship/helm_control.rs, crates/phoenix-simulation/src/console/helm/transit_worlds.rs, crates/phoenix-simulation/src/console/helm/transit.rs, crates/phoenix-simulation/src/snapshot/transit.rs, crates/phoenix-sim-gameplay/src/ship/transit.rs, crates/phoenix-simulation/src/ship/continuation.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/snapshot/mod.rs, tests/snapshot_resume.rs, tests/lockstep_six_peer.rs, crates/phoenix-sim-gameplay/src/ship/helm_admission.rs, crates/phoenix-sim-gameplay/src/ship/helm.rs, crates/phoenix-sim-gameplay/src/ai/core.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/console/helm/server.rs, gui/action-map.js, gui/console-state.js]
+updated: 2026-10-16
 ---
 
 # Helm Runtime
@@ -65,3 +65,24 @@ Private deterministic scatter and accepted static gravity inputs stay in the ord
 An optional `world_travel` drive uses the same paid work and physical arrival. Navigation publishes closed authored routes through its existing permitted board; the existing waypoint command selects a unique x/z anchor, and the drive freezes its complete authored point, including height. `transit_worlds.rs` rebuilds immutable accepted route, loader ancestry and static-body recipes at ordinary world materialisation. The existing World layer queue activates the selected destination and support parent-first. Source layers remain resident; a return reuses their actors and scripts.
 
 `ShipTransitDrives` also retains the actual current arrival-policy World and latest successful World-arrival stamp. Every order freezes its original World so completed histories on other drives remain valid after later travel; subsequent local jumps use the actual current scope. `EntityOriginLayer` keeps its separate actor lifetime and script ownership. Unsupported or ambiguous layer-authored drive origins refuse before minting. `sector_jump_cruiser.toml` is an optional configured consumer. The sector continuation witness is in `tests/local_jump_continuation.rs`; source and client checks do not establish its unexecuted native result. Formation remains separate work.
+
+
+Formation selection lives on the existing Navigation course. Genuine received
+Comms acceptance is separate from selecting an earned contact alias, and neither
+step grants Helm control. Each configured Helm axis has an explicit Follow
+Navigation HUD action and retains only the selected semantic generation in its
+existing intent. `console/helm/navigation.rs` consumes its permitted Navigation
+publication's dated motion; it never correlates another radar's alias or reads
+the leader's body. Original sample age and actual accepted instrument cadence
+bound availability. A changed or withdrawn course suppresses old assistance;
+manual axis input replaces only that axis's demand.
+
+`HelmNavigationInputs` is a current-tick derived context reset at restore. The
+same existing paid physics resolver/integrator consumes it. The ordinary travel
+AI verbs can request following; docking, hazard, combat/pass and Weapons-bearing
+choices retain priority. The existing held AI motion plan saves its optional
+Navigation generation and folds it in `helm-navigation-plan` only when present.
+Owner witnesses cover genuine received coordination, paid observation and
+selection, fresh-host candidate validation, and the new paid movement/freshness
+and manual-breakaway continuation. The new Helm following Rust witnesses await
+native execution; browser/physical fleet acceptance remains separate.

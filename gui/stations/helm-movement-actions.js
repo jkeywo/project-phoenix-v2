@@ -7,7 +7,8 @@ export const HELM_MODE_ACTION = action('mode', 'mode');
 export const HELM_SPEED_ACTION = action('desired-speed', 'desired_speed');
 export const HELM_HEADING_ACTION = action('desired-heading', 'desired_heading');
 export const HELM_MATCH_ACTION = action('match-speed', 'match_speed');
-export const HELM_MOVEMENT_ACTIONS = Object.freeze([HELM_MODE_ACTION, HELM_SPEED_ACTION, HELM_HEADING_ACTION, HELM_MATCH_ACTION]);
+export const HELM_FOLLOW_NAVIGATION_ACTION = action('follow-navigation', 'follow_navigation');
+export const HELM_MOVEMENT_ACTIONS = Object.freeze([HELM_MODE_ACTION, HELM_SPEED_ACTION, HELM_HEADING_ACTION, HELM_MATCH_ACTION, HELM_FOLLOW_NAVIGATION_ACTION]);
 
 export function registerHelmMovementActions(registry, { getState = () => null, sendAction } = {}) {
   const send = createCorrelatedActionSender(sendAction);
@@ -32,6 +33,13 @@ export function registerHelmMovementActions(registry, { getState = () => null, s
     if (field === 'contact' && value !== null && !held.movement.contacts.some(row => row.contact === value)) return false;
     return send(actionId, correlation, inputMs, name,
       { control_system_id: held.axis.system_id, [field]: value });
+  });
+  registry.register(HELM_FOLLOW_NAVIGATION_ACTION, ({actionId,correlation,inputMs,detail}={})=>{
+    const held=current(detail||{});if(!held)return false;
+    const generation=detail.generation;
+    if(generation===null ? !Number.isSafeInteger(held.axis.following_generation)||held.axis.following_generation<=0
+      : !Number.isSafeInteger(generation)||generation<=0||generation!==held.movement.navigation_generation||held.axis.navigation_available!==true||held.axis.available!==true)return false;
+    return send(actionId,correlation,inputMs,'set_helm_follow_navigation',{control_system_id:held.axis.system_id,generation});
   });
   return registry;
 }

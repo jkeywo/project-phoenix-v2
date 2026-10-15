@@ -186,6 +186,7 @@ pub fn apply_helm_commands(
 pub fn integrate_ship_physics(
     physical_q: Query<&crate::ship::physical_damage::ShipDamage>,
     time: Res<Time>,
+    logical_tick: Option<Res<crate::sim_tick::SimTick>>,
     physics_cfg_res: Option<Res<ShipPhysicsConfigResource>>,
     bank_cfg_res: Option<Res<BankConfigResource>>,
     mut power_q: Query<&mut crate::ship::power::ShipPowerSystem>,
@@ -208,6 +209,7 @@ pub fn integrate_ship_physics(
                 Option<&crate::ship::helm_control::CompiledHelmControl>,
                 Option<&crate::ship::helm_control::HelmControlState>,
                 Option<&mut crate::ship::impulse_boost_systems::BoostActuation>,
+                Option<&crate::ship::helm_control::HelmNavigationInputs>,
             ),
         ),
         With<crate::ai::server::AiHighFidelity>,
@@ -252,7 +254,7 @@ pub fn integrate_ship_physics(
         lateral_in,
         vertical_in,
         (impulse, boost),
-        (movement_profile, movement_state, mut boost_actuation),
+        (movement_profile, movement_state, mut boost_actuation, navigation_inputs),
     ) in ships.iter_mut()
     {
         // Debug-only single-writer tripwire (issue #699). The guard arrives
@@ -334,6 +336,8 @@ pub fn integrate_ship_physics(
             });
         let impulse_active = impulse_requested && impulse_fraction > 0.0;
 
+        let navigation_inputs = navigation_inputs
+            .and_then(|input| input.current(logical_tick.as_ref().map(|tick| tick.0)));
         let mut movement_config = None;
         let mut movement_resolved = None;
         if !impulse_active {
@@ -345,7 +349,9 @@ pub fn integrate_ship_physics(
                 config.max_speed *= modifiers.get(&ModifierSlot::MaxSpeed);
                 config.max_reverse_speed *= modifiers.get(&ModifierSlot::MaxSpeed);
                 config.max_yaw_rate *= modifiers.get(&ModifierSlot::MaxYawRate);
-                let Some(request) = intent.resolve(&profile.0, state, dt, &config) else {
+                let Some(request) =
+                    intent.resolve(&profile.0, state, dt, &config, navigation_inputs)
+                else {
                     continue;
                 };
                 let boost_cfg = boost_cfg_comp.cloned().unwrap_or_default();
@@ -356,7 +362,7 @@ pub fn integrate_ship_physics(
                     potential.acceleration *= boost_cfg.multiplier;
                     potential.max_yaw_rate *= boost_cfg.steering_multiplier;
                     let request = intent
-                        .resolve(&profile.0, state, dt, &potential)
+                        .resolve(&profile.0, state, dt, &potential, navigation_inputs)
                         .unwrap_or(request);
                     let activity = if movement_axis_online(sources, &profile.0.thrust) {
                         request.thrust.abs()
@@ -383,7 +389,9 @@ pub fn integrate_ship_physics(
                     config.acceleration *= multiplier;
                     config.max_yaw_rate *= 1.0 + (boost_cfg.steering_multiplier - 1.0) * fraction;
                 }
-                let Some(request) = intent.resolve(&profile.0, state, dt, &config) else {
+                let Some(request) =
+                    intent.resolve(&profile.0, state, dt, &config, navigation_inputs)
+                else {
                     continue;
                 };
                 movement_config = Some(config);

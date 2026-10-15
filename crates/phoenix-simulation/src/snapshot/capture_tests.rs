@@ -133,6 +133,7 @@ fn capture_projects_ship_fidelity_and_resource_motion_on_the_fixed_clock() {
             },
             hazard: HazardAssessment::default(),
             docking_active: true,
+            navigation_generation: None,
         },
     );
     world.insert_resource(plan);
@@ -153,6 +154,7 @@ fn capture_projects_ship_fidelity_and_resource_motion_on_the_fixed_clock() {
             desired_facing_local: [0.0, 0.0, 1.0],
             hazard_forces: [0.0; 3],
             docking_active: true,
+            navigation_generation: None,
             ..Default::default()
         })
     );

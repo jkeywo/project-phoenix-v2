@@ -54,6 +54,51 @@ impl Environment<'_, '_> {
     pub(crate) fn actor(&self, entity: Entity) -> Option<&str> {
         self.scopes.get(entity).ok()?.3.map(|uuid| uuid.0.as_str())
     }
+    /// A shared dated sample keeps its original age. Newer observations may
+    /// confirm its instrument but cannot renew the age of an unseen sample.
+    pub(crate) fn formation_sample_current(
+        &self,
+        entity: Entity,
+        config: &ShipConfigComponent,
+        boards: &ShipSystemBlackboards,
+        course: &phoenix_model::formation::FormationCourse,
+    ) -> bool {
+        let (Some(now), Some(fixed)) = (self.now(), self.fixed.as_ref()) else {
+            return false;
+        };
+        if !course.valid_at(now) {
+            return false;
+        }
+        let dt = fixed.timestep().as_secs_f64();
+        if !dt.is_finite() || dt <= 0.0 {
+            return false;
+        }
+        let Ok((_, _, _, _, _, _, Some(profiles))) = self.scopes.get(entity) else {
+            return false;
+        };
+        let permitted = config.0.observations_for_system(&course.owner, &boards.0);
+        let mut maximum_age = None;
+        for (instrument, profile) in &profiles.0 {
+            if !permitted
+                .get(instrument)
+                .and_then(crate::science::contact_routing::observations)
+                .is_some_and(|records| {
+                    records
+                        .iter()
+                        .any(|record| record.contact_id == course.leader)
+                })
+            {
+                continue;
+            }
+            let age = f64::from(profile.profile.sample_interval_secs) * 2.0 + dt;
+            if maximum_age.is_some_and(|held| held != age) {
+                return false;
+            }
+            maximum_age = Some(age);
+        }
+        maximum_age
+            .is_some_and(|maximum| (now - course.measurement.observed_tick) as f64 * dt <= maximum)
+    }
     pub(crate) fn formation_readings(
         &self,
         entity: Entity,

@@ -3167,3 +3167,60 @@ fn reversible_defeat_frontiers_and_event_edges_are_deterministic_and_folded() {
         15
     );
 }
+
+#[test]
+fn held_navigation_plan_generation_is_sorted_and_empty_plan_preserves_existing_digest() {
+    use crate::ship::helm_planner::{HelmMotionPlan, ShipMotionPlan};
+    let mut world = World::new();
+    let a = world.spawn(EntityUuid("navigation-plan-a".into())).id();
+    let b = world.spawn(EntityUuid("navigation-plan-b".into())).id();
+    let old = world_digest(&world);
+    let mut plan = HelmMotionPlan::default();
+    plan.ships.insert(a, ShipMotionPlan::default());
+    world.insert_resource(plan);
+    assert_eq!(
+        world_digest(&world),
+        old,
+        "unbound ordinary plans add no digest contribution"
+    );
+    world
+        .resource_mut::<HelmMotionPlan>()
+        .ships
+        .get_mut(&a)
+        .unwrap()
+        .navigation_generation = Some(3);
+    let bound = world_digest(&world);
+    assert_ne!(bound, old);
+    world.resource_mut::<HelmMotionPlan>().ships.insert(
+        b,
+        ShipMotionPlan {
+            navigation_generation: Some(5),
+            ..Default::default()
+        },
+    );
+    let forward = world_digest(&world);
+    let mut reversed = HelmMotionPlan::default();
+    reversed.ships.insert(
+        b,
+        ShipMotionPlan {
+            navigation_generation: Some(5),
+            ..Default::default()
+        },
+    );
+    reversed.ships.insert(
+        a,
+        ShipMotionPlan {
+            navigation_generation: Some(3),
+            ..Default::default()
+        },
+    );
+    world.insert_resource(reversed);
+    assert_eq!(world_digest(&world), forward);
+    world
+        .resource_mut::<HelmMotionPlan>()
+        .ships
+        .get_mut(&a)
+        .unwrap()
+        .navigation_generation = Some(4);
+    assert_ne!(world_digest(&world), forward);
+}

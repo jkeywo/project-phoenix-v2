@@ -6429,3 +6429,11 @@ workshop.comms_radio.media,Comms equipment,Human media capability,,,
 workshop.comms_radio.media_none,Comms equipment,No human media,,,
 workshop.comms_radio.media_audio,Comms equipment,Audio,,,
 workshop.comms_radio.media_video,Comms equipment,Audio and video,,,
+helm.movement.follow_navigation,Explicit own Helm formation assistance,Follow Navigation,Follow Navigation,Follow Navigation,source
+helm.movement.stop_navigation,Explicit own Helm formation assistance,Stop following,Stop following,Stop following,source
+helm.movement.navigation_selected,Explicit own Helm formation assistance,Following selected course,Following selected course,Following selected course,source
+helm.movement.navigation_paused,Explicit own Helm formation assistance,Course unavailable; following paused,Course unavailable; following paused,Course unavailable; following paused,source
+semantic_action.helm.follow_navigation.label,Explicit own formation control,Follow Navigation,Follow Navigation,Follow Navigation,source
+semantic_action.helm.follow_navigation.accessibility,Explicit own formation control,Follow or stop following the selected Navigation course on this axis,Follow or stop following the selected Navigation course on this axis,Follow or stop following the selected Navigation course on this axis,source
+semantic_action.navigation.formation.select.label,Explicit own formation control,Select formation course,Select formation course,Select formation course,source
+semantic_action.navigation.formation.select.accessibility,Explicit own formation control,Select the accepted formation request and measured leader for Navigation,Select the accepted formation request and measured leader for Navigation,Select the accepted formation request and measured leader for Navigation,source

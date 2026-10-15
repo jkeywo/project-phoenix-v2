@@ -15,6 +15,9 @@ id = "support-target"
 name = "support-target"
 spawn_on = "game_start"
 transform = { position = [0,3,-90] }
+# The request names an actually observable unique subject, not a private route.
+[entity.overrides]
+name = "support-target"
 [script]
 setup = """
 on_world_loaded("request_support");

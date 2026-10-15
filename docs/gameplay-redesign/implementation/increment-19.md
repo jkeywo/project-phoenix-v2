@@ -69,6 +69,24 @@ probe retains its ordinary sensors, finite reserves, component condition, dated
 history and existing viable Comms/sharing; the parent's bay view cannot read remote
 live state through private custody references.
 
+The first closed composition is `CraftBay { id, power_input, config }` on the
+actual Bay System. `BayConfig` supplies compartment, finite capacity space,
+launch/recovery work seconds, recovery range, maximum parent speed and local
+release offset. The probe's `ProbeProfile` supplies its occupied space; its
+ordinary accepted energy/damage/sensor profiles supply actual capability.
+`LaunchCraft { craft }`, `RecoverCraft { contact }` and `CancelCraftHandling` use
+the same admitted owner: launch addresses an own stored identity, recovery resolves
+an exact current permitted contact, and physical placement checks reveal no hidden
+obstacle facts. Each per-bay job wraps the existing actual Job vocabulary.
+
+Initial `carried_by = { parent, bay }` belongs to the ordinary authored World row,
+referencing a declared base actor and actual Bay System. Resolve and commit it
+inside the existing spawn chain before any gameplay, physics or publication;
+there is no bootstrap tick where an authored Carried probe operates in space.
+Conditional, layered/additive and runtime Carried authoring are explicitly
+unsupported in this first adapter and refuse before materialization. Later
+lifecycle extensions must reuse the same custody owner.
+
 The same actual probe has exactly one canonical location: `Carried { parent, bay }`
 or `Deployed`. One actual BayJob owns accepted launch/recovery work and progress;
 Launching/Recovering are projections of that job, not another saved phase/progress

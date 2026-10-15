@@ -238,3 +238,15 @@ path and ordinary waypoint/Helm-clearance mechanism. This fills the existing
 Transfer chain's approach consumer; it adds no route controller, private position,
 new observation grant or remote authority. Unknown/obfuscated targets retain the
 same knowledge boundary. Crew-chosen waypoints remain an ordinary alternative.
+
+### Known fixed supply destinations
+
+The physical supply reference explicitly charts its two fixed facilities through
+the existing authored `charted` tag. The ordinary Cruiser Navigation Console
+receives Tactical radar, whose real reach does not cover the initial source or
+the distant receiver. Science finding a source independently does not silently
+pool that knowledge into Navigation. Known fixed supply ports can instead appear
+on the existing public chart. This is authored initial map knowledge, not a live
+private position/stock grant: near-field acquisition, physical Dock mating and
+both paid finite service endpoints remain mandatory. Unknown uncharted ship
+references keep the existing refusal boundary.

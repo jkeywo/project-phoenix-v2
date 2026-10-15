@@ -54,6 +54,25 @@ function setup(opts) {
 }
 
 describe('PhHelmRadar', () => {
+  it('renders only delivered conditional approach corridors and clears them on information loss', () => {
+    const { el } = setup();
+    el.state = { range: 100, x: 0, z: 0, ship_heading: 0,
+      tracks: [{ id: 'opaque-ordnance', name: 'Measured return' }],
+      observed_approaches: [{ contact: 'opaque-ordnance', observed_tick: 7, seconds: 10,
+        own_position: [0, 0], contact_position: [0, 20], position_error: 5, separation: [15, 25] }],
+    };
+    const panel = el.shadowRoot.getElementById('approaches');
+    expect(panel.hidden).toBe(false);
+    expect(panel.querySelector('li').textContent).toContain('Measured return');
+    expect(panel.querySelector('li').textContent).toContain('15–25');
+    const group = el.shadowRoot.getElementById('approach-corridors');
+    expect(group.querySelector('circle').getAttribute('r')).toBe('2.5');
+    expect(group.querySelector('circle').getAttribute('cy')).toBe('60');
+    expect(group.querySelector('line')).not.toBeNull();
+    el.state = { range: 100, observed_approaches: [] };
+    expect(panel.hidden).toBe(true);
+    expect(group.children).toHaveLength(0);
+  });
   beforeEach(() => {
     document.body.innerHTML = '';
     delete window.activateSemanticAction;

@@ -33,6 +33,7 @@ pub(crate) fn register(app: &mut App) {
         FixedUpdate,
         publish
             .in_set(crate::sim_sets::SimSet::Publish)
+            .in_set(crate::sim_sets::FixedStep::PublishSensorReferences)
             .after(crate::ship::sensors::publish_sensor_radar_blackboard)
             .after(crate::console::helm::publish_helm_blackboard)
             .after(crate::console::weapons::blackboard::publish_tactical_radar_blackboard)
@@ -135,7 +136,7 @@ pub fn attach_views(
     }
 }
 
-fn publish(
+pub(crate) fn publish(
     mut ships: Query<(
         &ShipConfigComponent,
         &BroadTracks,

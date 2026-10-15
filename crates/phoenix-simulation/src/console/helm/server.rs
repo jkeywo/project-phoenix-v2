@@ -313,6 +313,7 @@ pub(crate) fn publish_helm_blackboard(
         };
 
         let bb = HelmBlackboard {
+            approaches: Vec::new(),
             // The motion aggregate owns no instrument's measured geometry.
             // Presence prevents the client from restoring legacy world truth.
             tracks: broad_profile.map(|_| Vec::new()),

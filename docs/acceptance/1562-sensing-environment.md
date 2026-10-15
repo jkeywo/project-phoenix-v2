@@ -341,3 +341,35 @@ PHOENIX_SMOKE_PORT=3098 npx --no-install playwright test sensors-console.spec.js
 This is client acceptance evidence. The new snapshot and reading joins still
 need native execution and whole-host continuation; this checkpoint does not
 close increment 14.
+
+### Conditional observed-ordnance approaches
+
+The existing in-flight torpedo owner now supplies physical position samples to
+ordinary paid Broad instruments. Radar vocabulary, range, signal paths and
+concealment constrain acquisition; no launcher, guidance target, true velocity
+or firing-tube identity is included in public records. The existing Missile tag
+also covers authored `torpedo` filters. Recognition and measured velocity follow
+the ordinary observation lifecycle.
+
+Helm's approach projection reads only its permitted measured Console feeds plus
+own motion. Optional `helm_console.projection` reuses the existing positive
+forecast-horizon policy; the Cruiser's 60-second horizon is provisional display
+tuning. The result states its constant-observed-motion assumption, shows a
+growing corridor and separation interval, and does not issue steering commands
+or claim an impending collision. Unknown motion/error metadata and conflicting
+copies are withheld. Numeric bounds include coordinate narrowing and are rounded
+outwards before publication.
+
+Targeted Helm/Console client suites passed **438 cases**. After rebuilding the
+pure-JS client, the actual Cruiser Helm `@core` journey passed **1 case in 5.2s**:
+
+```text
+npx vitest run tests/client/ph-helm-radar.test.js tests/client/console-state.test.js
+PHOENIX_SMOKE_PORT=3099 npx --no-install playwright test helm-observed-approaches.spec.js --project chromium
+```
+
+Strict strings passed with 5756 entries and no errors/warnings. The new pure
+calculation, actual projectile observation and permitted-feed publication tests
+are authored but have not run natively at this checkpoint. Visual Workshop
+enable/disable authoring, broader integrated continuation and increment exit
+acceptance remain pending.

@@ -15,6 +15,7 @@
 //! power and weather, stores what the pure half hands back, and publishes it on
 //! the ship's `scan` blackboard channel for `gui/destroyer/captain.html`.
 
+pub mod approaches;
 pub mod broad;
 pub mod contact_routing;
 pub mod focused;
@@ -30,12 +31,12 @@ pub mod server;
 pub mod sharing;
 
 pub use scan::{
-    ScanBandConfig, ScanConditions, ScanConfig, ScanReading, ScanRefusal, ScanSubject, derive,
-    quantise, scanned_flag,
+    derive, quantise, scanned_flag, ScanBandConfig, ScanConditions, ScanConfig, ScanReading,
+    ScanRefusal, ScanSubject,
 };
 pub use server::{
-    FocusedSaveState, FocusedScanRecord, ScanSaveState, SciencePlugin, ShipScanRecord,
     publish_scan_blackboard, scan_blackboard_key_for, scan_owner_from_blackboard_key, tick_scans,
+    FocusedSaveState, FocusedScanRecord, ScanSaveState, SciencePlugin, ShipScanRecord,
 };
 
 #[cfg(test)]

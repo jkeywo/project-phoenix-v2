@@ -932,6 +932,13 @@ impl EntityConfig {
             return Err(SerdeError::custom("ScanConfig requires at least one explicit [[sensing.focused]] instrument bound to its actual Sensors System; convert the former implicit scan suite"));
         }
         crate::science::sensing::validate_scan_feeds(&config).map_err(SerdeError::custom)?;
+        if let Some(projection) = config
+            .helm_console
+            .as_ref()
+            .and_then(|helm| helm.projection.as_ref())
+        {
+            projection.validate().map_err(SerdeError::custom)?;
+        }
         crate::resources::fitting::CompiledFitting::compile(&config).map_err(SerdeError::custom)?;
         crate::resources::logistics_profile::compile_entity_logistics(&config)
             .map_err(SerdeError::custom)?;

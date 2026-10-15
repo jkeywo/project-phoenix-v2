@@ -1,9 +1,40 @@
 //! Entity schema: helm. Public paths remain in the parent module.
 use super::*;
 
+/// Explicit false can override an inherited enabled display. Scalar/table
+/// replacement uses the ordinary include resolver, with no removal sentinel.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum HelmProjectionConfig {
+    Enabled(phoenix_model::sensing_forecast::ScanForecastPolicy),
+    Disabled(bool),
+}
+impl HelmProjectionConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        match self {
+            Self::Enabled(policy) => policy.validate(),
+            Self::Disabled(false) => Ok(()),
+            Self::Disabled(true) => Err(
+                "helm_console.projection must be false or an explicit positive horizon_secs policy"
+                    .into(),
+            ),
+        }
+    }
+    pub fn horizon(&self) -> Option<f32> {
+        match self {
+            Self::Enabled(policy) => Some(policy.horizon_secs),
+            Self::Disabled(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HelmConsoleConfig {
+    /// Conditional observed-ordnance approach display. Absent means no
+    /// estimates; it never changes steering or avoidance authority.
+    #[serde(default)]
+    pub projection: Option<HelmProjectionConfig>,
     #[serde(default)]
     pub max_speed: f32,
     #[serde(default)]

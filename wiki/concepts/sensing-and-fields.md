@@ -105,6 +105,14 @@ existing System tree runtime. This work has its own logical-tick cadence and
 does not install another controller. Snapshot `spatial_fields` validates the
 candidate's evidence and reading clocks before restore writes any state.
 
+Broad also samples actual `TorpedoSystemResource` in-flight positions, without
+copying launcher/guidance orders into measurements. Gameplay `science/approaches`
+derives conditional closest approaches and conservative corridors from public
+track DTOs. Simulation's corresponding publisher reads the Helm owner's permitted
+feeds after ordinary publication. `helm_console.projection` enables the display;
+it does not modify motion. The browser Helm radar paints the delivered corridors
+and states their unchanged-motion assumption.
+
 The existing browser and native outbound sinks use `ConsoleDeliveryProjection`
 to preserve own-ship data and explicitly charted landmarks while withholding
 foreign live snapshots and unseen lifecycle events. Typed target references are

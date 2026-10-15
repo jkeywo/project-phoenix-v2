@@ -5756,3 +5756,6 @@ sensing.reference.choose,Sensors held reference correlation,Held record,Vorliege
 sensing.reference.attach,Sensors held reference correlation,Attach reference,Referenz zuordnen,Attach reference,machine
 sensing.reference.unusual,Sensors held reference correlation,Unusual record,Ungewöhnlicher Eintrag,Unusual record,machine
 sensing.reference.sample_tick,Sensors held reference correlation,Original finding tick {tick},Ursprünglicher Erfassungstick {tick},Original finding tick {tick},machine
+sensing.approach.title,Helm observed motion,Observed approaches ({count}),Beobachtete Annäherungen ({count}),Observed approaches ({count}),machine
+sensing.approach.assumption,Helm observed motion,"Assumes unchanged observed velocities. Guidance and future manoeuvres are unknown; these corridors do not confirm a collision.","Unveränderte beobachtete Geschwindigkeiten werden angenommen. Lenkung und zukünftige Manöver sind unbekannt; diese Korridore bestätigen keine Kollision.","Assumes unchanged observed velocities. Guidance and future manoeuvres are unknown; these corridors do not confirm a collision.",machine
+sensing.approach.item,Helm observed motion,{contact}: {seconds}s · separation {lower}–{upper} · sample tick {tick},{contact}: {seconds}s · Abstand {lower}–{upper} · Messtick {tick},{contact}: {seconds}s · separation {lower}–{upper} · sample tick {tick},machine

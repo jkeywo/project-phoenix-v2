@@ -204,6 +204,7 @@ impl Plugin for SciencePlugin {
         super::sharing::register(app);
         super::references::register(app);
         super::reading::register(app);
+        super::approaches::register(app);
         app.add_systems(
             FixedUpdate,
             (

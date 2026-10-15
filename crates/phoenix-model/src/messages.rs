@@ -4257,6 +4257,8 @@ impl Default for CommandBlackboard {
 /// happens client-side in `gui/console-state.js`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct HelmBlackboard {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub approaches: Vec<crate::sensing_tracks::ObservedApproach>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracks: Option<Vec<crate::sensing_tracks::SensorTrackSnapshot>>,
     pub yaw: f32,

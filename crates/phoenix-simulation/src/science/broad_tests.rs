@@ -1,5 +1,71 @@
 use super::*;
 #[test]
+fn actual_in_flight_ordnance_is_measured_without_guidance_or_launcher_intelligence() {
+    let (mut app, observer, target, profile) = rig();
+    app.world_mut().despawn(target);
+    app.world_mut()
+        .get_mut::<BroadProfile>(observer)
+        .unwrap()
+        .0
+        .get_mut(&profile.system)
+        .unwrap()
+        .radar
+        .shows
+        .push(phoenix_model::tags::EntityTag::from_str("torpedo").unwrap());
+    app.world_mut()
+        .get_mut::<crate::server_app::TorpedoSystemResource>(observer)
+        .unwrap()
+        .0
+        .in_flight
+        .push(crate::weapons::torpedo::Torpedo {
+            impact: Default::default(),
+            strike_damage_bonus: 0.0,
+            uuid: "private-projectile-uuid".into(),
+            x: 20.0,
+            y: 0.0,
+            z: 0.0,
+            heading: 2.0,
+            pitch: 0.8,
+            lifespan_remaining: 100.0,
+            target_uuid: Some("secret-guidance-target".into()),
+            source_uuid: Some("secret-launcher".into()),
+            tube_id: "secret-tube".into(),
+            shield_pierce: 0.5,
+        });
+    fund(&mut app, observer, &profile, 1.0);
+    app.update();
+    let first = app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system]
+        .projection(&profile, 0, 0.5)
+        .unwrap();
+    assert_eq!(first.len(), 1);
+    assert!(first[0].velocity.is_none());
+    assert!(!first[0].selectable);
+    assert!(first[0].identity.is_none());
+    let wire = serde_json::to_string(&first).unwrap();
+    for forbidden in [
+        "private-projectile-uuid",
+        "secret-guidance-target",
+        "secret-launcher",
+        "secret-tube",
+    ] {
+        assert!(!wire.contains(forbidden));
+    }
+    app.world_mut()
+        .get_mut::<crate::server_app::TorpedoSystemResource>(observer)
+        .unwrap()
+        .0
+        .in_flight[0]
+        .x = 100000.0;
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 2;
+    fund(&mut app, observer, &profile, 1.0);
+    app.update();
+    let held = app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system]
+        .projection(&profile, 2, 0.5)
+        .unwrap();
+    assert_eq!(held[0].observed_tick, 0);
+    assert!(held[0].predicted && held[0].position[0] < 100.0);
+}
+#[test]
 fn streamed_rock_actor_uses_authored_tags_paid_observation_and_normal_contact_alias() {
     let (mut app, observer, target, profile) = rig();
     app.world_mut().despawn(target);

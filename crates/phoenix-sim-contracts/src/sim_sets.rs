@@ -273,6 +273,8 @@ pub enum FixedStep {
     PublishCommandBlackboard,
     PublishHelmBlackboard,
     PublishCaptainBlackboard,
+    PublishSensorReferences,
+    PublishObservedApproaches,
     AggregateDoctrineBlackboards,
     PublishViewscreenBlackboard,
     ClearLastAttackerOnDeath,

@@ -83,6 +83,7 @@ export function makeHelmRender(variant) {
         ship_heading: s.ship_heading || 0, speed: s.speed || 0, on_screen_active: !!s.on_screen,
         config: {}, engine_port_thrust: s.engine_port_thrust || 0, engine_stbd_thrust: s.engine_stbd_thrust || 0,
         hostile_arcs: s.hostile_arcs || [], hostile_arc_color: s.hostile_arc_color || null,
+        tracks: s.tracks || [], observed_approaches: s.observed_approaches || [],
       };
     }
 

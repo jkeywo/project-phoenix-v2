@@ -914,6 +914,7 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                 updates: vec![(
                     SystemId("helm".into()),
                     SystemBlackboard::Helm(HelmBlackboard {
+                        approaches: Vec::new(),
                         tracks: None,
                         yaw: 0.785,
                         forward_speed: 75.0,
@@ -5208,6 +5209,7 @@ fn hud_state_json_omits_absent_computer_message() {
 #[test]
 fn system_blackboard_helm_serde_fields() {
     let bb = SystemBlackboard::Helm(HelmBlackboard {
+        approaches: Vec::new(),
         tracks: None,
         yaw: 1.5,
         forward_speed: 42.0,

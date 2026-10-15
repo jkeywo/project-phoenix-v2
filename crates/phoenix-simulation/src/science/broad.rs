@@ -131,6 +131,7 @@ pub(crate) fn tick(
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     world: Option<Res<crate::lobby::server::WorldResource>>,
+    ordnance: Query<&crate::server_app::TorpedoSystemResource>,
     scene: Query<(
         Option<&EntityUuid>,
         Option<&crate::server_app::AsteroidUuid>,
@@ -230,6 +231,46 @@ pub(crate) fn tick(
                         )
                     });
                 if range.is_finite() && range > 0.0 {
+                    // Existing projectiles are not scene entities. Their one
+                    // authoritative owner supplies positions to the same paid
+                    // instrument, with no guidance/order/velocity shortcut.
+                    if radar
+                        .shows
+                        .contains(&phoenix_model::tags::EntityTag::Missile)
+                    {
+                        for projectile in ordnance.iter().flat_map(|owner| &owner.0.in_flight) {
+                            let position = Vec3::new(projectile.x, projectile.y, projectile.z);
+                            if !position.is_finite()
+                                || position.distance(origin) > range
+                                || runtime.as_ref().is_some_and(|runtime| {
+                                    crate::gm::operations::contact::mode(
+                                        &runtime.contact_overrides,
+                                        &observer.0,
+                                        &projectile.uuid,
+                                    ) == crate::gm::operations::contact::ContactMode::Conceal
+                                })
+                            {
+                                continue;
+                            }
+                            let support = paths.transmission(
+                                origin,
+                                position,
+                                phoenix_sim_gameplay::regions::signal_path::SignalClass::Sensors,
+                            );
+                            if support > 0.0 {
+                                measurements.push(BroadMeasurement {
+                                    source: projectile.uuid.clone(),
+                                    observation: None,
+                                    selectable: false,
+                                    position: [position.x, position.z],
+                                    support,
+                                    identity: None,
+                                    classification: Some("torpedo".into()),
+                                    assessment: None,
+                                });
+                            }
+                        }
+                    }
                     for (
                         id,
                         rock,

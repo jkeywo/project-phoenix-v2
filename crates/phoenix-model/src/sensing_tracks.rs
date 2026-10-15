@@ -10,6 +10,21 @@ pub enum TrackStage {
     Classified,
     Assessed,
 }
+
+/// A conditional projection of permitted measured motion, never a guidance
+/// solution, collision guarantee or hidden target order.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedApproach {
+    pub contact: String,
+    pub observed_tick: u64,
+    pub predicted: bool,
+    pub seconds: f32,
+    pub own_position: [f32; 2],
+    pub contact_position: [f32; 2],
+    pub position_error: f32,
+    pub separation: [f32; 2],
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrackIdentity {

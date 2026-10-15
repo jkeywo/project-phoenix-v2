@@ -918,6 +918,8 @@ shows = [ "player", "asteroid_field", "ship", "station", "planet", "star", "carg
 selects = [ "ship", "station", "planet", "cargo", "asteroid" ]
 
 [helm_console]
+# [ai] Provisional display horizon only; estimates never steer the ship.
+projection = { horizon_secs = 60 }
 # Red-alert hostile weapon-arc overlay (issue #874): RGBA 0-1, the fourth
 # entry being the fill opacity. Deliberately far fainter than the Tactical
 # radar's own arc fills (0.30 / 0.25): the overlay paints OVER the blips the

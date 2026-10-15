@@ -1277,7 +1277,8 @@ export function buildHelmConsoleState(state, systemIds = []) {
   const lateralBb = blackboardOfKind(state, 'HelmLateralThrust', systemIds)?.data;
 
   return {
-    ...(trackMode ? { track_mode: true, tracks: observed.tracks } : {}),
+    ...(trackMode ? { track_mode: true, tracks: observed.tracks,
+      observed_approaches: blackboardsOfKind(state, 'Helm').flatMap(entry => entry.data.approaches || []) } : {}),
     range,
     ship_heading:            (((shipYaw * 180 / Math.PI % 360) + 360) % 360),
     speed:                   forwardSpeed,

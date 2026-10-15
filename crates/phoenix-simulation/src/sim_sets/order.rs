@@ -243,6 +243,8 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             PublishCommandBlackboard,
             PublishHelmBlackboard,
             PublishCaptainBlackboard,
+            PublishSensorReferences,
+            PublishObservedApproaches,
         ],
     );
     // PublishAggregate: reviewed conflicting owner sequence.

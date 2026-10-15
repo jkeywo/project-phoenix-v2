@@ -9,7 +9,7 @@ pub struct ScanForecastPolicy {
 impl ScanForecastPolicy {
     pub fn validate(&self) -> Result<(), String> {
         if !self.horizon_secs.is_finite() || self.horizon_secs <= 0.0 {
-            return Err("focused forecast horizon must be finite and positive".into());
+            return Err("forecast horizon must be finite and positive".into());
         }
         Ok(())
     }

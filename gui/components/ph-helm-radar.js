@@ -28,6 +28,8 @@ export class PhHelmRadar extends PhElement {
       '.svg-overlay { position: absolute; inset: 0; pointer-events: none; overflow: visible; }',
       '.thrust-arc { fill: none; stroke: var(--cyan); stroke-width: 4; stroke-linecap: round; }',
       '.hostile-arc { stroke: none; }',
+      '.approach-corridor { fill: none; stroke: var(--amber); stroke-width: .5; stroke-dasharray: 2 2; }',
+      '#approaches { font-size: .8rem; color: var(--amber); }',
       SCOPE_CHROME_CSS,
       SCOPE_ON_SCREEN_CSS,
       '</style>',
@@ -41,12 +43,15 @@ export class PhHelmRadar extends PhElement {
       // contacts. The authored alpha (0.07) is what keeps the blips legible
       // through it, not the stacking order (issue #874).
       '    <g id="hostile-arcs"></g>',
+      '    <defs><clipPath id="approach-clip"><circle cx="50" cy="50" r="50" /></clipPath></defs>',
+      '    <g id="approach-corridors" clip-path="url(#approach-clip)"></g>',
       '    <path class="thrust-arc" id="arc-port" />',
       '    <path class="thrust-arc" id="arc-stbd" />',
       '  </svg>',
       scopeChromeMarkup(),
       scopeOnScreenMarkup(),
       '</div>',
+      '<details id="approaches" hidden><summary></summary><p></p><ul></ul></details>',
     ].join('\n');
   }
 
@@ -102,12 +107,51 @@ export class PhHelmRadar extends PhElement {
 
     this.#updateThrustArcs(s);
     this.#renderHostileArcs(s);
+    this.#renderApproaches(s);
 
     updateScopeChrome(this.shadowRoot, {
       x: s.x, z: s.z, headingDeg: s.ship_heading, speed: s.speed,
     });
 
     setScopeOnScreen(this.shadowRoot, s.on_screen_active);
+  }
+
+  #renderApproaches(s) {
+    const pair = value => Array.isArray(value) && value.length === 2 && value.every(Number.isFinite);
+    const rows = (Array.isArray(s.observed_approaches) ? s.observed_approaches : []).filter(row =>
+      typeof row?.contact === 'string' && pair(row.own_position) && pair(row.contact_position)
+      && pair(row.separation) && row.separation[0] >= 0 && row.separation[1] >= row.separation[0]
+      && Number.isFinite(row.seconds) && row.seconds >= 0
+      && Number.isFinite(row.position_error) && row.position_error >= 0);
+    const details = this.shadowRoot.getElementById('approaches');
+    details.hidden = rows.length === 0;
+    details.querySelector('summary').textContent = t('sensing.approach.title', { count: rows.length });
+    details.querySelector('p').textContent = t('sensing.approach.assumption');
+    const list = details.querySelector('ul'), overlay = this.shadowRoot.getElementById('approach-corridors');
+    list.replaceChildren(); overlay.replaceChildren();
+    const yaw = (s.ship_heading || 0) * Math.PI / 180, cos = Math.cos(yaw), sin = Math.sin(yaw);
+    const point = position => {
+      const dx = position[0] - (s.x || 0), dz = position[1] - (s.z || 0);
+      return [50 + (dx * cos + dz * sin) * 50 / s.range, 50 - (dx * sin - dz * cos) * 50 / s.range];
+    };
+    for (const row of rows) {
+      const label = s.tracks?.find(track => track.id === row.contact)?.name || row.contact;
+      const item = document.createElement('li');
+      item.textContent = t('sensing.approach.item', { contact: label, seconds: Math.round(row.seconds * 10) / 10,
+        lower: Math.floor(row.separation[0]), upper: Math.ceil(row.separation[1]), tick: row.observed_tick });
+      list.append(item);
+      if (!Number.isFinite(s.range) || s.range <= 0) continue;
+      const own = point(row.own_position), contact = point(row.contact_position);
+      if (![...own, ...contact, row.position_error * 50 / s.range].every(Number.isFinite)) continue;
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', own[0]); line.setAttribute('y1', own[1]);
+      line.setAttribute('x2', contact[0]); line.setAttribute('y2', contact[1]);
+      line.setAttribute('class', 'approach-corridor'); overlay.append(line);
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', contact[0]); circle.setAttribute('cy', contact[1]);
+      circle.setAttribute('r', row.position_error * 50 / s.range);
+      circle.setAttribute('class', 'approach-corridor'); overlay.append(circle);
+    }
   }
 
   #updateThrustArcs(state) {

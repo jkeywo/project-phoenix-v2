@@ -262,6 +262,19 @@ fn prepare_escort(app: &mut App, parent: Entity, child: Entity) -> String {
     uuid
 }
 fn dispatch(app: &mut App, person: &str, team: u32) {
+    let parent = app
+        .world()
+        .try_query_filtered::<Entity, With<LocalShip>>()
+        .unwrap()
+        .single(app.world())
+        .unwrap();
+    let request = people(app, parent)
+        .officers
+        .into_iter()
+        .find(|officer| officer.id == person)
+        .unwrap()
+        .destination_request
+        .unwrap();
     control(
         app,
         "engineering",
@@ -269,9 +282,11 @@ fn dispatch(app: &mut App, person: &str, team: u32) {
         Control::DispatchOfficerTransfer {
             officer: person.into(),
             team_idx: team,
+            request,
         },
     );
 }
+
 fn continuation(app: &mut App) {
     continuation_with_operator(app, false);
 }

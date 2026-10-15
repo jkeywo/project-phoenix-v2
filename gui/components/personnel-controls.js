@@ -37,7 +37,7 @@ export function renderPersonnelControls(container, state, owner) {
       };
       post.addEventListener('click', () => { if (select.value !== '') activate(Number(select.value)); });
       release.addEventListener('click', () => activate(null));
-      const arm = () => { const current = mount.view.officers.find(item => item.id === officer.id); row.armed = { owner: mount.view.system_id, tick: current?.changed_tick }; };
+      const arm = () => { const current = mount.view.officers.find(item => item.id === officer.id); row.armed = { owner: mount.view.system_id, tick: current?.changed_tick, request: JSON.stringify(current?.destination_request), destination:row.destination.value }; };
       treat.addEventListener('click', () => {
         const current = mount.view.officers.find(item => item.id === officer.id);
         if (!current || !mount.view.controllable || careSelect.value === '') return;
@@ -50,12 +50,14 @@ export function renderPersonnelControls(container, state, owner) {
         const current = mount.view.officers.find(item => item.id === officer.id);
         if (!current || !mount.view.controllable) return;
         if (row.armed && (row.armed.owner !== mount.view.system_id || row.armed.tick !== current.changed_tick)) { row.armed = null; return; }
+        if (row.armed && (row.armed.request !== JSON.stringify(current.destination_request)
+          || action === PERSONNEL_DESTINATION_ACTION_ID && detail.destination !== null && row.armed.destination !== row.destination.value)) {row.armed=null;return;}
         row.armed = null;
         activateEngineeringAction(mount.owner, action, {officer:current.id,changed_tick:current.changed_tick,control_system_id:mount.view.system_id,...detail},wire);
       };
       request.addEventListener('click', () => { if (destination.value) sendTransfer(PERSONNEL_DESTINATION_ACTION_ID,'set_duty_officer_destination',{destination:destination.value === 'home' ? {kind:'home'} : {kind:'craft',craft:destination.value}}); });
       cancel.addEventListener('click', () => sendTransfer(PERSONNEL_DESTINATION_ACTION_ID,'set_duty_officer_destination',{destination:null}));
-      transfer.addEventListener('click', () => { if (escort.value !== '') sendTransfer(PERSONNEL_TRANSFER_ACTION_ID,'dispatch_officer_transfer',{team_idx:Number(escort.value)}); });
+      transfer.addEventListener('click', () => { if (escort.value !== '') sendTransfer(PERSONNEL_TRANSFER_ACTION_ID,'dispatch_officer_transfer',{team_idx:Number(escort.value),request:structuredClone(mount.view.officers.find(item=>item.id===officer.id)?.destination_request)}); });
       for (const button of [post, release, treat, request, cancel, transfer]) button.addEventListener('pointerdown', arm);
       for (const input of [select, post, release, careSelect, treat, destination, request, cancel, escort, transfer]) input.addEventListener('keydown', event => {
         if (event.key === ' ' || event.key === 'Enter') arm();

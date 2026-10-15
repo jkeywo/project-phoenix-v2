@@ -54,6 +54,10 @@ export function personnelTreatment(view, detail) {
   return { officer: officer.id, team_idx: detail.team_idx };
 }
 
+function sameDestinationRequest(a,b) {
+  return a?.requested_tick === b?.requested_tick && a?.destination?.kind === b?.destination?.kind
+    && (b?.destination?.kind === 'home' || a?.destination?.craft === b?.destination?.craft);
+}
 /** Visible choices are information only; the ordinary owner rechecks actual custody. */
 export function personnelDestination(view, detail) {
   if (!view || view.controllable !== true || !detail || detail.control_system_id !== view.system_id) return null;
@@ -68,6 +72,7 @@ export function personnelTransfer(view, detail) {
   if (!view || view.controllable !== true || !detail || detail.control_system_id !== view.system_id) return null;
   const officer = view.officers?.find(row => row.id === detail.officer);
   if (!officer || detail.changed_tick !== officer.changed_tick || !index(detail.team_idx)
-    || !officer.destination_request || !officer.transfer_teams?.includes(detail.team_idx)) return null;
-  return {officer:officer.id,team_idx:detail.team_idx};
+    || !officer.destination_request || !sameDestinationRequest(detail.request, officer.destination_request)
+    || !officer.transfer_teams?.includes(detail.team_idx)) return null;
+  return {officer:officer.id,team_idx:detail.team_idx,request:{destination:{...officer.destination_request.destination},requested_tick:officer.destination_request.requested_tick}};
 }

@@ -572,3 +572,16 @@ custody only at physical collection/delivery. Ordinary recovery or a destination
 request is not rescue completion. This consumer will need normal Human/AI,
 authoring, capacity/no-write/loss and full fresh continuation proof. Broader
 boarding, capture, duty-officer away work and full20 acceptance remain open.
+
+
+The dispatch boundary also latches the exact observed destination request. Custody
+`changed_tick` alone is insufficient because changing intent need not move an
+officer. The admitted owner compares expected/current requests before planning,
+team claim or Job mint; ordinary AI uses its own permitted request. Held controls
+retain request and selected-destination identity, so a replacement order or a
+stored pod disappearing cannot become an unseen dispatch or fallback Home order.
+Targeted GUI regressions cover both cases. The consumer-level stale rejection
+asserts unchanged complete capture/digest, with a matching-request positive
+counter proving that the same prepared actual hardware can mint exactly one Job.
+That adapter fixture is not a substitute for normal Human admission/AI choice in
+the separate host proof; native execution remains integrator-owned.

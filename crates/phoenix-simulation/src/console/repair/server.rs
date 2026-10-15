@@ -1721,9 +1721,9 @@ pub fn operate_repair_ai(
                         let mut dispatched = false;
                         let mut free = teams.0.free_team_indices(None);
                         for officer in &personnel.officers {
-                            if officer.destination_request.is_none() {
+                            let Some(request) = officer.destination_request.as_ref() else {
                                 continue;
-                            }
+                            };
                             let payload = if matches!(
                                 officer.location,
                                 phoenix_model::personnel::OfficerLocation::WithRepairTeam { .. }
@@ -1733,7 +1733,7 @@ pub fn operate_repair_ai(
                             } else {
                                 officer.transfer_teams.iter().copied().find(|team|free.contains(&(*team as usize))).map(|team| {
                                     free.retain(|free|*free!=team as usize);
-                                    crate::core::messages::SystemControlPayload::DispatchOfficerTransfer {officer:officer.id.clone(),team_idx:team}
+                                    crate::core::messages::SystemControlPayload::DispatchOfficerTransfer {officer:officer.id.clone(),team_idx:team,request:request.clone()}
                                 })
                             };
                             if let Some(payload) = payload {

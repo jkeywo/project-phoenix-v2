@@ -88,7 +88,7 @@ export const ACTION_MAP = Object.freeze({
   set_duty_officer_posting: logisticsCommand('SetDutyOfficerPosting', ['officer', 'team_idx']),
   treat_duty_officer: logisticsCommand('TreatDutyOfficer', ['officer', 'team_idx']),
   set_duty_officer_destination: logisticsCommand('SetDutyOfficerDestination', ['officer', 'destination']),
-  dispatch_officer_transfer: logisticsCommand('DispatchOfficerTransfer', ['officer', 'team_idx']),
+  dispatch_officer_transfer: logisticsCommand('DispatchOfficerTransfer', ['officer', 'team_idx', 'request']),
   set_weapon_target: logisticsCommand('SetWeaponTarget', ['uuid']),
   set_weapon_group_target: logisticsCommand('SetWeaponGroupTarget', ['group', 'uuid']),
   follow_weapon_group: logisticsCommand('FollowWeaponGroup', []),

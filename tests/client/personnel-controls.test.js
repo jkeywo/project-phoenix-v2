@@ -120,19 +120,19 @@ const transferRoster = () => {
 };
 it('routes destination intent and actual eligible escort through ordinary correlated Repair admission',()=>{
   const view=personnelPayload(transferRoster(),'actual-repair',true);
-  const detail={officer:'chief',changed_tick:7,control_system_id:'actual-repair'};
+  const detail={officer:'chief',changed_tick:7,control_system_id:'actual-repair',request:structuredClone(view.officers[0].destination_request)};
   expect(personnelDestination(view,{...detail,destination:{kind:'craft',craft:'actual-pod'}})).toEqual({officer:'chief',destination:{kind:'craft',craft:'actual-pod'}});
   expect(personnelDestination(view,{...detail,destination:{kind:'craft',craft:'guessed-remote'}})).toBeNull();
   expect(personnelDestination(view,{...detail,changed_tick:6,destination:null})).toBeNull();
   expect(personnelTransfer(view,{...detail,team_idx:0})).toBeNull();
-  expect(personnelTransfer(view,{...detail,team_idx:1})).toEqual({officer:'chief',team_idx:1});
+  expect(personnelTransfer(view,{...detail,team_idx:1})).toEqual({officer:'chief',team_idx:1,request:detail.request});
   const repair={system_id:'actual-repair',repair_auto:false,personnel_controllable:true,personnel:view};
   const state={system_ids:['actual-repair'],system_families:{'actual-repair':'repair'},systems:{'actual-repair':repair}};
   let sequence=0;const send=vi.fn(),registry=createEngineeringActionRegistry({getState:()=>state,sendAction:send,actionFeedback:new ActionFeedbackLifecycle({correlation:()=> 'escort-'+(++sequence)})});
   registry.activate(PERSONNEL_DESTINATION_ACTION_ID,{context:'engineering',detail:{...detail,destination:{kind:'home'}}});
   registry.activate(PERSONNEL_TRANSFER_ACTION_ID,{context:'engineering',detail:{...detail,team_idx:1}});
   const wire=vi.fn();for(const [action,fields] of send.mock.calls)dispatchConsoleAction({action,...fields},wire,vi.fn());
-  expect(wire.mock.calls.map(row=>row[1].payload)).toEqual([{type:'SetDutyOfficerDestination',data:{officer:'chief',destination:{kind:'home'}}},{type:'DispatchOfficerTransfer',data:{officer:'chief',team_idx:1}}]);
+  expect(wire.mock.calls.map(row=>row[1].payload)).toEqual([{type:'SetDutyOfficerDestination',data:{officer:'chief',destination:{kind:'home'}}},{type:'DispatchOfficerTransfer',data:{officer:'chief',team_idx:1,request:detail.request}}]);
   repair.personnel_controllable=false;registry.activate(PERSONNEL_TRANSFER_ACTION_ID,{context:'engineering',detail:{...detail,team_idx:1}});expect(send).toHaveBeenCalledTimes(2);
 });
 it('keeps carried/escort readouts local and does not offer an unobserved remote berth',()=>{
@@ -152,4 +152,26 @@ it('preserves the destination picker across publications and refuses held stale 
   renderPersonnelControls(container,{personnel:view},owner);expect(container.querySelector('[data-personnel-destination]')).toBe(select);expect(select.value).toBe('actual-pod');expect(document.activeElement).toBe(select);
   const buttons=[...container.querySelectorAll('button')],set=buttons[2];set.click();expect(owner.sendAction).toHaveBeenCalledWith('set_duty_officer_destination',expect.objectContaining({destination:{kind:'craft',craft:'actual-pod'}}));
   set.dispatchEvent(new Event('pointerdown'));const newer=structuredClone(view);newer.officers[0].changed_tick++;renderPersonnelControls(container,{personnel:newer},owner);set.click();expect(owner.sendAction).toHaveBeenCalledTimes(1);
+});
+
+it('refuses a held dispatch or cancellation when intent changed without moving the officer',()=>{
+ const container=document.createElement('section');document.body.append(container);const owner={sendAction:vi.fn()};
+ const view=personnelPayload(transferRoster(),'actual-repair',true);renderPersonnelControls(container,{personnel:view},owner);
+ const escort=container.querySelector('[data-personnel-escort]');escort.value='1';escort.dispatchEvent(new Event('change'));
+ const buttons=[...container.querySelectorAll('button')],dispatch=buttons[4],cancel=buttons[3];
+ dispatch.dispatchEvent(new Event('pointerdown'));
+ const changed=structuredClone(view);changed.officers[0].destination_request.requested_tick++;
+ renderPersonnelControls(container,{personnel:changed},owner);dispatch.click();expect(owner.sendAction).not.toHaveBeenCalled();
+ const detail={officer:'chief',team_idx:1,changed_tick:7,control_system_id:'actual-repair',request:view.officers[0].destination_request};
+ expect(personnelTransfer(changed,detail)).toBeNull();
+ cancel.dispatchEvent(new Event('pointerdown'));changed.officers[0].destination_request.requested_tick++;
+ renderPersonnelControls(container,{personnel:changed},owner);cancel.click();expect(owner.sendAction).not.toHaveBeenCalled();
+});
+it('refuses a held destination action when its selected stored craft disappears',()=>{
+ const container=document.createElement('section');document.body.append(container);const owner={sendAction:vi.fn()};
+ const view=personnelPayload(transferRoster(),'actual-repair',true);renderPersonnelControls(container,{personnel:view},owner);
+ const selector=container.querySelector('[data-personnel-destination]');selector.value='actual-pod';
+ const request=[...container.querySelectorAll('button')][2];request.dispatchEvent(new Event('pointerdown'));
+ renderPersonnelControls(container,{personnel:{...view,carried_destinations:[]}},owner);expect(selector.value).toBe('home');request.click();
+ expect(owner.sendAction).not.toHaveBeenCalled();
 });

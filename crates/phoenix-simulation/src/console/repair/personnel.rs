@@ -232,7 +232,11 @@ pub(crate) fn apply(
                             teams.0.recall(team);
                         }
                     }
-                    SystemControlPayload::DispatchOfficerTransfer { officer, team_idx } => {
+                    SystemControlPayload::DispatchOfficerTransfer {
+                        officer,
+                        team_idx,
+                        request: expected,
+                    } => {
                         state
                             .validate(profile, teams.0.job_state(), tick)
                             .map_err(|_| "invalid actual officer custody")?;
@@ -241,6 +245,9 @@ pub(crate) fn apply(
                             .and_then(|queue| queue.personnel_destinations.get(officer))
                             .cloned()
                             .ok_or("no actual destination request")?;
+                        if &request != expected {
+                            return Err("destination request changed since dispatch was selected");
+                        }
                         let context = context
                             .as_deref()
                             .ok_or("missing actual carried-craft context")?;

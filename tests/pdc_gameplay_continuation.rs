@@ -361,12 +361,10 @@ fn ship_contact(app: &App, own: Entity) -> Option<(String, String)> {
     let boards = app.world().get::<ShipSystemBlackboards>(own)?;
     let tracks = app.world().get::<BroadTracks>(own)?;
     let view = config.observations_for_system(&id("tactical-radar"), &boards.0);
-    boards
-        .0
-        .keys()
-        .filter_map(|key| view.get(key))
-        .filter_map(contact_routing::observations)
-        .flatten()
+    // Select from the addressed instrument's actual publication, so the
+    // explicit human input never depends on HashMap order among other feeds.
+    contact_routing::observations(view.get(&id("tactical-radar"))?)?
+        .iter()
         .filter(|row| row.selectable && !row.predicted)
         .find_map(|row| {
             (row.identity.as_ref()?.name == "PDC probe launcher").then_some(())?;
@@ -602,7 +600,7 @@ fn actual_larger_salvo_exceeds_one_paid_two_barrel_cycle() {
     let (mut app, own, _) = prepare(SALVO);
     let before = app.world().resource::<Trace>().initial_rounds;
     for _ in 0..2400 {
-        if app.world().resource::<Trace>().interceptions.len() >= 1
+        if !app.world().resource::<Trace>().interceptions.is_empty()
             && app.world().resource::<Trace>().launched.len() >= 2
             && flights(&mut app).is_empty()
         {

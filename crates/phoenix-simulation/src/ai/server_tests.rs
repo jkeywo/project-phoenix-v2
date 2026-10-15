@@ -2086,7 +2086,7 @@ ai_only = true
         .expect("finite motor hardware must match the authored Systems");
     (
         crate::ship_plugin::ShipConfigComponent(ship),
-        crate::ship_plugin::ShipPowerSystem(power),
+        crate::ship::power::ShipPowerSystem(power),
     )
 }
 

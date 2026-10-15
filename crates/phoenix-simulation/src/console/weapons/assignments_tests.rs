@@ -407,6 +407,32 @@ fn acquired_ray_cover_is_not_live_shield_truth_and_requires_fresh_compatible_evi
         });
     }
     assert_eq!(read(app.world_mut(), [0.0, 0.0]), Some(0));
+    {
+        let mut boards = app
+            .world_mut()
+            .get_mut::<ShipSystemBlackboards>(ship)
+            .unwrap();
+        let SystemBlackboard::TacticalRadar(board) = boards
+            .0
+            .get_mut(&SystemId("tactical-radar".into()))
+            .unwrap()
+        else {
+            unreachable!()
+        };
+        let record = &mut board.tracks.as_mut().unwrap()[0];
+        // One actual sampled ray, with the profile's ordinary two-unit error.
+        record.position = [1.4142135, 46.414215];
+        record.position_error = 2.0;
+        record
+            .assessment
+            .as_mut()
+            .unwrap()
+            .protection
+            .as_mut()
+            .unwrap()
+            .incoming_sector = 0;
+    }
+    assert_eq!(read(app.world_mut(), [0.0, 0.0]), Some(0));
     assert_eq!(read(app.world_mut(), [100.0, 0.0]), None);
     app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 1_000;
     assert_eq!(read(app.world_mut(), [0.0, 0.0]), None);

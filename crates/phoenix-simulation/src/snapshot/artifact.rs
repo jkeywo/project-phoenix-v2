@@ -561,7 +561,9 @@ pub const SNAPSHOT_FORMAT: u32 = 60;
 /// status request without consulting unknown reverse-link viability.
 /// "0.38" applies authored nonplayer World headings to the existing physics
 /// owner, matching the retained transform and runtime-spawn convention.
-pub const SIMULATION_RULES: &str = "0.38";
+/// "0.39" compares acquired shield rays against their published position
+/// uncertainty, retaining current/fresh/evidence-only weapon decisions.
+pub const SIMULATION_RULES: &str = "0.39";
 
 /// The authored data, computed rather than remembered.
 ///

@@ -1,6 +1,30 @@
 use super::*;
 
 #[test]
+fn observed_shield_ray_accepts_its_position_cone_but_not_another_approach() {
+    let actual = [0.0, 0.0];
+    let observer = [0.0, -45.0];
+    let sector = shield_observation_sector(observer, actual);
+    let measured = measured_position(actual, 2.0);
+    assert_ne!(shield_observation_sector(observer, measured), sector);
+    assert!(shield_ray_compatible(observer, measured, 2.0, sector));
+    assert!(!shield_ray_compatible(observer, measured, 0.0, sector));
+    assert!(!shield_ray_compatible([45.0, 0.0], measured, 2.0, sector));
+    assert!(!shield_ray_compatible(measured, measured, 2.0, sector));
+    for error in [-1.0, f32::NAN, f32::INFINITY] {
+        assert!(!shield_ray_compatible(observer, measured, error, sector));
+    }
+    assert!(!shield_ray_compatible(observer, measured, 2.0, 360));
+    assert!(shield_ray_compatible([0.0, -45.0], [0.01, 0.0], 0.1, 359));
+    assert!(shield_ray_compatible(
+        [f32::MAX, 0.0],
+        [-f32::MAX, 0.0],
+        2.0,
+        90
+    ));
+}
+
+#[test]
 fn distant_elevation_rounding_stays_inside_the_published_error() {
     let mut p = profile();
     p.position_error = 0.8;

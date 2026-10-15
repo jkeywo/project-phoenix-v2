@@ -297,6 +297,9 @@ impl WeaponAimInputs<'_, '_> {
         aim: &WeaponAim,
         own: [f32; 2],
     ) -> Option<i32> {
+        if !aim.measured {
+            return None;
+        }
         let (boards, config, broad, controls, assignments, _, _, _) =
             self.scopes.get(entity).ok()?;
         let config = &config?.0;
@@ -309,8 +312,6 @@ impl WeaponAimInputs<'_, '_> {
         if !step.is_finite() || step <= 0.0 {
             return None;
         }
-        let sector =
-            phoenix_sim_gameplay::science::tracks::shield_observation_sector(own, aim.position);
         let mut readings = Vec::new();
         for (source, profile) in &profiles.0 {
             let Some(records) = view
@@ -338,8 +339,12 @@ impl WeaponAimInputs<'_, '_> {
                 else {
                     continue;
                 };
-                let delta = sector.abs_diff(protection.incoming_sector);
-                if delta.min(360 - delta) <= 1 {
+                if phoenix_sim_gameplay::science::tracks::shield_ray_compatible(
+                    own,
+                    record.position,
+                    record.position_error,
+                    protection.incoming_sector,
+                ) {
                     readings.push((taken, protection.blocked));
                 }
             }

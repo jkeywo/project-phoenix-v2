@@ -12,6 +12,38 @@ pub fn shield_observation_sector(observer: [f32; 2], subject: [f32; 2]) -> u16 {
         crate::simmath::atan2(observer[0] - subject[0], subject[1] - observer[1]).to_degrees();
     (degrees.rem_euclid(360.0).round() as u16) % 360
 }
+/// A measured ray can be compatible with an uncertain position without being
+/// aligned to its centre. This reads only one published record's geometry.
+pub fn shield_ray_compatible(
+    observer: [f32; 2],
+    subject: [f32; 2],
+    position_error: f32,
+    incoming_sector: u16,
+) -> bool {
+    if incoming_sector >= 360
+        || !position_error.is_finite()
+        || position_error < 0.0
+        || observer
+            .iter()
+            .chain(subject.iter())
+            .any(|value| !value.is_finite())
+    {
+        return false;
+    }
+    let dx = f64::from(observer[0]) - f64::from(subject[0]);
+    let dz = f64::from(subject[1]) - f64::from(observer[1]);
+    let distance = (dx.powi(2) + dz.powi(2)).sqrt();
+    if distance <= f64::from(position_error) {
+        return false;
+    }
+    let bearing = crate::simmath::atan2((dx / distance) as f32, (dz / distance) as f32)
+        .to_degrees()
+        .rem_euclid(360.0);
+    let difference = (bearing - f32::from(incoming_sector)).abs();
+    let allowance =
+        crate::simmath::asin((f64::from(position_error) / distance) as f32).to_degrees() + 1.0;
+    difference.min(360.0 - difference) <= allowance
+}
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Physical producer input, already limited by actual coverage/visibility.

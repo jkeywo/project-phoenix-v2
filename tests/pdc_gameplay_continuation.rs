@@ -58,6 +58,7 @@ struct Trace {
     before_payload_hp: Option<f64>,
     payload_damaged_own_hull: bool,
     producer_initial: Option<serde_json::Value>,
+    launcher_readiness: [u64; 3],
 }
 
 impl std::fmt::Debug for Trace {
@@ -81,7 +82,59 @@ impl std::fmt::Debug for Trace {
             .field("initial_energy", &self.initial_energy)
             .field("before_payload_hp", &self.before_payload_hp)
             .field("payload_damaged_own_hull", &self.payload_damaged_own_hull)
+            .field("launcher_readiness", &self.launcher_readiness)
             .finish()
+    }
+}
+fn observe_launcher_readiness(
+    aims: project_phoenix::console::weapons::assignments::WeaponAimInputs,
+    ships: Query<(
+        Entity,
+        &EntityUuid,
+        &TorpedoSystemResource,
+        &project_phoenix::ship::state::ShipPhysics,
+    )>,
+    mut trace: ResMut<Trace>,
+) {
+    for (entity, uuid, torpedoes, physics) in &ships {
+        if uuid.0 != trace.launcher {
+            continue;
+        }
+        for tube in &torpedoes.0.tubes {
+            if !tube.is_loaded() {
+                continue;
+            }
+            let owner =
+                project_phoenix::ship::system_registry::torpedo_tube_system_id(&tube.id).unwrap();
+            let Some(aim) = aims
+                .resolve(entity, &owner, |_| None)
+                .filter(|aim| aim.allows(tube.targets.as_deref()))
+            else {
+                continue;
+            };
+            let geometry = aims.geometry(
+                entity,
+                &owner,
+                &project_phoenix::weapons::mount::MountConfig {
+                    facing_deg: tube.facing_deg,
+                    fire_arc_deg: tube.fire_arc_deg,
+                    range: torpedoes.0.config.speed * torpedoes.0.config.lifespan,
+                },
+                &aim,
+                physics,
+            );
+            if geometry.in_arc && geometry.in_range {
+                trace.launcher_readiness[0] += 1;
+                if let Some(cover) =
+                    aims.observed_shield_cover(entity, &owner, &aim, [physics.x, physics.z])
+                {
+                    trace.launcher_readiness[1] += 1;
+                    if cover == 0 {
+                        trace.launcher_readiness[2] += 1;
+                    }
+                }
+            }
+        }
     }
 }
 #[allow(clippy::type_complexity)]
@@ -314,6 +367,12 @@ fn boot(world: &str) -> (App, Entity) {
             .before_ignore_deferred(FixedStep::HandleCollisions),
     );
     graph_diagnostics::install(&mut app);
+    app.add_systems(
+        FixedUpdate,
+        observe_launcher_readiness
+            .after_ignore_deferred(FixedStep::AiTorpedoAutoFire)
+            .before_ignore_deferred(FixedStep::HandleFireTorpedo),
+    );
     app.finish();
     app.cleanup();
     steps(&mut app, 10);
@@ -532,6 +591,28 @@ fn launcher_entity(app: &mut App, uuid: &str) -> Entity {
 /// or observation and is never consumed by a controller.
 fn launcher_diagnostics(app: &mut App, uuid: &str) -> serde_json::Value {
     let entity = launcher_entity(app, uuid);
+    let mut aim_state = bevy::ecs::system::SystemState::<
+        project_phoenix::console::weapons::assignments::WeaponAimInputs,
+    >::new(app.world_mut());
+    let aim_details = {
+        let aims = aim_state.get(app.world());
+        let world = app.world();
+        let physics = world
+            .get::<project_phoenix::ship::state::ShipPhysics>(entity)
+            .unwrap();
+        world.get::<TorpedoSystemResource>(entity).unwrap().0.tubes.iter().map(|tube| {
+            let owner = project_phoenix::ship::system_registry::torpedo_tube_system_id(&tube.id).unwrap();
+            let aim = aims.resolve(entity, &owner, |_| None);
+            let detail = aim.map(|aim| {
+                let geometry = aims.geometry(entity, &owner, &project_phoenix::weapons::mount::MountConfig {
+                    facing_deg: tube.facing_deg, fire_arc_deg: tube.fire_arc_deg,
+                    range: world.get::<TorpedoSystemResource>(entity).unwrap().0.config.speed * world.get::<TorpedoSystemResource>(entity).unwrap().0.config.lifespan,
+                }, &aim, physics);
+                serde_json::json!({"route":aim.route,"position":aim.position,"allowed":aim.allows(tube.targets.as_deref()),"arc":geometry.in_arc,"range":geometry.in_range,"cover":aims.observed_shield_cover(entity,&owner,&aim,[physics.x,physics.z])})
+            });
+            serde_json::json!({"id":tube.id,"aim":detail})
+        }).collect::<Vec<_>>()
+    };
     let world = app.world();
     let pose = world
         .get::<project_phoenix::ship::state::ShipPhysics>(entity)
@@ -567,7 +648,7 @@ fn launcher_diagnostics(app: &mut App, uuid: &str) -> serde_json::Value {
         "captain_policy":world.get::<project_phoenix::console::captain::server::CaptainAiPolicy>(entity).map(|policy| format!("{:?}", policy.0)),
         "world_entities":world.get_resource::<project_phoenix::ai::server::WorldSnapshot>().map(|snapshot| snapshot.entities.iter().map(|row| serde_json::json!({"uuid":row.uuid,"faction":row.faction,"position":row.position})).collect::<Vec<_>>()),
         "selection":world.get::<TacticalRadarSelection>(entity).map(|selection| &selection.0),
-        "sources":sources,"tubes":tubes,"boards":boards
+        "sources":sources,"tubes":tubes,"boards":boards,"aims":aim_details
     })
 }
 fn first_difference(a: &serde_json::Value, b: &serde_json::Value, path: &str) -> Option<String> {

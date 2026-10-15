@@ -537,3 +537,38 @@ returning and after loss. The AI case reproduces the real AFK holder on the fres
 host before restore and checks ordinary AI policy on both hosts throughout.
 Independent source review passed; native execution is pending at the integrator.
 This quiet one-host proof does not claim network/device or full20 acceptance.
+
+
+## Next dependency: stable references and explicit actual holders
+
+The first carrier loop deliberately supports own-origin officers. Its on-ship
+compartment and posted-team locations implicitly mean the origin ship, and its
+request keys are local officer IDs. A recovered pod can preserve foreign
+survivors, but those survivors cannot honestly disembark into a different ship
+until that ambiguity is removed.
+
+First make an equivalent structural migration: a typed `PersonRef` contains the
+existing origin UUID and officer ID; actual on-ship compartment/team custody
+explicitly contains its holder actor. Transfer work, orders, normal controls and
+permitted rows retain the same stable reference. The one global roster keeps its
+existing origin/officer maps and immutable accepted definitions. No extra person,
+manifest authority, current-position copy, scheduler or controller is introduced.
+Existing own posting, local care, expertise, escort, physical return, loss and
+strict continuation journeys must remain equivalent. Unsupported earlier payloads
+must fail explicitly. This phase alone does not admit foreign jobs.
+
+Knowledge and loss use different joins. Actual holder determines physical
+casualties and local permitted facts. An origin row is retained identity, never
+implicit remote telemetry or a continuing manning bonus. The receiving Console
+may learn actual people aboard or a locally recovered pod manifest through its
+explicit current-custody feed; the original ship's individual AI and controls
+must still produce identical views for hidden remote survivor variants.
+
+Only after that migration is verified should a bounded foreign rescue handoff
+move a named survivor from an actual recovered stored pod to an accepted finite
+receiving compartment. It must borrow the same real finite team and interior
+cursor, commit real receiving capacity through actual jobs, and change sole
+custody only at physical collection/delivery. Ordinary recovery or a destination
+request is not rescue completion. This consumer will need normal Human/AI,
+authoring, capacity/no-write/loss and full fresh continuation proof. Broader
+boarding, capture, duty-officer away work and full20 acceptance remain open.

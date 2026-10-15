@@ -1,10 +1,10 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "title": "Incremental implementation of the gameplay redesign",
   "approved_date": "2026-10-13",
   "current_increment": 14,
   "constraints": {
-    "serial": true,
+    "serial": false,
     "reference_hull": "assets/entities/alliance_cruiser.toml",
     "preserve_shipped_content": true,
     "preserve_network_architecture": true,
@@ -256,6 +256,7 @@
       "title": "Shared Comms channels and remote orders",
       "status": "pending",
       "depends_on": [
+        14,
         15
       ],
       "completion": "Human/AI channels, generic requests, public chatter, security/interception, relays, receipts and human media use existing networking without message-capacity accounting.",
@@ -266,6 +267,8 @@
       "title": "Electronic operations",
       "status": "pending",
       "depends_on": [
+        14,
+        15,
         16
       ],
       "completion": "Jamming, spoofing, protection, concealment and bounded disruption reuse mounts/signals/resources/conditions and expose known/friendly effects.",
@@ -276,7 +279,8 @@
       "title": "Movement and transit extensions",
       "status": "pending",
       "depends_on": [
-        17
+        14,
+        15
       ],
       "completion": "Direct/assisted motion, Match Speed, formation/docking and jump/transit preserve the capital/small-craft dimensional split.",
       "evidence": []
@@ -286,6 +290,8 @@
       "title": "Ordinary deployables and carried craft",
       "status": "pending",
       "depends_on": [
+        16,
+        17,
         18
       ],
       "completion": "Configured entities plus deployment/sortie/recovery work support probes, turrets, decoys, fighters, shuttles and drones with ordinary autonomous/link-loss behaviour.",
@@ -296,6 +302,7 @@
       "title": "Broader personnel operations",
       "status": "pending",
       "depends_on": [
+        14,
         19
       ],
       "completion": "Duty Officers, medical/security/boarding/away/transfer work reuses team/jobs and supports rescue, abandonment and capture participation.",
@@ -306,6 +313,8 @@
       "title": "Facilities and systemic outside actors",
       "status": "pending",
       "depends_on": [
+        13,
+        18,
         20
       ],
       "completion": "Facilities, workforce and actor objectives use common equipment/damage/teams/stocks/physical delivery and causal service dependencies.",
@@ -2855,6 +2864,162 @@
   ],
   "validation_workflow": {
     "approved_date": "2026-10-14",
-    "description": "Initial increment commits are followed by validation and fixes on pinned agent worktrees while the main thread begins the next increment. Merge fixes in dependency order; initial commits do not claim verified completion. Cargo builds and performance captures remain sequential."
+    "description": "Initial increment commits are followed by validation and fixes on pinned agent worktrees while the main thread begins the next increment. Merge fixes in dependency order; initial commits do not claim verified completion. Cargo builds and performance captures remain sequential. Approved 2026-10-15: dependency-ready slices of increments 16–24 may run in the three lanes defined in parallel-work.md; initial integration and completion remain distinct."
+  },
+  "parallel_work": {
+    "approved_date": "2026-10-15",
+    "contract": "docs/gameplay-redesign/implementation/parallel-work.md",
+    "description": "Three implementation lanes after increment 15 initial integration and targeted checks. Completion dependencies remain separate from permitted early slices. Per-increment commits, one integrator, pinned validation and sequential Cargo/performance work; no acceptance is waived.",
+    "lanes": [
+      {
+        "id": "communications",
+        "title": "Communications and electronic operations"
+      },
+      {
+        "id": "movement",
+        "title": "Movement and craft"
+      },
+      {
+        "id": "personnel",
+        "title": "Personnel, facilities and mission execution"
+      }
+    ],
+    "slices": [
+      {
+        "id": "16-core",
+        "increment": 16,
+        "lane": "communications",
+        "after": [
+          15
+        ],
+        "requires_contract": "Shared channel, signal/security, generic request and receipt contracts; existing transport."
+      },
+      {
+        "id": "17-electronic",
+        "increment": 17,
+        "lane": "communications",
+        "after": [
+          "16-core"
+        ],
+        "requires_contract": "Integrated 16 channel/link consumer and 14/15 mount/sensing contracts."
+      },
+      {
+        "id": "18-motion",
+        "increment": 18,
+        "lane": "movement",
+        "after": [
+          15
+        ],
+        "requires_contract": "Direct/assisted motion, docking/transit and dimensional split; formation delivery joins 16."
+      },
+      {
+        "id": "19-static",
+        "increment": 19,
+        "lane": "movement",
+        "after": [
+          15
+        ],
+        "requires_contract": "Ordinary battery-backed entity deployment/recovery and shared 19/20 custody contract."
+      },
+      {
+        "id": "19-craft",
+        "increment": 19,
+        "lane": "movement",
+        "after": [
+          "19-static",
+          "18-motion",
+          "16-core"
+        ],
+        "requires_contract": "Actual motion, remote links and ordinary link-loss AI; deception joins 17, passengers join 20."
+      },
+      {
+        "id": "20-local",
+        "increment": 20,
+        "lane": "personnel",
+        "after": [
+          15
+        ],
+        "requires_contract": "Existing team/jobs/routes/conditions, actual shared access boundaries and one personnel/custody owner."
+      },
+      {
+        "id": "21-facilities",
+        "increment": 21,
+        "lane": "personnel",
+        "after": [
+          15
+        ],
+        "requires_contract": "Existing equipment/damage/stock/servicing owners; actual facility consumer."
+      },
+      {
+        "id": "20-external",
+        "increment": 20,
+        "lane": "personnel",
+        "after": [
+          "20-local",
+          "19-craft"
+        ],
+        "requires_contract": "Shared actual craft/personnel custody transitions, physical transfer and interruption."
+      },
+      {
+        "id": "21-actors",
+        "increment": 21,
+        "lane": "personnel",
+        "after": [
+          "21-facilities",
+          "20-local",
+          "18-motion"
+        ],
+        "requires_contract": "Actual workforce, stock/service dependencies and deliveries; carried craft join 19 if used."
+      },
+      {
+        "id": "22-core",
+        "increment": 22,
+        "lane": "personnel",
+        "after": [
+          15
+        ],
+        "requires_contract": "Adopted activity/event vocabulary and existing repair/delivery tracer; HTN/scheduling do not make physical claims."
+      },
+      {
+        "id": "22-integrated",
+        "increment": 22,
+        "lane": "personnel",
+        "after": [
+          "22-core",
+          "20-external",
+          "21-actors"
+        ],
+        "requires_contract": "Actual personnel/facility outcomes, monitored execution and full Workshop/continuation demonstration."
+      },
+      {
+        "id": "23-modes",
+        "increment": 23,
+        "lane": "personnel",
+        "after": [
+          "22-integrated"
+        ],
+        "requires_contract": "Persistent actual assets/commitments; Patrol, War, Sandbox have ordered playable exits."
+      },
+      {
+        "id": "24-search",
+        "increment": 24,
+        "lane": "communications",
+        "after": [
+          "22-core"
+        ],
+        "requires_contract": "Stable activity operators and actual HTN consumer; bounded hypothetical search with no physical mutation."
+      },
+      {
+        "id": "24-final",
+        "increment": 24,
+        "lane": "communications",
+        "after": [
+          "24-search",
+          "23-modes",
+          "17-electronic"
+        ],
+        "requires_contract": "Revalidate admission and pacing against actual modes; complete planetary/catalogue/Workshop/crew-size and outstanding integration acceptance."
+      }
+    ]
   }
 }

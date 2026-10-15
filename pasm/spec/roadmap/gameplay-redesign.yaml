@@ -5,7 +5,7 @@ entities:
       confidence: confirmed
       title: Incremental Gameplay Redesign Rollout
       summary: >-
-        Implement the user-approved 0–24 sequence one playable increment at a time.
+        Implement the user-approved 0–24 redesign with dependency-ready parallel slices for 16–24 and separate verified playable exits.
         Preserve shipped hulls, scenarios and tools, existing networking and individual
         knowledge-limited System AI. Each capability includes authoring, human controls,
         AI, deterministic state and continuation integration. Structural migration
@@ -14,6 +14,7 @@ entities:
         - "Approved 2026-10-13. Older saves and external packs may require conversion or their original compatible build; incompatible state must be refused explicitly."
         - "The canonical catalogue ledger and playable exits live in docs/gameplay-redesign/implementation/migration-ledger.json. GitHub PRD #1562 retains execution-issue status."
         - "Future design contracts are adopted per increment; this roadmap does not claim implementation of later capabilities."
+        - "User-approved 2026-10-15: three isolated lanes for Comms/electronics, movement/craft and personnel/facilities. docs/gameplay-redesign/implementation/parallel-work.md and ledger v2 define early-slice contracts and completion dependencies. One integrator owns shared schemas/schedules, dependency-order integration and final gates; Cargo/performance captures remain sequential. Earlier acceptance is not waived."
     implementation:
       target_paths:
         - docs/gameplay-redesign/implementation/migration-ledger.json
@@ -237,7 +238,7 @@ entities:
       title: "16 — Shared Comms channels and remote orders"
       summary: "Human/AI channels, generic requests, public chatter, security/interception, relays, receipts and human media use existing networking without message-capacity accounting."
       rationale:
-        - "Starts after increment 15 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+        - "Full completion depends on increments 14, 15; early implementation is permitted only under the adopted parallel-work.md slice contracts. Completion still requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -250,7 +251,7 @@ entities:
       title: "17 — Electronic operations"
       summary: "Jamming, spoofing, protection, concealment and bounded disruption reuse mounts/signals/resources/conditions and expose known/friendly effects."
       rationale:
-        - "Starts after increment 16 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+        - "Full completion depends on increments 14, 15, 16; early implementation is permitted only under the adopted parallel-work.md slice contracts. Completion still requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -263,7 +264,7 @@ entities:
       title: "18 — Movement and transit extensions"
       summary: "Direct/assisted motion, Match Speed, formation/docking and jump/transit preserve the capital/small-craft dimensional split."
       rationale:
-        - "Starts after increment 17 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+        - "Full completion depends on increments 14, 15; early implementation is permitted only under the adopted parallel-work.md slice contracts. Completion still requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -276,7 +277,7 @@ entities:
       title: "19 — Ordinary deployables and carried craft"
       summary: "Configured entities plus deployment/sortie/recovery work support probes, turrets, decoys, fighters, shuttles and drones with ordinary autonomous/link-loss behaviour."
       rationale:
-        - "Starts after increment 18 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+        - "Full completion depends on increments 16, 17, 18; early implementation is permitted only under the adopted parallel-work.md slice contracts. Completion still requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -289,7 +290,7 @@ entities:
       title: "20 — Broader personnel operations"
       summary: "Duty Officers, medical/security/boarding/away/transfer work reuses team/jobs and supports rescue, abandonment and capture participation."
       rationale:
-        - "Starts after increment 19 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+        - "Full completion depends on increments 14, 19; early implementation is permitted only under the adopted parallel-work.md slice contracts. Completion still requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -302,7 +303,7 @@ entities:
       title: "21 — Facilities and systemic outside actors"
       summary: "Facilities, workforce and actor objectives use common equipment/damage/teams/stocks/physical delivery and causal service dependencies."
       rationale:
-        - "Starts after increment 20 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+        - "Full completion depends on increments 13, 18, 20; early implementation is permitted only under the adopted parallel-work.md slice contracts. Completion still requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -316,7 +317,7 @@ entities:
       summary: "Reusable activity contracts, partial-order HTN domains and crew-aware temporal scheduling execute through independent situations, Scenario trees and ordinary jobs. Authored missions support sequential or concurrent work, committed deadlines, plan repair and Workshop inspection."
       rationale:
         - "User-approved revision 2026-10-14; detailed contracts and acceptance: docs/gameplay-redesign/implementation/increment-22.md. Future design only; prior increments and current execution status are unchanged."
-        - "Starts after increment 21 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+        - "Full completion depends on increments 21; early implementation is permitted only under the adopted parallel-work.md slice contracts. Completion still requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -330,7 +331,7 @@ entities:
       summary: "Authored Patrol, then War, then Sandbox retain real assets, commitments and consequences across encounters. Capture, service, vessel return and evacuation prove persistence, actual transport, outside-actor outcomes and correct objective credit."
       rationale:
         - "User-approved revision 2026-10-14; detailed contracts and acceptance: docs/gameplay-redesign/implementation/increment-23.md. Future design only; prior increments and current execution status are unchanged."
-        - "Starts after increment 22 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+        - "Full completion depends on increments 22; early implementation is permitted only under the adopted parallel-work.md slice contracts. Completion still requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -344,7 +345,7 @@ entities:
       summary: "Bounded GOAP-like search combines existing activity operators around authored goals, admitting feasible optional opportunities into HTN missions. Adapt unannounced work within pacing bounds; preserve commitments and earned advantages. Complete planetary, catalogue, Workshop and 2/4/6/8-seat audits."
       rationale:
         - "User-approved revision 2026-10-14; detailed contracts and acceptance: docs/gameplay-redesign/implementation/increment-24.md. Future design only; prior increments and current execution status are unchanged."
-        - "Starts after increment 23 has a verified playable exit; completion requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
+        - "Full completion depends on increments 23; early implementation is permitted only under the adopted parallel-work.md slice contracts. Completion still requires human/AI operation, shipped content, authority/knowledge, continuation, authoring and appropriate gameplay evidence."
     architecture:
       kind: roadmap-milestone
       authority: authoritative

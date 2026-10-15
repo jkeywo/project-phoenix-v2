@@ -2,7 +2,7 @@
 
 Approved future plan, 14 October 2026. This replaces increment 22's earlier
 workflow-only scope; it does not claim implementation or change increments 0–21.
-Start after increment 21's verified playable exit under the existing programme rules.
+Full completion follows increment 21's verified playable exit. The approved 15 October [parallel-work contract](parallel-work.md) permits earlier existing-capability planner slices after contracts are adopted.
 See [architecture decisions](../architecture/README.md#mission-planning-increments-22-24)
 and [PASM design](../../../pasm/spec/design/gameplay-redesign.yaml).
 

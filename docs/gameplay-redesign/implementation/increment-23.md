@@ -1,7 +1,7 @@
 # Increment 23 — Continuing modes and persistent mission consequences
 
-Approved future plan, 14 October 2026. Start after [increment 22](increment-22.md)'s
-verified playable exit. Preserve the existing programme gates and increments 0–21.
+Approved future plan, 14 October 2026. Full completion follows [increment 22](increment-22.md)'s
+verified playable exit. The 15 October [parallel-work contract](parallel-work.md) permits implementation after its initial integrated prerequisite; each mode retains its own playable exit.
 See [architecture decisions](../architecture/README.md#mission-planning-increments-22-24)
 and [PASM design](../../../pasm/spec/design/gameplay-redesign.yaml).
 

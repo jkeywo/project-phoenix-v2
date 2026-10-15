@@ -2,7 +2,7 @@
 
 The user approved the incremental implementation plan on 13 October 2026.
 Execution is tracked in [PRD #1562](https://github.com/jkeywo/project-phoenix-v2/issues/1562). The
-[implementation report](./index.html) presents the serial sequence and the
+[implementation report](./index.html) presents the dependency-ordered sequence and the
 complete [migration ledger](./migration-ledger.json). The
 [mechanism reconciliation](../architecture/feature-reconciliation.html) and
 [architecture decisions](../architecture/README.md) constrain implementation.
@@ -18,6 +18,15 @@ unchanged. Plan documents in the ledger are design references, not passed eviden
 - [24 — Opportunity discovery, adaptive direction and final integration](increment-24.md): bounded GOAP-like opportunity search feeding the HTN, live pacing and original final audits.
 
 The architecture direction is recorded in [mission planning decisions](../architecture/README.md#mission-planning-increments-22-24) and the [PASM design](../../../pasm/spec/design/gameplay-redesign.yaml).
+
+## Parallel execution approved 15 October 2026
+
+[Parallel work contract](parallel-work.md) supersedes the serial-only execution rule
+for increments 16–24. Three isolated lanes implement Comms/electronics, movement/craft
+and personnel/facilities; planner consumers can overlap once their activity contracts
+are stable. Full completion dependencies and permitted early slices are separate in
+the ledger. The integrator owns shared schemas, schedules, versions and final gates.
+Per-increment commits and all outstanding acceptance remain required.
 
 ## Working contract
 
@@ -60,7 +69,7 @@ node scripts/redesign-ledger.mjs --write
 ```
 
 The checker compares all 216 IDs and titles with the catalogue decision record,
-checks serial dependencies and dispositions, requires evidence for completed
+checks completion dependencies and the acyclic early-work graph and dispositions, requires evidence for completed
 increments and checks that the generated report is current.
 
 ## Increment 0 — baseline
@@ -114,7 +123,7 @@ recorded separately; automated source or headless tests cannot claim it.
 
 ## Scheduled PASM reconciliation
 
-The new redesign design/roadmap slices record the serial migration and selected
+The redesign design/roadmap slices record the dependency-ordered migration and selected
 future direction. Earlier planned hard battery exhaustion, mutually exclusive
 wide/focused scans, orbital body motion and starbase-only refitting are replaced
 on their designated increments. Current code-oriented power, sensing and save

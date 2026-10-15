@@ -1457,6 +1457,13 @@ ceiling = 10000
 label = "damage.resource.machinery_parts"
 
 
+# Retain Axiom's finite fabrication feedstock when replacing its capacities.
+[[entity.overrides.infrastructure.capacity]]
+id = "alloy"
+amount = 10000
+ceiling = 10000
+label = "production.alloy"
+
 [[entity.overrides.infrastructure.capacity]]
 id = "skyway_claim_havelock"
 amount = 22

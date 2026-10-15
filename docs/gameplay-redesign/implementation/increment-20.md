@@ -418,3 +418,55 @@ Worker client regression evidence: three existing Personnel/Repair/Workshop clie
 files pass 72 tests (4.90s). Owner, actual adapter, source-receipt/terminal no-write
 and joined Human/Backfill 360-step Medical continuation assertions are migrated
 or authored for the single owner, but native execution remains with root.
+
+## Adopted next consumer: owned carried personnel
+
+[ai] Runtime work starts only after native verification of the retained roster.
+The first reference adds finite accepted passenger berths to an actual battery-only
+engineless carried pod. It reuses the existing ordinary entity, Bay Job, Carried/
+Deployed custody, body presence, energy, damage and launch/recovery path. Existing
+probes retain zero berths. This does not deliver a flying shuttle or special pilot.
+
+[ai] Closed destination requests extend the established Repair work/request owner.
+A request selects the actual officer and destination, never invents another people
+pool or reserves all future work. Human control may explicitly choose an eligible
+team; ordinary delegated Repair AI selects one through the same admitted boundary.
+No unconditional boarding policy or second System controller runs beside it.
+Later World/planner commands can issue that same normal intent without becoming
+custody or completion evidence.
+
+[ai] A typed activity borrows one existing finite Repair TeamJobs slot and physical
+cursor, excluding repair, fitting, treatment and other personnel work. The team
+first reaches the officer's actual source compartment. Only then does custody move
+from that compartment onto the same actual committed Job/cursor. It escorts the
+officer along ordinary access-controlled routes to the real carried pod's Bay
+compartment. Actual handoff then installs the one AboardCraft/berth custody record.
+The same team returns physically before its Job releases. After ordinary recovery,
+a later job can collect at the Bay and physically return the officer to their home.
+No patient, officer, team or craft is teleported by destination selection.
+
+[ai] Berth occupancy and committed claims derive from the one roster and actual
+active jobs. Launch/recovery and escort handoffs cannot concurrently claim the
+same craft/Bay. Recheck actual carried parent, equipment/access readiness and finite
+compatible receiving space before handoff; pending desired intent is not a claim.
+Blocked routes, recall, changed destination or missing craft retain actual custody
+and supported physical return. An already completed handoff is never retroactively
+undone. Off-ship officers provide no original-ship expertise or manning bonus.
+
+[ai] Keep the same origin/officer identity through departure, Bay launch, deployed
+operation, recovery and unloading. Origin removal retains living off-ship custody;
+actual host/craft loss records the supported terminal loss without protecting the
+body, suppressing destruction events or replacing people. The full candidate must
+close origin/source, actual craft/berth, exclusive team/Job and cursor references
+before any restore writes. Whole-restore suppression must not manufacture loss.
+Foreign disembarkation, rescue/capture completion and participant recovery remain
+later consumers; recovering an occupied ordinary craft cannot duplicate its roster.
+
+[ai] Extend accepted Workshop berth/profile/request references and the existing
+Personnel/Bay controls through history, validation, Preview and disposable Test.
+Explicit local feeds expose only permitted real boarding choices and work; a
+globally stored roster creates no shared AI knowledge. Actual Human/ordinary AI,
+physical collect/handoff/return, interruption, origin/craft loss, finite capacity,
+malformed no-write and fresh 360-step complete capture/digest evidence are required.
+Root owns compatibility versions and full gates. This bounded consumer does not
+close increments19/20.

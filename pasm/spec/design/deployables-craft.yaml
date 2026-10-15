@@ -39,6 +39,7 @@ entities:
       rationale:
         - "Mines use actual local trigger/sensing/identification and physical payload, not hidden faction truth or friendly blast immunity. Indiscriminate variants remain possible. 17 decoys are actual short-lived engineless battery/spoofer ships, distinct from apparent report geometry."
         - "S092 standing deliveries use actual cargo, reserve goals, viable jobs and destination capacity without all-future reservations or gifts. S093 work craft repair/deploy carried equipment, not general new-entity fabrication. S094 permits real compatible energy/shield assistance only; component repair remains teams/work craft. 20 supplies actual rescue/Medical/participant continuation and pods retain equipment-backed signalling plus pickup."
+        - "[ai] The next bounded 19/20 join, after retained PersonnelRoster verification, adds accepted finite passenger berths to an ordinary battery-only engineless pod. Actual Bay custody/handling remains unchanged in ownership; manifest and berth occupancy derive solely from PersonnelRoster and actual active escort jobs. Bay handling and escort handoffs exclude one another through those existing actual job owners. First physical owned boarding/recovery/unload does not claim a moving shuttle, pilot, foreign rescue/capture or broader personnel exit; detailed contract lives in increment-20.md."
   - decision: redesign-deployables-authoring-and-continuation
     core:
       status: accepted

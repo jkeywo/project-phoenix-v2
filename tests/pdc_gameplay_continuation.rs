@@ -438,7 +438,27 @@ fn prepare(world: &str) -> (App, Entity, String) {
 }
 fn rounds(app: &App, own: Entity) -> i64 {
     let stock = &app.world().get::<InfrastructureCondition>(own).unwrap().0;
-    stock.capacity("side-kinetic-rounds").unwrap() + stock.capacity("hold-kinetic-rounds").unwrap()
+    let profile = &app
+        .world()
+        .get::<project_phoenix::resources::logistics_server::CompiledShipLogistics>(own)
+        .unwrap()
+        .0;
+    let moving = &app
+        .world()
+        .get::<project_phoenix::resources::logistics_server::ShipLogistics>(own)
+        .unwrap()
+        .0;
+    // Dispatch removes real goods from a store before arrival. Count the actual
+    // freight owner too; reservations and receiving-space claims are not goods.
+    let freight: i64 = moving
+        .batches
+        .values()
+        .filter(|batch| profile.store(&batch.source).unwrap().resource == "kinetic_rounds")
+        .map(|batch| batch.amount)
+        .sum();
+    stock.capacity("side-kinetic-rounds").unwrap()
+        + stock.capacity("hold-kinetic-rounds").unwrap()
+        + freight
 }
 fn reserve(app: &App, own: Entity) -> f32 {
     app.world()

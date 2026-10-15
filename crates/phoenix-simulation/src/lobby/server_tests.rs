@@ -1517,3 +1517,32 @@ fn console_eligibility_reports_replace_private_session_results() {
         ));
     }
 }
+#[test]
+fn optional_fitting_planner_uses_accepted_hull_definitions_without_live_inventory() {
+    let cruiser = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    let projected = project_ship_client_config(&cruiser);
+    let context = projected.fitting_planner.unwrap();
+    assert!(!context.content_id.is_empty());
+    assert!(context.slots.iter().any(|slot| slot.slot == "fore-beam"
+        && !slot.home_station.is_empty()
+        && slot.compatible_equipment.contains(&slot.default_equipment)));
+    let changed = {
+        let mut alternate = cruiser.clone();
+        alternate.fitting.as_mut().unwrap().equipment[0].storage_space += 1;
+        project_ship_client_config(&alternate)
+            .fitting_planner
+            .unwrap()
+    };
+    assert_ne!(context.content_id, changed.content_id);
+    let dynasty = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/dynasty_player_cruiser.toml",
+    )
+    .unwrap();
+    assert!(project_ship_client_config(&dynasty)
+        .fitting_planner
+        .is_none());
+    assert!(ShipClientConfig::default().fitting_planner.is_none());
+}

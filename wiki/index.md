@@ -48,6 +48,7 @@ Current implementation orientation only. For intended design use
 - [Repair Plugin](./concepts/repair-plugin.md)
 - [Recorded Observations](./concepts/recorded-observations.md)
 - [Resource Stores and Service Links](./concepts/resource-stores.md) — shared stock/claims, docked replenishment and Workshop authoring
+- [Equipment Fitting](./concepts/equipment-fitting.md) — fixed-slot hardware, actual assemblies, physical team work and recovery
 - [Weapons Runtime](./concepts/weapons-intent.md)
 - [Weapons Plugin](./concepts/weapons-plugin.md)
 - [Shields Runtime](./concepts/shields-intent.md)

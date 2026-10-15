@@ -514,6 +514,7 @@ pub(crate) fn project_ship_client_config(
     // [helm_console.radar] range when present, falling back to the legacy
     // flat radar_range field, then to the Default.
     let mut next = ShipClientConfig::default();
+    next.fitting_planner = crate::resources::fitting_server::planner_context(ship_config);
     if let Some(hc) = &ship_config.helm_console {
         let range = hc.effective_radar_range();
         if range > 0.0 {
@@ -805,6 +806,9 @@ pub fn update_session_with_config(
 
     if let Some(ship_config) = crate::entities::config_cache::get_config_cache().get(config_path) {
         ship_client_config.0 = project_ship_client_config(ship_config);
+        if let Some(context) = &mut ship_client_config.0.fitting_planner {
+            context.hull_path = config_path.to_owned();
+        }
 
         // Ship manual (issue #772): build the read-only per-station manual from
         // the same selected-ship config that feeds the client above. Generated

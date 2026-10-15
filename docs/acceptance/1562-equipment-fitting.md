@@ -1,8 +1,9 @@
 # Increment 13: equipment fitting acceptance
 
 Increment 13 is in progress. The compiler, equipment library and physical team
-extension have source checkpoints; integrated runtime tests and the remaining
-authoring, planner, recovery and continuation journeys are being completed.
+extension, recovery integration, Workshop and personal planner have source
+checkpoints; physical delivery and integrated continuation evidence are being
+completed.
 This document is a receipt and acceptance procedure, not a playable-exit claim.
 
 ## Source and focused evidence
@@ -43,6 +44,55 @@ with its own Console scope, local reserve, conditions and facility allocation.
 Its existing weapon settings are retained. The added facility hardware's
 0.25 flow/generation allowance is intentional provisional tuning and needs
 gameplay evidence; no combat balance result is inferred from source inspection.
+
+`7cea1073` integrates equipment recovery with the ordinary enable/AI path,
+permitted reports, physical task exclusion, complete-roster continuation and
+protocol/snapshot/rules 12/50/0.22. A source integration compile passed with
+`cargo check -p phoenix-simulation --lib --no-default-features` (25.07s;
+`.phoenix/increment13-equipment-integration-check-retry.log`). This is a compile
+result, not runtime or save/resume evidence. The previous failed attempt remains
+recorded separately; it found the Bevy query tuple limit and an ambiguous preflight
+Result type, both corrected before the retry.
+
+The isolated pure owner at `361bb309` passed nine fitting/energy cases and 39
+Content entity-override cases. Logs and source provenance are under
+`C:/Users/jkeyw/.codex/worktrees/increment-13-pure-validation/project-phoenix-v2/.phoenix/`.
+The separately attempted `include_resolve` filter selected zero cases and is not
+counted. A preceding integrated batch had eight passes and one real facility
+validation failure: port validation accepted only a passive Dock declaration.
+The correction accepts either supported passive or composed Dock hardware, and
+the later nine-case batch verifies Axiom's actual facility path.
+
+`608d6508` adds physical team visits and portable fetch transitions. The combined
+Gameplay repair/fitting/energy batch passed **43 cases**, zero failures or ignored,
+with 0.73s test execution:
+
+```text
+cargo test -p phoenix-sim-gameplay --lib -- jobs::repair resources::fitting::tests fitting_reconfiguration --test-threads=1
+```
+
+Log `.phoenix/increment13-fetch-pure-tests.log`, SHA256
+`32800139427e8490f520e8447b7f15e2fa526d1e5e1f276c58bbbe720f673603`.
+Matching Gameplay dependency records are retained in
+`.phoenix/increment13-fetch-pure-dependencies/`. This tests the pure `608d6508`
+changes with the integrated Model definitions; parent runtime delivery is a
+separate consumer requiring its own evidence.
+
+`79108ad5` and `13371b49` integrate reviewed Workshop composition, refit/recovery
+controls, data-only favourites and protocol compatibility. Focused worker
+JavaScript checks passed 190 cases across 15 suites, nine plan regressions and
+64 compatibility/archive cases. `85cca8b5` adds prelaunch lobby planning and
+validated draft handoff to explicit ordinary in-play requests; its final bounded
+batch passed 254 cases across eight suites. These batches overlap and are not
+added into a unique-case total. Strict strings (5,609 labels, zero missing or
+orphaned), layers and independent read reviews passed. None is browser/native
+human acceptance or a complete JavaScript integration suite.
+
+`4bbc4559` extracts one accepted-hull planner definition for lobby and live status.
+Prelaunch preferences do not alter actual installed hardware. A plan queues real
+requests only after the current operator's permitted live fitting rows arrive.
+The source checkpoint does not establish shared inventory, physical availability
+or command authority from a favourite.
 
 ## Human and ordinary AI journeys
 

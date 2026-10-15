@@ -2,6 +2,8 @@
 # response is scoped to this declared capability and its unobstructed geometry;
 # an intrusive request is not universally detectable by every subject.
 includes = ["../../assets/entities/alliance_cruiser.toml"]
+# Public subject identity is deliberately unique; mission references are not hidden UUID aliases.
+name = "survey-cache"
 
 # This scenario explicitly exposes the subject as a selectable ship contact.
 [target]

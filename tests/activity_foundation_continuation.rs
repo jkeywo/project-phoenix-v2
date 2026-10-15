@@ -140,6 +140,46 @@ fn control(app: &mut App, token: &str, station: &str, target: &str, payload: Con
     steps(app, 4);
 }
 
+/// Test-only observer of committed per-System payment on every actual fixed
+/// interval, including intervals advanced inside ordinary command helpers.
+/// Read-only to machinery/World; this witness is neither captured nor folded.
+#[derive(Resource, Default, Debug)]
+struct ActivityPaymentWitness {
+    repair: Option<(u64, f64)>,
+    delivery: Option<(u64, f64)>,
+}
+fn observe_activity_payment(
+    tick: Res<project_phoenix::sim_tick::SimTick>,
+    runtime: Res<WorldContentRuntime>,
+    ships: Query<
+        (
+            &project_phoenix::entities::spawner::EntityUuid,
+            &ShipPowerSystem,
+        ),
+        With<LocalShip>,
+    >,
+    mut witness: ResMut<ActivityPaymentWitness>,
+) {
+    let Ok((uuid, power)) = ships.single() else {
+        return;
+    };
+    let witness = &mut *witness;
+    for (owner, slot) in [
+        ("repair", &mut witness.repair),
+        ("logistics", &mut witness.delivery),
+    ] {
+        let amount = power.0.emitted_work(&id(owner));
+        let bound = runtime.situations.instances.values().any(|row| {
+            row.accepted
+                .as_ref()
+                .is_some_and(|accepted| accepted.actor == uuid.0 && accepted.owner == id(owner))
+        });
+        if bound && amount > 0.0 {
+            *slot = Some((tick.0, amount));
+        }
+    }
+}
+
 fn boot() -> (App, Entity) {
     boot_world(WORLD)
 }
@@ -158,6 +198,17 @@ fn boot_definition(path: &str, hull: &str) -> (App, Entity) {
         ..Default::default()
     })
     .unwrap();
+    app.init_resource::<ActivityPaymentWitness>();
+    app.add_systems(
+        FixedUpdate,
+        observe_activity_payment
+            .in_set(project_phoenix::sim_sets::SimSet::Physics)
+            .after_ignore_deferred(project_phoenix::sim_sets::FixedStep::TickRepairTeams),
+    );
+    app.add_systems(
+        FixedUpdate,
+        observe_activity_payment.in_set(project_phoenix::sim_sets::SimSet::Publish),
+    );
     let period = sim_tick_period(app.world().resource::<WorldConfig>().global.sim_tick_hz);
     app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(period));
     app.finish();
@@ -922,8 +973,10 @@ fn imported_alternative_partial_order_runs_actual_human_and_ai_jobs_with_360_hos
     }
     assert_same(&live, &resumed, 360);
     assert!(
-        paid_repair && paid_delivery,
-        "both ordinary owners must spend finite real energy"
+        (paid_repair || live.world().resource::<ActivityPaymentWitness>().repair.is_some())
+            && (paid_delivery || live.world().resource::<ActivityPaymentWitness>().delivery.is_some()),
+        "both ordinary owners must spend finite real energy: sampled repair={paid_repair} delivery={paid_delivery}; actual fixed-interval witness={:?}",
+        live.world().resource::<ActivityPaymentWitness>()
     );
     assert_eq!(recalled.len(), 2);
     assert!(demand_sent);

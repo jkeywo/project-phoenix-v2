@@ -1084,11 +1084,42 @@ fn actual_world_route_form_edits_keep_unrelated_source_and_support_existing_arra
     let source = "# exact root\n[anchors]\nhome=[0,0,0] # retain anchor\n\n[[transit_destination]]\nid='home' # retained id comment\nlabel='route.home'\ntarget={kind='base',anchor='home'} # retained target comment\n\n[extension]\nkeep=7 # retain unknown\n";
     let mut files = BTreeMap::from([(ROOT.to_owned(), source.to_owned())]);
     let dependency = WorkshopDependencies::default();
-    let edited = compose(&files, &dependency, &request(ROOT, source, vec![
-        Edit::Put { path: vec![key("transit_destination"), Segment::Index(0), key("label")], value_source: "\"route.renamed\"".into() },
-        Edit::Put { path: vec![key("transit_destination"), Segment::Index(0), key("target")], value_source: "{kind=\"base\",anchor=\"home\"}".into() },
-        Edit::Insert { path: vec![key("transit_destination")], index: 1, value_source: "{id=\"outer\",label=\"route.outer\",target={kind=\"layer\",path=\"assets/worlds/outer.toml\",anchor=\"arrival\"}}".into() },
-    ])).unwrap();
+    let edited = compose(
+        &files,
+        &dependency,
+        &request(
+            ROOT,
+            source,
+            vec![
+                Edit::Put {
+                    path: vec![key("transit_destination"), Segment::Index(0), key("label")],
+                    value_source: "\"route.renamed\"".into(),
+                },
+                Edit::Put {
+                    path: vec![
+                        key("transit_destination"),
+                        Segment::Index(0),
+                        key("target"),
+                        key("anchor"),
+                    ],
+                    value_source: "\"home\"".into(),
+                },
+                Edit::AppendTable {
+                    path: vec![key("transit_destination")],
+                    fields: vec![
+                        ("id".into(), "\"outer\"".into()),
+                        ("label".into(), "\"route.outer\"".into()),
+                        (
+                            "target".into(),
+                            "{kind=\"layer\",path=\"assets/worlds/outer.toml\",anchor=\"arrival\"}"
+                                .into(),
+                        ),
+                    ],
+                },
+            ],
+        ),
+    )
+    .unwrap();
     assert!(edited.starts_with("# exact root\n[anchors]\nhome=[0,0,0] # retain anchor\n"));
     assert!(edited.contains("id='home' # retained id comment"));
     assert!(edited.contains("# retained target comment"));
@@ -1124,11 +1155,13 @@ fn actual_world_route_form_edits_keep_unrelated_source_and_support_existing_arra
         &request(
             ROOT,
             empty,
-            vec![Edit::Put {
+            vec![Edit::AppendTable {
                 path: vec![key("transit_destination")],
-                value_source:
-                    "[{id=\"home\",label=\"route.home\",target={kind=\"base\",anchor=\"home\"}}]"
-                        .into(),
+                fields: vec![
+                    ("id".into(), "\"home\"".into()),
+                    ("label".into(), "\"route.home\"".into()),
+                    ("target".into(), "{kind=\"base\",anchor=\"home\"}".into()),
+                ],
             }],
         ),
     )
@@ -1139,5 +1172,50 @@ fn actual_world_route_form_edits_keep_unrelated_source_and_support_existing_arra
             .transit_destinations
             .len(),
         1
+    );
+}
+
+#[test]
+fn world_route_target_leaf_edits_support_nested_target_tables_without_rewriting_neighbors() {
+    let source = "# exact\n[anchors]\nhome=[0,0,0]\n[[transit_destination]]\nid='route' # keep id\nlabel='route.label'\n[transit_destination.target]\nkind='layer' # keep kind\npath='assets/worlds/outer.toml'\nanchor='arrival' # keep anchor\n[extension]\nkeep=7\n";
+    let files = BTreeMap::from([(ROOT.to_owned(), source.to_owned())]);
+    let base = vec![key("transit_destination"), Segment::Index(0), key("target")];
+    let leaf = |key_name: &str| {
+        let mut path = base.clone();
+        path.push(key(key_name));
+        path
+    };
+    let edited = compose(
+        &files,
+        &WorkshopDependencies::default(),
+        &request(
+            ROOT,
+            source,
+            vec![
+                Edit::Put {
+                    path: leaf("kind"),
+                    value_source: "\"base\"".into(),
+                },
+                Edit::Put {
+                    path: leaf("anchor"),
+                    value_source: "\"home\"".into(),
+                },
+                Edit::Remove { path: leaf("path") },
+            ],
+        ),
+    )
+    .unwrap();
+    assert!(edited.contains("id='route' # keep id"));
+    assert!(edited.contains("# keep kind"));
+    assert!(edited.contains("# keep anchor"));
+    assert!(edited.contains("[extension]\nkeep=7\n"));
+    assert_eq!(
+        crate::world::config::parse_world(&edited)
+            .unwrap()
+            .transit_destinations[0]
+            .target,
+        crate::world::transit_destinations::WorldTransitTarget::Base {
+            anchor: "home".into()
+        }
     );
 }

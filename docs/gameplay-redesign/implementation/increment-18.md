@@ -553,3 +553,12 @@ that demand normally. The current mechanical axis consumer and paid integrator
 remain the actuator path. Existing snapshot/digest/preflight definitions extend
 these owners, rather than adding a parallel goal, fleet controller or physics
 store. Contract adoption alone is no execution evidence.
+
+The first native source-editor run exposed a mismatch concealed by the initial
+JavaScript adapter: TOML value-array Insert cannot append [[array-of-table]]
+rows. Route addition now uses the actual existing AppendTable operation. That
+consumer preserves both array-table and inline-table-array representations,
+including its existing duplicate-rating refusal. Target updates use exact leaf
+edits so nested and inline target tables both remain supported. Native source
+regressions retain their source/comment assertions and additionally cover these
+representations; the corrected native run remains integrator-owned.

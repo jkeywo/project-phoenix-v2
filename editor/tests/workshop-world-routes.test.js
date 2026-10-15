@@ -16,11 +16,18 @@ export function routeFixture() {
     const world = parse(files[request.document_path]);
     for (const edit of request.edits) {
       const value = edit.value_source === undefined ? undefined : parse('value=' + edit.value_source).value;
-      if (edit.path.length === 1) {
+      if (edit.op === 'append_table') {
+        (world.transit_destination ||= []).push(Object.fromEntries(edit.fields.map(([key, source]) => [key, parse('value=' + source).value])));
+      } else if (edit.path.length === 1) {
         if (edit.op === 'put') world.transit_destination = value;
         else world.transit_destination.splice(edit.index, 0, value);
-      } else if (edit.op === 'remove') world.transit_destination.splice(edit.path[1], 1);
-      else world.transit_destination[edit.path[1]][edit.path[2]] = value;
+      } else if (edit.op === 'remove' && edit.path.length === 2) world.transit_destination.splice(edit.path[1], 1);
+      else {
+        let parent = world;
+        for (const key of edit.path.slice(0, -1)) parent = parent[key];
+        const key = edit.path.at(-1);
+        if (edit.op === 'remove') delete parent[key]; else parent[key] = value;
+      }
     }
     return stringify(world);
   }) };
@@ -36,14 +43,17 @@ it('reads actual selectable roots and finite read-only dependency anchors', () =
 it('adds, edits and removes through actual compose packets, accepted history and export', async () => {
   const f = routeFixture(), before = f.draft.read(root);
   await applyWorldRouteOperation({ ...f, operation: add });
-  expect(f.runtime.compose.mock.calls[0][1].edits[0]).toMatchObject({ op: 'put', path: ['transit_destination'] });
+  expect(f.runtime.compose.mock.calls[0][1].edits[0]).toMatchObject({ op: 'append_table', path: ['transit_destination'] });
   const inserted = f.draft.read(root);
   f.draft.undo(); expect(f.draft.read(root)).toBe(before); f.draft.redo(); expect(f.draft.read(root)).toBe(inserted);
   await applyWorldRouteOperation({ ...f, operation: { ...add, type: 'route-update', original: 'outer', id: 'new-id' } });
   expect(f.runtime.compose.mock.lastCall[1].edits.map(row => row.path)).toEqual([
-    ['transit_destination', 0, 'id'], ['transit_destination', 0, 'label'], ['transit_destination', 0, 'target'],
+    ['transit_destination', 0, 'id'], ['transit_destination', 0, 'label'],
+    ['transit_destination', 0, 'target', 'kind'], ['transit_destination', 0, 'target', 'path'], ['transit_destination', 0, 'target', 'anchor'],
   ]);
   expect(inspectWorldRoutes(new WorkshopDocument(f.draft.archive()), f.dependencies, root).routes[0].id).toBe('new-id');
+  await applyWorldRouteOperation({ ...f, operation: { ...add, type: 'route-update', original: 'new-id', id: 'new-id', target: { kind: 'base', anchor: 'home' } } });
+  expect(inspectWorldRoutes(f.draft, f.dependencies, root).routes[0].target).toEqual({ kind: 'base', anchor: 'home' });
   await applyWorldRouteOperation({ ...f, operation: { type: 'route-remove', path: root, original: 'new-id' } });
   expect(inspectWorldRoutes(f.draft, f.dependencies, root).routes).toEqual([]);
 });

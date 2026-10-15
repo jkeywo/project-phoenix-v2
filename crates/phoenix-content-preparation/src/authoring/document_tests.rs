@@ -919,3 +919,67 @@ fn manifest_extension_keys_do_not_inherit_an_unrelated_world_schema() {
         source.replace('4', "5")
     );
 }
+
+#[test]
+fn append_table_preserves_inline_route_arrays_and_their_unrelated_source() {
+    let source = "# root\r\ntransit_destination = [\r\n    { id='home', label='route.home', target={kind='base',anchor='home'} }, # retained row\r\n] # retained list\r\n[anchors]\r\nhome=[0,0,0] # retained anchor\r\n";
+    let result = edit(
+        source,
+        &request(
+            WORLD,
+            source,
+            vec![append(
+                &[key("transit_destination")],
+                &[
+                    ("id", "\"outer\""),
+                    ("label", "\"route.outer\""),
+                    (
+                        "target",
+                        "{kind=\"layer\",path=\"assets/worlds/outer.toml\",anchor=\"arrival\"}",
+                    ),
+                ],
+            )],
+        ),
+    )
+    .unwrap();
+    assert_untouched_lines_survive(source, &result, &[]);
+    assert!(!result.contains("[[transit_destination]]"));
+    assert_eq!(
+        crate::world::config::parse_world(&result)
+            .unwrap()
+            .transit_destinations
+            .len(),
+        2
+    );
+    let invalid = "transit_destination=[7]\n";
+    assert!(edit(
+        invalid,
+        &request(
+            WORLD,
+            invalid,
+            vec![append(&[key("transit_destination")], &[("id", "\"bad\"")])]
+        )
+    )
+    .is_err());
+}
+
+#[test]
+fn inline_rating_table_append_keeps_the_existing_duplicate_name_refusal() {
+    let source =
+        "[[station]]\nid='captain'\nrating=[{name='Std',automated_systems=[]}] # retained\n";
+    let path = [key("station"), Segment::Index(0), key("rating")];
+    assert!(edit(
+        source,
+        &request(HULL, source, vec![append(&path, &[("name", "\"Std\"")])])
+    )
+    .unwrap_err()
+    .contains("already exists"));
+    let result = edit(
+        source,
+        &request(HULL, source, vec![append(&path, &[("name", "\"Novice\"")])]),
+    )
+    .unwrap();
+    assert!(result.contains("# retained"));
+    assert!(result.contains("name='Std'"));
+    assert!(result.contains("Novice"));
+}

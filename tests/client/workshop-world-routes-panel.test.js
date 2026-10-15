@@ -13,7 +13,8 @@ function fixture() {
   ]));
   const dependencies = { base_files: { [outer]: '[anchors]\narrival=[100,42,0]\n' }, packs: [] };
   const runtime = { validate: vi.fn(async () => ({ accepted: true })), compose: vi.fn(async (files, request) => {
-    const value = parse(files[path]); value.transit_destination = parse('value=' + request.edits[0].value_source).value;
+    const value = parse(files[path]);
+    (value.transit_destination ||= []).push(Object.fromEntries(request.edits[0].fields.map(([key, source]) => [key, parse('value=' + source).value])));
     return stringify(value);
   }) };
   let held = false;

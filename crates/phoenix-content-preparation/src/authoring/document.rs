@@ -300,8 +300,9 @@ pub enum Edit {
     },
     /// Remove an array element, a table key or an array-of-tables entry.
     Remove { path: Vec<Segment> },
-    /// Append an entry to an array of tables, keys in the given order, placed
-    /// after that array's last entry rather than at the end of the file.
+    /// Append a table entry, preserving an existing array-of-tables or inline
+    /// value-array representation. An absent key creates an array of tables.
+    /// Keys retain their given order; unrelated source is not rewritten.
     AppendTable {
         path: Vec<Segment>,
         fields: Vec<(String, String)>,
@@ -691,10 +692,6 @@ fn apply(document: &mut DocumentMut, document_path: &str, edit: &Edit) -> Result
             if parent.get(key).is_none() {
                 parent.insert(key, Item::ArrayOfTables(ArrayOfTables::new()));
             }
-            let tables = parent
-                .get_mut(key)
-                .and_then(Item::as_array_of_tables_mut)
-                .ok_or("The key is not an array of tables.")?;
             let mut table = Table::new();
             for (field, value_source) in fields {
                 table.insert(field, Item::Value(parse_value(value_source)?));
@@ -703,17 +700,41 @@ fn apply(document: &mut DocumentMut, document_path: &str, edit: &Edit) -> Result
             // excuse, so it is the one cross-entry rule checked at edit time.
             if key == "rating" {
                 if let Some(name) = table.get("name").and_then(Item::as_str) {
-                    if tables
-                        .iter()
-                        .any(|existing| existing.get("name").and_then(Item::as_str) == Some(name))
-                    {
+                    let duplicate = match parent.get(key) {
+                        Some(Item::ArrayOfTables(tables)) => tables.iter().any(|existing| {
+                            existing.get("name").and_then(Item::as_str) == Some(name)
+                        }),
+                        Some(Item::Value(Value::Array(array))) => array.iter().any(|existing| {
+                            existing
+                                .as_inline_table()
+                                .and_then(|row| row.get("name"))
+                                .and_then(Value::as_str)
+                                == Some(name)
+                        }),
+                        _ => false,
+                    };
+                    if duplicate {
                         return Err(format!(
                             "A rating named {name:?} already exists on this station."
                         ));
                     }
                 }
             }
-            tables.push(table);
+            match parent.get_mut(key) {
+                Some(Item::ArrayOfTables(tables)) => tables.push(table),
+                Some(Item::Value(Value::Array(array))) => {
+                    if array.iter().any(|value| value.as_inline_table().is_none()) {
+                        return Err("The array must contain table entries.".into());
+                    }
+                    let mut inline = InlineTable::new();
+                    for (field, value) in table.iter() {
+                        inline.insert(field, value.as_value().expect("parsed table field").clone());
+                    }
+                    let index = array.len();
+                    insert_element(array, index, Value::InlineTable(inline))?;
+                }
+                _ => return Err("The key is not an array of tables.".into()),
+            }
         }
     }
     Ok(())

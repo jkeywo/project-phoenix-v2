@@ -53,7 +53,6 @@ function validateRoutes(rows, inspection) {
 const targetSource = target => target.kind === 'base'
   ? `{ kind = "base", anchor = ${tomlBasicString(target.anchor)} }`
   : `{ kind = "layer", path = ${tomlBasicString(target.path)}, anchor = ${tomlBasicString(target.anchor)} }`;
-const rowSource = row => `{ id = ${tomlBasicString(row.id)}, label = ${tomlBasicString(row.label)}, target = ${targetSource(row.target)} }`;
 
 /** The existing runtime TOML editor retains exact unrelated source. The same
  * accepted-source transaction owns history, validation, export and Test. */
@@ -72,13 +71,17 @@ export async function applyWorldRouteOperation({ draft, dependencies, provider, 
       } else {
         const row = { id: selected.id, label: selected.label, target: selected.target };
         if (selected.type === 'route-add') {
-          const length = rows.length; rows.push(row);
-          edits = [length ? { op: 'insert', path: ['transit_destination'], index: length, value_source: rowSource(row) }
-            : { op: 'put', path: ['transit_destination'], value_source: `[${rowSource(row)}]` }];
+          rows.push(row);
+          edits = [{ op: 'append_table', path: ['transit_destination'], fields: [
+            ['id', tomlBasicString(row.id)], ['label', tomlBasicString(row.label)], ['target', targetSource(row.target)],
+          ] }];
         } else if (selected.type === 'route-update' && index >= 0) {
-          rows[index] = row;
+          const previous = rows[index]; rows[index] = row;
           edits = ['id', 'label'].map(key => ({ op: 'put', path: ['transit_destination', index, key], value_source: tomlBasicString(row[key]) }));
-          edits.push({ op: 'put', path: ['transit_destination', index, 'target'], value_source: targetSource(row.target) });
+          for (const [key, value] of Object.entries(row.target))
+            edits.push({ op: 'put', path: ['transit_destination', index, 'target', key], value_source: tomlBasicString(value) });
+          if (previous.target?.path !== undefined && row.target.kind === 'base')
+            edits.push({ op: 'remove', path: ['transit_destination', index, 'target', 'path'] });
         } else throw new Error('The selected route has changed.');
       }
       validateRoutes(rows, inspection);

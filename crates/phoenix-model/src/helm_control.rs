@@ -21,6 +21,29 @@ pub struct HelmControlConfig {
     pub lateral: Option<SystemId>,
 }
 
+/// Authored false explicitly disables an inherited binding profile. Runtime
+/// state still has only the optional compiled profile and its one intent map.
+pub fn deserialize_optional_config<'de, D>(
+    deserializer: D,
+) -> Result<Option<HelmControlConfig>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Authored {
+        Profile(HelmControlConfig),
+        Disabled(bool),
+    }
+    match Authored::deserialize(deserializer)? {
+        Authored::Profile(profile) => Ok(Some(profile)),
+        Authored::Disabled(false) => Ok(None),
+        Authored::Disabled(true) => Err(serde::de::Error::custom(
+            "helm_control accepts actual axis bindings or false",
+        )),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HelmAxisView<I> {

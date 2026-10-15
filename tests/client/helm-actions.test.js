@@ -1,3 +1,4 @@
+import { HELM_MOVEMENT_ACTIONS } from '../../gui/stations/helm-movement-actions.js';
 import { describe, expect, it, vi } from 'vitest';
 import {
   clientSettingsSemanticActions,
@@ -46,6 +47,7 @@ describe('Helm semantic actions', () => {
       HELM_BOOST_ACTION,
       HELM_VIEWSCREEN_ACTION,
       HELM_DOCK_ACTION,
+      ...HELM_MOVEMENT_ACTIONS,
     ]);
     for (const action of HELM_ACTIONS) {
       expect(action.contexts).toEqual([HELM_ACTION_CONTEXT]);
@@ -304,6 +306,8 @@ describe('Helm semantic actions', () => {
       'tactical.torpedo-volley-up',
       'tactical.torpedo-fire',
       'tactical.strike-boost',
+      'tactical.weapons-restraint', 'tactical.phaser-stop',
+      'tactical.weapon-target', 'tactical.weapon-group-target', 'tactical.follow-weapon-group', 'tactical.follow-primary-target',
       'comms.hail',
       'comms.select-message',
       'comms.respond',
@@ -311,9 +315,11 @@ describe('Helm semantic actions', () => {
       'comms.show-on-screen',
       'sensors.target-selection',
       'sensors.scan',
+      'sensors.cancel-scan', 'sensors.passive-enabled', 'sensors.attach-reference',
       'sensors.viewscreen',
       'sensors.cancel-impulse',
       'science.shield-focus',
+      'science.shield-raised', 'science.shield-recovery',
       'navigation.chart',
       'navigation.waypoint-place',
       'navigation.waypoint-anchor',
@@ -326,6 +332,11 @@ describe('Helm semantic actions', () => {
       'navigation.map-pan-down',
       'navigation.map-zoom-in',
       'navigation.map-zoom-out',
+      'navigation.shared-waypoint', 'sensing.radar-sharing',
+      'power.energy-generation', 'power.energy-reactor', 'power.energy-group', 'power.energy-priority', 'power.energy-mode', 'power.energy-system-flow',
+      'logistics.enabled', 'stock.target', 'stock.reserve', 'stock.priority', 'logistics.dispatch', 'logistics.return',
+      'production.enabled', 'production.target', 'production.recipe', 'recovery.enabled', 'recovery.selection',
+      'port.maintenance', 'port.start-order', 'port.stop-order', 'port.transfer-store', 'engineering.transfer-direction', 'engineering.transfer-resource',
       'power.decrease-allocation',
       'power.increase-allocation',
       'repair.dispatch-team',
@@ -337,6 +348,7 @@ describe('Helm semantic actions', () => {
       'editor.mod.import',
       'editor.mod.validate',
       'editor.mod.export',
+      'fitting.request', 'fitting.dispatch', 'fitting.cancel', 'fitting.recover', 'fitting.recover-cancel',
     ]);
     expect(clientSettingsSemanticActions(registry).map((action) => action.id)).toEqual([
       'captain.red-alert',
@@ -353,6 +365,8 @@ describe('Helm semantic actions', () => {
       'tactical.torpedo-volley-up',
       'tactical.torpedo-fire',
       'tactical.strike-boost',
+      'tactical.weapons-restraint', 'tactical.phaser-stop',
+      'tactical.weapon-target', 'tactical.weapon-group-target', 'tactical.follow-weapon-group', 'tactical.follow-primary-target',
       'comms.hail',
       'comms.select-message',
       'comms.respond',
@@ -360,9 +374,11 @@ describe('Helm semantic actions', () => {
       'comms.show-on-screen',
       'sensors.target-selection',
       'sensors.scan',
+      'sensors.cancel-scan', 'sensors.passive-enabled', 'sensors.attach-reference',
       'sensors.viewscreen',
       'sensors.cancel-impulse',
       'science.shield-focus',
+      'science.shield-raised', 'science.shield-recovery',
       'navigation.chart',
       'navigation.waypoint-place',
       'navigation.waypoint-anchor',
@@ -375,6 +391,11 @@ describe('Helm semantic actions', () => {
       'navigation.map-pan-down',
       'navigation.map-zoom-in',
       'navigation.map-zoom-out',
+      'navigation.shared-waypoint', 'sensing.radar-sharing',
+      'power.energy-generation', 'power.energy-reactor', 'power.energy-group', 'power.energy-priority', 'power.energy-mode', 'power.energy-system-flow',
+      'logistics.enabled', 'stock.target', 'stock.reserve', 'stock.priority', 'logistics.dispatch', 'logistics.return',
+      'production.enabled', 'production.target', 'production.recipe', 'recovery.enabled', 'recovery.selection',
+      'port.maintenance', 'port.start-order', 'port.stop-order', 'port.transfer-store', 'engineering.transfer-direction', 'engineering.transfer-resource',
       'power.decrease-allocation',
       'power.increase-allocation',
       'repair.dispatch-team',
@@ -383,6 +404,7 @@ describe('Helm semantic actions', () => {
       'engineering.tractor',
       'engineering.umbilical',
       'repair.external-dispatch',
+      'fitting.request', 'fitting.dispatch', 'fitting.cancel', 'fitting.recover', 'fitting.recover-cancel',
     ]);
   });
 });

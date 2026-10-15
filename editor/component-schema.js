@@ -502,6 +502,7 @@ export const ENTITY_CONFIG_SECTIONS = [
   'star',
   'radar_appearance',
   'helm_console',
+  'helm_control',
   'weapons_console',
   'engineering_console',
   'captain_console',

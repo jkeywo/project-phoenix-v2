@@ -1,4 +1,5 @@
 import { guardWeaponGroupReferences } from './workshop-weapon-groups.js';
+import { guardHelmMovementReferences } from './workshop-helm-movement.js';
 import { guardSensingReferences } from './workshop-sensing.js';
 import { guardFittingReferences } from './workshop-fitting.js';
 import { guardRecoveryReferences } from './workshop-resource-recovery.js';
@@ -449,6 +450,7 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
     guardLogisticsSystemRemoval(inspection.composition.resolved.value, operation.id);
   if (effectiveValue.interior) guardLogisticsLayout(effectiveValue, effectiveValue.interior);
   guardWeaponGroupReferences(inspection.composition.resolved.value, effectiveValue);
+  guardHelmMovementReferences(inspection.composition.resolved.value, effectiveValue);
   guardFittingReferences(inspection.composition.resolved.value, effectiveValue);
   guardSensingReferences(inspection.composition.resolved.value, effectiveValue);
   guardProductionReferences(inspection.composition.resolved.value, effectiveValue);

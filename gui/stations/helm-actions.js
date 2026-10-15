@@ -10,6 +10,7 @@
 import { defineStationAction, createCorrelatedActionSender, keyboard as key, button, gamepad } from './action-support.js';
 
 import { familyView } from '../console-payload.js';
+import { HELM_MOVEMENT_ACTIONS, registerHelmMovementActions } from './helm-movement-actions.js';
 import {
   createSemanticActionRegistry,
   SEMANTIC_HANDLED_WITHOUT_FEEDBACK,
@@ -82,12 +83,19 @@ export const HELM_ACTIONS = Object.freeze([
   HELM_BOOST_ACTION,
   HELM_VIEWSCREEN_ACTION,
   HELM_DOCK_ACTION,
+  ...HELM_MOVEMENT_ACTIONS,
 ]);
 
 export function helmActionView(state) {
   if (!state || typeof state !== 'object') return null;
   const projected = familyView(state, HELM_ACTION_CONTEXT);
   return Object.keys(projected).length > 0 ? projected : state;
+}
+
+function manualAxis(view, role, legacyAuto) {
+  return Object.hasOwn(view, 'helm_movement')
+    ? view.helm_movement?.axes?.some(axis => axis.role === role && axis.controllable === true) === true
+    : !legacyAuto;
 }
 
 export function registerHelmActions(registry, options = {}) {
@@ -111,10 +119,11 @@ export function registerHelmActions(registry, options = {}) {
   const hasDockControl = typeof options.hasDockControl === 'function'
     ? options.hasDockControl : () => true;
   const send = createCorrelatedActionSender(sendAction);
+  registerHelmMovementActions(registry, { getState, sendAction });
 
   registry.register(HELM_THRUST_ACTION, ({ value } = {}) => {
     const view = helmActionView(getState());
-    if (!view || view.helm_auto || !hasThrustControl() || !sendAction
+    if (!view || !manualAxis(view, 'thrust', view.helm_auto) || !hasThrustControl() || !sendAction
         || typeof view.thrust_system_id !== 'string' || !view.thrust_system_id
         || !Number.isFinite(value)) return false;
     sendAction('set_helm_thrust', { value, control_system_id: view.thrust_system_id });
@@ -123,7 +132,7 @@ export function registerHelmActions(registry, options = {}) {
 
   registry.register(HELM_STEERING_ACTION, ({ value } = {}) => {
     const view = helmActionView(getState());
-    if (!view || view.helm_auto || !hasSteeringControl() || !sendAction
+    if (!view || !manualAxis(view, 'steering', view.helm_auto) || !hasSteeringControl() || !sendAction
         || typeof view.steering_system_id !== 'string' || !view.steering_system_id
         || !Number.isFinite(value)) return false;
     sendAction('set_helm_steering', { value, control_system_id: view.steering_system_id });
@@ -132,7 +141,7 @@ export function registerHelmActions(registry, options = {}) {
 
   registry.register(HELM_LATERAL_ACTION, ({ value } = {}) => {
     const view = helmActionView(getState());
-    if (!view || view.lateral_auto || !hasLateralControl()
+    if (!view || !manualAxis(view, 'lateral', view.lateral_auto) || !hasLateralControl()
         || typeof view.lateral_system_id !== 'string' || !view.lateral_system_id
         || !sendAction || !Number.isFinite(value)) return false;
     sendAction('set_helm_lateral', { value, control_system_id: view.lateral_system_id });

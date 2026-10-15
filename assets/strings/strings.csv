@@ -5901,3 +5901,43 @@ semantic_action.guidance.target.label,Guided round source controls,Send guided-r
 semantic_action.guidance.target.accessibility,Guided round source controls,Send a permitted target reading to an own launched round,Eine erlaubte Zielmessung an einen eigenen Flugkörper senden,Send a permitted target reading to an own launched round,machine
 semantic_action.guidance.stop.label,Guided round source controls,Stop guided-round guidance,Lenkwaffenlenkung stoppen,Stop guided-round guidance,machine
 semantic_action.guidance.stop.accessibility,Guided round source controls,Send stop guidance to an own launched round,Lenkungsstopp an einen eigenen Flugkörper senden,Send stop guidance to an own launched round,machine
+helm.movement.assistance,Helm movement controls,Assisted demands,Assistierte Vorgaben,Assisted demands,machine
+helm.movement.speed,Helm movement controls,Desired speed,Sollgeschwindigkeit,Desired speed,machine
+helm.movement.heading,Helm movement controls,Heading (degrees),Kurs (Grad),Heading (degrees),machine
+helm.movement.set,Helm movement controls,Set,Setzen,Set,machine
+helm.movement.match,Helm movement controls,Match speed,Geschwindigkeit angleichen,Match speed,machine
+helm.movement.cancel,Helm movement controls,Stop matching,Angleichung beenden,Stop matching,machine
+helm.movement.choose,Helm movement controls,Choose an observed contact,Beobachteten Kontakt wählen,Choose an observed contact,machine
+helm.movement.axis.thrust,Helm movement controls,Thrust,Schub,Thrust,machine
+helm.movement.axis.steering,Helm movement controls,Steering,Steuerung,Steering,machine
+helm.movement.axis.lateral,Helm movement controls,Lateral thrust,Seitenschub,Lateral thrust,machine
+helm.movement.unavailable,Helm movement controls,No actuator work available,Keine Antriebsarbeit verfügbar,No actuator work available,machine
+helm.movement.delegated,Helm movement controls,Read only,Nur Anzeige,Read only,machine
+helm.movement.mode.assisted,Helm movement controls,Assisted,Assistiert,Assisted,machine
+helm.movement.mode.direct,Helm movement controls,Direct,Direkt,Direct,machine
+helm.movement.contact,Helm movement controls,{name}: {speed} AU/s · sample {tick},{name}: {speed} AE/s · Messung {tick},{name}: {speed} AU/s · sample {tick},machine
+helm.movement.holding,Helm movement controls,Matching {speed} AU/s · sample {tick} · age {age} ticks,Angleichung auf {speed} AE/s · Messung {tick} · Alter {age} Ticks,Matching {speed} AU/s · sample {tick} · age {age} ticks,machine
+helm.movement.stale,Helm movement controls,Holding last speed {speed} AU/s · sample {tick} · age {age} ticks,Letzte Geschwindigkeit {speed} AE/s gehalten · Messung {tick} · Alter {age} Ticks,Holding last speed {speed} AU/s · sample {tick} · age {age} ticks,machine
+semantic_action.helm.mode.label,Helm movement controls,Choose the mode for this axis,Modus für diese Achse wählen,Choose the mode for this axis,machine
+semantic_action.helm.mode.accessibility,Helm movement controls,Choose the mode for this axis,Modus für diese Achse wählen,Choose the mode for this axis,machine
+semantic_action.helm.desired_speed.label,Helm movement controls,Set desired speed,Sollgeschwindigkeit setzen,Set desired speed,machine
+semantic_action.helm.desired_speed.accessibility,Helm movement controls,Set desired speed,Sollgeschwindigkeit setzen,Set desired speed,machine
+semantic_action.helm.desired_heading.label,Helm movement controls,Set desired heading,Sollkurs setzen,Set desired heading,machine
+semantic_action.helm.desired_heading.accessibility,Helm movement controls,Set desired heading,Sollkurs setzen,Set desired heading,machine
+semantic_action.helm.match_speed.label,Helm movement controls,Match an observed speed,Beobachtete Geschwindigkeit angleichen,Match an observed speed,machine
+semantic_action.helm.match_speed.accessibility,Helm movement controls,Match an observed speed,Beobachtete Geschwindigkeit angleichen,Match an observed speed,machine
+workshop.helm_movement.title,Workshop movement binding form,Movement controls,Bewegungssteuerung,Movement controls,machine
+workshop.helm_movement.hint,Workshop movement binding form,Bind actual thrust and steering Systems. Modes remain independently controlled; disabling restores legacy assisted controls.,Tatsaechliche Schub- und Steuersysteme zuordnen. Modi bleiben unabhaengig; deaktiviert gelten die bisherigen unterstuetzten Kontrollen.,Bind actual thrust and steering Systems. Modes remain independently controlled; disabling restores legacy assisted controls.,machine
+workshop.helm_movement.template,Workshop movement binding form,Hull,Rumpf,Hull,machine
+workshop.helm_movement.enabled,Workshop movement binding form,Enable assisted and Direct modes,Unterstuetzten und direkten Modus aktivieren,Enable assisted and Direct modes,machine
+workshop.helm_movement.thrust,Workshop movement binding form,Thrust owner,Schubsystem,Thrust owner,machine
+workshop.helm_movement.steering,Workshop movement binding form,Steering owner,Steuersystem,Steering owner,machine
+workshop.helm_movement.lateral,Workshop movement binding form,Lateral owner (optional),Seitenschubsystem (optional),Lateral owner (optional),machine
+workshop.helm_movement.none,Workshop movement binding form,No lateral binding,Keine Seitenschubzuordnung,No lateral binding,machine
+workshop.helm_movement.materialise,Workshop movement binding form,Materialise inherited binding profile,Geerbtes Zuordnungsprofil lokal uebernehmen,Materialise inherited binding profile,machine
+workshop.helm_movement.save,Workshop movement binding form,Save movement bindings,Bewegungszuordnung speichern,Save movement bindings,machine
+workshop.helm_movement.refused,Workshop movement binding form,Movement edit refused: {reason},Bewegungsaenderung abgelehnt: {reason},Movement edit refused: {reason},machine
+helm.movement.hint,Helm retained movement intent display,Direct applies force; centring thrust coasts. Assisted holds the chosen speed. Each axis switches independently.,Direkt gibt Kraft vor; zentrierter Schub laesst das Schiff treiben. Assistiert haelt die gewaehlte Geschwindigkeit. Jede Achse schaltet unabhaengig.,Direct applies force; centring thrust coasts. Assisted holds the chosen speed. Each axis switches independently.,machine
+helm.movement.heading_goal,Helm retained movement intent display,Heading {value}°,Kurs {value}°,Heading {value}°,machine
+helm.movement.speed_goal,Helm retained movement intent display,Speed {value} AU/s,Geschwindigkeit {value} AE/s,Speed {value} AU/s,machine
+helm.movement.stick_goal,Helm retained movement intent display,Input {value}%,Eingabe {value}%,Input {value}%,machine

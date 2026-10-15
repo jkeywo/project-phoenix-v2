@@ -72,7 +72,11 @@ pub struct EntityConfig {
     pub collider: Option<ColliderConfig>,
     pub appearance: Option<AppearanceConfig>,
     pub helm_console: Option<HelmConsoleConfig>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "phoenix_model::helm_control::deserialize_optional_config"
+    )]
     pub helm_control: Option<phoenix_model::helm_control::HelmControlConfig>,
     /// Optional helm capability declaration (`[helm_capability]`).
     /// Describes vertical movement mode and impulse steering policy.

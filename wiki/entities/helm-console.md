@@ -3,7 +3,7 @@ title: Helm Console
 type: entity
 tags: [console, helm, input, ship, physics, radar, impulse, boost, dock]
 sources: [gui/battleship/helm.html, gui/cruiser/helm.html, gui/destroyer/helm.html, gui/stations/helm-console.js, gui/console-state.js, gui/components/ph-helm-radar.js, gui/components/ph-helm-joystick.js, gui/stations/helm-actions.js, gui/gamepad-input.js, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-sim-gameplay/src/ship/helm_admission.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/ship/physics.rs, crates/phoenix-sim-gameplay/src/ship/impulse.rs, crates/phoenix-sim-gameplay/src/ship/boost.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-sim-gameplay/src/modifiers/coordination.rs, crates/phoenix-simulation/src/dock/server.rs, crates/phoenix-simulation/src/entities/spawner.rs, assets/entities/alliance_destroyer.toml, assets/entities/alliance_cruiser.toml]
-updated: 2026-10-13
+updated: 2026-10-15
 ---
 
 # Helm Console
@@ -21,6 +21,15 @@ mounts. `crates/phoenix-simulation/src/console/helm/server.rs` publishes Helm st
 components. `crates/phoenix-sim-gameplay/src/ship/physics_systems.rs` consumes those components during the
 fixed simulation tick and passes the resulting inputs through the pure physics
 model in `crates/phoenix-sim-gameplay/src/ship/physics.rs`.
+
+An explicit `helm_control` binding profile enables the shared
+`ph-helm-movement` widget. It shows separate Assisted/Direct mode controls for
+each actual owned axis, desired speed/heading, and a Match Speed picker built
+from permitted dated observations. Configured axes use the retained intent map
+and Simulation applier described in [Helm Runtime](../concepts/helm-control-intent.md);
+the older command components remain the route for unmigrated axes. The dedicated
+Workshop movement form edits those bindings through accepted source/history,
+with explicit inherited materialisation and a false disable override.
 
 Human and Backfill Helm use the same commands and physics path. Admission and
 the station's active rating decide which source may operate each fine system;

@@ -88,11 +88,17 @@ export function makeHelmRender(variant) {
     }
 
     // ── Joystick(s) ──────────────────────────────────────────────────────
+    const movementEl = doc.getElementById('helm-movement');
+    if (movementEl) movementEl.state = s.helm_movement || null;
     const joystickEl = doc.getElementById(ids.joystick);
-    updateControl(joystickEl, { auto: !!s.helm_auto });
+    updateControl(joystickEl, { auto: Object.hasOwn(s, 'helm_movement')
+      ? !s.helm_movement?.axes?.some(axis => ['thrust', 'steering'].includes(axis.role) && axis.controllable)
+      : !!s.helm_auto });
     if (ids.lateral) {
       const lateralEl = doc.getElementById(ids.lateral);
-      updateControl(lateralEl, { auto: !!s.lateral_auto });
+      updateControl(lateralEl, { auto: Object.hasOwn(s, 'helm_movement')
+        ? !s.helm_movement?.axes?.some(axis => axis.role === 'lateral' && axis.controllable)
+        : !!s.lateral_auto });
     }
 
     // ── Impulse / boost ──────────────────────────────────────────────────

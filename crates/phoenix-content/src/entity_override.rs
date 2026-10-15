@@ -386,6 +386,7 @@ pub fn is_atomic_logistics_profile(path: &str) -> bool {
             | "field"
             | "signal_material"
             | "sensing"
+            | "helm_control"
     )
 }
 

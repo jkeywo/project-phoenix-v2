@@ -1,4 +1,5 @@
 import { weaponTargetsPayload } from './weapon-targets.js';
+import { buildHelmMovement } from './helm-movement.js';
 import { scanPublicationOwner } from './scan-source.js';
 import { buildReferenceControls } from './sensor-references.js';
 import { observationTickFor } from './observation-details.js';
@@ -1277,8 +1278,14 @@ export function buildHelmConsoleState(state, systemIds = []) {
 
   const engineBlackboards = blackboardsOfKind(state, 'HelmEngine', systemIds);
   const lateralBb = blackboardOfKind(state, 'HelmLateralThrust', systemIds)?.data;
+  const movementEntry = blackboardsOfKind(state, 'Helm').find(entry => entry.data.movement);
+  const movement = movementEntry ? buildHelmMovement(movementEntry.data.movement, {
+    systemIds, controlSources: state.controlSources,
+    tracks: [...delivered, ...blackboardsOfKind(state, 'SensorRadar').flatMap(entry => entry.data.tracks || [])], tick: state.observationTick,
+  }) : null;
 
   return {
+    ...(movementEntry ? { helm_movement: movement } : {}),
     ...(trackMode ? { track_mode: true, tracks: observed.tracks,
       observed_approaches: blackboardsOfKind(state, 'Helm').flatMap(entry => entry.data.approaches || []) } : {}),
     range,
@@ -1295,9 +1302,9 @@ export function buildHelmConsoleState(state, systemIds = []) {
     // Instance ids are opaque: no canonical-id or prefix inference belongs on
     // the client. A legacy server that omits the projection yields null, which
     // lets older action paths retain their own compatibility fallback.
-    thrust_system_id:        authoredSystemIdOfKind(state, 'helm_thrust', systemIds),
-    steering_system_id:      authoredSystemIdOfKind(state, 'helm_steering', systemIds),
-    lateral_system_id:       authoredSystemIdOfKind(state, 'lateral_thrust', systemIds),
+    thrust_system_id:        movementEntry ? movement?.axes.find(axis => axis.role === 'thrust')?.system_id : authoredSystemIdOfKind(state, 'helm_thrust', systemIds),
+    steering_system_id:      movementEntry ? movement?.axes.find(axis => axis.role === 'steering')?.system_id : authoredSystemIdOfKind(state, 'helm_steering', systemIds),
+    lateral_system_id:       movementEntry ? movement?.axes.find(axis => axis.role === 'lateral')?.system_id : authoredSystemIdOfKind(state, 'lateral_thrust', systemIds),
     impulse_system_id:       authoredSystemIdOfKind(state, 'helm_impulse', systemIds),
     boost_system_id:         authoredSystemIdOfKind(state, 'helm_boost', systemIds),
     // Viewscreen is Captain-owned on shipped hulls, so it deliberately falls

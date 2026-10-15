@@ -1,6 +1,23 @@
 use super::*;
 
 #[test]
+fn movement_bindings_replace_as_one_profile_without_inherited_lateral_or_helm_tuning_loss() {
+    let base: toml::Value = toml::from_str("[helm_console]\nmax_speed=20\n[helm_control]\nthrust='drive'\nsteering='rudder'\nlateral='side'\n").unwrap();
+    for policy in [MergePolicy::ComposeFragments, MergePolicy::InstanceOverride] {
+        let disabled: toml::Value = toml::from_str("helm_control=false\n").unwrap();
+        let merged = merge_entity_config_toml_with(&base, &disabled, policy).unwrap();
+        assert_eq!(merged["helm_control"].as_bool(), Some(false));
+        let enabled: toml::Value =
+            toml::from_str("[helm_control]\nthrust='drive'\nsteering='rudder'\n").unwrap();
+        let restored = merge_entity_config_toml_with(&merged, &enabled, policy).unwrap();
+        assert!(restored["helm_control"].get("lateral").is_none());
+        assert_eq!(restored["helm_console"], base["helm_console"]);
+        let cleared = merge_entity_config_toml_with(&base, &enabled, policy).unwrap();
+        assert!(cleared["helm_control"].get("lateral").is_none());
+    }
+}
+
+#[test]
 fn explicit_impact_replacement_can_remove_inherited_emp_without_changing_other_weapon_settings() {
     for path in [
         "weapon",

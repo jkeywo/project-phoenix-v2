@@ -92,6 +92,7 @@ describe('battleship helm renderStation', () => {
     expect(el('helm-radar').state).toEqual({
       blips: [{ id: 'b1' }], range: 700, x: 10, z: 20, ship_heading: 90, speed: 5, on_screen_active: true,
       config: {}, engine_port_thrust: 0.5, engine_stbd_thrust: 0.6, hostile_arcs: [{ id: 'h1' }], hostile_arc_color: '#f00',
+      tracks: [], observed_approaches: [],
     });
     expect(el('helm-joystick').state).toEqual({ auto: true });
     expect(el('impulse-btn').state).toEqual({ state: 'charging', charge_pct: 40, auto: true });

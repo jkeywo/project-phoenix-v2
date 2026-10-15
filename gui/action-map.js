@@ -496,6 +496,34 @@ export const ACTION_MAP = Object.freeze({
   },
 
   /** Continuous semantic steering uses only the existing narrow axis route. */
+  set_helm_mode: (a, send) => {
+    if (!a.control_system_id || !['assisted', 'direct'].includes(a.mode)) return;
+    send(a.correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(a.correlation ? { correlation: a.correlation } : {}), target: a.control_system_id,
+      payload: { type: 'SetHelmMode', data: { mode: a.mode } },
+    });
+  },
+  set_helm_desired_speed: (a, send) => {
+    if (!a.control_system_id || typeof a.speed !== 'number' || !Number.isFinite(Math.fround(a.speed))) return;
+    send(a.correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(a.correlation ? { correlation: a.correlation } : {}), target: a.control_system_id,
+      payload: { type: 'SetDesiredSpeed', data: { speed: a.speed } },
+    });
+  },
+  set_helm_desired_heading: (a, send) => {
+    if (!a.control_system_id || typeof a.heading_rad !== 'number' || !Number.isFinite(Math.fround(a.heading_rad))) return;
+    send(a.correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(a.correlation ? { correlation: a.correlation } : {}), target: a.control_system_id,
+      payload: { type: 'SetDesiredHeading', data: { heading_rad: a.heading_rad } },
+    });
+  },
+  set_helm_match_speed: (a, send) => {
+    if (!a.control_system_id || !(a.contact === null || (typeof a.contact === 'string' && a.contact))) return;
+    send(a.correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(a.correlation ? { correlation: a.correlation } : {}), target: a.control_system_id,
+      payload: { type: 'SetMatchSpeed', data: { contact: a.contact } },
+    });
+  },
   set_helm_steering: (a, send) => {
     if (!Number.isFinite(a.value)) return;
     sendSteering(a.value, send, controlSystemId(a, HELM_STEERING_SYSTEM_ID));

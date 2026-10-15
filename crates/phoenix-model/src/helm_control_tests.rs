@@ -1,6 +1,45 @@
 use super::*;
 
 #[test]
+fn authored_disabled_binding_is_explicit_and_closed() {
+    #[derive(Deserialize)]
+    struct Authored {
+        #[serde(default, deserialize_with = "deserialize_optional_config")]
+        helm_control: Option<HelmControlConfig>,
+    }
+    assert!(
+        serde_json::from_str::<Authored>(r#"{"helm_control":false}"#)
+            .unwrap()
+            .helm_control
+            .is_none()
+    );
+    assert!(serde_json::from_str::<Authored>(r#"{}"#)
+        .unwrap()
+        .helm_control
+        .is_none());
+    assert_eq!(
+        serde_json::from_str::<Authored>(
+            r#"{"helm_control":{"thrust":"drive","steering":"rudder"}}"#
+        )
+        .unwrap()
+        .helm_control
+        .unwrap()
+        .lateral,
+        None
+    );
+    for value in [
+        "true",
+        "null",
+        r#"{"thrust":"drive"}"#,
+        r#"{"thrust":"drive","steering":"rudder","extra":true}"#,
+    ] {
+        assert!(
+            serde_json::from_str::<Authored>(&format!(r#"{{"helm_control":{value}}}"#)).is_err()
+        );
+    }
+}
+
+#[test]
 fn dated_matching_is_one_distinct_retained_request_without_receipt_refresh() {
     let original = ThrustIntent::Assisted {
         demand: SpeedDemand::Match {

@@ -5,7 +5,7 @@ use crate::entities::spawner::EntityUuid;
 use crate::ship::power::ShipPowerSystem;
 use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
 use bevy::prelude::*;
-use phoenix_model::sensing::{PassiveBlackboard, PassiveConfig, PassiveSignal, PassiveSignature};
+use phoenix_model::sensing::{PassiveBlackboard, PassiveConfig, PassiveSignal};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -254,52 +254,25 @@ fn tick(
         .p0()
         .iter()
         .filter_map(|(uuid, transform, power, config)| {
-            let mut strength = if power.0.network().generation_enabled {
+            let reactor_output = if power.0.network().generation_enabled {
                 f64::from(power.0.network().output_actual_per_sec)
             } else {
                 0.0
             };
-            let mut signature = PassiveSignature::Reactor;
-            // The strongest actual machinery cause labels this bearing. Local
-            // reserves can operate equipment with reactor generation disabled.
-            if let Some(config) = config {
-                for system in &config.0.systems {
-                    let kind = system.kind.as_str();
-                    let measured = power.0.emitted_work(&system.id) / f64::from(dt);
-                    let cause = if [
-                        crate::ship::system_registry::HELM_ENGINE_KIND,
-                        crate::ship::system_registry::HELM_THRUST_KIND,
-                        crate::ship::system_registry::HELM_BOOST_KIND,
-                    ]
-                    .contains(&kind)
-                    {
-                        PassiveSignature::Propulsion
-                    } else if kind == crate::ship::system_registry::SENSORS_KIND {
-                        PassiveSignature::ActiveScan
-                    } else if [
-                        crate::ship::system_registry::PHASER_BANK_KIND,
-                        crate::ship::system_registry::BLASTER_BANK_KIND,
-                        crate::ship::system_registry::TORPEDO_TUBE_KIND,
-                    ]
-                    .contains(&kind)
-                    {
-                        PassiveSignature::Weapon
-                    } else {
-                        continue;
-                    };
-                    if measured > strength {
-                        strength = measured;
-                        signature = cause;
-                    }
-                }
-            }
-            (strength > 0.0).then(|| {
-                (
-                    uuid.0.clone(),
-                    transform.translation,
-                    strength.min(f64::from(f32::MAX)) as f32,
-                    signature,
-                )
+            let machinery = config.into_iter().flat_map(|config| {
+                config
+                    .0
+                    .systems
+                    .iter()
+                    .map(|system| (system.kind.as_str(), power.0.emitted_work(&system.id)))
+            });
+            phoenix_sim_gameplay::science::signatures::observed_signature(
+                reactor_output,
+                machinery,
+                dt,
+            )
+            .map(|(strength, signature)| {
+                (uuid.0.clone(), transform.translation, strength, signature)
             })
         })
         .collect();

@@ -15,6 +15,7 @@ sources:
   - crates/phoenix-simulation/src/science/sharing.rs
   - crates/phoenix-simulation/src/console/navigation/sharing.rs
   - crates/phoenix-sim-gameplay/src/science/sensing.rs
+  - crates/phoenix-sim-gameplay/src/science/signatures.rs
   - crates/phoenix-simulation/src/science/broad.rs
   - crates/phoenix-simulation/src/science/contact_routing.rs
   - crates/phoenix-simulation/src/science/focused_ai.rs
@@ -75,6 +76,10 @@ The scan readout displays this payload without running its own prediction model.
 
 `PassiveProfile` and `PassiveState` map actual System IDs to independent powered
 receivers, ordinary closed AI frames, enabled intent and actual measured samples.
+`science::signatures::observed_signature` measures their strongest actual reactor
+or supported machinery cause, preserving reactor-first and authored-order ties.
+Passive supplies current output and work at its existing measurement boundary;
+the helper stores no extra physical state or observer knowledge.
 Physical producers use actual resource expenditure, mount coverage and signal
 paths. Public signals carry bearing, error, signature, strength and dated local
 provenance rather than the emitting actor's private identity. Existing screens

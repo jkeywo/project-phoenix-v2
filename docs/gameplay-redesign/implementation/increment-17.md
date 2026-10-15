@@ -485,3 +485,13 @@ S027 low-emission human warnings and explicit ordinary-AI intent/context, plus
 S021 bounded information/access/disruption objectives, remain subsequent selected
 consumers. This adopted slice does not claim them satisfied by a cloak toggle or
 by existing ReportStatus alone.
+
+### Structural operating-signature extraction
+
+Passive now calls the pure Gameplay `science::signatures::observed_signature`
+owner with the same actual reactor output, emitted work, interval and authored
+System order as before. Classification, strict stronger-than selection, zero
+suppression, output saturation, sampling timing and scene ordering are unchanged.
+Focused owner tests describe reserve operation, ties, ignored equipment and
+saturation. They are formatted source pending the root's coordinated Cargo run;
+this extraction adds no concealment effect or new emission cause.

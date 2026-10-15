@@ -206,6 +206,8 @@ pub struct RenderConfig {
     pub materialise_start_scale: f32,
 }
 
+pub use crate::world::contact_render_config::ContactProxyConfig;
+
 impl Default for RenderConfig {
     fn default() -> Self {
         Self {

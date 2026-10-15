@@ -3,7 +3,7 @@ use crate::{
     core::messages::{EntitySnapshot, SystemBlackboard, SystemId, ViewMode},
     server_app::ShipSystemBlackboards,
     ship::{config::ShipConfig, state::ShipViewMode},
-    world::contact_render_config::ContactProxyConfig,
+    world::config::ContactProxyConfig,
 };
 use phoenix_model::sensing_tracks::SensorTrackSnapshot;
 use std::collections::BTreeMap;

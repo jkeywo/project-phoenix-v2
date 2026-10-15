@@ -92,9 +92,9 @@ template_path="assets/entities/alliance_cruiser.toml"
     config.ship_slots = slot_world.ship_slots;
     for binding in &mut config.situations {
         match &mut binding.request {
-            ActivityRequest::Repair { actor, .. } | ActivityRequest::Delivery { actor, .. } => {
-                *actor = "slot:lead".into()
-            }
+            ActivityRequest::Repair { actor, .. }
+            | ActivityRequest::Delivery { actor, .. }
+            | ActivityRequest::Communication { actor, .. } => *actor = "slot:lead".into(),
         }
     }
     if let ActivityRequest::Repair { team, .. } = &mut config.situations[0].request {

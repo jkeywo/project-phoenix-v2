@@ -3,6 +3,7 @@ title: Sensing and Spatial Fields
 type: concept
 tags: [science, observations, regions, simulation]
 sources:
+  - crates/phoenix-model/src/focused_enquiry.rs
   - crates/phoenix-model/src/sensing.rs
   - crates/phoenix-model/src/sensing_forecast.rs
   - crates/phoenix-sim-gameplay/src/science/forecast.rs
@@ -17,6 +18,8 @@ sources:
   - crates/phoenix-simulation/src/console_delivery_references.rs
   - gui/components/ph-scan-readout.js
   - gui/workshop-sensing-panel.js
+  - crates/phoenix-sim-world/src/world/script/triggers_enquiry.rs
+  - crates/phoenix-simulation/src/science/enquiry.rs
   - crates/phoenix-simulation/src/science/server.rs
   - crates/phoenix-simulation/src/science/focused.rs
   - crates/phoenix-simulation/src/science/passive.rs
@@ -31,16 +34,33 @@ sources:
 `ShipScanRecord` maps actual System IDs to active paid focused enquiries, bounded unfinished work,
 retained readings and the latest-screen projection. `tick_scans` admits no free
 completion: current geometry, shared Sensors path, operational condition and
-actual local energy constrain progress. Completion samples published condition
-and emits the existing scenario scan flag. Historical readings do not track
+actual local energy constrain progress. General completion samples published
+condition and emits the existing scenario scan flag. Historical readings do not track
 later live condition changes. The Console publication carries the actual owner
 for controls. Each qualified `scan/{UTF8-byte-length}:{owner}` channel follows its
 actual System’s Console; an exact typed feed grants information only. Completed
 readings retain the public contact alias captured by the enquiry.
 
+`FocusedAim` closes supported questions to General, Environment, Resources and
+Anomaly. Equipment declares optional question support and relative duration/cost;
+all use the same active work slot. Subject `enquiry_observation` rules independently
+permit normal or intrusive measurement of actual local field exposure, labelled
+finite capacities or supported effect signatures. `EnquiryScene` samples the
+receiver or an already-observed subject point, withholds ambiguous public quantity
+labels and never publishes internal capacity IDs. Non-General readings carry typed
+quantities, with absent structural condition and bulk mass rather than fabricated
+values. Protected and absent answers share the ordinary refusal.
+
+The first actual paid work and its completion enqueue observer-aware `Enquiry`
+events on the existing World event path. `on_enquiry` scripts filter subject,
+observer, System, question, mode and phase. This supports authored contextual
+reactions; it does not guarantee that every subject detects every scan. Ordinary
+System AI preserves an active human question/mode for the same observed mission
+handle, including after handoff. Only a genuinely different request can retarget it.
+
 An optional focused `forecast` policy supplies a finite positive horizon. On an
 actual completed enquiry, the forecast consumer uses two retained readings of
-the same public contact at different sample ticks. It projects condition ranges
+the same public contact, question and mode at different sample ticks. It projects condition ranges
 with quantisation uncertainty and common observed resource levels under an
 explicit unchanged-trend assumption. The issued forecast stays on the existing
 canonical `ScanReading`, including its original samples and horizon; later live
@@ -122,7 +142,8 @@ the local hull. The scan readout selects actual owners from `scans[]`; its contr
 always address that selected System.
 
 Workshop edits the whole sensing profile through accepted source/history, with
-separate add/edit/remove rows for each role. Explicit `sensing.control` bindings
+separate add/edit/remove rows for each role, supported questions, forecast policy
+and subject observation permissions. Explicit `sensing.control` bindings
 identify the singular Combat Lock and Science Designation machinery owners,
 without pooling the independent instruments’ observations. Authored NPC Tactical radars
 now have finite explicit reach; the old absent-table unbounded acquisition is not

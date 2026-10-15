@@ -63,6 +63,7 @@ pub(crate) fn spawn_entity_with_ship_seed(
     for section in SPAWN_SECTIONS {
         section.apply(config, position, &mut entity_commands);
     }
+    crate::resources::recovery_server::install_source(config, &mut entity_commands);
 
     super::ship_spawn::install(config, position, seed, &mut entity_commands);
     entity_commands.id()

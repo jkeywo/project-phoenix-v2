@@ -387,13 +387,54 @@ Fabrication adds an optional fitted System and finite alloy stock (12 initially,
 ceiling 24) on these two hulls; Support storage increases by 24. A provisional
 10-second recipe consumes one main machinery part and two alloy for one round
 of ammunition. Initial production target zero keeps it optional and preserves
-the six starting rounds. Axiom has finite alloy stock. The replacing Skyway
-Control capacity profile still needs its matching retained alloy row.
+the six starting rounds. Axiom has finite alloy stock, and the replacing Skyway
+Control capacity profile retains the matching finite alloy row.
 
-The pure owner run at `c3caaf3c` passes 41 cases, including exact 100+56 refill to
-a 156 target, finite shortage continuation and retained/closed refill state.
-Workshop/Console production source passed independent review and targeted JS
-checks. Renderer-free integrated compilation passed after the new family mapping
-was completed. Additional native local-store/fabrication cases, recipe-scoped
-observation planning, final schema pins and whole-host continuation are pending;
-this checkpoint is not the complete increment 12 exit.
+The later pure owner run at `5132c036` passes 47 cases, including exact 100+56
+refill, finite shortage continuation, retained refill state and recipe-scoped
+planning without a copied inventory. The renderer-free native owner checkpoint
+at `f454148f` passes 38 cases, including all seven fabrication cases, local-store
+and admission regressions, shipped hull loading and the then-current exact schema
+pin. See the acceptance receipt for separate source pins and retained failures.
+Whole-host continuation for later slices, integrated gates and playable/manual
+acceptance remain pending; these checks do not complete increment 12.
+
+## 12.4 implementation contracts
+
+Recovery is an optional fitted `resource-recovery` System, with ordinary power,
+damage, control and individual AI. An atomic selection names one known source,
+one supported resource and one compatible main store in the tool's compartment.
+Internal logistics moves delivered material onward. Human selection and enabled
+work remain standing orders; ordinary AI chooses only from its permitted recovery
+readout and configured stock demand. Zero ore/scrap goals require no harvesting.
+
+A source explicitly declares which existing finite endpoint holds each resource.
+`Always` supplies public cargo/deposit examples; `Disabled` uses the existing
+coarse ship-disablement frontier, rather than inventing another defeat test.
+Candidate information requires an explicit Radar feed and actual tool range.
+The default Cruiser uses Science's shared selection, while an explicitly authored
+Tactical feed can support multiple known contacts. Co-hosting never adds a feed.
+Candidate manifests expose resource types, not private foreign stock quantities.
+An acquired target remains the tool's own tracked intent while in range, so
+Science can select another contact without stopping ongoing recovery. That
+retained identity does not acquire any other contact; clearing selection drops it.
+Execution checks actual source supply/floors and destination stock/space before
+paying work; current stocks are checked again at settlement.
+
+Fractional paid work is continuation state, not material stock. A whole-unit offer
+queues an ordinary finite transfer, then consumes its exact receipt before the
+fold/save boundary. Ordinary capacity effects settle first; transfer settlement
+stages and validates all affected actual owners before writing either endpoint.
+Shared bays, incoming space, loaded rounds and protected main reserves participate
+in that same transaction. No mix of immediate magazines and deferred capacity
+deltas may create resources or overstate a receipt.
+
+The two curated Cruisers receive the tool in Support without another seat or an
+increased group/reactor budget. Initial tool reserve 15/20, intake/work rate 1,
+range 8 and recovery rate 2 are provisional authored tuning. Ore and scrap each
+start at zero with ceiling 24; their combined 48 units extend Support space to
+855/852 respectively. Optional five-second recipes consume two ore or scrap for
+one alloy. A quiet probe provides a finite 12-scrap/four-machinery cargo pod and
+24-ore deposit, without deadlines, respawn or kill rewards. Existing Science
+filters must show and select those actual cargo/asteroid contacts. This contract
+does not establish balance or a completed live recovery exit.

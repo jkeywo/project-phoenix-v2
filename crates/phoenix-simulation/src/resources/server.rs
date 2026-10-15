@@ -45,7 +45,7 @@ pub struct ResourceTransfer {
     pub receipt: Option<TransferReceiptKey>,
 }
 
-fn source_available(
+pub(crate) fn source_available(
     stock: &Stock,
     endpoint: &ResourceEndpoint,
     profile: Option<&CompiledShipLogistics>,

@@ -91,6 +91,8 @@ pub struct ScriptDialogueResponse {
 /// script analogue of a [`CommsDialogueNode`](crate::comms::content::CommsDialogueNode).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScriptDialogueNode {
+    /// A requested decision, honored only by an actual immutable bound on_pick.
+    pub opportunity_decision: Option<phoenix_model::comms_request::OpportunityDecision>,
     /// The message body to inject into the inbox, as a `strings.csv` id.
     pub message: String,
     /// Runtime values to interpolate into `message`'s `{placeholder}` tokens,
@@ -143,7 +145,16 @@ pub fn read_dialogue_node(value: Dynamic) -> Result<Option<ScriptDialogueNode>, 
             out
         }
     };
+    let opportunity_decision = match map.get("opportunity_decision") {
+        None => None,
+        Some(value) => Some(match value.clone().into_string().as_deref() {
+            Ok("accept") => phoenix_model::comms_request::OpportunityDecision::Accept,
+            Ok("decline") => phoenix_model::comms_request::OpportunityDecision::Decline,
+            _ => return Err("dialogue opportunity_decision must be accept or decline".into()),
+        }),
+    };
     Ok(Some(ScriptDialogueNode {
+        opportunity_decision,
         message,
         params,
         responses,
@@ -388,8 +399,15 @@ pub fn enter_node_scoped(
     ) else {
         return Err(EnterError::Refused);
     };
+    let requested_decision = value
+        .clone()
+        .try_cast::<Map>()
+        .is_some_and(|map| map.contains_key("opportunity_decision"));
     match read_dialogue_node(value) {
         Ok(node) => Ok((effects, node)),
+        // A malformed attempted decision is not an ordinary malformed narrative
+        // return. It gains no authority and discards the attempted call whole.
+        Err(_) if requested_decision => Err(EnterError::Refused),
         Err(message) => Err(EnterError::Shape {
             effects: Box::new(effects),
             message,

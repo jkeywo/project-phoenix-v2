@@ -225,6 +225,7 @@ impl EffectSink {
         std::mem::take(&mut *self.opens.lock().expect("effect sink lock"))
             .into_iter()
             .map(|open| OpenCommsRequest {
+                opportunity: None,
                 script_path: script_path.to_string(),
                 origin_layer: origin_layer.map(str::to_string),
                 ..open
@@ -1821,6 +1822,9 @@ fn report_row(spec: &Map) -> Result<crate::core::report::ReportRow, String> {
 /// keys are ignored, matching `spawn_entity`; `add_objective` deliberately
 /// forwards them to the strict shared Directive contract.
 fn open_comms_request(spec: &Map) -> Result<OpenCommsRequest, String> {
+    if spec.contains_key("opportunity") || spec.contains_key("opportunity_decision") {
+        return Err("optional work offer context is stamped only by its actual World owner".into());
+    }
     let from = map_str(spec, "from")
         .ok_or_else(|| "open_comms requires a string `from` (the sender ref id)".to_string())?;
     let root_fn = map_str(spec, "node_fn").ok_or_else(|| {
@@ -1842,6 +1846,7 @@ fn open_comms_request(spec: &Map) -> Result<OpenCommsRequest, String> {
         None => crate::core::messages::CommsPriority::Routine,
     };
     Ok(OpenCommsRequest {
+        opportunity: None,
         sender_uuid: None,
         recipient_ship: None,
         recipients: crate::recipients::RecipientSelection::from_rhai_map(spec)?,

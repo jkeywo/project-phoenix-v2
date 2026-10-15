@@ -621,3 +621,74 @@ fn loading_engine_collects_registrations() {
         }]
     );
 }
+
+#[test]
+fn ordinary_entry_and_timer_calls_discard_optional_decision_attempts_but_charge_work() {
+    let host = RuntimeHost::new();
+    let ast = host
+        .engine()
+        .compile(
+            r#"fn attempt(ctx) {
+        ctx.flags.increment("forbidden",1);
+        ctx.schedule.after(1,|ctx|{ctx.flags.increment("deferred",1);});
+        #{message:"requested",opportunity_decision:"accept",responses:[]}
+    }"#,
+        )
+        .unwrap();
+    let error = host
+        .try_call_scoped(
+            &clock(),
+            &ast,
+            "offer.rhai",
+            "attempt",
+            &[FlagStore::new()],
+            &DeadlineTable::default(),
+            &CommitmentLedger::default(),
+            &EvidenceLog::default(),
+            None,
+            Map::new(),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("bound Comms reply"));
+    let mut budget = TickBudget::new();
+    assert!(
+        host.try_call_scoped_budgeted(
+            &mut budget,
+            &clock(),
+            &ast,
+            "offer.rhai",
+            "attempt",
+            &[FlagStore::new()],
+            &DeadlineTable::default(),
+            &CommitmentLedger::default(),
+            &EvidenceLog::default(),
+            None,
+            Map::new()
+        )
+        .is_err(),
+        "Scenario callback must receive refusal, never successful empty effects"
+    );
+    assert!(budget.ops_used() > 0);
+    assert_eq!(budget.calls_used(), 1);
+    // The same ordinary controller's retained Comms return path still carries
+    // the result to its exact admitted bound-response owner for validation.
+    let (effects, value, ops) = host
+        .try_call_returning_scoped(
+            &clock(),
+            &ast,
+            "offer.rhai",
+            "attempt",
+            &[FlagStore::new()],
+            &DeadlineTable::default(),
+            &CommitmentLedger::default(),
+            &EvidenceLog::default(),
+            None,
+            Map::new(),
+        )
+        .unwrap();
+    assert!(effects.completed && ops > 0);
+    assert!(value
+        .try_cast::<Map>()
+        .unwrap()
+        .contains_key("opportunity_decision"));
+}

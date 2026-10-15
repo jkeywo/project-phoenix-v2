@@ -40,6 +40,7 @@ fn scripted_comms_app() -> App {
 
 fn request(root_fn: &str, from: &str) -> OpenCommsRequest {
     OpenCommsRequest {
+        opportunity: None,
         sender_uuid: None,
         recipient_ship: None,
         recipients: None,
@@ -161,6 +162,7 @@ fn addressed_comms_runs_root_once_and_uses_ordinary_ship_projection() {
         .resource_mut::<WorldScriptRuntime>()
         .pending_comms_opens
         .push(OpenCommsRequest {
+            opportunity: None,
             recipients: crate::recipients::RecipientSelection::from_fields(
                 Some(vec!["lead".into()]),
                 None,
@@ -274,6 +276,7 @@ fn addressed_delivery_adapters_share_live_layer_declarations_and_absent_slots() 
             .resource_mut::<WorldScriptRuntime>()
             .pending_comms_opens
             .push(OpenCommsRequest {
+                opportunity: None,
                 recipients: Some(selection.clone()),
                 ..request("hail", "control")
             });
@@ -364,6 +367,7 @@ fn addressed_comms_keeps_endpoint_system_and_hull_eligibility_separate_from_memb
             .resource_mut::<WorldScriptRuntime>()
             .pending_comms_opens
             .push(OpenCommsRequest {
+                opportunity: None,
                 recipients: Some(selection),
                 ..request("hail", "control")
             });
@@ -384,6 +388,7 @@ fn addressed_comms_keeps_endpoint_system_and_hull_eligibility_separate_from_memb
 fn addressed_comms_authored_threads_are_private_and_stable_on_reopen() {
     let mut app = recipient_comms_app();
     let open = OpenCommsRequest {
+        opportunity: None,
         thread_id: Some("escort-orders".into()),
         recipients: crate::recipients::RecipientSelection::from_fields(
             None,
@@ -425,6 +430,7 @@ fn addressed_comms_empty_selection_does_not_enter_root_or_broadcast() {
         .resource_mut::<WorldScriptRuntime>()
         .pending_comms_opens
         .push(OpenCommsRequest {
+            opportunity: None,
             recipients: crate::recipients::RecipientSelection::from_fields(
                 Some(vec!["absent".into()]),
                 None,
@@ -481,6 +487,7 @@ fn addressed_comms_resolves_changed_instance_membership_after_snapshot_restore()
         .resource_mut::<WorldScriptRuntime>()
         .pending_comms_opens
         .push(OpenCommsRequest {
+            opportunity: None,
             recipients: crate::recipients::RecipientSelection::from_fields(
                 None,
                 None,
@@ -559,6 +566,7 @@ fn a_queued_open_injects_the_root_node_and_records_a_scripted_dialogue() {
     let mut app = scripted_comms_app();
     let mut sr = compile_fixture(AXIOM_TREE);
     sr.pending_comms_opens.push(OpenCommsRequest {
+        opportunity: None,
         display_name: Some("Axiom Control".into()),
         urgent: true,
         ..request("hail_axiom", "axiom")
@@ -647,6 +655,7 @@ fn a_layer_owned_open_runs_and_is_recorded_in_its_origin_scope() {
         "#,
     );
     sr.pending_comms_opens.push(OpenCommsRequest {
+        opportunity: None,
         origin_layer: Some(LAYER.to_string()),
         ..request("hail_axiom", "axiom")
     });
@@ -1607,6 +1616,7 @@ fn queued_one_way_reports_reach_the_inbox_in_order_with_their_body_and_urgency()
     sr.pending_comms_opens = reports
         .iter()
         .map(|(root_fn, urgent)| OpenCommsRequest {
+            opportunity: None,
             urgent: *urgent,
             ..request(root_fn, "starbase")
         })
@@ -1724,4 +1734,39 @@ fn issuing_hail_histories_continue_paid_work_and_clear_independently_after_json_
     assert!(!report.is_complete());
     assert_eq!(crate::snapshot::capture(original.world()), before);
     assert_eq!(crate::sim_digest::world_digest(original.world()), digest);
+}
+
+#[test]
+fn root_entry_cannot_request_optional_work_or_apply_its_buffered_effects() {
+    let mut app = recipient_comms_app();
+    app.insert_resource(compile_fixture(
+        r#"
+        fn hail(ctx) { ctx.flags.increment("forbidden_entry", 1);
+            #{message:"Decision requested",opportunity_decision:"accept",responses:[]} }
+    "#,
+    ));
+    app.world_mut()
+        .resource_mut::<WorldScriptRuntime>()
+        .pending_comms_opens
+        .push(request("hail", "control"));
+    app.update();
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("forbidden_entry"),
+        0
+    );
+    assert!(app
+        .world()
+        .resource::<crate::server_app::CommsInboxRes>()
+        .0
+        .iter()
+        .next()
+        .is_none());
+    assert!(app
+        .world()
+        .resource::<crate::comms::server::CommsRuntime>()
+        .active_dialogues
+        .is_empty());
 }

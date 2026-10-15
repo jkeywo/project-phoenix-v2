@@ -488,3 +488,32 @@ fn a_response_fns_flag_writes_reach_the_mutate_flag_boundary() {
         ]
     );
 }
+
+#[test]
+fn optional_offer_decisions_are_closed_result_data_without_a_script_binding() {
+    let node = |decision: rhai::Dynamic| {
+        let mut map = rhai::Map::new();
+        map.insert("message".into(), "Decision requested".into());
+        map.insert("opportunity_decision".into(), decision);
+        read_dialogue_node(map.into())
+    };
+    assert_eq!(
+        node("accept".into()).unwrap().unwrap().opportunity_decision,
+        Some(phoenix_model::comms_request::OpportunityDecision::Accept)
+    );
+    assert_eq!(
+        node("decline".into())
+            .unwrap()
+            .unwrap()
+            .opportunity_decision,
+        Some(phoenix_model::comms_request::OpportunityDecision::Decline)
+    );
+    for value in [
+        "Accept".into(),
+        "replace-later-offer".into(),
+        1_i64.into(),
+        true.into(),
+    ] {
+        assert!(node(value).is_err());
+    }
+}

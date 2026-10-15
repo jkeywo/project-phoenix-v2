@@ -220,6 +220,7 @@ impl GmCommsParams<'_, '_> {
                     script
                         .pending_comms_opens
                         .push(crate::comms::content::OpenCommsRequest {
+                            opportunity: None,
                             recipient_ship: Some(ship.clone()),
                             sender_uuid: Some(identity.id.clone()),
                             from: from.clone(),

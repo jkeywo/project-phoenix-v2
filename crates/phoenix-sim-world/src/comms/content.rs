@@ -166,6 +166,9 @@ pub struct ActiveDialogue {
 /// resolving the name against a different fn.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScriptedDialogue {
+    /// Immutable actual own-offer binding. Never authored by a script open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opportunity: Option<phoenix_model::comms_request::OpportunityRef>,
     /// Recipient inherited by every node in this conversation. Older
     /// conversations remain fleet-wide when their catalogue metadata decodes.
     #[serde(default)]
@@ -207,6 +210,9 @@ pub struct ScriptedDialogue {
 /// reason (anonymous and short fn names are not unique across units).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenCommsRequest {
+    /// Immutable actual own-offer binding. Never authored by a script open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opportunity: Option<phoenix_model::comms_request::OpportunityRef>,
     /// Deferred authored addressing. Resolved once when the root action runs;
     /// each resulting dialogue then carries its immutable recipient_ship.
     #[serde(default, skip_serializing_if = "Option::is_none")]

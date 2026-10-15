@@ -60,3 +60,24 @@ discovery, open, actual decision request and later funded physical work. The
 source adapter and formatted owner tests are not execution or increment-24 exit
 evidence. Integration waits for the real World record, frozen primitive source
 and actual collector join.
+
+
+## Source adapter handoff
+
+The adapter now has optional immutable Open/ScriptedDialogue context, closed
+accept/decline result parsing, exact shared own-offer validity before Human
+payment and ordinary AI choice, exclusive Pending commit, and commitment-buffer
+refusal before Pending/effects. Generic entry/timer/Scenario attempts return an
+actual CallError; the budgeted owner charges real operations and cannot credit a
+ScenarioApplied result. Pending/open and active context leaf preflight is ready
+for the integration owner's central hook/digest join.
+
+Independent planner-lane source review passed after correcting the success-empty
+semantic-refusal finding. Formatted tests cover typed Offered-record response
+preconditions through the existing actual Lobby/admission/router, Human and
+ordinary AI Pending decisions, duplicate/stale/foreign/unbound/decided/refused
+no-payment/no-effect paths and commitment callback no-Pending/no-ledger writes.
+These are unexecuted source tests. The precondition is not evidence of discovery
+or physical plan execution. Integration waits for the real World opportunity
+producer and accepted-source/history closure; actual fresh JSON360 and native
+proof remains with that coherent join and the root Cargo owner.

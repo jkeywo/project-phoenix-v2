@@ -1347,6 +1347,7 @@ fn dialogue(node_fn: &str) -> ActiveDialogue {
         },
         thread_id: "thread-1".into(),
         script: ScriptedDialogue {
+            opportunity: None,
             recipient_ship: None,
             script_path: "probe#script.comms".into(),
             origin_layer: None,
@@ -1358,6 +1359,7 @@ fn dialogue(node_fn: &str) -> ActiveDialogue {
 
 fn open_request(root_fn: &str) -> OpenCommsRequest {
     OpenCommsRequest {
+        opportunity: None,
         sender_uuid: None,
         recipient_ship: None,
         recipients: None,

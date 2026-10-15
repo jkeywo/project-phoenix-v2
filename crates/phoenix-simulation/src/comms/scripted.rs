@@ -360,6 +360,28 @@ pub(crate) fn open_scripted_comms_threads(
             })
             .unwrap_or(channel_name);
 
+        if let Some(reference) = &req.opportunity {
+            if reference.validate().is_err()
+                || req.from != "_self"
+                || req.sender_uuid.is_some()
+                || req.recipients.is_some()
+                || req.origin_layer.is_some()
+                || recipients.len() != 1
+                || recipients[0]
+                    .as_ref()
+                    .is_none_or(|recipient| recipient.0 != reference.actor)
+                || crate::world::opportunities::validate_offered_opportunity(
+                    runtime,
+                    reference,
+                    &reference.actor,
+                    script_clock.tick,
+                )
+                .is_err()
+            {
+                continue;
+            }
+        }
+
         let context = ScriptCallContext {
             log_ctx: "open_scripted_comms_threads",
             clock: script_clock,
@@ -417,6 +439,16 @@ pub(crate) fn open_scripted_comms_threads(
                 continue;
             }
         };
+
+        // Root entry cannot decide an optional offer, including one stamped by
+        // World. Only a later actually admitted recipient response can do that.
+        if node
+            .as_ref()
+            .is_some_and(|node| node.opportunity_decision.is_some())
+        {
+            bevy::log::warn!("scripted Comms root cannot decide an opportunity");
+            continue;
+        }
 
         // Effects first, message second: a root fn that both sets a flag and
         // returns a node has its flag applied before the message is delivered —
@@ -524,6 +556,7 @@ pub(crate) fn open_scripted_comms_threads(
                     current_node: wire_node,
                     thread_id,
                     script: ScriptedDialogue {
+                        opportunity: req.opportunity.clone(),
                         recipient_ship: recipient.clone(),
                         script_path: req.script_path.clone(),
                         origin_layer: req.origin_layer.clone(),
@@ -534,6 +567,35 @@ pub(crate) fn open_scripted_comms_threads(
             );
         }
     }
+}
+
+/// Internal reports are not radio packets. Only a current actual World offer,
+/// addressed to this very ship, can use its own internal conversation path.
+pub(crate) fn own_opportunity(
+    runtime: &crate::world::server::WorldContentRuntime,
+    script: &crate::comms::content::ScriptedDialogue,
+    message: &crate::core::messages::CommsMessage,
+    actor: &str,
+    now: u64,
+) -> bool {
+    script.opportunity.as_ref().is_some_and(|reference| {
+        reference.actor == actor
+            && script.origin_layer.is_none()
+            && script
+                .recipient_ship
+                .as_ref()
+                .is_some_and(|recipient| recipient.0 == actor)
+            && message.sender_uuid == "_self"
+            && message.transmission.is_none()
+            && message
+                .recipient_ship
+                .as_ref()
+                .is_some_and(|recipient| recipient.0 == actor)
+            && crate::world::opportunities::validate_offered_opportunity(
+                runtime, reference, actor, now,
+            )
+            .is_ok()
+    })
 }
 
 // -- Tests -------------------------------------------------------------------

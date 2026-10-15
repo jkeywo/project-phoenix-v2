@@ -553,7 +553,22 @@ impl RuntimeHost {
             origin_layer,
             extra,
         )
-        .map(|(effects, _value, ops)| (effects, ops))
+        .and_then(|(effects, value, ops)| {
+            // Generic entry/timer/Scenario calls cannot request optional work.
+            // Refuse rather than returning successful empty effects: Scenario
+            // application receipts must never credit this forbidden callback.
+            let forbidden = value
+                .try_cast::<Map>()
+                .is_some_and(|map| map.contains_key("opportunity_decision"));
+            if forbidden {
+                Err(vellum_script::CallError::Runtime {
+                    path: path.into(),
+                    message: "optional work decisions require an admitted bound Comms reply".into(),
+                })
+            } else {
+                Ok((effects, ops))
+            }
+        })
     }
 
     /// Run a scripted comms dialogue fn (issue #982, M4) under the tick's shared

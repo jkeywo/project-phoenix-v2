@@ -674,6 +674,27 @@ pub(crate) fn handle_respond_to_message(
             continue;
         }
 
+        let now_tick = aux.script.sim_tick.as_ref().map(|tick| tick.0).unwrap_or(0);
+        let internal_opportunity = hull.uuid.is_some_and(|actor| {
+            inbox
+                .0
+                .iter()
+                .find(|message| message.id == *message_id)
+                .is_some_and(|message| {
+                    crate::comms::scripted::own_opportunity(
+                        &runtime,
+                        &dialogue.script,
+                        message,
+                        &actor.0,
+                        now_tick,
+                    )
+                })
+        });
+        if dialogue.script.opportunity.is_some() && !internal_opportunity {
+            reject(&mut aux.outbox, cmd, message_id, *response_index);
+            continue;
+        }
+
         // Server-side range gate: if range tracking is active, the sender of
         // this message must currently be in range OF THE HULL ANSWERING IT.
         // Out-of-range responses are rejected (issue #761): forced/stale
@@ -688,7 +709,7 @@ pub(crate) fn handle_respond_to_message(
         // `selected_response`, the `on_pick`'s writes and the retired dialogue.
         // `sender_in_range_for_slot` asks the same question of the hull that is
         // actually answering, which every host answers identically.
-        if comms.range_active {
+        if comms.range_active && !internal_opportunity {
             let sender_uuid = inbox.0.sender_uuid_for(message_id).unwrap_or_default();
             if !crate::comms::server::slot_may_answer_sender(&comms, hull.slot, &sender_uuid) {
                 reject(&mut aux.outbox, cmd, message_id, *response_index);
@@ -777,7 +798,6 @@ pub(crate) fn handle_respond_to_message(
         let sd = &dialogue.script;
         // Read the clock BEFORE borrowing the runtime, so the two reads of
         // `aux` stay sequential.
-        let now_tick = aux.script.sim_tick.as_ref().map(|t| t.0).unwrap_or(0);
         let elapsed_secs = aux.time.as_ref().and_then(|t| {
             runtime
                 .mission_clock
@@ -854,6 +874,48 @@ pub(crate) fn handle_respond_to_message(
                 continue;
             }
         };
+
+        // Only an actual admitted reply on this exact immutable own offer
+        // may request a decision. No Promise, child or machinery is created here.
+        if let Some(decision) = follow_up
+            .as_ref()
+            .and_then(|node| node.opportunity_decision)
+        {
+            let Some(reference) = sd.opportunity.as_ref() else {
+                reject(&mut aux.outbox, cmd, message_id, *response_index);
+                continue;
+            };
+            let Some(actor) = hull.uuid.map(|uuid| uuid.0.as_str()).filter(|actor| {
+                reference.actor == *actor
+                    && sd
+                        .recipient_ship
+                        .as_ref()
+                        .is_some_and(|recipient| recipient.0 == *actor)
+            }) else {
+                reject(&mut aux.outbox, cmd, message_id, *response_index);
+                continue;
+            };
+            // This generated opportunity's Promise is created atomically with
+            // real child admission by the World collector, never by on_pick.
+            if malformed.is_some() || !effects.commitment_changes.is_empty() {
+                reject(&mut aux.outbox, cmd, message_id, *response_index);
+                continue;
+            }
+            let prepared = match crate::world::opportunities::prepare_opportunity_decision(
+                &mut runtime,
+                reference,
+                actor,
+                decision,
+                now_tick,
+            ) {
+                Ok(prepared) => prepared,
+                Err(_) => {
+                    reject(&mut aux.outbox, cmd, message_id, *response_index);
+                    continue;
+                }
+            };
+            crate::world::opportunities::record_opportunity_decision(prepared);
+        }
 
         crate::world::server::apply_script_call(
             effects,
@@ -997,6 +1059,7 @@ pub(crate) fn handle_respond_to_message(
                     current_node: wire_node,
                     thread_id,
                     script: crate::comms::content::ScriptedDialogue {
+                        opportunity: sd.opportunity.clone(),
                         recipient_ship: dialogue.script.recipient_ship.clone(),
                         script_path: sd.script_path.clone(),
                         origin_layer: sd.origin_layer.clone(),
@@ -2532,6 +2595,16 @@ pub fn operate_comms_response_ai(
             let Some(dialogue) = comms.active_dialogues.get(&message.id) else {
                 continue;
             };
+            let internal_opportunity = crate::comms::scripted::own_opportunity(
+                ai_env.content_runtime(),
+                &dialogue.script,
+                &message,
+                &operator_uuid.0,
+                tick,
+            );
+            if dialogue.script.opportunity.is_some() && !internal_opportunity {
+                continue;
+            }
             let responses = &dialogue.current_node.responses;
             if responses.is_empty() {
                 continue;
@@ -2548,11 +2621,12 @@ pub fn operate_comms_response_ai(
             // fingerprint it is armed against, and whether the
             // `CommsBackfillChoice` draw is taken. All three would then be
             // host-dependent, which is the GM `ship_power` incident's shape.
-            let sender_in_range = crate::comms::server::sender_in_range_for_slot(
-                comms,
-                Some(host),
-                &message.sender_uuid,
-            );
+            let sender_in_range = internal_opportunity
+                || crate::comms::server::sender_in_range_for_slot(
+                    comms,
+                    Some(host),
+                    &message.sender_uuid,
+                );
 
             // ── The weighted picker (issue #1343) ────────────────────────────
             //

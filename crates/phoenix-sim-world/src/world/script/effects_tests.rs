@@ -1254,6 +1254,7 @@ fn open_comms_buffers_the_request_with_its_metadata() {
     assert_eq!(
         opens,
         vec![OpenCommsRequest {
+            opportunity: None,
             sender_uuid: None,
             recipient_ship: None,
             recipients: None,
@@ -1280,6 +1281,7 @@ fn open_comms_defaults_every_optional_key() {
     assert_eq!(
         opens,
         vec![OpenCommsRequest {
+            opportunity: None,
             sender_uuid: None,
             recipient_ship: None,
             recipients: None,
@@ -1411,4 +1413,17 @@ contact_information = { set_report_policy = { target = "target", policy = { dela
         "run"
     )
     .is_err());
+}
+
+#[test]
+fn scripts_cannot_stamp_host_owned_optional_offer_context() {
+    let mut spec = rhai::Map::new();
+    spec.insert("from".into(), "_self".into());
+    spec.insert("node_fn".into(), "offer".into());
+    assert!(open_comms_request(&spec).unwrap().opportunity.is_none());
+    for field in ["opportunity", "opportunity_decision"] {
+        spec.insert(field.into(), "forged".into());
+        assert!(open_comms_request(&spec).is_err());
+        spec.remove(field);
+    }
 }

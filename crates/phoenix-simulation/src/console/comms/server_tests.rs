@@ -1637,6 +1637,7 @@ fn seat_ai_dialogue(app: &mut App, sender_uuid: &str) -> (String, String) {
                 },
                 thread_id: id.clone(),
                 script: crate::comms::content::ScriptedDialogue {
+                    opportunity: None,
                     recipient_ship: None,
                     script_path: crate::comms::scripted::tests::PATH.to_string(),
                     origin_layer: None,
@@ -2129,6 +2130,7 @@ fn seat_weighted_dialogue(
                 },
                 thread_id: thread_id.to_string(),
                 script: crate::comms::content::ScriptedDialogue {
+                    opportunity: None,
                     recipient_ship: None,
                     script_path: crate::comms::scripted::tests::PATH.to_string(),
                     origin_layer: None,
@@ -3277,6 +3279,7 @@ fn seat_scripted_dialogue(
                 },
                 thread_id: "scripted-thread".to_string(),
                 script: crate::comms::content::ScriptedDialogue {
+                    opportunity: None,
                     recipient_ship: None,
                     script_path: crate::comms::scripted::tests::PATH.to_string(),
                     origin_layer: None,
@@ -4321,3 +4324,6 @@ fn comms_instance_history_survives_departure_and_completed_join() {
         crate::core::messages::ObjectiveStatus::Completed
     );
 }
+
+#[path = "opportunity_response_tests.rs"]
+mod opportunity_responses;

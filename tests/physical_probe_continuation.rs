@@ -289,10 +289,6 @@ fn joined_paid_probe_launch_recovery_keeps_actual_body_history_and_json360() {
     steps(&mut live, 2);
     assert!(live.world().get::<RapierColliderHandle>(child).is_none());
     assert!(live.world().get::<RapierRigidBodyHandle>(child).is_none());
-    assert_eq!(
-        *live.world().get::<Visibility>(child).unwrap(),
-        Visibility::Hidden
-    );
     let held = live.world().get::<BroadTracks>(child).unwrap().0[&own]
         .tracks
         .clone();

@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub use phoenix_simulation::*;
+mod actor_visibility;
 pub mod debug_overlay;
 pub mod entities;
 #[cfg(feature = "server")]

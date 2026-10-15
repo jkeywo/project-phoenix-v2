@@ -381,7 +381,7 @@ pub(crate) fn handle(world: &mut World) {
             crate::core::messages::ActionFeedbackOutcome::Refused
         };
         if let Some(feedback) =
-            crate::command_admission::admitted_action_feedback(&command, outcome)
+            crate::command_admission::feedback::admitted_action_feedback(&command, outcome)
         {
             if let Some(mut outbox) =
                 world.get_resource_mut::<Messages<crate::lobby::OutboundMessage>>()

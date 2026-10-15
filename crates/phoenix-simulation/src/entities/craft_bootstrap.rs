@@ -74,7 +74,7 @@ pub(crate) fn stage_initial(
     // sensing, energy or render queries can see an operational free child.
     commands
         .entity(entity)
-        .insert((ProbeCustody(location.clone()), Disabled, Visibility::Hidden));
+        .insert((ProbeCustody(location.clone()), Disabled));
     commands.queue(move |world:&mut World| {
         let result=(|| {
             let CraftLocation::Carried{parent_uuid,bay}=&location else{return Err("initial custody must be Carried".into());};

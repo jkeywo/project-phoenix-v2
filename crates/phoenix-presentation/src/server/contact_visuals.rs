@@ -8,7 +8,7 @@ use crate::{
     world::config::WorldConfig,
 };
 use bevy::prelude::*;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 #[derive(Component, Clone, Debug, PartialEq)]
 pub(crate) struct ContactProxy {
@@ -23,7 +23,9 @@ pub(crate) fn register(app: &mut App) {
         .add_systems(
             Update,
             (
-                sync_contact_visuals.after(crate::server_app_render::update_mesh_lod),
+                sync_contact_visuals
+                    .after(crate::server_app_render::update_mesh_lod)
+                    .before(crate::actor_visibility::sync),
                 draw_contact_proxies,
             )
                 .chain(),
@@ -58,12 +60,11 @@ pub(crate) fn sync_contact_visuals(
             Or<(With<EntityUuid>, With<AsteroidUuid>)>,
             Without<LocalShip>,
             Without<ContactProxy>,
+            Allow<bevy::ecs::entity_disabling::Disabled>,
         ),
     >,
-    parents: Query<&ChildOf>,
-    mut visual_visibility: Query<(Entity, &mut Visibility), Without<ContactProxy>>,
+    mut exclusions: ResMut<crate::actor_visibility::ObserverVisibilityRoots>,
     proxies: Query<(Entity, &ContactProxy), Without<EntityUuid>>,
-    mut previous: Local<HashMap<Entity, Visibility>>,
 ) {
     let fitted = observer.single().ok();
     let restricted = super::measured_contacts::restricted(
@@ -112,26 +113,7 @@ pub(crate) fn sync_contact_visuals(
             hidden_roots.insert(entity);
         }
     }
-    let mut live = std::collections::HashSet::new();
-    for (entity, mut visibility) in &mut visual_visibility {
-        live.insert(entity);
-        let mut ancestor = entity;
-        let mut hidden = hidden_roots.contains(&ancestor);
-        while !hidden {
-            let Ok(parent) = parents.get(ancestor) else {
-                break;
-            };
-            ancestor = parent.parent();
-            hidden = hidden_roots.contains(&ancestor);
-        }
-        if hidden {
-            previous.entry(entity).or_insert(*visibility);
-            visibility.set_if_neq(Visibility::Hidden);
-        } else if let Some(original) = previous.remove(&entity) {
-            visibility.set_if_neq(original);
-        }
-    }
-    previous.retain(|entity, _| live.contains(entity));
+    exclusions.0 = hidden_roots;
 
     let style = world_config
         .as_ref()

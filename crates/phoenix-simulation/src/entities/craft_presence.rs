@@ -52,7 +52,7 @@ pub(crate) fn set_carried(
     withdraw_current_support(world, &uuid, entity);
     let mut actual = world.entity_mut(entity);
     actual.remove::<(RapierColliderHandle, RapierRigidBodyHandle)>();
-    actual.insert((ProbeCustody(location), Disabled, Visibility::Hidden));
+    actual.insert((ProbeCustody(location), Disabled));
     Ok(())
 }
 
@@ -88,10 +88,7 @@ pub(crate) fn set_deployed(
     }
     let mut actual = world.entity_mut(entity);
     actual.remove::<Disabled>();
-    actual.insert((
-        ProbeCustody(CraftLocation::Deployed {}),
-        Visibility::Inherited,
-    ));
+    actual.insert(ProbeCustody(CraftLocation::Deployed {}));
     // Preserved Collider/RigidBody re-enter ordinary Rapier initialization.
     Ok(())
 }
@@ -127,11 +124,10 @@ pub(crate) fn restore_presence(world: &mut World, entity: Entity, location: &Cra
     match location {
         CraftLocation::Carried { .. } => {
             actual.remove::<(RapierColliderHandle, RapierRigidBodyHandle)>();
-            actual.insert((Disabled, Visibility::Hidden));
+            actual.insert(Disabled);
         }
         CraftLocation::Deployed {} => {
             actual.remove::<Disabled>();
-            actual.insert(Visibility::Inherited);
         }
     }
 }

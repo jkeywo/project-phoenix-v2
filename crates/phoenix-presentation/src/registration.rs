@@ -7,8 +7,11 @@ use crate::server_app_render::{
 use bevy::prelude::*;
 
 pub fn add_presentation_plugins(app: &mut App) {
-    #[cfg(feature = "server")]
     use crate::authoritative::{DeclareState, StateClass};
+    app.declare_state::<crate::actor_visibility::ObserverVisibilityRoots>(
+        StateClass::Presentation,
+        "observer-visibility-roots",
+    );
     #[cfg(feature = "server")]
     app.declare_state::<crate::server::asset_preload::AssetPreloadResource>(
         StateClass::Presentation,
@@ -22,12 +25,14 @@ pub fn add_presentation_plugins(app: &mut App) {
         app.add_plugins(crate::entities::star::StarRenderPlugin)
             .add_plugins(crate::entities::planet::PlanetRenderPlugin)
             .init_resource::<ProceduralMeshCache>()
+            .init_resource::<crate::actor_visibility::ObserverVisibilityRoots>()
             // The authored `[render]` calibration (PRD #1023). Initialised to
             // its own defaults here so the LOD swap always has one, and
             // overwritten from the world's block at `PostStartup` by the
             // renderer plugin.
             .init_resource::<crate::render_setup::RenderTuning>()
             .add_systems(Update, render_spawned_entities)
+            .add_systems(Update,crate::actor_visibility::sync.after(render_spawned_entities).after(update_mesh_lod))
             .add_systems(Update, update_mesh_lod.after(render_spawned_entities))
             .add_systems(
                 Update,

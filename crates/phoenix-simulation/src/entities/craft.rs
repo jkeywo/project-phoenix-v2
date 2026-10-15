@@ -43,7 +43,6 @@ pub(crate) fn install(config: &EntityConfig, position: Vec3, commands: &mut Enti
                 z: position.z,
                 ..Default::default()
             },
-            Visibility::Inherited,
         ));
     }
 }

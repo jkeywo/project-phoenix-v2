@@ -23,7 +23,7 @@ fn shape(
         if !warnings.is_empty() {
             return Err("physical craft recipe did not resolve exactly".into());
         }
-        crate::ship::craft_profile::validate_entity(&config)?;
+        phoenix_sim_gameplay::ship::craft_profile::validate_entity(&config)?;
         return Ok((config.probe, config.ship_config, config.energy));
     }
     let live = world

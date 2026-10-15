@@ -4,7 +4,11 @@ use crate::server::measured_contacts::tests::{config, grant_to_viewscreen, scien
 fn app() -> (App, Entity, Entity) {
     let mut app = App::new();
     app.insert_resource(State::new(GamePhase::InProgress));
-    app.add_systems(Update, sync_contact_visuals);
+    app.init_resource::<crate::actor_visibility::ObserverVisibilityRoots>();
+    app.add_systems(
+        Update,
+        (sync_contact_visuals, crate::actor_visibility::sync).chain(),
+    );
     let mut config = config();
     grant_to_viewscreen(&mut config);
     let observer = app
@@ -282,4 +286,53 @@ fn actual_generated_rock_bundle_does_not_bypass_measured_visibility() {
         app.world().get::<Visibility>(generated),
         Some(&Visibility::Visible)
     );
+}
+
+#[test]
+fn released_custody_never_reveals_a_concealed_or_unobserved_foreign_actor() {
+    use bevy::ecs::entity_disabling::Disabled;
+    use phoenix_model::{craft::CraftLocation, identity::SystemId};
+    use phoenix_simulation::entities::craft::ProbeCustody;
+    for original in [Visibility::Visible, Visibility::Hidden] {
+        let (mut app, observer, actor) = app();
+        app.world_mut()
+            .entity_mut(actor)
+            .insert((original, ProbeCustody(CraftLocation::Deployed {})));
+        app.update();
+        assert_eq!(
+            app.world().get::<Visibility>(actor),
+            Some(&Visibility::Hidden)
+        );
+        app.world_mut().entity_mut(actor).insert((
+            Disabled,
+            ProbeCustody(CraftLocation::Carried {
+                parent_uuid: "carrier".into(),
+                bay: SystemId("bay".into()),
+            }),
+        ));
+        app.update();
+        assert_eq!(
+            app.world().get::<Visibility>(actor),
+            Some(&Visibility::Hidden)
+        );
+        app.world_mut()
+            .entity_mut(actor)
+            .remove::<Disabled>()
+            .insert(ProbeCustody(CraftLocation::Deployed {}));
+        app.update();
+        assert_eq!(
+            app.world().get::<Visibility>(actor),
+            Some(&Visibility::Hidden),
+            "release never bypasses observer privacy"
+        );
+        app.world_mut()
+            .entity_mut(observer)
+            .remove::<SensingControls>();
+        app.update();
+        assert_eq!(
+            app.world().get::<Visibility>(actor),
+            Some(&original),
+            "only all hide reasons clearing restores prior visibility"
+        );
+    }
 }

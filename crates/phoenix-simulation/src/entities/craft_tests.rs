@@ -335,7 +335,7 @@ fn recovery_needs_current_permitted_alias_then_paid_handling_withdraws_support_a
         .get::<ShipPowerSystem>(child)
         .unwrap()
         .0
-        .capture_state();
+        .capture_continuation();
     next(&mut app);
     runtime::commit(app.world_mut());
     assert!(app.world().get::<Disabled>(child).is_some());
@@ -352,7 +352,7 @@ fn recovery_needs_current_permitted_alias_then_paid_handling_withdraws_support_a
             .get::<ShipPowerSystem>(child)
             .unwrap()
             .0
-            .capture_state(),
+            .capture_continuation(),
         child_power
     );
     view::publish(app.world_mut());

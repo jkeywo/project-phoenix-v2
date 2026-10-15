@@ -134,3 +134,18 @@ it('preserves sustained and finite-round authoring through accepted edits and in
 it('refuses an explicitly empty or null beam operation rather than defaulting it', () => {
   for(const mode of ['',null]) { const value=edited(draft());value.delivery.operation=mode;expect(()=>operation(draft(),{section:'weapon',originalId:'beam-a',weapon:value})).toThrow(/operation/); }
 });
+
+it('preserves closed explicit target lists and inherited legacy false across export/history', async () => {
+  const inherited=source.replace('strategy_id="a"','strategy_id="a"\ntargets=["missile"]');
+  const deps={base_files:{[base]:inherited},packs:[]},current=draft('includes=["base.toml"]\n# child\n');
+  let value=inspectWeapons(current,deps,path).weapons[0].weapon;expect(value.targets).toEqual(['missile']);value.targets=[];
+  const runtime={dependencies:async()=>deps,validate:vi.fn(async()=>({accepted:true,findings:[]}))};
+  await applyWeaponOperation({draft:current,runtime,operation:{path,section:'weapon',originalId:'beam-a',weapon:value,materialise:true}});
+  expect(inspectWeapons(current,deps,path).weapons[0].weapon.targets).toEqual([]);
+  value=inspectWeapons(current,deps,path).weapons[0].weapon;value.targets=false;
+  await applyWeaponOperation({draft:current,runtime,operation:{path,section:'weapon',originalId:'beam-a',weapon:value,materialise:true}});
+  expect(inspectWeapons(new WorkshopDocument(current.archive()),deps,path).weapons[0].weapon.targets).toBe(false);
+  current.undo();expect(inspectWeapons(current,deps,path).weapons[0].weapon.targets).toEqual([]);current.redo();
+  expect(deps.base_files[base]).toBe(inherited);
+  for(const targets of [true,null,['missile','missile'],['unknown-tag']]) {const bad=structuredClone(value);bad.targets=targets;expect(()=>operation(current,{section:'weapon',originalId:'beam-a',weapon:bad},deps)).toThrow(/target/);}
+});

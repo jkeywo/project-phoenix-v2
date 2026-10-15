@@ -39,6 +39,7 @@ penetration = 20
 
 [[weapon]]
 id = "blaster-side"
+targets = ["ship", "asteroid"]
 strategy_id = "side"
 barrels = [ "phasers_fore", "phasers_aft" ]
 

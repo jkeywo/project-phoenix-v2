@@ -1,3 +1,4 @@
+import { validateWeaponTargets } from './workshop-weapon-model.js';
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
 import { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
@@ -24,7 +25,7 @@ export function fittingHardware(value, system) {
   const consumer = value.energy?.consumer?.find(row => row.system === system.id);
   if ((!generic && !legacy) || !consumer) throw new Error('Choose an actual beam bank with a canonical local reserve.');
   const bank = generic?.delivery || legacy;
-  return { kind: 'beam', operation: bank.operation ?? 'fixed', beam_range: generic?.mount.range ?? bank.beam_range, auto_arc_deg: bank.auto_arc_deg,
+  return { kind: 'beam', ...((generic || legacy).targets !== undefined && (generic || legacy).targets !== false ? { targets: structuredClone((generic || legacy).targets) } : {}), operation: bank.operation ?? 'fixed', beam_range: generic?.mount.range ?? bank.beam_range, auto_arc_deg: bank.auto_arc_deg,
     beam_damage_per_sec: bank.damage_per_sec ?? bank.beam_damage_per_sec, beam_duration_secs: bank.duration_secs ?? bank.beam_duration_secs,
     cooldown_secs: bank.cooldown_secs, cycle_jitter: bank.cycle_jitter ?? 0, shield_pierce: bank.shield_pierce ?? 0,
     impact: structuredClone(generic?.impact || bank.impact), continuous_cost_per_sec: consumer.continuous_cost_per_sec };
@@ -35,9 +36,9 @@ export function inspectFitting(draft, dependencies, path) {
     rooms: value.interior?.compartment || [], services: value.resource_services || {} };
 }
 const compatible = (slot, equipment) => equipment.hardware.kind === slot.family && equipment.interface === slot.interface && equipment.size <= slot.size;
-const sameHardware = (left, right) => { if (left.kind === 'beam') { left = { operation: 'fixed', ...left }; right = { operation: 'fixed', ...right }; }
+const sameHardware = (left, right) => { if (left.kind === 'beam') { left = { operation: 'fixed', ...left }; right = { operation: 'fixed', ...right }; if (left.targets === false) delete left.targets; if (right.targets === false) delete right.targets; }
   return Object.keys(left).length === Object.keys(right).length && Object.keys(left).every(key => typeof left[key] === 'number'
-  ? Math.fround(left[key]) === Math.fround(right[key]) : key === 'impact' ? left.impact?.damage_type === right.impact?.damage_type && Math.fround(left.impact?.penetration) === Math.fround(right.impact?.penetration)
+  ? Math.fround(left[key]) === Math.fround(right[key]) : key === 'targets' ? JSON.stringify(left.targets) === JSON.stringify(right.targets) : key === 'impact' ? left.impact?.damage_type === right.impact?.damage_type && Math.fround(left.impact?.penetration) === Math.fround(right.impact?.penetration)
     && !!left.impact?.emp === !!right.impact?.emp && (!left.impact?.emp || Math.fround(left.impact.emp.duration_secs) === Math.fround(right.impact.emp.duration_secs)) : left[key] === right[key]); };
 
 export function validateFitting(profile, value) {
@@ -73,12 +74,13 @@ export function validateFitting(profile, value) {
       requirements.add(key);
     }
     if (hardware?.kind === 'beam') {
-      if (!closed(hardware, ['kind', 'operation', 'beam_range', 'auto_arc_deg', 'beam_damage_per_sec', 'beam_duration_secs', 'cooldown_secs', 'cycle_jitter', 'shield_pierce', 'impact', 'continuous_cost_per_sec'])
+      if (!closed(hardware, ['kind', 'targets', 'operation', 'beam_range', 'auto_arc_deg', 'beam_damage_per_sec', 'beam_duration_secs', 'cooldown_secs', 'cycle_jitter', 'shield_pierce', 'impact', 'continuous_cost_per_sec'])
         || !['fixed','sustained'].includes(hardware.operation === undefined ? 'fixed' : hardware.operation) || hardware.operation === 'sustained' && hardware.cycle_jitter !== 0
         || !['beam_range', 'auto_arc_deg', 'beam_damage_per_sec', 'beam_duration_secs'].every(key => positive(hardware[key]))
         || !['cooldown_secs', 'continuous_cost_per_sec'].every(key => finite(hardware[key])) || !finite(hardware.cycle_jitter) || Math.fround(hardware.cycle_jitter) >= 1
         || !finite(hardware.shield_pierce) || hardware.shield_pierce > 1 || !closed(hardware.impact, ['damage_type', 'penetration', 'emp'])
         || !['physical', 'laser'].includes(hardware.impact.damage_type) || !finite(hardware.impact.penetration)) throw new Error('Beam hardware requires supported finite range, work, cycle and impact values.');
+      validateWeaponTargets(hardware.targets);
       validateEmpPayload(hardware.impact.emp);
     } else if (hardware?.kind === 'reactor') {
       if (!closed(hardware, ['kind', 'sustainable_output_per_sec', 'max_output_per_sec', 'ramp_per_sec', 'charge_heat_per_unit', 'discharge_heat_per_unit'])

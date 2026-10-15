@@ -1,3 +1,4 @@
+import { validateWeaponTargets } from './workshop-weapon-model.js';
 import { guardFittingReferences } from './workshop-fitting.js';
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
@@ -40,7 +41,7 @@ export function inspectWeapons(draft, dependencies, path) {
       const name = kind === 'beam' ? beamNames[field] : field;
       if (row[name] !== undefined) delivery[field] = clone(row[name]);
     }
-    weapons.push({ section, weapon: { id: row.id, mount: { facing_deg: row.facing_deg ?? 0, fire_arc_deg: row.fire_arc_deg,
+    weapons.push({ section, weapon: { ...(row.targets !== undefined ? { targets: clone(row.targets) } : {}), id: row.id, mount: { facing_deg: row.facing_deg ?? 0, fire_arc_deg: row.fire_arc_deg,
       range: kind === 'beam' ? row.beam_range : kind === 'bolt' ? row.range : guidedWeaponRange(value) },
     delivery, ...Object.fromEntries(['impact', 'marker', 'barrels', 'pattern', 'ai'].filter(key => row[key] !== undefined).map(key => [key, clone(row[key])])) } });
   }
@@ -75,6 +76,7 @@ export function prepareWeaponOperation(draft, dependencies, operation) {
   if (!selected && inspection.weapons.some(row => row.weapon.id === weapon.id)) throw new Error('Weapon id already exists.');
   if (selected && weapon.delivery.kind !== selected.weapon.delivery.kind) throw new Error('Create another weapon to use a different delivery.');
   for (const key of ['facing_deg', 'fire_arc_deg', 'range']) if (!Number.isFinite(weapon.mount?.[key])) throw new Error('Mount settings must be finite numbers.');
+  validateWeaponTargets(weapon.targets);
   const prefix = `${section}[id=${weapon.id}]`;
   if (inspection.fields.some(field => (field.path === prefix || field.path.startsWith(prefix + '.')) && field.owner !== inspection.path)
     && !operation.materialise) throw new Error('Explicitly materialise inherited weapon settings before editing.');
@@ -83,6 +85,7 @@ export function prepareWeaponOperation(draft, dependencies, operation) {
     row = clone((at(inspection.resolved.value, section) || []).find(item => item.id === weapon.id));
     row.facing_deg = weapon.mount.facing_deg; row.fire_arc_deg = weapon.mount.fire_arc_deg;
     row.impact = clone(weapon.impact);
+    delete row.targets; if (weapon.targets !== undefined) row.targets = clone(weapon.targets);
     if (weapon.delivery.kind === 'bolt') delete row.rounds;
     if (weapon.delivery.kind === 'beam') row.beam_range = weapon.mount.range;
     else if (weapon.delivery.kind === 'bolt') row.range = weapon.mount.range;

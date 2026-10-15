@@ -170,6 +170,7 @@ impl CompiledFitting {
             }
             match &equipment.hardware {
                 EquipmentHardware::Beam(h) => {
+                    crate::weapons::operation::validate_target_filter(h.targets.as_deref())?;
                     h.impact.validate()?;
                     if h.operation == phoenix_model::weapon_operation::BeamOperation::Sustained
                         && h.cycle_jitter != 0.0
@@ -327,6 +328,7 @@ impl CompiledFitting {
                     .find(|c| c.system == slot.system)
                     .ok_or("beam reserve is absent")?;
                 EquipmentHardware::Beam(BeamHardware {
+                    targets: bank.targets.clone(),
                     operation: bank.operation,
                     beam_range: bank.beam_range,
                     auto_arc_deg: bank.auto_arc_deg,
@@ -378,6 +380,7 @@ impl CompiledFitting {
                         })
                         .ok_or("beam strategy missing")?;
                     bank.beam_range = h.beam_range;
+                    bank.targets = h.targets.clone();
                     bank.operation = h.operation;
                     bank.auto_arc_deg = h.auto_arc_deg;
                     bank.beam_damage_per_sec = h.beam_damage_per_sec;

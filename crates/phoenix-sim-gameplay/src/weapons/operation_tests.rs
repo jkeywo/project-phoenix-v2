@@ -77,3 +77,16 @@ fn actual_projectile_heading_yields_forward_and_broadside_recoil_without_mass_in
     assert!(recoil_delta(f32::NAN, 6.0).is_err());
     assert!(recoil_delta(0.0, -1.0).is_err());
 }
+
+#[test]
+fn explicit_target_domains_do_not_guess_tags_or_replace_an_intentional_hold() {
+    use phoenix_model::tags::EntityTag::{Missile, Ship};
+    assert!(target_allowed(None, &[], true));
+    assert!(!target_allowed(None, &[Missile], false));
+    assert!(!target_allowed(Some(&[]), &[Ship], true));
+    assert!(!target_allowed(Some(&[Missile]), &[], true));
+    assert!(target_allowed(Some(&[Ship, Missile]), &[Missile], false));
+    assert!(!target_allowed(Some(&[Missile]), &[Ship], true));
+    validate_target_filter(Some(&[])).unwrap();
+    assert!(validate_target_filter(Some(&[Missile, Missile])).is_err());
+}

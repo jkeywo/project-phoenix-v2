@@ -853,6 +853,7 @@ fn installed_beam_mode_is_the_actual_portable_definition_and_default_stays_fixed
         .find(|item| item.id == spare)
         .unwrap();
     if let EquipmentHardware::Beam(beam) = &mut item.hardware {
+        beam.targets = Some(Vec::new());
         beam.operation = BeamOperation::Sustained;
         beam.cycle_jitter = 0.0;
     }
@@ -891,4 +892,67 @@ fn installed_beam_mode_is_the_actual_portable_definition_and_default_stays_fixed
             .operation,
         BeamOperation::Sustained
     );
+}
+
+#[test]
+fn portable_target_filter_keeps_explicit_empty_distinct_from_default_none() {
+    let (mut config, _, _) = fixture();
+    let fitting = config.fitting.as_mut().unwrap();
+    let spare = fitting
+        .assemblies
+        .iter()
+        .find(|a| a.id == "fore-beam-spare")
+        .unwrap()
+        .definition
+        .clone();
+    let EquipmentHardware::Beam(hardware) = &mut fitting
+        .equipment
+        .iter_mut()
+        .find(|e| e.id == spare)
+        .unwrap()
+        .hardware
+    else {
+        panic!("beam")
+    };
+    hardware.targets = Some(vec![]);
+    let profile = CompiledFitting::compile(&config).unwrap().unwrap();
+    let mut state = FittingState::from_profile(&profile).unwrap();
+    assert_eq!(
+        profile
+            .effective_config(&state)
+            .unwrap()
+            .weapons_console
+            .unwrap()
+            .phaser_banks[0]
+            .targets,
+        None
+    );
+    swap(&profile, &mut state, "fore-beam", "fore-beam-spare", 77);
+    assert_eq!(
+        profile
+            .effective_config(&state)
+            .unwrap()
+            .weapons_console
+            .unwrap()
+            .phaser_banks[0]
+            .targets,
+        Some(vec![])
+    );
+    let EquipmentHardware::Beam(hardware) = &mut config
+        .fitting
+        .as_mut()
+        .unwrap()
+        .equipment
+        .iter_mut()
+        .find(|e| e.id == spare)
+        .unwrap()
+        .hardware
+    else {
+        panic!("beam")
+    };
+    hardware.targets = Some(vec![
+        phoenix_model::tags::EntityTag::Missile,
+        phoenix_model::tags::EntityTag::Missile,
+    ]);
+    assert!(CompiledFitting::compile(&config).is_err());
 }

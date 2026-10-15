@@ -29,6 +29,13 @@ pub type PhaserBankId = String;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct PhaserBankConfig {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "phoenix_model::weapon_operation::deserialize_target_filter"
+    )]
+    pub targets: Option<Vec<phoenix_model::tags::EntityTag>>,
+
     #[serde(default)]
     pub operation: phoenix_model::weapon_operation::BeamOperation,
     pub impact: phoenix_model::damage::DamageProfile,
@@ -115,6 +122,13 @@ pub type BlasterBankId = String;
 /// fields (recoil, screenshake, visual variants).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct BlasterBankConfig {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "phoenix_model::weapon_operation::deserialize_target_filter"
+    )]
+    pub targets: Option<Vec<phoenix_model::tags::EntityTag>>,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rounds: Option<phoenix_model::weapon_operation::WeaponRoundFeed>,
     pub impact: phoenix_model::damage::DamageProfile,
@@ -213,6 +227,7 @@ impl BlasterBankConfig {
     /// Convert this TOML config into a runtime `crate::weapons::blaster::BlasterBankConfig`.
     pub fn to_runtime(&self) -> crate::weapons::blaster::BlasterBankConfig {
         crate::weapons::blaster::BlasterBankConfig {
+            targets: self.targets.clone(),
             rounds: self.rounds.clone(),
             impact: self.impact,
             id: self.id.clone(),
@@ -251,6 +266,13 @@ pub type TorpedoTubeId = String;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TorpedoTubeConfig {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "phoenix_model::weapon_operation::deserialize_target_filter"
+    )]
+    pub targets: Option<Vec<phoenix_model::tags::EntityTag>>,
+
     pub impact: phoenix_model::damage::DamageProfile,
     pub id: TorpedoTubeId,
     pub facing_deg: f32,
@@ -491,6 +513,7 @@ pub fn validate_torpedo_tubes(tubes: &[TorpedoTubeConfig]) -> Result<(), String>
     }
     let mut seen = std::collections::HashSet::new();
     for t in tubes {
+        crate::weapons::operation::validate_target_filter(t.targets.as_deref())?;
         if !seen.insert(t.id.as_str()) {
             return Err(format!("duplicate torpedo tube id '{}'", t.id));
         }

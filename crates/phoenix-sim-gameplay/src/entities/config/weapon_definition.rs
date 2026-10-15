@@ -7,6 +7,13 @@ pub type WeaponMountConfig = crate::weapons::mount::MountConfig;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WeaponDefinition {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "phoenix_model::weapon_operation::deserialize_target_filter"
+    )]
+    pub targets: Option<Vec<phoenix_model::tags::EntityTag>>,
+
     pub id: String,
     /// Existing bank/tube identity, independently namespaced by delivery
     /// family. Defaults to the authored definition id.
@@ -109,6 +116,7 @@ impl WeaponDefinition {
         {
             return Err("strategy_id must be nonempty without surrounding whitespace".into());
         }
+        crate::weapons::operation::validate_target_filter(self.targets.as_deref())?;
         self.mount.validate()?;
         self.impact.validate()?;
         if self
@@ -247,6 +255,7 @@ impl WeaponDefinition {
                 shield_pierce,
             } => {
                 let bank = PhaserBankConfig {
+                    targets: self.targets,
                     operation,
                     impact: self.impact,
                     id,
@@ -284,6 +293,7 @@ impl WeaponDefinition {
                 screenshake_magnitude,
             } => {
                 let bank = BlasterBankConfig {
+                    targets: self.targets,
                     rounds,
                     impact: self.impact,
                     id,
@@ -318,6 +328,7 @@ impl WeaponDefinition {
                 ai_target_count,
             } => {
                 let tube = TorpedoTubeConfig {
+                    targets: self.targets,
                     impact: self.impact,
                     id,
                     facing_deg: mount.facing_deg,
@@ -344,6 +355,7 @@ pub(super) fn validate_round_feeds(config: &EntityConfig) -> Result<(), String> 
         return Ok(());
     };
     for bank in &weapons.phaser_banks {
+        crate::weapons::operation::validate_target_filter(bank.targets.as_deref())?;
         if bank.operation == phoenix_model::weapon_operation::BeamOperation::Sustained
             && bank.cycle_jitter != 0.0
         {
@@ -351,6 +363,7 @@ pub(super) fn validate_round_feeds(config: &EntityConfig) -> Result<(), String> 
         }
     }
     for bank in &weapons.blaster_banks {
+        crate::weapons::operation::validate_target_filter(bank.targets.as_deref())?;
         let Some(feed) = &bank.rounds else {
             continue;
         };

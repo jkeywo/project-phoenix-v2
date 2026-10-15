@@ -71,6 +71,32 @@ pub fn recoil_delta(heading: f32, impulse: f32) -> Result<[f32; 2], String> {
     ])
 }
 
+/// An omitted policy keeps only the caller's already-established ordinary
+/// actuator domain. Explicit tags match held evidence; unknown tags are not
+/// invented. Physical collision/collateral is deliberately separate.
+pub fn target_allowed(
+    filter: Option<&[phoenix_model::tags::EntityTag]>,
+    observed_tags: &[phoenix_model::tags::EntityTag],
+    legacy_ordinary: bool,
+) -> bool {
+    filter.map_or(legacy_ordinary, |filter| {
+        phoenix_model::tags::matches_any(observed_tags, filter)
+    })
+}
+
+pub fn validate_target_filter(
+    filter: Option<&[phoenix_model::tags::EntityTag]>,
+) -> Result<(), String> {
+    if let Some(filter) = filter {
+        for (index, tag) in filter.iter().enumerate() {
+            if filter[..index].contains(tag) {
+                return Err("weapon target tags must be distinct closed EntityTag values".into());
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "operation_tests.rs"]
 mod tests;

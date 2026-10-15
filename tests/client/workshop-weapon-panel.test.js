@@ -67,3 +67,11 @@ it('authors sustained mode without jitter and preserves finite rounds through th
   control('rounds-enabled').checked=false;control('rounds-enabled').dispatchEvent(new Event('change'));control('save').click();await settle();expect(parse(f.current.read(path)).weapon.find(row=>row.id==='blaster-side').delivery.rounds).toBeUndefined();
   f.current.undo();f.panel.refresh();expect(control('rounds-enabled').checked).toBe(true);f.panel.dispose();
 });
+
+it('uses closed native target choices and keeps explicit empty hold versus legacy policy', async () => {
+  const {current,panel}=fixture();await settle();expect(control('targets-mode').value).toBe('legacy');expect(control('target-tags').disabled).toBe(true);
+  control('targets-mode').value='explicit';control('targets-mode').dispatchEvent(new Event('change'));control('save').click();await settle();expect(parse(current.read(path)).weapon[0].targets).toEqual([]);
+  for(const option of control('target-tags').options)option.selected=['ship','missile'].includes(option.value);control('save').click();await settle();expect(parse(current.read(path)).weapon[0].targets).toEqual(['ship','missile']);
+  control('targets-mode').value='legacy';control('targets-mode').dispatchEvent(new Event('change'));control('save').click();await settle();expect(parse(current.read(path)).weapon[0].targets).toBe(false);
+  current.undo();panel.refresh();expect(control('targets-mode').value).toBe('explicit');expect([...control('target-tags').selectedOptions].map(o=>o.value)).toEqual(['ship','missile']);panel.dispose();
+});

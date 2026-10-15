@@ -1,3 +1,4 @@
+import { WEAPON_TARGET_TAGS } from '../editor/workshop-weapon-model.js';
 import { t } from './strings.js';
 import { inspectFitting, fittingHardware, emptyFitting, applyFittingOperation } from '../editor/workshop-fitting.js';
 import { runWorkshopMutation } from './workshop-edit-session.js';
@@ -50,9 +51,15 @@ export function mountWorkshopFitting({ root, provider, runtime, draft: getDraft,
     definitionId.value = record.id; definitionInterface.value = record.interface; definitionSize.value = record.size; storage.value = record.storage_space;
     workClass.value = record.work.class; workSecs.value = record.work.work_secs; manual.value = record.work.manual_work_fraction;
     hardware.replaceChildren(el('legend', 'hardware')); hardwareInputs = new Map();
-    if (record.hardware) for (const [key, amount] of Object.entries(record.hardware.kind === 'beam' ? { operation: 'fixed', ...record.hardware } : record.hardware)) {
+    if (record.hardware) for (const [key, amount] of Object.entries(record.hardware.kind === 'beam' ? { operation: 'fixed', targets: undefined, ...record.hardware } : record.hardware)) {
       if (key === 'kind') { hardware.dataset.kind = amount; continue; }
-      if (key === 'operation') {
+      if (key === 'targets') {
+        const mode = select('targets-mode'), tags = select('target-tags'); tags.multiple = true; tags.size = 5;
+        for (const value of ['legacy','explicit']) { const option = el('option'); option.value=value; option.textContent=t('workshop.weapon.targets.'+value); mode.append(option); }
+        for (const value of WEAPON_TARGET_TAGS) { const option=el('option');option.value=value;option.textContent=value;option.selected=Array.isArray(amount)&&amount.includes(value);tags.append(option); }
+        mode.value = Array.isArray(amount) ? 'explicit' : 'legacy';mode.addEventListener('change',controls);
+        hardwareInputs.set(key,{mode,tags});hardware.append(label(mode,'workshop.weapon.targets.mode'),label(tags,'workshop.weapon.targets.tags'),el('p','workshop.weapon.targets.hint'));
+      } else if (key === 'operation') {
         const control = select('beam-operation');
         for (const value of ['fixed','sustained']) { const option = el('option'); option.value = value; option.textContent = t('workshop.weapon.operation.' + value); control.append(option); }
         control.value = amount; hardwareInputs.set(key, control); hardware.append(label(control, 'workshop.weapon.operation'));
@@ -74,6 +81,7 @@ export function mountWorkshopFitting({ root, provider, runtime, draft: getDraft,
   function controls() {
     for (const control of node.querySelectorAll('input,select,button')) control.disabled = disposed || loading || busy() || !inspection;
     adapter.disabled = true;
+    const policy = hardwareInputs.get('targets'); if (policy) policy.tags.disabled ||= policy.mode.value !== 'explicit';
     if (inspection) paintAssemblyDisabled();
   }
   function paintAssemblyDisabled() { const installed = profile().assembly.find(row => row.id === assemblies.value)?.location.kind === 'installed';
@@ -106,7 +114,7 @@ export function mountWorkshopFitting({ root, provider, runtime, draft: getDraft,
   });
   const removeSlot = button('remove-slot', () => { const next = profile(); next.slot = next.slot.filter(row => row.id !== slots.value); next.assembly = next.assembly.filter(item => item.location.kind !== 'installed' || item.location.slot !== slots.value); void apply(next); });
   const saveDefinition = button('save-definition', () => { const next = profile(), values = { kind: hardware.dataset.kind };
-    for (const [key, control] of hardwareInputs) values[key] = key === 'impact' ? { damage_type: control.type.value, penetration: control.penetration.valueAsNumber,
+    for (const [key, control] of hardwareInputs) values[key] = key === 'targets' ? (control.mode.value === 'explicit' ? [...control.tags.selectedOptions].map(option=>option.value) : false) : key === 'impact' ? { damage_type: control.type.value, penetration: control.penetration.valueAsNumber,
       ...(control.emp.checked ? { emp: { duration_secs: control.duration.valueAsNumber } } : {}) } : key === 'operation' ? control.value : control.valueAsNumber;
     const row = { id: definitionId.value, interface: definitionInterface.value, size: definitionSize.valueAsNumber, storage_space: storage.valueAsNumber,
       work: { class: workClass.value, work_secs: workSecs.valueAsNumber, manual_work_fraction: manual.valueAsNumber,

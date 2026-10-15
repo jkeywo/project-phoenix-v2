@@ -5873,3 +5873,8 @@ sensing.track.protection.title,Acquired shield ray assessment,Observed shield co
 sensing.track.protection.blocked,Observed subject-to-instrument world bearing,Blocked at incoming bearing {bearing}°,Blockiert bei Einfallsrichtung {bearing}°,Blocked at incoming bearing {bearing}°,machine
 sensing.track.protection.open,Observed subject-to-instrument world bearing,Open at incoming bearing {bearing}°,Offen bei Einfallsrichtung {bearing}°,Open at incoming bearing {bearing}°,machine
 sensing.track.protection.sample,Original assessment sample time,Sample tick {tick},Messung Tick {tick},Sample tick {tick},machine
+workshop.weapon.targets.mode,Weapon target policy,Target policy,Zielrichtlinie,Target policy,machine
+workshop.weapon.targets.tags,Weapon target policy,Allowed observed tags,Erlaubte beobachtete Tags,Allowed observed tags,machine
+workshop.weapon.targets.legacy,Weapon target policy,Ordinary target domains,Gewoehnliche Zielklassen,Ordinary target domains,machine
+workshop.weapon.targets.explicit,Weapon target policy,Explicit observed tags,Explizite beobachtete Tags,Explicit observed tags,machine
+workshop.weapon.targets.hint,Weapon target policy,An explicit empty selection holds fire. Filters do not prevent physical collateral.,Eine explizit leere Auswahl haelt das Feuer. Filter verhindern keine physischen Kollateralschaeden.,An explicit empty selection holds fire. Filters do not prevent physical collateral.,machine

@@ -52,3 +52,10 @@ describe('Workshop physical equipment form', () => {
     expect(panel.node.querySelector('[role=status]').textContent).toContain('capacity'); expect(draft.read(path)).toBe(source); panel.dispose();
   });
 });
+
+it('round trips portable explicit empty targets and legacy false without numeric coercion', async () => {
+  const {panel,draft}=fixture();await settle();change('definitions','efficient');change('targets-mode','explicit');click('save-definition');await settle();
+  expect(parse(draft.read(path)).fitting.equipment.find(row=>row.id==='efficient').hardware.targets).toEqual([]);
+  for(const option of control('target-tags').options)option.selected=option.value==='missile';click('save-definition');await settle();expect(parse(draft.read(path)).fitting.equipment.find(row=>row.id==='efficient').hardware.targets).toEqual(['missile']);
+  change('targets-mode','legacy');click('save-definition');await settle();expect(parse(draft.read(path)).fitting.equipment.find(row=>row.id==='efficient').hardware.targets).toBe(false);panel.dispose();
+});

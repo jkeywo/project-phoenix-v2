@@ -1,3 +1,4 @@
+import { WEAPON_TARGET_TAGS } from '../editor/workshop-weapon-model.js';
 import { t } from './strings.js';
 import { runWorkshopMutation } from './workshop-edit-session.js';
 import { inspectWeapons, applyWeaponOperation, defaultWeapon, guidedWeaponRange, WEAPON_PARAMETERS, weaponSystemAddress } from '../editor/workshop-weapons.js';
@@ -19,6 +20,7 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
   const damageType = el('select', 'damage-type'), penetration = input('penetration', 'number');
   const empEnabled = input('emp-enabled', 'checkbox'), empDuration = input('emp-duration', 'number');
   const operation = el('select', 'operation'), roundsEnabled = input('rounds-enabled', 'checkbox'), roundStore = el('select', 'round-store'), roundAmount = input('round-amount', 'number');
+  const targetMode = el('select', 'targets-mode'), targetTags = el('select', 'target-tags', null, { multiple: '', size: '5' });
   const console = el('select', 'console'), group = el('select', 'group'), compartment = el('select', 'compartment');
   for (const type of ['physical', 'laser']) { const option = el('option'); option.value = type; option.textContent = t('workshop.damage.type.' + type); damageType.append(option); }
   const parameters = el('fieldset', 'parameters'), pattern = el('fieldset', 'pattern'), color = input('color');
@@ -28,6 +30,8 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
   const addStep = el('button', 'add-step', 'workshop.weapon.add_step', { type: 'button' });
   let dependencies = null, inspection = null, selected = null, paramInputs = {}, steps = [], disposed = false, loading = false, generation = 0, observed = null, stepSerial = 0;
   const option = (select, value, text) => { const item = el('option'); item.value = value; item.textContent = text; select.append(item); };
+  for (const value of ['legacy','explicit']) option(targetMode, value, t('workshop.weapon.targets.' + value));
+  for (const tag of WEAPON_TARGET_TAGS) option(targetTags, tag, tag);
   for (const key of Object.keys(WEAPON_PARAMETERS)) option(kind, key, t('workshop.weapon.' + key));
   for (const value of ['fixed','sustained']) option(operation, value, t('workshop.weapon.operation.' + value));
   node.append(el('h3', null, 'workshop.weapon.title'), el('p', null, 'workshop.weapon.hint'), label(template, 'workshop.weapon.template'),
@@ -36,6 +40,7 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
     ...Object.entries(mount).map(([key, control]) => label(control, 'workshop.weapon.' + key)),
     label(damageType, 'workshop.damage.damage_type'), label(penetration, 'workshop.damage.penetration'),
     label(empEnabled, 'workshop.damage.emp_payload'), label(empDuration, 'workshop.damage.emp_duration'),
+    label(targetMode, 'workshop.weapon.targets.mode'), label(targetTags, 'workshop.weapon.targets.tags'), el('p', null, 'workshop.weapon.targets.hint'),
     label(operation, 'workshop.weapon.operation'), label(roundsEnabled, 'workshop.weapon.rounds'), label(roundStore, 'workshop.weapon.round_store'), label(roundAmount, 'workshop.weapon.round_amount'),
     label(console, 'workshop.weapon.console'), label(group, 'workshop.weapon.group'), label(compartment, 'workshop.weapon.compartment'),
     label(marker, 'workshop.weapon.marker'), label(barrels, 'workshop.weapon.barrels'), label(color, 'workshop.weapon.color'), parameters, pattern, save);
@@ -49,6 +54,7 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
     barrels.disabled ||= kind.value === 'beam';
     color.disabled ||= kind.value !== 'beam';
     empDuration.disabled ||= !empEnabled.checked;
+    targetTags.disabled ||= targetMode.value !== 'explicit';
     operation.disabled ||= kind.value !== 'beam'; roundsEnabled.disabled ||= kind.value !== 'bolt';
     roundStore.disabled ||= kind.value !== 'bolt' || !roundsEnabled.checked; roundAmount.disabled ||= roundStore.disabled;
     if (kind.value === 'beam' && operation.value === 'sustained') for (const key of ['duration_secs','cycle_jitter']) if (paramInputs[key]) paramInputs[key].disabled = true;
@@ -69,6 +75,8 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
     damageType.value = value.impact?.damage_type || ''; penetration.value = value.impact?.penetration ?? '';
     empEnabled.checked = !!value.impact?.emp; empDuration.value = value.impact?.emp?.duration_secs ?? 6;
     const definition = inspection?.resolved.value || {};
+    targetMode.value = Array.isArray(value.targets) ? 'explicit' : 'legacy';
+    for (const option of targetTags.options) option.selected = Array.isArray(value.targets) && value.targets.includes(option.value);
     operation.value = value.delivery.operation || 'fixed';
     roundsEnabled.checked = !!value.delivery.rounds; roundAmount.value = value.delivery.rounds?.amount ?? 1;
     roundStore.replaceChildren();
@@ -125,6 +133,7 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
   async function apply() {
     if (busy() || loading || !inspection) return;
     const value = structuredClone(selected?.weapon || defaultWeapon(kind.value));
+    value.targets = targetMode.value === 'explicit' ? [...targetTags.selectedOptions].map(option => option.value) : false;
     value.id = id.value; value.mount = Object.fromEntries(Object.entries(mount).map(([key, control]) => [key, control.valueAsNumber]));
     value.impact = { damage_type: damageType.value, penetration: penetration.valueAsNumber,
       ...(empEnabled.checked ? { emp: { duration_secs: empDuration.valueAsNumber } } : {}) };
@@ -148,6 +157,7 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
   save.addEventListener('click', () => void apply());
   empEnabled.addEventListener('change', controls);
   roundsEnabled.addEventListener('change', controls);
+  targetMode.addEventListener('change', controls);
   operation.addEventListener('change', () => { if (operation.value === 'sustained' && paramInputs.cycle_jitter) paramInputs.cycle_jitter.value = '0'; controls(); });
   create.addEventListener('click', () => { selected = null; existing.selectedIndex = -1; const value = defaultWeapon(kind.value);
     if (kind.value === 'guided') value.mount.range = guidedWeaponRange(inspection.resolved.value);

@@ -2,6 +2,7 @@ use super::*;
 
 fn make_system() -> BlasterSystem {
     BlasterSystem::new(BlasterBankConfig {
+        targets: None,
         rounds: None,
         impact: phoenix_model::damage::DamageProfile::default(),
         id: "fore".to_string(),

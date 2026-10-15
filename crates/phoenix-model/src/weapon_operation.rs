@@ -30,3 +30,26 @@ impl WeaponRoundFeed {
         Ok(())
     }
 }
+
+/// Authored table inheritance needs an explicit legacy-policy override. Runtime
+/// state keeps the usual Option: false clears inherited tags; [] remains Hold.
+pub fn deserialize_target_filter<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<crate::tags::EntityTag>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Authored {
+        Tags(Vec<crate::tags::EntityTag>),
+        Legacy(bool),
+    }
+    match Authored::deserialize(deserializer)? {
+        Authored::Tags(tags) => Ok(Some(tags)),
+        Authored::Legacy(false) => Ok(None),
+        Authored::Legacy(true) => Err(serde::de::Error::custom(
+            "weapon targets accept false or a closed EntityTag array, never true",
+        )),
+    }
+}

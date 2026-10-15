@@ -313,3 +313,38 @@ fn sustained_operation_is_explicit_and_finite_rounds_require_actual_local_owner(
         );
     }
 }
+
+#[test]
+fn target_policy_compiles_all_families_and_preserves_explicit_empty() {
+    use phoenix_model::tags::EntityTag::Missile;
+    for (source, family) in [(BEAM, 0), (BOLT, 1), (GUIDED, 2)] {
+        for (authored, expected) in [
+            ("targets=[\"missile\"]", Some(vec![Missile])),
+            ("targets=[]", Some(vec![])),
+            ("targets=false", None),
+        ] {
+            let value = source.replace("[weapon.ai]", &format!("{authored}\n[weapon.ai]"));
+            let parsed = parse(&value).unwrap();
+            let actual = match family {
+                0 => parsed.weapons_console.as_ref().unwrap().phaser_banks[0]
+                    .targets
+                    .clone(),
+                1 => parsed.weapons_console.as_ref().unwrap().blaster_banks[0]
+                    .targets
+                    .clone(),
+                _ => parsed.torpedoes.as_ref().unwrap().tubes[0].targets.clone(),
+            };
+            assert_eq!(actual, expected);
+            let saved = serde_json::to_string(&parsed).unwrap();
+            let restored: EntityConfig = serde_json::from_str(&saved).unwrap();
+            assert_eq!(parsed, restored);
+        }
+        for bad in [
+            "targets=true",
+            "targets=[\"unknown-target-tag\"]",
+            "targets=[\"missile\",\"missile\"]",
+        ] {
+            assert!(parse(&source.replace("[weapon.ai]", &format!("{bad}\n[weapon.ai]"))).is_err());
+        }
+    }
+}

@@ -53,6 +53,16 @@ a due attempted step advances even if none fires. Missing origins do not borrow
 another barrel. `recoil_delta` returns the opposite world XZ impulse. These
 helpers keep quantities in the existing Stock owner.
 
+`WeaponDefinition.targets` compiles to each supported bank/tube and portable
+beam hardware as `Option<Vec<EntityTag>>`. The pure `target_allowed` helper
+keeps caller-provided ordinary-domain eligibility for None, rejects every target
+for an explicit empty list, and otherwise matches only held observed tags.
+Unknown classification does not become a Ship or Missile fact. The authored
+`targets=false` override clears an inherited filter while the runtime still
+stores None; Workshop's Legacy policy writes that tombstone. These are selection
+rules, and cannot make friendly or civilian physical collateral immune.
+
+
 
 `phoenix-model/src/turret.rs` describes the bounded `Turret` System component.
 Gameplay `weapons/turret.rs` owns finite sector traversal and actual bearing;

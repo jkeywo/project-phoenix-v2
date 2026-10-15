@@ -51,6 +51,7 @@ use std::f32::consts::PI;
 /// future TOML fields without a `deny_unknown_fields` compile error.
 #[derive(Clone, Debug)]
 pub struct BlasterBankConfig {
+    pub targets: Option<Vec<phoenix_model::tags::EntityTag>>,
     pub rounds: Option<phoenix_model::weapon_operation::WeaponRoundFeed>,
     pub impact: phoenix_model::damage::DamageProfile,
     /// Bank identifier (matches the TOML `id` field, e.g. `"fore"`, `"aft"`).
@@ -99,6 +100,7 @@ pub struct BlasterBankConfig {
 impl Default for BlasterBankConfig {
     fn default() -> Self {
         Self {
+            targets: None,
             rounds: None,
             impact: phoenix_model::damage::DamageProfile::default(),
             id: String::new(),

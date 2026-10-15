@@ -58,6 +58,82 @@ participant/authority. Simulation joins actual actors, resources and jobs withou
 sibling imports. Every deployed actual System uses its existing individual AI,
 admitted commands and permitted Console knowledge; no swarm/wing/central controller.
 
+## Adopted first physical probe slice
+
+This first consumer is one actual battery-only, engineless sensor probe handled by
+an installed compatible Bay System. Its accepted profile has no passengers, child
+craft, visual descendants or weapon capability. These are limits on this prototype,
+not restrictions on unrelated ordinary entities. Stationary turrets, moving release,
+propelled craft, passengers and emitted-ordnance joins remain later slices. The
+probe retains its ordinary sensors, finite reserves, component condition, dated
+history and existing viable Comms/sharing; the parent's bay view cannot read remote
+live state through private custody references.
+
+The same actual probe has exactly one canonical location: `Carried { parent, bay }`
+or `Deployed`. One actual BayJob owns accepted launch/recovery work and progress;
+Launching/Recovering are projections of that job, not another saved phase/progress
+copy on the probe. Bay occupancy derives from actual carried locations and the
+job's receiving claim. Each accepted bay reserves a finite compatible physical
+allocation disjoint from existing cargo and portable-equipment locker allocations.
+It cannot count the same compartment space twice. Refusal stages no payment, new
+identity or extra receiving claim; completed handling changes that same craft's
+location once and preserves its actual physical state.
+
+Handling requires the actual Bay System's installed/source/Operation/access and
+paid work gates, plus a finite authored nonnegative maximum parent speed. Measure
+speed from the existing physical motion owner; a resolved fixed parent with no
+motion owner is stationary, while missing motion on a movable parent refuses.
+No fake Helm, propulsion or second integrator is installed to satisfy handling.
+Parent movement beyond that threshold, damage, disablement, missing Power or lost
+access pauses/refuses supported work without resetting performed progress. Release
+and recovery use accepted local bay geometry and the same actual body; moving
+launch momentum and propelled rendezvous are not claimed by this stopped-parent
+prototype. Human and the Bay System's ordinary individual AI issue the same
+admitted commands under their actual Console authority.
+
+While carried, derive nonspatial inactive presence from the canonical location.
+The initial adapter may use Bevy Disabled, but must explicitly detach actual Rapier
+backend handles at stow and allow ordinary backend initialization at release;
+Disabled or RigidBodyDisabled alone is insufficient proof of removal. Preserve the
+authored collider/body and every causal component. Actual physics-query/backend
+and presentation tests must prove hit before stow, no hit/visible body while stored,
+and hit again after release with the same identity and state. No standalone unused
+presence framework is an exit. The childless profile keeps recursive visual and
+weapon-flight storage outside this first supported adapter.
+
+Stored actors still participate in canonical capture/digest/preflight and passive
+reserve drain, thermal/condition aging and absolute EMP/resistance expiry. Explicit
+query participation must include stored actors where that owner requires it;
+ordinary active generation, sensor acquisitions, emissions and controller work are
+suspended. At stow, use the existing no-work observation boundary to withdraw
+current Broad support/private routes while retaining original dated history. A
+storage gap cannot yield fabricated continuous velocity or refreshed observations.
+Relaunch neither refills the battery nor heals, resets, remints or clones equipment.
+
+Actual removal of a parent loses its actual Carried craft in the same existing
+removal cleanup/event transaction before the next public/checkpoint boundary. Use
+the ordinary World/GM/physical-loss lifecycle owners; retain deterministic ordering
+and normal terminal cleanup without minting replacement craft or emitting an
+unpaid ejection. Deployed craft survive parent removal independently. A disabled
+but present parent only blocks handling. The actual removal consumer must cover
+ordinary scripted/GM, physical loss and supported layer teardown paths, rather
+than leave hidden stored orphans through an unhandled deletion path. Bulk restore
+suppresses gameplay loss cascades and validates the entire candidate parent/bay/
+craft roster before writes; unsupported single-row inverse resurrection of contained
+craft refuses before creating any body.
+
+Capture the canonical location and the sole BayJob/claims alongside the existing
+ordinary probe state. Rebuild presence/occupancy/backend views from accepted state,
+without saving another mutable stored blueprint, bay count or physics owner.
+Before writes, reject missing/duplicate parent or craft, incompatible/overfull or
+overlapping allocation, impossible job/location/clock and unsupported profile,
+including candidates whose carried actors are absent from ordinary active queries.
+Prove actual paid launch/acquisition/recovery, passive aging and unchanged battery/
+condition/identity, interrupted/blocked work, actual parent removal versus deployed
+survival, exact fresh JSON 360-step continuation and complete-candidate no-write
+negatives. Supported accepted-source Workshop data/forms and real backend/render
+journeys belong to this same probe consumer; this slice does not close full 19.
+
 ## One actual craft and equipment owner
 
 The battery-only consumer uses the existing energy network with explicitly zero

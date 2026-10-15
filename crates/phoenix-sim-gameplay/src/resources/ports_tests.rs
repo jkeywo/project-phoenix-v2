@@ -39,13 +39,13 @@ fn advance(state: &mut PortOrderState, tick: u64, dt: f32, supply: i64, grant: f
     state
         .advance(
             &profile(),
-            &SystemId::new("umbilical"),
+            &SystemId("umbilical".into()),
             tick,
             dt,
             5.0,
             supply,
             |system, seconds| {
-                assert_eq!(system, &SystemId::new("umbilical"));
+                assert_eq!(system, &SystemId("umbilical".into()));
                 assert!(seconds > 0.0 && seconds <= dt);
                 Ok(grant)
             },
@@ -173,7 +173,7 @@ fn unavailable_supply_pausing_and_json_preserve_already_paid_work() {
                 candidate
                     .advance(
                         &profile(),
-                        &SystemId::new("umbilical"),
+                        &SystemId("umbilical".into()),
                         tick,
                         1.0,
                         5.0,
@@ -199,7 +199,7 @@ fn unavailable_supply_pausing_and_json_preserve_already_paid_work() {
         state
             .advance(
                 &profile(),
-                &SystemId::new("umbilical"),
+                &SystemId("umbilical".into()),
                 6,
                 1.0,
                 5.0,
@@ -250,7 +250,7 @@ fn replay_errors_and_replacement_keep_a_monotonic_settled_frontier() {
         state
             .advance(
                 &profile(),
-                &SystemId::new("umbilical"),
+                &SystemId("umbilical".into()),
                 2,
                 1.0,
                 5.0,
@@ -265,7 +265,7 @@ fn replay_errors_and_replacement_keep_a_monotonic_settled_frontier() {
         assert!(state
             .advance(
                 &profile(),
-                &SystemId::new("umbilical"),
+                &SystemId("umbilical".into()),
                 3,
                 1.0,
                 5.0,
@@ -336,7 +336,7 @@ fn future_visit_cannot_buy_work_before_its_actual_frontier() {
     assert!(state
         .advance(
             &profile(),
-            &SystemId::new("umbilical"),
+            &SystemId("umbilical".into()),
             4,
             1.0,
             5.0,

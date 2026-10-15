@@ -1,0 +1,58 @@
+# Quiet runtime probe for actual activity adapters and Scenario continuation.
+# No mission deadlines, threat pacing, stock grants or new machinery recipes.
+[global]
+seed = 156222
+[player_spawn]
+position = [0, 0, 0]
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "activity-ship"
+name = "activity-ship"
+spawn_on = "game_start"
+transform = { position = [0, 0, 0] }
+
+[[situation_definition]]
+id = "restore"
+initial = "useful"
+[[situation_definition.state]]
+id = "useful"
+when = { kind = "achieved" }
+call = { script = "tests/fixtures/activity-foundation-world.toml#script.setup", function = "credit_repair" }
+next = "returned"
+[[situation_definition.state]]
+id = "returned"
+when = { kind = "settled", outcome = "cancelled" }
+call = { script = "tests/fixtures/activity-foundation-world.toml#script.setup", function = "credit_return" }
+
+[[situation_definition]]
+id = "supply"
+initial = "received"
+[[situation_definition.state]]
+id = "received"
+when = { kind = "received" }
+call = { script = "tests/fixtures/activity-foundation-world.toml#script.setup", function = "credit_delivery" }
+next = "refused"
+[[situation_definition.state]]
+id = "refused"
+when = { kind = "received" }
+call = { script = "tests/fixtures/activity-foundation-world.toml#script.setup", function = "discard_effects" }
+
+[[situation]]
+id = "repair-room"
+definition = "restore"
+request = { kind = "repair", actor = "activity-ship", owner = "repair", team = 0, request = { type = "Work", data = { kind = "compartment", compartment = "engineering" } }, target = { kind = "compartment", compartment = "engineering" }, goal = "structure" }
+[[situation]]
+id = "four-rounds"
+definition = "supply"
+request = { kind = "delivery", actor = "activity-ship", owner = "logistics", source = "hold-ammunition", destination = "magazine", commodity = "torpedoes", amount = 4 }
+
+[script]
+setup = """
+fn credit_repair(ctx) { ctx.flags.increment("repair_credit", 1); }
+fn credit_return(ctx) { ctx.flags.increment("return_credit", 1); }
+fn credit_delivery(ctx) { ctx.flags.increment("delivery_credit", 1); }
+fn discard_effects(ctx) {
+    ctx.flags.increment("forbidden_credit", 1);
+    throw "deliberate activity probe sandbox refusal";
+}
+"""

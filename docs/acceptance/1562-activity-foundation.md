@@ -38,8 +38,22 @@ actors, and eight malformed whole-candidate no-write variants. Pure World tests
 also cover independent instances, exact source refusal and causal achievement
 versus settlement ordering.
 
-These new native cases have not been compiled or executed at this source
-checkpoint. No full-host 360-step capture/digest, mesh, browser, crew-workload,
-balance or complete acceptance result is claimed. A real authored demonstration,
-accepted Workshop controls/live inspection, complete host continuation and the
-remaining22A/22B/22C/22D scope remain required. Shipped scenarios are unchanged.
+The existing Scripts workspace now edits these same bindings through accepted
+source history and its disposable Test route. The shared Gameplay support check
+also runs in ContentPreparation against actual actors, row overrides and every
+offered launch hull. Privileged Scenario inspection shows exact instances,
+pending facts and Applied/Refused frontiers without advancing their owners.
+Seven focused form/source tests and the broader 84-test affected client run pass;
+independent read-only reviews cover backend support and form/inspection seams.
+PASM validate, scan and traceability pass for this source contract.
+
+`tests/activity_foundation_continuation.rs` and its quiet authored World add an
+actual-headless source tracer: real crew/admission, a physical Damage-owner
+initial incident, reserved partial Repair, committed finite delivery, actual
+recall/return, once-only script effects/refusal, two malformed candidate no-write
+checks and 360 complete capture/digest comparisons. The fixture introduces no
+mission deadlines or pacing and changes no shipped scenario. This new full-host
+tracer has not been compiled or executed. Native integration receipts remain
+owned by the integrator; this document claims no full-host, mesh, browser,
+crew-workload, balance or full22 completion from source review. Dynamic
+opportunities, HTN and the remaining22A/22B/22C/22D scope remain required.

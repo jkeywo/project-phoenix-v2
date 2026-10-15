@@ -2,6 +2,7 @@ import { scanPublicationOwner } from './scan-source.js';
 import { observationTickFor } from './observation-details.js';
 import { consoleReadState } from './console-topology.js';
 import { projectSensorTracks } from './sensor-tracks.js';
+import { clampRadarEdge } from './radar-edge.js';
 /**
  * gui/console-state.js — Pure state builder functions for HTML console iframes.
  *
@@ -435,13 +436,9 @@ export function buildWaypointBlip(waypoint, shipX, shipZ, shipYaw, range, opts =
     radar_y = dz / safeRange;
   }
 
-  const normalizedDistance = Math.hypot(radar_x, radar_y);
-  const edge = opts.edgeClamp && normalizedDistance > 1;
-  if (edge) {
-    const scale = 0.96 / normalizedDistance;
-    radar_x *= scale;
-    radar_y *= scale;
-  }
+  const point = clampRadarEdge(radar_x, radar_y, opts.edgeClamp);
+  radar_x = point.radar_x; radar_y = point.radar_y;
+  const edge = point.edge;
 
   // When the waypoint is anchored to a parent entity, expose the parent
   // UUID so the navigation iframe can route a tap on the waypoint blip
@@ -509,13 +506,9 @@ export function buildTargetBlip(targetUuid, entities, shipX, shipZ, shipYaw, ran
     radar_y = dz / safeRange;
   }
 
-  const normalizedDistance = Math.hypot(radar_x, radar_y);
-  const edge = opts.edgeClamp && normalizedDistance > 1;
-  if (edge) {
-    const scale = 0.96 / normalizedDistance;
-    radar_x *= scale;
-    radar_y *= scale;
-  }
+  const point = clampRadarEdge(radar_x, radar_y, opts.edgeClamp);
+  radar_x = point.radar_x; radar_y = point.radar_y;
+  const edge = point.edge;
 
   return {
     uuid: targetUuid,

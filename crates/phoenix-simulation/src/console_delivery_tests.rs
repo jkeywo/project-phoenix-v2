@@ -546,8 +546,8 @@ fn typed_weapons_use_recorded_identity_and_lost_contacts_clear_without_reading_s
 }
 
 #[test]
-fn typed_receipts_are_capped_before_aliasing_and_legacy_targets_do_not_broadcast_to_ungranted_consoles()
- {
+fn typed_receipts_are_capped_before_aliasing_and_legacy_targets_do_not_broadcast_to_ungranted_consoles(
+) {
     let mut app = fixture();
     let contact = observe(&mut app, "tactical-radar", 0, 1.0);
     let raw = board_packet(&mut app, &["sensor-radar"], Target::All);
@@ -581,7 +581,7 @@ fn typed_receipts_are_capped_before_aliasing_and_legacy_targets_do_not_broadcast
 }
 
 #[test]
-fn typed_sensors_maps_use_permitted_aliases_and_keep_explicit_synthetic_evidence_separate() {
+fn typed_sensors_maps_keep_permitted_aliases_without_disclosing_a_decoy_specific_list() {
     let mut app = fixture();
     let contact = observe(&mut app, "sensor-radar", 0, 1.0);
     let entity = local_ship(&mut app);
@@ -651,9 +651,18 @@ fn typed_sensors_maps_use_permitted_aliases_and_keep_explicit_synthetic_evidence
         board.contact_classifications[&contact],
         "Recorded classification"
     );
-    assert_eq!(board.contact_classifications[ghost], "Reported class");
+    assert!(!board.contact_classifications.contains_key(ghost));
     assert!(board.contact_overrides.is_empty());
-    assert_eq!(board.contact_ghosts[0].position, Some([1.0, 0.0, 2.0]));
+    assert!(board.contact_ghosts.is_empty());
+    assert!(!encoded(visible).contains("__gm_ghost"));
+    let SystemBlackboard::Sensors(original) = only_board(&raw.msg) else {
+        unreachable!()
+    };
+    assert_eq!(
+        original.contact_ghosts[0].position,
+        Some([1.0, 0.0, 2.0]),
+        "the raw host/GM source is not mutated"
+    );
     let report = board.contact_reports[&contact].as_ref().unwrap();
     assert_eq!(report.age_ticks, 3);
     assert_eq!(report.position_mm, [1000, 0, 2000]);
@@ -764,11 +773,9 @@ fn live_delta_never_exposes_foreign_position_health_flags_or_shield_frequency() 
         delivery: DeliveryClass::Snapshot,
     });
     assert!(phone(&outputs, "helm").is_none());
-    assert!(
-        outputs
-            .iter()
-            .all(|out| out.delivery == DeliveryClass::Snapshot)
-    );
+    assert!(outputs
+        .iter()
+        .all(|out| out.delivery == DeliveryClass::Snapshot));
     assert_eq!(
         phone(&outputs, crate::console_bridge::LOCAL_CONSOLE_TOKEN),
         Some(&raw)

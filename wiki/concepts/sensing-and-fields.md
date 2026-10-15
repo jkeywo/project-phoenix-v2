@@ -55,8 +55,10 @@ lifecycle. They retain the reported position, permitted label and original sampl
 metadata; repeated receipt does not renew their age or acquire current physical
 facts. Public metadata names the instrument's contact handle, while the actual
 actor remains only a private current actuator route. Other radar instruments do
-not inherit the Sensors report, and explicit synthetic ghosts remain separate
-reported evidence without an actor route.
+not inherit the Sensors report. Explicit synthetic points use those same retained
+tracks and generic reported provenance, with no physical actuator route. Their
+private no-actor distinction is never copied into a public decoy-specific list or
+flag; the measured GUI shows ordinary nonselectable reported evidence.
 
 `contact_routing` resolves a current selectable public return through the consuming
 System's permitted Console view before consulting its private actuator association.

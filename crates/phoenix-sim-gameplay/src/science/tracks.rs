@@ -71,12 +71,22 @@ impl BroadTrackState {
     /// Returns only the most recently supported physical association. This is
     /// actuator routing, not public identity evidence or a search over truth.
     pub fn resolve_current(&self, contact: &str) -> Option<&str> {
+        if self
+            .tracks
+            .get(contact)?
+            .observation
+            .as_ref()
+            .is_some_and(|observation| observation.subject == ObservationSubject::Unknown)
+        {
+            return None;
+        }
         self.current
             .iter()
             .find_map(|(source, id)| (id == contact).then_some(source.as_str()))
     }
     pub fn contact_for_source(&self, source: &str) -> Option<&str> {
-        self.current.get(source).map(String::as_str)
+        let id = self.current.get(source)?;
+        self.resolve_current(id).map(|_| id.as_str())
     }
     pub fn validate(&self, profile: &BroadConfig, tick: u64, fixed_dt: f32) -> Result<(), String> {
         profile_valid(profile, fixed_dt)?;
@@ -156,7 +166,10 @@ impl BroadTrackState {
                     !report_metadata_valid(observation, tick)
                         || observation.observed_tick != Some(track.observed_tick)
                         || observation.provenance.system.as_ref() != Some(&self.owner)
-                        || observation.subject != (ObservationSubject::Entity { uuid: id.clone() })
+                        || (observation.subject
+                            != (ObservationSubject::Entity { uuid: id.clone() })
+                            && observation.subject != ObservationSubject::Unknown)
+                        || observation.subject == ObservationSubject::Unknown && track.selectable
                         || track.classification.is_some()
                         || track.assessment.is_some()
                         || track
@@ -178,6 +191,14 @@ impl BroadTrackState {
         for (source, id) in &self.current {
             if !valid_source(source) || !self.tracks.contains_key(id) || !associations.insert(id) {
                 return Err("invalid current broad contact association".into());
+            }
+            if source.starts_with("ghost/")
+                != self.tracks[id]
+                    .observation
+                    .as_ref()
+                    .is_some_and(|observation| observation.subject == ObservationSubject::Unknown)
+            {
+                return Err("invalid synthetic observation route".into());
             }
         }
         Ok(())
@@ -208,6 +229,7 @@ impl BroadTrackState {
                         || observation.provenance.system.as_ref() != Some(&self.owner)
                         || sample.classification.is_some()
                         || sample.assessment.is_some()
+                        || (observation.subject == ObservationSubject::Unknown && sample.selectable)
                         || sample
                             .identity
                             .as_ref()
@@ -215,6 +237,14 @@ impl BroadTrackState {
                 })
             {
                 return Err("invalid or duplicate broad measurement".into());
+            }
+            if sample.source.starts_with("ghost/")
+                != sample
+                    .observation
+                    .as_ref()
+                    .is_some_and(|observation| observation.subject == ObservationSubject::Unknown)
+            {
+                return Err("invalid synthetic observation route".into());
             }
         }
         if self.last_tick == Some(tick) {
@@ -357,7 +387,9 @@ impl BroadTrackState {
             let track = next.tracks.get_mut(id).expect("checked association");
             if let Some(observation) = &sample.observation {
                 let mut observation = observation.clone();
-                observation.subject = ObservationSubject::Entity { uuid: id.clone() };
+                if observation.subject != ObservationSubject::Unknown {
+                    observation.subject = ObservationSubject::Entity { uuid: id.clone() };
+                }
                 // Reprocessing a held report buys no new identity evidence,
                 // renews no clock, and cannot learn current velocity or facts.
                 if track.observation.as_ref() != Some(&observation) {
@@ -491,7 +523,12 @@ impl BroadTrackState {
                 let age = (tick - track.observed_tick) as f64 * f64::from(fixed_dt);
                 SensorTrackSnapshot {
                     contact_id: track.contact_id.clone(),
-                    observation: track.observation.clone(),
+                    observation: track.observation.clone().map(|mut observation| {
+                        observation.subject = ObservationSubject::Entity {
+                            uuid: track.contact_id.clone(),
+                        };
+                        observation
+                    }),
                     selectable: track.selectable && current.contains(&track.contact_id),
                     observed_tick: track.observed_tick,
                     position,
@@ -560,7 +597,23 @@ fn profile_valid(profile: &BroadConfig, fixed_dt: f32) -> Result<(), String> {
     Ok(())
 }
 fn valid_source(value: &str) -> bool {
+    if let Some(value) = value.strip_prefix("ghost/") {
+        let Some((length, id)) = value.split_once(':') else {
+            return false;
+        };
+        return valid_source_id(id) && length == id.len().to_string();
+    }
+    valid_source_id(value)
+}
+fn valid_source_id(value: &str) -> bool {
     !value.is_empty() && value.len() <= 128 && !value.chars().any(char::is_control)
+}
+/// Private sample key scoped by the existing observing instrument owner.
+pub fn synthetic_source(id: &str) -> Result<String, String> {
+    if !valid_source_id(id) {
+        return Err("invalid synthetic observation key".into());
+    }
+    Ok(format!("ghost/{}:{id}", id.len()))
 }
 fn bounded_float(value: f64) -> f32 {
     value.clamp(-f64::from(f32::MAX), f64::from(f32::MAX)) as f32

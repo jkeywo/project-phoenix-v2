@@ -1,4 +1,5 @@
 import { t, wireText } from './strings.js';
+import { clampRadarEdge } from './radar-edge.js';
 
 const pair = value => Array.isArray(value) && value.length === 2 && value.every(Number.isFinite);
 const stages = new Set(['return', 'identified', 'classified', 'assessed']);
@@ -16,11 +17,13 @@ export function projectSensorTracks(tracks, { x = 0, z = 0, yaw = 0, range = 0, 
     const dx = track.position[0] - x, dz = track.position[1] - z;
     const name = track.stage !== 'return' && track.identity?.name ? wireText(track.identity.name) : t('console.sensors.basic_contact');
     const age = Number.isSafeInteger(tick) && tick >= track.observed_tick ? tick - track.observed_tick : null;
+    const reported = track.observation?.provenance?.kind === 'sensors_report';
+    const visible = validRange && (reported || Math.hypot(dx, dz) <= range);
     const row = { id: track.contact_id, name, stage: track.stage, predicted: track.predicted === true,
-      error: track.position_error, age, selectable: track.selectable === true && track.predicted === false && validRange && Math.hypot(dx, dz) <= range };
+      error: track.position_error, age, selectable: track.selectable === true && track.predicted === false && visible };
     rows.push(row);
-    if (validRange && Math.hypot(dx, dz) <= range) blips.push({
-      uuid: row.id, radar_x: (dx * cos + dz * sin) / range, radar_y: (dx * sin - dz * cos) / range,
+    if (visible) blips.push({
+      uuid: row.id, ...clampRadarEdge((dx * cos + dz * sin) / range, (dx * sin - dz * cos) / range, reported),
       scaled_radius: 0, uncertainty_radius: row.error / range, track: true, predicted: row.predicted,
       icon: null, kind: 'contact', name, label: name, selectable: row.selectable,
     });

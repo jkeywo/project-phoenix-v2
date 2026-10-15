@@ -1,4 +1,58 @@
 use super::*;
+#[test]
+fn synthetic_evidence_shares_tracks_but_never_becomes_an_actor_route_or_public_decoy_flag() {
+    let p = profile();
+    let mut state = BroadTrackState::new(&p);
+    let mut ghost = reported(&p, 2);
+    ghost.source = synthetic_source(&"é".repeat(64)).unwrap();
+    ghost.observation.as_mut().unwrap().subject = ObservationSubject::Unknown;
+    ghost.selectable = false;
+    state.advance(&p, 4, 0.5, 1.0, &[ghost.clone()]).unwrap();
+    let id = state.current[&ghost.source].clone();
+    assert!(
+        state.resolve_current(&id).is_none() && state.contact_for_source(&ghost.source).is_none()
+    );
+    let public = state.projection(&p, 4, 0.5).unwrap();
+    assert_eq!(
+        public[0].observation.as_ref().unwrap().subject,
+        ObservationSubject::Entity { uuid: id.clone() }
+    );
+    assert!(!public[0].selectable);
+    let wire = serde_json::to_string(&public).unwrap();
+    assert!(!wire.contains("unknown") && !wire.contains("ghost/") && !wire.contains("synthetic"));
+    let before = state.clone();
+    let mut restored: BroadTrackState =
+        serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+    state.advance(&p, 5, 0.5, 1.0, &[ghost.clone()]).unwrap();
+    restored.advance(&p, 5, 0.5, 1.0, &[ghost]).unwrap();
+    assert_eq!(state, restored);
+    assert_eq!(state.tracks[&id], before.tracks[&id]);
+}
+#[test]
+fn synthetic_sample_cannot_claim_actor_permission_and_private_route_shape_is_validated() {
+    let p = profile();
+    let mut state = BroadTrackState::new(&p);
+    let before = state.clone();
+    let mut ghost = reported(&p, 2);
+    ghost.source = synthetic_source("example").unwrap();
+    ghost.observation.as_mut().unwrap().subject = ObservationSubject::Unknown;
+    assert!(state.advance(&p, 4, 0.5, 1.0, &[ghost.clone()]).is_err());
+    assert_eq!(state, before);
+    ghost.selectable = false;
+    state.advance(&p, 4, 0.5, 1.0, &[ghost.clone()]).unwrap();
+    let id = state.current[&ghost.source].clone();
+    state
+        .tracks
+        .get_mut(&id)
+        .unwrap()
+        .observation
+        .as_mut()
+        .unwrap()
+        .subject = ObservationSubject::Entity { uuid: id };
+    assert!(state.validate(&p, 4, 0.5).is_err());
+    assert!(synthetic_source(&"x".repeat(129)).is_err());
+    assert!(synthetic_source("line\nbreak").is_err());
+}
 fn reported(profile: &BroadConfig, observed: u64) -> BroadMeasurement {
     use phoenix_model::observation::*;
     BroadMeasurement {
@@ -6,7 +60,9 @@ fn reported(profile: &BroadConfig, observed: u64) -> BroadMeasurement {
         observation: Some(
             ObservationMetadata::at(
                 observed,
-                ObservationSubject::Unknown,
+                ObservationSubject::Entity {
+                    uuid: "private-report-actor".into(),
+                },
                 ObservationProvenance {
                     kind: ObservationSource::SensorsReport,
                     system: Some(profile.system.clone()),

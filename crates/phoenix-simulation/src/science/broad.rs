@@ -356,6 +356,35 @@ pub(crate) fn tick(
                     }
                 }
             }
+            if paid > 0.0
+                && ship_config.0.system(system).is_some_and(|system| {
+                    system.kind == crate::ship::system_registry::SENSOR_RADAR_KIND
+                })
+            {
+                if let Some(runtime) = runtime.as_ref() {
+                    for ghost in runtime
+                        .contact_information
+                        .ghosts
+                        .get(&observer.0)
+                        .into_iter()
+                        .flat_map(|rows| rows.values())
+                    {
+                        let presentation =
+                            crate::gm::operations::information::ghost_uuid(&observer.0, &ghost.id);
+                        if crate::gm::operations::contact::mode(
+                            &runtime.contact_overrides,
+                            &observer.0,
+                            &presentation,
+                        ) == crate::gm::operations::contact::ContactMode::Conceal
+                        {
+                            continue;
+                        }
+                        if let Some(sample) = ghost_measurement(system, ghost, state, tick.0) {
+                            measurements.push(sample);
+                        }
+                    }
+                }
+            }
             // Equal observed labels are not proof that two returns are the
             // same authored actor. Keep both returns, withholding correlation.
             let mut labels = BTreeMap::<String, usize>::new();
@@ -377,6 +406,73 @@ pub(crate) fn tick(
         }
     }
 }
+fn ghost_measurement(
+    owner: &SystemId,
+    ghost: &crate::gm::operations::information::GhostContact,
+    state: &BroadTrackState,
+    tick: u64,
+) -> Option<BroadMeasurement> {
+    use phoenix_model::observation::*;
+    let source = synthetic_source(&ghost.id).ok()?;
+    let position = [
+        ghost.position_mm[0] as f32 / 1000.0,
+        ghost.position_mm[2] as f32 / 1000.0,
+    ];
+    let current = state
+        .current
+        .get(&source)
+        .and_then(|id| state.tracks.get(id));
+    let same_evidence = |track: &&BroadTrack| {
+        track.position == position
+            && track
+                .identity
+                .as_ref()
+                .is_some_and(|identity| identity.name == ghost.label)
+            && track
+                .observation
+                .as_ref()
+                .is_some_and(|observation| observation.subject == ObservationSubject::Unknown)
+    };
+    let held = if current.is_some() {
+        current.filter(same_evidence)
+    } else {
+        // Loss of current support clears routing, not the held sample's clock.
+        // Reuse only an unambiguous retained report; source IDs never associate
+        // a lost observed actor, and synthetic points have no actor to route.
+        let mut retained = state.tracks.values().filter(same_evidence);
+        retained.next().filter(|_| retained.next().is_none())
+    };
+    let observation = held
+        .and_then(|track| track.observation.as_ref())
+        .filter(|observation| observation.subject == ObservationSubject::Unknown)
+        .cloned()
+        .unwrap_or_else(|| {
+            ObservationMetadata::at(
+                tick,
+                ObservationSubject::Unknown,
+                ObservationProvenance {
+                    kind: ObservationSource::SensorsReport,
+                    system: Some(owner.clone()),
+                    label: "console.sensors.report_source".into(),
+                },
+                ObservationUncertainty::Unspecified,
+            )
+        });
+    Some(BroadMeasurement {
+        source,
+        observation: Some(observation),
+        selectable: false,
+        position,
+        support: 1.0,
+        identity: Some(TrackIdentity {
+            name: ghost.label.clone(),
+            faction: None,
+            references: Vec::new(),
+        }),
+        classification: None,
+        assessment: None,
+    })
+}
 fn reported_measurement(
     owner: &SystemId,
     source: &str,
@@ -390,7 +486,9 @@ fn reported_measurement(
         source: source.to_owned(),
         observation: Some(ObservationMetadata::at(
             sample.observed_tick,
-            ObservationSubject::Unknown,
+            ObservationSubject::Entity {
+                uuid: source.into(),
+            },
             ObservationProvenance {
                 kind: ObservationSource::SensorsReport,
                 system: Some(owner.clone()),

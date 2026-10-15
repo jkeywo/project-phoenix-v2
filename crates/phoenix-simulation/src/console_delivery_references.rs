@@ -16,6 +16,7 @@ pub(super) struct KnownContact {
 
 #[derive(Default)]
 pub(super) struct ReferenceProjection {
+    measured: bool,
     contexts: BTreeMap<ConsoleId, Vec<KnownContact>>,
     publishers: BTreeMap<SystemId, ConsoleId>,
     receipt: BTreeMap<String, BTreeSet<SystemId>>,
@@ -42,6 +43,7 @@ impl ReferenceProjection {
         let empty = HashMap::new();
         let boards = boards.map_or(&empty, |boards| &boards.0);
         let mut result = Self::default();
+        result.measured = tracks.is_some() || controls.is_some();
         result.concealed = concealed.clone();
         if let (Some(sessions), Some(hosts)) = (sessions, hosts) {
             for player in sessions
@@ -260,8 +262,13 @@ impl ReferenceProjection {
                     board.science_target_uuid.as_deref(),
                     Some(SENSOR_RADAR_KIND),
                 );
-                // Explicit synthetic reports stay reported evidence. Keys that
-                // name real actors must use this Console's observation alias.
+                // Fitted instruments already carry these reports through the
+                // ordinary track DTO. A second decoy-specific list would reveal
+                // that the evidence was synthetic. The host retains originals.
+                if self.measured {
+                    board.contact_ghosts.clear();
+                }
+                // Legacy unconfigured hosts retain explicit reported points.
                 board
                     .contact_ghosts
                     .retain(|ghost| !self.concealed.contains(&ghost.uuid));

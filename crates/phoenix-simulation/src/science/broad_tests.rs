@@ -1,5 +1,92 @@
 use super::*;
 #[test]
+fn paid_sensor_tracks_include_ghosts_without_any_scene_entity_and_keep_unchanged_sample_time() {
+    let (mut app, observer, _, profile) = rig();
+    let observer_id = app.world().get::<EntityUuid>(observer).unwrap().0.clone();
+    let mut runtime = crate::world::server::WorldContentRuntime::default();
+    runtime
+        .contact_information
+        .ghosts
+        .entry(observer_id.clone())
+        .or_default()
+        .insert(
+            "explicit-point".into(),
+            crate::gm::operations::information::GhostContact {
+                id: "explicit-point".into(),
+                palette: "SECRET PALETTE".into(),
+                label: "Reported point".into(),
+                position_mm: [500000, 0, 90000],
+            },
+        );
+    app.insert_resource(runtime);
+    fund(&mut app, observer, &profile, 1.0);
+    app.update();
+    let source = synthetic_source("explicit-point").unwrap();
+    let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
+    let id = state.current[&source].clone();
+    let first = state.tracks[&id].clone();
+    let public = state.projection(&profile, 0, 0.5).unwrap();
+    let ghost = public.iter().find(|track| track.contact_id == id).unwrap();
+    assert_eq!(ghost.position, [500.0, 90.0]);
+    assert_eq!(ghost.identity.as_ref().unwrap().name, "Reported point");
+    assert!(!ghost.selectable);
+    assert!(state.resolve_current(&id).is_none());
+    let wire = serde_json::to_string(ghost).unwrap();
+    assert!(
+        !wire.contains("SECRET") && !wire.contains("explicit-point") && !wire.contains("unknown")
+    );
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 1;
+    fund(&mut app, observer, &profile, 0.0);
+    app.update();
+    assert!(
+        !app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system]
+            .current
+            .contains_key(&source)
+    );
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 2;
+    fund(&mut app, observer, &profile, 1.0);
+    app.update();
+    assert_eq!(
+        app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system].tracks[&id],
+        first
+    );
+    {
+        let mut runtime = app
+            .world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>();
+        let ghost = runtime
+            .contact_information
+            .ghosts
+            .get_mut(&observer_id)
+            .unwrap()
+            .get_mut("explicit-point")
+            .unwrap();
+        ghost.label = "Changed report".into();
+        ghost.position_mm[0] = 700000;
+    }
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 3;
+    fund(&mut app, observer, &profile, 1.0);
+    app.update();
+    let changed = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system].tracks[&id];
+    assert_eq!(changed.observed_tick, 3);
+    assert_eq!(changed.position, [700.0, 90.0]);
+    assert_eq!(changed.identity.as_ref().unwrap().name, "Changed report");
+    assert!(changed.velocity.is_none());
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .contact_information
+        .ghosts
+        .clear();
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 4;
+    fund(&mut app, observer, &profile, 1.0);
+    app.update();
+    assert!(
+        !app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system]
+            .current
+            .contains_key(&source)
+    );
+}
+#[test]
 fn absent_report_never_falls_back_to_scene_and_hide_policy_never_restores_live_identity() {
     use crate::gm::operations::information::reports::{ReportPolicy, ReportSample, ReportState};
     let (mut app, observer, target, profile) = rig();

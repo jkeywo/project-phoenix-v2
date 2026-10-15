@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildSensorsConsoleState, buildWeaponsConsoleState, buildHelmConsoleState } from '../../gui/console-state.js';
+import { buildSensorsConsoleState, buildWeaponsConsoleState, buildHelmConsoleState, buildTargetBlip } from '../../gui/console-state.js';
 import { consoleReadState } from '../../gui/console-topology.js';
 import { projectSensorTracks } from '../../gui/sensor-tracks.js';
 import { createSensorScienceActionRegistry, SENSORS_TARGET_ACTION_ID, SENSORS_SCAN_ACTION_ID } from '../../gui/stations/sensors-actions.js';
@@ -29,6 +29,23 @@ describe('permitted broad track radar', () => {
     expect(view.tracks.map(track => track.id)).toEqual(['second-observation', 'third-observation']);
     expect(view.target_uuid).toBe('second-observation');
     expect(JSON.stringify(view)).not.toContain('secret-uuid');
+  });
+  it('shows reported synthetic evidence through measured tracks without a second ghost list or a physical target', () => {
+    const contact = sample({ position: [1000, 0], selectable: false, stage: 'identified',
+      identity: { name: 'Reported contact', faction: null }, identity_tick: 10,
+      observation: { subject: { kind: 'entity', uuid: 'contact-1' }, observed_tick: 10,
+        provenance: { kind: 'sensors_report', system: 'broad', label: 'console.sensors.report_source' } } });
+    const state = raw([contact]); state.blackboards.broad.selected_target = null;
+    state.blackboards.sensors.contact_ghosts = [{ uuid: '__gm_ghost:SECRET', name: 'DO NOT COPY', position: [2, 0, 3] }];
+    const view = buildSensorsConsoleState(state, ['focus', 'broad']);
+    expect(view.blips).toHaveLength(1); expect(view.tracks).toHaveLength(1);
+    expect(view.blips[0]).toMatchObject({ uuid: 'contact-1', name: 'Reported contact', radar_x: .96, radar_y: 0, edge: true, selectable: false });
+    expect(view.tracks[0]).toMatchObject({ age: 20, selectable: false });
+    expect(view.target_uuid).toBeNull(); expect(contact.position).toEqual([1000, 0]);
+    expect(JSON.stringify(view)).not.toMatch(/SECRET|DO NOT COPY|__gm_ghost/);
+    const legacy = buildTargetBlip('reported', [{ uuid: 'reported', position: [1000, 0, 0] }], 0, 0, 0, 100, { edgeClamp: true });
+    expect([view.blips[0].radar_x, view.blips[0].radar_y]).toEqual([legacy.radar_x, legacy.radar_y]);
+    expect(projectSensorTracks([{ ...contact, observation: undefined }], { range: 100 }).blips).toEqual([]);
   });
   it('uses measured contact IDs and circles without entity identity or hull geometry fallback', () => {
     const view = buildSensorsConsoleState(raw(), ['focus', 'broad']);

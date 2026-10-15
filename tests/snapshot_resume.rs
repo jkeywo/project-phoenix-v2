@@ -6947,7 +6947,9 @@ fn the_resumed_world_keeps_the_reading_the_crew_took() {
         "the probe world carries exactly one ship with a survey suite"
     );
     let (uuid, record) = captured[0];
-    let reading = record
+    let scan_owner = project_phoenix::ship::system_registry::sensors_system_id();
+    let focused = &record.instruments[&scan_owner];
+    let reading = focused
         .last
         .as_ref()
         .expect("precondition: the capture must be taken after a scan came back");
@@ -6960,7 +6962,7 @@ fn the_resumed_world_keeps_the_reading_the_crew_took() {
         reading.condition_fraction.unwrap() > 0.0,
         "precondition: it read a real, non-zero condition off the depot's track"
     );
-    assert!(record.refusal.is_none());
+    assert!(focused.refusal.is_none());
 
     let mut resumed = boot_to_restore_point(&scan_args(), &payload);
     let before_restore = resumed
@@ -6971,12 +6973,12 @@ fn the_resumed_world_keeps_the_reading_the_crew_took() {
         .cloned()
         .expect("the fresh world spawned the destroyer from its template");
     assert!(
-        before_restore.last.is_none(),
+        before_restore.0[&scan_owner].last.is_none(),
         "control: a freshly booted crew have surveyed nothing, so an inert restore \
          would be visible here rather than hidden behind a value that matched"
     );
     assert_eq!(
-        before_restore.config.bands.len(),
+        before_restore.0[&scan_owner].config.bands.len(),
         2,
         "…and it carries its authored fidelity ladder, which the save deliberately \
          does NOT: that is content, re-derived from the template on spawn"
@@ -7001,10 +7003,10 @@ fn the_resumed_world_keeps_the_reading_the_crew_took() {
         .query::<&project_phoenix::science::ShipScanRecord>()
         .iter(resumed.world())
         .next()
-        .map(|record| record.config.clone())
+        .map(|record| record.0[&scan_owner].config.clone())
         .expect("the record is still attached");
     assert_eq!(
-        live_ladder, before_restore.config,
+        live_ladder, before_restore.0[&scan_owner].config,
         "and the restore left the spawned ladder alone — it restores the mutable half \
          of the record, not the content half"
     );

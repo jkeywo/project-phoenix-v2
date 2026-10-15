@@ -311,7 +311,7 @@ fn actual_receiver_retains_an_original_sample_with_later_forwarded_receipts() {
                     system: phoenix_model::identity::SystemId("broad".into()),
                     contact: "5:broad:contact-1".into(),
                 },
-                sample_id: "original-sample".into(),
+                sample_id: "29:radar-origin-0123456789abcdef5:broad17:5:broad:contact-1:17".into(),
                 observed_tick: 17,
                 observer_position: Some([1.0, -2.0]),
                 velocity_error: 0.4,

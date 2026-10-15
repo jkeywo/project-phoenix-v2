@@ -75,7 +75,7 @@ fn held_measurement_retains_original_sample_and_provenance_across_serialisation(
                     system: SystemId("broad".into()),
                     contact: "5:broad:contact-1".into(),
                 },
-                sample_id: "original-sample".into(),
+                sample_id: "29:radar-origin-0123456789abcdef5:broad17:5:broad:contact-1:17".into(),
                 observed_tick: 17,
                 observer_position: Some([1.0, -2.0]),
                 velocity_error: 0.4,
@@ -126,6 +126,36 @@ fn held_measurement_retains_original_sample_and_provenance_across_serialisation(
         }
         assert!(invalid.validate(99).is_err(), "invalid provenance {fault}");
     }
+    for fault in 0..4 {
+        let mut invalid = restored.clone();
+        let GuidanceSource::Console {
+            samples,
+            observation,
+            ..
+        } = &mut invalid.source
+        else {
+            unreachable!()
+        };
+        match fault {
+            0 => samples.push(samples[0].clone()),
+            1 => samples[0].sample_id = "forged-sample".into(),
+            2 => *samples = vec![samples[0].clone(); GUIDANCE_MAX_SAMPLES + 1],
+            _ => {
+                samples.clear();
+                *observation = None;
+            }
+        }
+        assert!(
+            invalid.validate(99).is_err(),
+            "unsupported sample proof {fault}"
+        );
+    }
+    let mut dated_report = restored.clone();
+    let GuidanceSource::Console { samples, .. } = &mut dated_report.source else {
+        unreachable!()
+    };
+    samples.clear();
+    dated_report.validate(99).unwrap();
     assert!(restored.validate(16).is_err());
     let mut malformed = restored.clone();
     malformed.position[1] = f32::NAN;

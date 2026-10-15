@@ -46,37 +46,7 @@ fn text(value: &str) -> bool {
     !value.is_empty() && value.len() <= 1024 && !value.chars().any(char::is_control)
 }
 pub fn provenance_valid(value: &RadarSampleProvenance, tick: u64) -> bool {
-    let source = value.origin.source.strip_prefix("radar-origin-");
-    let prefix = format!(
-        "{}:{}:contact-",
-        value.origin.system.0.len(),
-        value.origin.system.0
-    );
-    let contact = value.origin.contact.strip_prefix(&prefix);
-    source.is_some_and(|source| {
-        source.len() == 16
-            && source
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    }) && text(&value.origin.system.0)
-        && value.origin.system.0.len() <= 128
-        && contact.is_some_and(|contact| {
-            contact
-                .parse::<u64>()
-                .is_ok_and(|n| n > 0 && n < u64::MAX && n.to_string() == contact)
-        })
-        && value.sample_id == sample_id(&value.origin, value.observed_tick)
-        && value.observed_tick <= tick
-        && value
-            .received_tick
-            .is_none_or(|received| received >= value.observed_tick && received <= tick)
-        && value
-            .observer_position
-            .is_none_or(|pose| pose.iter().all(|x| x.is_finite()))
-        && value.velocity_error.is_finite()
-        && value.velocity_error >= 0.0
-        && value.drift_error_per_sec.is_finite()
-        && value.drift_error_per_sec >= 0.0
+    value.valid_at(tick)
 }
 
 /// Export originals, never a fused projection as a new independent sample.

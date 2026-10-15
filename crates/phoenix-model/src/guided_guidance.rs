@@ -5,6 +5,10 @@ use crate::{
     sensing_sharing::RadarSampleProvenance,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
+
+/// Bounded original measurement proof, not simulated channel capacity.
+pub const GUIDANCE_MAX_SAMPLES: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -109,34 +113,35 @@ impl GuidanceObservation {
                     "guidance observation is missing its original Console provenance".into(),
                 );
             }
-            let valid_text = |id: &str| {
-                !id.trim().is_empty() && id.len() <= 1024 && !id.chars().any(char::is_control)
-            };
-            if samples.iter().any(|sample| {
-                !valid_text(&sample.origin.source)
-                    || !valid_id(&sample.origin.system.0)
-                    || !valid_text(&sample.origin.contact)
-                    || !valid_text(&sample.sample_id)
-                    || sample.observed_tick > self.sampled_tick
-                    || sample
-                        .received_tick
-                        .is_some_and(|received| received < sample.observed_tick || received > now)
-                    || sample
-                        .observer_position
-                        .is_some_and(|point| point.iter().any(|coordinate| !coordinate.is_finite()))
-                    || !sample.velocity_error.is_finite()
-                    || sample.velocity_error < 0.0
-                    || !sample.drift_error_per_sec.is_finite()
-                    || sample.drift_error_per_sec < 0.0
-            }) || observation.as_ref().is_some_and(|report| {
-                !report.is_valid()
-                    || report
-                        .observed_tick
-                        .is_some_and(|taken| taken > self.sampled_tick)
-                    || report.received_tick.is_some_and(|received| {
-                        received > now || report.observed_tick.is_some_and(|taken| received < taken)
-                    })
-            }) {
+            let mut ids = BTreeSet::new();
+            let mut frontiers = BTreeSet::new();
+            if samples.len() > GUIDANCE_MAX_SAMPLES
+                || (samples.is_empty()
+                    && observation
+                        .as_ref()
+                        .is_none_or(|report| report.observed_tick != Some(self.sampled_tick)))
+                || samples.iter().any(|sample| {
+                    !sample.valid_at(now)
+                        || sample.observed_tick > self.sampled_tick
+                        || !ids.insert(&sample.sample_id)
+                        || !frontiers.insert((
+                            &sample.origin.source,
+                            &sample.origin.system,
+                            &sample.origin.contact,
+                            sample.observed_tick,
+                        ))
+                })
+                || observation.as_ref().is_some_and(|report| {
+                    !report.is_valid()
+                        || report
+                            .observed_tick
+                            .is_some_and(|taken| taken > self.sampled_tick)
+                        || report.received_tick.is_some_and(|received| {
+                            received > now
+                                || report.observed_tick.is_some_and(|taken| received < taken)
+                        })
+                })
+            {
                 return Err(
                     "guidance must retain finite, originally dated sample/report provenance".into(),
                 );

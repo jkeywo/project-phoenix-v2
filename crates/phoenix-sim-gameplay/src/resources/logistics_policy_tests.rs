@@ -15,6 +15,7 @@ fn observed(id: &str, occupied: i64, target: i64, priority: u16) -> Replenishmen
         occupied,
         target,
         priority,
+        replenishing: false,
     }
 }
 fn ids(rows: &[ReplenishmentObservation], policy: &HandlingConfig) -> Vec<String> {

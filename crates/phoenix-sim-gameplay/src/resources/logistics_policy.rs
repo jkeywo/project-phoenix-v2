@@ -9,6 +9,8 @@ pub struct ReplenishmentObservation {
     pub occupied: i64,
     pub target: i64,
     pub priority: u16,
+    /// A previously triggered standing refill has not yet met its observed goal.
+    pub replenishing: bool,
 }
 
 /// Rank eligible desired stocks, independent of source availability. Lower
@@ -43,7 +45,8 @@ pub fn ordered_replenishment_candidates(
             continue;
         }
         let deficit = observation.target - observation.occupied;
-        if deficit >= handling.max_batch
+        if observation.replenishing
+            || deficit >= handling.max_batch
             || observation.occupied
                 <= reorder_threshold(observation.target, handling.reorder_fraction)
         {

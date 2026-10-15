@@ -47,6 +47,7 @@ pub struct LogisticsState {
     pub goals: BTreeMap<String, i64>,
     pub floors: BTreeMap<String, i64>,
     pub priorities: BTreeMap<String, u16>,
+    pub replenishing: BTreeSet<String>,
     pub batches: BTreeMap<JobId, DeliveryBatch>,
     pub blocked: BTreeMap<JobId, DeliveryBlock>,
     pub last_outcome: Option<DeliveryOutcome>,
@@ -90,6 +91,7 @@ impl LogisticsState {
                 .iter()
                 .map(|s| (s.id.clone(), s.priority))
                 .collect(),
+            replenishing: BTreeSet::new(),
             batches: BTreeMap::new(),
             blocked: BTreeMap::new(),
             last_outcome: None,
@@ -126,6 +128,31 @@ impl LogisticsState {
     ) -> Result<(), String> {
         profile.store(store)?;
         self.priorities.insert(store.into(), priority);
+        Ok(())
+    }
+    /// Refresh only supplied, permitted destination observations. This is
+    /// standing-demand continuation, not a stock cache, claim or controller.
+    pub fn refresh_replenishment(
+        &mut self,
+        profile: &CompiledLogistics,
+        observations: &[ReplenishmentObservation],
+    ) -> Result<(), String> {
+        let mut permitted = observations.to_vec();
+        for observation in &mut permitted {
+            if profile.store(&observation.store)?.role != StoreRole::Local {
+                return Err("refill observations must name actual local stores".into());
+            }
+            observation.replenishing = self.replenishing.contains(&observation.store);
+        }
+        let eligible = ordered_replenishment_candidates(&permitted, profile.handling())?;
+        let mut next = self.replenishing.clone();
+        for observation in &permitted {
+            if observation.occupied >= observation.target {
+                next.remove(&observation.store);
+            }
+        }
+        next.extend(eligible.into_iter().map(|candidate| candidate.store));
+        self.replenishing = next;
         Ok(())
     }
     fn check_amount(
@@ -417,6 +444,11 @@ impl LogisticsState {
             || self.goals.keys().cloned().collect::<BTreeSet<_>>() != keys
             || self.floors.keys().cloned().collect::<BTreeSet<_>>() != keys
             || self.priorities.keys().cloned().collect::<BTreeSet<_>>() != keys
+            || self.replenishing.iter().any(|id| {
+                profile
+                    .store(id)
+                    .map_or(true, |store| store.role != StoreRole::Local)
+            })
         {
             return Err(
                 "logistics continuation identity or goal set differs from authored profile".into(),

@@ -667,3 +667,205 @@ fn old_authored_policy_defaults_are_explicit_and_new_values_stay_closed() {
     authored["handling"][0]["unrestricted_policy"] = serde_json::json!(true);
     assert!(serde_json::from_value::<LogisticsConfig>(authored).is_err());
 }
+
+fn refill_fixture(
+    source: i64,
+) -> (
+    CompiledLogistics,
+    LogisticsState,
+    BTreeMap<ResourceEndpoint, EndpointStock>,
+) {
+    let (mut profile, _, mut stocks) = fixture();
+    let hold = profile.store("hold").unwrap().endpoint.clone();
+    let magazine = profile.store("magazine").unwrap().endpoint.clone();
+    for (endpoint, ceiling, level) in [(&hold, 256, source), (&magazine, 156, 0)] {
+        profile.endpoints.get_mut(endpoint).unwrap().ceiling = ceiling;
+        stocks.get_mut(endpoint).unwrap().stock = Stock::new(level, ceiling).unwrap();
+    }
+    profile
+        .config
+        .stores
+        .iter_mut()
+        .find(|s| s.id == "magazine")
+        .unwrap()
+        .target = 156;
+    let local = profile.store("magazine").unwrap().compartment.clone();
+    for bay in &mut profile.config.storage {
+        bay.space = if bay.compartment == local { 156 } else { 256 };
+    }
+    profile.config.handling[0].max_batch = 100;
+    profile.config.handling[0].max_active = 1;
+    profile.config.handling[0].units_per_sec = 100.0;
+    profile.config.handling[0].reorder_fraction = 0.5;
+    let state = LogisticsState::new(&profile);
+    state.validate(&profile, &stocks).unwrap();
+    (profile, state, stocks)
+}
+fn observe_magazine(
+    profile: &CompiledLogistics,
+    state: &mut LogisticsState,
+    stocks: &BTreeMap<ResourceEndpoint, EndpointStock>,
+) -> Vec<ReplenishmentObservation> {
+    let value = &stocks[&profile.store("magazine").unwrap().endpoint];
+    let observation = ReplenishmentObservation {
+        store: "magazine".into(),
+        occupied: value.stock.level + value.stock.incoming_total() + value.held,
+        target: state.goals["magazine"],
+        priority: state.priorities["magazine"],
+        replenishing: false,
+    };
+    state
+        .refresh_replenishment(profile, &[observation.clone()])
+        .unwrap();
+    let observation = ReplenishmentObservation {
+        replenishing: state.replenishing.contains("magazine"),
+        ..observation
+    };
+    ordered_replenishment_candidates(&[observation], profile.handling()).unwrap()
+}
+fn finish_delivery(
+    profile: &CompiledLogistics,
+    state: &mut LogisticsState,
+    stocks: &mut BTreeMap<ResourceEndpoint, EndpointStock>,
+) {
+    for _ in 0..20 {
+        step(profile, state, stocks, 100.0, &BTreeSet::new(), 1.0);
+        if state.batches.is_empty() {
+            return;
+        }
+    }
+    panic!("bounded physical route did not finish");
+}
+
+#[test]
+fn triggered_refill_finishes_target_across_batches_then_waits_for_the_next_low_water_cycle() {
+    let (profile, mut state, mut stocks) = refill_fixture(256);
+    assert_eq!(observe_magazine(&profile, &mut state, &stocks).len(), 1);
+    dispatch(&profile, &mut state, &mut stocks, 156);
+    assert_eq!(state.batches.values().next().unwrap().amount, 100);
+    finish_delivery(&profile, &mut state, &mut stocks);
+    let candidates = observe_magazine(&profile, &mut state, &stocks);
+    assert_eq!(
+        candidates.len(),
+        1,
+        "100/156 is above low water but its refill is unfinished"
+    );
+    assert_eq!(candidates[0].target - candidates[0].occupied, 56);
+    dispatch(&profile, &mut state, &mut stocks, 56);
+    finish_delivery(&profile, &mut state, &mut stocks);
+    assert!(observe_magazine(&profile, &mut state, &stocks).is_empty());
+    assert!(state.replenishing.is_empty());
+    assert_eq!(
+        stocks[&ResourceEndpoint::TorpedoMagazine {}].stock.level,
+        156
+    );
+    assert_eq!(
+        stocks[&ResourceEndpoint::Capacity {
+            id: "hold-ammo".into()
+        }]
+            .stock
+            .level,
+        100
+    );
+    stocks
+        .get_mut(&ResourceEndpoint::TorpedoMagazine {})
+        .unwrap()
+        .stock
+        .adjust(-1);
+    assert!(observe_magazine(&profile, &mut state, &stocks).is_empty());
+    stocks
+        .get_mut(&ResourceEndpoint::TorpedoMagazine {})
+        .unwrap()
+        .stock
+        .adjust(-77);
+    assert_eq!(observe_magazine(&profile, &mut state, &stocks).len(), 1);
+    assert!(state.replenishing.contains("magazine"));
+}
+
+#[test]
+fn refill_survives_source_shortage_disable_missing_observation_and_json_until_actual_supply_returns(
+) {
+    let (profile, mut state, mut stocks) = refill_fixture(100);
+    observe_magazine(&profile, &mut state, &stocks);
+    dispatch(&profile, &mut state, &mut stocks, 156);
+    finish_delivery(&profile, &mut state, &mut stocks);
+    observe_magazine(&profile, &mut state, &stocks);
+    let before = state.clone();
+    let before_stock = stocks.clone();
+    assert!(state
+        .dispatch(
+            &profile,
+            state.last_tick,
+            "hold",
+            "magazine",
+            56,
+            |action| apply_stock_action(&profile, action, &mut stocks)
+        )
+        .is_err());
+    assert_eq!(state, before);
+    assert_eq!(stocks, before_stock);
+    state.set_enabled(false);
+    state.refresh_replenishment(&profile, &[]).unwrap();
+    let mut restored: LogisticsState =
+        serde_json::from_slice(&serde_json::to_vec(&state).unwrap()).unwrap();
+    restored.validate(&profile, &stocks).unwrap();
+    assert!(restored.replenishing.contains("magazine"));
+    restored.set_enabled(true);
+    // An actual finite external source supplies the previously missing56 units.
+    let mut provider = Stock::new(56, 56).unwrap();
+    provider.reserve("supply", 56).unwrap();
+    let supplied = provider.consume("supply").unwrap();
+    assert_eq!(
+        stocks
+            .get_mut(&ResourceEndpoint::Capacity {
+                id: "hold-ammo".into()
+            })
+            .unwrap()
+            .stock
+            .adjust(supplied),
+        56
+    );
+    assert_eq!(observe_magazine(&profile, &mut restored, &stocks).len(), 1);
+    dispatch(&profile, &mut restored, &mut stocks, 56);
+    finish_delivery(&profile, &mut restored, &mut stocks);
+    observe_magazine(&profile, &mut restored, &stocks);
+    assert!(restored.replenishing.is_empty());
+    assert_eq!(provider.level, 0);
+    assert_eq!(stocks.values().map(|v| v.stock.level).sum::<i64>(), 156);
+}
+
+#[test]
+fn refill_refresh_is_closed_transactional_and_never_changes_unobserved_stores() {
+    let (profile, mut state, stocks) = refill_fixture(100);
+    observe_magazine(&profile, &mut state, &stocks);
+    let before = state.clone();
+    let invalid = ReplenishmentObservation {
+        store: "hold".into(),
+        occupied: 0,
+        target: 1,
+        priority: 0,
+        replenishing: true,
+    };
+    assert!(state.refresh_replenishment(&profile, &[invalid]).is_err());
+    assert_eq!(state, before);
+    state.refresh_replenishment(&profile, &[]).unwrap();
+    assert_eq!(state, before);
+    for key in ["hold", "foreign"] {
+        let mut invalid = state.clone();
+        invalid.replenishing.insert(key.into());
+        assert!(invalid.validate(&profile, &stocks).is_err());
+    }
+    state
+        .refresh_replenishment(
+            &profile,
+            &[ReplenishmentObservation {
+                store: "magazine".into(),
+                occupied: 100,
+                target: 0,
+                priority: 0,
+                replenishing: true,
+            }],
+        )
+        .unwrap();
+    assert!(state.replenishing.is_empty());
+}

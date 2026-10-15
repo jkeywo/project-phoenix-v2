@@ -19,6 +19,7 @@ pub mod system_status;
 pub mod observation;
 
 pub mod damage;
+pub mod guided_guidance;
 pub mod energy;
 pub mod equipment_recovery_ui;
 pub mod field;

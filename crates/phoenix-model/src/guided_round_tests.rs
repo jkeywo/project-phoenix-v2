@@ -11,6 +11,8 @@ fn profile() -> GuidedRoundProfile {
         shield_pierce: 0.2,
         impact: DamageProfile::default(),
         durability: 6.0,
+        seeker: None,
+        receiver: None,
     }
 }
 

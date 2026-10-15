@@ -15,6 +15,8 @@ pub struct GuidedRoundProfile {
     pub shield_pierce: f32,
     pub impact: DamageProfile,
     pub durability: f32,
+    pub seeker: Option<crate::guided_guidance::SeekerProfile>,
+    pub receiver: Option<crate::guided_guidance::GuidanceReceiverProfile>,
 }
 
 impl GuidedRoundProfile {
@@ -37,7 +39,14 @@ impl GuidedRoundProfile {
                     .into(),
             );
         }
-        self.impact.validate()
+        self.impact.validate()?;
+        if let Some(seeker) = &self.seeker {
+            seeker.validate()?;
+        }
+        if let Some(receiver) = &self.receiver {
+            receiver.validate()?;
+        }
+        Ok(())
     }
 
     /// An active vector entry is neither expired nor already intercepted.

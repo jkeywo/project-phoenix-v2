@@ -670,6 +670,10 @@ pub struct TorpedoesConfig {
     /// Finite physical interception durability, frozen into actual launches.
     #[serde(default = "default_torpedo_durability")]
     pub durability: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seeker: Option<phoenix_model::guided_guidance::SeekerProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver: Option<phoenix_model::guided_guidance::GuidanceReceiverProfile>,
     #[serde(default = "default_torpedo_speed")]
     pub speed: f32,
     /// Maximum turn rate in **degrees per second** (homing).
@@ -771,6 +775,8 @@ impl Default for TorpedoesConfig {
             damage_hull: default_torpedo_damage_hull(),
             damage_shields: default_torpedo_damage_shields(),
             durability: default_torpedo_durability(),
+            seeker: None,
+            receiver: None,
             speed: default_torpedo_speed(),
             turn_rate_deg_per_sec: default_torpedo_turn_rate_deg_per_sec(),
             lifespan: default_torpedo_lifespan(),
@@ -818,6 +824,8 @@ impl TorpedoesConfig {
             damage_hull: self.damage_hull,
             damage_shields: self.damage_shields,
             durability: self.durability,
+            seeker: self.seeker,
+            receiver: self.receiver,
             speed: self.speed,
             turn_rate: self.turn_rate_deg_per_sec.to_radians(),
             lifespan: self.lifespan,

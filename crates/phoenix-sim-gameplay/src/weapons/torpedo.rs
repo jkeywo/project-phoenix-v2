@@ -58,6 +58,8 @@ pub struct TorpedoConfig {
     pub damage_shields: i32,
     /// Physical interception durability carried by each launched round.
     pub durability: f32,
+    pub seeker: Option<phoenix_model::guided_guidance::SeekerProfile>,
+    pub receiver: Option<phoenix_model::guided_guidance::GuidanceReceiverProfile>,
     /// Travel speed in world units per second.
     pub speed: f32,
     /// Maximum turn rate in radians per second (homing).
@@ -101,6 +103,8 @@ impl Default for TorpedoConfig {
             damage_hull: 50,
             damage_shields: 5,
             durability: 1.0,
+            seeker: None,
+            receiver: None,
             speed: 15.0,
             turn_rate: PI / 4.0,
             lifespan: 20.0,
@@ -130,6 +134,8 @@ impl TorpedoConfig {
             shield_pierce: self.shield_pierce,
             impact,
             durability: self.durability,
+            seeker: self.seeker,
+            receiver: self.receiver,
         }
     }
 }

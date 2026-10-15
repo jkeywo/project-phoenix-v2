@@ -1,0 +1,38 @@
+entities:
+  - decision: redesign-electronic-equipment-signal-contract
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Electronic Operations Extend Actual Signal and Equipment Owners
+      summary: "Increment 17 adopts G024/S018–21/S026–27 using 14 signal geometry/evidence, 15 actual mounts/conditions and 16 channels/links/security. Jamming, spoofing, finite protection, bounded access and emissions retain normal resource, authority and individual System AI rules; no hostile actuator takeover or second transport."
+      rationale:
+        - "docs/gameplay-redesign/implementation/increment-17.md fixes implementation/exit contracts. Parallel runtime entry requires integrated 16 channel consumer and 14/15 foundations; full completion retains verified 14/15/16 exits. Preparation changes no runtime or acceptance status."
+        - "[ai] Migrate one existing environmental interference consumer equivalently, then author a real paid jammer affecting an actual 16 link and friendly coverage. Regions supplies shared geometry/falloff/path sampling, not a second environment simulation. Moving emitters use authoritative pose and actual mount bearing/work/Operation; effect-specific exposure/path composition cannot double-count identical influence."
+        - "Reference Cruiser Comms owns jamming/disruption and Science electronic protection through authored Console assignments, not role-name rules. Each actual System keeps one controller, normal admitted commands and explicit feeds. No message-capacity budget or universal electronic-warfare planner is added."
+  - decision: redesign-electronic-evidence-and-finite-protection
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Known Effects and Finite System Protection Preserve Uncertainty
+      summary: "Jamming can affect friendlies and supported links/sensing. Own emission and known interference are visible, but source attribution requires actual evidence/reports. Finite protection prioritises compatible Systems; simplified Station presets map to the same capacity, without component allocation or universal immunity."
+      rationale:
+        - "AD69–71 share shape/source/falloff and signal-specific field/terrain sampling while effect processors retain their semantics. A jammer need not be an opaque wall. 16 receipts still require real return links; central host knowledge cannot reveal remote outcomes or hidden emitter UUID/position/strength."
+        - "[ai] Paid grants bound actual influence; disabled/unfunded emitters cannot act. Current protection/degraded status uses ordinary System observations. Temporary interference/protection does not erase physical faults, portable EMP/resistance or held history; stopping preserves real costs and hardware state."
+  - decision: redesign-electronic-deception-and-emission-authority
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Deception Changes Evidence and Emissions Do Not Seize Human Controls
+      summary: "Onboard spoofing creates supported dated signals/reports through canonical observations, without moving actors or changing material truth. Bounded access/disruption never commands enemy Systems. Cloak/emitting actions affect detectability without a universal cloak-off rule; low-emission human profiles warn rather than block or require overrides."
+      rationale:
+        - "[ai] Copies retain origin/sample/receipt/confidence and do not improve evidence. Contradictions/history remain. Apparent spoofed bodies gain no actual collider, and public metadata cannot prove a synthetic decoy false. 19 owns actual engineless battery/spoofer decoys and their lifecycle."
+        - "S021 uses supported evidence, delivery, prerequisites, finite work/lifetime and counterplay, not network intrusion, enemy control-source changes or a coding puzzle. 16 captured-only decoding/keys retain their authority; waiting does not grant universal plaintext."
+        - "S026–27 emissions have real acquisition consequences under profile/resource limits. Preserve earned/predicted observations; only particular authored hardware incompatibilities force transitions. Humans can deliberately emit normally, and ordinary AI follows actual intent/context without privileged risk information."
+  - decision: redesign-electronic-authoring-and-continuation
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Electronic Equipment Is Authorable and Continuable Before Exit
+      summary: "Accepted Workshop profiles bind actual Systems/resources/rooms/mounts/feeds and expose supported finite effect/protection/access/emission controls. Canonical intent/work/evidence is saved once, current influence rebuilt before restored use, and full-candidate owner/claim/clock validation precedes writes."
+      rationale:
+        - "[ai] Actual Human/AI paid traversal, friendly interference, finite protection, asymmetric receipts, contradictory spoof evidence, bounded access and cloak/exposure/history require targeted proof. Fresh JSON continuation needs at least 360 complete captures/digests and different-LocalShip peers plus malformed no-write cases. Browser/native authoring, shipped content, performance and 2/4/6/8-human workload remain separate; initial integration is not a verified exit."

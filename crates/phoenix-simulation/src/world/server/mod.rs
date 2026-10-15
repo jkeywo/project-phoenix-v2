@@ -91,6 +91,7 @@ pub use activation::seed_ship_power_counter;
 pub use activation::world_activation_blocked;
 
 mod spawning;
+pub(crate) use spawning::apply_authored_spawn_transform;
 pub use spawning::spawn_immediate_entities_internal;
 pub(crate) use spawning::spawn_world_entities;
 

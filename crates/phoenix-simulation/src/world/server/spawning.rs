@@ -258,6 +258,7 @@ pub fn spawn_immediate_entities_internal(
             .insert(crate::entities::spawner::EntityTemplatePath::new(
                 &entity_inst.template_path,
             ));
+        apply_authored_spawn_transform(commands, entity, pos, entity_inst.transform.as_ref());
         // The authored narrative mark (issue #1338). Attached here rather than
         // in a `SpawnSection` because the payload is the WORLD's authored
         // `name` — the unique reference id triggers, comms and objectives all
@@ -289,4 +290,32 @@ pub(super) fn resolve_position(
     let pos =
         crate::world::config::resolve_entity_position_with(entity_inst, anchors, entities_by_name)?;
     Ok(Vec3::new(pos[0], pos[1], pos[2]))
+}
+
+/// Apply a non-player World's authored pose after the ordinary capability
+/// inserts. Existing physical machinery owns its yaw; static scenery keeps
+/// only its Transform. This is the same sign convention as scripted spawns.
+pub(crate) fn apply_authored_spawn_transform(
+    commands: &mut Commands,
+    entity: Entity,
+    position: Vec3,
+    authored: Option<&crate::world::config::TransformConfig>,
+) {
+    let Some(authored) = authored else { return };
+    if authored.rotation.is_some() || authored.scale.is_some() {
+        commands.entity(entity).insert(Transform {
+            translation: position,
+            rotation: authored.quat(),
+            scale: authored.scale_vec(),
+        });
+    }
+    if let Some([_, transform_yaw, _]) = authored.rotation {
+        commands
+            .entity(entity)
+            .queue(move |mut entity: bevy::ecs::world::EntityWorldMut| {
+                if let Some(mut physics) = entity.get_mut::<crate::ship::state::ShipPhysics>() {
+                    physics.yaw = -transform_yaw;
+                }
+            });
+    }
 }

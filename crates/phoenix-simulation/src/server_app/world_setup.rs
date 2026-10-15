@@ -296,6 +296,12 @@ pub(crate) fn spawn_anonymous_entities_internal(
             .insert(crate::entities::spawner::EntityTemplatePath::new(
                 &entity_inst.template_path,
             ));
+        crate::world::server::apply_authored_spawn_transform(
+            commands,
+            spawned_entity,
+            pos,
+            entity_inst.transform.as_ref(),
+        );
         upsert_world_entity(
             world,
             snapshot_from_entity_config(uuid, entity_inst.id.clone(), &config, pos),
@@ -791,6 +797,16 @@ pub(crate) fn spawn_game_start_entities(
             }
         }
 
+        // Non-player World rows use the ordinary scripted-spawn pose contract.
+        // Fleet orientation retains its separately seeded legacy convention.
+        if !is_fleet_ship {
+            crate::world::server::apply_authored_spawn_transform(
+                &mut commands,
+                spawned,
+                pos,
+                entity_inst.transform.as_ref(),
+            );
+        }
         // Apply rotation on the spawned entity's Transform
         if let Some(q) = player_spawn_rot {
             commands
@@ -1155,3 +1171,7 @@ mod game_start_identity_tests;
 #[cfg(test)]
 #[path = "world_setup_ship_spawn_tests.rs"]
 mod ship_spawn_tests;
+
+#[cfg(test)]
+#[path = "world_setup_authored_pose_tests.rs"]
+mod authored_pose_tests;

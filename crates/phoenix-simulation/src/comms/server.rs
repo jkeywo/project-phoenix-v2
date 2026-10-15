@@ -420,6 +420,7 @@ pub(crate) fn register_comms_consumer(app: &mut App) {
                 Payload::Hail,
                 Payload::SendCommsText,
                 Payload::SendCommsRequest,
+                Payload::SetCommsMediaCall,
                 Payload::MarkCommsRead,
                 Payload::RespondToMessage,
                 Payload::ClearComms,
@@ -433,6 +434,7 @@ impl Plugin for CommsWorldPlugin {
     fn build(&self, app: &mut App) {
         register_comms_consumer(app);
         crate::comms::radio::register(app);
+        crate::comms::media_control::register(app);
         crate::comms::requests::register(app);
         crate::comms::jamming::register(app);
         app.init_resource::<CommsRuntime>()

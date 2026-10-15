@@ -204,6 +204,22 @@ fn a_published_infrastructure_block_round_trips() {
 fn client_message_table() -> Vec<(ClientMessageDiscriminants, ClientMessage)> {
     vec![
         (
+            ClientMessageDiscriminants::CommsMediaStart,
+            ClientMessage::CommsMediaStart(phoenix_model::comms_media::MediaStart {
+                call_origin_id: "media-call".into(),
+            }),
+        ),
+        (
+            ClientMessageDiscriminants::CommsMediaStop,
+            ClientMessage::CommsMediaStop(phoenix_model::comms_media::MediaStop {
+                lease_generation: 1,
+            }),
+        ),
+        (
+            ClientMessageDiscriminants::CommsMediaFrame,
+            ClientMessage::CommsMediaFrame(media_packet()),
+        ),
+        (
             ClientMessageDiscriminants::SelectCrewSpectatorTarget,
             ClientMessage::SelectCrewSpectatorTarget {
                 uuid: "remaining-ship".into(),
@@ -390,6 +406,20 @@ fn client_message_table() -> Vec<(ClientMessageDiscriminants, ClientMessage)> {
 
 fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
     vec![
+        (
+            ServerMessageDiscriminants::CommsMediaState,
+            ServerMessage::CommsMediaState(phoenix_model::comms_media::MediaSessionView {
+                call_origin_id: Some("media-call".into()),
+                mode: Some(phoenix_model::comms_media::MediaMode::Audio),
+                eligible: true,
+                lease_generation: Some(1),
+                peer_lease_generation: Some(2),
+            }),
+        ),
+        (
+            ServerMessageDiscriminants::CommsMediaFrame,
+            ServerMessage::CommsMediaFrame(media_packet()),
+        ),
         (
             ServerMessageDiscriminants::CrewSpectatorState,
             ServerMessage::CrewSpectatorState(CrewSpectatorPayload {
@@ -4640,6 +4670,9 @@ fn comms_control_system_payloads_round_trip() {
         SystemControlPayload::Hail {
             target_uuid: "starbase-1".into(),
         },
+        SystemControlPayload::SetCommsMediaCall {
+            origin_id: Some("media-call".into()),
+        },
         SystemControlPayload::SendCommsRequest {
             channel: "public".into(),
             audience: phoenix_model::comms_channel::CommsAudience::Contact {
@@ -6924,5 +6957,16 @@ fn exact_owned_protection_controls_keep_correlated_codec() {
             payload,
             correlation: ActionCorrelationId::new("protection-change").unwrap(),
         });
+    }
+}
+
+fn media_packet() -> phoenix_model::comms_media::MediaPacket {
+    phoenix_model::comms_media::MediaPacket {
+        call_origin_id: "media-call".into(),
+        lease_generation: 1,
+        sequence: 1,
+        capture_ms: 0,
+        kind: phoenix_model::comms_media::MediaPacketKind::Pcm16Mono16k,
+        data: "AAAA".into(),
     }
 }

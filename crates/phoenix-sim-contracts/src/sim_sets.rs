@@ -62,6 +62,7 @@ pub struct AiTickLabel;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
 pub enum FixedStep {
     TickCommsRadio,
+    HandleCommsMediaCall,
     TickMounts,
     TickComponentEffects,
     LodAiShips,

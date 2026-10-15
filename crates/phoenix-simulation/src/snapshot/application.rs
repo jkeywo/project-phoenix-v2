@@ -1676,6 +1676,11 @@ pub(super) fn apply_entity_state_with(
     if let Some(saved) = &row.mounts {
         entity_mut.insert(saved.clone());
     }
+    if let Some(saved) = &row.comms_media {
+        entity_mut.insert(saved.clone());
+    } else {
+        entity_mut.remove::<crate::comms::media_control::ShipCommsMediaIntent>();
+    }
     if let Some(saved) = &row.identity_emitters {
         entity_mut.insert((
             saved.clone(),

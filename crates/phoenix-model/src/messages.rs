@@ -2349,6 +2349,10 @@ pub enum SystemControlPayload {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         planned_request: Option<String>,
     },
+    /// Select an actually accepted/heard call; device consent remains local.
+    SetCommsMediaCall {
+        origin_id: Option<String>,
+    },
     MarkCommsRead {
         message_id: String,
     },
@@ -2765,6 +2769,10 @@ pub enum SystemControlPayload {
 #[strum_discriminants(name(ClientMessageDiscriminants), derive(Hash, strum::EnumIter))]
 #[serde(tag = "type", content = "data")]
 pub enum ClientMessage {
+    /// Ephemeral device metadata/frames; host edges intercept before fixed ingress.
+    CommsMediaStart(crate::comms_media::MediaStart),
+    CommsMediaStop(crate::comms_media::MediaStop),
+    CommsMediaFrame(crate::comms_media::MediaPacket),
     /// Camera-only choice from an original member of a destroyed crew.
     SelectCrewSpectatorTarget {
         uuid: String,
@@ -3449,6 +3457,8 @@ pub struct CrewSpectatorShip {
 #[serde(tag = "type", content = "data")]
 #[allow(clippy::large_enum_variant)]
 pub enum ServerMessage {
+    CommsMediaState(crate::comms_media::MediaSessionView),
+    CommsMediaFrame(crate::comms_media::MediaPacket),
     CrewSpectatorState(CrewSpectatorPayload),
     Welcome {
         state: GameState,
@@ -5786,6 +5796,8 @@ pub struct RepairBlackboard {
 /// blackboard (issue #565).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct CommsBlackboard {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_capability: Option<crate::comms_media::MediaMode>,
     /// Own released tasks; recipients must already exist in this Console's contacts.
     #[serde(default)]
     pub planned_requests: Vec<crate::comms_request::PlannedCommsRequest>,

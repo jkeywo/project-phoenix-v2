@@ -115,6 +115,12 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
         });
         return report;
     }
+    if let Err((uuid, reason)) = super::comms_media::validate_roster(world, snapshot) {
+        report
+            .gaps
+            .push(RestoreGap::ResourceStateInvalid { uuid, reason });
+        return report;
+    }
     if let Err((uuid, reason)) = super::concealment::validate_roster(world, snapshot) {
         report
             .gaps
@@ -312,6 +318,16 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
         );
     }
     super::sensing_publications::restore_held(world, snapshot);
+    // Device consent never resumes. Retain the live generation high-water so
+    // queued pre-restore packets cannot match a fresh explicit start.
+    if let Some(mut leases) = world.get_resource_mut::<crate::comms::media_session::MediaLeases>() {
+        leases.invalidate_all();
+    }
+    if let Some(mut carriers) =
+        world.get_resource_mut::<crate::comms::media_control::PaidMediaCarriers>()
+    {
+        carriers.clear();
+    }
 
     report
 }

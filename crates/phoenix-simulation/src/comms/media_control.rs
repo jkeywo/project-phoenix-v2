@@ -266,3 +266,25 @@ pub(crate) fn derive_paid_carriers(
             .insert((source.uuid.clone(), receiver.uuid.clone()), call);
     }
 }
+
+/// Selection uses the ordinary admitted System transaction; radio derives routes
+/// later in Physics from the once-paid endpoints. Session leases are wall-clock
+/// transport bookkeeping and are deliberately absent from fixed state.
+pub(crate) fn register(app: &mut App) {
+    use crate::authoritative::{DeclareState, StateClass};
+    use crate::sim_sets::{FixedStep, SimSet};
+    app.declare_state::<ShipCommsMediaIntent>(StateClass::Folded, "ship-comms-media-intent")
+        .declare_state::<PaidMediaCarriers>(StateClass::Derived, "comms-media-current-carriers")
+        .declare_state::<super::media_session::MediaLeases>(
+            StateClass::Timer,
+            "comms-media-session-leases",
+        )
+        .init_resource::<PaidMediaCarriers>()
+        .init_resource::<super::media_session::MediaLeases>()
+        .add_systems(
+            FixedUpdate,
+            apply_media_call_commands
+                .in_set(SimSet::Input)
+                .in_set(FixedStep::HandleCommsMediaCall),
+        );
+}

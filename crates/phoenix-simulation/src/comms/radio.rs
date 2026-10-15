@@ -21,7 +21,10 @@ pub(crate) fn install(
     commands: &mut EntityCommands,
 ) {
     if let Some(radio) = config.comms.as_ref().and_then(|comms| comms.radio.as_ref()) {
-        commands.insert(RadioProfile(radio.clone()));
+        commands.insert((
+            RadioProfile(radio.clone()),
+            super::media_control::ShipCommsMediaIntent::default(),
+        ));
     }
 }
 

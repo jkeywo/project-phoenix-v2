@@ -124,6 +124,7 @@ pub(crate) fn publish_comms_blackboard(
     ) in &mut ships
     {
         let mut bb = CommsBlackboard::default();
+        bb.media_capability = radio.and_then(|profile| profile.0.media);
         bb.receiver_interference = if modifiers.is_some_and(|modifiers| {
             modifiers.has_flag(&crate::core::messages::FlagKind::CommsJammed)
         }) {

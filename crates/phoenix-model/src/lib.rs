@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 pub mod comms_channel;
 pub mod comms_history;
+pub mod comms_media;
 pub mod comms_request;
 pub mod console;
 pub mod debug_surface;

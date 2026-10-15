@@ -80,7 +80,10 @@ fn dispatch(
         // the SessionManager side-map by `handle_report_station_eligibility_system`,
         // not through a pure result-producing handler — so like the other
         // runtime variants it is a no-op on this dispatch path.
-        ClientMessage::ConsoleVisited { .. }
+        ClientMessage::CommsMediaStart(_)
+        | ClientMessage::CommsMediaStop(_)
+        | ClientMessage::CommsMediaFrame(_)
+        | ClientMessage::ConsoleVisited { .. }
         | ClientMessage::SetConsoleView { .. }
         | ClientMessage::ControlSystem { .. }
         | ClientMessage::SelectCrewSpectatorTarget { .. }

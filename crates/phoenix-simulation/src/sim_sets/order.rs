@@ -99,6 +99,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             TickCommsRequestReading,
             OperateCommsResponseAi,
             HandleRespondToMessage,
+            HandleCommsMediaCall,
             OperateTractorAi,
             OperateDockAi,
             OperateUmbilicalAi,

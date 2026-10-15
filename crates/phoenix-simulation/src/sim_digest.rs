@@ -485,6 +485,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("ship-signal-protection-intent", fold_protection_namespace),
     ("ship-identity-emitter-intent", fold_identity_namespace),
     ("ship-concealment-emitter-intent", fold_concealment_namespace),
+    ("ship-comms-media-intent", fold_media_intent_namespace),
     ("broad-tracks", fold_broad_tracks_namespace),
     ("navigation-sharing", fold_navigation_sharing_namespace),
     ("navigation-request", fold_navigation_request_namespace),
@@ -3083,6 +3084,16 @@ fn fold_craft_namespace(world: &World, acc: u64) -> u64 {
         acc,
         "bay-jobs",
         |state: &crate::entities::craft::ShipBayJobs| Some(state.clone()),
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+
+fn fold_media_intent_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "ship-comms-media-intent",
+        |owner: &crate::comms::media_control::ShipCommsMediaIntent| Some(owner.clone()),
         |acc, state| fold_serde(acc, &state),
     )
 }

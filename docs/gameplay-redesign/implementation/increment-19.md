@@ -360,3 +360,9 @@ Visibility is neither canonical state nor a Simulation dependency. Headless
 acceptance verifies actual body/backend inactivity; a Presentation owner witness
 verifies visual projection separately. Neither test alone claims a physical
 screen or GPU acceptance pass.
+
+The existing observer privacy gate and Carried custody contribute hide reasons to
+one Presentation visibility owner. Deployed is never an instruction to show an
+actor. Remove a hide only when all current reasons clear, restoring that owner's
+recorded prior Visibility. The same owner runs without an observer gate in
+serverless previews; it never changes simulation or saved custody.

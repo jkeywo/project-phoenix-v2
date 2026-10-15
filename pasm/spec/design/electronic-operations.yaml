@@ -57,4 +57,13 @@ entities:
       summary: "Jammer AI/admitted channels precede its actual Input work boundary, then the same range owner refreshes before Hail when real jammer equipment exists. Later Physics radio/returns and Broadcast notices consume that same paid tick; Physics traversal affects the next emission."
       rationale:
         - "[ai] Preserve existing fictional Hail/Respond Input and normal Broadcast range-refresh owners. Add only an explicitly named Input invocation of the same update_comms_range_flags after paid jammer work and before Hail, conditional on actual jammer presence. No alternate range map, controller or repeated channel application."
-        - "Actual reserve pays before later same-step distribution. Missing current-tick processing fails links closed rather than reusing bootstrap/prior influence. Current actual shared mount bearing owns coverage; later paid traversal changes next-step coverage. Restore supplies no derived work credit or receiver census."
+        - "[ai] Actual reserve pays before later same-step distribution. Actual late-spawn/restore boundary: missing current-tick work contributes zero physical exposure, never a free global denial or prior/bootstrap influence; other actual paid sources remain effective. Receiver notice may remain unknown until processing, independently of the physical factor. Current actual shared mount bearing owns coverage; later paid traversal changes next-step coverage. Restore supplies no derived work credit or receiver census."
+
+  - decision: redesign-comms-jammer-explicit-request
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Jamming Selection Uses an Explicit Comms Request
+      summary: "Jam{target} extends existing typed mission/doctrine requests with Comms relevance only. The same individual jammer tree reads its explicitly bound request feed and selects an available permitted full-XYZ contact only when retained target intent is empty."
+      rationale:
+        - "[ai] Adopted before directive/runtime edits. Reuse existing directive codec/effect/editor and per-System original reading frontier, with a real authored reference request. Unknown target observations, absent Viewscreen feed or Tactical-primary-only context cannot supply a selection; no true pose/name lookup or separate planner is introduced. Explicit manual target remains independent."

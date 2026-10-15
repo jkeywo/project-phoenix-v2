@@ -37,7 +37,7 @@ entities:
       confidence: confirmed
       origin: ai
       title: Current Paid Physical Jammer Emission
-      summary: "Derived current-tick actual emitter pose/bearing/profile/grant, recomputed only by ordinary paid Input work. No reusable bootstrap credit, receiver census or saved effect store; missing current boundary fails link use closed."
+      summary: "Derived current-tick actual emitter pose/bearing/profile/grant, recomputed only by ordinary paid Input work. No reusable bootstrap credit, receiver census or saved effect store; unprocessed sources contribute zero physical exposure while current paid sources remain effective; receiver knowledge may remain unknown."
     architecture:
       classification: derived
       owner: comms-electronic-equipment

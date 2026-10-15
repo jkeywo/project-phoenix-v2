@@ -118,8 +118,12 @@ existing reserve before that step's later distribution. With actual jammer
 hardware present, the same range-flags owner refreshes additionally in a named
 Input step after that paid boundary and before Hail; its normal Broadcast
 refresh remains. Actual Physics radio/returns and Broadcast notices consume the
-same current-tick result. Missing current-tick processing fails links closed,
-never reuses a previous/bootstrap emission, and creates no alternate range map.
+same current-tick result. [ai] The actual late-spawn boundary refines unavailable
+emission processing: a source without current paid work contributes zero physical
+exposure, never a free global denial and never reuse of a prior/bootstrap emission.
+Other current paid sources retain their effects. Receiver notices may remain
+unknown until processing completes; knowledge incompleteness does not itself
+create a physical effect. This creates no alternate range map.
 
 Canonical generic channels, shared mount state, actual power/conditions and
 original held observations remain at their existing owners in capture/restore
@@ -133,7 +137,14 @@ existing Workshop composition/history/validation/Preview/Test and ordinary
 correlated Console controls in the same slice. The same individual tree may
 maintain an independent retained target or select a supported explicit request
 through its permitted feed and existing reading gate; it cannot borrow Tactical
-primary selection implicitly.
+primary selection implicitly. The closed `Jam {target}` directive extends the
+existing mission/doctrine vocabulary with Comms affinity only. The same owner
+reads it through an explicitly bound Viewscreen feed, spends the existing
+per-System text-reading interval and selects a matching permitted full-XYZ
+contact only while its retained target is empty. No raw target-name World lookup,
+implicit Tactical primary, new goal controller or manual-target replacement is
+introduced. Reference data includes a real applicable request; vacant AI must
+actually read, select and operate, and unbound-feed/primary-only cases refuse.
 
 Required first-slice evidence is equivalent natural interference, actual paid
 hostile and friendly links, self exposure, finite traversal, explicit stop and

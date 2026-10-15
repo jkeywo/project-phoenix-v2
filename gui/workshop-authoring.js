@@ -1,4 +1,5 @@
 import { mountWorkshopSensing } from './workshop-sensing-panel.js';
+import { mountWorkshopFields } from './workshop-fields-panel.js';
 import { mountWorkshopFitting } from './workshop-fitting-panel.js';
 import { mountWorkshopPorts } from './workshop-ports-panel.js';
 import { mountWorkshopRecovery } from './workshop-recovery-panel.js';
@@ -213,6 +214,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let resourcePanel = null;
   let logisticsPanel = null;
   let productionPanel = null;
+  let fieldsPanel = null;
   let fittingPanel = null;
   let sensingPanel = null;
   let resourceRecoveryPanel = null;
@@ -307,6 +309,9 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   sensingPanel = mountWorkshopSensing({ root, attach: false, provider, runtime, draft: () => draft,
     ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  fieldsPanel = mountWorkshopFields({ root, attach: false, provider, runtime, draft: () => draft,
+    ...operations.panel(),
+    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   fittingPanel = mountWorkshopFitting({ root, attach: false, provider, runtime, draft: () => draft,
     ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
@@ -344,7 +349,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     dependencies: () => catalogueDependencies, t: translate,
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
   const compositionTools = el('div', null, { class: 'workshop-composition-tools' });
-  compositionTools.append(compositionPanel.node, spatialPanel.node, sensingPanel.node, shipAuthoringPanel.node, resourcePanel.node, logisticsPanel.node, productionPanel.node, fittingPanel.node, resourceRecoveryPanel.node, portPanel.node, weaponPanel.node, energyPanel.node, shieldPanel.node, interiorPanel.node, damagePanel.node, slotAuthoringPanel.node);
+  compositionTools.append(fieldsPanel.node, compositionPanel.node, spatialPanel.node, sensingPanel.node, shipAuthoringPanel.node, resourcePanel.node, logisticsPanel.node, productionPanel.node, fittingPanel.node, resourceRecoveryPanel.node, portPanel.node, weaponPanel.node, energyPanel.node, shieldPanel.node, interiorPanel.node, damagePanel.node, slotAuthoringPanel.node);
   layoutMount = mountWorkshopLayout({
     root, surface: layout,
     panels: { files: filesPanel, source: sourcePanel, inspector, add: addPanel, recovery: recoveryPanel,
@@ -515,6 +520,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     resourcePanel?.refresh({ hidden: testing });
     logisticsPanel?.refresh({ hidden: testing });
     productionPanel?.refresh({ hidden: testing });
+    fieldsPanel?.refresh({ hidden: testing });
     fittingPanel?.refresh({ hidden: testing });
     sensingPanel?.refresh({ hidden: testing });
     resourceRecoveryPanel?.refresh({ hidden: testing });
@@ -1176,6 +1182,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     resourcePanel?.dispose();
     logisticsPanel?.dispose();
     productionPanel?.dispose();
+    fieldsPanel?.dispose();
     fittingPanel?.dispose();
     sensingPanel?.dispose();
     resourceRecoveryPanel?.dispose();

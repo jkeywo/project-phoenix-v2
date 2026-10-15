@@ -5644,3 +5644,41 @@ workshop.sensing.room,Workshop sensing authoring,Physical compartment,Physischer
 workshop.sensing.refused,Workshop sensing authoring,Sensing change refused: {reason},Sensoraenderung abgelehnt: {reason},Sensing change refused: {reason},machine
 sensing.scan.detailed.label,Focused scanner fidelity,Detailed,Detailliert,Detailed,machine
 sensing.scan.coarse.label,Focused scanner fidelity,Coarse,Grob,Coarse,machine
+workshop.fields.title,Workshop spatial fields,Fields and signal materials,Felder und Signalmaterialien,Fields and signal materials,machine
+workshop.fields.hint,Workshop spatial fields,"Edit physical bounds, local falloff and signal paths. Absorption applies along the path; opacity is specific to the selected signal. Evolution uses simulation time.","Bearbeite räumliche Grenzen, lokalen Abfall und Signalwege. Absorption wirkt entlang des Weges; Undurchlässigkeit gilt für das jeweilige Signal. Die Entwicklung nutzt Simulationszeit.","Edit physical bounds, local falloff and signal paths. Absorption applies along the path; opacity is specific to the selected signal. Evolution uses simulation time.",machine
+workshop.fields.template,Workshop spatial fields,Entity template,Entitätsvorlage,Entity template,machine
+workshop.fields.materialise,Workshop spatial fields,Materialise inherited environment,Geerbte Umgebung lokal übernehmen,Materialise inherited environment,machine
+workshop.fields.shape,Workshop spatial fields,Physical shape,Räumliche Form,Physical shape,machine
+workshop.fields.none,Workshop spatial fields,None,Keine,None,machine
+workshop.fields.sphere,Workshop spatial fields,Sphere,Kugel,Sphere,machine
+workshop.fields.box,Workshop spatial fields,Box,Quader,Box,machine
+workshop.fields.torus,Workshop spatial fields,Planar annulus,Ebener Ring,Planar annulus,machine
+workshop.fields.radius,Workshop spatial fields,Radius,Radius,Radius,machine
+workshop.fields.half-x,Workshop spatial fields,Half width X,Halbe Breite X,Half width X,machine
+workshop.fields.half-y,Workshop spatial fields,Half height Y,Halbe Höhe Y,Half height Y,machine
+workshop.fields.half-z,Workshop spatial fields,Half depth Z,Halbe Tiefe Z,Half depth Z,machine
+workshop.fields.yaw,Workshop spatial fields,Shape yaw (radians),Formdrehung (Radiant),Shape yaw (radians),machine
+workshop.fields.inner-radius,Workshop spatial fields,Inner radius,Innenradius,Inner radius,machine
+workshop.fields.outer-radius,Workshop spatial fields,Outer radius,Außenradius,Outer radius,machine
+workshop.fields.field,Workshop spatial fields,Enable authored field,Feld definieren,Enable authored field,machine
+workshop.fields.falloff,Workshop spatial fields,Falloff,Abfall,Falloff,machine
+workshop.fields.step,Workshop spatial fields,Step,Stufe,Step,machine
+workshop.fields.linear,Workshop spatial fields,Linear,Linear,Linear,machine
+workshop.fields.smooth,Workshop spatial fields,Smooth,Weich,Smooth,machine
+workshop.fields.strength,Workshop spatial fields,Initial strength,Anfangsstärke,Initial strength,machine
+workshop.fields.sensor-absorption,Workshop spatial fields,Sensor absorption per metre,Sensorabsorption je Meter,Sensor absorption per metre,machine
+workshop.fields.comms-absorption,Workshop spatial fields,Comms absorption per metre,Funkabsorption je Meter,Comms absorption per metre,machine
+workshop.fields.evolution,Workshop spatial fields,Enable bounded evolution,Begrenzte Entwicklung aktivieren,Enable bounded evolution,machine
+workshop.fields.duration,Workshop spatial fields,Evolution duration (seconds),Entwicklungsdauer (Sekunden),Evolution duration (seconds),machine
+workshop.fields.translation-x,Workshop spatial fields,Total translation X,Gesamtverschiebung X,Total translation X,machine
+workshop.fields.translation-y,Workshop spatial fields,Total translation Y,Gesamtverschiebung Y,Total translation Y,machine
+workshop.fields.translation-z,Workshop spatial fields,Total translation Z,Gesamtverschiebung Z,Total translation Z,machine
+workshop.fields.final-scale,Workshop spatial fields,Final shape scale,Endgültiger Größenfaktor,Final shape scale,machine
+workshop.fields.final-strength,Workshop spatial fields,Final strength,Endstärke,Final strength,machine
+workshop.fields.material,Workshop spatial fields,Enable substantial signal material,Signalmaterial definieren,Enable substantial signal material,machine
+workshop.fields.material-sensor-absorption,Workshop spatial fields,Material sensor absorption per metre,Sensorabsorption des Materials je Meter,Material sensor absorption per metre,machine
+workshop.fields.material-comms-absorption,Workshop spatial fields,Material Comms absorption per metre,Funkabsorption des Materials je Meter,Material Comms absorption per metre,machine
+workshop.fields.sensor-opaque,Workshop spatial fields,Opaque to sensors,Für Sensoren undurchlässig,Opaque to sensors,machine
+workshop.fields.comms-opaque,Workshop spatial fields,Opaque to Comms,Für Funk undurchlässig,Opaque to Comms,machine
+workshop.fields.apply,Workshop spatial fields,Apply environment,Umgebung übernehmen,Apply environment,machine
+workshop.fields.refused,Workshop spatial fields,Environment refused: {reason},Umgebung abgelehnt: {reason},Environment refused: {reason},machine

@@ -1,0 +1,10 @@
+# [ai] Explicit substantial terrain variant; ordinary base bodies keep legacy paths.
+includes = ["moon_luna.toml"]
+[shape]
+type = "sphere"
+radius = 9
+[signal_material]
+sensor_absorption_per_unit = 0
+comms_absorption_per_unit = 0
+sensor_opaque = true
+comms_opaque = true

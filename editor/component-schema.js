@@ -435,6 +435,24 @@ export const COMPONENT_SCHEMA = {
     ],
   },
 
+  field: {
+    section: 'field', label: 'Spatial Field', fields: [
+      { key: 'falloff', type: 'string', enum: ['step', 'linear', 'smooth'] },
+      { key: 'strength', type: 'number', default: 1 },
+      { key: 'sensor_absorption_per_unit', type: 'number', default: 0 },
+      { key: 'comms_absorption_per_unit', type: 'number', default: 0 },
+      { key: 'evolution', type: 'object', optional: true },
+    ],
+  },
+  signal_material: {
+    section: 'signal_material', label: 'Signal Material', fields: [
+      { key: 'sensor_absorption_per_unit', type: 'number', default: 0 },
+      { key: 'comms_absorption_per_unit', type: 'number', default: 0 },
+      { key: 'sensor_opaque', type: 'boolean', default: false },
+      { key: 'comms_opaque', type: 'boolean', default: false },
+    ],
+  },
+
   effects: {
     section: 'effects',
     label: 'Region Effects',
@@ -497,6 +515,8 @@ export const ENTITY_CONFIG_SECTIONS = [
   'target',
   'asteroid_field',
   'shape',
+  'field',
+  'signal_material',
   'effects',
   'behaviour',
   'stations',

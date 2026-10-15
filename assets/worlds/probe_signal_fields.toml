@@ -1,0 +1,53 @@
+# Quiet field/terrain probe. No objectives, deadlines or existing mission edits.
+# Both ends of the straight link are outside the cloud. An adequate ordinary
+# Science scan of field-control invokes the typed World effect, starting a
+# bounded analytic shift/fade. This is a diagnostic causal action, not scan loot.
+[global]
+seed = 1414
+ai_helm_tick_hz = 30
+[player_spawn]
+position = [-50, 0, 0]
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+spawn_on = "game_start"
+transform = { position = [-50, 0, 0] }
+[[entity]]
+template_path = "assets/entities/recovery_cargo_pod.toml"
+id = "field-control"
+transform = { position = [-45, 0, 10] }
+[[entity]]
+template_path = "assets/entities/region_signal_cloud.toml"
+id = "moving-cloud"
+transform = { position = [0, 0, 0] }
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+id = "cloud-contact"
+transform = { position = [50, 0, 0] }
+[[entity]]
+template_path = "assets/entities/signal_planet_earth.toml"
+id = "opaque-planet"
+transform = { position = [0, 0, 80] }
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+id = "covered-contact"
+transform = { position = [50, 0, 160] }
+[[entity]]
+template_path = "assets/entities/signal_moon_luna.toml"
+id = "opaque-moon"
+transform = { position = [0, 0, -80] }
+[[entity]]
+template_path = "assets/entities/signal_asteroid_huge.toml"
+id = "clearable-rock"
+transform = { position = [0, 0, -120] }
+[script]
+setup = """
+on_flag_set("scan.field-control.taken", "shift_field");
+fn shift_field(ctx) {
+    ctx.effects.replace_region_field("moving-cloud", #{
+        falloff: "smooth", strength: 1.0,
+        sensor_absorption_per_unit: 4.0, comms_absorption_per_unit: 4.0,
+        evolution: #{ duration_secs: 10.0, translation: [0.0, 0.0, 40.0], final_scale: 1.0, final_strength: 0.0 }
+    });
+}
+"""

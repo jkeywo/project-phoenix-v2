@@ -1,0 +1,19 @@
+# [ai] Increment14 diagnostic field: explicit path effects, no inherited endpoint
+# radar dampening or CommsJam, so a crossing path is attenuated exactly once.
+tags = ["region", "nebula"]
+[shape]
+type = "sphere"
+radius = 12
+[field]
+falloff = "smooth"
+strength = 1
+sensor_absorption_per_unit = 4
+comms_absorption_per_unit = 4
+[effects.slow_zone]
+thrust_modifier = -0.25
+yaw_rate_modifier = -0.25
+[effects.nebula_fog]
+color = [0.25, 0.45, 0.7]
+density = 0.006
+[radar_appearance]
+region_colour = [0.25, 0.45, 0.7]

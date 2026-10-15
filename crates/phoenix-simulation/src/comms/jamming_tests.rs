@@ -108,8 +108,8 @@ fn actual_paid_mounted_emission_has_self_and_receiver_exposure_once_without_repl
     let reserve = energy(&world, source);
     assert_eq!(
         factor(&mut world, Vec3::ZERO),
-        0.0,
-        "unprocessed equipment cannot reuse bootstrap influence"
+        1.0,
+        "unprocessed equipment cannot create free bootstrap influence"
     );
     world.run_system_once(tick).unwrap();
     assert!(energy(&world, source) < reserve);
@@ -134,7 +134,7 @@ fn actual_paid_mounted_emission_has_self_and_receiver_exposure_once_without_repl
     world.resource_mut::<crate::sim_tick::SimTick>().0 += 1;
     assert_eq!(
         factor(&mut world, Vec3::ZERO),
-        0.0,
+        1.0,
         "prior paid interval cannot be reused"
     );
     command(
@@ -368,5 +368,68 @@ fn shared_actual_signal_gate_scales_each_endpoint_once_and_recovers_after_stop()
     assert!(
         reaches(&mut world, 101.0),
         "same signal owner recovers after an actual stop boundary"
+    );
+}
+
+#[test]
+fn actual_late_spawn_never_creates_free_global_denial_or_erases_current_paid_peers() {
+    let (mut world, source, _, contact) = fixture();
+    prepare(&mut world, source, &contact);
+    world.run_system_once(tick).unwrap();
+    assert_eq!(factor(&mut world, Vec3::ZERO), 0.2);
+    // Same accepted spawn path used by a World action after the Input boundary.
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/jamming_cruiser.toml",
+    )
+    .unwrap();
+    let late = crate::entities::spawner::spawn_entity(
+        &mut world.commands(),
+        &config,
+        Vec3::new(10000.0, 0.0, 0.0),
+        "late-disabled-jammer".into(),
+        None,
+    );
+    world.flush();
+    let before = energy(&world, late);
+    assert_eq!(
+        factor(&mut world, Vec3::ZERO),
+        0.2,
+        "late unpaid gear cannot erase actual paid peer influence"
+    );
+    let notice = |world: &mut World| {
+        world
+            .run_system_once(|paths: crate::regions::signal_path::RegionSignalQuery| {
+                paths.comms_receiver_interference(Vec3::ZERO)
+            })
+            .unwrap()
+    };
+    assert_eq!(
+        notice(&mut world),
+        Some(true),
+        "actual current effect is still locally knowable"
+    );
+    world.despawn(source);
+    assert_eq!(
+        factor(&mut world, Vec3::ZERO),
+        1.0,
+        "only late disabled equipment remains, so no physical effect"
+    );
+    assert_eq!(
+        notice(&mut world),
+        None,
+        "unprocessed receiver knowledge stays unknown"
+    );
+    assert_eq!(
+        energy(&world, late),
+        before,
+        "receiver query never buys work"
+    );
+    world.run_system_once(tick).unwrap();
+    assert_eq!(factor(&mut world, Vec3::ZERO), 1.0);
+    assert_eq!(notice(&mut world), Some(false));
+    assert_eq!(
+        energy(&world, late),
+        before,
+        "disabled actual owner still cannot emit"
     );
 }

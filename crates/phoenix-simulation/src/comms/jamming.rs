@@ -69,7 +69,8 @@ impl ShipJamming {
             phoenix_sim_gameplay::weapons::illumination::validate_channels(
                 channels,
                 &system.channels,
-            )?;
+            )
+            .map_err(|reason| format!("jamming intent: {reason}"))?;
         }
         Ok(())
     }
@@ -323,12 +324,16 @@ pub(crate) fn receiver_factor(
     tick: Option<u64>,
     paths: &crate::regions::signal_path::RegionSignalQuery,
     receiver: Vec3,
-) -> Option<f32> {
+) -> (f32, bool) {
     sources.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
     let mut total = 0.0_f64;
+    let mut complete = true;
     for (_, readout) in sources {
         if tick.is_none_or(|tick| readout.processed_tick != Some(tick)) {
-            return None;
+            // No paid current work is no physical contribution. Incomplete
+            // knowledge cannot create global interference or cancel paid peers.
+            complete = false;
+            continue;
         }
         for emission in readout.entries.values() {
             let path = paths.transmission(
@@ -346,7 +351,10 @@ pub(crate) fn receiver_factor(
             );
         }
     }
-    Some(phoenix_sim_gameplay::regions::interference::endpoint_factor(false, total))
+    (
+        phoenix_sim_gameplay::regions::interference::endpoint_factor(false, total),
+        complete,
+    )
 }
 pub(crate) fn has_emitters(owners: Query<&ShipJamming>) -> bool {
     !owners.is_empty()

@@ -1,4 +1,5 @@
 use super::*;
+use bevy::ecs::system::RunSystemOnce;
 use phoenix_sim_gameplay::ship::composition::CommandChannelValue;
 fn fixture() -> (World, Entity, PhoenixSnapshot) {
     let config = crate::entities::include_resolve::load_entity_config(
@@ -66,6 +67,30 @@ fn actual_installed_channels_json_and_single_row_apply_keep_one_owner_without_re
             .unwrap()
             .is_unprocessed(),
         "restore does not invent an emission or receiver acknowledgement"
+    );
+    let factor = world
+        .run_system_once(|paths: crate::regions::signal_path::RegionSignalQuery| {
+            paths.comms_receiver_factor(Vec3::ZERO)
+        })
+        .unwrap();
+    assert_eq!(
+        factor, 1.0,
+        "unprocessed restored intent cannot itself create interference"
+    );
+    let energy = world
+        .get::<crate::ship::power::ShipPowerSystem>(entity)
+        .unwrap()
+        .0
+        .capture_continuation();
+    world.run_system_once(crate::comms::jamming::tick).unwrap();
+    assert_eq!(
+        world
+            .get::<crate::ship::power::ShipPowerSystem>(entity)
+            .unwrap()
+            .0
+            .capture_continuation(),
+        energy,
+        "old retained handle cannot buy work without actual current permitted evidence"
     );
 }
 #[test]

@@ -71,3 +71,16 @@ entities:
         - "[ai] Fit/minor/severe conditions live only in PersonnelState. Initial condition may be authored setup; this does not claim injury propagation, away casualties or death delivered. Unfit officers cannot provide expertise or be newly posted. Completed actual treatment changes that same condition to fit once. No automatic deterioration or reroll."
         - "[ai] The accepted profile binds actual installed service machinery, finite work terms and medication through the established resource service/stock owner. Stock is consumed once when treatment actually begins, with working configured port replenishment in the optional reference. Waiting for medication or power is visible. No free stock, duplicate reservations or refund after committed use."
         - "[ai] Ordinary Human and Repair AI commands share existing admission and permitted Personnel knowledge; selected plot surgery may use existing human-seeking Console policy rather than a universal manual minigame. Accepted Workshop edit/history/validation/Preview/Test and whole-candidate condition/job/site/stock joins are part of the slice. Native continuation and human acceptance remain explicit integration work."
+
+  - decision: redesign-personnel-retained-single-roster
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: One Retained Personnel Roster Outlives Its Origin Ship
+      summary: "Before passengers, structurally move canonical PersonnelState from entity components into one Gameplay PersonnelRoster resource keyed by stable origin actor UUID and officer ID. Retain the finite accepted definition and source provenance; existing posting, expertise and care consumers join that same owner with equivalent live behaviour."
+      rationale:
+        - "[ai] Remove per-entity canonical maps completely, without a dual-write adapter or second people pool. CompiledPersonnel remains an accepted derived entity binding. The global roster is not a global crew planner or shared AI knowledge: only the explicitly permitted local Console projection reaches players and per-System AI."
+        - "[ai] Ordinary entity destruction, removal, events and objective semantics stay intact. Actual on-board people receive an explicit terminal loss record on removal; future living off-ship custody survives origin loss through this same owner. No protected wreck, substitute actor, replacement people, teleport or occupancy immunity. Restore suppression does not manufacture casualties while replacing bootstrap entities."
+        - "[ai] Capture, digest and restore the roster once globally, including accepted immutable definition/provenance and terminal history. Before writes, validate exact finite populations, active origin/profile and actual Repair job/cursor joins, removed-origin terminal closure, source resolution, clocks and identity uniqueness. Missing required global state and unsupported old per-entity payloads are explicit refusals."
+        - "[ai] Passenger berths and transfer jobs follow only after this structural migration is verified. This slice creates no unconsumed passenger location or new transfer controller. Physical browser/native and full increment20 acceptance remain separate from owner/source evidence."

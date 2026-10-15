@@ -366,3 +366,34 @@ patient. Exact LocalShip UUID matching governs private inspection/forgeries.
 The finite roster guard includes a forged terminal extra-team no-write regression
 before accepted-home indexing. Native execution remains solely the integrator's;
 authored assertions and source review are not passing gameplay evidence.
+
+## Adopted structural prerequisite: retained personnel owner
+
+[ai] Move the existing canonical per-entity PersonnelState maps into one Gameplay
+PersonnelRoster resource. Stable identity is the original actor UUID plus the
+accepted local officer ID. Each origin retains its finite accepted definition and
+source provenance. CompiledPersonnel remains a derived actor binding; actual
+posting, repair expertise, care and local read-model consumers join the one roster.
+No old canonical map, dual-write adapter, extra crew pool or global crew planner
+survives the migration. Authored profiles and Workshop editing remain unchanged.
+
+[ai] Actual actor removal keeps ordinary destruction events, objective results,
+GM semantics and body removal. On-board officers receive explicit terminal loss
+records in the roster. A later passenger consumer can retain living off-ship
+custody without retaining an operational origin ship or inventing another actor.
+Restore suppression prevents bootstrap replacement from generating new casualties.
+No passenger location, transfer scheduler or berth counter is added in this slice.
+
+[ai] Snapshot and digest the roster once globally. Validate complete finite
+populations, immutable accepted source definitions, active actor and Repair
+job/cursor references, removed-origin terminal closure, unique origin identities
+and nonfuture clocks before writes. Resolve retained runtime source recipes against
+accepted content; compare authored/live definitions with their accepted bindings.
+Missing required roster state and old per-entity payloads are refused explicitly.
+Single-row machinery restore may validate against the live roster but cannot rewind
+global personnel custody. Console and individual System AI publication remains the
+explicit permitted local subset; the roster resource confers no knowledge access.
+
+Structural owner, loss, malformed no-write and fresh hosted continuation evidence
+are required before the owned-carrier passenger loop starts. Root owns compatibility
+versions and native integration. This prerequisite does not close increment20.

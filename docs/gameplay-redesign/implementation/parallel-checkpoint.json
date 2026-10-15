@@ -2,8 +2,8 @@
   "date": "2026-10-15",
   "status": "partial",
   "current_summary": {
-    "source": "aa857479",
-    "per_increment_report": "README.md#per-increment-progress--15-october-2026",
+    "source": "e225d662",
+    "per_increment_report": "README.md#per-increment-progress--16-october-2026",
     "closed_increments": [
       0
     ],
@@ -19,9 +19,10 @@
     "remaining_scope": "All physical-device and human acceptance; integrated exits for 8–24; unfinished runtime and authored modes listed per increment in README.md.",
     "integrated_since_last_host_batch": "Sector transit and Workshop routes; complete fixed-interval work receipts; shared signatures and paid concealment; bounded optional maintenance execution; physical carried-personnel escort with exact destination-request admission; measured formation Navigation. Full-host proof sources are integrated, not yet executed.",
     "content_authoring_retry": {
+      "source": "ca4c4b26; no subsequent content fixture change",
       "command": "cargo test -p phoenix-content-preparation --lib --no-default-features -- authoring::composition::tests",
-      "result": "15 passed, 1 failed. New route consumers pass. Catalogue fixture correction integrated as a75687f5; rerun is included in the current four-owner batch.",
-      "log": ".phoenix/resumed-route-append-owner-retry.log"
+      "result": "17 passed,0 failed; actual accepted physical catalogue hull recipe.",
+      "log": ".phoenix/resumed-complete-hull-content-native-retry.log"
     },
     "simulation_owner_retry": {
       "source": "4b278710",
@@ -96,7 +97,37 @@
         "result": "Scripted Comms filters: 26 passed, 3 failed. Two bare fixture mesh-crew owner omissions and one intentional debug script panic remain under correction.",
         "log": ".phoenix/resumed-comms-cloak-asset-only-native-retry.log"
       }
-    ]
+    ],
+    "latest_native": {
+      "source": "f1e339fe",
+      "command": "cargo test -p phoenix-simulation -p phoenix-sim-gameplay -p phoenix-sim-world --lib --no-default-features --no-fail-fast -- concealment power identity personnel planning formation signatures comms::scripted sim_digest::tests security::server science::passive world::dispatch world::layers snapshot::transit console::helm:: console::navigation::server::knowledge_tests console::comms::server::tests::opportunity_responses console::repair::",
+      "result": "Gameplay109 passed, World25 passed; Simulation637 passed,23 failed. Broader selection than the preceding four-owner run. Prior Formation, cloak, terminal personnel and exact digest regressions now pass.",
+      "log": ".phoenix/resumed-three-owner-corrected-native.log",
+      "corrections": "00d3d9dd full Power machinery capture schema;84ef2f91 stored craft capture schema;ebf566a4 dynamic unresolved Comms callback fixture;651d85bb actual energy/AI input/integrator fixtures;e225d662 funded retained Repair adapter fixtures. Reviewed corrections retain gameplay/restore/payment assertions."
+    },
+    "funded_fixture_retry": {
+      "source": "e225d662",
+      "status": "running; no result claimed",
+      "log": ".phoenix/resumed-funded-fixtures-native-retry.log"
+    },
+    "prepared_media": {
+      "branch": "codex/comms-media-integration",
+      "source": "30a49c77",
+      "status": "prepared isolated integration, not on main; native and device acceptance unrun",
+      "source_review": "Worker canonical/transport, root physical joins, independent native bridge reviews passed. Conflict resolutions retain both concealment and media guards.",
+      "client": "15 affected files initially261 passed/2 stale Navigation projection expectations failed; final focused23-test Comms Console retry passes after exact fields were updated. All263 selected tests have passing evidence after retries; initial batch was not green.",
+      "logs": [
+        ".phoenix/resumed-prepared-media-client.log",
+        ".phoenix/resumed-prepared-media-navigation-retry2.log",
+        ".phoenix/resumed-prepared-media-client-build.log"
+      ],
+      "static": "Strict strings6404 with no findings; dependency layers pass; pure JS client build stamps36/phoenix-base/4.",
+      "compatibility": {
+        "protocol": 36,
+        "snapshot": 79,
+        "rules": "0.61"
+      }
+    }
   },
   "scope": "Integrated communication, movement, illumination, local personnel and equipment-bound facility checkpoints; no increment exit",
   "source": "873ca2d9 plus authored illumination power-group correction ba716438; later fixture corrections are not part of this executable",

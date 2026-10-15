@@ -27,7 +27,6 @@ fn power_host() -> App {
         ),
     ));
     app.init_resource::<crate::world::server::WorldContentRuntime>()
-        .add_plugins(crate::infrastructure::server::InfrastructurePlugin)
         .insert_sim_rng(crate::sim_rng::SimRng::new(
             715,
             crate::sim_rng::SeedSource::World,

@@ -2648,7 +2648,17 @@ fn authored_power_trees_drive_actual_finite_hardware_without_legacy_policy() {
                 programs.0.get(&reactor),
                 &BTreeMap::new(),
                 &readings,
-                &BTreeMap::from([("reactor-generation".into(), true)]),
+                &BTreeMap::from([
+                    (
+                        "reactor-generation".into(),
+                        physical.network().generation_enabled,
+                    ),
+                    (
+                        "priority-allocation".into(),
+                        physical.network().mode
+                            == phoenix_model::energy::EnergyAllocationMode::Minimal,
+                    ),
+                ]),
                 frames.0.get_mut(&reactor).unwrap(),
                 tick,
             )

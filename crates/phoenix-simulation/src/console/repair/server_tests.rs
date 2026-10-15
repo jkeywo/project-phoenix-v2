@@ -18,6 +18,35 @@ fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>)
     }
 }
 
+/// The retained percentage-hull adapter still buys actual Repair work. These
+/// focused scheduler/queue rigs omit reactor integration, so install one finite
+/// charged test battery using the accepted hardware and real paid-work owner.
+/// Its 1,000-unit finite test reserve is never replenished. Authored cost and
+/// thermal/trip policy remain intact; this is not unlimited sustained work or
+/// a change to any production hull, repair rate or balance value.
+fn fixture_repair_power() -> crate::ship::power::ShipPowerSystem {
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_battleship.toml",
+    )
+    .unwrap();
+    let mut energy = config.energy.unwrap();
+    let repair = energy
+        .consumers
+        .iter_mut()
+        .find(|consumer| consumer.system == repair_system_id())
+        .expect("accepted Repair equipment has an actual paid consumer");
+    assert!(repair.continuous_cost_per_sec > 0.0);
+    repair.reserve.capacity = 1_000.0;
+    repair.initial_energy = repair.reserve.capacity;
+    crate::ship::power::ShipPowerSystem(
+        crate::modifiers::power_system::PowerSystem::from_energy(
+            energy,
+            config.ship_config.unwrap(),
+        )
+        .unwrap(),
+    )
+}
+
 fn test_app() -> App {
     let mut app = App::new();
     crate::ai::host::register_ai_host_env(&mut app);
@@ -88,6 +117,7 @@ fn test_app() -> App {
         ShipShields(ShieldSystem::default(), 0.5),
         ShipImpulse(crate::ship::impulse::ImpulseState::new()),
         crate::modifiers::ShipModifiers::new(),
+        fixture_repair_power(),
         RepairRequestQueue::default(),
         // Nested tuple to keep the outer bundle within Bevy's 15-arity limit.
         // Issue #830: the global `ShipRepairTeams` Resource is gone; every
@@ -133,6 +163,7 @@ fn retained_crew_wrecks_cannot_be_revived_by_queued_repair_teams() {
             .spawn((
                 crate::server_app::Ship,
                 crate::modifiers::ShipModifiers::new(),
+                fixture_repair_power(),
                 EntitySystemHull(hull),
                 ShipRepairTeams(teams),
             ))
@@ -1495,6 +1526,7 @@ fn spawn_npc_repair(
             ShipRepairTeams(crate::modifiers::repair_teams::RepairTeams::new(2)),
             crate::entities::spawner::EntitySystemHull(hull),
             crate::modifiers::ShipModifiers::new(),
+            fixture_repair_power(),
             queue,
             npc_repair_config(),
             crate::core::messages::AdmittedCommands::default(),
@@ -1562,6 +1594,14 @@ fn npc_ship_with_repair_teams_regenerates_hull_over_time() {
         .0
         .total_current();
 
+    let energy_before = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(npc)
+        .unwrap()
+        .0
+        .network()
+        .consumers[&repair_system_id()]
+        .energy;
     // 200 iterations comfortably covers the 5 s travel + repair time.
     for _ in 0..200 {
         app.update();
@@ -1577,6 +1617,32 @@ fn npc_ship_with_repair_teams_regenerates_hull_over_time() {
         hp_after > hp_before,
         "NPC hull HP must increase after AI-admitted dispatch + repair \
          (before={hp_before}, after={hp_after})"
+    );
+    let power = &app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(npc)
+        .unwrap()
+        .0;
+    assert!(
+        power.network().consumers[&repair_system_id()].energy < energy_before,
+        "normal AI repair must spend its finite Repair battery"
+    );
+    assert!(
+        power.emitted_work(&repair_system_id()) > 0.0,
+        "restored HP must be backed by actual paid work"
+    );
+    let actual = &power.network().consumers[&repair_system_id()];
+    let trip = power
+        .config()
+        .consumers
+        .iter()
+        .find(|consumer| consumer.system == repair_system_id())
+        .unwrap()
+        .reserve
+        .trip_heat;
+    assert!(
+        actual.heat < trip,
+        "this repair fixture must finish below its unchanged authored thermal trip"
     );
 }
 
@@ -1997,6 +2063,7 @@ fn spawn_two_station_npc(
             ShipRepairTeams(crate::modifiers::repair_teams::RepairTeams::new(teams)),
             crate::entities::spawner::EntitySystemHull(hull),
             crate::modifiers::ShipModifiers::new(),
+            fixture_repair_power(),
             queue,
             two_station_config(),
             crate::core::messages::AdmittedCommands::default(),
@@ -2466,6 +2533,7 @@ fn core_bucket_request_outranks_less_damaged_same_tier_station() {
             ShipRepairTeams(crate::modifiers::repair_teams::RepairTeams::new(1)),
             crate::entities::spawner::EntitySystemHull(hull),
             crate::modifiers::ShipModifiers::new(),
+            fixture_repair_power(),
             queue,
             config,
             crate::core::messages::AdmittedCommands::default(),
@@ -2563,6 +2631,7 @@ fn spawn_two_ownerless_rows(
             ShipRepairTeams(crate::modifiers::repair_teams::RepairTeams::new(team_count)),
             crate::entities::spawner::EntitySystemHull(hull),
             crate::modifiers::ShipModifiers::new(),
+            fixture_repair_power(),
             queue,
             config,
             crate::core::messages::AdmittedCommands::default(),
@@ -3346,6 +3415,7 @@ fn actual_team_completion_records_evidence_without_resolving_other_group_work() 
                 crate::server_app::Ship,
                 ShipRepairTeams(teams),
                 crate::modifiers::ShipModifiers::new(),
+                fixture_repair_power(),
                 crate::entities::spawner::EntitySystemHull(hull),
                 ShipConfigComponent(toml::from_str("").unwrap()),
                 queue,
@@ -3368,6 +3438,83 @@ fn actual_team_completion_records_evidence_without_resolving_other_group_work() 
                 evidence[0].subject,
                 phoenix_model::observation::ObservationSubject::System { id }
             );
+        }
+    }
+}
+
+#[test]
+fn legacy_adapter_never_heals_without_its_actual_funded_repair_consumer() {
+    for funded in [None, Some(false), Some(true)] {
+        let mut app = App::new();
+        let mut time = Time::<()>::default();
+        time.advance_by(std::time::Duration::from_secs(1));
+        app.insert_resource(time)
+            .add_systems(Update, tick_repair_teams);
+        let id = SystemId("core".into());
+        let mut hull = SystemHull::from_config(&[(id.clone(), 100.0)]);
+        hull.set_hp(&id, 99.0);
+        let mut teams = RepairTeams::new(1);
+        teams.restore_slots(&[TeamSlot::Repairing {
+            system_id: Some(id.clone()),
+            display_name: None,
+            priority: None,
+            priority_system_id: None,
+        }]);
+        let entity = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                crate::modifiers::ShipModifiers::new(),
+                crate::entities::spawner::EntitySystemHull(hull),
+                ShipRepairTeams(teams),
+            ))
+            .id();
+        if let Some(charged) = funded {
+            let mut power = fixture_repair_power();
+            if !charged {
+                power
+                    .0
+                    .network_mut()
+                    .consumers
+                    .get_mut(&repair_system_id())
+                    .unwrap()
+                    .energy = 0.0;
+            }
+            app.world_mut().entity_mut(entity).insert(power);
+        }
+        app.update();
+        let hp = app
+            .world()
+            .get::<crate::entities::spawner::EntitySystemHull>(entity)
+            .unwrap()
+            .0
+            .get(&id)
+            .unwrap()
+            .current;
+        if funded == Some(true) {
+            assert!(
+                hp > 99.0,
+                "funded real machinery must heal through the retained adapter"
+            );
+            let power = &app
+                .world()
+                .get::<crate::ship::power::ShipPowerSystem>(entity)
+                .unwrap()
+                .0;
+            assert!(power.network().consumers[&repair_system_id()].energy < 1_000.0);
+            assert!(power.emitted_work(&repair_system_id()) > 0.0);
+        } else {
+            assert_eq!(
+                hp, 99.0,
+                "absent or depleted power must never manufacture repair progress"
+            );
+            if let Some(power) = app
+                .world()
+                .get::<crate::ship::power::ShipPowerSystem>(entity)
+            {
+                assert_eq!(power.0.network().consumers[&repair_system_id()].energy, 0.0);
+                assert_eq!(power.0.emitted_work(&repair_system_id()), 0.0);
+            }
         }
     }
 }

@@ -1917,17 +1917,10 @@ fn human_sender_advisory_is_consumed_by_a_backfilled_helm() {
 // the bug class this issue removes. It is a deliberate behaviour change, not
 // an oversight, which is why it has a test of its own.
 
-/// Arm the REAL brownout emitter on this ship: the two components its query
-/// takes, the reactor on `power_source`, and the system itself in the set
-/// `ShipPowerPlugin` registers it in (`SimSet::Modifiers`, ordered before
-/// `process_coordination_lag` so the write and the routing of it are the
-/// production order). `ShipPlugin` — the only plugin `test_app` installs —
-/// does not carry `ShipPowerPlugin`, so without this the emitter would never
-/// run and BOTH tests below would pass for the wrong reason.
-///
-/// A `CoordEnqueueBox` collector comes with it for exactly that reason: each
-/// test asserts the advisory was really emitted before asserting what
-/// delivery did with it.
+/// Keep the shared fixture's actual authored energy groups and arm the current
+/// reactor authority. The collector proves the real emitter produced a message
+/// before either test judges routing; no empty default hardware substitutes for
+/// the ship's actual Console-to-group ownership.
 fn arm_brownout_advisory(app: &mut App, power_source: ControlSource) {
     let ship = find_ship_entity(app);
     if power_source == ControlSource::Human {
@@ -1957,10 +1950,17 @@ fn arm_brownout_advisory(app: &mut App, power_source: ControlSource) {
             .insert(station, rating);
     }
 
-    app.world_mut().entity_mut(ship).insert((
-        crate::ship::power::ShipPowerSystem(crate::modifiers::power_system::PowerSystem::default()),
-        crate::ship::power::PowerBrownoutState::default(),
-    ));
+    assert!(!app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(ship)
+        .unwrap()
+        .0
+        .network()
+        .groups
+        .is_empty());
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(crate::ship::power::PowerBrownoutState::default());
     {
         let mut q = app
             .world_mut()
@@ -1973,13 +1973,7 @@ fn arm_brownout_advisory(app: &mut App, power_source: ControlSource) {
         }
     }
     app.init_resource::<CoordEnqueueBox>()
-        .add_systems(PostUpdate, collect_coord)
-        .add_systems(
-            Update,
-            crate::ship::power::tick_power_brownout_advisory
-                .in_set(crate::sim_sets::SimSet::Modifiers)
-                .before(process_coordination_lag),
-        );
+        .add_systems(PostUpdate, collect_coord);
 }
 
 fn brownout_advisories(app: &App) -> usize {
@@ -1991,12 +1985,13 @@ fn brownout_advisories(app: &App) -> usize {
         .count()
 }
 
-/// Force the reactor into the exhaustion-LOCK state and raise the
-/// lock-changed edge the advisory now fires on. This fixture registers only
-/// `tick_power_brownout_advisory` (not the `tick_power_system` integration
-/// that would drive a flat battery to the lock over many ticks), and these
-/// are ROUTING tests, so the lock state is set directly rather than reached.
+/// Present a selected incoming-flow cut to the real emitter before the normal
+/// next power tick can recover it. These are routing-only tests: they inject the
+/// cut edge, then execute the actual producer once and let normal delayed
+/// routing/recipient Systems consume its real message. Power's own tests cover
+/// physical supply exhaustion and restoration.
 fn drive_ship_into_brownout(app: &mut App) {
+    use bevy::ecs::system::RunSystemOnce;
     let mut q = app.world_mut().query_filtered::<(
         &mut crate::ship::power::ShipPowerSystem,
         &mut crate::ship::power::PowerBrownoutState,
@@ -2009,6 +2004,9 @@ fn drive_ship_into_brownout(app: &mut App) {
         }
         brownout.locked_changed = true;
     }
+    app.world_mut()
+        .run_system_once(crate::ship::power::tick_power_brownout_advisory)
+        .expect("the actual brownout producer consumes the injected routing edge");
 }
 
 /// The changed case. Human at Power, human at Helm → Suppress.

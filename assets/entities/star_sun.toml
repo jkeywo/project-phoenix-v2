@@ -1,5 +1,5 @@
 name = "entity.star_sun.name"
-tags = ["star", "center"]
+tags = ["star", "center", "charted"]
 
 [target]
 tags = ["star"]

@@ -69,6 +69,8 @@ pub mod comms;
 pub use phoenix_math::composite_rng;
 pub mod console_ai;
 pub mod console_bridge;
+/// Shared game-owned disclosure boundary for browser and native phone delivery.
+pub mod console_delivery;
 /// The loaded-content ledger (issue #935): every authored file the world/entity
 /// loader actually reads, folded into `snapshot::content_digest` so an edit to
 /// a hull, fragment, or sidecar moves a save's content version exactly as

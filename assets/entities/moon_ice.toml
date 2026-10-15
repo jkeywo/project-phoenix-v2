@@ -1,5 +1,5 @@
 name = "entity.moon_ice.name"
-tags = ["moon"]
+tags = ["moon", "charted"]
 
 [target]
 tags = ["moon"]

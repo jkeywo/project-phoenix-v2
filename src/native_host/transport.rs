@@ -144,6 +144,7 @@ fn drain_native_inbound(
 fn flush_native_outbound(
     transport: Option<ResMut<NativeTransportLink>>,
     mut reader: MessageReader<OutboundMessage>,
+    projection: phoenix_simulation::console_delivery::ConsoleDeliveryProjection,
 ) {
     let Some(mut transport) = transport else {
         // Nothing is listening. The messages still drain — Bevy clears them
@@ -152,7 +153,11 @@ fn flush_native_outbound(
         reader.read().for_each(|_| {});
         return;
     };
-    for out in reader.read() {
+    if reader.is_empty() {
+        return;
+    }
+    let projection = projection.capture();
+    for out in reader.read().flat_map(|out| projection.project(out)) {
         transport.0.dispatch(TransportDispatch {
             target: &out.target,
             msg: &out.msg,

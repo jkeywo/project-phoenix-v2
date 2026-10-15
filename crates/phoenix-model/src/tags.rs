@@ -42,6 +42,8 @@ pub enum EntityTag {
     ObjectiveMarker,
     /// Explicit authored permission for safe GM removal, subject to hard class gates.
     GmRemovable,
+    /// Explicit public chart geometry, independent of instrument detection.
+    Charted,
 }
 
 impl EntityTag {
@@ -66,6 +68,7 @@ impl EntityTag {
             "trigger_volume" => Some(EntityTag::TriggerVolume),
             "objective_marker" => Some(EntityTag::ObjectiveMarker),
             "gm_removable" => Some(EntityTag::GmRemovable),
+            "charted" => Some(EntityTag::Charted),
             _ => None,
         }
     }
@@ -87,6 +90,7 @@ impl EntityTag {
             EntityTag::TriggerVolume => "trigger_volume",
             EntityTag::ObjectiveMarker => "objective_marker",
             EntityTag::GmRemovable => "gm_removable",
+            EntityTag::Charted => "charted",
         }
     }
 }

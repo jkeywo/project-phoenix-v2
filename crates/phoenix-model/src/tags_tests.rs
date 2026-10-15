@@ -19,6 +19,7 @@ fn known_tag_strings_round_trip() {
         ("trigger_volume", EntityTag::TriggerVolume),
         ("objective_marker", EntityTag::ObjectiveMarker),
         ("gm_removable", EntityTag::GmRemovable),
+        ("charted", EntityTag::Charted),
     ];
     for (s, expected) in cases {
         assert_eq!(EntityTag::from_str(s), Some(expected), "from_str({s:?})");

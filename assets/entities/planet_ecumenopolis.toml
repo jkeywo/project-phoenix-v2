@@ -1,5 +1,5 @@
 name = "entity.planet_ecumenopolis.name"
-tags = ["planet", "habitable"]
+tags = ["planet", "habitable", "charted"]
 
 [target]
 tags = ["planet"]

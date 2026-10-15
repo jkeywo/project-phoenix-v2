@@ -98,6 +98,69 @@ fn outbound_messages_reach_the_transport_with_their_target_and_delivery_class() 
 }
 
 #[test]
+fn actual_native_sink_redacts_raw_world_messages_before_loopback_dispatch() {
+    use crate::core::codec::JsonCodec;
+    use crate::core::messages::{EntitySnapshot, WorldData};
+    use crate::entities::spawner::EntityUuid;
+    use crate::lobby::{Sessions, WorldResource};
+    let (mut app, handle) = seam_app();
+    let config = phoenix_simulation::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    app.world_mut().spawn((
+        phoenix_simulation::server_app::LocalShip,
+        EntityUuid("own-native".into()),
+        phoenix_simulation::science::broad::BroadProfile::from_config(&config)
+            .unwrap()
+            .unwrap(),
+    ));
+    let mut sessions = crate::lobby::session::SessionManager::new();
+    sessions.register("phone".into(), "Phone".into()).unwrap();
+    app.insert_resource(Sessions(sessions));
+    let world = WorldData {
+        entities: vec![EntitySnapshot {
+            uuid: "hidden-native".into(),
+            name: Some("SECRET-NATIVE".into()),
+            position: Some([123.0, 7.0, 456.0]),
+            tags: vec!["ship".into()],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    app.insert_resource(WorldResource(world.clone()));
+    app.world_mut().write_message(OutboundMessage {
+        target: Target::All,
+        msg: ServerMessage::WorldSetup { world },
+        delivery: DeliveryClass::Reliable,
+    });
+    app.update();
+    let output = handle.drain_outbound();
+    assert_eq!(
+        output.len(),
+        2,
+        "one host route and one ordinary phone route"
+    );
+    let (_, phone, class) = output
+        .iter()
+        .find(|(target, _, _)| *target == Target::Token("phone".into()))
+        .unwrap();
+    assert_eq!(*class, DeliveryClass::Reliable);
+    let encoded = JsonCodec.encode_server(phone).unwrap();
+    assert!(!encoded.contains("SECRET-NATIVE") && !encoded.contains("hidden-native"));
+    let (_, host, _) = output
+        .iter()
+        .find(|(target, _, _)| {
+            *target == Target::Token(crate::console_bridge::LOCAL_CONSOLE_TOKEN.into())
+        })
+        .unwrap();
+    assert!(JsonCodec
+        .encode_server(host)
+        .unwrap()
+        .contains("SECRET-NATIVE"));
+}
+
+#[test]
 fn three_legs_fold_into_one_link_and_each_reports_its_own_departures() {
     // What `phoenix-host` builds since issue #1353: local panes, the direct
     // LAN accept leg and the cloud relay, folded through `Box<dyn>` into the

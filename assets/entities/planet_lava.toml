@@ -1,5 +1,5 @@
 name = "entity.planet_lava.name"
-tags = ["planet"]
+tags = ["planet", "charted"]
 
 [target]
 tags = ["planet"]

@@ -4699,9 +4699,17 @@ fn publish_waypoint_existence(
 
 /// Reads outbound messages each frame and forwards them to the JS callback.
 #[cfg(target_arch = "wasm32")]
-fn flush_outbound(mut reader: MessageReader<OutboundMessage>) {
+fn flush_outbound(
+    mut reader: MessageReader<OutboundMessage>,
+    projection: phoenix_simulation::console_delivery::ConsoleDeliveryProjection,
+) {
+    if reader.is_empty() {
+        return;
+    }
+    let projection = projection.capture();
     let dispatches: Vec<(String, String, String)> = reader
         .read()
+        .flat_map(|out| projection.project(out))
         .filter_map(|out| {
             let payload = JsonCodec.encode_server(&out.msg).ok()?;
             let target = match &out.target {

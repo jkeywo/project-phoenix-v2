@@ -1,5 +1,5 @@
 name = "entity.planet_gas_giant.name"
-tags = ["planet"]
+tags = ["planet", "charted"]
 
 [target]
 tags = ["planet"]

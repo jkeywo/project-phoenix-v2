@@ -158,6 +158,88 @@ access/disruption, cloak/low-emission profiles and 19 physical decoys remain the
 subsequent selected 17 slices; this first consumer does not close them or 16's
 remaining generic requests/order/media/security scope.
 
+## Adopted next slice: Sensors interference and finite System protection
+
+[ai] Adopted after the first paid Comms consumer and its neutral-unpaid boundary.
+Extend the same authored jammer profile with a closed `Comms | Sensors` effect;
+absence retains the existing Comms effect. The same actual emitter, generic
+intent, mount, original dated aim, Operation and paid Input boundary remain its
+only owners. A Sensors contribution uses natural Sensors transmission on the
+emitter-to-receiver segment. It does not reuse a Comms path or charge equipment
+interference again on the observation segment.
+
+For supported Broad, Focused and Passive acquisition, scale the actual receiving
+instrument's finite usable reach once by its current equipment receiver factor.
+Existing natural field/terrain acquisition rules remain separate. Lost acquisition
+may coast/predict or retain history under its existing contract; it cannot refresh
+from hidden truth, delete earned observations or manufacture a source attribution.
+The existing natural `SensorBlind` flag is not already equivalent coverage across
+these owners. This slice explicitly adds equipment Sensors reach degradation; any
+later adoption of natural blindness at an additional consumer must be declared and
+proved separately. Existing CommsJammed denial remains exactly zero and is not
+weakened by equipment protection.
+
+Fit a distinct Science-owned composed `SignalProtection` System with an actual
+PowerInput, positive continuous work, Operation and room. It has only canonical
+generic enabled and ordered System-priority channels. Extend the existing closed
+channel vocabulary with `system_priority`, a bounded duplicate-free ordered list
+of actual own SystemIds. No second assignment map, desired-state projection or
+protection controller is saved. The ordinary per-System tree, human commands,
+GUI, Workshop and restored runtime all use that same commandstore.
+
+The accepted protection profile declares finite positive capacity, finite positive
+suppression strength, and positive allocation cost for each explicitly eligible
+actual Comms/Broad/Focused/Passive System. Eligibility is validated against actual
+supported equipment kinds, not Station names or hidden current interference.
+Walk the retained priority list in order; reserve a System's whole declared cost
+only when it fits remaining capacity, otherwise leave it unprotected and continue.
+Omitted Systems receive no allocation. Capacity is an equipment capability, not a
+new Stock or conserved message resource. Station presets expand to these same
+actual eligible IDs in a visible deterministic order and consume the same capacity.
+Multiple protectors allocate independently in stable source-System order.
+
+An enabled operational protector pays its normal continuous work even when no
+interference exists. Allocation never selects only secretly affected Systems or
+uses exposure strength to pick winners. Its current granted work fraction scales
+its suppression strength, without granting extra capacity. For an allocated
+receiver, sum applicable current paid suppression in stable order and subtract it
+from the nonnegative equipment exposure, clamped at zero; then apply the existing
+`1 / (1 + remaining exposure)` reach factor once. Natural field/terrain effects,
+physical faults and EMP remain separate. This bounded reduction neither guarantees
+immunity nor restores missing observations. Disabled, Offline, destroyed, unfunded
+or unprocessed protection contributes no suppression; restore cannot reuse credit.
+
+Current protection allocation and grant are derived at the same paid Input
+boundary before link/acquisition consumers. Freeze only that boundary's actual
+paid result; later distribution/pose changes affect the next boundary. Publish
+own enabled/priorities/allocated/waiting facts and each receiving instrument's
+supported local degradation notice. Do not publish hidden emitter/victim rosters,
+exact hostile exposure/strength or whether another actor successfully received.
+A protected status means allocated paid capability, not verified remote success.
+
+[ai] Shared authoring prerequisite: allow optional typed `initial` values on the
+existing generic channel definitions. Validate the value against its declared
+kind and bounds before accepting composition; `system_priority` values must use
+only the profile's eligible actual own IDs. Absence preserves existing Boolean
+false, entity-target None, and new empty-priority defaults. Instantiate these
+values only into the canonical commandstore at actual creation. Rebinding,
+validation/history/Preview/Test and snapshot shape checks preserve the type and
+accepted ownership. Restore applies saved intent, not authored initial intent;
+changing defaults cannot rewrite active or historical state. No shadow defaults
+store becomes authoritative.
+
+Author an explicit reference Science protector and Sensors jammer with finite
+provisional values and priorities that create a real capacity conflict between
+actual receiver Systems. Include ordinary AI maintenance and admitted human
+priority changes, simplified Station preset equivalence, stopping/resource loss,
+friendly/self exposure, natural/equipment separation and paid protection with no
+hostile interference. Prove real dated acquisition loss/recovery without history
+erasure, finite allocation/payment and no hidden-exposure selection, fresh JSON
+360 complete captures/digests, different LocalShip peers and malformed owner/type/
+priority/recipe no-write refusals. Browser/native/authoring/performance/human
+acceptance remains separate. Spoofing, bounded access/disruption, cloak/emission
+profiles and 19 physical decoys remain pending selected 17 scope.
+
 ## Physical influence, protection and evidence
 
 Share supported geometry/source transforms/falloff with natural fields under AD69,

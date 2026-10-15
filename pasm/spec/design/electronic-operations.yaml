@@ -67,3 +67,25 @@ entities:
       summary: "Jam{target} extends existing typed mission/doctrine requests with Comms relevance only. The same individual jammer tree reads its explicitly bound request feed and selects an available permitted full-XYZ contact only when retained target intent is empty."
       rationale:
         - "[ai] Adopted before directive/runtime edits. Reuse existing directive codec/effect/editor and per-System original reading frontier, with a real authored reference request. Unknown target observations, absent Viewscreen feed or Tactical-primary-only context cannot supply a selection; no true pose/name lookup or separate planner is introduced. Explicit manual target remains independent."
+
+  - decision: redesign-sensors-interference-system-protection
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Sensors Interference and Finite Protection Use Actual Receiver Systems
+      summary: "The next 17 slice extends the same paid jammer with closed Comms/Sensors effect and fits a Science SignalProtection System. Actual ordered System priorities allocate finite capability before supported receiver reach is degraded once; no hidden-exposure selection, natural immunity or second controller."
+      rationale:
+        - "[ai] Adopted in docs/gameplay-redesign/implementation/increment-17.md before runtime. Sensors equipment exposure uses natural Sensors emitter-to-receiver transmission; Broad/Focused/Passive finite usable reach is scaled once while existing natural field/terrain rules and held/predicted history remain separate. SensorBlind is not claimed to have already equivalent coverage."
+        - "One canonical generic enabled/system_priority commandstore serves the actual per-System tree, UI and save owner. Profile eligibility names actual supported own Comms/Broad/Focused/Passive Systems and positive costs. Walk declared/user order, reserve whole costs that fit finite capacity, and never prioritise by secret exposure. Station presets expand to those same actual IDs."
+        - "Enabled operational protection pays even without interference. Current paid fraction scales bounded suppression, not capacity; current allocated suppression subtracts from equipment exposure before 1/(1+remaining exposure). Unprocessed/unfunded protection is neutral. Natural CommsJammed, terrain, physical faults and EMP remain separate; no lost evidence is resurrected. Own notices disclose no hostile strength, attribution or receiver census."
+        - "Reference data, real Human/ordinary AI capacity conflict/payment/acquisition/recovery/history, different-LocalShip JSON360 continuation and candidate no-write cases are required. This adoption claims no native or full17 acceptance and leaves spoof/access/cloak/emission/19-decoy scope explicit."
+
+  - decision: redesign-generic-channel-typed-initial-values
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Typed Authored Initial Values Instantiate Only Canonical Channel Intent
+      summary: "Optional generic channel initial values are accepted only when kind/bounds/actual owner validation succeeds. Existing absent defaults remain exact; creation initialises the sole commandstore and restore retains saved intent."
+      rationale:
+        - "[ai] The finite protection reference needs an authored enabled state and ordered System priorities without hidden desired-state storage. system_priority is bounded, duplicate-free and restricted to the actual profile's eligible own Systems. Boolean/entity_target remain closed existing kinds."
+        - "Composition, Workshop rebind/history/Preview/Test and snapshot shape validation preserve exact type and ownership. Absent initial keeps Boolean false/entity_target None/priority empty. Initial values are creation inputs, not a second live authority or a restore-time override. Integrator owns central compatibility and schedule joins."

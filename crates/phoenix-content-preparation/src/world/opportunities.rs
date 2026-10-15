@@ -207,8 +207,16 @@ pub(super) fn findings(
             .situations
             .iter()
             .any(|row| row.id.starts_with("htn-optional/"))
+            || source
+                .config
+                .situation_definitions
+                .iter()
+                .any(|row| row.id.starts_with("htn-optional/"))
         {
-            return Err("authored situations cannot occupy generated execution namespaces".into());
+            return Err(
+                "authored situations or definitions cannot occupy generated execution namespaces"
+                    .into(),
+            );
         }
         for recipe in super::activity_bindings::candidates(&authored.actor, source, loader)? {
             for room in &authored.compartments {

@@ -276,3 +276,32 @@ combat comparisons, deterministic/headless/layer checks and 2/4/6/8-human worklo
 remain required. These prove motion and choices rather than a new minigame. Source
 or targeted tests do not establish physical controls/performance/human acceptance,
 or close 18/19 merely because a preparation or initial implementation commits.
+
+## Adopted configured gravity response
+
+Extend the actual existing LocalJump consumer with an authored finite nonnegative
+`gravity_response` multiplier. Omission means 1, preserving the original drive's
+arrival policy and original keyed scatter. A smaller value reduces that drive's
+gravity displacement; zero removes that displacement, while actual collision and
+representable-placement checks still apply. A larger value increases the effective
+exclusion radius. Multiply each accepted static body's original exclusion radius
+by the accepted drive response using wider finite arithmetic; do not mutate body
+policy, historical evidence, the World roster or another drive's state.
+
+Freeze the response in the same accepted drive profile as preparation, scatter
+and fuel. Recompute the saved physical arrival from that immutable profile and
+original static body recipes during whole-candidate preflight. Failed placement
+retains the existing waiting phase and cannot partially consume fuel or payment.
+The original default response is omitted from JSON, retaining the old stateless
+scatter key for unchanged equipment. No additional arrival cache or RNG stream is
+introduced. Workshop edits the same closed drive profile through its existing
+accepted source/history transaction.
+
+The concrete consumer is an optional gravity-hardened LocalJump Cruiser derived
+from the existing LocalJump Cruiser, retaining its actual drive System, finite
+fuel, energy, preparation, Console feeds and AI. Its provisional response is 0.25;
+this is an equipment demonstration, not a balance claim or inter-system transit.
+It must pass actual profile/placement/continuation and authoring checks before the
+capability is considered verified. Formation and sector travel remain the
+following consumers; their best-stat and actual World/content transitions cannot
+be claimed from this local extension.

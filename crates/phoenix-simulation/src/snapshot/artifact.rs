@@ -436,7 +436,9 @@ use super::*;
 /// beam operation and frozen guided-round equipment. Older state is refused.
 /// `54` scopes issued hails to the actual issuing ship. Old unscoped history
 /// cannot be assigned to a fleet hull without inventing ownership.
-pub const SNAPSHOT_FORMAT: u32 = 54;
+/// `55` retains original burst launch identity, dated guidance provenance and
+/// source-owned issued/heard order knowledge separately from physical flight.
+pub const SNAPSHOT_FORMAT: u32 = 55;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -530,7 +532,9 @@ pub const SNAPSHOT_FORMAT: u32 = 54;
 /// "0.25" adds measured per-bank targeting, finite mounted fire and shared
 /// weapon resources, temporary EMP and equipment-supported shield enquiry.
 /// "0.26" applies fleet hails and their anti-repeat history per issuing hull.
-pub const SIMULATION_RULES: &str = "0.26";
+/// "0.27" delivers paid source orders through finite paired receiver links;
+/// guidance received after movement steers on the following advance.
+pub const SIMULATION_RULES: &str = "0.27";
 
 /// The authored data, computed rather than remembered.
 ///

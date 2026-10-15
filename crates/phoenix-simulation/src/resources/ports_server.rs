@@ -598,6 +598,11 @@ fn prepare(world: &mut World) {
                     let mut power = world
                         .get::<crate::ship::power::ShipPowerSystem>(entity)
                         .cloned();
+                    let efficiency = world
+                        .get::<crate::ship::compartment_damage::ShipDamage>(entity)
+                        .map_or(1.0, |damage| {
+                            damage.factor(&system, phoenix_model::damage::DamageBinding::Operation)
+                        });
                     if disabled {
                         blocked = Some("ports.blocked.disabled");
                     } else if let Some(ref mut power) = power {
@@ -649,7 +654,7 @@ fn prepare(world: &mut World) {
                                     power
                                         .0
                                         .work_continuous(system, seconds, 1.0)
-                                        .map(|grant| grant.fraction)
+                                        .map(|grant| grant.fraction * efficiency)
                                 },
                             ) {
                                 if ordered {

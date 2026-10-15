@@ -347,6 +347,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         production: _,
         recovery: _,
         recoverable: _,
+        port_service: _,
         damage: _,
         sensors_console: _,
         navigation_console: _,
@@ -462,6 +463,28 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         phoenix_model::recovery::RecoverableSourceConfig,
         availability,
         resources
+    );
+    exhaustive_struct!(
+        port_service_schema,
+        phoenix_model::ports::PortServiceConfig,
+        policy,
+        eligible_factions,
+        offers
+    );
+    exhaustive_struct!(
+        port_offer_schema,
+        phoenix_model::ports::PortOfferConfig,
+        id,
+        resource,
+        quota,
+        unit_amount,
+        costs
+    );
+    exhaustive_struct!(
+        port_cost_schema,
+        phoenix_model::ports::PortCost,
+        resource,
+        amount
     );
     exhaustive_struct!(
         production_recipe_schema,

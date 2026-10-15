@@ -12,7 +12,26 @@ fn id(value: &str) -> SystemId {
 }
 
 fn rig(policy: PortServicePolicy) -> (App, Entity, Entity) {
-    rig_with(policy, |_| {})
+    let (mut app, ship, provider) = rig_with(policy, |_| {});
+    // These replenishment cases start after finite ordinary parts use. Preserve
+    // authored ceilings; custom full-bay cases use rig_with directly instead.
+    let mut inventory = app
+        .world_mut()
+        .get_mut::<crate::infrastructure::InfrastructureCondition>(ship)
+        .unwrap();
+    let mut stock = inventory
+        .0
+        .capacity_stock("hold-machinery-parts")
+        .unwrap()
+        .clone();
+    stock.reserve("fixture-completed-parts-use", 20).unwrap();
+    assert_eq!(stock.consume("fixture-completed-parts-use"), Some(20));
+    inventory
+        .0
+        .replace_capacity_stock("hold-machinery-parts", stock)
+        .unwrap();
+    drop(inventory);
+    (app, ship, provider)
 }
 fn rig_with(
     policy: PortServicePolicy,
@@ -626,6 +645,119 @@ fn offline_tool_preserves_order_and_cannot_spend_then_resumes() {
             .lines[0]
             .delivered_lots,
         2
+    );
+}
+
+#[test]
+fn partial_operation_reduces_yield_for_the_same_paid_work_and_zero_pauses() {
+    let (mut normal, ship, _) = rig(PortServicePolicy::ManualOffer);
+    let (mut impaired, impaired_ship, _) = rig(PortServicePolicy::ManualOffer);
+    let authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    let mut damage = crate::ship::compartment_damage::ShipDamage::from_config(&authored)
+        .unwrap()
+        .unwrap();
+    let system = id("umbilical");
+    let component = damage.definition.components[&system]
+        .iter()
+        .find(|(_, definition)| {
+            definition.binding == phoenix_model::damage::DamageBinding::Operation
+        })
+        .unwrap()
+        .0
+        .clone();
+    damage
+        .state
+        .components
+        .get_mut(&system)
+        .unwrap()
+        .get_mut(&component)
+        .unwrap()
+        .condition = phoenix_model::damage::ComponentCondition::Patched { factor: 0.5 };
+    impaired
+        .world_mut()
+        .entity_mut(impaired_ship)
+        .insert(damage);
+    let before = normal
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(ship)
+        .unwrap()
+        .0
+        .capture_continuation();
+    order(&mut normal, ship, 1);
+    order(&mut impaired, impaired_ship, 1);
+    normal.update();
+    impaired.update();
+    let full = normal
+        .world()
+        .get::<TransferUmbilical>(ship)
+        .unwrap()
+        .port_order
+        .fraction;
+    let half = impaired
+        .world()
+        .get::<TransferUmbilical>(impaired_ship)
+        .unwrap()
+        .port_order
+        .fraction;
+    assert!(full > 0.0 && full < 1.0);
+    assert_eq!(half, full * 0.5);
+    let paid = normal
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(ship)
+        .unwrap()
+        .0
+        .capture_continuation();
+    let impaired_paid = impaired
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(impaired_ship)
+        .unwrap()
+        .0
+        .capture_continuation();
+    assert_ne!(
+        paid.network.consumers[&system].energy,
+        before.network.consumers[&system].energy
+    );
+    assert_eq!(
+        paid, impaired_paid,
+        "damage changes useful output, not the energy charged for that work"
+    );
+    impaired
+        .world_mut()
+        .get_mut::<crate::ship::compartment_damage::ShipDamage>(impaired_ship)
+        .unwrap()
+        .state
+        .components
+        .get_mut(&system)
+        .unwrap()
+        .get_mut(&component)
+        .unwrap()
+        .condition = phoenix_model::damage::ComponentCondition::Destroyed;
+    let intent = impaired
+        .world()
+        .get::<TransferUmbilical>(impaired_ship)
+        .unwrap()
+        .port_order
+        .clone();
+    impaired.update();
+    assert_eq!(
+        impaired
+            .world()
+            .get::<TransferUmbilical>(impaired_ship)
+            .unwrap()
+            .port_order,
+        intent
+    );
+    assert_eq!(
+        impaired
+            .world()
+            .get::<crate::ship::power::ShipPowerSystem>(impaired_ship)
+            .unwrap()
+            .0
+            .capture_continuation(),
+        impaired_paid
     );
 }
 

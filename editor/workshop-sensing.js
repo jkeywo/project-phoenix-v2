@@ -11,6 +11,8 @@ export const sensingRoles = {
   broad: { kinds: ['helm_radar', 'tactical_radar', 'sensor_radar'], fields: ['reading_ticks', 'sample_interval_secs', 'identity_secs', 'classification_secs', 'assessment_secs', 'position_error', 'drift_error_per_sec', 'track_retention_secs'] },
   passive: { kind: 'passive_receiver', fields: ['sample_interval_secs', 'min_signal_strength', 'bearing_error_rad'] },
 };
+export const focusedAims = ['general','environment','resources','anomaly'];
+export const enquiryEffects = ['damage_zone','slow_zone','blocks_impulse','radar_dampening','comms_jam','sensor_blind','nebula_fog'];
 export const initialPassiveTree = () => ({ root: 'passive', tree: [{ id: 'passive', initial: 'receive', state: [{ id: 'receive', task: [
   { id: 'operate-capable-receiver', action: { kind: 'write', channel: 'operate', value: { source: 'fact', name: 'can_operate' } } },
 ] }] }] });
@@ -46,7 +48,7 @@ export function validateSensing(profile, value) {
   for (const [role, spec] of Object.entries(sensingRoles)) {
     for (const row of profile[role] || []) {
     const system = systems.find(system => system.id === row.system);
-    if (!closed(row, ['system', ...spec.fields, ...(role === 'passive' ? ['mount'] : []), ...(role === 'focused' ? ['forecast'] : [])]) || !system || !(spec.kinds || [spec.kind]).includes(system.kind) || seen.has(row.system)
+    if (!closed(row, ['system', ...spec.fields, ...(role === 'passive' ? ['mount'] : []), ...(role === 'focused' ? ['forecast','default_aim','aims'] : [])]) || !system || !(spec.kinds || [spec.kind]).includes(system.kind) || seen.has(row.system)
       || !value.console?.some(console => console.id === system.console)) throw new Error('Each instrument needs its distinct actual System kind and owning Console.');
     seen.add(row.system);
     if (!value.damage || !value.interior?.placements?.[system.id] || !value.energy?.consumer?.some(consumer => consumer.system === system.id)
@@ -56,6 +58,16 @@ export function validateSensing(profile, value) {
       if (row.forecast != null && (!closed(row.forecast, ['horizon_secs']) || !positive(row.forecast.horizon_secs))) throw new Error('Focused forecast horizon must be finite and positive.');
       if (!positive(row.work_secs) || !Number.isInteger(row.history_limit) || row.history_limit < 1 || row.history_limit > 65535 || !finite(row.unfinished_retention_secs) || !value.scan)
         throw new Error('Focused sensing requires positive work/history, finite retention and actual Scan bands.');
+      const aims=new Set();
+      if (row.aims != null && !Array.isArray(row.aims)) throw new Error('Focused questions must be an array.');
+      for (const aim of row.aims || []) {
+        if (!closed(aim,['aim','work_multiplier','resource_multiplier','intrusive']) || !focusedAims.includes(aim.aim) || aims.has(aim.aim)
+          || !positive(aim.work_multiplier) || !positive(aim.resource_multiplier) || !positive(Math.fround(row.work_secs)*Math.fround(aim.work_multiplier))
+          || (aim.intrusive!=null && typeof aim.intrusive!=='boolean')) throw new Error('Focused questions require unique supported aims and finite positive costs.');
+        aims.add(aim.aim);
+      }
+      const defaultAim=row.default_aim ?? 'general';
+      if (!focusedAims.includes(defaultAim) || (defaultAim!=='general' && !aims.has(defaultAim))) throw new Error('Default question must be supported by its equipment.');
     } else if (role === 'broad') {
       const radar = { helm_radar: value.helm_console?.radar, tactical_radar: value.weapons_console?.radar, sensor_radar: value.sensors_console?.long_range_radar }[system.kind];
       if (!radar || !positive(radar.range)) throw new Error('Broad sensing requires its actual fitted radar coverage.');
@@ -72,15 +84,18 @@ export function validateSensing(profile, value) {
   if (systems.some(system => system.kind === 'passive_receiver' && !(profile.passive || []).some(row => row.system === system.id))) throw new Error('Every fitted passive receiver requires its matching sensing profile.');
 }
 export function replaceSensingSource(source, profile) {
+  return replaceSectionSource(source,'sensing',profile);
+}
+function replaceSectionSource(source, section, profile) {
   const headers = [...source.matchAll(/^[ \t]*\[{1,2}([^\r\n]+?)\]{1,2}[ \t]*(?:#.*)?(?:\r?\n|$)/gm)].map(match => ({ start: match.index, name: match[1].replace(/\]$/, '').trim() }));
-  const spans = headers.filter(row => row.name === 'sensing' || row.name.startsWith('sensing.')).map(row => {
+  const spans = headers.filter(row => row.name === section || row.name.startsWith(section+'.')).map(row => {
     let end = headers.find(next => next.start > row.start)?.start ?? source.length;
     const tail = source.slice(row.start, end).match(/(?:^|\n)((?:[ \t]*(?:#[^\r\n]*)?\r?\n)+)$/)?.[1]; if (tail?.includes('#')) end -= tail.length;
     return { start: row.start, end };
   });
-  if (!spans.length && parse(source).sensing !== undefined) throw new Error('Expand inline sensing into tables before editing.');
+  if (!spans.length && parse(source)[section] !== undefined) throw new Error('Expand inline '+section+' into tables before editing.');
   const clean = Object.fromEntries(Object.entries(profile).filter(([, row]) => row != null));
-  const nl = source.includes('\r\n') ? '\r\n' : '\n', text = stringify({ sensing: clean }).trim().replace(/\n/g, nl) + nl;
+  const nl = source.includes('\r\n') ? '\r\n' : '\n', text = stringify({ [section]: clean }).trim().replace(/\n/g, nl) + nl;
   if (!spans.length) return source + (source.endsWith(nl + nl) ? '' : source.endsWith(nl) ? nl : nl + nl) + text;
   let after = source; for (const span of spans.slice().reverse()) after = after.slice(0, span.start) + after.slice(span.end);
   return after.slice(0, spans[0].start) + text + after.slice(spans[0].start);
@@ -126,4 +141,38 @@ export async function applySensingOperation({ draft, provider, runtime, dependen
   return acceptWorkshopChanges({ draft, provider, runtime, dependencies, current, stale: 'stale-sensing-operation',
     prepare: async (captured, effective) => prepareSensingOperation(captured, effective, selected, await runtime.shipSchema()).changes,
     inspect: (candidate, effective) => inspectSensing(candidate, effective, selected.path) });
+}
+
+export function validateEnquiryObservation(policy,value) {
+  if (!closed(policy,['property']) || !Array.isArray(policy.property)) throw new Error('Observation rules require a closed property list.');
+  const seen=new Set();
+  for (const row of policy.property) {
+    const property=row?.property, key=property && [property.kind,property.capacity,property.effect].join(':');
+    if (!closed(row,['property','normal','intrusive','point','step']) || !property || typeof property!=='object'
+      || seen.has(key) || !Number.isFinite(row.step) || row.step<=0
+      || (row.point!=null && !['receiver','observed_subject'].includes(row.point))
+      || ['normal','intrusive'].some(mode=>row[mode]!=null && typeof row[mode]!=='boolean')) throw new Error('Observation rules need unique supported properties and finite positive precision.');
+    seen.add(key);
+    if (property.kind==='capacity') {
+      if (!closed(property,['kind','capacity']) || typeof property.capacity!=='string' || !property.capacity || property.capacity.length>128 || /[\u0000-\u001f\u007f]/.test(property.capacity)
+        || !value.infrastructure?.capacity?.some(row=>row.id===property.capacity && typeof row.label==='string' && row.label.length)) throw new Error('Choose a real labelled capacity on this subject.');
+    } else if (property.kind==='field_exposure') {
+      if (!closed(property,['kind']) || !value.shape) throw new Error('Exposure requires actual local field geometry.');
+    } else if (property.kind==='effect_signature') {
+      if (!closed(property,['kind','effect']) || !enquiryEffects.includes(property.effect) || !value.shape) throw new Error('Signature requires supported physical effect geometry.');
+    } else throw new Error('Unsupported observation property.');
+  }
+}
+export function prepareEnquiryObservationOperation(draft,dependencies,operation) {
+  const before=draft.read(operation.path), inspection=inspectEntityComposition(draft,dependencies,operation.path);
+  if (!operation.materialise && inspection.fields.some(field=>(field.path==='enquiry_observation' || field.path.startsWith('enquiry_observation.')) && field.owner!==operation.path)) throw new Error('Explicitly materialise inherited observation rules before editing.');
+  validateEnquiryObservation(operation.value,inspection.resolved.value);
+  const after=replaceSectionSource(before,'enquiry_observation',operation.value);
+  parse(after); return {changes:[{path:operation.path,before,after}]};
+}
+export async function applyEnquiryObservationOperation({draft,provider,runtime,dependencies,operation,current=()=>true}) {
+  const selected=structuredClone(operation);
+  return acceptWorkshopChanges({draft,provider,runtime,dependencies,current,stale:'stale-enquiry-operation',
+    prepare:async(captured,effective)=>prepareEnquiryObservationOperation(captured,effective,selected).changes,
+    inspect:(candidate,effective)=>inspectEntityComposition(candidate,effective,selected.path)});
 }

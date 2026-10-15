@@ -5,7 +5,7 @@ import { damageFixture } from './damage-fixture.js';
 import { WorkshopDocument } from '../workshop-document.js';
 import { createStoreZip } from '../mod-pack-export.js';
 import { resolveTemplate } from '../entity-includes.js';
-import { inspectSensing, validateSensing, prepareSensingOperation, applySensingOperation, guardSensingReferences } from '../workshop-sensing.js';
+import { inspectSensing, validateSensing, prepareSensingOperation, applySensingOperation, guardSensingReferences, validateEnquiryObservation, prepareEnquiryObservationOperation, applyEnquiryObservationOperation } from '../workshop-sensing.js';
 const path = 'assets/entities/test.toml', base = 'assets/entities/base.toml', deps = { base_files: {}, packs: [] };
 const make = text => new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: '[pack]\nformat=1\nid="test"\nname="Test"\nversion="1"\n' }, { path, text }]));
 function fixture() { const out = damageFixture(); out.schema.console_instance_publication_kinds.passive_receiver = 'Passive'; return out; }
@@ -21,6 +21,17 @@ describe('accepted-source independent sensing instruments', () => {
       const profile=structuredClone(value.sensing);profile.focused[0].forecast={horizon_secs:Infinity};
       expect(()=>validateSensing(profile,value)).toThrow(/forecast/);
     }
+  });
+  it('roundtrips acquired forecast policy and supported questions without replacing physical hardware', () => {
+    const {value,schema}=fixture(), profile=structuredClone(value.sensing);
+    Object.assign(profile.focused[0],{forecast:{horizon_secs:120},default_aim:'environment',aims:[{aim:'environment',work_multiplier:2,resource_multiplier:1,intrusive:false}]});
+    validateSensing(profile,value);
+    const after=prepareSensingOperation(make(stringify(value)),deps,{path,value:profile},schema).changes[0].after;
+    expect(parse(after).sensing).toEqual(profile); expect(parse(after).energy).toEqual(value.energy);
+    const bad=structuredClone(profile); bad.focused[0].forecast.horizon_secs=0;
+    expect(()=>validateSensing(bad,value)).toThrow(/forecast/i);
+    bad.focused[0].forecast.horizon_secs=1; bad.focused[0].aims.push(structuredClone(bad.focused[0].aims[0]));
+    expect(()=>validateSensing(bad,value)).toThrow(/unique/);
   });
   it('requires explicit real actuator ownership and closed controller trees', () => {
     const {value}=fixture(), profile=structuredClone(value.sensing);
@@ -107,5 +118,34 @@ describe('accepted-source independent sensing instruments', () => {
       const invalid = structuredClone(result); delete invalid.sensors_console;
       expect(() => validateSensing(result.sensing, invalid)).toThrow(/radar coverage/);
     }
+  });
+});
+
+describe('accepted-source subject observation rules',()=>{
+  const policy={property:[{property:{kind:'capacity',capacity:'supplies'},normal:false,intrusive:true,point:'receiver',step:1}]};
+  function subjectValue(){const {value}=fixture();value.infrastructure={condition_max:100,publish:false,capacity:[{id:'supplies',amount:5,label:'component.scan.quantity.resource_units'}]};value.shape={type:'sphere',radius:10};return value;}
+  it('edits real property permissions independently and preserves hardware through undo/redo',()=>{
+    const value=subjectValue(), source=stringify(value), draft=make(source);
+    const changes=prepareEnquiryObservationOperation(draft,deps,{path,value:policy}).changes;
+    expect(parse(changes[0].after).enquiry_observation).toEqual(policy);
+    expect(parse(changes[0].after).energy).toEqual(value.energy);
+    expect(draft.read(path)).toBe(source);
+    draft.apply(changes);
+    draft.undo();expect(draft.read(path)).toBe(source);draft.redo();expect(parse(draft.read(path)).enquiry_observation).toEqual(policy);
+  });
+  it('requires actual published labels/geometry, closed properties and mode types',()=>{
+    const value=subjectValue();validateEnquiryObservation(policy,value);
+    for(const change of [
+      row=>row.property.capacity='hidden-missing',row=>row.normal='true',row=>row.point='actual-center',row=>row.step=0,row=>row.property.kind='all-secrets',
+    ]) {const bad=structuredClone(policy);change(bad.property[0]);expect(()=>validateEnquiryObservation(bad,value)).toThrow();}
+    const duplicate=structuredClone(policy);duplicate.property.push({...duplicate.property[0],property:{capacity:'supplies',kind:'capacity'}});
+    expect(()=>validateEnquiryObservation(duplicate,value)).toThrow(/unique/);
+    const field={property:[{property:{kind:'field_exposure'},normal:true,step:Number.MIN_VALUE}]};validateEnquiryObservation(field,value);
+    delete value.shape;expect(()=>validateEnquiryObservation(field,value)).toThrow(/geometry/);
+  });
+  it('performs authoritative acceptance before changing source or history',async()=>{
+    const value=subjectValue(), source=stringify(value), draft=make(source), runtime={validate:vi.fn(async()=>({accepted:false,findings:[{message:'policy refused'}]}))};
+    await expect(applyEnquiryObservationOperation({draft,runtime,dependencies:deps,operation:{path,value:policy}})).rejects.toThrow();
+    expect(draft.read(path)).toBe(source);expect(draft.snapshot().history.undo).toHaveLength(0);
   });
 });

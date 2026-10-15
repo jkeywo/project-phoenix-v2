@@ -7,7 +7,7 @@ import { createStoreZip } from '../../editor/mod-pack-export.js';
 import { mountWorkshopSensing } from '../../gui/workshop-sensing-panel.js';
 const path = 'assets/entities/test.toml', control = id => document.getElementById('workshop-sensing-' + id);
 const settle = async () => { for (let i = 0; i < 30; i++) await new Promise(resolve => setTimeout(resolve, 1)); };
-function fixture(withoutPassive = false, dual = false) {
+function fixture(withoutPassive = false, dual = false, configure = () => {}) {
   document.body.innerHTML = '<main></main>'; const { value, schema } = damageFixture(); schema.console_instance_publication_kinds.passive_receiver = 'Passive';
   if (dual) for(const role of ['focused','passive']) {
     const original=value.sensing[role][0], id=original.system+'-two';
@@ -22,6 +22,7 @@ function fixture(withoutPassive = false, dual = false) {
     for (const console of value.console) console.feed = console.feed?.filter(row => row.source !== id);
     for (const station of value.station) for (const rating of station.rating || []) for (const key of ['automated_systems', 'detailed_systems']) if (rating[key]) rating[key] = rating[key].filter(other => other !== id);
   }
+  configure(value);
   const source = stringify(value);
   const draft = new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: '[pack]\nformat=1\nid="test"\nname="Test"\nversion="1"\n' }, { path, text: source }]));
   const runtime = { dependencies: async () => ({ base_files: {}, packs: [] }), shipSchema: async () => schema, validate: vi.fn(async () => ({ accepted: true })) };
@@ -32,14 +33,32 @@ describe('Workshop structured sensing controls', () => {
   it('edits own-faction sharing and optional forecast on canonical accepted profiles', async () => {
     const {draft,panel}=fixture();await settle();
     control('share_own_faction-0').checked=true;control('receive-0').checked=false;
-    control('focused-forecast-enabled').checked=true;control('focused-forecast-horizon').value='12';
+    control('focused-forecast').checked=true;control('focused-forecast-horizon').value='12';
     control('save').click();await settle();
     const value=parse(draft.read(path));
     expect(value.sensing.sharing.find(row=>row.system==='sensor-radar')).toEqual({system:'sensor-radar',share_own_faction:true,receive:false});
     expect(value.sensing.sharing.some(row=>row.system==='helm-radar')).toBe(false);
     expect(value.sensing.focused[0].forecast).toEqual({horizon_secs:12});
-    control('focused-forecast-enabled').checked=false;control('save').click();await settle();
+    control('focused-forecast').checked=false;control('save').click();await settle();
     expect(parse(draft.read(path)).sensing.focused[0].forecast).toBeUndefined();panel.dispose();
+  });
+  it('preserves forecast and question settings while editing another focused field',async()=>{
+    const {draft,panel}=fixture(false,false,value=>Object.assign(value.sensing.focused[0],{forecast:{horizon_secs:120},default_aim:'environment',aims:[{aim:'environment',work_multiplier:2,resource_multiplier:1,intrusive:false}]}));
+    await settle();expect(control('focused-forecast').checked).toBe(true);expect(control('focused-default-aim').value).toBe('environment');
+    control('focused-work_secs').value='6';control('save').click();await settle();
+    let profile=parse(draft.read(path)).sensing.focused[0];expect(profile.forecast).toEqual({horizon_secs:120});expect(profile.aims).toEqual([{aim:'environment',work_multiplier:2,resource_multiplier:1,intrusive:false}]);
+    control('focused-forecast-horizon').value='90';control('focused-aim-resources-enabled').checked=true;control('focused-aim-resources-intrusive').checked=true;control('save').click();await settle();
+    profile=parse(draft.read(path)).sensing.focused[0];expect(profile.forecast.horizon_secs).toBe(90);expect(profile.aims).toContainEqual({aim:'resources',work_multiplier:1,resource_multiplier:1,intrusive:true});
+    draft.undo();panel.refresh();expect(control('focused-forecast-horizon').value).toBe('120');panel.dispose();
+  });
+  it('authors subject permissions through acceptance and keeps refused edits out of history',async()=>{
+    const {draft,runtime,panel}=fixture(false,false,value=>{value.shape={type:'sphere',radius:10};value.infrastructure={condition_max:100,publish:false,capacity:[{id:'supplies',amount:5,label:'component.scan.quantity.resource_units'}]};});
+    await settle();const before=parse(draft.read(path));control('observation-add').click();
+    control('observation-0-property').value='capacity:supplies';control('observation-0-intrusive').checked=true;control('observation-save').click();await settle();
+    const accepted=draft.read(path);expect(parse(accepted).enquiry_observation).toEqual({property:[{property:{kind:'capacity',capacity:'supplies'},normal:false,intrusive:true,point:'receiver',step:1}]});
+    expect(parse(accepted).energy).toEqual(before.energy);expect(runtime.validate).toHaveBeenCalledOnce();
+    runtime.validate.mockResolvedValueOnce({accepted:false,findings:[{message:'no permission'}]});control('observation-0-normal').checked=true;control('observation-save').click();await settle();
+    expect(draft.read(path)).toBe(accepted);expect(draft.snapshot().history.undo).toHaveLength(1);expect(control('status').textContent).toContain('no permission');panel.dispose();
   });
   it('edits and removes a focused instrument without overwriting another receiver or its bindings', async () => {
     const {draft,panel}=fixture(false,true);await settle();

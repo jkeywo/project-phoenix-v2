@@ -48,6 +48,7 @@ fn profile() -> BroadConfig {
 }
 fn sample(source: &str, x: f32) -> BroadMeasurement {
     BroadMeasurement {
+        selectable: true,
         source: source.into(),
         position: [x, 0.0],
         support: 1.0,

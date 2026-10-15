@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Debug)]
 pub struct BroadMeasurement {
     pub source: String,
+    pub selectable: bool,
     pub position: [f32; 2],
     pub support: f32,
     pub identity: Option<TrackIdentity>,
@@ -22,6 +23,7 @@ pub struct BroadMeasurement {
 #[serde(deny_unknown_fields)]
 pub struct BroadTrack {
     pub contact_id: String,
+    pub selectable: bool,
     pub observed_tick: u64,
     pub position: [f32; 2],
     pub velocity: Option<[f32; 2]>,
@@ -275,6 +277,7 @@ impl BroadTrackState {
                         id.clone(),
                         BroadTrack {
                             contact_id: id.clone(),
+                            selectable: sample.selectable,
                             observed_tick: tick,
                             position: measured_position(sample.position, profile.position_error),
                             velocity: None,
@@ -323,6 +326,7 @@ impl BroadTrackState {
                     bounded_float(2.0 * f64::from(profile.position_error) / elapsed);
             }
             track.position = position;
+            track.selectable = sample.selectable;
             track.observed_tick = tick;
             if track.refresh_secs >= f64::from(profile.identity_secs) && sample.identity.is_some() {
                 track.identity.clone_from(&sample.identity);
@@ -370,6 +374,7 @@ impl BroadTrackState {
                 let age = (tick - track.observed_tick) as f64 * f64::from(fixed_dt);
                 SensorTrackSnapshot {
                     contact_id: track.contact_id.clone(),
+                    selectable: track.selectable && current.contains(&track.contact_id),
                     observed_tick: track.observed_tick,
                     position,
                     velocity: track.velocity,

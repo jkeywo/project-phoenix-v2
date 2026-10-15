@@ -27,6 +27,9 @@ pub struct TrackAssessment {
 #[serde(deny_unknown_fields)]
 pub struct SensorTrackSnapshot {
     pub contact_id: String,
+    /// The observing instrument permits acquisition of this return. This is
+    /// independent of whether its identity or classification is known yet.
+    pub selectable: bool,
     pub observed_tick: u64,
     pub position: [f32; 2],
     pub velocity: Option<[f32; 2]>,

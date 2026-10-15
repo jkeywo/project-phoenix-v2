@@ -21,6 +21,21 @@
     "diagnosis": "Three new movement/guidance fixtures expected observed velocity/evidence before the authored sample interval or serialized runtime hull state that omits authored shields. Reviewed fixture corrections integrated separately as 04877c3a and c660e16e. Retry pending.",
     "untested_changes": "Post-review repeated-send identity regression, positive listening-cost validation/data and new 360-step radio JSON/no-write continuation case await native execution. Previous radio tests do not establish these results."
   },
-  "compatibility": "Integrated command vocabulary 15; snapshot 56 and simulation rules 0.28 include the newly joined canonical Helm movement and dated radio facts. Unsupported older saves/peers must fail explicitly.",
+  "integrated_followup": {
+    "model": "9 passed, including radio, Helm and personnel",
+    "gameplay": "23 passed, including actual radio config validation and 360-step pure personnel continuation",
+    "client": "502 passed across 12 affected suites; .phoenix/parallel-radio-personnel-client-retry.log",
+    "native_content_retry": "232 passed, 0 failed; the two named source corrections below remain excluded",
+    "native_log": ".phoenix/parallel-native-content-retry.log",
+    "native_log_sha256": "11829bdf63177834d3cb65eb97e5b5842c87dc3c0a78ad4433c5dac07d348997",
+    "native_executable_sha256": "38c2b944256118d0209052da1c7493dd7c1081160e42d27ad4c6079bbd7b1aeb",
+    "native_tested_source": "Executable built from 768c548e plus the current authored Broadside/Dynasty Comms cost correction; it predates illumination and the lateral publication fix",
+    "excluded_source_cases": [
+      "comms::radio::tests::radio_inbox_and_paid_reserves_continue_after_json_and_malformed_copies_do_not_write",
+      "console::helm::control::tests::renamed_actual_owner_runs_the_existing_compiled_ai_and_normal_admission"
+    ],
+    "corrections": "Copied child energy tables now retain the required positive listening cost. Radio continuation seeds real pre-save publications; the renamed lateral case receives a separate real kind/publication ownership fix. Both source corrections await rebuilt execution."
+  },
+  "compatibility": "This checkpoint initially used protocol 15, snapshot 56 and simulation rules 0.28 for canonical Helm movement and dated radio facts. Later integrated lanes advance the shared pins at their authoritative constants. Unsupported older saves/peers must fail explicitly.",
   "limits": "Initial checkpoint, not a verified increment exit. No updated native continuation result, whole-host radio demonstration, browser/native device acceptance, balance/performance result, complete ordinary-AI radio policy, generic requests, receipts, interception/decoding, relays or media is claimed. No push or full integration gate run."
 }

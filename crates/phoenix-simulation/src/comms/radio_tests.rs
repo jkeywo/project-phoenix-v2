@@ -3,6 +3,44 @@ use crate::core::messages::{AdmittedCommand, SystemId};
 use crate::world_id::InstallWorldIdMint;
 use bevy::ecs::system::RunSystemOnce;
 
+fn first_difference(
+    left: &serde_json::Value,
+    right: &serde_json::Value,
+    path: &str,
+) -> Option<String> {
+    use serde_json::Value;
+    match (left, right) {
+        (Value::Object(a), Value::Object(b)) => {
+            for key in a
+                .keys()
+                .chain(b.keys())
+                .collect::<std::collections::BTreeSet<_>>()
+            {
+                let location = format!("{path}.{key}");
+                match (a.get(key), b.get(key)) {
+                    (Some(a), Some(b)) => {
+                        if let Some(difference) = first_difference(a, b, &location) {
+                            return Some(difference);
+                        }
+                    }
+                    _ => return Some(format!("{location}: field presence differs")),
+                }
+            }
+            None
+        }
+        (Value::Array(a), Value::Array(b)) => {
+            if a.len() != b.len() {
+                return Some(format!("{path}: lengths {} / {}", a.len(), b.len()));
+            }
+            a.iter()
+                .zip(b)
+                .enumerate()
+                .find_map(|(i, (a, b))| first_difference(a, b, &format!("{path}[{i}]")))
+        }
+        _ => (left != right).then(|| format!("{path}: {left} / {right}")),
+    }
+}
+
 fn fixture(distance: f32) -> (App, Entity, Entity) {
     let mut app = App::new();
     app.insert_resource(crate::sim_tick::SimTick(10))
@@ -190,6 +228,28 @@ fn radio_inbox_and_paid_reserves_continue_after_json_and_malformed_copies_do_not
             .init_resource::<crate::gm::actions::action::GmActionJournal>()
             .init_resource::<crate::gm::operations::puppet::StationPuppets>()
             .init_resource::<crate::gm::operations::puppet::PendingGmStationCommands>();
+        // A real host publishes these derived views before a save. Restore
+        // rebuilds the same views and then reinstates held publications. Seed
+        // them here too instead of comparing an un-published bootstrap to a
+        // post-restore host that has already run its ordinary projection pass.
+        let _ = app
+            .world_mut()
+            .run_system_once(crate::science::server::publish_scan_blackboard);
+        let _ = app
+            .world_mut()
+            .run_system_once(crate::science::passive::publish);
+        let _ = app
+            .world_mut()
+            .run_system_once(crate::ship::sensors::publish_sensor_radar_blackboard);
+        let _ = app
+            .world_mut()
+            .run_system_once(crate::console::helm::server::publish_helm_blackboard);
+        let _ = app
+            .world_mut()
+            .run_system_once(crate::console::navigation::server::publish_navigation_blackboard);
+        let _ = app.world_mut().run_system_once(
+            crate::console::weapons::blackboard::publish_tactical_radar_blackboard,
+        );
         (app, source)
     }
     fn advance(app: &mut App) {
@@ -214,10 +274,16 @@ fn radio_inbox_and_paid_reserves_continue_after_json_and_malformed_copies_do_not
     let report = crate::snapshot::restore(resumed.world_mut(), &saved);
     assert!(report.is_complete(), "{report:?}");
     for step in 0..360 {
-        assert_eq!(
-            crate::snapshot::capture(live.world()),
-            crate::snapshot::capture(resumed.world()),
-            "step {step}"
+        let live_state = crate::snapshot::capture(live.world());
+        let resumed_state = crate::snapshot::capture(resumed.world());
+        assert!(
+            live_state == resumed_state,
+            "step {step}: {:?}",
+            first_difference(
+                &serde_json::to_value(&live_state).unwrap(),
+                &serde_json::to_value(&resumed_state).unwrap(),
+                "snapshot"
+            )
         );
         assert_eq!(
             crate::sim_digest::world_digest(live.world()),

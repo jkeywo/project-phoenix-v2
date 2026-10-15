@@ -502,15 +502,21 @@ pub(crate) fn register(app: &mut App) {
             "illumination-emission-readout",
         );
     crate::ai::cadence::register_ai_cadence(app);
-    for payload in [
-        Payload::SetIlluminationTarget,
-        Payload::SetIlluminationEnabled,
+    for (payload, feedback) in [
+        (
+            Payload::SetIlluminationTarget,
+            &[Payload::SetIlluminationTarget][..],
+        ),
+        (
+            Payload::SetIlluminationEnabled,
+            &[Payload::SetIlluminationEnabled][..],
+        ),
     ] {
         app.register_admitted_consumer(
             ConsumerMatcher::kind_payload(crate::ship::system_registry::ILLUMINATION_KIND, payload)
                 .with_feedback(
                     crate::command_admission::FeedbackAddress::DeclaredKindOnly,
-                    &[payload],
+                    feedback,
                 ),
         );
     }

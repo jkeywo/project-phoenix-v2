@@ -194,7 +194,11 @@ fn actual_paid_science_emission_assists_matching_opted_in_round_beyond_seeker_wi
     let reading = actual.last_guidance.as_ref().unwrap();
     assert_eq!(reading.sampled_tick, 100);
     assert_eq!(reading.target_uuid, "actual-target");
-    assert!(!reading.samples.is_empty());
+    let phoenix_model::guided_guidance::GuidanceSource::Console { samples, .. } = &reading.source
+    else {
+        panic!("Science assistance must retain Console provenance")
+    };
+    assert!(!samples.is_empty());
     let held = reading.clone();
     command(
         &mut world,

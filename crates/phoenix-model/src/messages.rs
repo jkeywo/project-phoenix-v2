@@ -2626,6 +2626,22 @@ pub enum SystemControlPayload {
         /// The obstruction entity's uuid.
         target: String,
     },
+    /// Change only the addressed actual thrust or steering owner's mode.
+    SetHelmMode {
+        mode: crate::helm_control::HelmControlMode,
+    },
+    /// Signed desired forward speed; actual thrust owner and paid limits apply.
+    SetDesiredSpeed {
+        speed: f32,
+    },
+    /// Absolute heading in radians; only the addressed steering owner changes.
+    SetDesiredHeading {
+        heading_rad: f32,
+    },
+    /// Match one permitted dated contact. None cancels matching, not motion.
+    SetMatchSpeed {
+        contact: Option<String>,
+    },
 }
 
 /// `ClientMessageDiscriminants` (from `strum::EnumDiscriminants`) is a

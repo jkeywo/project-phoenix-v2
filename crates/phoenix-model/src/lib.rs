@@ -28,6 +28,7 @@ pub mod focused_enquiry;
 pub mod guided_guidance;
 pub mod guided_orders;
 pub mod guided_round;
+pub mod helm_control;
 pub mod interior;
 pub mod job;
 pub mod logistics;

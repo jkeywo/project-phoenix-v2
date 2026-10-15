@@ -401,6 +401,39 @@ impl BlasterSystem {
         admit_launch: &mut impl FnMut(usize) -> bool,
         next_uuid: &mut impl FnMut() -> String,
     ) -> Vec<LaunchEvent> {
+        let origins: Vec<_> = barrel_origins.iter().copied().map(Some).collect();
+        self.tick_with_origins(
+            dt,
+            charge_dt,
+            &origins,
+            shooter_yaw,
+            target_x,
+            target_z,
+            target_vx,
+            target_vz,
+            source_uuid,
+            admit_launch,
+            next_uuid,
+        )
+    }
+
+    /// Authoritative optional-origin executor. None preserves an unavailable
+    /// physical barrel at its authored index; no other barrel substitutes.
+    #[allow(clippy::too_many_arguments)]
+    pub fn tick_with_origins(
+        &mut self,
+        dt: f32,
+        charge_dt: f32,
+        barrel_origins: &[Option<(f32, f32)>],
+        shooter_yaw: f32,
+        target_x: f32,
+        target_z: f32,
+        target_vx: f32,
+        target_vz: f32,
+        source_uuid: &str,
+        admit_launch: &mut impl FnMut(usize) -> bool,
+        next_uuid: &mut impl FnMut() -> String,
+    ) -> Vec<LaunchEvent> {
         // Prune expired projectiles.
         self.in_flight.retain(|p| !p.is_expired());
 
@@ -458,7 +491,9 @@ impl BlasterSystem {
                 if !attempted.insert(barrel) {
                     continue;
                 }
-                let Some(&(origin_x, origin_z)) = barrel_origins.get(barrel as usize) else {
+                let Some(&(origin_x, origin_z)) =
+                    barrel_origins.get(barrel as usize).and_then(Option::as_ref)
+                else {
                     continue;
                 };
                 if !origin_x.is_finite() || !origin_z.is_finite() || !admit_launch(barrel as usize)

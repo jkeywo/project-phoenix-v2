@@ -1425,3 +1425,60 @@ fn funded_charge_progress_pauses_without_pausing_live_projectiles() {
     assert!(sys.in_flight[0].z < before);
     assert_eq!(sys.volley.next_step, 1);
 }
+
+#[test]
+fn optional_origin_holes_keep_indices_and_never_pay_or_mint_for_missing_barrels() {
+    let mut system = make_system();
+    system.config.pattern = vec![crate::weapons::pattern::BarrelPatternStep {
+        barrels: vec![1, 2, 0],
+        offset_secs: 0.0,
+    }];
+    assert!(system.request_charge_start());
+    let mut paid = Vec::new();
+    let mut minted = 0;
+    let events = system.tick_with_origins(
+        0.1,
+        0.1,
+        &[Some((1.0, 0.0)), None, Some((5.0, 0.0))],
+        0.0,
+        10.0,
+        0.0,
+        0.0,
+        0.0,
+        "source",
+        &mut |index| {
+            paid.push(index);
+            true
+        },
+        &mut || {
+            minted += 1;
+            format!("round-{minted}")
+        },
+    );
+    assert_eq!(paid, vec![2, 0]);
+    assert_eq!(minted, 2);
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| (event.barrel, event.x))
+            .collect::<Vec<_>>(),
+        vec![(2, 5.0), (0, 1.0)]
+    );
+    assert!(system.volley.on_cooldown);
+    let mut empty = make_system();
+    assert!(empty.request_charge_start());
+    let events = empty.tick_with_origins(
+        0.1,
+        0.1,
+        &[None],
+        0.0,
+        10.0,
+        0.0,
+        0.0,
+        0.0,
+        "source",
+        &mut |_| panic!("unavailable barrel bought work"),
+        &mut || panic!("unavailable barrel minted a round"),
+    );
+    assert!(events.is_empty());
+}

@@ -47,6 +47,35 @@ fn blaster_ai_combat_lock(
     }
 }
 use crate::entities::model_rig::ModelMarkers;
+
+/// Keep an unavailable authored marker at its real barrel index. Only an
+/// implicit barrel with no marker authors the historical ship-centre origin.
+fn resolve_barrel_origins(
+    config: &crate::weapons::blaster::BlasterBankConfig,
+    markers: Option<&ModelMarkers>,
+    transform: &Transform,
+    centre: (f32, f32),
+) -> Vec<Option<(f32, f32)>> {
+    let resolve = |name: &str| {
+        markers?
+            .resolve_world_position(transform, name)
+            .filter(|point| point.is_finite())
+            .map(|point| (point.x, point.z))
+    };
+    if config.barrels.is_empty() {
+        vec![match config.marker.as_deref() {
+            Some(name) => resolve(name),
+            None => (centre.0.is_finite() && centre.1.is_finite()).then_some(centre),
+        }]
+    } else {
+        config.barrels.iter().map(|name| resolve(name)).collect()
+    }
+}
+
+#[cfg(test)]
+#[path = "barrel_origin_tests.rs"]
+mod barrel_origin_tests;
+
 use crate::server_app::{AsteroidUuid, GameOverReason, SimOutbox};
 use crate::ship::state::ShipPhysics;
 use crate::ship_plugin::ShipSystemControlSources;
@@ -696,29 +725,14 @@ pub(crate) fn tick_blaster_system(
             #[cfg(feature = "server")]
             let screenshake_magnitude = bank.config.screenshake_magnitude;
 
-            // Resolve one world-space origin per authored barrel marker (issue
-            // #765). A bank with no barrels authored has one implicit barrel =
-            // the bank's single `marker`. Each name resolves via the rig, and
-            // falls back to ship centre when the bank has no marker or the
-            // sidecar doesn't declare it.
-            let barrel_names: Vec<Option<String>> = if bank.config.barrels.is_empty() {
-                vec![bank.config.marker.clone()]
-            } else {
-                bank.config.barrels.iter().cloned().map(Some).collect()
-            };
-            let barrel_origins: Vec<(f32, f32)> = barrel_names
-                .iter()
-                .map(|name| {
-                    name.as_deref()
-                        .and_then(|n| {
-                            markers_opt.and_then(|m| m.resolve_world_position(transform, n))
-                        })
-                        .map(|pos| (pos.x, pos.z))
-                        .unwrap_or((physics.x, physics.z))
-                })
-                .collect();
+            let barrel_origins = resolve_barrel_origins(
+                &bank.config,
+                markers_opt,
+                transform,
+                (physics.x, physics.z),
+            );
 
-            let events = bank.tick_with_work(
+            let events = bank.tick_with_origins(
                 dt,
                 charge_dt,
                 &barrel_origins,

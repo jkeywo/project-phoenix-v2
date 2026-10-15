@@ -285,6 +285,10 @@ fn tick(
         Option<&crate::console::weapons::assignments::ShipWeaponTargets>,
         Option<&crate::science::passive::PassiveState>,
         &crate::core::messages::AdmittedCommands,
+        Option<(
+            &crate::resources::fitting_server::CompiledShipFitting,
+            &crate::resources::fitting_server::ShipFitting,
+        )>,
     )>,
 ) {
     let dt = time.timestep().as_secs_f32();
@@ -307,6 +311,7 @@ fn tick(
             assignments,
             passive,
             admitted,
+            fitting,
         )) = ships.iter_mut().find(|(id, ..)| id.0 == uuid)
         else {
             continue;
@@ -373,6 +378,9 @@ fn tick(
                     })
                     .unwrap_or(false);
             let enabled = receiver_enabled
+                && fitting.is_none_or(|(profile, state)| {
+                    !crate::resources::fitting_server::unavailable(profile, state, owner)
+                })
                 && sources.0.entries().any(|(id, _)| id == owner)
                 && !sources.0.is_offline(owner)
                 && sources.0.source_for(owner)

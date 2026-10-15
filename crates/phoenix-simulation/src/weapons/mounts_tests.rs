@@ -303,3 +303,215 @@ fn sensor_field_of_view_uses_the_single_actual_bearing_instead_of_weapon_toleran
     assert!(!rotated.geometry(0.0, -40.0, 0.0, 0.0, 0.0).in_arc);
     assert!(sensor_mount(Some(&profiles), None, &owner, &mount).is_none());
 }
+
+#[test]
+fn actual_tick_preserves_bearing_and_power_during_refit_and_vacancy_then_resumes() {
+    use crate::core::messages::{SystemBlackboard, TacticalRadarBlackboard, ViewscreenBlackboard};
+    use crate::resources::fitting_server::{
+        CompiledShipFitting, RefitStage, RefitWork, ShipFitting,
+    };
+    use crate::science::broad::{BroadMeasurement, BroadProfile, BroadTracks};
+    use crate::ship::power::ShipPowerSystem;
+    use bevy::ecs::system::RunSystemOnce;
+
+    let authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    let owner = SystemId("phaser-fore".into());
+    let instrument = SystemId("tactical-radar".into());
+    let broad = BroadProfile::from_config(&authored).unwrap().unwrap();
+    let mut tracks = BroadTracks::new(&broad);
+    let state = tracks.0.get_mut(&instrument).unwrap();
+    state
+        .advance(
+            &broad.0[&instrument].profile,
+            0,
+            0.5,
+            1.0,
+            &[BroadMeasurement {
+                source: "held-target".into(),
+                selectable: true,
+                observation: None,
+                position: [40.0, 10.0],
+                support: 1.0,
+                identity: None,
+                classification: None,
+                assessment: None,
+            }],
+        )
+        .unwrap();
+    let measured = state
+        .projection(&broad.0[&instrument].profile, 0, 0.5)
+        .unwrap();
+    let mut boards = crate::server_app::ShipSystemBlackboards::default();
+    boards.0.insert(
+        instrument,
+        SystemBlackboard::TacticalRadar(TacticalRadarBlackboard {
+            tracks: Some(measured),
+            ..Default::default()
+        }),
+    );
+    boards.0.insert(
+        crate::ship::system_registry::viewscreen_system_id(),
+        SystemBlackboard::Viewscreen(ViewscreenBlackboard {
+            combat_lock: Some("held-target".into()),
+            ..Default::default()
+        }),
+    );
+    let mut world = World::new();
+    world.insert_resource(Time::<Fixed>::from_seconds(0.1));
+    world.insert_resource(crate::sim_tick::SimTick(0));
+    let entity = crate::entities::spawner::spawn_entity(
+        &mut world.commands(),
+        &authored,
+        Vec3::ZERO,
+        "observer".into(),
+        None,
+    );
+    world.flush();
+    world.entity_mut(entity).insert((
+        boards,
+        tracks,
+        crate::core::messages::AdmittedCommands::default(),
+    ));
+    world
+        .get_mut::<crate::ship_plugin::ShipSystemControlSources>(entity)
+        .unwrap()
+        .0
+        .set(
+            owner.clone(),
+            crate::ship::control_source::ControlSource::Ai,
+        );
+    let pose = *world.get::<Transform>(entity).unwrap();
+    let initial_power = world
+        .get::<ShipPowerSystem>(entity)
+        .unwrap()
+        .0
+        .capture_continuation();
+    world.run_system_once(tick).unwrap();
+    let bearing = world.get::<ShipMounts>(entity).unwrap().0[&owner].offset_deg;
+    assert!(
+        bearing > 0.0,
+        "positive control: an installed bank really traverses"
+    );
+    let paid = world
+        .get::<ShipPowerSystem>(entity)
+        .unwrap()
+        .0
+        .capture_continuation();
+    assert_ne!(paid, initial_power);
+
+    // Set up the physical equipment owner's normal stage frontiers. The mount
+    // reader neither advances this job nor moves its actual assemblies.
+    let profile = world.get::<CompiledShipFitting>(entity).unwrap().clone();
+    let slot = profile
+        .0
+        .config()
+        .slots
+        .iter()
+        .find(|slot| slot.system == owner)
+        .unwrap();
+    let mut fitting = world.get::<ShipFitting>(entity).unwrap().clone();
+    let spare = fitting.equipment.assemblies.values().find(|item| {
+        matches!(&item.location, crate::resources::fitting::EquipmentLocation::Stored { locker }
+            if profile.0.locker(locker).unwrap().compartment == profile.0.compartment(&slot.id).unwrap())
+            && profile.0.compatible(&slot.id, &item.definition).is_ok()
+    }).unwrap().clone();
+    let crate::resources::fitting::EquipmentLocation::Stored { locker } = spare.location else {
+        unreachable!()
+    };
+    let job = world
+        .get_mut::<crate::console::repair::server::ShipRepairTeams>(entity)
+        .unwrap()
+        .0
+        .claim_refit(0, 1, owner.clone(), slot.id.clone())
+        .unwrap();
+    fitting
+        .equipment
+        .stored_to_work(&profile.0, &spare.id, job.0, &slot.id)
+        .unwrap();
+    fitting.work.insert(
+        slot.id.clone(),
+        RefitWork {
+            request: 1,
+            slot: slot.id.clone(),
+            item: spare.id.clone(),
+            removed_item: fitting
+                .equipment
+                .installed(&slot.id)
+                .map(|item| item.id.clone()),
+            locker: locker.clone(),
+            source_locker: locker.clone(),
+            job,
+            stage: RefitStage::Removing,
+            progress: 0.0,
+            reserved: false,
+            waiting: String::new(),
+        },
+    );
+    let check_frozen = |world: &mut World, now| {
+        world.resource_mut::<crate::sim_tick::SimTick>().0 = now;
+        world.run_system_once(tick).unwrap();
+        assert_eq!(
+            world.get::<ShipMounts>(entity).unwrap().0[&owner].offset_deg,
+            bearing
+        );
+        assert_eq!(
+            world
+                .get::<ShipPowerSystem>(entity)
+                .unwrap()
+                .0
+                .capture_continuation(),
+            paid
+        );
+        assert_eq!(world.get::<Transform>(entity).unwrap(), &pose);
+    };
+    world.entity_mut(entity).insert(fitting.clone());
+    check_frozen(&mut world, 1);
+    let condition = world
+        .get::<crate::ship::compartment_damage::ShipDamage>(entity)
+        .unwrap()
+        .state
+        .components[&owner][&slot.operation_component]
+        .clone();
+    let old = fitting
+        .equipment
+        .remove_installed(&profile.0, &slot.id, job.0, condition)
+        .unwrap();
+    fitting
+        .equipment
+        .return_to_locker(&profile.0, &old, job.0, &locker)
+        .unwrap();
+    fitting.work.get_mut(&slot.id).unwrap().stage = RefitStage::Installing;
+    world.entity_mut(entity).insert(fitting.clone());
+    check_frozen(&mut world, 2);
+    fitting.work.clear();
+    world.entity_mut(entity).insert(fitting.clone());
+    check_frozen(&mut world, 3);
+    let condition = fitting
+        .equipment
+        .install_from_work(&profile.0, &slot.id, &spare.id, job.0)
+        .unwrap();
+    world
+        .get_mut::<crate::ship::compartment_damage::ShipDamage>(entity)
+        .unwrap()
+        .state
+        .components
+        .get_mut(&owner)
+        .unwrap()
+        .insert(slot.operation_component.clone(), condition);
+    world.entity_mut(entity).insert(fitting);
+    world.resource_mut::<crate::sim_tick::SimTick>().0 = 4;
+    world.run_system_once(tick).unwrap();
+    assert!(world.get::<ShipMounts>(entity).unwrap().0[&owner].offset_deg > bearing);
+    assert_ne!(
+        world
+            .get::<ShipPowerSystem>(entity)
+            .unwrap()
+            .0
+            .capture_continuation(),
+        paid
+    );
+    assert_eq!(world.get::<Transform>(entity).unwrap(), &pose);
+}

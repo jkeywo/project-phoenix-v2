@@ -543,7 +543,9 @@ pub const SNAPSHOT_FORMAT: u32 = 58;
 /// through the sole existing team/job navigation and work owners.
 /// "0.30" emits independently paid, measured Science assistance to explicitly
 /// opted-in matching guided rounds, retaining their physical target intent.
-pub const SIMULATION_RULES: &str = "0.30";
+/// "0.31" settles equipment-bound facility services using both real paid
+/// energy owners and the existing finite stock exchange in one transaction.
+pub const SIMULATION_RULES: &str = "0.31";
 
 /// The authored data, computed rather than remembered.
 ///

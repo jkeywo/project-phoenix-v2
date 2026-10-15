@@ -5,7 +5,8 @@ Contract preparation, 15 October 2026, under main `bc5cfbc6`'s
 initial integration/targeted checks using existing equipment/service owners.
 Full completion requires 13/18/20's verified exits. Workforce joins 20's underlying
 team/custody model; new movement and carried craft join 18/19 where actually used.
-This document neither starts runtime nor changes ledger/acceptance status.
+The first equipment-bound replenishment checkpoint is integrated as `68257c81`.
+Increment 21 is in progress; its native and playable acceptance remains pending.
 
 ## Outcome and selected scope
 

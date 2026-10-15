@@ -477,6 +477,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         port_service_schema,
         phoenix_model::ports::PortServiceConfig,
+        system,
         policy,
         eligible_factions,
         offers

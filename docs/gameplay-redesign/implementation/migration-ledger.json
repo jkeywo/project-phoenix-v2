@@ -330,7 +330,7 @@
     {
       "id": 21,
       "title": "Facilities and systemic outside actors",
-      "status": "pending",
+      "status": "in_progress",
       "depends_on": [
         13,
         18,
@@ -338,7 +338,8 @@
       ],
       "completion": "Facilities, workforce and actor objectives use common equipment/damage/teams/stocks/physical delivery and causal service dependencies.",
       "evidence": [
-        "docs/gameplay-redesign/implementation/increment-21.md"
+        "docs/gameplay-redesign/implementation/increment-21.md",
+        "docs/acceptance/1562-facility-foundation.md"
       ]
     },
     {

@@ -4,6 +4,7 @@ const BEAM: &str = r#"
 [[weapon]]
 id = "phaser-fore"
 strategy_id = "fore"
+impact = { damage_type = "laser", penetration = 0 }
 marker = "beam_mount"
 [weapon.ai]
 idle = true
@@ -26,6 +27,7 @@ const BOLT: &str = r#"
 [[weapon]]
 id = "blaster-fore"
 strategy_id = "fore"
+impact = { damage_type = "physical", penetration = 0 }
 barrels = ["port", "starboard"]
 pattern = [{barrels=[0],offset_secs=0.0}, {barrels=[1],offset_secs=0.2}]
 [weapon.ai]
@@ -56,6 +58,7 @@ idle = true
 [[weapon]]
 id = "torpedo-tube-fore"
 strategy_id = "fore"
+impact = { damage_type = "physical", penetration = 0 }
 barrels = ["port", "starboard"]
 pattern = [{barrels=[0,1],offset_secs=0.0}]
 [weapon.ai]
@@ -82,6 +85,7 @@ fn generic_beam_compiles_to_the_same_existing_strategy_and_round_trips() {
         r#"
 [[weapons_console.phaser_banks]]
 id="fore"
+impact={damage_type="laser",penetration=0}
 facing_deg=-90.0
 fire_arc_deg=180.0
 auto_arc_deg=120.0
@@ -155,7 +159,7 @@ fn generic_identity_is_unique_but_strategy_identity_keeps_family_namespaces() {
 
 #[test]
 fn generic_and_shorthand_cannot_create_two_controllers_for_one_bank() {
-    let source = format!("{BEAM}\n[[weapons_console.phaser_banks]]\nid='fore'\nfacing_deg=0.0\nfire_arc_deg=90.0\nauto_arc_deg=90.0\n");
+    let source = format!("{BEAM}\n[[weapons_console.phaser_banks]]\nid='fore'\nimpact={damage_type='laser',penetration=0}\nfacing_deg=0.0\nfire_arc_deg=90.0\nauto_arc_deg=90.0\n");
     assert!(parse(&source)
         .unwrap_err()
         .to_string()

@@ -1,4 +1,5 @@
 pub mod arc_geometry;
+pub mod assignments;
 pub mod beam_render;
 pub mod blaster;
 pub mod mount;

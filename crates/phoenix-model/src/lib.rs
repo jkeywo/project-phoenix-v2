@@ -5,6 +5,7 @@ pub mod debug_surface;
 pub mod entity;
 pub mod identity;
 pub mod tags;
+pub mod weapon_targets;
 
 pub mod texture;
 
@@ -18,12 +19,12 @@ pub mod system_status;
 pub mod observation;
 
 pub mod damage;
-pub mod guided_round;
 pub mod energy;
 pub mod equipment_recovery_ui;
 pub mod field;
 pub mod fitting;
 pub mod focused_enquiry;
+pub mod guided_round;
 pub mod interior;
 pub mod job;
 pub mod logistics;

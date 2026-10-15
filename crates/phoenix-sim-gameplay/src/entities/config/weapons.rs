@@ -540,6 +540,10 @@ pub fn validate_torpedo_tubes(tubes: &[TorpedoTubeConfig]) -> Result<(), String>
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WeaponsConsoleConfig {
+    /// Prepared groups collate individual System commands; membership grants
+    /// neither information nor machinery authority.
+    #[serde(default, rename = "group", skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<phoenix_model::weapon_targets::WeaponGroupConfig>,
     /// RGBA colour used by the client Tactical UI for torpedo fire-arc
     /// overlays. When absent, the `ShipClientConfig` default is used.
     #[serde(default)]

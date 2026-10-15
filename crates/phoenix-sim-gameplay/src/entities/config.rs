@@ -965,6 +965,15 @@ impl EntityConfig {
                 }
             }
         }
+        if let Some(weapons) = &config.weapons_console {
+            if !weapons.groups.is_empty() {
+                let ship = config.ship_config.as_ref().ok_or_else(|| {
+                    SerdeError::custom("prepared weapon groups require actual owned weapon Systems")
+                })?;
+                crate::weapons::assignments::validate_groups(&weapons.groups, ship)
+                    .map_err(SerdeError::custom)?;
+            }
+        }
         if let Some(sensing) = &config.sensing {
             crate::science::sensing::validate_sensing(sensing, &config)
                 .map_err(SerdeError::custom)?;

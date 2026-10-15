@@ -223,6 +223,99 @@ contracts, without sibling dependencies or another authoritative world store.
 **Exit:** alternative methods resolve against real capabilities, unsupported
 bindings are explained, and existing scenarios continue without planner adoption.
 
+### 22B first consumer: imported maintenance domain
+
+Implementation contract, 15 October 2026. This is the early existing-capability
+22B slice, not a claim that 22A, 22C/D, broader personnel/facilities or full 22 have
+completed. The first actual imported domain decomposes the supported internal
+Repair and main-to-local delivery operators above. Existing worlds without an
+explicit planning declaration keep their present execution.
+
+World source declares `planning.import` rows with an asset `path`, namespace `as`
+and exact exported `names`, plus a named root task and typed arguments. A domain
+library is closed versioned TOML: format 1, stable library identity, explicit
+exports, required supported operator families, typed task parameters, alternative
+methods and primitive activity operators. Nested imports use the same explicit
+shape. Imported definitions are identified by canonical asset path and definition
+id; a namespace is an authored reference, not a new identity. Resolve through the
+existing overlay-aware WorldReader and LoadedWorld/LedgerPlan boundary. The ledger
+records every actually read library's source before content freeze. Missing source,
+absolute/traversing paths, unsupported format/capability requirements, duplicate
+exports/namespaces, ambiguous references, import/definition cycles, unreachable
+exports and incompatible parameter bindings refuse activation and Preview/Test.
+An exported root may use its library's validated private definition closure;
+private definitions do not become selectable imports in a caller.
+
+The first closed parameter kinds are actor, System, team, Repair request, physical
+Repair target, Repair goal, store, commodity and quantity. A call argument is an
+explicit typed literal or a named parameter reference; no string interpolation,
+implicit name lookup or arbitrary Rhai expression supplies a physical binding.
+Team/quantity obey the existing command frontiers. Actor scope remains the actual
+base-world names/authored launch slots accepted by 22A. The first maintenance plan
+binds one actual actor; its Repair and delivery leaves share that binding. Existing
+independent 22A situations remain independent. Multi-actor method composition is
+still open22B work rather than an implicit Cartesian search.
+
+For each offered hull, content preparation proves at least one compatible complete
+decomposition through the shared immutable support checks; alternatives need not
+all fit every offered hull. Runtime waits for that actor's actual accepted
+equipment, then chooses the first supported authored alternative deterministically.
+Explanation retains why earlier methods refused. The accepted actor relation and
+choice tick bind that decision, never the host's LocalShip. A missing future actor
+waits; later refit/capability loss does not silently replace the saved method.
+Capability support is not a resource claim,
+a successful command or proof of a current/finished physical result.
+
+A method contains named task calls and explicit predecessor/evidence edges. The
+expanded graph must be acyclic. Dependencies use the existing Accepted, Achieved,
+Settled(outcome), Received or Returned facts of the addressed leaf instance.
+Repair achievement never implies a returned/free team, and cancelled return never
+satisfies delivery receipt. Finite technical limits apply before selecting a new
+plan: at most 32 imported libraries, import depth 8, 256 validated definitions/expanded
+nodes and 32 physical leaves, sharing the existing situation capacity with explicit
+22A instances. Exhaustion refuses the new plan without evicting existing work,
+evidence or history. No 22C attention/deadline feasibility is implied by these bounds.
+
+WorldContentRuntime owns the selected root arguments, selected method identities
+and original choice tick. Immutable domain definitions compile from frozen source;
+the selected graph is derived from those identities and bindings. Stable plan/node
+paths generate leaf situation ids. Existing SituationInstances remain the sole
+owner of accepted jobs, evidence, Scenario effects and execution frontiers; a plan
+is not another physical job, stock/team map or progression controller. A ready leaf
+arms through the existing actor/accepted-request bridge only when predecessor
+evidence is acknowledged. Earlier unrelated ordinary work is neither rolled back
+nor retrospectively credited to a newly unlocked leaf.
+
+Expose only ready requests for the actual owning ship/System through its ordinary
+permitted Repair or Logistics publication. These are derived typed request views,
+not a new message bus or authority grant. A request is a mission instruction,
+not evidence of hidden damage, Stock, a remote actor or current scene geometry.
+Repair still chooses/diagnoses work through its normal permitted reports and
+actual on-site tools; Logistics retains its normal permitted endpoint/demand
+knowledge. Receiving the request never expands either knowledge boundary.
+A Human may use the existing ordinary commands voluntarily. The same existing per-System AI reads its exact permitted
+view and emits the same admitted Dispatch command when its real machinery permits;
+the HTN itself never dispatches a job, writes resources or overrides delegation.
+Other unbound Human/AI work remains independent. Current stock/access/power/team
+availability is still revalidated by the ordinary physical transaction. A blocked
+request waits/refuses honestly; hypothetical method effects do not complete it.
+
+Snapshot/digest include the saved choice and existing situation/pending frontiers.
+Candidate-only validation recompiles the exact imported closure, checks chosen
+method/argument/leaf identities and causal choice/arming/dependency ticks before
+any writes. Historical completed leaves keep their accepted immutable provenance
+after actor removal or team reuse. An unresolved future actor is not silently
+re-armed, and restore does not choose a new method from today's circumstances.
+
+The opt-in source demonstration must use an imported compound task with alternative
+methods and real unordered/ordered Repair and delivery leaves, accepted backend
+validation and existing Workshop source/history/Test. Inspect chosen methods,
+unsupported reasons, dependencies and actual job/evidence separately. Prove actual
+normal Human/AI commands, partial-order release, refusal/no fabricated completion,
+no duplicate effects and 360 complete JSON capture/digest continuation. Scheduling,
+attention calibration, dynamic opportunity search and automatic plan repair remain
+22C/D/24 work; no complete22B exit follows from a schema-only decomposition test.
+
 ## 22C — Crew-aware temporal scheduling
 
 Keep ship capability/combat effectiveness, human crew capacity and shared physical

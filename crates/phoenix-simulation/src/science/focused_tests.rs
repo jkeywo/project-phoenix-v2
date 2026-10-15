@@ -8,10 +8,20 @@ fn rig() -> (App, Entity) {
     rig_with(false)
 }
 fn rig_with(dual: bool) -> (App, Entity) {
-    let mut config = crate::entities::include_resolve::load_entity_config(
-        "assets/entities/alliance_cruiser.toml",
-    )
-    .unwrap();
+    rig_with_subject(dual, None)
+}
+fn rig_with_subject(
+    dual: bool,
+    subject: Option<&crate::entities::config::EntityConfig>,
+) -> (App, Entity) {
+    rig_from("assets/entities/alliance_cruiser.toml", dual, subject)
+}
+fn rig_from(
+    path: &str,
+    dual: bool,
+    subject: Option<&crate::entities::config::EntityConfig>,
+) -> (App, Entity) {
+    let mut config = crate::entities::include_resolve::load_entity_config(path).unwrap();
     if dual {
         crate::science::test_support::clone_instrument(&mut config, "sensors", "focused-two");
     }
@@ -37,17 +47,28 @@ fn rig_with(dual: bool) -> (App, Entity) {
             ..Default::default()
         },
     );
-    app.world_mut().spawn((
-        crate::entities::spawner::EntityUuid("00000000-0000-0000-0000-000000000142".into()),
-        Transform::from_xyz(4.0, 0.0, 0.0),
-        crate::entities::spawner::EntityTagsSection(vec!["station".into()]),
-        crate::entities::spawner::EntityTarget(crate::entities::target::TargetSection {
-            tags: vec!["station".into()],
-            threat_level: Default::default(),
-            description: None,
-        }),
-        crate::infrastructure::InfrastructureCondition(infrastructure),
-    ));
+    if let Some(subject) = subject {
+        crate::entities::spawner::spawn_entity(
+            &mut app.world_mut().commands(),
+            subject,
+            Vec3::new(4.0, 0.0, 0.0),
+            "00000000-0000-0000-0000-000000000142".into(),
+            None,
+        );
+        app.world_mut().flush();
+    } else {
+        app.world_mut().spawn((
+            crate::entities::spawner::EntityUuid("00000000-0000-0000-0000-000000000142".into()),
+            Transform::from_xyz(4.0, 0.0, 0.0),
+            crate::entities::spawner::EntityTagsSection(vec!["station".into()]),
+            crate::entities::spawner::EntityTarget(crate::entities::target::TargetSection {
+                tags: vec!["station".into()],
+                threat_level: Default::default(),
+                description: None,
+            }),
+            crate::infrastructure::InfrastructureCondition(infrastructure),
+        ));
+    }
     // Establish one real paid observation before isolating focused work. No
     // subsequent focused step may spend or replenish the independent radar.
     app.world_mut()
@@ -63,6 +84,242 @@ fn rig_with(dual: bool) -> (App, Entity) {
         .run_system_once(crate::ship::sensors::publish_sensor_radar_blackboard)
         .unwrap();
     (app, observer)
+}
+
+fn enquiry_rig() -> (App, Entity) {
+    let subject = crate::entities::include_resolve::load_entity_config(
+        "tests/fixtures/sensing-enquiry-subject.toml",
+    )
+    .unwrap();
+    rig_from(
+        "tests/fixtures/sensing-enquiry-cruiser.toml",
+        false,
+        Some(&subject),
+    )
+}
+fn question(
+    app: &mut App,
+    observer: Entity,
+    aim: phoenix_model::focused_enquiry::FocusedAim,
+    intrusive: bool,
+) {
+    request(app, observer);
+    let mut admitted = app
+        .world_mut()
+        .get_mut::<AdmittedCommands>(observer)
+        .unwrap();
+    let SystemControlPayload::ScanTarget {
+        aim: asked,
+        intrusive: mode,
+        ..
+    } = &mut admitted.0.last_mut().unwrap().payload
+    else {
+        unreachable!()
+    };
+    *asked = aim;
+    *mode = intrusive;
+}
+
+#[test]
+fn different_questions_share_one_paid_slot_and_resume_only_their_own_retained_progress() {
+    use phoenix_model::focused_enquiry::FocusedAim;
+    let (mut app, observer) = enquiry_rig();
+    question(&mut app, observer, FocusedAim::Environment, false);
+    step(&mut app);
+    let owner = SystemId("sensors".into());
+    let first = app.world().get::<ShipScanRecord>(observer).unwrap().0[&owner]
+        .focused
+        .clone()
+        .unwrap();
+    assert!(first.progress > 0.0 && first.paid_started_tick.is_some());
+    question(&mut app, observer, FocusedAim::Resources, true);
+    step(&mut app);
+    let record = &app.world().get::<ShipScanRecord>(observer).unwrap().0[&owner];
+    assert_eq!(record.focused.as_ref().unwrap().aim, FocusedAim::Resources);
+    assert_eq!(record.unfinished.len(), 1);
+    assert_eq!(record.unfinished[&first.key()].progress, first.progress);
+    assert_eq!(
+        record.focused.as_ref().unwrap().progress,
+        first.progress,
+        "another question starts its own first paid slice"
+    );
+    question(&mut app, observer, FocusedAim::Environment, false);
+    step(&mut app);
+    let record = &app.world().get::<ShipScanRecord>(observer).unwrap().0[&owner];
+    assert_eq!(
+        record.focused.as_ref().unwrap().progress,
+        first.progress + 0.1
+    );
+    assert_eq!(record.unfinished.len(), 1);
+    assert!(record
+        .unfinished
+        .values()
+        .all(|work| work.aim == FocusedAim::Resources && work.intrusive));
+}
+
+#[test]
+fn private_and_absent_answers_share_refusal_and_cannot_spend_or_generate_a_reading() {
+    use phoenix_model::focused_enquiry::FocusedAim;
+    let (mut app, observer) = enquiry_rig();
+    let initial = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(observer)
+        .unwrap()
+        .0
+        .capture_continuation();
+    for aim in [FocusedAim::General, FocusedAim::Resources] {
+        question(&mut app, observer, aim, false);
+        step(&mut app);
+        let record =
+            &app.world().get::<ShipScanRecord>(observer).unwrap().0[&SystemId("sensors".into())];
+        assert_eq!(
+            record.refusal,
+            Some(crate::science::ScanRefusal::NoReadableCondition)
+        );
+        assert!(record.history.is_empty() && record.focused.is_none());
+    }
+    assert_eq!(
+        app.world()
+            .get::<crate::ship::power::ShipPowerSystem>(observer)
+            .unwrap()
+            .0
+            .capture_continuation(),
+        initial
+    );
+}
+
+#[test]
+fn active_intrusive_resource_question_survives_real_json_restore_and_exact_continuation() {
+    use phoenix_model::focused_enquiry::{FocusedAim, ScanQuantityValue};
+    let (mut app, observer) = enquiry_rig();
+    app.insert_resource(crate::world::server::WorldContentRuntime::default());
+    let before = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(observer)
+        .unwrap()
+        .0
+        .capture_continuation();
+    question(&mut app, observer, FocusedAim::Resources, true);
+    step(&mut app);
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(observer)
+        .unwrap()
+        .0
+        .clear();
+    for _ in 0..4 {
+        step(&mut app);
+    }
+    let snapshot = crate::snapshot::capture(app.world());
+    let snapshot = serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
+    let (mut resumed, resumed_observer) = enquiry_rig();
+    resumed.insert_resource(crate::world::server::WorldContentRuntime::default());
+    let report = crate::snapshot::restore(resumed.world_mut(), &snapshot);
+    assert!(report.gaps.is_empty(), "{report:?}");
+    assert_eq!(crate::snapshot::capture(resumed.world()), snapshot);
+    for _ in 0..360 {
+        step(&mut app);
+        step(&mut resumed);
+        assert_eq!(
+            crate::snapshot::capture(resumed.world()),
+            crate::snapshot::capture(app.world())
+        );
+        assert_eq!(
+            crate::sim_digest::world_digest(resumed.world()),
+            crate::sim_digest::world_digest(app.world())
+        );
+    }
+    let record =
+        &app.world().get::<ShipScanRecord>(observer).unwrap().0[&SystemId("sensors".into())];
+    assert_eq!(record.history.len(), 1);
+    assert!(record.focused.is_none());
+    let reading = record.last.as_ref().unwrap();
+    assert!(reading.intrusive && reading.aim == FocusedAim::Resources);
+    assert_eq!(reading.quantities[0].value, ScanQuantityValue::Count(42));
+    assert!(reading.condition_fraction.is_none() && reading.mass.is_none());
+    let after = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(observer)
+        .unwrap()
+        .0
+        .capture_continuation();
+    let owner = SystemId("sensors".into());
+    let paid = before.network.consumers[&owner].energy - after.network.consumers[&owner].energy;
+    assert!(
+        (paid - 4.0).abs() < 0.0001,
+        "two seconds of actual work at cost multiplier two: {paid}"
+    );
+    assert_eq!(
+        resumed
+            .world()
+            .get::<ShipScanRecord>(resumed_observer)
+            .unwrap()
+            .save_state(),
+        app.world()
+            .get::<ShipScanRecord>(observer)
+            .unwrap()
+            .save_state()
+    );
+}
+
+#[test]
+fn world_enquiry_boundaries_identify_the_actual_paid_observer_and_repeat_for_later_work() {
+    use crate::world::config::EnquiryPhase;
+    use crate::world::content::WorldEvent;
+    use phoenix_model::focused_enquiry::FocusedAim;
+    let (mut app, observer) = enquiry_rig();
+    app.insert_resource(crate::world::server::WorldContentRuntime::default());
+    question(&mut app, observer, FocusedAim::Resources, false);
+    step(&mut app);
+    assert!(app
+        .world()
+        .resource::<crate::world::server::WorldContentRuntime>()
+        .pending_world_events
+        .is_empty());
+    question(&mut app, observer, FocusedAim::Resources, true);
+    question(&mut app, observer, FocusedAim::Resources, true);
+    step(&mut app);
+    let pending = &app
+        .world()
+        .resource::<crate::world::server::WorldContentRuntime>()
+        .pending_world_events;
+    assert!(
+        matches!(pending.as_slice(),[WorldEvent::Enquiry{target_uuid,observer_uuid,system,aim,intrusive:true,phase:EnquiryPhase::Started}]
+        if target_uuid=="00000000-0000-0000-0000-000000000142" && observer_uuid=="00000000-0000-0000-0000-000000000141" && system.0=="sensors" && aim=="resources")
+    );
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(observer)
+        .unwrap()
+        .0
+        .clear();
+    for _ in 0..30 {
+        step(&mut app);
+    }
+    let pending = &app
+        .world()
+        .resource::<crate::world::server::WorldContentRuntime>()
+        .pending_world_events;
+    assert_eq!(pending.len(), 2);
+    assert!(matches!(
+        pending[1],
+        WorldEvent::Enquiry {
+            phase: EnquiryPhase::Completed,
+            ..
+        }
+    ));
+    question(&mut app, observer, FocusedAim::Resources, true);
+    step(&mut app);
+    let pending = &app
+        .world()
+        .resource::<crate::world::server::WorldContentRuntime>()
+        .pending_world_events;
+    assert_eq!(pending.len(), 3);
+    assert!(matches!(
+        pending[2],
+        WorldEvent::Enquiry {
+            phase: EnquiryPhase::Started,
+            ..
+        }
+    ));
 }
 fn step(app: &mut App) {
     app.world_mut()

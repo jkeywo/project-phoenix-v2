@@ -160,7 +160,7 @@ pub(crate) fn validate(saved: &FocusedSaveState, limit: usize, tick: u64) -> Res
             || !work.work_secs.is_finite()
             || work.work_secs <= 0.0
             || !work.progress.is_finite()
-            || !(0.0..=work.work_secs).contains(&work.progress)
+            || !(0.0..work.work_secs).contains(&work.progress)
             || work.started_tick > work.last_valid_tick
             || work.last_valid_tick > work.last_tick
             || work.last_tick > tick

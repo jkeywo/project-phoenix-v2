@@ -1,0 +1,13 @@
+# Accepted-source retention variation; all physical hull/equipment stays inherited.
+includes = ["../../assets/entities/alliance_cruiser.toml"]
+[[sensing.focused]]
+system = "sensors"
+work_secs = 2
+history_limit = 64
+unfinished_retention_secs = 8
+forecast = { horizon_secs = 120 }
+aims = [
+  { aim = "environment", work_multiplier = 1, resource_multiplier = 1 },
+  { aim = "resources", work_multiplier = 1, resource_multiplier = 2, intrusive = true },
+  { aim = "anomaly", work_multiplier = 2, resource_multiplier = 1 },
+]

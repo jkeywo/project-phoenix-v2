@@ -128,6 +128,15 @@ impl EnquiryScene<'_, '_> {
                 quantities.push(quantity);
             }
         }
+        // Labels are the public quantity identity. Never choose one private
+        // store, invent suffixes, or sum stores that cannot be distinguished.
+        let mut counts = BTreeMap::new();
+        for quantity in &quantities {
+            *counts
+                .entry((quantity.kind, quantity.label.clone()))
+                .or_insert(0usize) += 1;
+        }
+        quantities.retain(|quantity| counts[&(quantity.kind, quantity.label.clone())] == 1);
         quantities
     }
 }

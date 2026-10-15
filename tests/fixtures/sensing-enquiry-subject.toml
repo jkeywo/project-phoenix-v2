@@ -1,0 +1,42 @@
+# Actual typed measurements; there is no authored verdict or result text.
+name = "component.scan.aim.environment"
+tags = ["station", "region"]
+[target]
+tags = ["station"]
+threat_level = "none"
+[shape]
+type = "sphere"
+radius = 6
+[field]
+falloff = "linear"
+strength = 1
+sensor_absorption_per_unit = 0
+comms_absorption_per_unit = 0
+[field.evolution]
+duration_secs = 30
+translation = [0, 0, 0]
+final_scale = 1
+final_strength = 2
+[effects.sensor_blind]
+[infrastructure]
+publish = false
+condition = 75
+condition_max = 100
+[[infrastructure.capacity]]
+id = "supplies"
+amount = 42
+label = "component.scan.quantity.resource_units"
+[[enquiry_observation.property]]
+property = { kind = "field_exposure" }
+normal = true
+point = "receiver"
+step = 0.01
+[[enquiry_observation.property]]
+property = { kind = "capacity", capacity = "supplies" }
+intrusive = true
+step = 1
+[[enquiry_observation.property]]
+property = { kind = "effect_signature", effect = "sensor_blind" }
+normal = true
+point = "observed_subject"
+step = 1

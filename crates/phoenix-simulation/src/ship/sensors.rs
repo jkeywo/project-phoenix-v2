@@ -1489,6 +1489,10 @@ pub fn operate_sensors_ai(
                         )
                     })
             });
+            let active_contact = scan_record
+                .and_then(|record| record.0.get(&consumer))
+                .and_then(|record| record.focused.as_ref())
+                .map(|work| work.presentation_id.as_str());
             let mut scan_contact = None;
             let mut candidates = Vec::new();
             for owner in tracks.0.keys() {
@@ -1513,7 +1517,11 @@ pub fn operate_sensors_ai(
                                         .any(|reference| reference == requested)
                             })
                     }) {
-                        scan_contact = Some(track.contact_id.clone());
+                        // Prefer the already-working permitted handle if more
+                        // than one bound instrument reports this mission target.
+                        if scan_contact.as_deref() != active_contact || scan_contact.is_none() {
+                            scan_contact = Some(track.contact_id.clone());
+                        }
                     }
                     let mut facts = crate::world::flags::AiFacts::new();
                     facts.set_fact(crate::entities::ai_flag_hosts::DETECTABLE, 1.0);
@@ -1543,6 +1551,15 @@ pub fn operate_sensors_ai(
             }
             candidates.sort_by(|a, b| a.uuid.cmp(&b.uuid));
             candidates.dedup_by(|a, b| a.uuid == b.uuid);
+            // A mission request for this same measured contact does not replace
+            // an operator's in-flight question/mode when ordinary AI takes over.
+            // A genuinely different requested contact can still change priority.
+            let scan_contact = scan_contact.filter(|contact| {
+                scan_record
+                    .and_then(|record| record.0.get(&consumer))
+                    .and_then(|record| record.focused.as_ref())
+                    .is_none_or(|work| work.presentation_id != *contact)
+            });
             let mut facts = crate::world::flags::AiFacts::new();
             if let Some(rating) = selector_comp.power_rating {
                 facts.set_fact(crate::entities::ai_flag_hosts::POWER_RATING, rating as f64);

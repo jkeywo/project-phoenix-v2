@@ -735,9 +735,11 @@ pub fn derive_enquiry(
         reading.intrusive = intrusive;
         return Ok(reading);
     }
+    let mut labels = std::collections::BTreeSet::new();
     if quantities.is_empty()
         || quantities.iter().any(|row| {
             row.validate().is_err()
+                || !labels.insert((row.kind, &row.label))
                 || !matches!(
                     (aim, row.kind),
                     (FocusedAim::Environment, ScanQuantityKind::FieldExposure)

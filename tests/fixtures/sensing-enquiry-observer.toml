@@ -1,0 +1,22 @@
+# This particular subject has a real funded passive receiver. The quiet-world
+# response is scoped to this declared capability and its unobstructed geometry;
+# an intrusive request is not universally detectable by every subject.
+includes = ["../../assets/entities/alliance_cruiser.toml"]
+
+[infrastructure]
+publish = false
+
+[[enquiry_observation.property]]
+property = { kind = "capacity", capacity = "machinery_parts" }
+intrusive = true
+step = 1
+
+[[sensing.passive]]
+system = "passive-receiver"
+sample_interval_secs = 0.1
+min_signal_strength = 0.000001
+bearing_error_rad = 0.01
+[sensing.passive.mount]
+facing_deg = 0
+arc_deg = 360
+range = 200

@@ -596,7 +596,7 @@ pub fn tick_scans(
                     );
                     continue;
                 };
-                let subject = ScanSubject {
+                let mut subject = ScanSubject {
                     uuid: target_uuid.clone(),
                     name: name.map(|n| n.0.clone()).unwrap_or_default(),
                     condition: subject_condition(condition),
@@ -624,6 +624,21 @@ pub fn tick_scans(
                 };
 
                 let work = record.focused.as_ref().expect("active enquiry");
+                if work.aim != phoenix_model::focused_enquiry::FocusedAim::General {
+                    subject.name = config
+                        .zip(boards)
+                        .zip(tracks)
+                        .and_then(|((config, boards), tracks)| {
+                            super::contact_routing::identity_for_source(
+                                &config.0,
+                                boards,
+                                tracks,
+                                owner,
+                                target_uuid,
+                            )
+                        })
+                        .unwrap_or_default();
+                }
                 let observed = config.zip(boards).and_then(|(config, boards)| {
                     let view = config.0.observations_for_system(owner, &boards.0);
                     let mut keys: Vec<_> = boards.0.keys().collect();
@@ -687,6 +702,15 @@ pub fn tick_scans(
                         if paid > 0.0 {
                             if work.paid_started_tick.is_none() {
                                 work.paid_started_tick = Some(now_tick);
+                                emit_enquiry(
+                                    runtime.as_deref_mut(),
+                                    &operator_uuid,
+                                    target_uuid,
+                                    owner,
+                                    work.aim,
+                                    work.intrusive,
+                                    crate::world::config::EnquiryPhase::Started,
+                                );
                             }
                             work.progress = (work.progress + budget * paid).min(work.work_secs);
                             work.last_valid_tick = now_tick;
@@ -698,6 +722,15 @@ pub fn tick_scans(
                         if work.progress < work.work_secs {
                             continue;
                         }
+                        emit_enquiry(
+                            runtime.as_deref_mut(),
+                            &operator_uuid,
+                            target_uuid,
+                            owner,
+                            work.aim,
+                            work.intrusive,
+                            crate::world::config::EnquiryPhase::Completed,
+                        );
                         crate::pdebug!(
                             log,
                             crate::logging::LogCat::Sensors,
@@ -724,9 +757,11 @@ pub fn tick_scans(
                             .focused
                             .as_ref()
                             .map(|work| work.presentation_id.clone());
+                        let general =
+                            reading.aim == phoenix_model::focused_enquiry::FocusedAim::General;
                         record.remember(reading, usize::from(policy.history_limit), f64::from(dt));
                         record.focused = None;
-                        if let Some(authored_id) = authored_id {
+                        if let Some(authored_id) = authored_id.filter(|_| general) {
                             mirror_scanned(runtime.as_deref_mut(), &authored_id.0, &log);
                         }
                         if let Some(queue) = lifecycle.as_deref_mut() {
@@ -789,6 +824,28 @@ fn expire_focused_work(
         > policy.unfinished_retention_secs as f64
     {
         work.progress = 0.0;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_enquiry(
+    runtime: Option<&mut WorldContentRuntime>,
+    observer: &str,
+    target: &str,
+    system: &SystemId,
+    aim: phoenix_model::focused_enquiry::FocusedAim,
+    intrusive: bool,
+    phase: crate::world::config::EnquiryPhase,
+) {
+    if let Some(runtime) = runtime {
+        runtime.pending_world_events.push(WorldEvent::Enquiry {
+            target_uuid: target.to_owned(),
+            observer_uuid: observer.to_owned(),
+            system: system.clone(),
+            aim: aim.as_str().to_owned(),
+            intrusive,
+            phase,
+        });
     }
 }
 

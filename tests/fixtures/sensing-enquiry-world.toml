@@ -1,0 +1,33 @@
+# Quiet contextual enquiry proof: both actors use their actual inherited
+# machinery. No combat, deadlines, hidden stock grants or scripted conditions.
+[global]
+seed = 156214
+[player_spawn]
+position = [0, 0, 0]
+[[entity]]
+template_path = "tests/fixtures/sensing-enquiry-cruiser.toml"
+id = "player-ship"
+name = "player-ship"
+spawn_on = "game_start"
+transform = { position = [0, 0, 0] }
+[[entity]]
+template_path = "tests/fixtures/sensing-enquiry-observer.toml"
+id = "survey-cache"
+name = "survey-cache"
+spawn_on = "game_start"
+transform = { position = [40, 0, 0] }
+
+[script]
+setup = """
+// This authored receiver can hear the paid scan in the fixture geometry. The
+// host test independently witnesses its actual passive ActiveScan observation.
+on_world_loaded("assign_scan");
+fn assign_scan(ctx) {
+    ctx.effects.add_objective(#{id: "inspect-supplies", text: "component.scan.aim.resources",
+        mandatory: false, source: "mission", base_priority: 50,
+        directive_kind: "Scan", target: "survey-cache", targets: ["survey-cache"]});
+}
+on_enquiry("survey-cache", #{observer: "player-ship", system: "sensors",
+    aim: "resources", intrusive: true, phase: "completed"}, "scan_detected").repeat();
+fn scan_detected(ctx) { ctx.flags.increment("intrusive_scan_detected", 1); }
+"""

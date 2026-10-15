@@ -686,3 +686,31 @@ fn a_refusal_serialises_under_its_snake_case_name() {
         "\"no_readable_condition\""
     );
 }
+
+#[test]
+fn ambiguous_public_quantity_labels_cannot_issue_a_reading_that_restore_would_refuse() {
+    use phoenix_model::focused_enquiry::*;
+    let quantity = ScanQuantity {
+        kind: ScanQuantityKind::Capacity,
+        label: "world.test.supplies".into(),
+        value: ScanQuantityValue::Count(42),
+    };
+    assert_eq!(
+        derive_enquiry(
+            &suite(),
+            &depot(0.9),
+            &at(100.0),
+            FocusedAim::Resources,
+            true,
+            vec![
+                quantity.clone(),
+                ScanQuantity {
+                    value: ScanQuantityValue::Count(7),
+                    ..quantity
+                }
+            ],
+            17
+        ),
+        Err(ScanRefusal::NoReadableCondition)
+    );
+}

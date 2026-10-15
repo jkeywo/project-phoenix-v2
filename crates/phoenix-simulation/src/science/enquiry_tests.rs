@@ -179,3 +179,49 @@ fn minimum_positive_precision_preserves_a_finite_physical_reading() {
     );
     assert_eq!(quantise_exposure(0.0, f64::from_bits(1)), 0.0);
 }
+
+#[test]
+fn equally_labelled_actual_capacities_are_all_withheld_without_inventing_a_combined_store() {
+    let mut world = World::new();
+    subject(
+        &mut world,
+        r#"
+[infrastructure]
+publish=false
+[[infrastructure.capacity]]
+id="private-a"
+amount=42
+label="world.test.supplies"
+[[infrastructure.capacity]]
+id="private-b"
+amount=7
+label="world.test.supplies"
+[[infrastructure.capacity]]
+id="separate"
+amount=3
+label="world.test.distinct"
+[[enquiry_observation.property]]
+property={kind="capacity",capacity="private-a"}
+intrusive=true
+step=1
+[[enquiry_observation.property]]
+property={kind="capacity",capacity="private-b"}
+intrusive=true
+step=1
+[[enquiry_observation.property]]
+property={kind="capacity",capacity="separate"}
+normal=true
+intrusive=true
+step=1
+"#,
+    );
+    let answer = sample(&mut world, FocusedAim::Resources, true, Vec3::ZERO, None);
+    assert_eq!(answer.len(), 1);
+    assert_eq!(answer[0].label, "world.test.distinct");
+    assert_eq!(answer[0].value, ScanQuantityValue::Count(3));
+    let ordinary = sample(&mut world, FocusedAim::Resources, false, Vec3::ZERO, None);
+    assert_eq!(
+        ordinary, answer,
+        "protected duplicates do not change the unrelated normal answer"
+    );
+}

@@ -3,8 +3,10 @@
 Contract preparation, 15 October 2026. Follow the adopted
 [parallel-work contract](parallel-work.md): runtime entry needs 16's integrated
 channel/link contract and actual consumer plus the 14/15 sensing/mount foundations.
-Full completion requires verified 14/15/16 exits. This document starts no runtime,
-changes no existing commitment and claims no validation or acceptance result.
+Full completion requires verified 14/15/16 exits. The first Comms-jammer
+implementation contract below is adopted against 16's actual radio/request
+consumer; later selected slices remain pending. This document claims no native,
+playable or complete-increment acceptance result.
 
 ## Outcome and selected scope
 
@@ -54,6 +56,86 @@ poses, mounts, work grants, channels and permitted observations. World authors
 targets/context/outcomes through existing effects. Session keeps admission and
 participation; Presentation/phone project only permitted evidence. No domain imports
 a sibling, no central electronic-warfare AI or alternate component-health simulation.
+
+## Adopted first slice: receiver-only Comms interference
+
+[ai] Adopted after the actual 16 channel/request consumer, 15 independent
+illumination/mount owner and the 14 natural signal path. First extract the
+existing environmental `CommsJammed` endpoint denial onto the shared endpoint
+factor contract with equivalent behaviour, and prove that migration before
+introducing equipment effects. An existing flag gives an exact factor of zero;
+absence gives one. Existing terrain/field segment attenuation remains at its
+current conversation-path owner and is not folded into the endpoint twice.
+
+Fit a separate Comms-owned composed `JammingEmitter` System. Its retained generic
+Boolean enabled and target-reference channels are the only intent: UI, ordinary
+compiled per-System tree, shared mount and persistence use those same channels.
+The mount's actual traversal/bearing, actual Operation/control source and
+continuous energy grant bound emission each ordinary fixed step. Target-driven
+traversal uses only the owning Console's permitted dated full-XYZ observations,
+including their original time; unavailable evidence cannot be replaced by a live
+remote pose. The existing shared mount/arc/geometry functions remain the owners
+of supported geometry. No second turret or jammer controller is introduced.
+
+The physical effect is receiver exposure, not another attenuation volume on the
+conversation segment. For each actual receiver point, a finite paid source
+contributes authored strength multiplied by shared supported falloff, actual
+mount coverage, the natural Comms transmission from emitter to receiver and
+that step's granted work fraction. Evaluate using actual authoritative emitter
+and receiver geometry solely to execute the effect. Sum nonnegative finite
+contributions in stable source-UUID/System order using widened arithmetic; the
+receiver's equipment factor is `1 / (1 + exposure)`. Multiply its own finite
+endpoint reach by that factor once. Each endpoint has its own independently
+computed factor; radio delivery, returned outcomes and fictional hail use the
+same factor seam rather than charging a second effect at their individual
+admission/delivery checks. The natural conversation path remains separate.
+
+An emitter at exactly the receiver point is inside its own coverage with full
+spatial falloff and a zero-length natural path transmission of one; an undefined
+zero-length direction does not grant self immunity. Other receiver points must
+pass the same supported 3D range/coverage and actual mount bearing gates.
+Friendly receivers obey identical physical rules. An emitter's own radio can
+therefore lose reach while its independent jammer continues paying work.
+No secret affiliation test, victim roster or universal self/friendly immunity
+is added. Reference parameters are explicit authored provisional tuning.
+
+Expose local jammer intent, actual emitting/waiting/resource state and supported
+own receiver interference/link notices through ordinary System details and
+Comms projections. A degraded receiver may know interference without learning
+an unseen emitter's identity, location, exact strength or intended target. The
+source cannot inspect a receiver census or infer successful disruption from its
+own work grant. Existing report permissions and actual return links govern any
+cross-Console or cross-ship claim. Local read/decision history remains available
+when the delivery link is lost.
+
+Current paid emissions/exposure are derived, not saved work credit. Clear them
+on restore and recompute from actual ordinary paid processing before any link
+consumer may use them; restored bootstrap emission must not buy free influence.
+Canonical generic channels, shared mount state, actual power/conditions and
+original held observations remain at their existing owners in capture/restore
+and the digest. Missing, Offline, destroyed, unfunded or out-of-coverage hardware
+contributes nothing. No duplicate inventory, saved victim list or retry bus is
+introduced. Integrator owns central schedule and compatibility joins.
+
+Author a finite actual reference profile with Comms Console bindings, room,
+Operation, shared mount, energy group and explicit observation feeds. Extend the
+existing Workshop composition/history/validation/Preview/Test and ordinary
+correlated Console controls in the same slice. The same individual tree may
+maintain an independent retained target or select a supported explicit request
+through its permitted feed and existing reading gate; it cannot borrow Tactical
+primary selection implicitly.
+
+Required first-slice evidence is equivalent natural interference, actual paid
+hostile and friendly links, self exposure, finite traversal, explicit stop and
+recovery, asymmetric structured returns, unknown-cause privacy and no
+endpoint/path double application. Continue active work in a fresh JSON host for
+at least 360 complete capture/digest steps and compare different LocalShips;
+reject forged owner/channel/mount/resource/clock candidates without live writes.
+Browser/Workshop/native human journeys, performance and station workload remain
+separate evidence. Sensors jamming, finite protection, onboard spoofing, bounded
+access/disruption, cloak/low-emission profiles and 19 physical decoys remain the
+subsequent selected 17 slices; this first consumer does not close them or 16's
+remaining generic requests/order/media/security scope.
 
 ## Physical influence, protection and evidence
 

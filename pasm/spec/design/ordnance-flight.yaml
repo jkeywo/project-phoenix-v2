@@ -10,3 +10,43 @@ entities:
         - "[ai] Each actual burst emission still pays its own ordinary work and captures its own granted strike_damage_bonus. A later round cannot inherit an earlier paid boost or receive current upgraded equipment payload. A pending burst preserves its original profile, origin/pattern and cadence while ordinary machinery availability can delay emission."
         - "[ai] Interception reuses the actual finite-round bolt, mount, delivery and individual bank controller. Only permitted measured missile returns can support a selection; private physical projectile identity is confined to an authorised actuator/impact route. Unknown allegiance or target intention is not fabricated. Target-domain data, shared actual resource costs and ordinary assignment/Hold rules constrain operation."
         - "Post-launch intent, actual receiver/link limits and independent Science illumination are separate dependent slices. This profile preparation does not claim working interception, guidance, Workshop operation, playable acceptance or a verified increment exit."
+
+  - decision: guided-round-source-removal-continuity
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Launched Guided Rounds Outlive Their Launcher
+      summary: "Actual source removal or capability replacement moves the same already-launched TorpedoSystem vector into a nonspatial carrier, retaining round identity, attribution, frozen profile and remaining flight. The carrier has no ship, control, AI, launch tube, stock, pending burst or energy consumer."
+      rationale:
+        - "[ai] The ordinary lifecycle and observation producers continue to read that actual vector; there is no second projectile pool or controller. Closed carrier continuation is recreated directly, with full-candidate shape and identity checks. Empty carriers are removed after ordinary expiry, interception or detonation."
+        - "[ai] Exclusive snapshot roster replacement suppresses carrier creation from discarded bootstrap state. Replacement launcher copies cannot duplicate or upgrade already-launched IDs. A body GM inverse whose capture contains launched guided or bolt rounds is refused before spawning, including after those old rounds have hit or expired; deliberate current-flight rejoining is not part of this increment checkpoint."
+  - state: guided-flight-carrier-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Guided Flight Carrier Identity
+      summary: "A folded zero-sized entity marker distinguishes a nonspatial continued flight owner from an operable ship. Actual physical flight remains in the existing TorpedoSystemResource."
+    architecture:
+      classification: authoritative
+      owner: shared-weapon-mount-and-delivery
+      writers: [shared-weapon-mount-and-delivery]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/console/weapons/guided_flight.rs, crates/phoenix-simulation/src/snapshot/guided_carriers.rs]
+      symbols: [GuidedFlightCarrier]
+      tests: [crates/phoenix-simulation/src/console/weapons/guided_flight_tests.rs]
+  - state: guided-flight-restore-guard
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Guided Flight Restore Write Guard
+      summary: "Transient exclusive restore context prevents discarded bootstrap flight vectors from becoming extra carriers. It has no saved or folded value and is restored after the roster replacement."
+    architecture:
+      classification: derived
+      owner: shared-weapon-mount-and-delivery
+      writers: [shared-weapon-mount-and-delivery]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/console/weapons/guided_flight.rs, crates/phoenix-simulation/src/snapshot/restore.rs]
+      symbols: [RestoreGuard]
+      tests: [crates/phoenix-simulation/src/console/weapons/guided_flight_tests.rs]

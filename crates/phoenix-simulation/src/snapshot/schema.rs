@@ -10,6 +10,9 @@ use super::*;
 pub struct EntityState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weapon_targets: Option<phoenix_sim_gameplay::weapons::assignments::WeaponTargetAssignments>,
+    /// Nonspatial owner of already-launched rounds after launcher removal.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub guided_flight_carrier: bool,
     /// Physical bearings only; target/enabled intent belongs to each System.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mounts: Option<crate::weapons::mounts::ShipMounts>,
@@ -2093,4 +2096,8 @@ pub enum MeshControlSource {
     Ai,
     Offline,
     Simplified,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }

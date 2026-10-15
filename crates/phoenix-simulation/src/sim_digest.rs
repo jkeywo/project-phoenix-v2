@@ -1779,6 +1779,12 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
     acc = fold_u64(acc, rows.len() as u64);
     for (key, entity, physics, hull, alert, power) in rows {
         acc = fold_str(acc, &key.id);
+        if world
+            .get::<crate::console::weapons::guided_flight::GuidedFlightCarrier>(entity)
+            .is_some()
+        {
+            acc = fold_str(acc, "guided-flight-carrier");
+        }
         acc = fold_physics(acc, physics.as_ref());
         acc = fold_hull(acc, hull.as_ref());
         if let Some(shields) = world.get::<crate::ship::shields::ShipShields>(entity) {

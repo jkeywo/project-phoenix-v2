@@ -11,6 +11,7 @@ pub mod beam;
 pub mod blackboard;
 pub mod blaster;
 mod round_work;
+pub mod guided_flight;
 pub mod server;
 pub mod shared;
 pub mod strike;

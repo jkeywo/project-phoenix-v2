@@ -17723,3 +17723,59 @@ mod disablement_tests;
 
 #[path = "sustained_tests.rs"]
 mod sustained_tests;
+#[test]
+fn actual_torpedo_lifecycle_expires_and_disposes_a_removed_launchers_carrier() {
+    use crate::console::weapons::guided_flight::GuidedFlightCarrier;
+    use bevy::ecs::system::RunSystemOnce;
+    let mut app = test_app();
+    app.insert_resource(State::new(GamePhase::InProgress));
+    let mut owner = TorpedoSystem::new(TorpedoConfig {
+        load_time: 0.1,
+        lifespan: 0.2,
+        ..Default::default()
+    });
+    let tube = owner.tubes[0].id.clone();
+    assert!(owner.start_load(&tube));
+    owner.tick(
+        0.1,
+        &std::collections::HashMap::new(),
+        &mut || unreachable!(),
+    );
+    assert!(matches!(
+        owner.launch(
+            &tube,
+            "independent-flight".into(),
+            0.0,
+            5.0,
+            0.0,
+            0.0,
+            None,
+            Some("removed-launcher".into())
+        ),
+        crate::weapons::torpedo::LaunchResult::Launched { .. }
+    ));
+    let source = app
+        .world_mut()
+        .spawn((
+            crate::entities::spawner::EntityUuid("removed-launcher".into()),
+            crate::server_app::Ship,
+            TorpedoSystemResource(owner),
+        ))
+        .id();
+    app.world_mut().despawn(source);
+    app.world_mut().flush();
+    let mut query = app
+        .world_mut()
+        .query_filtered::<Entity, With<GuidedFlightCarrier>>();
+    assert_eq!(query.iter(app.world()).count(), 1);
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_secs_f32(0.5));
+    app.world_mut()
+        .run_system_once(crate::console::weapons::torpedo::tick_torpedo_lifecycle)
+        .unwrap();
+    app.world_mut().flush();
+    assert_eq!(query.iter(app.world()).count(), 0);
+    let outgoing = app.world_mut().resource_mut::<SimOutbox>().drain();
+    assert_eq!(outgoing.iter().filter(|entry| matches!(&entry.message,ServerMessage::TorpedoDestroyed{uuid} if uuid=="independent-flight")).count(),1);
+}

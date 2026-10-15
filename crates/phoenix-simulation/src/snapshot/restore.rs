@@ -38,6 +38,12 @@ impl RestoreReport {
 /// what tell a host which world that is.
 pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
     let mut report = RestoreReport::default();
+    if let Err((uuid, reason)) = super::guided_carriers::validate(world, snapshot) {
+        report
+            .gaps
+            .push(RestoreGap::ResourceStateInvalid { uuid, reason });
+        return report;
+    }
     if let Err((uuid, reason)) = super::guided_rounds::validate_roster(snapshot) {
         report
             .gaps
@@ -135,7 +141,9 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
     if !report.gaps.is_empty() {
         return report;
     }
+    let prior_guard = crate::console::weapons::guided_flight::suppress(world, true);
     restore_entities(world, snapshot, &mut report);
+    crate::console::weapons::guided_flight::suppress(world, prior_guard);
     if report.gaps.iter().any(|gap| {
         matches!(
             gap,

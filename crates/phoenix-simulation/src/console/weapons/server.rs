@@ -105,6 +105,7 @@ impl Plugin for WeaponsPlugin {
         // projection beside the live publisher in `blackboard.rs`. The generic
         // lifecycle runner receives only the registered callbacks.
         super::blackboard::register_weapons_replication_lifecycle(app);
+        super::guided_flight::register(app);
         // The AI host spine's read-only world context (issue #1207): the phaser,
         // blaster, torpedo, doctrine and tactical-selector hosts in this plugin
         // now consume `AiHostEnv`, a bare-`Res` param, so every app that runs

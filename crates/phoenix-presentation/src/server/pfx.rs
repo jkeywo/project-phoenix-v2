@@ -1161,7 +1161,7 @@ fn phaser_texture_material(
 /// bolts, matching their heavier-weapon role.
 #[allow(clippy::too_many_arguments)]
 fn sync_torpedo_pfx(
-    ships_q: Query<&TorpedoSystemResource, With<crate::server_app::Ship>>,
+    ships_q: Query<&TorpedoSystemResource>,
     torpedo_pfx_assets: Res<TorpedoPfxAssets>,
     bolt_pfx_assets: Res<BlasterBoltPfxAssets>,
     phaser_pfx_assets: Res<PhaserPfxAssets>,

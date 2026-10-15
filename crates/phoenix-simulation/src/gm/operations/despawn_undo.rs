@@ -367,6 +367,17 @@ pub fn restore_precheck(
     let Some(state) = capture.state.as_deref() else {
         return Err(GmActionRefusalReason::InverseUnsupported);
     };
+    // Physical shots outlive the removed body and may already have hit or
+    // expired. A body inverse cannot replay their captured launch state.
+    if state.weapons.as_ref().is_some_and(|weapons| {
+        !weapons.torpedoes_in_flight.is_empty()
+            || weapons
+                .blasters
+                .iter()
+                .any(|bank| !bank.in_flight.is_empty())
+    }) {
+        return Err(GmActionRefusalReason::InverseUnsupported);
+    }
     let Some(origin) = state.spawn.as_ref() else {
         return Err(GmActionRefusalReason::InverseUnsupported);
     };

@@ -66,6 +66,13 @@ pub(super) fn preflight_missing_entities(
                 .push(RestoreGap::MissingEntity(row.uuid.clone())),
         }
     }
+    for row in snapshot.entities.iter().filter(|row| {
+        row.guided_flight_carrier && !present.iter().any(|(uuid, ..)| uuid == &row.uuid)
+    }) {
+        let entity =
+            crate::console::weapons::guided_flight::spawn_empty(&mut staging, row.uuid.clone());
+        staged.push((entity, row));
+    }
     // Existing attackers can retain samples of targets that are materialized by
     // this restore. Validate all attacks only after every target shape exists.
     for row in &snapshot.entities {
@@ -183,11 +190,16 @@ pub(super) fn restore_entities(
         if present.iter().any(|(_, uuid)| uuid == &row.uuid) {
             continue;
         }
-        match row
-            .spawn
-            .as_ref()
-            .and_then(|origin| spawn_from_origin(world, row, origin))
-        {
+        match if row.guided_flight_carrier {
+            Some(crate::console::weapons::guided_flight::spawn_empty(
+                world,
+                row.uuid.clone(),
+            ))
+        } else {
+            row.spawn
+                .as_ref()
+                .and_then(|origin| spawn_from_origin(world, row, origin))
+        } {
             Some(entity) => {
                 report.entities_spawned += 1;
                 writes.push((entity, row.clone()));

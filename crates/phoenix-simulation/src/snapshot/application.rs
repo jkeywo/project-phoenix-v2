@@ -1210,6 +1210,10 @@ pub(super) fn validate_physical_repair_claims(
 /// tick for an inverse: nothing here simulates the interval, so the value is
 /// simply the reading every age-relative continuation is measured against.
 pub(crate) fn apply_entity_state(world: &mut World, entity: Entity, row: &EntityState, tick: u64) {
+    if !super::guided_carriers::unique_single_row(world, entity, row) {
+        bevy::log::error!("refused single-row restore: guided flight is already owned elsewhere");
+        return;
+    }
     if let Err(reason) = validate_entity_repair_jobs(world, entity, row) {
         bevy::log::error!("refused repair job restore for {}: {}", row.uuid, reason);
         return;

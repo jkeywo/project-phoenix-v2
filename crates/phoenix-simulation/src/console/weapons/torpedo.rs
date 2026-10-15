@@ -1108,7 +1108,10 @@ pub(crate) fn tick_torpedo_lifecycle(
             &mut TorpedoSystemResource,
             Option<&mut crate::ship::power::ShipPowerSystem>,
         ),
-        With<crate::server_app::Ship>,
+        Or<(
+            With<crate::server_app::Ship>,
+            With<super::guided_flight::GuidedFlightCarrier>,
+        )>,
     >,
     (mut torpedo_sys_res, ships): (
         ResMut<TorpedoSystemResource>,
@@ -1331,6 +1334,24 @@ pub(crate) fn tick_torpedo_lifecycle(
                 delivery: det.delivery(),
                 source_uuid: det.source_uuid,
                 tube_id: det.tube_id,
+            });
+        }
+    }
+
+    for (entity, _, provider, _) in &torpedo_sys_q {
+        if provider.0.tubes.is_empty() && provider.0.in_flight.is_empty() {
+            // Only actual carriers have no tubes under the closed admission.
+            // The filter below avoids treating unusual authored empty ships as carriers.
+            commands.queue(move |world: &mut World| {
+                if world
+                    .get::<super::guided_flight::GuidedFlightCarrier>(entity)
+                    .is_some()
+                    && world
+                        .get::<TorpedoSystemResource>(entity)
+                        .is_some_and(|owner| owner.0.in_flight.is_empty())
+                {
+                    world.despawn(entity);
+                }
             });
         }
     }

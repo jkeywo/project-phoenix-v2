@@ -551,6 +551,7 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                 target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
                 target_name: Some("Klingon Raider".into()),
                 banks: vec![PhaserBankState {
+                    firing: false,
                     id: "port".to_string(),
                     fire_ready: true,
                     on_cooldown: false,
@@ -4291,6 +4292,7 @@ fn weapon_readiness_contract_round_trips_for_all_families() {
         target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
         target_name: Some("Raider".into()),
         banks: vec![PhaserBankState {
+            firing: false,
             id: "port".into(),
             fire_ready: false,
             on_cooldown: false,

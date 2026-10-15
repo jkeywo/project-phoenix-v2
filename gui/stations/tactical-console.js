@@ -129,7 +129,8 @@ export function makeTacticalRender(variant) {
       const el = doc.getElementById(ids.phasers);
       if (el) {
         el.state = {
-          banks: w.banks || [],
+          banks: (w.banks || []).map(bank => ({ ...bank,
+            ...(w.weapon_targets ? { manual_control: w.weapon_targets.rows?.some(row => row.system === `phaser-${bank.id}` && row.controllable === true) === true } : {}) })),
           target_valid: !!w.target_uuid,
           mode: w.phaser_mode || 'Auto',
         };

@@ -363,6 +363,9 @@ pub struct WeaponEmitterArc {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PhaserBankState {
     pub id: PhaserBank,
+    /// Actual active burn; post-shot rest is represented separately by on_cooldown.
+    #[serde(default)]
+    pub firing: bool,
     /// True if this bank's locked target is within `beam_range` and inside
     /// the bank's `fire_arc_deg` (manual-fire arc).
     pub fire_ready: bool,

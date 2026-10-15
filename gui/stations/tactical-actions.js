@@ -18,6 +18,7 @@ export const TACTICAL_ACTION_CONTEXT = 'tactical';
 export const TACTICAL_TARGET_ACTION_ID = 'tactical.target-selection';
 export const TACTICAL_PHASER_MODE_ACTION_ID = 'tactical.phaser-mode';
 export const TACTICAL_PHASER_FIRE_ACTION_ID = 'tactical.phaser-fire';
+export const TACTICAL_PHASER_STOP_ACTION_ID = 'tactical.phaser-stop';
 export const TACTICAL_BLASTER_CHARGE_ACTION_ID = 'tactical.blaster-charge';
 export const TACTICAL_BLASTER_FIRE_ACTION_ID = 'tactical.blaster-fire';
 export const TACTICAL_BLASTER_CANCEL_ACTION_ID = 'tactical.blaster-cancel';
@@ -45,6 +46,7 @@ export const TACTICAL_ACTIONS = Object.freeze([
   action(TACTICAL_TORPEDO_FIRE_ACTION_ID, 'torpedo_fire', 'torpedo_fire', key('KeyG'), axis('left-stick-y', 'positive')),
   action(TACTICAL_STRIKE_BOOST_ACTION_ID, 'strike_boost', 'strike_boost', key('KeyV'), button('face-top')),
   action(TACTICAL_RESTRAINT_ACTION_ID, 'weapons_restraint', 'weapons_restraint', key('KeyH'), null),
+  defineStationAction({ id: TACTICAL_PHASER_STOP_ACTION_ID, contexts: [TACTICAL_ACTION_CONTEXT], labelKey: 'tactical.phaser_stop', accessibilityKey: 'tactical.phaser_stop', bindings: [null, null] }),
 ]);
 
 export function tacticalActionView(state) {
@@ -130,6 +132,14 @@ export function registerTacticalActions(registry, options = {}) {
   const getState = typeof options.getState === 'function' ? options.getState : () => null;
   const sendAction = typeof options.sendAction === 'function' ? options.sendAction : null;
   const send = createCorrelatedActionSender(sendAction);
+  registry.register(TACTICAL_ACTIONS[11], ({ actionId, correlation, inputMs, detail } = {}) => {
+    const view = tacticalActionView(getState());
+    if (!view || view.phaser_mode !== 'Manual') return false;
+    const bank = entryWithId(view.banks, detail?.bank);
+    const owner = view.weapon_targets?.rows?.find(row => row.system === `phaser-${bank?.id}`);
+    return typeof bank?.id === 'string' && bank.id && bank.firing === true && owner?.controllable === true
+      ? send(actionId, correlation, inputMs, 'stop_phaser', { bank: bank.id }) : false;
+  });
   registry.register(TACTICAL_ACTIONS[10], ({ actionId, correlation, inputMs, detail } = {}) => {
     const view = tacticalActionView(getState());
     if (!view || view.weapons_restraint_auto || !view.tactical_radar_system_id || typeof view.weapons_restrained !== 'boolean') return false;

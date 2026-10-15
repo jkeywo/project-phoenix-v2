@@ -116,6 +116,15 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
+  stop_phaser: (a, send) => {
+    if (!a.bank) return;
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? { correlation: a.correlation } : {}), target: `phaser-${a.bank}`,
+      payload: { type: 'StopPhaser' },
+    });
+  },
+
   /** Engage the tractor beam against the ship's current lock (issue #1156). */
   engage_tractor: (a, send) => {
     const correlated = typeof a.correlation === 'string' && a.correlation;

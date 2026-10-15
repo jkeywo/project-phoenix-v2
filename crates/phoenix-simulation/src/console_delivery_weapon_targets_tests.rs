@@ -166,14 +166,36 @@ fn withheld_stale_and_forged_references_remain_unavailable_and_never_become_hold
         .individual = Some(Ref::Target {
         contact: "hidden".into(),
     });
-    raw.assignments.get_mut(&SystemId("phaser-fore".into())).unwrap().group.as_mut().unwrap().target = Ref::Target { contact: fresh_alias };
+    raw.assignments
+        .get_mut(&SystemId("phaser-fore".into()))
+        .unwrap()
+        .group
+        .as_mut()
+        .unwrap()
+        .target = Ref::Target {
+        contact: fresh_alias,
+    };
 
     drop(boards);
     assert_eq!(
         projected(&mut app).assignments[&SystemId("phaser-fore".into())].individual,
         Some(Ref::Unavailable)
     );
-    crate::gm::operations::contact::set(&mut app.world_mut().resource_mut::<crate::world::server::WorldContentRuntime>().contact_overrides,
-        "own", "hidden", crate::gm::operations::contact::ContactMode::Conceal);
-    assert_eq!(projected(&mut app).assignments[&SystemId("phaser-fore".into())].group.as_ref().unwrap().target, Ref::Unavailable);
+    crate::gm::operations::contact::set(
+        &mut app
+            .world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .contact_overrides,
+        "own",
+        "hidden",
+        crate::gm::operations::contact::ContactMode::Conceal,
+    );
+    assert_eq!(
+        projected(&mut app).assignments[&SystemId("phaser-fore".into())]
+            .group
+            .as_ref()
+            .unwrap()
+            .target,
+        Ref::Unavailable
+    );
 }

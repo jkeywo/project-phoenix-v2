@@ -10,6 +10,7 @@ import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js
 import { PhElement, phDefine } from './ph-element.js';
 import {
   TACTICAL_PHASER_FIRE_ACTION_ID,
+  TACTICAL_PHASER_STOP_ACTION_ID,
   TACTICAL_PHASER_MODE_ACTION_ID,
 } from '../stations/tactical-actions.js';
 import { activateTacticalAction } from '../stations/tactical-action-control.js';
@@ -159,8 +160,10 @@ export class PhPhasersControls extends PhElement {
         btn.innerHTML = '<span class="btn-bg"></span><span class="led"></span><span class="label">' + t('console.common.fire') + '</span>';
         btn.addEventListener('click', () => {
           if (!btn.disabled) {
-            activateTacticalAction(this, TACTICAL_PHASER_FIRE_ACTION_ID,
-              { bank: bank.id }, 'fire_phaser');
+            const current = this.state?.banks?.find(row => row.id === bank.id);
+            const stopping = current?.firing === true;
+            activateTacticalAction(this, stopping ? TACTICAL_PHASER_STOP_ACTION_ID : TACTICAL_PHASER_FIRE_ACTION_ID,
+              { bank: bank.id }, stopping ? 'stop_phaser' : 'fire_phaser');
           }
         });
         lineBottom.appendChild(btn);
@@ -207,6 +210,8 @@ export class PhPhasersControls extends PhElement {
         status.textContent = '';
         row.className = 'bank-row';
       }
+      if (bank.firing === true) ready = !auto && bank.manual_control === true;
+      btn.querySelector('.label').textContent = t(bank.firing === true ? 'component.phasers.stop' : 'console.common.fire');
       btn.disabled = !ready;
       btn.className = 'btn' + (ready ? ' armed' : ' disabled');
       btn.querySelector('.led').className = 'led' + (ready ? ' on' : '');

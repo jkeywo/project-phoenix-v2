@@ -1,3 +1,5 @@
+import { scanPublicationSource } from '../gui/scan-source.js';
+import { prunePublicationFeedsSource } from './workshop-stock-bindings.js';
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
 import { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
@@ -20,11 +22,20 @@ export function inspectSensing(draft, dependencies, path) {
   return { ...inspection, sensing: structuredClone(inspection.resolved.value.sensing || null), systems: authoredAndGeneratedSystems(inspection.resolved.value) };
 }
 export function validateSensing(profile, value) {
-  if (!closed(profile, Object.keys(sensingRoles)) || (profile.broad != null && !Array.isArray(profile.broad))
-    || !(profile.focused || profile.passive || profile.broad?.length)) throw new Error('Sensing requires closed instrument profiles and a broad instrument array.');
+  if (!closed(profile, [...Object.keys(sensingRoles), "control"]) || Object.keys(sensingRoles).some(role => profile[role] != null && !Array.isArray(profile[role]))
+    || !Object.keys(sensingRoles).some(role => profile[role]?.length)) throw new Error('Sensing requires closed instrument profiles and instrument arrays.');
   const systems = authoredAndGeneratedSystems(value), seen = new Set();
+  if (profile.control != null && !closed(profile.control,['combat_lock','science_target'])) throw new Error('Sensing control bindings must be closed.');
+  for (const [binding,kind] of [['combat_lock','tactical_radar'],['science_target','sensors']]) {
+    const owner=profile.control?.[binding];
+    if (owner != null && !systems.some(system=>system.id===owner && system.kind===kind && value.console?.some(console=>console.id===system.console))) throw new Error('Sensing control binding needs an actual owned '+kind+' System.');
+    if (owner == null && profile.broad?.length && systems.some(system=>system.kind===kind)) throw new Error('Broad sensing requires explicit '+binding+' actuator ownership.');
+  }
+  for(const owner of [...(profile.focused || []).map(row=>row.system),profile.control?.combat_lock,profile.control?.science_target].filter(Boolean)) {
+    if(!systems.find(system=>system.id===owner)?.config?.ai?.tree?.length) throw new Error("Sensing controller requires an explicit closed System AI tree.");
+  }
   for (const [role, spec] of Object.entries(sensingRoles)) {
-    for (const row of role === 'broad' ? profile.broad || [] : profile[role] ? [profile[role]] : []) {
+    for (const row of profile[role] || []) {
     const system = systems.find(system => system.id === row.system);
     if (!closed(row, ['system', ...spec.fields, ...(role === 'passive' ? ['mount'] : [])]) || !system || !(spec.kinds || [spec.kind]).includes(system.kind) || seen.has(row.system)
       || !value.console?.some(console => console.id === system.console)) throw new Error('Each instrument needs its distinct actual System kind and owning Console.');
@@ -47,7 +58,7 @@ export function validateSensing(profile, value) {
     }
     }
   }
-  if (systems.some(system => system.kind === 'passive_receiver' && system.id !== profile.passive?.system)) throw new Error('Every fitted passive receiver requires its matching sensing profile.');
+  if (systems.some(system => system.kind === 'passive_receiver' && !(profile.passive || []).some(row => row.system === system.id))) throw new Error('Every fitted passive receiver requires its matching sensing profile.');
 }
 export function replaceSensingSource(source, profile) {
   const headers = [...source.matchAll(/^[ \t]*\[{1,2}([^\r\n]+?)\]{1,2}[ \t]*(?:#.*)?(?:\r?\n|$)/gm)].map(match => ({ start: match.index, name: match[1].replace(/\]$/, '').trim() }));
@@ -71,25 +82,30 @@ export function prepareSensingOperation(draft, dependencies, operation, schema) 
   const before = draft.read(operation.path); let source = before;
   let inspection = inspectSensing(draft, dependencies, operation.path);
   if (!operation.materialise && inspection.fields.some(field => (field.path === 'sensing' || field.path.startsWith('sensing.')) && field.owner !== operation.path)) throw new Error('Explicitly materialise inherited sensing before editing.');
+  const prior = inspection.resolved.value;
   const profile = structuredClone(operation.value), candidate = { paths: () => draft.paths(), isBinary: path => draft.isBinary(path), read: path => path === operation.path ? source : draft.read(path) };
   if (operation.type === 'sensing-fit-passive') {
-    if (!profile.passive || inspection.systems.some(system => system.id === profile.passive.system)) throw new Error('Choose a fresh passive receiver System identity.');
+    const receiver = profile.passive?.find(row => row.system === operation.new_system);
+    if (!receiver || inspection.systems.some(system => system.id === receiver.system)) throw new Error('Choose a fresh passive receiver System identity.');
     if (!inspection.resolved.value.energy || !inspection.resolved.value.damage || !inspection.resolved.value.interior) throw new Error('Configure actual Energy, Damage and Interiors before fitting passive equipment.');
     source = replaceSensingSource(source, profile);
-    source = prepareShipOperation(candidate, dependencies, schema, { path: operation.path, type: 'system-add', id: profile.passive.system, kind: 'passive_receiver', console: operation.console, power_group: operation.group,
+    source = prepareShipOperation(candidate, dependencies, schema, { path: operation.path, type: 'system-add', id: receiver.system, kind: 'passive_receiver', console: operation.console, power_group: operation.group,
       compartment: operation.compartment, ai: initialPassiveTree(), materialise: operation.materialise }).changes[0].after;
     inspection = inspectSensing(candidate, dependencies, operation.path);
     let console = inspection.resolved.value.console.find(console => console.id === operation.console);
     if (!console) throw new Error('Choose an actual owning Console.');
     const ownedRatings = console.rating?.length ? console.rating : null, ratings = ownedRatings || inspection.resolved.value.station?.find(station => station.id === console.home_station)?.rating || [];
-    if (ratings.length) source = prepareShipOperation(candidate, dependencies, schema, { path: operation.path, type: 'rating-fit-system', system: profile.passive.system,
+    if (ratings.length) source = prepareShipOperation(candidate, dependencies, schema, { path: operation.path, type: 'rating-fit-system', system: receiver.system,
       ...(ownedRatings ? { console: console.id } : { station: console.home_station }) }).changes[0].after;
     if (!parse(source).console?.some(row => row.id === console.id)) {
       if (!operation.materialise) throw new Error('Explicitly materialise the inherited receiver Console before adding its feed.');
       source += '\n' + stringify({ console: [console] }) + '\n';
     }
-    source = prepareShipOperation(candidate, dependencies, schema, { path: operation.path, type: 'console-feed-add', id: console.id, source: profile.passive.system, kind: 'Passive' }).changes[0].after;
+    source = prepareShipOperation(candidate, dependencies, schema, { path: operation.path, type: 'console-feed-add', id: console.id, source: receiver.system, kind: 'Passive' }).changes[0].after;
   }
+  const remaining = new Set((profile.focused || []).map(row=>scanPublicationSource(row.system)));
+  const obsolete = new Set((prior.sensing?.focused || []).map(row=>scanPublicationSource(row.system)).filter(source=>!remaining.has(source)));
+  source = prunePublicationFeedsSource(source,prior,obsolete,operation.materialise,"Scan");
   validateSensing(profile, inspectSensing(candidate, dependencies, operation.path).resolved.value);
   source = replaceSensingSource(source, profile);
   parse(source); return { changes: [{ path: operation.path, before, after: source }] };

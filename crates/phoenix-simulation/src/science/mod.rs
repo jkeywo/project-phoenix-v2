@@ -30,6 +30,9 @@ pub use scan::{
     ScanRefusal, ScanSubject,
 };
 pub use server::{
-    publish_scan_blackboard, scan_blackboard_key, tick_scans, ScanSaveState, SciencePlugin,
-    ShipScanRecord, SCAN_BLACKBOARD_KEY,
+    publish_scan_blackboard, scan_blackboard_key_for, scan_owner_from_blackboard_key, tick_scans,
+    FocusedSaveState, FocusedScanRecord, ScanSaveState, SciencePlugin, ShipScanRecord,
 };
+
+#[cfg(test)]
+mod test_support;

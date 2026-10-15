@@ -1,6 +1,6 @@
 //! Continuation for the existing focused scan owner. Acquisition is still
 //! performed by `science::server`; these records never query hidden truth.
-use super::server::{ScanSaveState, ShipScanRecord};
+use super::server::{FocusedSaveState, FocusedScanRecord};
 use crate::science::scan::ScanReading;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 #[serde(deny_unknown_fields)]
 pub struct FocusedWork {
     pub subject: String,
+    pub presentation_id: String,
     pub progress: f32,
     pub work_secs: f32,
     pub started_tick: u64,
@@ -17,13 +18,9 @@ pub struct FocusedWork {
     pub waiting: String,
 }
 
-impl ShipScanRecord {
-    pub(crate) fn validate_state(&self, saved: &ScanSaveState, tick: u64) -> Result<(), String> {
-        let policy = self.focused_config.clone().unwrap_or_else(|| {
-            phoenix_model::sensing::FocusedConfig::legacy(
-                crate::ship::system_registry::sensors_system_id(),
-            )
-        });
+impl FocusedScanRecord {
+    pub(crate) fn validate_state(&self, saved: &FocusedSaveState, tick: u64) -> Result<(), String> {
+        let policy = &self.policy;
         validate(
             saved,
             usize::from(policy.history_limit),
@@ -56,7 +53,7 @@ impl ShipScanRecord {
 }
 
 pub(crate) fn validate(
-    saved: &ScanSaveState,
+    saved: &FocusedSaveState,
     limit: usize,
     work_secs: f32,
     tick: u64,
@@ -68,6 +65,9 @@ pub(crate) fn validate(
     let mut previous = 0;
     for reading in &saved.history {
         if reading.subject_uuid.is_empty()
+            || reading.contact_id.as_ref().is_none_or(|id| {
+                id.is_empty() || id.len() > 512 || id.chars().any(char::is_control)
+            })
             || reading.taken_at_tick > tick
             || reading.taken_at_tick < previous
             || !samples.insert((reading.subject_uuid.clone(), reading.taken_at_tick))
@@ -103,6 +103,9 @@ pub(crate) fn validate(
     }
     for work in saved.focused.iter().chain(saved.unfinished.values()) {
         if work.subject.is_empty()
+            || work.presentation_id.is_empty()
+            || work.presentation_id.len() > 512
+            || work.presentation_id.chars().any(char::is_control)
             || work.work_secs != work_secs
             || !work.progress.is_finite()
             || !(0.0..=work_secs).contains(&work.progress)

@@ -3482,6 +3482,10 @@ screen = "gui/dynasty-cruiser/gunnery.html"
 home_station = "gunnery"
 
 [[console.feed]]
+source = "helm-radar"
+kind = "Helm"
+
+[[console.feed]]
 source = "captain"
 kind = "Captain"
 
@@ -3564,7 +3568,7 @@ source = "navigation"
 kind = "Navigation"
 
 [[console.feed]]
-source = "scan"
+source = "scan/7:sensors"
 kind = "Scan"
 
 [[console.feed]]

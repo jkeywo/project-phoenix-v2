@@ -1097,6 +1097,26 @@ field_replaceable = true
 [system.damage_component.susceptibility]
 physical = 1
 laser = 1
+
+[system.config.ai]
+root = "targeting"
+
+[[system.config.ai.tree]]
+id = "targeting"
+initial = "observe"
+
+[[system.config.ai.tree.state]]
+id = "observe"
+
+[[system.config.ai.tree.state.task]]
+id = "designate"
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "designate"
+[system.config.ai.tree.state.task.action.value]
+source = "fact"
+name = "can_operate"
+
 [[system]]
 id = "phaser-fore"
 power_group = "energy-phaser-fore"

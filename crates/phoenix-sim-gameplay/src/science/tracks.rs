@@ -404,6 +404,7 @@ impl BroadTrackState {
 }
 fn profile_valid(profile: &BroadConfig, fixed_dt: f32) -> Result<(), String> {
     phoenix_model::sensing::SensingConfig {
+        control: Default::default(),
         broad: vec![profile.clone()],
         ..Default::default()
     }

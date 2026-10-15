@@ -921,8 +921,17 @@ impl EntityConfig {
                 .iter()
                 .any(|system| system.kind == crate::ship::system_registry::PASSIVE_RECEIVER_KIND)
         }) {
-            return Err(SerdeError::custom("a fitted passive receiver requires its explicit [sensing.passive] instrument profile"));
+            return Err(SerdeError::custom("a fitted passive receiver requires its explicit [[sensing.passive]] instrument profile"));
         }
+        if config.scan.is_some()
+            && config
+                .sensing
+                .as_ref()
+                .is_none_or(|profile| profile.focused.is_empty())
+        {
+            return Err(SerdeError::custom("ScanConfig requires at least one explicit [[sensing.focused]] instrument bound to its actual Sensors System; convert the former implicit scan suite"));
+        }
+        crate::science::sensing::validate_scan_feeds(&config).map_err(SerdeError::custom)?;
         crate::resources::fitting::CompiledFitting::compile(&config).map_err(SerdeError::custom)?;
         crate::resources::logistics_profile::compile_entity_logistics(&config)
             .map_err(SerdeError::custom)?;
@@ -1147,6 +1156,26 @@ impl EntityConfig {
                         &crate::resources::production_ai::bindings(),
                     )
                     .map_err(SerdeError::custom)?;
+                    continue;
+                }
+                if [
+                    crate::ship::system_registry::SENSORS_KIND,
+                    crate::ship::system_registry::TACTICAL_RADAR_KIND,
+                ]
+                .contains(&system.kind.as_str())
+                    && authored.is_some()
+                {
+                    let tree: crate::ai::state_tree::AiTreeConfig = authored
+                        .unwrap()
+                        .clone()
+                        .try_into()
+                        .map_err(SerdeError::custom)?;
+                    let bindings = if system.kind == crate::ship::system_registry::SENSORS_KIND {
+                        crate::science::sensing_ai::focused_bindings()
+                    } else {
+                        crate::science::sensing_ai::targeting_bindings()
+                    };
+                    crate::ai::state_tree::compile(&tree, &bindings).map_err(SerdeError::custom)?;
                     continue;
                 }
                 if system.kind == crate::ship::system_registry::PASSIVE_RECEIVER_KIND {

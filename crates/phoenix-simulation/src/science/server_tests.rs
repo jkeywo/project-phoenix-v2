@@ -76,20 +76,26 @@ fn app_with(config: ScanConfig, condition: f32, depot_x: f32) -> (App, Entity) {
     // that builds its own bare `App` deliberately leaves it out, which is
     // the `None` arm every fixture in the crate takes.
     app.insert_resource(WorldContentRuntime::default());
-    let ship = app
-        .world_mut()
-        .spawn((
-            crate::server_app::Ship,
-            EntityUuid(SHIP.to_string()),
-            Transform::from_xyz(0.0, 0.0, 0.0),
-            AdmittedCommands::default(),
-            ShipScanRecord {
-                config,
-                ..Default::default()
-            },
-            crate::server_app::ShipSystemBlackboards::default(),
-        ))
-        .id();
+    let mut authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    authored.scan = Some(config);
+    let sensing = authored.sensing.as_mut().unwrap();
+    sensing.broad.clear(); // This fixture owns focused hardware only, so its ordinary requests are direct references.
+    sensing.focused[0].work_secs = 0.1;
+    let mut time = Time::<()>::default();
+    time.advance_by(std::time::Duration::from_millis(100));
+    app.insert_resource(time)
+        .insert_resource(crate::sim_tick::SimTick(0));
+    let ship = crate::entities::spawner::spawn_entity(
+        &mut app.world_mut().commands(),
+        &authored,
+        Vec3::ZERO,
+        SHIP.into(),
+        None,
+    );
+    app.world_mut().flush();
     app.world_mut().spawn((
         EntityUuid(DEPOT.to_string()),
         crate::entities::spawner::EntityId(DEPOT_ID.to_string()),
@@ -159,11 +165,20 @@ fn has_feedback(
     })
 }
 
-fn record(app: &App, ship: Entity) -> ShipScanRecord {
+fn record(app: &App, ship: Entity) -> FocusedScanRecord {
     app.world()
         .get::<ShipScanRecord>(ship)
         .expect("the ship keeps a scan record")
+        .0[&SystemId("sensors".into())]
         .clone()
+}
+
+fn step(app: &mut App) {
+    app.update();
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+}
+fn scan_key() -> SystemId {
+    scan_blackboard_key_for(&SystemId("sensors".into()))
 }
 
 /// **AC1.** The command arrives through `AdmittedCommands` on the `sensors`
@@ -176,7 +191,7 @@ fn an_admitted_scan_command_reads_the_targets_live_condition_track() {
         .resource::<Messages<crate::lobby::server::OutboundMessage>>()
         .get_cursor();
     ask_for_correlated_scan(&mut app, ship, DEPOT, "science", "science-scan-applied");
-    app.update();
+    step(&mut app);
 
     let feedback: Vec<_> = cursor
         .read(
@@ -218,7 +233,7 @@ fn an_admitted_scan_command_reads_the_targets_live_condition_track() {
 fn a_scan_reading_reports_the_subjects_authored_mass() {
     let (mut app, ship) = app_with(suite(), 62.0, 200.0);
     ask_for_scan(&mut app, ship, DEPOT);
-    app.update();
+    step(&mut app);
 
     let reading = record(&app, ship).last.expect("a reading came back");
     assert_eq!(reading.mass, DEPOT_MASS);
@@ -230,33 +245,18 @@ fn a_scan_reading_reports_the_subjects_authored_mass() {
 /// same documented default an unauthored TOML gets.
 #[test]
 fn a_subject_with_no_entity_mass_component_falls_back_to_the_documented_default() {
-    let mut app = App::new();
-    app.add_systems(Update, (tick_scans, publish_scan_blackboard).chain());
-    app.insert_resource(WorldContentRuntime::default());
-    let ship = app
+    let (mut app, ship) = app_with(suite(), 62.0, 200.0);
+    let depot = app
         .world_mut()
-        .spawn((
-            crate::server_app::Ship,
-            EntityUuid(SHIP.to_string()),
-            Transform::from_xyz(0.0, 0.0, 0.0),
-            AdmittedCommands::default(),
-            ShipScanRecord {
-                config: suite(),
-                ..Default::default()
-            },
-            crate::server_app::ShipSystemBlackboards::default(),
-        ))
-        .id();
-    // No EntityMass component — the case the fallback in `subject_mass`
-    // exists for.
-    app.world_mut().spawn((
-        EntityUuid(DEPOT.to_string()),
-        Transform::from_xyz(200.0, 0.0, 0.0),
-        EntityName("world.probe.entity.depot.name".to_string()),
-        depot_condition(62.0),
-    ));
+        .query::<(Entity, &EntityUuid)>()
+        .iter(app.world())
+        .find_map(|(entity, id)| (id.0 == DEPOT).then_some(entity))
+        .unwrap();
+    app.world_mut()
+        .entity_mut(depot)
+        .remove::<crate::entities::spawner::EntityMass>();
     ask_for_scan(&mut app, ship, DEPOT);
-    app.update();
+    step(&mut app);
 
     let reading = record(&app, ship).last.expect("a reading came back");
     assert_eq!(reading.mass, crate::entities::config::DEFAULT_ENTITY_MASS);
@@ -270,20 +270,22 @@ fn a_subject_with_no_entity_mass_component_falls_back_to_the_documented_default(
 fn mutating_the_subjects_condition_changes_what_the_next_scan_says() {
     let (mut app, ship) = app_with(suite(), 62.0, 200.0);
     ask_for_scan(&mut app, ship, DEPOT);
-    app.update();
+    step(&mut app);
     let before = record(&app, ship).last.expect("a reading");
 
     // The storm takes thirty points off it. Nothing else in the world moves.
     {
-        let mut q = app.world_mut().query::<&mut InfrastructureCondition>();
+        let mut q = app
+            .world_mut()
+            .query::<(&EntityUuid, &mut InfrastructureCondition)>();
         let mut condition = q
             .iter_mut(app.world_mut())
-            .next()
+            .find_map(|(id, condition)| (id.0 == DEPOT).then_some(condition))
             .expect("the depot carries a track");
         condition.0.degrade(30.0);
     }
     ask_for_scan(&mut app, ship, DEPOT);
-    app.update();
+    step(&mut app);
     let after = record(&app, ship).last.expect("a second reading");
 
     assert!(
@@ -306,7 +308,7 @@ fn mutating_the_subjects_condition_changes_what_the_next_scan_says() {
 fn the_same_scan_from_further_out_comes_back_at_a_coarser_band() {
     let (mut app, ship) = app_with(suite(), 62.0, 2_400.0);
     ask_for_scan(&mut app, ship, DEPOT);
-    app.update();
+    step(&mut app);
 
     let reading = record(&app, ship).last.expect("a reading");
     assert_eq!(reading.band, "coarse");
@@ -336,11 +338,11 @@ fn scanning_something_with_no_condition_track_is_refused_with_a_reason() {
     assert!(app.world().get::<InfrastructureCondition>(rock).is_none());
 
     ask_for_scan(&mut app, ship, DEPOT);
-    app.update();
+    step(&mut app);
     assert!(record(&app, ship).last.is_some(), "precondition: a reading");
 
     ask_for_scan(&mut app, ship, "rock-9");
-    app.update();
+    step(&mut app);
     let record = record(&app, ship);
     assert_eq!(record.refusal, Some(ScanRefusal::NoReadableCondition));
     assert!(
@@ -366,7 +368,7 @@ fn scanning_a_uuid_no_entity_answers_to_is_refused_as_no_such_target() {
         "science",
         "science-scan-refused",
     );
-    app.update();
+    step(&mut app);
     let feedback: Vec<_> = cursor
         .read(
             app.world()
@@ -404,7 +406,7 @@ fn a_structure_the_scenario_keeps_off_the_wire_cannot_be_scanned() {
     ));
 
     ask_for_scan(&mut app, ship, "sealed-1");
-    app.update();
+    step(&mut app);
     let record = record(&app, ship);
     assert_eq!(
         record.refusal,
@@ -417,26 +419,31 @@ fn a_structure_the_scenario_keeps_off_the_wire_cannot_be_scanned() {
 /// A hull with no `[scan]` table still answers when it is asked.
 #[test]
 fn a_hull_that_cannot_scan_is_refused_by_name_rather_than_ignored() {
-    let mut app = App::new();
-    app.add_systems(Update, tick_scans);
-    let ship = app
-        .world_mut()
-        .spawn((
-            crate::server_app::Ship,
-            EntityUuid(SHIP.to_string()),
-            Transform::default(),
-            AdmittedCommands::default(),
-        ))
-        .id();
-    ask_for_scan(&mut app, ship, DEPOT);
-    app.update();
-    assert_eq!(
-        app.world()
-            .get::<ShipScanRecord>(ship)
-            .expect("the refusal record is inserted")
-            .refusal,
-        Some(ScanRefusal::NotCapable)
+    let (mut app, ship) = app_with(suite(), 62.0, 200.0);
+    app.world_mut().entity_mut(ship).remove::<ShipScanRecord>();
+    let mut cursor = app
+        .world()
+        .resource::<Messages<crate::lobby::server::OutboundMessage>>()
+        .get_cursor();
+    ask_for_correlated_scan(&mut app, ship, DEPOT, "science", "missing-instrument");
+    step(&mut app);
+    assert!(
+        app.world().get::<ShipScanRecord>(ship).is_none(),
+        "a refusal must not manufacture an observation owner"
     );
+    let feedback: Vec<_> = cursor
+        .read(
+            app.world()
+                .resource::<Messages<crate::lobby::server::OutboundMessage>>(),
+        )
+        .cloned()
+        .collect();
+    assert!(has_feedback(
+        &feedback,
+        "science",
+        "missing-instrument",
+        ActionFeedbackOutcome::Refused
+    ));
 }
 
 /// The reading reaches the wire under the `scan` channel, with the string
@@ -445,13 +452,13 @@ fn a_hull_that_cannot_scan_is_refused_by_name_rather_than_ignored() {
 fn the_reading_is_published_under_the_scan_blackboard_channel() {
     let (mut app, ship) = app_with(suite(), 62.0, 200.0);
     ask_for_scan(&mut app, ship, DEPOT);
-    app.update();
+    step(&mut app);
 
     let boards = app
         .world()
         .get::<crate::server_app::ShipSystemBlackboards>(ship)
         .expect("the ship publishes");
-    let bb = match boards.0.get(&scan_blackboard_key()) {
+    let bb = match boards.0.get(&scan_key()) {
         Some(SystemBlackboard::Scan(bb)) => bb.clone(),
         other => panic!("expected a scan blackboard, got {other:?}"),
     };
@@ -468,13 +475,13 @@ fn the_reading_is_published_under_the_scan_blackboard_channel() {
 fn a_refusal_is_published_as_a_string_id_rather_than_as_prose() {
     let (mut app, ship) = app_with(suite(), 62.0, 200.0);
     ask_for_scan(&mut app, ship, "not-in-this-world");
-    app.update();
+    step(&mut app);
 
     let boards = app
         .world()
         .get::<crate::server_app::ShipSystemBlackboards>(ship)
         .expect("the ship publishes");
-    let bb = match boards.0.get(&scan_blackboard_key()) {
+    let bb = match boards.0.get(&scan_key()) {
         Some(SystemBlackboard::Scan(bb)) => bb.clone(),
         other => panic!("expected a scan blackboard, got {other:?}"),
     };
@@ -510,7 +517,7 @@ fn a_reading_that_comes_back_raises_the_subjects_scanned_flag() {
     assert_eq!(runtime(&app).flags.counter(&scanned_flag(DEPOT_ID)), 0);
 
     ask_for_scan(&mut app, ship, DEPOT);
-    app.update();
+    step(&mut app);
 
     assert_eq!(
         runtime(&app).flags.counter(&scanned_flag(DEPOT_ID)),
@@ -538,7 +545,7 @@ fn a_structure_with_no_authored_id_is_scannable_and_mirrors_nothing() {
     ));
 
     ask_for_scan(&mut app, ship, "anonymous-1");
-    app.update();
+    step(&mut app);
 
     assert!(
         record(&app, ship).last.is_some(),
@@ -563,11 +570,11 @@ fn re_scanning_raises_nothing_twice_and_scanning_elsewhere_unlearns_nothing() {
     ));
 
     ask_for_scan(&mut app, ship, DEPOT);
-    app.update();
+    step(&mut app);
     ask_for_scan(&mut app, ship, DEPOT);
-    app.update();
+    step(&mut app);
     ask_for_scan(&mut app, ship, "depot-2");
-    app.update();
+    step(&mut app);
 
     assert_eq!(
         queued_flag_sets(&app),
@@ -604,9 +611,9 @@ fn a_refused_scan_raises_no_flag_for_the_thing_it_could_not_read() {
     ));
 
     ask_for_scan(&mut app, ship, "sealed-1");
-    app.update();
+    step(&mut app);
     ask_for_scan(&mut app, ship, "not-in-this-world");
-    app.update();
+    step(&mut app);
 
     assert_eq!(
         runtime(&app).flags.counter(&scanned_flag("sealed_depot")),
@@ -624,17 +631,16 @@ fn a_refused_scan_raises_no_flag_for_the_thing_it_could_not_read() {
 fn the_save_projection_carries_the_reading_and_not_the_authored_table() {
     let (mut app, ship) = app_with(suite(), 62.0, 200.0);
     ask_for_scan(&mut app, ship, DEPOT);
-    app.update();
+    step(&mut app);
 
     let live = record(&app, ship);
     let saved = live.save_state();
     assert_eq!(saved.last, live.last);
     assert!(saved.refusal.is_none());
 
-    let mut restored = ShipScanRecord {
-        config: suite(),
-        ..Default::default()
-    };
+    let mut restored = live.clone();
+    restored.last = None;
+    restored.history.clear();
     restored.restore(&saved);
     assert_eq!(restored, live, "the whole record comes back");
 }
@@ -645,12 +651,12 @@ fn held_scan_metadata_keeps_its_sample_and_precision_after_the_clock_advances() 
     let (mut app, ship) = app_with(suite(), 62.0, 200.0);
     app.insert_resource(crate::sim_tick::SimTick(17));
     ask_for_scan(&mut app, ship, DEPOT);
-    app.update();
+    step(&mut app);
     let first = app
         .world()
         .get::<crate::server_app::ShipSystemBlackboards>(ship)
         .unwrap()
-        .0[&scan_blackboard_key()]
+        .0[&scan_key()]
         .clone();
     app.world_mut()
         .get_mut::<AdmittedCommands>(ship)
@@ -658,12 +664,12 @@ fn held_scan_metadata_keeps_its_sample_and_precision_after_the_clock_advances() 
         .0
         .clear();
     app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 90;
-    app.update();
+    step(&mut app);
     let current = &app
         .world()
         .get::<crate::server_app::ShipSystemBlackboards>(ship)
         .unwrap()
-        .0[&scan_blackboard_key()];
+        .0[&scan_key()];
     assert_eq!(
         *current, first,
         "publishing/forwarding does not renew a held reading"

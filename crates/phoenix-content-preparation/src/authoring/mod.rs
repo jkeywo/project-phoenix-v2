@@ -230,10 +230,24 @@ pub fn ship_schema() -> WorkshopShipSchema {
                 crate::ship::system_registry::LOGISTICS_KIND.into(),
                 crate::ship::system_registry::FABRICATION_KIND.into(),
                 crate::ship::system_registry::RECOVERY_KIND.into(),
+                crate::ship::system_registry::SENSORS_KIND.into(),
+                crate::ship::system_registry::TACTICAL_RADAR_KIND.into(),
                 crate::ship::system_registry::PASSIVE_RECEIVER_KIND.into(),
             ],
             shield_recovery_bindings,
             hosts: BTreeMap::from([
+                (
+                    crate::ship::system_registry::SENSORS_KIND.into(),
+                    crate::ai::state_tree::schema_metadata(
+                        &phoenix_sim_gameplay::science::sensing_ai::focused_bindings(),
+                    ),
+                ),
+                (
+                    crate::ship::system_registry::TACTICAL_RADAR_KIND.into(),
+                    crate::ai::state_tree::schema_metadata(
+                        &phoenix_sim_gameplay::science::sensing_ai::targeting_bindings(),
+                    ),
+                ),
                 (
                     crate::ship::system_registry::PASSIVE_RECEIVER_KIND.into(),
                     crate::ai::state_tree::schema_metadata(

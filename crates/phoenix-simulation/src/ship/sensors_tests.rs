@@ -934,20 +934,33 @@ const SCAN_SUITE_REACH: f32 = 400.0;
 /// at this distance come back", and `ScanConfig::band_for` answers that off the
 /// ladder's reach alone.
 fn scan_suite(max_range: f32) -> crate::science::server::ShipScanRecord {
-    crate::science::server::ShipScanRecord {
-        config: crate::science::scan::ScanConfig {
-            bands: vec![crate::science::scan::ScanBandConfig {
-                id: "coarse".into(),
-                label: "test.scan.band.coarse.label".into(),
-                max_range,
-                condition_step: 0.25,
-                report_thresholds: true,
-                report_capacities: true,
-            }],
-            ..Default::default()
+    crate::science::server::ShipScanRecord(std::collections::BTreeMap::from([(
+        SystemId("sensors".into()),
+        crate::science::server::FocusedScanRecord {
+            config: crate::science::scan::ScanConfig {
+                bands: vec![crate::science::scan::ScanBandConfig {
+                    id: "coarse".into(),
+                    label: "test.scan.band.coarse.label".into(),
+                    max_range,
+                    condition_step: 0.25,
+                    report_thresholds: true,
+                    report_capacities: true,
+                }],
+                ..Default::default()
+            },
+            policy: phoenix_model::sensing::FocusedConfig {
+                system: SystemId("sensors".into()),
+                work_secs: 1.0,
+                history_limit: 32,
+                unfinished_retention_secs: 0.0,
+            },
+            last: None,
+            refusal: None,
+            history: vec![],
+            focused: None,
+            unfinished: Default::default(),
         },
-        ..Default::default()
-    }
+    )]))
 }
 
 /// Admitted sensors commands currently queued on the single test ship.

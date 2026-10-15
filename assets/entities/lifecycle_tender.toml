@@ -220,7 +220,7 @@ source = "navigation"
 kind = "Navigation"
 
 [[console.feed]]
-source = "scan"
+source = "scan/7:sensors"
 kind = "Scan"
 
 [[console.feed]]
@@ -242,6 +242,44 @@ kind = "Tractor"
 [[console.feed]]
 source = "viewscreen"
 kind = "Viewscreen"
+
+
+[system.config.ai]
+root = "focused"
+
+[[system.config.ai.tree]]
+id = "focused"
+initial = "observe"
+
+[[system.config.ai.tree.state]]
+id = "observe"
+
+[[system.config.ai.tree.state.task]]
+id = "designate"
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "designate"
+[system.config.ai.tree.state.task.action.value]
+source = "fact"
+name = "can_operate"
+
+[[system.config.ai.tree.state.task]]
+id = "enquire"
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "enquire"
+[system.config.ai.tree.state.task.action.value]
+source = "fact"
+name = "request_available"
+
+[[system.config.ai.tree.state.task]]
+id = "cancel"
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "cancel"
+[system.config.ai.tree.state.task.action.value]
+source = "literal"
+value = false
 
 [[system]]
 id = "power-reactor"
@@ -624,3 +662,13 @@ label = "damage.resource.machinery_parts"
 [resource_services.machinery_parts]
 kind = "capacity"
 id = "machinery_parts"
+
+# Explicit timed focused suite; preserves the previous one-second accepted migration tuning.
+[[sensing.focused]]
+system = "sensors"
+work_secs = 1
+history_limit = 32
+unfinished_retention_secs = 0
+
+[sensing.control]
+science_target = "sensors"

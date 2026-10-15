@@ -502,6 +502,9 @@ impl ScanRefusal {
 pub struct ScanReading {
     /// The subject's UUID — the row key a dossier comparison joins on.
     pub subject_uuid: String,
+    /// Public presentation identity retained at sampling; never resolve it from future truth.
+    #[serde(default)]
+    pub contact_id: Option<String>,
     /// `strings.csv` id for the subject's crew-facing name, or empty.
     #[serde(default)]
     pub subject_name: String,
@@ -675,6 +678,7 @@ pub fn derive(
     let mass_class = config.mass_class_for(subject.mass);
 
     Ok(ScanReading {
+        contact_id: None,
         subject_uuid: subject.uuid.clone(),
         subject_name: subject.name.clone(),
         band: band.id.clone(),

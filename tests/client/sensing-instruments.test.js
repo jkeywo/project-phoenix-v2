@@ -44,12 +44,12 @@ describe('scoped human sensing instruments', () => {
     el.state = { passive: [{ ...state.passive[0], controllable: false }] }; expect(button.hidden).toBe(true); expect(el.shadowRoot.querySelectorAll('li')).toHaveLength(1);
   });
   it('joins exact owner and permitted feed without turning feed access into control', () => {
-    const raw = { blackboards: { scan: { owner: 'focused-array', capable: true, history: [reading(10)] }, 'receiver-x': { enabled: true, signals: [sample] }, hidden: { signals: [{ ...sample, sample_id: 'private' }] } }, blackboardKinds: { scan: 'Scan', 'receiver-x': 'Passive', hidden: 'Passive' }, controlSources: { 'focused-array': 'Human', 'receiver-x': 'Human' }, observationTick: 30 };
-    const owned = ['focused-array', 'receiver-x']; let scoped = consoleReadState(raw, { id: 'science', systems: owned, feeds: [{ source: 'scan', kind: 'Scan' }] });
+    const raw = { blackboards: { 'scan/13:focused-array': { owner: 'focused-array', capable: true, history: [reading(10)] }, 'receiver-x': { enabled: true, signals: [sample] }, hidden: { signals: [{ ...sample, sample_id: 'private' }] } }, blackboardKinds: { 'scan/13:focused-array': 'Scan', 'receiver-x': 'Passive', hidden: 'Passive' }, controlSources: { 'focused-array': 'Human', 'receiver-x': 'Human' }, observationTick: 30 };
+    const owned = ['focused-array', 'receiver-x']; let scoped = consoleReadState(raw, { id: 'science', systems: owned, feeds: [{ source: 'scan/13:focused-array', kind: 'Scan' }] });
     let projected = buildSensorsConsoleState(scoped, owned); expect(projected.scan.controllable).toBe(true); expect(projected.scan.system_id).toBe('focused-array'); expect(projected.passive.map(row => row.system_id)).toEqual(['receiver-x']);
-    projected = buildSensorsConsoleState(consoleReadState(raw, { id: 'visitor', systems: [], feeds: [{ source: 'scan', kind: 'Scan' }, { source: 'receiver-x', kind: 'Passive' }] }), []);
+    projected = buildSensorsConsoleState(consoleReadState(raw, { id: 'visitor', systems: [], feeds: [{ source: 'scan/13:focused-array', kind: 'Scan' }, { source: 'receiver-x', kind: 'Passive' }] }), []);
     expect(projected.scan.controllable).toBe(false); expect(projected.passive[0].controllable).toBe(false); expect(projected.scan.history).toHaveLength(1);
-    delete raw.blackboards.scan.owner; scoped = consoleReadState(raw, { id: 'science', systems: owned, feeds: [{ source: 'scan', kind: 'Scan' }] }); expect(buildSensorsConsoleState(scoped, owned).scan.controllable).toBe(false);
+    delete raw.blackboards['scan/13:focused-array'].owner; scoped = consoleReadState(raw, { id: 'science', systems: owned, feeds: [{ source: 'scan/13:focused-array', kind: 'Scan' }] }); expect(buildSensorsConsoleState(scoped, owned).scan.controllable).toBe(false);
   });
   it('correlates exact-owner actions, rejects stale and missing owners, and preserves authoritative refusal', () => {
     let state = view(), n = 0; const send = vi.fn(), feedback = new ActionFeedbackLifecycle({ correlation: () => 'sense-' + ++n });
@@ -70,11 +70,11 @@ describe('scoped human sensing instruments', () => {
   it('mounts the actual Cruiser Science instruments and carries a normal correlated focused/cancel/passive journey', () => {
     const config = resolveTemplate('assets/entities/alliance_cruiser.toml', { read: path => fs.existsSync(path) ? fs.readFileSync(path, 'utf8') : null }, parse).resolved.value;
     const definition = config.console.find(row => row.id === 'science'), ids = config.system.filter(row => row.console === definition.id).map(row => row.id);
-    const focused = config.sensing.focused.system, receiver = config.sensing.passive.system;
+    const focused = config.sensing.focused[0].system, receiver = config.sensing.passive[0].system;
     document.body.innerHTML = fs.readFileSync('gui/cruiser/science.html', 'utf8');
     const projected = buildSensorsConsoleState(consoleReadState({ observationTick: 40,
-      blackboards: { scan: { owner: focused, capable: true, reading: reading(20), history: [reading(20)], focused: { subject: 'known-contact', progress: 500, waiting: '' } },
-        [receiver]: { enabled: false, can_operate: true, signals: [sample] } }, blackboardKinds: { scan: 'Scan', [receiver]: 'Passive' },
+      blackboards: { [`scan/${focused.length}:${focused}`]: { owner: focused, capable: true, reading: reading(20), history: [reading(20)], focused: { subject: 'known-contact', progress: 500, waiting: '' } },
+        [receiver]: { enabled: false, can_operate: true, signals: [sample] } }, blackboardKinds: { [`scan/${focused.length}:${focused}`]: 'Scan', [receiver]: 'Passive' },
       controlSources: Object.fromEntries(ids.map(id => [id, 'Human'])), sensorsTarget: 'known-contact' }, { ...definition, systems: ids, feeds: definition.feed }), ids);
     projected.target_uuid = 'known-contact'; let correlation = 0;
     const sent = vi.fn(), registry = createSensorScienceActionRegistry({ getState: () => projected, sendAction: sent,

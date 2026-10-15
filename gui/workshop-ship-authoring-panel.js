@@ -1,4 +1,5 @@
 import { stockPublicationSources } from '../editor/workshop-stock-bindings.js';
+import { scanPublicationSource } from './scan-source.js';
 import { mountStateTrees, repairJobTreeContext } from './workshop-state-trees.js';
 import { mountSystemComponents } from './workshop-system-components.js';
 import { runWorkshopMutation } from './workshop-edit-session.js';
@@ -180,7 +181,9 @@ export function mountWorkshopShipAuthoring({ root, provider, runtime, draft: get
     consoleHome.value = console?.home_station || ''; consoleSeeking.checked = console?.human_seeking === true;
     consoleHosts.value = (console?.host_order || []).join(', '); consoleRating.value = console?.visiting_rating || '';
     feeds.replaceChildren(...(console?.feed || []).map((row, index) => option(String(index), `${row.source}: ${row.kind}`)));
-    feedSource.replaceChildren(...[...new Set([...(schema?.console_feed_sources || []), ...stockPublicationSources(inspection?.composition?.resolved.value || {}, schema), ...(inspection?.systems || []).filter(row => schema?.console_instance_publication_kinds?.[row.kind]).map(row => row.id)])].map(value => option(value)));
+    feedSource.replaceChildren(...[...new Set([...(schema?.console_feed_sources || []).filter(source=>source!=='scan'),
+      ...(inspection?.composition?.resolved.value.sensing?.focused || []).map(profile=>scanPublicationSource(profile.system)),
+      ...stockPublicationSources(inspection?.composition?.resolved.value || {}, schema), ...(inspection?.systems || []).filter(row => schema?.console_instance_publication_kinds?.[row.kind]).map(row => row.id)])].map(value => option(value)));
     feedKind.replaceChildren(...(schema?.console_feed_kinds || []).map(kind => option(kind)));
     const station = selectedStation(), system = selectedSystem();
     stationId.value = station?.id || ''; stationName.value = station?.name || ''; stationDescription.value = station?.description || '';

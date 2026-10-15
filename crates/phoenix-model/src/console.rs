@@ -180,7 +180,16 @@ pub struct ConsoleFeed {
 
 impl ConsoleFeed {
     pub fn accepts(&self, source: &SystemId, observation: &SystemBlackboard) -> bool {
-        &self.source == source && self.kind == ConsoleObservationKind::of(observation)
+        &self.source == source
+            && self.kind == ConsoleObservationKind::of(observation)
+            && match observation {
+                SystemBlackboard::Scan(scan) => {
+                    crate::sensing::scan_owner_from_blackboard_key(source).as_ref()
+                        == scan.owner.as_ref()
+                        && scan.owner.is_some()
+                }
+                _ => true,
+            }
     }
 }
 

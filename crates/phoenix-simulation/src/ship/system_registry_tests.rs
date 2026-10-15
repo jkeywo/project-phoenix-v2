@@ -319,10 +319,6 @@ fn reserved_blackboard_keys_are_complete_and_not_system_kinds() {
             crate::dossier::DOSSIER_BLACKBOARD_KEY.to_string(),
             ConsoleFamily::Comms,
         ),
-        (
-            crate::science::SCAN_BLACKBOARD_KEY.to_string(),
-            ConsoleFamily::Sensors,
-        ),
     ]);
 
     assert_eq!(registry.project_blackboard_console_families(), expected);
@@ -330,7 +326,6 @@ fn reserved_blackboard_keys_are_complete_and_not_system_kinds() {
         HELM_STATION_ID,
         TACTICAL_STATION_ID,
         crate::dossier::DOSSIER_BLACKBOARD_KEY,
-        crate::science::SCAN_BLACKBOARD_KEY,
     ] {
         assert!(
             !registry.contains(key),

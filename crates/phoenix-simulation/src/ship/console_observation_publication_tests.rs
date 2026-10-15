@@ -20,7 +20,7 @@ fn held_metadata_is_cache_stable_and_handoff_preserves_sample_time() {
     config.consoles.push(ConsoleConfig {
         id: ConsoleId("science".into()),
         feeds: vec![ConsoleFeed {
-            source: SystemId("scan".into()),
+            source: SystemId("scan/7:scanner".into()),
             kind: ConsoleObservationKind::Scan,
         }],
         ..Default::default()
@@ -30,6 +30,7 @@ fn held_metadata_is_cache_stable_and_handoff_preserves_sample_time() {
         ..Default::default()
     };
     let board = SystemBlackboard::Scan(ScanBlackboard {
+        owner: Some(SystemId("scanner".into())),
         reading: Some(ScanReadingSnapshot {
             observation: Some(sample.clone()),
             ..Default::default()
@@ -42,7 +43,7 @@ fn held_metadata_is_cache_stable_and_handoff_preserves_sample_time() {
             crate::server_app::LocalShip,
             ShipConfigComponent(config),
             crate::server_app::ShipSystemBlackboards(HashMap::from([(
-                SystemId("scan".into()),
+                SystemId("scan/7:scanner".into()),
                 board,
             )])),
             ConsoleHosts(vec![ConsoleHostSnapshot {

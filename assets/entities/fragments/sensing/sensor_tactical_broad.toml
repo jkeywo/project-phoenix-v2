@@ -18,3 +18,7 @@ assessment_secs = 6
 position_error = 2
 drift_error_per_sec = 0.5
 track_retention_secs = 60
+
+[sensing.control]
+combat_lock = "tactical-radar"
+science_target = "sensors"

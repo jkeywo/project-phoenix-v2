@@ -115,9 +115,18 @@ impl<'a> ConsoleKnowledgeView<'a> {
     pub fn get(&self, source: &SystemId) -> Option<&'a phoenix_model::messages::SystemBlackboard> {
         let console = self.console?;
         let value = self.publications.get(source)?;
+        let derived_scan = if let phoenix_model::messages::SystemBlackboard::Scan(scan) = value {
+            let owner = phoenix_model::sensing::scan_owner_from_blackboard_key(source)?;
+            if scan.owner.as_ref() != Some(&owner) {
+                return None;
+            }
+            Some(owner)
+        } else {
+            None
+        };
         let owned = self
             .config
-            .system(source)
+            .system(derived_scan.as_ref().unwrap_or(source))
             .is_some_and(|system| system.console.as_ref() == Some(&console.id));
         (owned || console.feeds.iter().any(|feed| feed.accepts(source, value))).then_some(value)
     }
@@ -218,9 +227,9 @@ pub fn validate_consoles(config: &ShipConfig) -> Result<(), ShipConfigError> {
     let mut publications = super::system_registry::fixed_publication_kinds();
     let instance_kinds = super::system_registry::instance_publication_kinds();
     for system in &config.systems {
-        if system.id.0.starts_with("stock/") {
+        if system.id.0.starts_with("stock/") || system.id.0.starts_with("scan/") {
             return Err(refuse(
-                "stock/ is reserved for typed local-stock publications, not System identities"
+                "stock/ and scan/ are reserved for typed publications, not System identities"
                     .into(),
             ));
         }
@@ -228,6 +237,12 @@ pub fn validate_consoles(config: &ShipConfig) -> Result<(), ShipConfigError> {
             phoenix_model::logistics_ui::stock_publication(&system.id).0,
             phoenix_model::console::ConsoleObservationKind::Stock,
         );
+        if system.kind == super::system_registry::SENSORS_KIND {
+            publications.insert(
+                phoenix_model::sensing::scan_blackboard_key_for(&system.id).0,
+                phoenix_model::console::ConsoleObservationKind::Scan,
+            );
+        }
         if let Some(kind) = instance_kinds.get(&system.kind) {
             if publications
                 .get(&system.id.0)

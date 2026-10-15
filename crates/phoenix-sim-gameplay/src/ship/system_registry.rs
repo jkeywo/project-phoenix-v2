@@ -603,8 +603,6 @@ impl SystemKindRegistry {
             crate::dossier::DOSSIER_BLACKBOARD_KEY,
             ConsoleFamily::Comms,
         )?;
-        registry
-            .register_blackboard_key(crate::science::SCAN_BLACKBOARD_KEY, ConsoleFamily::Sensors)?;
         Ok(registry)
     }
 
@@ -990,7 +988,6 @@ pub fn fixed_publication_kinds(
         ("tactical-radar", Kind::TacticalRadar),
         ("sensor-radar", Kind::SensorRadar),
         ("dossiers", Kind::Dossiers),
-        ("scan", Kind::Scan),
         ("tractor", Kind::Tractor),
         ("umbilical", Kind::Umbilical),
         ("security", Kind::Security),
@@ -1008,6 +1005,7 @@ pub fn instance_publication_kinds(
 ) -> std::collections::BTreeMap<String, phoenix_model::console::ConsoleObservationKind> {
     use phoenix_model::console::ConsoleObservationKind as Kind;
     [
+        (HELM_RADAR_KIND, Kind::Helm),
         (PHASER_BANK_KIND, Kind::PhaserBank),
         (TORPEDO_TUBE_KIND, Kind::TorpedoTube),
         (SHIELD_ARC_KIND, Kind::ShieldArc),

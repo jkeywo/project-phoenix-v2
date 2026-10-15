@@ -18,16 +18,19 @@ sources:
 
 # Sensing and Spatial Fields
 
-`ShipScanRecord` owns active paid focused enquiries, bounded unfinished work,
+`SensingConfig.focused`, `broad` and `passive` are arrays of fitted instruments.
+`ShipScanRecord` maps actual System IDs to active paid focused enquiries, bounded unfinished work,
 retained readings and the latest-screen projection. `tick_scans` admits no free
 completion: current geometry, shared Sensors path, operational condition and
 actual local energy constrain progress. Completion samples published condition
 and emits the existing scenario scan flag. Historical readings do not track
 later live condition changes. The Console publication carries the actual owner
-for controls; a typed feed grants information only.
+for controls. Each qualified `scan/{UTF8-byte-length}:{owner}` channel follows its
+actual System’s Console; an exact typed feed grants information only. Completed
+readings retain the public contact alias captured by the enquiry.
 
-`PassiveProfile` binds an independently powered System and ordinary closed AI
-tree. `PassiveState` retains enabled intent and the last actual measured sample.
+`PassiveProfile` and `PassiveState` map actual System IDs to independent powered
+receivers, ordinary closed AI frames, enabled intent and actual measured samples.
 Physical producers use actual resource expenditure, mount coverage and signal
 paths. Public signals carry bearing, error, signature, strength and dated local
 provenance rather than the emitting actor's private identity. Existing screens
@@ -43,7 +46,9 @@ their instrument owner; current actuator routing stays private and expires with
 measured support. Co-hosting instruments does not merge their knowledge.
 
 Workshop edits the whole sensing profile through accepted source/history, with
-separate add/edit/remove rows for broad instruments. Authored NPC Tactical radars
+separate add/edit/remove rows for each role. Explicit `sensing.control` bindings
+identify the singular Combat Lock and Science Designation machinery owners,
+without pooling the independent instruments’ observations. Authored NPC Tactical radars
 now have finite explicit reach; the old absent-table unbounded acquisition is not
 an alternate equipment source.
 
@@ -58,7 +63,7 @@ Region membership, exposure and sampled pose are derived. Restore reconstructs
 these views, Region-owned modifiers and actual Comms reach before the next Input,
 preserving captured hail intent and avoiding synthetic boundary events. Field and
 recorded-observation continuations participate in the existing snapshot/digest;
-protocol 13, snapshot 51 and rules 0.23 mark the current compatibility boundary.
+the snapshot artifact and shared protocol constants declare the compatibility boundary.
 
 The broader redesign contract and incomplete work belong in PASM and the
 implementation/acceptance records, rather than this current-owner index.

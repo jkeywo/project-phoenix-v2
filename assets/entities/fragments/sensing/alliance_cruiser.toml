@@ -20,7 +20,7 @@ max_range = 100.0
 condition_step = 0.25
 report_capacities = false
 
-[sensing.focused]
+[[sensing.focused]]
 system = "sensors"
 work_secs = 2
 history_limit = 64
@@ -36,7 +36,7 @@ position_error = 2
 drift_error_per_sec = 0.5
 track_retention_secs = 60
 
-[sensing.passive]
+[[sensing.passive]]
 system = "passive-receiver"
 sample_interval_secs = 0.5
 min_signal_strength = 0.01
@@ -122,3 +122,7 @@ assessment_secs = 6
 position_error = 2
 drift_error_per_sec = 0.5
 track_retention_secs = 60
+
+[sensing.control]
+combat_lock = "tactical-radar"
+science_target = "sensors"

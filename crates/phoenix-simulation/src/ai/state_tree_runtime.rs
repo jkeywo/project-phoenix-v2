@@ -68,6 +68,16 @@ pub fn compile_ship_trees_with_energy(
                 &booleans,
                 &numbers,
             )
+        } else if system.kind == crate::ship::system_registry::SENSORS_KIND {
+            compile(
+                &definition,
+                &phoenix_sim_gameplay::science::sensing_ai::focused_bindings(),
+            )
+        } else if system.kind == crate::ship::system_registry::TACTICAL_RADAR_KIND {
+            compile(
+                &definition,
+                &phoenix_sim_gameplay::science::sensing_ai::targeting_bindings(),
+            )
         } else if system.kind == crate::ship::system_registry::PASSIVE_RECEIVER_KIND {
             compile(
                 &definition,

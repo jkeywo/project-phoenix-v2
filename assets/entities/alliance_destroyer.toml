@@ -1425,6 +1425,44 @@ field_replaceable = true
 [system.damage_component.susceptibility]
 physical = 1
 laser = 1
+
+[system.config.ai]
+root = "focused"
+
+[[system.config.ai.tree]]
+id = "focused"
+initial = "observe"
+
+[[system.config.ai.tree.state]]
+id = "observe"
+
+[[system.config.ai.tree.state.task]]
+id = "designate"
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "designate"
+[system.config.ai.tree.state.task.action.value]
+source = "fact"
+name = "can_operate"
+
+[[system.config.ai.tree.state.task]]
+id = "enquire"
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "enquire"
+[system.config.ai.tree.state.task.action.value]
+source = "fact"
+name = "request_available"
+
+[[system.config.ai.tree.state.task]]
+id = "cancel"
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "cancel"
+[system.config.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
 [[system]]
 id = "sensor-radar"
 power_group = "energy-sensor-radar"
@@ -1702,6 +1740,26 @@ field_replaceable = true
 [system.damage_component.susceptibility]
 physical = 1
 laser = 1
+
+[system.config.ai]
+root = "targeting"
+
+[[system.config.ai.tree]]
+id = "targeting"
+initial = "observe"
+
+[[system.config.ai.tree.state]]
+id = "observe"
+
+[[system.config.ai.tree.state.task]]
+id = "designate"
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "designate"
+[system.config.ai.tree.state.task.action.value]
+source = "fact"
+name = "can_operate"
+
 [[system]]
 id = "phaser-control"
 kind = "phaser_control"
@@ -4627,7 +4685,7 @@ source = "navigation"
 kind = "Navigation"
 
 [[console.feed]]
-source = "scan"
+source = "scan/7:sensors"
 kind = "Scan"
 
 [[console.feed]]
@@ -4717,6 +4775,10 @@ id = "tactical"
 name = "Tactical"
 screen = "gui/destroyer/tactical.html"
 home_station = "tactical"
+
+[[console.feed]]
+source = "helm-radar"
+kind = "Helm"
 
 [[console.feed]]
 source = "captain"
@@ -5133,3 +5195,46 @@ label = "damage.resource.machinery_parts"
 [resource_services.machinery_parts]
 kind = "capacity"
 id = "machinery_parts"
+
+# [ai] Independent paid acquisition uses each actual fitted radar and its own authored coverage/filter.
+[[sensing.broad]]
+system = "sensor-radar"
+sample_interval_secs = 0.5
+identity_secs = 1
+classification_secs = 3
+assessment_secs = 6
+position_error = 2
+drift_error_per_sec = 0.5
+track_retention_secs = 60
+
+[[sensing.broad]]
+system = "tactical-radar"
+sample_interval_secs = 0.5
+identity_secs = 1
+classification_secs = 3
+assessment_secs = 6
+position_error = 2
+drift_error_per_sec = 0.5
+track_retention_secs = 60
+
+[[sensing.broad]]
+system = "helm-radar"
+sample_interval_secs = 0.5
+identity_secs = 1
+classification_secs = 3
+assessment_secs = 6
+position_error = 2
+drift_error_per_sec = 0.5
+track_retention_secs = 60
+
+
+# Explicit timed focused suite; preserves the previous one-second accepted migration tuning.
+[[sensing.focused]]
+system = "sensors"
+work_secs = 1
+history_limit = 32
+unfinished_retention_secs = 0
+
+[sensing.control]
+combat_lock = "tactical-radar"
+science_target = "sensors"

@@ -1,3 +1,4 @@
+import { scanPublicationOwner } from './scan-source.js';
 /** Console identity is independent of its current Station and screen implementation. */
 export function consoleDefinitions(roster) {
   return (roster?.consoles || []).map(c => ({ ...c,
@@ -9,10 +10,17 @@ export function consoleHome(roster, id) {
 /** Produce a read view, never a second authoritative store. Feeds are typed. */
 export function consoleReadState(state, definition) {
   const allowed = new Set(definition.systems || []);
-  for (const feed of definition.feeds || []) {
-    if (state.blackboardKinds?.[feed.source] === feed.kind) allowed.add(feed.source);
+  for (const [source, board] of Object.entries(state.blackboards || {})) {
+    if (state.blackboardKinds?.[source] !== 'Scan') continue;
+    const owner=scanPublicationOwner(source);
+    if(owner && board.owner===owner && allowed.has(owner))allowed.add(source);
   }
-  const select = source => Object.fromEntries(Object.entries(source || {}).filter(([id]) => allowed.has(id)));
+  for (const feed of definition.feeds || []) {
+    if (state.blackboardKinds?.[feed.source] === feed.kind
+      && (feed.kind!=='Scan' || (scanPublicationOwner(feed.source) && scanPublicationOwner(feed.source)===state.blackboards?.[feed.source]?.owner))) allowed.add(feed.source);
+  }
+  const select = source => Object.fromEntries(Object.entries(source || {}).filter(([id]) => allowed.has(id)
+    && (state.blackboardKinds?.[id] !== 'Scan' || (scanPublicationOwner(id) && scanPublicationOwner(id)===state.blackboards?.[id]?.owner))));
   const view = { ...state, blackboards: select(state.blackboards), blackboardKinds: select(state.blackboardKinds),
     controlSystemIds: [...(definition.systems || [])],
     blackboardPresentation: select(state.blackboardPresentation),

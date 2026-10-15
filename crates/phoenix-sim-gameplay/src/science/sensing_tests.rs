@@ -1,5 +1,103 @@
 use super::*;
 use std::collections::BTreeMap;
+
+#[test]
+fn explicit_actuator_binding_selects_one_real_owner_without_merging_observations() {
+    let mut config =
+        crate::test_fixtures::load_entity_config("assets/entities/alliance_cruiser.toml").unwrap();
+    let profile = config.sensing.clone().unwrap();
+    validate_sensing(&profile, &config).unwrap();
+    let mut missing = profile.clone();
+    missing.control.science_target = None;
+    assert!(validate_sensing(&missing, &config)
+        .unwrap_err()
+        .contains("science_target"));
+    let mut wrong = profile.clone();
+    wrong.control.combat_lock = Some(crate::core::messages::SystemId("sensors".into()));
+    assert!(validate_sensing(&wrong, &config).is_err());
+    let ship = config.ship_config.as_mut().unwrap();
+    let mut second = ship
+        .system(&crate::core::messages::SystemId("sensors".into()))
+        .unwrap()
+        .clone();
+    second.id = crate::core::messages::SystemId("focused-two".into());
+    ship.systems.push(second);
+    let mut consumer = config
+        .energy
+        .as_ref()
+        .unwrap()
+        .consumers
+        .iter()
+        .find(|row| row.system.0 == "sensors")
+        .unwrap()
+        .clone();
+    consumer.system = crate::core::messages::SystemId("focused-two".into());
+    config.energy.as_mut().unwrap().consumers.push(consumer);
+    let room = config.interior.as_ref().unwrap().placements
+        [&crate::core::messages::SystemId("sensors".into())]
+        .clone();
+    config
+        .interior
+        .as_mut()
+        .unwrap()
+        .placements
+        .insert(crate::core::messages::SystemId("focused-two".into()), room);
+    let mut multiple = profile;
+    let mut focused = multiple.focused[0].clone();
+    focused.system = crate::core::messages::SystemId("focused-two".into());
+    multiple.focused.push(focused);
+    validate_sensing(&multiple, &config).unwrap();
+    multiple.control.science_target = Some(crate::core::messages::SystemId("focused-two".into()));
+    validate_sensing(&multiple, &config).unwrap();
+    assert_eq!(multiple.focused.len(), 2);
+}
+
+#[test]
+fn configured_producer_and_canonical_typed_scan_feed_are_required_together() {
+    let mut config =
+        crate::test_fixtures::load_entity_config("assets/entities/alliance_cruiser.toml").unwrap();
+    validate_scan_feeds(&config).unwrap();
+    config.sensing.as_mut().unwrap().focused.clear();
+    assert!(validate_scan_feeds(&config).is_err());
+}
+
+#[test]
+fn focused_and_targeting_closed_trees_keep_policy_outputs_and_private_frames() {
+    use crate::ai::state_tree::{compile, step, TreeRuntime};
+    let program = compile(
+        &crate::science::sensing_ai::focused_tree(),
+        &crate::science::sensing_ai::focused_bindings(),
+    )
+    .unwrap();
+    let mut runtime = TreeRuntime::default();
+    for (tick, requested) in [(1, false), (2, true), (3, false)] {
+        let result = step(
+            &program,
+            &BTreeMap::from([
+                ("can_operate".into(), true),
+                ("request_available".into(), requested),
+                ("acquiring".into(), false),
+                ("has_target".into(), requested),
+            ]),
+            &BTreeMap::from([
+                ("designate".into(), false),
+                ("enquire".into(), false),
+                ("cancel".into(), false),
+            ]),
+            &mut runtime,
+            tick,
+        )
+        .unwrap();
+        assert_eq!(result.intents.get("enquire"), Some(&requested));
+        assert_eq!(result.intents.get("designate"), Some(&true));
+        assert_eq!(result.intents.get("cancel"), Some(&false));
+    }
+    compile(
+        &crate::science::sensing_ai::targeting_tree(),
+        &crate::science::sensing_ai::targeting_bindings(),
+    )
+    .unwrap();
+}
 #[test]
 fn all_fitted_instruments_derive_their_actual_independent_coverage() {
     for hull in [
@@ -47,12 +145,16 @@ fn all_fitted_instruments_derive_their_actual_independent_coverage() {
 
 fn instrument_profile() -> SensingConfig {
     SensingConfig {
-        focused: Some(FocusedConfig {
+        control: SensingControlBindings {
+            combat_lock: Some(crate::core::messages::SystemId("tactical-radar".into())),
+            science_target: Some(crate::core::messages::SystemId("sensors".into())),
+        },
+        focused: vec![FocusedConfig {
             system: crate::core::messages::SystemId("sensors".into()),
             work_secs: 2.0,
             history_limit: 64,
             unfinished_retention_secs: 0.0,
-        }),
+        }],
         broad: vec![BroadConfig {
             system: crate::core::messages::SystemId("sensor-radar".into()),
             sample_interval_secs: 0.5,
@@ -63,7 +165,7 @@ fn instrument_profile() -> SensingConfig {
             drift_error_per_sec: 0.5,
             track_retention_secs: 60.0,
         }],
-        passive: None,
+        passive: vec![],
     }
 }
 #[test]
@@ -74,7 +176,8 @@ fn actual_broad_and_focused_instruments_use_distinct_owned_physical_reserves() {
     profile.passive = config
         .sensing
         .as_ref()
-        .and_then(|profile| profile.passive.clone());
+        .map(|profile| profile.passive.clone())
+        .unwrap_or_default();
     validate_sensing(&profile, &config).unwrap();
     for mode in 0..6 {
         let mut bad = config.clone();
@@ -133,10 +236,10 @@ fn optional_roles_do_not_create_free_instruments_or_merge_shared_identity() {
     let mut profile = instrument_profile();
     profile.broad.clear();
     profile.validate().unwrap();
-    profile.focused = None;
+    profile.focused.clear();
     assert!(profile.validate().is_err());
     profile = instrument_profile();
-    profile.broad.first_mut().unwrap().system = profile.focused.as_ref().unwrap().system.clone();
+    profile.broad.first_mut().unwrap().system = profile.focused.first().unwrap().system.clone();
     assert!(profile.validate().is_err());
 }
 #[test]
@@ -144,8 +247,8 @@ fn malformed_numeric_and_extension_profiles_refuse_before_any_runtime_state() {
     for mode in 0..5 {
         let mut value = instrument_profile();
         match mode {
-            0 => value.focused.as_mut().unwrap().work_secs = 0.0,
-            1 => value.focused.as_mut().unwrap().history_limit = 0,
+            0 => value.focused.first_mut().unwrap().work_secs = 0.0,
+            1 => value.focused.first_mut().unwrap().history_limit = 0,
             2 => value.broad.first_mut().unwrap().classification_secs = 0.5,
             3 => value.broad.first_mut().unwrap().position_error = f32::NAN,
             _ => value.broad.first_mut().unwrap().track_retention_secs = -1.0,
@@ -153,12 +256,8 @@ fn malformed_numeric_and_extension_profiles_refuse_before_any_runtime_state() {
         assert!(value.validate().is_err());
     }
     let mut value = serde_json::to_value(instrument_profile()).unwrap();
-    value["focused"]["extension"] = serde_json::json!("read-private-world");
+    value["focused"][0]["extension"] = serde_json::json!("read-private-world");
     assert!(serde_json::from_value::<SensingConfig>(value).is_err());
-    assert_eq!(
-        FocusedConfig::legacy(crate::core::messages::SystemId("sensors".into())).work_secs,
-        1.0
-    );
 }
 #[test]
 fn passive_mount_delegates_exact_existing_weapon_geometry_and_refuses_invalid_arcs() {
@@ -246,9 +345,10 @@ fn passive_receiver_needs_own_hardware_and_closed_program_without_target_truth()
         1
     );
     let profile = SensingConfig {
-        focused: None,
+        control: Default::default(),
+        focused: vec![],
         broad: vec![],
-        passive: Some(PassiveConfig {
+        passive: vec![PassiveConfig {
             system: id.clone(),
             mount: SensorMountConfig {
                 facing_deg: 0.0,
@@ -258,7 +358,7 @@ fn passive_receiver_needs_own_hardware_and_closed_program_without_target_truth()
             sample_interval_secs: 0.5,
             min_signal_strength: 0.01,
             bearing_error_rad: 0.1,
-        }),
+        }],
     };
     validate_sensing(&profile, &entity).unwrap();
     entity
@@ -274,9 +374,9 @@ fn passive_receiver_needs_own_hardware_and_closed_program_without_target_truth()
         .unwrap_err()
         .contains("state tree"));
     let mut bad = profile.clone();
-    bad.passive.as_mut().unwrap().bearing_error_rad = 4.0;
+    bad.passive.first_mut().unwrap().bearing_error_rad = 4.0;
     assert!(bad.validate().is_err());
     let mut bad = profile.clone();
-    bad.passive.as_mut().unwrap().min_signal_strength = f32::NAN;
+    bad.passive.first_mut().unwrap().min_signal_strength = f32::NAN;
     assert!(bad.validate().is_err());
 }

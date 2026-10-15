@@ -5724,3 +5724,8 @@ sensing.track.yes,Broad sensing tracks,Yes,Ja,Yes,machine
 sensing.track.no,Broad sensing tracks,No,Nein,No,machine
 workshop.sensing.add-broad,Independent broad instruments,Add broad instrument,Breites Instrument hinzufuegen,Add broad instrument,machine
 workshop.sensing.remove-broad,Independent broad instruments,Remove broad profile,Breites Profil entfernen,Remove broad profile,machine
+
+workshop.sensing.add-instrument,Workshop sensing editor,Add instrument,Instrument hinzufügen,Add instrument,machine
+workshop.sensing.remove-instrument,Workshop sensing editor,Remove instrument,Instrument entfernen,Remove instrument,machine
+workshop.sensing.combat_lock,Workshop sensing editor,Combat lock controller,Kampfzielsteuerung,Combat lock controller,machine
+workshop.sensing.science_target,Workshop sensing editor,Science designation controller,Wissenschaftliche Zielsteuerung,Science designation controller,machine

@@ -3,6 +3,7 @@ import { guardFittingReferences } from './workshop-fitting.js';
 import { guardRecoveryReferences } from './workshop-resource-recovery.js';
 import { guardProductionReferences } from './workshop-production.js';
 import { stockPublicationSources, guardLogisticsSystemRemoval, guardLogisticsLayout } from './workshop-stock-bindings.js';
+import { scanPublicationSource } from '../gui/scan-source.js';
 import { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
 export { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
 import { writeStateTrees, writeRepairWorkflow, rebindStateTreeChannel } from './workshop-state-trees.js';
@@ -174,12 +175,14 @@ function verify(path, source, schema, value = parse(source)) {
     }
   }
   const publications = new Map(Object.entries(schema.console_publication_kinds || {}));
+  publications.delete('scan');
   for (const system of systems) {
     const kind = schema.console_instance_publication_kinds?.[system.kind];
     if (kind && publications.has(system.id) && publications.get(system.id) !== kind) throw finding(path, source, quote(system.id), `System ${system.id} conflicts with a reserved publication key.`);
     if (kind && !publications.has(system.id)) publications.set(system.id, kind);
   }
   for (const source of stockPublicationSources(value, schema)) publications.set(source, schema.console_stock_publication_kind);
+  for (const profile of value.sensing?.focused || []) publications.set(scanPublicationSource(profile.system),'Scan');
   for (const console of consoles) for (const feed of console.feed || []) {
     if (!publications.has(feed.source)) throw finding(path, source, quote(feed.source), `Console ${console.id} names an unknown feed source.`);
     if (!(schema.console_feed_kinds || []).includes(feed.kind)) throw finding(path, source, quote(feed.kind), `Unknown Console feed kind: ${feed.kind}`);

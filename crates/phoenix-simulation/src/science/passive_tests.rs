@@ -1,6 +1,123 @@
 use super::*;
 
 #[test]
+fn two_actual_receivers_keep_independent_intent_work_and_sample_frontiers() {
+    use crate::core::messages::{AdmittedCommand, SystemId};
+    let mut config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    crate::science::test_support::clone_instrument(&mut config, "passive-receiver", "receiver-two");
+    let first = SystemId("passive-receiver".into());
+    let second = SystemId("receiver-two".into());
+    let mut app = App::new();
+    let mut time = Time::<()>::default();
+    time.advance_by(std::time::Duration::from_millis(100));
+    app.insert_resource(time)
+        .insert_resource(crate::sim_tick::SimTick(1))
+        .add_systems(Update, (tick, publish).chain());
+    let receiver = crate::entities::spawner::spawn_entity(
+        &mut app.world_mut().commands(),
+        &config,
+        Vec3::ZERO,
+        "observer".into(),
+        None,
+    );
+    crate::entities::spawner::spawn_entity(
+        &mut app.world_mut().commands(),
+        &config,
+        Vec3::new(0.0, 0.0, -4.0),
+        "secret-source".into(),
+        None,
+    );
+    app.world_mut().flush();
+    let before = app
+        .world()
+        .get::<ShipPowerSystem>(receiver)
+        .unwrap()
+        .0
+        .capture_continuation();
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(receiver)
+        .unwrap()
+        .0
+        .push(AdmittedCommand {
+            target: second.clone(),
+            payload: Control::SetPassiveEnabled { enabled: false },
+            response_token: None,
+            feedback_correlation: None,
+        });
+    app.update();
+    let state = app.world().get::<PassiveState>(receiver).unwrap();
+    assert!(!state.0[&first].signals.is_empty());
+    assert!(state.0[&second].signals.is_empty());
+    assert!(!state.0[&second].enabled);
+    let saved: PassiveState = serde_json::from_slice(&serde_json::to_vec(state).unwrap()).unwrap();
+    let profile = app.world().get::<PassiveProfile>(receiver).unwrap();
+    saved.validate(profile, "observer", 1).unwrap();
+    let mut bad = saved.clone();
+    bad.0.remove(&second);
+    assert!(bad.validate(profile, "observer", 1).is_err());
+    let after = app
+        .world()
+        .get::<ShipPowerSystem>(receiver)
+        .unwrap()
+        .0
+        .capture_continuation();
+    assert!(after.network.consumers[&first].energy < before.network.consumers[&first].energy);
+    assert_eq!(
+        after.network.consumers[&second].energy,
+        before.network.consumers[&second].energy
+    );
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(receiver)
+        .unwrap()
+        .0[0]
+        .payload = Control::SetPassiveEnabled { enabled: true };
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 2;
+    app.update();
+    let state = app.world().get::<PassiveState>(receiver).unwrap();
+    assert_eq!(state.0[&first].last_sample_tick, Some(1));
+    assert_eq!(state.0[&second].last_sample_tick, Some(2));
+    assert!(!state.0[&second].signals.is_empty());
+    assert!(state.0[&second]
+        .signals
+        .iter()
+        .all(|signal| signal.sample_id.starts_with("observer/receiver-two/2/")));
+    let paid = app
+        .world()
+        .get::<ShipPowerSystem>(receiver)
+        .unwrap()
+        .0
+        .capture_continuation();
+    app.world_mut()
+        .get_mut::<ShipSystemControlSources>(receiver)
+        .unwrap()
+        .0 = crate::ship::control_source::ControlSourceResolver::default();
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 3;
+    app.update();
+    let boards = &app
+        .world()
+        .get::<crate::server_app::ShipSystemBlackboards>(receiver)
+        .unwrap()
+        .0;
+    for owner in [&first, &second] {
+        let Some(SystemBlackboard::Passive(board)) = boards.get(owner) else {
+            panic!("actual passive publication")
+        };
+        assert!(!board.can_operate);
+    }
+    assert_eq!(
+        app.world()
+            .get::<ShipPowerSystem>(receiver)
+            .unwrap()
+            .0
+            .capture_continuation(),
+        paid
+    );
+}
+
+#[test]
 fn local_battery_work_emits_without_generation_and_samples_hide_source_identity() {
     let config = crate::entities::include_resolve::load_entity_config(
         "assets/entities/alliance_cruiser.toml",
@@ -45,7 +162,9 @@ fn local_battery_work_emits_without_generation_and_samples_hide_source_identity(
         assert!(grant.granted > 0.0);
     }
     app.update();
-    let state = app.world().get::<PassiveState>(receiver).unwrap();
+    let owner = crate::core::messages::SystemId("passive-receiver".into());
+    let all = app.world().get::<PassiveState>(receiver).unwrap();
+    let state = &all.0[&owner];
     assert_eq!(state.signals.len(), 1);
     assert_eq!(state.signals[0].signature, PassiveSignature::Propulsion);
     assert_eq!(state.signals[0].sample_id, "observer/passive-receiver/1/0");
@@ -54,7 +173,7 @@ fn local_battery_work_emits_without_generation_and_samples_hide_source_identity(
         .contains("secret-source"));
     state
         .validate(
-            &app.world().get::<PassiveProfile>(receiver).unwrap().0,
+            &app.world().get::<PassiveProfile>(receiver).unwrap().0[&owner],
             "observer",
             1,
         )
@@ -72,6 +191,8 @@ fn local_battery_work_emits_without_generation_and_samples_hide_source_identity(
         .get_mut::<PassiveProfile>(receiver)
         .unwrap()
         .0
+        .get_mut(&owner)
+        .unwrap()
         .min_signal_strength = 0.0;
     app.world_mut().spawn((
         EntityUuid("opaque-terrain".into()),
@@ -89,16 +210,10 @@ fn local_battery_work_emits_without_generation_and_samples_hide_source_identity(
     app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 100;
     app.update();
     assert_eq!(
-        app.world()
-            .get::<PassiveState>(receiver)
-            .unwrap()
-            .last_sample_tick,
+        app.world().get::<PassiveState>(receiver).unwrap().0[&owner].last_sample_tick,
         Some(100)
     );
-    assert!(app
-        .world()
-        .get::<PassiveState>(receiver)
-        .unwrap()
+    assert!(app.world().get::<PassiveState>(receiver).unwrap().0[&owner]
         .signals
         .is_empty());
 }

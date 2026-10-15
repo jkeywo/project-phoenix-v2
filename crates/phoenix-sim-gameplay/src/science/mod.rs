@@ -2,18 +2,5 @@ pub mod scan;
 pub mod sensing;
 pub mod sensing_ai;
 pub mod tracks;
+pub use phoenix_model::sensing::{scan_blackboard_key_for, scan_owner_from_blackboard_key};
 pub use scan::*;
-/// The blackboard channel key a ship's last scan is published under.
-///
-/// **Not a system id.** No `[[system]]` block declares it, no station owns it,
-/// it registers no `ControlSource` and no `ControlSystem` message may target it
-/// — the thing that can be commanded and damaged is `sensors`, and that is what
-/// the scan command targets. This is where the *result* is carried, and it is
-/// a channel for `operations`' reason: the blackboard map and the
-/// `BlackboardUpdate` wire message are typed as `SystemId`.
-///
-/// A field on `SensorsBlackboard` was the obvious alternative and was rejected:
-/// that payload is the radar's live configuration, republished as contacts
-/// move, and hanging a rarely-changing reading off it would re-broadcast the
-/// reading every time a blip did.
-pub const SCAN_BLACKBOARD_KEY: &str = "scan";

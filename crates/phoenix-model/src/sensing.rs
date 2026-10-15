@@ -2,13 +2,39 @@
 use crate::identity::SystemId;
 use serde::{Deserialize, Serialize};
 
+/// A typed publication channel owned by one real focused instrument, never equipment.
+pub fn scan_blackboard_key_for(owner: &SystemId) -> SystemId {
+    SystemId(format!("scan/{}:{}", owner.0.len(), owner.0))
+}
+pub fn scan_owner_from_blackboard_key(key: &SystemId) -> Option<SystemId> {
+    let (size, owner) = key.0.strip_prefix("scan/")?.split_once(':')?;
+    let size = size.parse::<usize>().ok()?;
+    if owner.len() != size || size == 0 || size > 128 || owner.chars().any(char::is_control) {
+        return None;
+    }
+    let owner = SystemId(owner.into());
+    (scan_blackboard_key_for(&owner) == *key).then_some(owner)
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SensingConfig {
-    pub focused: Option<FocusedConfig>,
+    #[serde(default)]
+    pub control: SensingControlBindings,
+    #[serde(default)]
+    pub focused: Vec<FocusedConfig>,
     #[serde(default)]
     pub broad: Vec<BroadConfig>,
-    pub passive: Option<PassiveConfig>,
+    #[serde(default)]
+    pub passive: Vec<PassiveConfig>,
+}
+/// Singular machinery actuators may consume any permitted instrument's picture.
+/// This binding grants command ownership, never additional observations.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SensingControlBindings {
+    pub combat_lock: Option<SystemId>,
+    pub science_target: Option<SystemId>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -17,18 +43,6 @@ pub struct FocusedConfig {
     pub work_secs: f32,
     pub history_limit: u16,
     pub unfinished_retention_secs: f32,
-}
-impl FocusedConfig {
-    /// Parser migration tuning for an existing ScanConfig. Runtime still pays
-    /// actual timed work; this is not a competing instant scan implementation.
-    pub fn legacy(system: SystemId) -> Self {
-        Self {
-            system,
-            work_secs: 1.0,
-            history_limit: 32,
-            unfinished_retention_secs: 0.0,
-        }
-    }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -84,6 +98,15 @@ impl SensorMountConfig {
 }
 impl SensingConfig {
     pub fn validate(&self) -> Result<(), String> {
+        if self
+            .control
+            .combat_lock
+            .iter()
+            .chain(self.control.science_target.iter())
+            .any(|id| !system_valid(id))
+        {
+            return Err("sensing control bindings require actual System identities".into());
+        }
         let mut systems = std::collections::BTreeSet::new();
         for system in self
             .focused
@@ -99,7 +122,7 @@ impl SensingConfig {
         if systems.is_empty() {
             return Err("sensing profile must declare at least one independent instrument".into());
         }
-        if let Some(config) = &self.focused {
+        for config in &self.focused {
             if !positive(config.work_secs)
                 || config.history_limit == 0
                 || !nonnegative(config.unfinished_retention_secs)
@@ -125,7 +148,7 @@ impl SensingConfig {
                 return Err("broad sensing requires finite cadence, nonnegative error/retention and ordered assessment times".into());
             }
         }
-        if let Some(config) = &self.passive {
+        for config in &self.passive {
             config.mount.validate()?;
             if !positive(config.sample_interval_secs)
                 || !nonnegative(config.min_signal_strength)
@@ -170,3 +193,7 @@ pub struct PassiveBlackboard {
     pub last_sample_tick: Option<u64>,
     pub signals: Vec<PassiveSignal>,
 }
+
+#[cfg(test)]
+#[path = "sensing_tests.rs"]
+mod tests;

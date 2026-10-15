@@ -7,10 +7,17 @@ import { createStoreZip } from '../../editor/mod-pack-export.js';
 import { mountWorkshopSensing } from '../../gui/workshop-sensing-panel.js';
 const path = 'assets/entities/test.toml', control = id => document.getElementById('workshop-sensing-' + id);
 const settle = async () => { for (let i = 0; i < 30; i++) await new Promise(resolve => setTimeout(resolve, 1)); };
-function fixture(withoutPassive = false) {
+function fixture(withoutPassive = false, dual = false) {
   document.body.innerHTML = '<main></main>'; const { value, schema } = damageFixture(); schema.console_instance_publication_kinds.passive_receiver = 'Passive';
+  if (dual) for(const role of ['focused','passive']) {
+    const original=value.sensing[role][0], id=original.system+'-two';
+    value.system.push({...structuredClone(value.system.find(row=>row.id===original.system)),id});
+    value.energy.consumer.push({...structuredClone(value.energy.consumer.find(row=>row.system===original.system)),system:id});
+    value.interior.placements[id]=value.interior.placements[original.system];
+    value.sensing[role].push({...structuredClone(original),system:id});
+  }
   if (withoutPassive) {
-    const id = value.sensing.passive.system; delete value.sensing.passive; value.system = value.system.filter(row => row.id !== id); delete value.interior.placements[id];
+    const id = value.sensing.passive[0].system; delete value.sensing.passive; value.system = value.system.filter(row => row.id !== id); delete value.interior.placements[id];
     value.energy.consumer = value.energy.consumer.filter(row => row.system !== id);
     for (const console of value.console) console.feed = console.feed?.filter(row => row.source !== id);
     for (const station of value.station) for (const rating of station.rating || []) for (const key of ['automated_systems', 'detailed_systems']) if (rating[key]) rating[key] = rating[key].filter(other => other !== id);
@@ -22,6 +29,18 @@ function fixture(withoutPassive = false) {
   return { draft, runtime, panel, source };
 }
 describe('Workshop structured sensing controls', () => {
+  it('edits and removes a focused instrument without overwriting another receiver or its bindings', async () => {
+    const {draft,panel}=fixture(false,true);await settle();
+    const before=parse(draft.read(path)).sensing;
+    control('focused-1-work_secs').value='7';control('passive-1-range').value='220';control('save').click();await settle();
+    let value=parse(draft.read(path));expect(value.sensing.focused[0]).toEqual(before.focused[0]);
+    expect(value.sensing.focused[1].work_secs).toBe(7);expect(value.sensing.passive[1].mount.range).toBe(220);
+    expect(value.sensing.control).toEqual(before.control);
+    control('focused-remove').click();control('save').click();await settle();value=parse(draft.read(path));
+    expect(value.sensing.focused.map(row=>row.system)).toEqual(['sensors-two']);
+    expect(value.console.flatMap(row=>row.feed || []).some(feed=>feed.kind==='Scan'&&feed.source==='scan/7:sensors')).toBe(false);
+    expect(value.sensing.passive).toHaveLength(2);panel.dispose();
+  });
   it('edits and removes only the selected broad instrument while keeping the other profiles', async () => {
     const { draft, panel } = fixture(); await settle();
     const original = parse(draft.read(path)).sensing;
@@ -41,7 +60,7 @@ describe('Workshop structured sensing controls', () => {
     const { draft, panel, source } = fixture(); await settle();
     for (const input of panel.node.querySelectorAll('input,select')) expect(panel.node.querySelector(`label[for="${input.id}"]`)).not.toBeNull();
     control('focused-work_secs').value = '5'; control('passive-arc_deg').value = '90'; control('save').click(); await settle();
-    expect(parse(draft.read(path)).sensing.focused.work_secs).toBe(5); expect(parse(draft.read(path)).sensing.passive.mount.arc_deg).toBe(90);
+    expect(parse(draft.read(path)).sensing.focused[0].work_secs).toBe(5); expect(parse(draft.read(path)).sensing.passive[0].mount.arc_deg).toBe(90);
     draft.undo(); expect(draft.read(path)).toBe(source); panel.dispose();
   });
   it('offers only actual role hardware and preserves source after authoritative refusal', async () => {
@@ -64,7 +83,7 @@ describe('Workshop structured sensing controls', () => {
     control('console').value = 'science'; control('group').value = 'energy-passive-receiver'; control('room').value = 'bridge';
     control('passive-range').value = '240'; control('passive-sample_interval_secs').value = '2'; control('passive-arc_deg').value = '120';
     control('fit').click(); await settle();
-    expect(runtime.validate).toHaveBeenCalledOnce(); expect(parse(draft.read(path)).sensing.passive).toMatchObject({ system: 'passive-receiver', sample_interval_secs: 2, mount: { range: 240, arc_deg: 120 } });
+    expect(runtime.validate).toHaveBeenCalledOnce(); expect(parse(draft.read(path)).sensing.passive[0]).toMatchObject({ system: 'passive-receiver', sample_interval_secs: 2, mount: { range: 240, arc_deg: 120 } });
     expect(parse(draft.read(path)).energy.consumer.find(row => row.system === 'passive-receiver')).toBeTruthy(); panel.dispose();
   });
 });

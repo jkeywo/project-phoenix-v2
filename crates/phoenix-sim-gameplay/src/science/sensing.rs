@@ -19,6 +19,68 @@ pub fn validate_sensing(profile: &SensingConfig, entity: &EntityConfig) -> Resul
         .ship_config
         .as_ref()
         .ok_or("sensing requires actual System composition")?;
+    for (binding, kind, label) in [
+        (
+            &profile.control.combat_lock,
+            TACTICAL_RADAR_KIND,
+            "combat_lock",
+        ),
+        (
+            &profile.control.science_target,
+            SENSORS_KIND,
+            "science_target",
+        ),
+    ] {
+        if let Some(owner) = binding {
+            if ship.system(owner).is_none_or(|system| {
+                system.kind != kind
+                    || system
+                        .console
+                        .as_ref()
+                        .is_none_or(|console| !ship.consoles.iter().any(|row| &row.id == console))
+            }) {
+                return Err(format!(
+                    "sensing.control.{label} must bind an actual owned {kind} System"
+                ));
+            }
+        } else if !profile.broad.is_empty() && ship.systems.iter().any(|system| system.kind == kind)
+        {
+            return Err(format!(
+                "fitted broad sensing requires explicit sensing.control.{label} actuator ownership"
+            ));
+        }
+    }
+    for owner in profile
+        .focused
+        .iter()
+        .map(|row| &row.system)
+        .chain(profile.control.science_target.iter())
+        .chain(profile.control.combat_lock.iter())
+    {
+        let system = ship
+            .system(owner)
+            .ok_or("sensing controller owner missing")?;
+        let authored = system
+            .config
+            .as_ref()
+            .and_then(|config| config.get("ai"))
+            .ok_or_else(|| {
+                format!(
+                    "sensing controller {} requires an explicit config.ai tree",
+                    owner.0
+                )
+            })?;
+        let tree: crate::ai::state_tree::AiTreeConfig = authored
+            .clone()
+            .try_into()
+            .map_err(|error| format!("invalid sensing controller: {error}"))?;
+        let bindings = if system.kind == TACTICAL_RADAR_KIND {
+            crate::science::sensing_ai::targeting_bindings()
+        } else {
+            crate::science::sensing_ai::focused_bindings()
+        };
+        crate::ai::state_tree::compile(&tree, &bindings).map_err(|error| error.to_string())?;
+    }
     let energy = entity
         .energy
         .as_ref()
@@ -31,8 +93,8 @@ pub fn validate_sensing(profile: &SensingConfig, entity: &EntityConfig) -> Resul
         system.kind == PASSIVE_RECEIVER_KIND
             && profile
                 .passive
-                .as_ref()
-                .is_none_or(|config| config.system != system.id)
+                .iter()
+                .all(|config| config.system != system.id)
     }) {
         return Err("every fitted passive receiver requires its actual sensing profile".into());
     }
@@ -94,8 +156,38 @@ pub fn validate_sensing(profile: &SensingConfig, entity: &EntityConfig) -> Resul
                 .map_err(|error| error.to_string())?;
         }
     }
-    if profile.focused.is_some() && entity.scan.is_none() {
+    if !profile.focused.is_empty() && entity.scan.is_none() {
         return Err("focused sensing requires actual ScanConfig derivation bands".into());
+    }
+    Ok(())
+}
+/// ShipConfig validates the dynamic publication grammar; the complete entity
+/// requires an actual configured producer rather than a command-only Sensors node.
+pub fn validate_scan_feeds(entity: &EntityConfig) -> Result<(), String> {
+    let Some(ship) = &entity.ship_config else {
+        return Ok(());
+    };
+    for feed in ship
+        .consoles
+        .iter()
+        .flat_map(|console| &console.feeds)
+        .filter(|feed| feed.kind == phoenix_model::console::ConsoleObservationKind::Scan)
+    {
+        let owner = scan_owner_from_blackboard_key(&feed.source)
+            .ok_or("Scan feed requires a qualified actual instrument publication")?;
+        if entity.scan.is_none()
+            || !entity.sensing.as_ref().is_some_and(|profile| {
+                profile
+                    .focused
+                    .iter()
+                    .any(|instrument| instrument.system == owner)
+            })
+        {
+            return Err(format!(
+                "Scan feed {} has no actual configured focused instrument",
+                feed.source.0
+            ));
+        }
     }
     Ok(())
 }

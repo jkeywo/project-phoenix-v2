@@ -23,14 +23,18 @@ export function requiredStockFeeds(value, schema) {
 }
 /** Remove only publications that cease to exist, in the profile's transaction. */
 export function pruneStockFeedsSource(source, value, obsolete, materialise) {
+  return prunePublicationFeedsSource(source,value,obsolete,materialise,"Stock");
+}
+/** Existing typed-feed source cleanup, shared by actual Stock and Scan owners. */
+export function prunePublicationFeedsSource(source, value, obsolete, materialise, kind) {
   if (!obsolete.size) return source;
   const nl = source.includes('\r\n') ? '\r\n' : '\n';
   for (const console of value.console || []) {
-    const removed = feed => feed.kind === 'Stock' && obsolete.has(feed.source);
+    const removed = feed => feed.kind === kind && obsolete.has(feed.source);
     if (!console.feed?.some(removed)) continue;
     const local = parse(source).console?.find(row => row.id === console.id);
     if (!local) {
-      if (!materialise) throw new Error('Explicitly materialise inherited Consoles before removing their obsolete stock feeds.');
+      if (!materialise) throw new Error('Explicitly materialise inherited Consoles before removing their obsolete typed feeds.');
       source += nl + stringify({ console: [{ ...console, feed: console.feed.filter(feed => !removed(feed)) }] }).trim().replace(/\n/g, nl) + nl;
       continue;
     }
@@ -38,7 +42,7 @@ export function pruneStockFeedsSource(source, value, obsolete, materialise) {
       .map(match => ({ name: match[2].replace(/\]$/, '').trim(), start: match.index }));
     const start = headers.findIndex((header, i) => header.name === 'console'
       && parse(source.slice(header.start, headers.slice(i + 1).find(next => !next.name.startsWith('console.'))?.start ?? source.length)).console?.[0]?.id === console.id);
-    if (start < 0) throw new Error('Expand inline Consoles and feeds into TOML tables before editing stock bindings.');
+    if (start < 0) throw new Error('Expand inline Consoles and feeds into TOML tables before editing typed publication bindings.');
     const end = headers.findIndex((header, i) => i > start && !header.name.startsWith('console.'));
     const feeds = headers.slice(start + 1, end < 0 ? undefined : end).filter(header => header.name === 'console.feed');
     if (feeds.length !== (local.feed || []).length) throw new Error('Expand inline Console feeds into TOML tables before editing stock bindings.');

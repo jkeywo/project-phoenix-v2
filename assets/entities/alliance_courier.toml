@@ -684,6 +684,44 @@ field_replaceable = true
 [system.damage_component.susceptibility]
 physical = 1
 laser = 1
+
+[system.config.ai]
+root = "focused"
+
+[[system.config.ai.tree]]
+id = "focused"
+initial = "observe"
+
+[[system.config.ai.tree.state]]
+id = "observe"
+
+[[system.config.ai.tree.state.task]]
+id = "designate"
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "designate"
+[system.config.ai.tree.state.task.action.value]
+source = "fact"
+name = "can_operate"
+
+[[system.config.ai.tree.state.task]]
+id = "enquire"
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "enquire"
+[system.config.ai.tree.state.task.action.value]
+source = "fact"
+name = "request_available"
+
+[[system.config.ai.tree.state.task]]
+id = "cancel"
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "cancel"
+[system.config.ai.tree.state.task.action.value]
+source = "literal"
+value = false
+
 [[system]]
 id = "sensor-radar"
 power_group = "energy-sensor-radar"
@@ -1047,6 +1085,26 @@ field_replaceable = true
 [system.damage_component.susceptibility]
 physical = 1
 laser = 1
+
+[system.config.ai]
+root = "targeting"
+
+[[system.config.ai.tree]]
+id = "targeting"
+initial = "observe"
+
+[[system.config.ai.tree.state]]
+id = "observe"
+
+[[system.config.ai.tree.state.task]]
+id = "designate"
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "designate"
+[system.config.ai.tree.state.task.action.value]
+source = "fact"
+name = "can_operate"
+
 [[system]]
 id = "blaster-fore"
 kind = "blaster_bank"
@@ -2948,9 +3006,6 @@ kind = "HelmLateralThrust"
 source = "navigation"
 kind = "Navigation"
 
-[[console.feed]]
-source = "scan"
-kind = "Scan"
 
 [[console.feed]]
 source = "sensor-radar"

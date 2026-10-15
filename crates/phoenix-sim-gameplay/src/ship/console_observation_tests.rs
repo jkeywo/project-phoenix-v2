@@ -19,7 +19,7 @@ id="science"
 home_station="seat"
 screen="science.html"
 [[console.feed]]
-source="scan"
+source="scan/7:scanner"
 kind="Scan"
 [[console]]
 id="other"
@@ -54,8 +54,9 @@ fn boards() -> HashMap<SystemId, SystemBlackboard> {
         },
     );
     HashMap::from([(
-        SystemId("scan".into()),
+        SystemId("scan/7:scanner".into()),
         SystemBlackboard::Scan(ScanBlackboard {
+            owner: Some(SystemId("scanner".into())),
             reading: Some(ScanReadingSnapshot {
                 observation: Some(metadata),
                 ..Default::default()
@@ -68,7 +69,7 @@ fn boards() -> HashMap<SystemId, SystemBlackboard> {
 fn cohosted_consoles_share_neither_records_nor_metadata() {
     let config = fixture();
     let boards = boards();
-    let source = SystemId("scan".into());
+    let source = SystemId("scan/7:scanner".into());
     let permitted = config
         .observations_for_system(&SystemId("scanner".into()), &boards)
         .recorded_observations(&source);
@@ -88,7 +89,7 @@ fn cohosted_consoles_share_neither_records_nor_metadata() {
 fn explicit_typed_feed_can_be_revoked_without_granting_control() {
     let mut config = fixture();
     let boards = boards();
-    let source = SystemId("scan".into());
+    let source = SystemId("scan/7:scanner".into());
     let reader = SystemId("other-scanner".into());
     config.consoles[1].feeds.push(ConsoleFeed {
         source: source.clone(),
@@ -123,7 +124,7 @@ fn explicit_typed_feed_can_be_revoked_without_granting_control() {
 #[test]
 fn missing_metadata_or_live_board_never_fabricates_sample_time() {
     let config = fixture();
-    let source = SystemId("scan".into());
+    let source = SystemId("scan/7:scanner".into());
     let reader = SystemId("scanner".into());
     let mut boards = boards();
     boards.insert(

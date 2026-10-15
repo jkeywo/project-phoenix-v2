@@ -4,10 +4,17 @@ use crate::science::server::{publish_scan_blackboard, tick_scans};
 use bevy::prelude::*;
 
 fn rig() -> (App, Entity) {
-    let config = crate::entities::include_resolve::load_entity_config(
+    rig_with(false)
+}
+fn rig_with(dual: bool) -> (App, Entity) {
+    let mut config = crate::entities::include_resolve::load_entity_config(
         "assets/entities/alliance_cruiser.toml",
     )
     .unwrap();
+    config.sensing.as_mut().unwrap().broad.clear();
+    if dual {
+        crate::science::test_support::clone_instrument(&mut config, "sensors", "focused-two");
+    }
     let mut app = App::new();
     app.insert_resource(Time::<()>::default())
         .insert_resource(crate::sim_tick::SimTick(0))
@@ -44,12 +51,15 @@ fn step(app: &mut App) {
     app.update();
 }
 fn request(app: &mut App, entity: Entity) {
+    request_for(app, entity, "sensors");
+}
+fn request_for(app: &mut App, entity: Entity, owner: &str) {
     app.world_mut()
         .get_mut::<AdmittedCommands>(entity)
         .unwrap()
         .0
         .push(AdmittedCommand {
-            target: SystemId("sensors".into()),
+            target: SystemId(owner.into()),
             payload: SystemControlPayload::ScanTarget {
                 uuid: "00000000-0000-0000-0000-000000000142".into(),
             },
@@ -69,7 +79,8 @@ fn enquiry_requires_timed_paid_work_and_history_does_not_follow_live_condition()
         .capture_continuation();
     request(&mut app, observer);
     step(&mut app);
-    let first = app.world().get::<ShipScanRecord>(observer).unwrap();
+    let first =
+        &app.world().get::<ShipScanRecord>(observer).unwrap().0[&SystemId("sensors".into())];
     assert!(first.last.is_none());
     assert!(first
         .focused
@@ -83,10 +94,8 @@ fn enquiry_requires_timed_paid_work_and_history_does_not_follow_live_condition()
     for _ in 0..40 {
         step(&mut app);
     }
-    let before = app
-        .world()
-        .get::<ShipScanRecord>(observer)
-        .unwrap()
+    let before = app.world().get::<ShipScanRecord>(observer).unwrap().0
+        [&SystemId("sensors".into())]
         .save_state();
     assert!(before.focused.is_none());
     assert_eq!(before.history.len(), 1);
@@ -106,9 +115,7 @@ fn enquiry_requires_timed_paid_work_and_history_does_not_follow_live_condition()
         step(&mut app);
     }
     assert_eq!(
-        app.world()
-            .get::<ShipScanRecord>(observer)
-            .unwrap()
+        app.world().get::<ShipScanRecord>(observer).unwrap().0[&SystemId("sensors".into())]
             .save_state(),
         before
     );
@@ -133,8 +140,9 @@ fn active_work_round_trips_and_invalid_progress_or_history_frontiers_refuse() {
     let (mut app, observer) = rig();
     request(&mut app, observer);
     step(&mut app);
-    let record = app.world().get::<ShipScanRecord>(observer).unwrap();
-    let saved: ScanSaveState =
+    let record =
+        &app.world().get::<ShipScanRecord>(observer).unwrap().0[&SystemId("sensors".into())];
+    let saved: crate::science::server::FocusedSaveState =
         serde_json::from_slice(&serde_json::to_vec(&record.save_state()).unwrap()).unwrap();
     record.validate_state(&saved, 1).unwrap();
     for mode in 0..4 {
@@ -179,7 +187,8 @@ fn opaque_terrain_between_clear_endpoints_prevents_paid_enquiry() {
     for _ in 0..40 {
         step(&mut app);
     }
-    let record = app.world().get::<ShipScanRecord>(observer).unwrap();
+    let record =
+        &app.world().get::<ShipScanRecord>(observer).unwrap().0[&SystemId("sensors".into())];
     assert!(record.history.is_empty());
     assert_eq!(record.focused.as_ref().unwrap().progress, 0.0);
     assert_eq!(
@@ -191,5 +200,66 @@ fn opaque_terrain_between_clear_endpoints_prevents_paid_enquiry() {
             .network
             .consumers,
         initial.network.consumers
+    );
+}
+
+#[test]
+fn independently_fitted_focused_owners_pay_and_continue_only_their_own_enquiries() {
+    let (mut app, observer) = rig_with(true);
+    let owner = SystemId("focused-two".into());
+    let first = SystemId("sensors".into());
+    let before = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(observer)
+        .unwrap()
+        .0
+        .capture_continuation();
+    request_for(&mut app, observer, &owner.0);
+    step(&mut app);
+    let records = app.world().get::<ShipScanRecord>(observer).unwrap();
+    assert!(records.0[&owner]
+        .focused
+        .as_ref()
+        .is_some_and(|work| work.progress > 0.0));
+    assert!(records.0[&first].focused.is_none());
+    let saved = records.save_state();
+    records.validate_state(&saved, 1).unwrap();
+    let json: ScanSaveState = serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    assert_eq!(json, saved);
+    let mut missing = saved.clone();
+    missing.instruments.remove(&owner);
+    assert!(records.validate_state(&missing, 1).is_err());
+    let after = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(observer)
+        .unwrap()
+        .0
+        .capture_continuation();
+    assert!(after.network.consumers[&owner].energy < before.network.consumers[&owner].energy);
+    assert_eq!(
+        after.network.consumers[&first].energy,
+        before.network.consumers[&first].energy
+    );
+    let boards = &app
+        .world()
+        .get::<crate::server_app::ShipSystemBlackboards>(observer)
+        .unwrap()
+        .0;
+    assert!(boards.contains_key(&crate::science::scan_blackboard_key_for(&owner)));
+    assert!(boards.contains_key(&crate::science::scan_blackboard_key_for(&first)));
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(observer)
+        .unwrap()
+        .0
+        .clear();
+    for _ in 0..40 {
+        step(&mut app);
+    }
+    let records = app.world().get::<ShipScanRecord>(observer).unwrap();
+    assert_eq!(records.0[&owner].history.len(), 1);
+    assert!(records.0[&first].history.is_empty());
+    assert_eq!(
+        records.0[&owner].history[0].contact_id.as_deref(),
+        Some("00000000-0000-0000-0000-000000000142")
     );
 }

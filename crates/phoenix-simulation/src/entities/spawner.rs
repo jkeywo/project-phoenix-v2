@@ -754,27 +754,7 @@ struct ScanSpawn;
 
 impl SpawnSection for ScanSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
-        // The science scan (issue #1032) — attach the record when `[scan]` is
-        // present, on the same argument again. The record carries the authored
-        // fidelity ladder AND the last reading: a hull that can scan starts able to
-        // and having read nothing.
-        if let Some(scan) = &config.scan {
-            cmds.insert(crate::science::ShipScanRecord {
-                config: scan.clone(),
-                focused_config: Some(
-                    config
-                        .sensing
-                        .as_ref()
-                        .and_then(|profile| profile.focused.clone())
-                        .unwrap_or_else(|| {
-                            phoenix_model::sensing::FocusedConfig::legacy(
-                                crate::ship::system_registry::sensors_system_id(),
-                            )
-                        }),
-                ),
-                ..Default::default()
-            });
-        }
+        crate::science::server::install(config, cmds);
     }
 }
 

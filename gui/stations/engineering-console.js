@@ -89,7 +89,9 @@ export function makeEngineeringRender(variant) {
 
     // ── Power ───────────────────────────────────────────────────────────
     const p = familyView(s, 'power');
-    const productionView = familyView(s, 'production'), logisticsView = familyView(s, 'logistics');
+    const productionView = familyView(s, 'production'), logisticsView = familyView(s, 'logistics'), recoveryView = familyView(s, 'recovery');
+    const recovery = doc.getElementById('recovery-panel');
+    if (recovery) recovery.state = { ...recoveryView, system_id: familySystemId(s, 'recovery') };
     const production = doc.getElementById('production-panel');
     if (production) production.state = { ...productionView, system_id: familySystemId(s, 'production') };
     const logistics = doc.getElementById('logistics-panel');
@@ -153,7 +155,8 @@ export function makeEngineeringRender(variant) {
       const el = doc.getElementById(ids.autoBadge);
       const auto = (sh ? !!sh.shields_auto : true) && !!p.power_auto && !!r.repair_auto
         && (!familySystemId(s, 'logistics') || !!logisticsView.logistics_auto)
-        && (!familySystemId(s, 'production') || !!productionView.production_auto);
+        && (!familySystemId(s, 'production') || !!productionView.production_auto)
+        && (!familySystemId(s, 'recovery') || !!recoveryView.recovery_auto);
       if (el) setAutoState(null, el, auto);
     }
 

@@ -1,3 +1,4 @@
+import { guardRecoveryReferences } from './workshop-resource-recovery.js';
 import { guardProductionReferences } from './workshop-production.js';
 import { stockPublicationSources, guardLogisticsSystemRemoval, guardLogisticsLayout } from './workshop-stock-bindings.js';
 import { authoredAndGeneratedSystems } from './workshop-generated-systems.js';
@@ -439,6 +440,7 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
     guardLogisticsSystemRemoval(inspection.composition.resolved.value, operation.id);
   if (effectiveValue.interior) guardLogisticsLayout(effectiveValue, effectiveValue.interior);
   guardProductionReferences(inspection.composition.resolved.value, effectiveValue);
+  guardRecoveryReferences(inspection.composition.resolved.value, effectiveValue);
   if (operation.type === 'system-composition-set') {
     const resolved = effectiveValue.system.find(row => row.id === operation.id);
     for (const [key, identity, desired] of [['component', 'id', operation.components], ['channel', 'name', operation.channels]]) {

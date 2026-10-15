@@ -5332,3 +5332,60 @@ production.blocked.output_capacity,Production,Waiting for receiving capacity.,Wa
 production.blocked.work,Production,Waiting for powered fabrication work.,Warten auf mit Energie versorgte Fertigung.,Waiting for powered fabrication work.,machine
 workshop.production.earlier,Workshop production,Move output earlier,Ausgang nach vorn verschieben,Move output earlier,machine
 workshop.production.later,Workshop production,Move output later,Ausgang nach hinten verschieben,Move output later,machine
+recovery.title,Resource recovery,Resource recovery,Ressourcenbergung,Resource recovery,machine
+recovery.action.enabled,Resource recovery,Maintain recovery,Bergung fortsetzen,Maintain recovery,machine
+recovery.action.selection,Resource recovery,Select recovery operation,Bergungsvorgang wählen,Select recovery operation,machine
+recovery.set-selection,Resource recovery,Apply selection,Auswahl übernehmen,Apply selection,machine
+recovery.clear-selection,Resource recovery,Clear selection,Auswahl löschen,Clear selection,machine
+recovery.science-hint,Resource recovery,"Ask Science to select a known source. Its public manifest lists resource types, not quantities.","Wissenschaft soll eine bekannte Quelle auswählen. Das öffentliche Manifest nennt Ressourcenarten, keine Mengen.","Ask Science to select a known source. Its public manifest lists resource types, not quantities.",machine
+recovery.target,Resource recovery,Known source,Bekannte Quelle,Known source,machine
+recovery.resource,Resource recovery,Resource,Ressource,Resource,machine
+recovery.destination,Resource recovery,Receiving main store,Empfangendes Hauptlager,Receiving main store,machine
+recovery.none,Resource recovery,No source selected,Keine Quelle ausgewählt,No source selected,machine
+recovery.contact,Resource recovery,{name} · distance {distance},{name} · Entfernung {distance},{name} · distance {distance},machine
+recovery.unavailable-target,Resource recovery,Selected source unavailable,Ausgewählte Quelle nicht verfügbar,Selected source unavailable,machine
+recovery.enable,Resource recovery,Maintain recovery,Bergung fortsetzen,Maintain recovery,machine
+recovery.pause,Resource recovery,Pause recovery,Bergung pausieren,Pause recovery,machine
+recovery.receiving,Resource recovery,"Receiving stock {level}, incoming {incoming}, held {held}; goal {target}, shared space {headroom}.","Empfangsbestand {level}, eingehend {incoming}, gebunden {held}; Ziel {target}, gemeinsamer Platz {headroom}.","Receiving stock {level}, incoming {incoming}, held {held}; goal {target}, shared space {headroom}.",machine
+recovery.progress,Resource recovery,Last transfer: {moved}; next unit: {fraction}%.,Letzte Übertragung: {moved}; nächste Einheit: {fraction}%.,Last transfer: {moved}; next unit: {fraction}%.,machine
+recovery.resource.ore,Resource recovery,Ore,Erz,Ore,machine
+recovery.resource.scrap,Resource recovery,Scrap,Schrott,Scrap,machine
+energy.group.resource-recovery.label,Resource recovery,Resource recovery,Ressourcenbergung,Resource recovery,machine
+entity.recovery_cargo_pod.name,Resource recovery,Finite cargo pod,Endliche Frachtkapsel,Finite cargo pod,machine
+entity.recovery_ore_deposit.name,Resource recovery,Finite ore deposit,Endliches Erzvorkommen,Finite ore deposit,machine
+recovery.blocked.disabled,Resource recovery,Recovery paused,Bergung pausiert,Recovery paused,machine
+recovery.blocked.no_target,Resource recovery,Select a source shared by Science.,Eine von Wissenschaft geteilte Quelle auswählen.,Select a source shared by Science.,machine
+recovery.blocked.unknown_target,Resource recovery,Source is no longer in the permitted contact view.,Die Quelle ist nicht mehr in der zulässigen Kontaktansicht.,Source is no longer in the permitted contact view.,machine
+recovery.blocked.unsupported_resource,Resource recovery,Choose a supported resource and receiving store.,Eine unterstützte Ressource und ein Empfangslager auswählen.,Choose a supported resource and receiving store.,machine
+recovery.blocked.source_unavailable,Resource recovery,Source is unavailable for recovery.,Die Quelle steht nicht zur Bergung bereit.,Source is unavailable for recovery.,machine
+recovery.blocked.out_of_range,Resource recovery,Source is outside recovery range.,Die Quelle liegt außerhalb der Bergungsreichweite.,Source is outside recovery range.,machine
+recovery.blocked.no_stock,Resource recovery,No recoverable stock was transferred.,Kein bergbarer Bestand wurde übertragen.,No recoverable stock was transferred.,machine
+recovery.blocked.no_room,Resource recovery,Receiving storage has no room.,Das Empfangslager hat keinen Platz.,Receiving storage has no room.,machine
+recovery.blocked.goal_met,Resource recovery,Receiving stock goal reached.,Bestandsziel des Empfangslagers erreicht.,Receiving stock goal reached.,machine
+recovery.blocked.no_power,Resource recovery,Recovery machinery cannot perform work.,Die Bergungsanlage kann nicht arbeiten.,Recovery machinery cannot perform work.,machine
+workshop.recovery.title,Resource recovery,Recovery,Bergung,Recovery,machine
+workshop.recovery.template,Resource recovery,Entity definition,Entitätsdefinition,Entity definition,machine
+workshop.recovery.materialise,Resource recovery,Materialise inherited definitions,Geerbte Definitionen übernehmen,Materialise inherited definitions,machine
+workshop.recovery.tool,Resource recovery,Fitted recovery tool,Eingebaute Bergungsanlage,Fitted recovery tool,machine
+workshop.recovery.tool-hint,Resource recovery,"Fit ordinary machinery with a Console, local reserve and physical room. Science shares its selected contact.","Anlage mit Konsole, lokaler Reserve und Raum einbauen. Wissenschaft teilt den ausgewählten Kontakt.","Fit ordinary machinery with a Console, local reserve and physical room. Science shares its selected contact.",machine
+workshop.recovery.system,Resource recovery,System ID,System-ID,System ID,machine
+workshop.recovery.console,Resource recovery,Controlling Console,Steuernde Konsole,Controlling Console,machine
+workshop.recovery.group,Resource recovery,Power group,Energiegruppe,Power group,machine
+workshop.recovery.room,Resource recovery,Compartment,Abteil,Compartment,machine
+workshop.recovery.range,Resource recovery,Recovery range,Bergungsreichweite,Recovery range,machine
+workshop.recovery.units-per-sec,Resource recovery,Units per second,Einheiten pro Sekunde,Units per second,machine
+workshop.recovery.resources,Resource recovery,Supported resource IDs (comma separated),Unterstützte Ressourcen-IDs (kommagetrennt),Supported resource IDs (comma separated),machine
+workshop.recovery.create,Resource recovery,Fit recovery machinery,Bergungsanlage einbauen,Fit recovery machinery,machine
+workshop.recovery.save-tool,Resource recovery,Save tool settings,Anlageneinstellungen speichern,Save tool settings,machine
+workshop.recovery.source,Resource recovery,Public recoverable manifest,Öffentliches Bergungsmanifest,Public recoverable manifest,machine
+workshop.recovery.source-hint,Resource recovery,References finite stock endpoints. Edit quantities in Resources; damage does not create loot.,Verweist auf endliche Bestände. Mengen unter Ressourcen bearbeiten; Schaden erzeugt keine Beute.,References finite stock endpoints. Edit quantities in Resources; damage does not create loot.,machine
+workshop.recovery.availability,Resource recovery,Source availability,Verfügbarkeit der Quelle,Source availability,machine
+workshop.recovery.manifest,Resource recovery,Resource endpoints,Ressourcenendpunkte,Resource endpoints,machine
+workshop.recovery.resource,Resource recovery,Resource ID,Ressourcen-ID,Resource ID,machine
+workshop.recovery.endpoint,Resource recovery,Actual stock endpoint,Tatsächlicher Bestandsendpunkt,Actual stock endpoint,machine
+workshop.recovery.remove,Resource recovery,Remove resource,Ressource entfernen,Remove resource,machine
+workshop.recovery.add-resource,Resource recovery,Add resource,Ressource hinzufügen,Add resource,machine
+workshop.recovery.save-source,Resource recovery,Save public manifest,Öffentliches Manifest speichern,Save public manifest,machine
+workshop.recovery.duplicate-resource,Resource recovery,Each resource may appear once.,Jede Ressource darf nur einmal vorkommen.,Each resource may appear once.,machine
+workshop.recovery.refused,Resource recovery,Recovery change refused: {reason},Bergungsänderung abgelehnt: {reason},Recovery change refused: {reason},machine
+recovery.main-store,Resource recovery,{resource} main hold,{resource}-Hauptlager,{resource} main hold,machine

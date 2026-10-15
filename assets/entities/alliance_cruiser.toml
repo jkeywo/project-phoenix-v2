@@ -914,8 +914,8 @@ penetration = 40
 
 [sensors_console.long_range_radar]
 range = 300
-shows = [ "player", "asteroid_field", "ship", "station", "planet", "star" ]
-selects = [ "ship", "station", "planet" ]
+shows = [ "player", "asteroid_field", "ship", "station", "planet", "star", "cargo", "asteroid" ]
+selects = [ "ship", "station", "planet", "cargo", "asteroid" ]
 
 [helm_console]
 # Red-alert hostile weapon-arc overlay (issue #874): RGBA 0-1, the fourth
@@ -1909,21 +1909,21 @@ manual_overview = "You keep the ship alive. Allocate reactor power between helm,
 [[station.rating]]
 name = "Std"
 automated_systems = []
-detailed_systems = ["power-reactor", "power-battery", "repair", "tractor", "umbilical", "weapons-access", "logistics", "fabrication"]
+detailed_systems = ["power-reactor", "power-battery", "repair", "tractor", "umbilical", "weapons-access", "logistics", "fabrication", "resource-recovery"]
 
 [[station.rating]]
 name = "Guided"
-automated_systems = ["logistics", "fabrication"]
+automated_systems = ["logistics", "fabrication", "resource-recovery"]
 detailed_systems = ["power-reactor","power-battery","tractor","umbilical","weapons-access"]
 
 [[station.rating]]
 name = "Simplified"
-automated_systems = ["repair", "logistics", "fabrication"]
+automated_systems = ["repair", "logistics", "fabrication", "resource-recovery"]
 detailed_systems = ["power-reactor","power-battery","tractor","umbilical","weapons-access"]
 
 [[station.rating]]
 name = "Maintenance"
-automated_systems = ["repair", "power-reactor", "power-battery", "logistics", "fabrication"]
+automated_systems = ["repair", "power-reactor", "power-battery", "logistics", "fabrication", "resource-recovery"]
 detailed_systems = ["tractor","umbilical","weapons-access"]
 
 
@@ -5705,6 +5705,14 @@ kind = "Stock"
 [[console.feed]]
 source = "fabrication"
 kind = "Production"
+
+[[console.feed]]
+source = "resource-recovery"
+kind = "Recovery"
+
+[[console.feed]]
+source = "sensor-radar"
+kind = "SensorRadar"
 [[console]]
 id = "comms"
 name = "station.comms.name"
@@ -5931,6 +5939,7 @@ shield-arc-aft = "weapons"
 shield-arc-starboard = "weapons"
 weapons-access = "engineering"
 fabrication = "support"
+resource-recovery = "support"
 # [ai] Increment 10 mechanical access gate; ordinary System authority and AI.
 [[system]]
 id = "weapons-access"
@@ -6192,9 +6201,35 @@ priority = 3
 kind = "capacity"
 id = "alloy"
 
+[[logistics.store]]
+id = "hold-ore"
+resource = "ore"
+role = "main"
+compartment = "support"
+target = 0
+reserve = 0
+priority = 4
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "ore"
+
+[[logistics.store]]
+id = "hold-scrap"
+resource = "scrap"
+role = "main"
+compartment = "support"
+target = 0
+reserve = 0
+priority = 4
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "scrap"
+
 [[logistics.storage]]
 compartment = "support"
-space = 807
+space = 855
 
 [logistics.storage.unit_space]
 torpedoes = 1
@@ -6202,6 +6237,8 @@ machinery_parts = 1
 structural_parts = 1
 coolant = 1
 alloy = 1
+ore = 1
+scrap = 1
 
 [[logistics.storage]]
 compartment = "engineering"
@@ -6349,3 +6386,120 @@ amount = 2
 [[production.recipe.outputs]]
 store = "hold-ammunition"
 amount = 1
+
+[[production.recipe]]
+id = "ore-to-alloy"
+work_secs = 5
+
+[[production.recipe.inputs]]
+store = "hold-ore"
+amount = 2
+
+[[production.recipe.outputs]]
+store = "hold-alloy"
+amount = 1
+
+[[production.recipe]]
+id = "scrap-to-alloy"
+work_secs = 5
+
+[[production.recipe.inputs]]
+store = "hold-scrap"
+amount = 2
+
+[[production.recipe.outputs]]
+store = "hold-alloy"
+amount = 1
+
+# Increment12.4: public manifests refer only to real finite source stocks.
+[[system]]
+id = "resource-recovery"
+kind = "resource-recovery"
+console = "engineering"
+power_group = "energy-resource-recovery"
+
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[system.config.ai]
+root = "recovery"
+
+[[system.config.ai.tree]]
+id = "recovery"
+initial = "recover"
+
+[[system.config.ai.tree.state]]
+id = "recover"
+
+[[system.config.ai.tree.state.task]]
+id = "recover-needed"
+
+[system.config.ai.tree.state.task.action]
+kind = "write"
+channel = "recover"
+
+[system.config.ai.tree.state.task.action.value]
+source = "fact"
+name = "recovery_available"
+
+[[infrastructure.capacity]]
+id = "ore"
+amount = 0
+ceiling = 24
+label = "recovery.resource.ore"
+
+[[infrastructure.capacity]]
+id = "scrap"
+amount = 0
+ceiling = 24
+label = "recovery.resource.scrap"
+
+[resource_services.ore]
+kind = "capacity"
+id = "ore"
+
+[resource_services.scrap]
+kind = "capacity"
+id = "scrap"
+
+[recovery]
+system = "resource-recovery"
+range = 8
+units_per_sec = 2
+resources = [ "torpedoes", "coolant", "machinery_parts", "structural_parts", "alloy", "ore", "scrap" ]

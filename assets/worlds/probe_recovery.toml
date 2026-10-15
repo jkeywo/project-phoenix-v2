@@ -1,0 +1,29 @@
+# Quiet recovery/processing probe; no deadlines or scenario pacing changes.
+[global]
+seed = 1214
+ai_helm_tick_hz = 30
+
+[player_spawn]
+position = [ 0, 0, 0 ]
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+spawn_on = "game_start"
+
+[entity.transform]
+position = [ 0, 0, 0 ]
+
+[[entity]]
+template_path = "assets/entities/recovery_cargo_pod.toml"
+id = "finite-cargo"
+
+[entity.transform]
+position = [ 6, 0, 0 ]
+
+[[entity]]
+template_path = "assets/entities/recovery_ore_deposit.toml"
+id = "finite-deposit"
+
+[entity.transform]
+position = [ -6, 0, 0 ]

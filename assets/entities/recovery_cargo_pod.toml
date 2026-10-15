@@ -1,0 +1,48 @@
+# Finite public cargo manifest; all quantities remain in ordinary Infrastructure.
+name = "entity.recovery_cargo_pod.name"
+tags = [ "cargo", "structure" ]
+
+[target]
+tags = [ "cargo" ]
+threat_level = "none"
+
+[collider]
+shape = "Ball"
+radius = 0.6
+length = 0
+
+[mesh]
+shape = "sphere"
+radius = 0.6
+colour = [ 0.55, 0.7, 0.8 ]
+
+[radar_appearance]
+icon = "ship"
+
+[infrastructure]
+condition_max = 100
+decay_per_sec = 0
+hull_damage_share = 0
+
+[[infrastructure.capacity]]
+id = "scrap"
+amount = 12
+ceiling = 12
+label = "recovery.resource.scrap"
+
+[[infrastructure.capacity]]
+id = "machinery_parts"
+amount = 4
+ceiling = 4
+label = "damage.resource.machinery_parts"
+
+[recoverable]
+availability = "always"
+
+[recoverable.resources.scrap]
+kind = "capacity"
+id = "scrap"
+
+[recoverable.resources.machinery_parts]
+kind = "capacity"
+id = "machinery_parts"

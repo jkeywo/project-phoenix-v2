@@ -74,7 +74,7 @@
                on a hull that authors an umbilical system. Reuses the tractor
                panel's styling. -->
           <div class="tractor-panel" id="umbilical-panel" hidden></div>
-          <ph-logistics-controls id="logistics-panel" hidden></ph-logistics-controls><ph-production-controls id="production-panel" hidden></ph-production-controls>
+          <ph-logistics-controls id="logistics-panel" hidden></ph-logistics-controls><ph-production-controls id="production-panel" hidden></ph-production-controls><ph-recovery-controls id="recovery-panel" hidden></ph-recovery-controls>
         </div>
       </div>
     </div>
@@ -82,6 +82,7 @@
   <script type="module">
     import { mountTractorControl, mountUmbilicalControl } from '../stations/contextual-controls.js';
 
+    import '../components/ph-recovery-controls.js';
     import '../components/ph-production-controls.js';
     import '../components/ph-logistics-controls.js';
     import '../components/ph-power-controls.js';

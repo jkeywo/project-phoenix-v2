@@ -69,7 +69,7 @@ describe('Engineering, Power, and Repair semantic actions', () => {
     expect(sendAction).not.toHaveBeenCalled();
   });
   it('publishes authoritative actions with exactly two slots and shipped contexts', () => {
-    expect(ENGINEERING_ACTIONS).toHaveLength(25);
+    expect(ENGINEERING_ACTIONS).toHaveLength(27);
     expect(ENGINEERING_ACTIONS.some(action => action.id === 'stock.priority')).toBe(true);
     expect(ENGINEERING_ACTIONS.filter(action => action.id.startsWith('production.'))).toHaveLength(3);
     for (const action of ENGINEERING_ACTIONS) {

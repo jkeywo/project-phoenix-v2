@@ -1,0 +1,21 @@
+# Finite deposit, no respawn or HP-driven loot.
+includes = [ "asteroid_common_1_small.toml" ]
+name = "entity.recovery_ore_deposit.name"
+
+[infrastructure]
+condition_max = 100
+decay_per_sec = 0
+hull_damage_share = 0
+
+[[infrastructure.capacity]]
+id = "ore"
+amount = 24
+ceiling = 24
+label = "recovery.resource.ore"
+
+[recoverable]
+availability = "always"
+
+[recoverable.resources.ore]
+kind = "capacity"
+id = "ore"

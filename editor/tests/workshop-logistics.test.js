@@ -62,7 +62,7 @@ describe('accepted located logistics authoring', () => {
     await expect(pending).rejects.toThrow(/stale/); expect(draft.read(path)).toContain('# concurrent');
   });
   it('fits actual handling, reserve, faults, compartment, finite hold and explicit feeds atomically', () => {
-    const { value, schema } = damageFixture(); schema.console_instance_publication_kinds.logistics = 'Logistics'; delete value.logistics; delete value.production;
+    const { value, schema } = damageFixture(); schema.console_instance_publication_kinds.logistics = 'Logistics'; delete value.logistics; delete value.production; delete value.recovery;
     value.system = value.system.filter(row => !['logistics', 'fabrication'].includes(row.id)); delete value.interior.placements.logistics; delete value.interior.placements.fabrication;
     for (const console of value.console) console.feed = console.feed?.filter(row => row.source !== 'fabrication' && row.kind !== 'Stock');
     for (const station of value.station) for (const rating of station.rating || []) for (const key of ['automated_systems', 'detailed_systems'])

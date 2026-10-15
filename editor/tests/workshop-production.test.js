@@ -75,7 +75,8 @@ describe('accepted-source production recipes', () => {
   it.each(['alliance_cruiser', 'dynasty_player_cruiser'])('authors actual finite %s fabrication without adding seats or ammunition', hull => {
     const value = resolveTemplate(`assets/entities/${hull}.toml`, { read: file => fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null }, parse).resolved.value;
     expect(() => validateProduction(value.production, value)).not.toThrow();
-    expect(value.production).toMatchObject({ system: 'fabrication', initial_target: 0, recipe: [{ work_secs: 10, inputs: [{ store: 'hold-machinery-parts', amount: 1 }, { store: 'hold-alloy', amount: 2 }], outputs: [{ store: 'hold-ammunition', amount: 1 }] }] });
+    expect(value.production).toMatchObject({ system: 'fabrication', initial_target: 0 });
+    expect(value.production.recipe.find(row => row.id === 'torpedoes')).toMatchObject({ work_secs: 10, inputs: [{ store: 'hold-machinery-parts', amount: 1 }, { store: 'hold-alloy', amount: 2 }], outputs: [{ store: 'hold-ammunition', amount: 1 }] });
     expect(value.infrastructure.capacity.find(row => row.id === 'alloy')).toMatchObject({ amount: 12, ceiling: 24 });
     expect(value.resource_services.alloy).toEqual({ kind: 'capacity', id: 'alloy' }); expect(value.umbilical.allowed_resources).toContain('alloy');
     expect(value.torpedoes.initial_count + value.infrastructure.capacity.find(row => row.id === 'hold-ammunition').amount).toBe(6);

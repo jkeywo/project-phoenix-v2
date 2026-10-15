@@ -1,3 +1,4 @@
+import { guardRecoveryReferences } from './workshop-resource-recovery.js';
 import { guardManagedStockBounds } from './workshop-stock-bindings.js';
 import { guardProductionReferences } from './workshop-production.js';
 import { parse, stringify } from 'smol-toml';
@@ -136,9 +137,11 @@ export function prepareResourceOperation(draft, dependencies, operation) {
   // Pure preparation never lands an invalid draft. The authoritative runtime
   // validation below checks endpoint references, System admission and content.
   parse(after);
-  if (inspection.resolved.value.production) {
+  if (inspection.resolved.value.production || inspection.resolved.value.recovery || inspection.resolved.value.recoverable) {
     const candidate = { paths: () => draft.paths(), isBinary: path => draft.isBinary(path), read: path => path === operation.path ? after : draft.read(path) };
-    guardProductionReferences(inspection.resolved.value, inspectResources(candidate, dependencies, operation.path).resolved.value);
+    const proposed = inspectResources(candidate, dependencies, operation.path).resolved.value;
+    guardProductionReferences(inspection.resolved.value, proposed);
+    guardRecoveryReferences(inspection.resolved.value, proposed);
   }
   return { changes: [{ path: operation.path, before, after }] };
 }

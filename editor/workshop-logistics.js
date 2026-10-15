@@ -1,3 +1,4 @@
+import { guardRecoveryReferences } from './workshop-resource-recovery.js';
 import { guardProductionReferences } from './workshop-production.js';
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
@@ -151,6 +152,7 @@ export function prepareLogisticsOperation(draft, dependencies, operation, schema
   const candidate = { paths: () => draft.paths(), isBinary: path => draft.isBinary(path), read: path => path === operation.path ? source : draft.read(path) };
   const value = inspectLogistics(candidate, dependencies, operation.path).resolved.value;
   guardProductionReferences(inspection.resolved.value, value);
+  guardRecoveryReferences(inspection.resolved.value, value);
   const nextStockSources = new Set(stockPublicationSources(value, schema));
   source = pruneStockFeedsSource(source, value, new Set([...priorStockSources].filter(key => !nextStockSources.has(key))), operation.materialise);
   for (const feed of requiredStockFeeds(value, schema)) {

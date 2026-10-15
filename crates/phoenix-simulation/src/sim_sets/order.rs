@@ -119,6 +119,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             HandlePowerMessages,
             TickPowerSystem,
             HandleShieldsMessages,
+            TickShieldFrequencyCycle,
             TickShields,
             PruneRepairRequestQueue,
             OperateRepairAi,

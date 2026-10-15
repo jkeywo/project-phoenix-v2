@@ -233,6 +233,7 @@ pub enum FixedStep {
     RefreshAnchoredWaypoint,
     ShareNavigationObservations,
     TranslatePowerModifiers,
+    TickShieldFrequencyCycle,
     TickShields,
     TranslateImpulseModifiers,
     ApplyRadarDamageModifiers,

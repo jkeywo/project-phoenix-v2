@@ -23,6 +23,9 @@ pub struct FittingPlannerCatalog(pub phoenix_model::system_status::FittingPlanne
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RefitStage {
+    Fetching,
+    Delivering,
+    Returning,
     Preparing,
     Removing,
     Installing,
@@ -36,6 +39,7 @@ pub struct RefitWork {
     pub item: String,
     pub removed_item: Option<String>,
     pub locker: String,
+    pub source_locker: String,
     pub job: phoenix_model::job::JobId,
     pub stage: RefitStage,
     pub progress: f32,
@@ -91,43 +95,43 @@ pub(crate) fn install(
     }
 }
 
-pub(crate) fn planner_context(config: &crate::entities::config::EntityConfig) -> Option<phoenix_model::system_status::FittingPlannerContext> {
+pub(crate) fn planner_context(
+    config: &crate::entities::config::EntityConfig,
+) -> Option<phoenix_model::system_status::FittingPlannerContext> {
     let profile = CompiledFitting::compile(config).ok()??;
     Some(phoenix_model::system_status::FittingPlannerContext {
-            hull_path: String::new(),
-            content_id: format!(
-                "{:016x}",
-                vellum_digest::fnv1a(
-                    &serde_json::to_vec(config).expect("accepted hull serializes")
-                )
-            ),
-            slots: profile
-                .config()
-                .slots
-                .iter()
-                .map(|slot| phoenix_model::system_status::FittingPlannerSlot {
-                    slot: slot.id.clone(),
-                    system: slot.system.clone(),
-                    home_station: config
-                        .ship_config
-                        .as_ref()
-                        .and_then(|ship| {
-                            ship.system(&slot.system)
-                                .and_then(|system| ship.system_home_station(system))
-                        })
-                        .map(|station| station.0.clone())
-                        .unwrap_or_default(),
-                    default_equipment: slot.default_equipment.clone(),
-                    compatible_equipment: profile
-                        .config()
-                        .equipment
-                        .iter()
-                        .filter(|equipment| profile.compatible(&slot.id, &equipment.id).is_ok())
-                        .map(|equipment| equipment.id.clone())
-                        .collect(),
-                })
-                .collect(),
-        })
+        hull_path: String::new(),
+        content_id: format!(
+            "{:016x}",
+            vellum_digest::fnv1a(&serde_json::to_vec(config).expect("accepted hull serializes"))
+        ),
+        slots: profile
+            .config()
+            .slots
+            .iter()
+            .map(|slot| phoenix_model::system_status::FittingPlannerSlot {
+                slot: slot.id.clone(),
+                system: slot.system.clone(),
+                home_station: config
+                    .ship_config
+                    .as_ref()
+                    .and_then(|ship| {
+                        ship.system(&slot.system)
+                            .and_then(|system| ship.system_home_station(system))
+                    })
+                    .map(|station| station.0.clone())
+                    .unwrap_or_default(),
+                default_equipment: slot.default_equipment.clone(),
+                compatible_equipment: profile
+                    .config()
+                    .equipment
+                    .iter()
+                    .filter(|equipment| profile.compatible(&slot.id, &equipment.id).is_ok())
+                    .map(|equipment| equipment.id.clone())
+                    .collect(),
+            })
+            .collect(),
+    })
 }
 
 pub(crate) fn register(app: &mut App) {
@@ -381,8 +385,36 @@ fn dispatch(
     if foreign_repair_claim(world, entity, &profile.slot(slot)?.system) {
         return Err("another ship's repair team owns this physical task".into());
     }
-    let item = state.equipment.assemblies.values().find(|item| item.definition == definition && matches!(&item.location, EquipmentLocation::Stored { locker } if profile.locker(locker).is_ok_and(|locker| locker.compartment == room)))
-        .ok_or("no actual compatible spare in the working compartment")?.id.clone();
+    let item = state
+        .equipment
+        .assemblies
+        .values()
+        .filter(|item| {
+            item.definition == definition
+                && !state.work.values().any(|work| work.item == item.id)
+                && matches!(&item.location, EquipmentLocation::Stored { .. })
+        })
+        .min_by_key(|item| {
+            let EquipmentLocation::Stored { locker } = &item.location else {
+                unreachable!()
+            };
+            (
+                profile
+                    .locker(locker)
+                    .is_ok_and(|locker| locker.compartment != room),
+                item.id.clone(),
+            )
+        })
+        .ok_or("no actual compatible stored spare")?
+        .id
+        .clone();
+    let EquipmentLocation::Stored {
+        locker: source_locker,
+    } = &state.equipment.assemblies[&item].location
+    else {
+        unreachable!()
+    };
+    let source_locker = source_locker.clone();
     if profile.equipment(&definition)?.work.class == RefitClass::Facility
         && !facility_available(world, entity)
     {
@@ -403,9 +435,12 @@ fn dispatch(
             slot.to_owned(),
         )
         .ok_or("team or physical task is already committed")?;
-    state
-        .equipment
-        .stored_to_work(&profile, &item, job.0, slot)?;
+    if !teams
+        .0
+        .visit_refit_compartment(job, &profile.locker(&source_locker)?.compartment)
+    {
+        return Err("team cannot reach the actual spare locker".into());
+    }
     let locker = receiving_locker(
         &profile,
         &state,
@@ -421,8 +456,9 @@ fn dispatch(
             item,
             removed_item: old,
             locker,
+            source_locker,
             job,
-            stage: RefitStage::Preparing,
+            stage: RefitStage::Fetching,
             progress: 0.0,
             reserved: false,
             waiting: String::new(),
@@ -431,6 +467,44 @@ fn dispatch(
     state.next_request += 1;
     world.entity_mut(entity).insert((state, teams));
     Ok(())
+}
+
+/// Space held by actual fitting jobs, in addition to stored assemblies.
+/// Recovery must include these claims when offering the same finite lockers.
+pub fn reserved_space(profile: &CompiledFitting, state: &ShipFitting, locker: &str) -> u64 {
+    state.work.values().fold(0_u64, |total, work| {
+        let mut claimed = 0_u64;
+        if work.locker == locker
+            && !matches!(work.stage, RefitStage::Installing | RefitStage::Returning)
+        {
+            if let Some(old) = work
+                .removed_item
+                .as_ref()
+                .and_then(|id| state.equipment.assemblies.get(id))
+            {
+                claimed = claimed.saturating_add(
+                    profile
+                        .equipment(&old.definition)
+                        .map_or(u64::MAX, |definition| u64::from(definition.storage_space)),
+                );
+            }
+        }
+        if work.source_locker == locker {
+            if let Some(item) = state
+                .equipment
+                .assemblies
+                .get(&work.item)
+                .filter(|item| matches!(item.location, EquipmentLocation::InWork { .. }))
+            {
+                claimed = claimed.saturating_add(
+                    profile
+                        .equipment(&item.definition)
+                        .map_or(u64::MAX, |definition| u64::from(definition.storage_space)),
+                );
+            }
+        }
+        total.saturating_add(claimed)
+    })
 }
 
 fn receiving_locker(
@@ -456,17 +530,7 @@ fn receiving_locker(
     {
         let used: u64 = state.equipment.assemblies.values().filter(|item| matches!(&item.location, EquipmentLocation::Stored { locker: current } if current == &locker.id))
             .map(|item| profile.equipment(&item.definition).map_or(u64::MAX, |definition| definition.storage_space as u64)).fold(0, u64::saturating_add);
-        let claimed: u64 = state
-            .work
-            .values()
-            .filter(|work| work.locker == locker.id && work.stage != RefitStage::Installing)
-            .filter_map(|work| work.removed_item.as_ref())
-            .map(|id| {
-                profile
-                    .equipment(&state.equipment.assemblies[id].definition)
-                    .map_or(u64::MAX, |definition| definition.storage_space as u64)
-            })
-            .fold(0, u64::saturating_add);
+        let claimed = reserved_space(profile, state, &locker.id);
         let incoming = recovery.map_or(0, |owner| {
             crate::resources::equipment_recovery_server::reserved_space(owner, &locker.id, profile)
         });
@@ -630,15 +694,10 @@ fn advance(world: &mut World, entity: Entity, now: u64, dt: f32) {
         .zip(teams.0.layout())
         .map(|(access, layout)| access.blocked_connections(layout))
         .unwrap_or_default();
-    teams.0.tick_refits(dt, &blocked);
-    let mut flags = Vec::new();
-    let slots: Vec<_> = state.work.keys().cloned().collect();
-    for slot in slots {
-        let mut work = state.work[&slot].clone();
-        let Ok(requirements) = recipe(&profile, &state, &work) else {
-            continue;
-        };
-        if teams.0.save_state().teams.iter().flatten().any(|job| {
+    // Redirect a recalled carrier before return travel can finish its JobId.
+    // No paid stage or parts consumption occurs during this cleanup route.
+    for work in state.work.values_mut() {
+        let recalled = teams.0.save_state().teams.iter().flatten().any(|job| {
             job.id == work.job
                 && matches!(
                     job.activity,
@@ -647,15 +706,83 @@ fn advance(world: &mut World, entity: Entity, now: u64, dt: f32) {
                         ..
                     }
                 )
-        }) {
-            work.waiting = "cancelled".into();
+        });
+        if work.waiting == "cancelled" || recalled || work.stage == RefitStage::Returning {
+            work.stage = RefitStage::Returning;
+            work.progress = 0.0;
+            inventory.0.release_repair_claim(&work.claim());
+            work.reserved = false;
+            if matches!(
+                &state.equipment.assemblies[&work.item].location,
+                EquipmentLocation::InWork { .. }
+            ) {
+                if let Ok(locker) = profile.locker(&work.source_locker) {
+                    teams
+                        .0
+                        .visit_refit_return_compartment(work.job, &locker.compartment);
+                }
+            }
         }
-        if work.waiting == "cancelled" {
-            if return_items(&profile, &mut state, &work).is_ok() {
+    }
+    teams.0.tick_refits(dt, &blocked);
+    let mut flags = Vec::new();
+    let slots: Vec<_> = state.work.keys().cloned().collect();
+    for slot in slots {
+        let mut work = state.work[&slot].clone();
+        let Ok(requirements) = recipe(&profile, &state, &work) else {
+            continue;
+        };
+        if matches!(
+            &state.equipment.assemblies[&work.item].location,
+            EquipmentLocation::InWork { .. }
+        ) {
+            let actual_room =
+                teams
+                    .0
+                    .refit_location(work.job)
+                    .and_then(|location| match location {
+                        crate::ship::interior::TeamLocation::Compartment { compartment } => {
+                            Some(compartment.clone())
+                        }
+                        crate::ship::interior::TeamLocation::Crossing { from, .. } => {
+                            Some(from.clone())
+                        }
+                        _ => None,
+                    });
+            if let Some(room) = actual_room {
+                if state
+                    .equipment
+                    .move_in_work(&profile, &work.item, work.job.0, &room)
+                    .is_err()
+                {
+                    continue;
+                }
+            }
+        }
+        if work.stage == RefitStage::Returning {
+            let stored = matches!(
+                &state.equipment.assemblies[&work.item].location,
+                EquipmentLocation::Stored { .. }
+            );
+            if (stored || teams.0.refit_return_effect_enabled(work.job))
+                && return_items(
+                    &profile,
+                    &mut state,
+                    &work,
+                    world
+                        .get::<crate::resources::equipment_recovery_server::ShipEquipmentRecovery>(
+                            entity,
+                        ),
+                )
+                .is_ok()
+            {
                 inventory.0.release_repair_claim(&work.claim());
                 teams.0.recall_refit(work.job);
                 state.work.remove(&slot);
                 state.requested.remove(&slot);
+            } else {
+                work.waiting = "returning_equipment".into();
+                state.work.insert(slot, work);
             }
             continue;
         }
@@ -668,12 +795,36 @@ fn advance(world: &mut World, entity: Entity, now: u64, dt: f32) {
             work.waiting = "physical_task_claimed".into();
         } else if !teams.0.refit_effect_enabled(work.job) {
             work.waiting = "team_travelling".into();
-        } else if damage.catastrophic()
-            || damage
-                .state
-                .compartments
-                .get(profile.compartment(&slot).unwrap_or(""))
-                .is_none_or(|room| room.disabled)
+        } else if damage.catastrophic() {
+            work.waiting = "compartment_unavailable".into();
+        } else if work.stage == RefitStage::Fetching {
+            let source = &profile
+                .locker(&work.source_locker)
+                .expect("compiled locker")
+                .compartment;
+            let mut candidate = state.equipment.clone();
+            let mut candidate_teams = teams.clone();
+            if candidate
+                .pick_up_from_locker(&profile, &work.item, work.job.0, source)
+                .is_ok()
+                && candidate_teams.0.visit_refit_compartment(
+                    work.job,
+                    profile.compartment(&slot).expect("compiled slot"),
+                )
+            {
+                state.equipment = candidate;
+                teams = candidate_teams;
+                work.stage = RefitStage::Delivering;
+            } else {
+                work.waiting = "equipment_or_space_unavailable".into();
+            }
+        } else if work.stage == RefitStage::Delivering {
+            work.stage = RefitStage::Preparing;
+        } else if damage
+            .state
+            .compartments
+            .get(profile.compartment(&slot).unwrap_or(""))
+            .is_none_or(|room| room.disabled)
         {
             work.waiting = "compartment_unavailable".into();
         } else if profile
@@ -868,11 +1019,27 @@ fn return_items(
     profile: &CompiledFitting,
     state: &mut ShipFitting,
     work: &RefitWork,
+    recovery: Option<&crate::resources::equipment_recovery_server::ShipEquipmentRecovery>,
 ) -> Result<(), String> {
     let mut candidate = state.equipment.clone();
     if matches!(&candidate.assemblies[&work.item].location, EquipmentLocation::InWork { job, .. } if *job == work.job.0)
     {
-        candidate.return_to_locker(profile, &work.item, work.job.0, &work.locker)?;
+        candidate.return_to_locker(profile, &work.item, work.job.0, &work.source_locker)?;
+    }
+    let mut staged = state.clone();
+    staged.equipment = candidate.clone();
+    let locker = profile.locker(&work.source_locker)?;
+    let used = candidate.assemblies.values().filter(|item| matches!(&item.location, EquipmentLocation::Stored { locker: id } if id == &locker.id))
+        .map(|item| profile.equipment(&item.definition).map_or(u64::MAX, |definition| u64::from(definition.storage_space))).fold(0_u64, u64::saturating_add);
+    let incoming = recovery.map_or(0, |owner| {
+        crate::resources::equipment_recovery_server::reserved_space(owner, &locker.id, profile)
+    });
+    if used
+        .saturating_add(reserved_space(profile, &staged, &locker.id))
+        .saturating_add(incoming)
+        > u64::from(locker.space)
+    {
+        return Err("actual return locker is full or reserved".into());
     }
     state.equipment = candidate;
     Ok(())
@@ -918,12 +1085,25 @@ pub fn pending_requests(
     config: &crate::ship::config::ShipConfig,
     recipient: &SystemId,
 ) -> Vec<String> {
-    state.requested.iter().filter(|slot| !state.work.contains_key(*slot)
-        && profile.0.slot(slot).is_ok_and(|slot| can_report(config, recipient, &slot.system))
-        && state.equipment.desired.get(*slot).is_some_and(|desired|
-            state.equipment.assemblies.values().any(|item| &item.definition == desired && matches!(&item.location,EquipmentLocation::Stored { locker }
-                if profile.0.locker(locker).is_ok_and(|locker| Some(locker.compartment.as_str()) == profile.0.compartment(slot).ok())))))
-        .cloned().collect()
+    state
+        .requested
+        .iter()
+        .filter(|slot| {
+            !state.work.contains_key(*slot)
+                && profile
+                    .0
+                    .slot(slot)
+                    .is_ok_and(|slot| can_report(config, recipient, &slot.system))
+                && state.equipment.desired.get(*slot).is_some_and(|desired| {
+                    state.equipment.assemblies.values().any(|item| {
+                        &item.definition == desired
+                            && !state.work.values().any(|work| work.item == item.id)
+                            && matches!(&item.location, EquipmentLocation::Stored { .. })
+                    })
+                })
+        })
+        .cloned()
+        .collect()
 }
 
 pub(crate) fn project(
@@ -942,19 +1122,58 @@ pub(crate) fn project(
     for slot in &profile.0.config().slots {
         let current = installed(&state.equipment, &slot.id).map(|item| item.definition.clone());
         let work = state.work.get(&slot.id);
-        let choices = profile.0.config().equipment.iter().filter(|equipment| profile.0.compatible(&slot.id, &equipment.id).is_ok()).map(|equipment| {
-            let available = state.equipment.assemblies.values().filter(|item| item.definition == equipment.id && matches!(&item.location,
-                EquipmentLocation::Stored { locker } if profile.0.locker(locker).is_ok_and(|locker| Some(locker.compartment.as_str()) == profile.0.compartment(&slot.id).ok()))).count() as u32;
-            let (family, statistics) = match &equipment.hardware {
-                crate::resources::fitting::EquipmentHardware::Beam(hardware) => ("beam", BTreeMap::from([
-                    ("range".into(),hardware.beam_range.to_string()),("damage".into(),hardware.beam_damage_per_sec.to_string()),
-                    ("energy".into(),hardware.continuous_cost_per_sec.to_string()),("active".into(),hardware.beam_duration_secs.to_string()),("rest".into(),hardware.cooldown_secs.to_string())])),
-                crate::resources::fitting::EquipmentHardware::Reactor(hardware) => ("reactor",BTreeMap::from([
-                    ("sustained".into(),hardware.sustainable_output_per_sec.to_string()),("peak".into(),hardware.max_output_per_sec.to_string()),("ramp".into(),hardware.ramp_per_sec.to_string())])),
-            };
-            FittingChoiceView { equipment: equipment.id.clone(), available,
-                facility_required: equipment.work.class == RefitClass::Facility, family: family.into(), statistics }
-        }).collect();
+        let choices = profile
+            .0
+            .config()
+            .equipment
+            .iter()
+            .filter(|equipment| profile.0.compatible(&slot.id, &equipment.id).is_ok())
+            .map(|equipment| {
+                let available = state
+                    .equipment
+                    .assemblies
+                    .values()
+                    .filter(|item| {
+                        item.definition == equipment.id
+                            && !state.work.values().any(|work| work.item == item.id)
+                            && matches!(&item.location, EquipmentLocation::Stored { .. })
+                    })
+                    .count() as u32;
+                let (family, statistics) = match &equipment.hardware {
+                    crate::resources::fitting::EquipmentHardware::Beam(hardware) => (
+                        "beam",
+                        BTreeMap::from([
+                            ("range".into(), hardware.beam_range.to_string()),
+                            ("damage".into(), hardware.beam_damage_per_sec.to_string()),
+                            (
+                                "energy".into(),
+                                hardware.continuous_cost_per_sec.to_string(),
+                            ),
+                            ("active".into(), hardware.beam_duration_secs.to_string()),
+                            ("rest".into(), hardware.cooldown_secs.to_string()),
+                        ]),
+                    ),
+                    crate::resources::fitting::EquipmentHardware::Reactor(hardware) => (
+                        "reactor",
+                        BTreeMap::from([
+                            (
+                                "sustained".into(),
+                                hardware.sustainable_output_per_sec.to_string(),
+                            ),
+                            ("peak".into(), hardware.max_output_per_sec.to_string()),
+                            ("ramp".into(), hardware.ramp_per_sec.to_string()),
+                        ]),
+                    ),
+                };
+                FittingChoiceView {
+                    equipment: equipment.id.clone(),
+                    available,
+                    facility_required: equipment.work.class == RefitClass::Facility,
+                    family: family.into(),
+                    statistics,
+                }
+            })
+            .collect();
         let view = FittingSlotView {
             slot: slot.id.clone(),
             system: slot.system.clone(),

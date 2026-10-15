@@ -179,3 +179,161 @@ fn request_changes_intent_and_never_mints_a_missing_assembly() {
         count
     );
 }
+
+fn fetched_rig() -> (World, Entity, String, String) {
+    let (mut world, entity) = rig();
+    let choice = replacement(&world, entity, "fore-beam");
+    let mut state = world.get_mut::<ShipFitting>(entity).unwrap();
+    let item = state
+        .equipment
+        .assemblies
+        .values_mut()
+        .find(|item| {
+            item.definition == choice && matches!(item.location, EquipmentLocation::Stored { .. })
+        })
+        .unwrap();
+    let item_id = item.id.clone();
+    item.location = EquipmentLocation::Stored {
+        locker: "support-equipment".into(),
+    };
+    drop(state);
+    request(&mut world, entity, &id("phaser-fore"), "fore-beam", &choice).unwrap();
+    dispatch(&mut world, entity, &id("repair"), 0, "fore-beam").unwrap();
+    (world, entity, item_id, choice)
+}
+
+#[test]
+fn stored_salvage_is_fetched_by_actual_team_then_delivered_before_any_hardware_work() {
+    let (mut world, entity, item, choice) = fetched_rig();
+    let initial_parts = parts(&world, entity);
+    let initial = world.get::<ShipFitting>(entity).unwrap().clone();
+    assert_eq!(initial.work["fore-beam"].stage, RefitStage::Fetching);
+    assert!(
+        matches!(&initial.equipment.assemblies[&item].location, EquipmentLocation::Stored { locker } if locker == "support-equipment")
+    );
+    let job = initial.work["fore-beam"].job;
+    let mut saw_fetch_crossing = false;
+    let mut saw_delivery_crossing = false;
+    let mut saw_vacancy = false;
+    for tick in 1..1600 {
+        advance(&mut world, entity, tick, 0.125);
+        let state = world.get::<ShipFitting>(entity).unwrap();
+        let teams = world.get::<ShipRepairTeams>(entity).unwrap();
+        if let Some(work) = state.work.get("fore-beam") {
+            assert_eq!(work.job, job);
+            let crossing = matches!(
+                teams.0.refit_location(job),
+                Some(crate::ship::interior::TeamLocation::Crossing { .. })
+            );
+            saw_fetch_crossing |= work.stage == RefitStage::Fetching && crossing;
+            saw_delivery_crossing |= work.stage == RefitStage::Delivering && crossing;
+            if matches!(work.stage, RefitStage::Fetching | RefitStage::Delivering) {
+                assert!(!work.reserved);
+                assert_eq!(parts(&world, entity), initial_parts);
+                assert_eq!(
+                    state.equipment.installed("fore-beam"),
+                    initial.equipment.installed("fore-beam")
+                );
+            }
+        }
+        saw_vacancy |= state.equipment.installed("fore-beam").is_none();
+        if state.work.is_empty() {
+            break;
+        }
+    }
+    let state = world.get::<ShipFitting>(entity).unwrap();
+    assert!(saw_fetch_crossing && saw_delivery_crossing && saw_vacancy);
+    assert!(state.work.is_empty());
+    assert_eq!(state.equipment.installed("fore-beam").unwrap().id, item);
+    assert_eq!(
+        state.equipment.installed("fore-beam").unwrap().definition,
+        choice
+    );
+    assert_eq!(
+        state.equipment.assemblies.len(),
+        initial.equipment.assemblies.len()
+    );
+    assert_eq!(parts(&world, entity), initial_parts - 1);
+}
+
+#[test]
+fn cancellation_during_delivery_keeps_item_with_same_team_until_actual_storage_return() {
+    let (mut world, entity, item, _) = fetched_rig();
+    let original = world
+        .get::<ShipFitting>(entity)
+        .unwrap()
+        .equipment
+        .installed("fore-beam")
+        .unwrap()
+        .clone();
+    let initial_parts = parts(&world, entity);
+    let mut tick = 1;
+    loop {
+        advance(&mut world, entity, tick, 0.125);
+        tick += 1;
+        let state = world.get::<ShipFitting>(entity).unwrap();
+        let work = &state.work["fore-beam"];
+        if work.stage == RefitStage::Delivering
+            && matches!(
+                world
+                    .get::<ShipRepairTeams>(entity)
+                    .unwrap()
+                    .0
+                    .refit_location(work.job),
+                Some(crate::ship::interior::TeamLocation::Crossing { .. })
+            )
+        {
+            break;
+        }
+        assert!(tick < 400);
+    }
+    let job = world.get::<ShipFitting>(entity).unwrap().work["fore-beam"].job;
+    cancel(&mut world, entity, &id("repair"), "fore-beam").unwrap();
+    advance(&mut world, entity, tick, 0.125);
+    tick += 1;
+    assert_eq!(
+        world.get::<ShipFitting>(entity).unwrap().work["fore-beam"].stage,
+        RefitStage::Returning
+    );
+    assert!(matches!(
+        world
+            .get::<ShipFitting>(entity)
+            .unwrap()
+            .equipment
+            .assemblies[&item]
+            .location,
+        EquipmentLocation::InWork { .. }
+    ));
+    assert!(world
+        .get::<ShipRepairTeams>(entity)
+        .unwrap()
+        .0
+        .is_refit_team(0));
+    for now in tick..tick + 800 {
+        advance(&mut world, entity, now, 0.125);
+        if world.get::<ShipFitting>(entity).unwrap().work.is_empty() {
+            break;
+        }
+    }
+    let state = world.get::<ShipFitting>(entity).unwrap();
+    assert!(state.work.is_empty());
+    assert_eq!(state.equipment.installed("fore-beam"), Some(&original));
+    assert!(
+        matches!(&state.equipment.assemblies[&item].location, EquipmentLocation::Stored { locker } if locker == "support-equipment")
+    );
+    assert_eq!(parts(&world, entity), initial_parts);
+    assert!(world
+        .get::<ShipRepairTeams>(entity)
+        .unwrap()
+        .0
+        .is_refit_team(0)); // Still physically returning home.
+    assert_eq!(
+        job,
+        world
+            .get::<ShipRepairTeams>(entity)
+            .unwrap()
+            .0
+            .refit_job(1)
+            .unwrap()
+    );
+}

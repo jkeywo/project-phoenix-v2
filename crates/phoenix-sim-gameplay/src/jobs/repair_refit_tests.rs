@@ -305,3 +305,34 @@ fn fetch_continuation_rejects_unknown_or_inconsistent_override_without_writes() 
     assert!(!teams.visit_refit_compartment(JobId(u64::MAX), "home"));
     assert_eq!(teams.save_state(), baseline);
 }
+
+#[test]
+fn recalled_carrier_visits_real_storage_before_same_job_can_finish_home_return() {
+    let mut teams = fixture();
+    let id = claim(&mut teams);
+    teams.tick_refits(0.5, &BTreeSet::new());
+    let location = teams.refit_location(id).unwrap().clone();
+    assert!(teams.recall_refit(id));
+    assert!(teams.visit_refit_return_compartment(id, "work"));
+    assert_eq!(teams.refit_location(id), Some(&location));
+    let saved = teams.save_state();
+    let decoded = serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+    let mut restored = fixture();
+    restored.restore_state(&decoded).unwrap();
+    for _ in 0..20 {
+        teams.tick_refits(0.125, &BTreeSet::new());
+        restored.tick_refits(0.125, &BTreeSet::new());
+        assert_eq!(teams.save_state(), restored.save_state());
+    }
+    assert!(teams.refit_return_effect_enabled(id));
+    assert!(!teams.refit_effect_enabled(id));
+    assert!(!teams.finish_refit(id));
+    assert!(teams.is_refit_team(0));
+    assert_eq!(teams.free_team_indices(None), vec![1]);
+    teams.restore_state(&teams.save_state()).unwrap();
+    assert!(teams.recall_refit(id)); // Actual storage committed; now go home.
+    assert!(!teams.refit_return_effect_enabled(id));
+    teams.tick_refits(2.0, &BTreeSet::new());
+    assert_eq!(teams.work_list()[0].outcome, Some(JobOutcome::Cancelled));
+    teams.restore_state(&teams.save_state()).unwrap();
+}

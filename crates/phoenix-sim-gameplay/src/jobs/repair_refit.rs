@@ -124,7 +124,7 @@ impl RepairTeams {
         else {
             return None;
         };
-        if matches!(phase, TeamSlot::Returning { .. }) {
+        if matches!(phase, TeamSlot::Returning { .. }) && destination_compartment.is_none() {
             return None;
         }
         destination_compartment.as_deref().or_else(|| {
@@ -226,6 +226,79 @@ impl RepairTeams {
         true
     }
 
+    /// Cancellation carries equipment to real receiving space before the team
+    /// can finish returning home. This remains the same cancelled JobId.
+    pub fn visit_refit_return_compartment(&mut self, id: JobId, compartment: &str) -> bool {
+        let Some(layout) = &self.layout else {
+            return false;
+        };
+        if !layout
+            .config
+            .compartments
+            .iter()
+            .any(|room| room.id == compartment)
+        {
+            return false;
+        }
+        let Some(team) = self.state.teams.iter().position(|entry| {
+            entry.as_ref().is_some_and(|job| {
+                job.id == id
+                    && job.outcome.is_none()
+                    && matches!(job.activity, RepairActivity::Refit { .. })
+            })
+        }) else {
+            return false;
+        };
+        let Some(cursor) = self
+            .state
+            .navigation
+            .as_mut()
+            .and_then(|rows| rows.get_mut(team))
+        else {
+            return false;
+        };
+        let job = self.state.jobs.teams[team].as_mut().expect("selected job");
+        let RepairActivity::Refit {
+            target,
+            destination_compartment,
+            phase,
+            cancelled,
+            ..
+        } = &mut job.activity
+        else {
+            unreachable!();
+        };
+        if matches!(phase, TeamSlot::Returning { .. })
+            && destination_compartment.as_deref() == Some(compartment)
+        {
+            return true;
+        }
+        *destination_compartment = Some(compartment.into());
+        *cancelled = true;
+        *phase = TeamSlot::Returning {
+            remaining: self.timings.travel_duration,
+            system_id: Some(target.clone()),
+            display_name: None,
+            queued_system_id: None,
+            queued_display_name: None,
+        };
+        cursor.destination = Some(compartment.into());
+        cursor.route.clear();
+        cursor.blocked = false;
+        job.paused = true;
+        self.refresh();
+        true
+    }
+
+    pub fn refit_return_effect_enabled(&self, id: JobId) -> bool {
+        self.state.teams.iter().enumerate().any(|(team, entry)| {
+            let Some(job) = entry.as_ref().filter(|job| job.id == id && job.outcome.is_none() && job.execution_tick > 0 && !job.paused) else { return false; };
+            let RepairActivity::Refit { destination_compartment: Some(room), phase: TeamSlot::Returning { .. }, cancelled: true, .. } = &job.activity else { return false; };
+            self.state.navigation.as_ref().and_then(|rows| rows.get(team)).is_some_and(|cursor|
+                matches!(&cursor.location, TeamLocation::Compartment { compartment } if compartment == room))
+        })
+    }
+
     /// Call once from the fitting adapter, separately from ordinary repair.
     /// Arrival consumes this tick; on-site permission is evaluated next tick.
     pub fn tick_refits(&mut self, dt: f32, blocked: &BTreeSet<String>) {
@@ -275,7 +348,10 @@ impl RepairTeams {
                     layout.advance(cursor, &to, dt, blocked);
                     // Clearing an occupied edge is not a destination change.
                     cursor.destination = Some(match phase {
-                        TeamSlot::Returning { .. } => layout.config.team_homes[team].clone(),
+                        TeamSlot::Returning { .. } => destination_compartment
+                            .as_ref()
+                            .unwrap_or(&layout.config.team_homes[team])
+                            .clone(),
                         _ => destination_compartment
                             .as_ref()
                             .or_else(|| layout.compartment_for_system(target))
@@ -308,7 +384,20 @@ impl RepairTeams {
                     }
                 }
                 TeamSlot::Returning { .. } => {
-                    if layout.advance(cursor, &layout.config.team_homes[team], dt, blocked) {
+                    let was_arrived = matches!(&cursor.location, TeamLocation::Compartment { compartment } if destination_compartment.as_ref() == Some(compartment));
+                    if layout.advance(
+                        cursor,
+                        destination_compartment
+                            .as_ref()
+                            .unwrap_or(&layout.config.team_homes[team]),
+                        dt,
+                        blocked,
+                    ) {
+                        if destination_compartment.is_some() {
+                            // Wait for the actual item-storage transaction.
+                            job.paused = !was_arrived;
+                            continue;
+                        }
                         job.outcome = Some(if job.workflow_error {
                             JobOutcome::Failed
                         } else if *cancelled {
@@ -404,7 +493,7 @@ impl RepairTeams {
         else {
             return false;
         };
-        if matches!(phase, TeamSlot::Returning { .. }) {
+        if matches!(phase, TeamSlot::Returning { .. }) && destination_compartment.is_none() {
             return false;
         }
         let display_name = match phase {
@@ -451,13 +540,14 @@ impl RepairTeams {
                 .compartment_for_system(target)
                 .ok_or("unknown refit System home")?;
             if destination_compartment.as_ref().is_some_and(|destination| {
-                destination == room
+                (destination == room && !matches!(phase, TeamSlot::Returning { .. }))
                     || !layout
                         .config
                         .compartments
                         .iter()
                         .any(|room| &room.id == destination)
-                    || matches!(phase, TeamSlot::Returning { .. })
+                    || (matches!(phase, TeamSlot::Returning { .. }) && !*cancelled)
+                    || job.outcome.is_some()
             }) {
                 return Err("invalid refit destination override".into());
             }
@@ -499,7 +589,8 @@ impl RepairTeams {
                 .and_then(|rows| rows.get(team))
                 .ok_or("refit team has no physical cursor")?;
             if job.outcome.is_none()
-                && !matches!(phase, TeamSlot::Returning { .. })
+                && (!matches!(phase, TeamSlot::Returning { .. })
+                    || destination_compartment.is_some())
                 && (cursor
                     .destination
                     .as_ref()

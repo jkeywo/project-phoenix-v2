@@ -8,7 +8,7 @@ use crate::core::messages::{AdmittedCommands, SystemControlPayload as Control, S
 use crate::entities::spawner::EntityUuid;
 use crate::jobs::Job;
 use crate::resources::fitting::{CompiledFitting, EquipmentLocation};
-use crate::resources::fitting_server::{CompiledShipFitting, RefitStage, ShipFitting};
+use crate::resources::fitting_server::{CompiledShipFitting, ShipFitting};
 use crate::resources::recovery_server::CompiledShipRecovery;
 use crate::ship::compartment_damage::ShipDamage;
 use crate::ship::power::ShipPowerSystem;
@@ -179,23 +179,11 @@ fn available_space(
     for item in state.equipment.assemblies.values().filter(|item| matches!(&item.location, EquipmentLocation::Stored { locker: current } if current == locker)) {
         used = used.checked_add(u64::from(profile.equipment(&item.definition)?.storage_space)).ok_or("equipment space overflow")?;
     }
-    for work in state
-        .work
-        .values()
-        .filter(|work| work.locker == locker && work.stage != RefitStage::Installing)
-    {
-        if let Some(item) = work
-            .removed_item
-            .as_ref()
-            .and_then(|id| state.equipment.assemblies.get(id))
-        {
-            used = used
-                .checked_add(u64::from(
-                    profile.equipment(&item.definition)?.storage_space,
-                ))
-                .ok_or("equipment claim overflow")?;
-        }
-    }
+    used = used
+        .checked_add(crate::resources::fitting_server::reserved_space(
+            profile, state, locker,
+        ))
+        .ok_or("equipment claim overflow")?;
     Ok(capacity.saturating_sub(used))
 }
 

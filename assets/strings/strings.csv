@@ -6069,3 +6069,43 @@ settings.debug.scenario.activity.pending,Scenario activity author inspection,Pen
 entity.battery_probe.name,Finite battery probe name,Battery probe,Batteriesonde,Battery probe,machine
 entity.battery_probe.room,Finite probe compartment,Probe core,Sondenkern,Probe core,machine
 entity.battery_probe.description,Finite sensing equipment,Finite battery-powered sensor probe.,Sensorkapsel mit begrenzter Batterie.,Finite battery-powered sensor probe.,machine
+workshop.activities.title,Physical activity authoring,Physical activities,Physical activities,Physical activities,source
+workshop.activities.scope,Physical activity authoring,Base-world named actors and authored launch slots only. Bind exact ordinary Repair or delivery requests; achieved work and returned teams are separate evidence. Save before opening the existing disposable Test.,Base-world named actors and authored launch slots only. Bind exact ordinary Repair or delivery requests; achieved work and returned teams are separate evidence. Save before opening the existing disposable Test.,Base-world named actors and authored launch slots only. Bind exact ordinary Repair or delivery requests; achieved work and returned teams are separate evidence. Save before opening the existing disposable Test.,source
+workshop.activities.world,Physical activity authoring,World source,World source,World source,source
+workshop.activities.definition,Physical activity authoring,Definition identifier,Definition identifier,Definition identifier,source
+workshop.activities.instance,Physical activity authoring,Instance identifier,Instance identifier,Instance identifier,source
+workshop.activities.actor,Physical activity authoring,Declared actor,Declared actor,Declared actor,source
+workshop.activities.kind,Physical activity authoring,Activity kind,Activity kind,Activity kind,source
+workshop.activities.owner,Physical activity authoring,Actual System,Actual System,Actual System,source
+workshop.activities.team,Physical activity authoring,Actual team index,Actual team index,Actual team index,source
+workshop.activities.visit,Physical activity authoring,Ordinary Repair request,Ordinary Repair request,Ordinary Repair request,source
+workshop.activities.target,Physical activity authoring,Required physical goal,Required physical goal,Required physical goal,source
+workshop.activities.goal,Physical activity authoring,Required remedy,Required remedy,Required remedy,source
+workshop.activities.route,Physical activity authoring,Approved main-to-local route,Approved main-to-local route,Approved main-to-local route,source
+workshop.activities.amount,Physical activity authoring,Exact quantity,Exact quantity,Exact quantity,source
+workshop.activities.state,Physical activity authoring,State identifier,State identifier,State identifier,source
+workshop.activities.condition,Physical activity authoring,Required evidence,Required evidence,Required evidence,source
+workshop.activities.outcome,Physical activity authoring,Settlement outcome,Settlement outcome,Settlement outcome,source
+workshop.activities.script,Physical activity authoring,Existing script unit path,Existing script unit path,Existing script unit path,source
+workshop.activities.function,Physical activity authoring,Scenario function,Scenario function,Scenario function,source
+workshop.activities.remove,Physical activity authoring,Remove,Remove,Remove,source
+workshop.activities.add_state,Physical activity authoring,Add state,Add state,Add state,source
+workshop.activities.add_definition,Physical activity authoring,Add definition,Add definition,Add definition,source
+workshop.activities.add_instance,Physical activity authoring,Add instance,Add instance,Add instance,source
+workshop.activities.save,Physical activity authoring,Accept activity source,Accept activity source,Accept activity source,source
+workshop.activities.refused,Physical activity authoring,Activity source refused: {reason},Activity source refused: {reason},Activity source refused: {reason},source
+workshop.activities.repair,Physical activity authoring,Internal Repair,Internal Repair,Internal Repair,source
+workshop.activities.delivery,Physical activity authoring,Local delivery,Local delivery,Local delivery,source
+workshop.activities.exact,Physical activity authoring,Exact named goal,Exact named goal,Exact named goal,source
+workshop.activities.test_unavailable,Physical activity authoring,This World is not available in the current disposable Test catalogue.,This World is not available in the current disposable Test catalogue.,This World is not available in the current disposable Test catalogue.,source
+workshop.activities.condition.accepted,Physical activity authoring,Request accepted,Request accepted,Request accepted,source
+workshop.activities.condition.achieved,Physical activity authoring,Useful work achieved,Useful work achieved,Useful work achieved,source
+workshop.activities.condition.settled,Physical activity authoring,Assignment settled,Assignment settled,Assignment settled,source
+workshop.activities.condition.received,Physical activity authoring,Actual goods received,Actual goods received,Actual goods received,source
+workshop.activities.condition.returned,Physical activity authoring,Actual goods returned,Actual goods returned,Actual goods returned,source
+workshop.activities.outcome.completed,Physical activity authoring,Completed,Completed,Completed,source
+workshop.activities.outcome.cancelled,Physical activity authoring,Cancelled,Cancelled,Cancelled,source
+workshop.activities.outcome.failed,Physical activity authoring,Failed,Failed,Failed,source
+workshop.activities.goal.structure,Physical activity authoring,Structural restoration,Structural restoration,Structural restoration,source
+workshop.activities.goal.patch,Physical activity authoring,Component patch,Component patch,Component patch,source
+workshop.activities.goal.full,Physical activity authoring,Full component remedy,Full component remedy,Full component remedy,source

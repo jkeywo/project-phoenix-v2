@@ -6,6 +6,7 @@ import { mountWorkshopSensing } from './workshop-sensing-panel.js';
 import { mountWorkshopFields } from './workshop-fields-panel.js';
 import { mountWorkshopFitting } from './workshop-fitting-panel.js';
 import { mountWorkshopPersonnel } from './workshop-personnel-panel.js';
+import { mountWorkshopActivities } from './workshop-activities-panel.js';
 import { mountWorkshopPorts } from './workshop-ports-panel.js';
 import { mountWorkshopRecovery } from './workshop-recovery-panel.js';
 import { mountWorkshopProduction } from './workshop-production-panel.js';
@@ -236,6 +237,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   let damagePanel = null;
   let slotAuthoringPanel = null;
   let scriptsPanel = null;
+  let activitiesPanel = null;
   let spatialPanel = null;
   let layoutMount = null;
   let testLayoutMount = null;
@@ -367,6 +369,10 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
   scriptsPanel = mountWorkshopScripts({ root, attach: false, provider, runtime, draft: () => draft,
     ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  activitiesPanel = mountWorkshopActivities({ root, attach: false, provider, runtime, draft: () => draft,
+    ...operations.panel(), test: testWorld,
+    changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
+  scriptsPanel.node.append(activitiesPanel.node);
   spatialPanel = mountWorkshopSpatial({ root, attach: false, provider, runtime, draft: () => draft,
     ...operations.panel(),
     changed(path) { selected = path; refresh({ selection: true }); persistDraft(); show('workshop.changed'); } });
@@ -440,6 +446,16 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     ship.dispatchEvent(new win.Event('change'));
     enterTestWorkspace();
     ship.focus();
+    return true;
+  }
+
+  function testWorld(path) {
+    const world = root.querySelector('#workshop-test-world');
+    if (!world || ![...world.options].some(option => option.value === path && !option.disabled)) return false;
+    world.value = path;
+    world.dispatchEvent(new win.Event('change'));
+    enterTestWorkspace();
+    world.focus();
     return true;
   }
 
@@ -562,6 +578,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     damagePanel?.refresh({ hidden: testing });
     slotAuthoringPanel?.refresh({ hidden: testing });
     scriptsPanel?.refresh({ hidden: testing });
+    activitiesPanel?.refresh({ hidden: testing });
     spatialPanel?.refresh({ hidden: testing });
     localisationPanel?.refresh();
     toolbar.hidden = layout.hidden = feedback.hidden = findings.hidden = testing;
@@ -1229,6 +1246,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     damagePanel?.dispose();
     slotAuthoringPanel?.dispose();
     scriptsPanel?.dispose();
+    activitiesPanel?.dispose();
     spatialPanel?.dispose();
     layoutMount.dispose();
     controls.destroy();

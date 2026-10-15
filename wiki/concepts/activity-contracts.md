@@ -2,7 +2,7 @@
 title: Activity Contracts
 type: concept
 tags: [world, activities, repair, logistics, continuation]
-sources: [crates/phoenix-model/src/activity.rs, crates/phoenix-sim-world/src/world/activities.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/activities.rs, crates/phoenix-simulation/src/world/server/triggers.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/resources/logistics_server.rs, crates/phoenix-simulation/src/snapshot/activities.rs, crates/phoenix-simulation/src/sim_digest_activities.rs]
+sources: [crates/phoenix-model/src/activity.rs, crates/phoenix-sim-world/src/world/activities.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/activities.rs, crates/phoenix-simulation/src/world/server/triggers.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/resources/logistics_server.rs, crates/phoenix-simulation/src/snapshot/activities.rs, crates/phoenix-simulation/src/sim_digest_activities.rs, crates/phoenix-sim-gameplay/src/jobs/activity_bindings.rs, crates/phoenix-content-preparation/src/world/activity_bindings.rs, editor/workshop-activities.js, gui/workshop-activities-panel.js, crates/phoenix-simulation/src/debug/scenario.rs]
 updated: 2026-10-15
 ---
 
@@ -31,6 +31,13 @@ Snapshot and digest traverse this same World owner. Candidate validation checks
 bindings and causal evidence before writes. Retained terminal history is checked
 against immutable accepted equipment/remedies, including after a team slot is
 reused or the actor is removed; it does not inspect today's former job or damage.
+The Scripts workspace edits these same arrays through accepted source history.
+Gameplay's immutable support helper is shared by dispatch/arming and content
+preparation, which checks actual base actors, row overrides and every offered
+launch hull before Preview or Test. The existing privileged Scenario inspection
+shows exact instances, pending facts and activation results without advancing
+work or acknowledging evidence.
+
 This is the first activity consumer foundation. HTN decomposition, dynamic
-opportunities, workload scheduling and broader activity authoring are separate
+opportunities, workload scheduling and dynamic activity authoring are separate
 implementation work, not implied by these types or source tests.

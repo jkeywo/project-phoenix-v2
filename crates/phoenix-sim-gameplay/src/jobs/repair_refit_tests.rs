@@ -113,7 +113,7 @@ fn recall_mid_crossing_returns_from_actual_position_and_preserves_cancelled_outc
     let id = claim(&mut teams);
     teams.tick_refits(0.5, &BTreeSet::new());
     let position = teams.navigation().unwrap()[0].clone();
-    assert!(teams.recall(0));
+    assert!(teams.recall_refit(id));
     assert_eq!(teams.navigation().unwrap()[0], position);
     assert!(!teams.recall(0));
     teams.tick_refits(1.5, &BTreeSet::new()); // Finish committed outward crossing.

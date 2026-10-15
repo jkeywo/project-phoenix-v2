@@ -211,6 +211,19 @@ impl RepairTeams {
         team.is_some_and(|team| self.return_refit(team, false))
     }
 
+    /// Cancellation is valid during travel as well as on site. It preserves
+    /// the actual cursor; the fitting owner releases its unconsumed claims.
+    pub fn recall_refit(&mut self, id: JobId) -> bool {
+        let team = self.state.teams.iter().position(|entry| {
+            entry.as_ref().is_some_and(|job| {
+                job.id == id
+                    && job.outcome.is_none()
+                    && matches!(job.activity, RepairActivity::Refit { .. })
+            })
+        });
+        team.is_some_and(|team| self.return_refit(team, true))
+    }
+
     pub(super) fn return_refit(&mut self, team: usize, cancel: bool) -> bool {
         let Some(job) = self
             .state

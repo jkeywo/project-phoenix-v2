@@ -369,6 +369,7 @@ use materialization::restore_entities;
 pub(crate) use materialization::spawn_from_origin;
 pub use materialization::LayerReconcileStatus;
 
+mod activities;
 mod emp;
 mod helm_movement;
 #[cfg(test)]

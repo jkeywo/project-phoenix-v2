@@ -258,6 +258,13 @@ where
         }
     };
 
+    if !loaded.config.situation_definitions.is_empty() || !loaded.config.situations.is_empty() {
+        return LayerLoadResult {
+            outcome: LayerLoadOutcome::ParseFailed,
+            warnings: vec!["the first activity consumer requires base-world situation definitions; layer-owned activation/unload is unsupported".into()],
+            ledger: LedgerPlan::default(),
+        };
+    }
     let mut scenario_config = loaded.config;
     // The compiled `[script]` set the Merge load carried. Threaded out to the
     // applier on `Loaded`, which merges it into the live runtime (#1045).

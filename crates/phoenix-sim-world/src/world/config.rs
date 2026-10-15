@@ -1263,6 +1263,10 @@ impl GmPaletteEntry {
 #[derive(Debug, Default, Deserialize)]
 pub struct RawWorld {
     #[serde(default)]
+    pub situation_definition: Vec<crate::world::activities::SituationDefinition>,
+    #[serde(default)]
+    pub situation: Vec<crate::world::activities::SituationConfig>,
+    #[serde(default)]
     pub global: GlobalConfig,
     /// Hull-agnostic scenario detail-floor selectors (console-family/Station id
     /// or System kind). Resolved against the lobby-selected hull at runtime.
@@ -2481,6 +2485,8 @@ pub fn scripted_trigger(condition: TriggerCondition) -> Trigger {
 /// re-validate length on every read.
 #[derive(Clone, Debug, Default, bevy::prelude::Resource)]
 pub struct WorldConfig {
+    pub situation_definitions: Vec<crate::world::activities::SituationDefinition>,
+    pub situations: Vec<crate::world::activities::SituationConfig>,
     pub global: GlobalConfig,
     /// Hull-agnostic scenario detail-floor selectors from world TOML. A value
     /// matches either an authored Station id (console family) or a System kind;
@@ -3147,7 +3153,27 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         _ => DelayedUnloadPolicy::Cancel,
     };
 
-    Ok(WorldConfig {
+    let mut activity_definitions = std::collections::BTreeSet::new();
+    for definition in &raw.situation_definition {
+        definition.validate()?;
+        if !activity_definitions.insert(&definition.id) {
+            return Err("duplicate situation definition".into());
+        }
+    }
+    // Arming performs the same closed shape/conflict/capacity checks without
+    // requiring physical actors to have spawned during content parsing.
+    let mut checked_instances = crate::world::activities::SituationInstances::default();
+    for instance in &raw.situation {
+        let definition = raw
+            .situation_definition
+            .iter()
+            .find(|definition| definition.id == instance.definition)
+            .ok_or("unknown situation definition")?;
+        checked_instances.arm(instance, definition, 0)?;
+    }
+    let config = WorldConfig {
+        situation_definitions: raw.situation_definition,
+        situations: raw.situation,
         global: raw.global,
         scenario_detail_floor: raw.scenario_detail_floor,
         anchors,
@@ -3172,10 +3198,34 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         gm_npc_doctrine_palette: crate::gm_npc::parse_palette(&raw.gm_npc_doctrine_palette)?,
         gm_attention: raw.gm_attention.clone(),
         script_sources: inline_script_sources(raw.script.as_ref()),
-    })
+    };
+    config.validate_situation_actors()?;
+    Ok(config)
 }
 
 impl WorldConfig {
+    /// First activity consumer needs immutable authored provenance even after
+    /// the actor is gone. Dynamic/layer actors require a later lifecycle join.
+    pub fn validate_situation_actor(&self, actor: &str) -> Result<(), String> {
+        let supported = if let Some(slot) = actor.strip_prefix("slot:") {
+            self.effective_ship_slots().iter().any(|row| row.id == slot)
+        } else {
+            self.entities
+                .iter()
+                .any(|entity| entity.name.as_deref() == Some(actor))
+        };
+        if supported {
+            Ok(())
+        } else {
+            Err(format!("activity actor {actor:?} must name a declared base-world entity or authored launch slot; dynamic/layer actor lifecycle is not supported by this first consumer"))
+        }
+    }
+    pub fn validate_situation_actors(&self) -> Result<(), String> {
+        for instance in &self.situations {
+            self.validate_situation_actor(instance.request.actor())?;
+        }
+        Ok(())
+    }
     /// Picker slots, synthesising the legacy one-slot shape without requiring
     /// existing content to migrate or show another selection step.
     pub fn effective_ship_slots(&self) -> Vec<ShipSlotConfig> {

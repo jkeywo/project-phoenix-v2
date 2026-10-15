@@ -4,6 +4,9 @@ use crate::lobby::{InboundMessage, LobbyPlugin};
 use crate::ship::control_source::ControlSource;
 use bevy::ecs::system::RunSystemOnce;
 
+#[path = "logistics_activity_tests.rs"]
+mod activities;
+
 #[test]
 fn an_unmanaged_magazine_returns_a_correlated_refusal() {
     let mut world = World::new();

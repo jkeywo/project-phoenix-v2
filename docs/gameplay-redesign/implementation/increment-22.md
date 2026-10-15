@@ -157,6 +157,32 @@ identity/result required for exactly-once application and refusal/re-entry.
 The definition and live instance identities remain separate. This lowering
 implements the first Scenario lifecycle; it does not deliver 22B's actual HTN.
 
+Repair bindings distinguish the exact declared admitted request (including an
+ordinary group request) from the named required achievement. The named target
+must belong to that request's actual supported work scope. The ordinary AI
+keeps choosing its group through the existing controller; assignment or useful
+work on another component does not satisfy the named goal. Actor references
+resolve authored names or stable `slot:<authored ship-slot id>` identities,
+never a host's LocalShip view. The first base-world definitions support bounded
+acyclic Scenario state chains; layer-owned activation/unload refuses explicitly
+until its lifecycle is implemented. Multiple independent base-world instances
+may bind only named actors declared in the base World or actual authored launch
+slots. Declared but unresolved actors arm only when physically present. Dynamic
+script/GM and layer-only actor bindings refuse with an actionable source error;
+their immutable recipe/content provenance join remains open22 work. The existing
+base template/overrides and launch bootstrap validate retained historical evidence
+after actor removal without copying a second spawn owner into World. Instances
+can reuse a definition.
+
+The existing `GameStartEntityUuid` bootstrap record adds its actual
+`FleetPlacement.authored_slot_id`; the record still owns the same authored row
+and minted UUID. Validate unique slots/UUIDs and compatible authored rows before
+application. Removed-slot history resolves through this existing bootstrap
+relation and `FrozenShipSlots` hull choice, reusing the normal player-hull
+override merge. It does not infer identity from LocalShip or copy a second recipe
+owner. Accepted bindings/evidence can outlive a removed physical actor without
+inventing a returned/Failed result that the actual owner never emitted.
+
 1. Add the narrow shared fact schema and pure matching/deduplication rules, then
    wire the actual repair work/settlement and exact delivery Receive boundaries.
    Preserve ordinary dispatch, operator authority and one controller per System.

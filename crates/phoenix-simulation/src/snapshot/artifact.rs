@@ -941,7 +941,15 @@ pub fn required_boot_identity(run: &StoredRun) -> Result<&BootIdentity, LoadRefu
         ));
     }
     let mut seen = std::collections::BTreeSet::new();
+    let mut seen_slots = std::collections::BTreeSet::new();
     for row in &identity.game_start_entity_uuids {
+        if let Some(slot) = &row.authored_slot_id {
+            if slot.trim().is_empty() || !seen_slots.insert(slot) {
+                return Err(LoadRefusal::Unparsable(
+                    "invalid or duplicate GameStart authored launch slot".into(),
+                ));
+            }
+        }
         let uuid = &row.entity_uuid;
         let Some(parsed) = crate::world_id::WorldId::parse(uuid) else {
             return Err(LoadRefusal::Unparsable(format!(

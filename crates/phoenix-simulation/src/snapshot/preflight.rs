@@ -14,7 +14,21 @@ pub fn validate_boot_identity_for_world(
     identity: &BootIdentity,
     world_config: &crate::world::config::WorldConfig,
 ) -> Result<(), LoadRefusal> {
+    let mut slots = std::collections::BTreeSet::new();
+    let mut uuids = std::collections::BTreeSet::new();
     for row in &identity.game_start_entity_uuids {
+        if !uuids.insert(&row.entity_uuid) {
+            return Err(LoadRefusal::Unparsable(
+                "duplicate GameStart actor UUID".into(),
+            ));
+        }
+        if let Some(slot) = &row.authored_slot_id {
+            if !slots.insert(slot) {
+                return Err(LoadRefusal::Unparsable(
+                    "duplicate authored launch slot in GameStart identity".into(),
+                ));
+            }
+        }
         let authored_index = row.authored_index as usize;
         let Some(authored) = world_config.entities.get(authored_index) else {
             return Err(LoadRefusal::Unparsable(format!(
@@ -28,6 +42,61 @@ pub fn validate_boot_identity_for_world(
                 "the current snapshot boot identity names authored entity row {}, which is not a GameStart row",
                 row.authored_index
             )));
+        }
+    }
+    // Optional for legacy/reduced boot records, required by any situation that
+    // uses a slot. Validate provided links from accepted authored rows and the
+    // saved inclusion frontier, never from arbitrary current actors.
+    if !slots.is_empty() {
+        let cache = crate::entities::config_cache::get_config_cache();
+        let catalog = world_config.effective_ship_slots();
+        let mut authored_ship_index = 0;
+        let mut included_ship_index = 0;
+        for (index, entity) in world_config.entities.iter().enumerate() {
+            if entity.spawn_on != crate::world::config::WorldEntitySpawnOn::GameStart {
+                continue;
+            }
+            let config = crate::entities::loader::resolve_entity_via(
+                entity,
+                &cache,
+                &crate::entities::loader::WasmTemplateLoader,
+            )
+            .map_err(|error| {
+                LoadRefusal::Unparsable(format!(
+                    "cannot resolve authored launch row {index}: {error}"
+                ))
+            })?;
+            let ship = config.tags.iter().any(|tag| tag == "ship");
+            let authored_slot = ship
+                .then(|| world_config.ship_slots.get(authored_ship_index))
+                .flatten();
+            if ship {
+                authored_ship_index += 1;
+            }
+            let Some(saved) = identity
+                .game_start_entity_uuids
+                .iter()
+                .find(|row| row.authored_index as usize == index)
+            else {
+                continue;
+            };
+            let expected = authored_slot.or_else(|| {
+                (ship && world_config.ship_slots.is_empty())
+                    .then(|| catalog.get(included_ship_index))
+                    .flatten()
+            });
+            if ship {
+                included_ship_index += 1;
+            }
+            if saved
+                .authored_slot_id
+                .as_deref()
+                .is_some_and(|slot| expected.is_none_or(|expected| expected.id != slot))
+            {
+                return Err(LoadRefusal::Unparsable(format!(
+                    "GameStart row {index} has an incompatible authored launch slot"
+                )));
+            }
         }
     }
     for (authored_index, authored) in world_config.entities.iter().enumerate() {

@@ -1251,6 +1251,11 @@ fn fold_scenario_schedule(world: &World, mut acc: u64) -> u64 {
         .map(|runtime| runtime.pending_world_events.as_slice())
         .unwrap_or_default();
 
+    if let Some(runtime) = world.get_resource::<WorldContentRuntime>() {
+        if !runtime.situations.instances.is_empty() {
+            acc = activities::instances(acc, &runtime.situations);
+        }
+    }
     if callbacks.is_empty() && events.is_empty() {
         return acc;
     }
@@ -1280,6 +1285,7 @@ fn fold_scheduled_call(mut acc: u64, call: &crate::world::script::schedule::Sche
 /// [`fold_scenario_schedule`] for why the tag is written by hand.
 fn fold_world_event(mut acc: u64, event: &WorldEvent) -> u64 {
     match event {
+        WorldEvent::Activity(fact) => activities::fact(fold_u64(acc, 13), fact),
         WorldEvent::Enquiry {
             target_uuid,
             observer_uuid,
@@ -2981,3 +2987,5 @@ fn fold_illumination_namespace(world: &World, acc: u64) -> u64 {
         |acc, state| fold_serde(acc, &state),
     )
 }
+#[path = "sim_digest_activities.rs"]
+mod activities;

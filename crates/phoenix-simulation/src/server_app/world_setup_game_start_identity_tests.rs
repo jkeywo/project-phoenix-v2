@@ -25,10 +25,12 @@ fn a_named_game_start_row_uses_its_registered_world_identity() {
 fn authored_indexes_restore_player_and_npc_rows_without_predicate_shifting() {
     let saved = ResumeGameStartEntityUuids(vec![
         crate::snapshot::GameStartEntityUuid {
+            authored_slot_id: None,
             authored_index: 3,
             entity_uuid: "00000000-0000-8000-8000-000000000003".into(),
         },
         crate::snapshot::GameStartEntityUuid {
+            authored_slot_id: None,
             authored_index: 8,
             entity_uuid: "00000000-0000-8000-8000-000000000008".into(),
         },

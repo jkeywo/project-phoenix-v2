@@ -1,3 +1,4 @@
+pub mod activities;
 /// The promises a captain makes, and whether they end up kept (issue #1029) —
 /// a pure record whose resolution writes campaign flags, carrying no queue and
 /// no evaluator of its own.

@@ -86,6 +86,7 @@ fn portable_artifact(scenario: &str, versions: &vellum_save::Versions) -> String
                 selected_ship: "assets/entities/alliance_cruiser.toml".into(),
                 fleet: crate::lockstep::FleetRoster::default(),
                 game_start_entity_uuids: vec![crate::snapshot::GameStartEntityUuid {
+                    authored_slot_id: None,
                     authored_index: 0,
                     entity_uuid: "00000000-0000-8000-8000-000000000000".into(),
                 }],
@@ -139,6 +140,7 @@ fn catalogue_row(
                 selected_ship: "assets/entities/alliance_cruiser.toml".into(),
                 fleet: crate::lockstep::FleetRoster::default(),
                 game_start_entity_uuids: vec![crate::snapshot::GameStartEntityUuid {
+                    authored_slot_id: None,
                     authored_index: 0,
                     entity_uuid: "00000000-0000-8000-8000-000000000000".into(),
                 }],
@@ -597,6 +599,7 @@ fn browser_resume_refuses_a_different_selected_hull_before_staging() {
                 selected_ship: "assets/entities/alliance_destroyer.toml".into(),
                 fleet: crate::lockstep::FleetRoster::default(),
                 game_start_entity_uuids: vec![crate::snapshot::GameStartEntityUuid {
+                    authored_slot_id: None,
                     authored_index: 0,
                     entity_uuid: "00000000-0000-8000-8000-000000000000".into(),
                 }],
@@ -740,6 +743,7 @@ fn portable_import_applies_the_non_default_hull_gate_before_staging() {
                 selected_ship: "assets/entities/alliance_cruiser.toml".into(),
                 fleet: crate::lockstep::FleetRoster::default(),
                 game_start_entity_uuids: vec![crate::snapshot::GameStartEntityUuid {
+                    authored_slot_id: None,
                     authored_index: 0,
                     entity_uuid: "00000000-0000-8000-8000-000000000000".into(),
                 }],

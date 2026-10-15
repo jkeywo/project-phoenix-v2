@@ -47,6 +47,7 @@ fn artifact(versions: vellum_save::Versions) -> String {
                 selected_ship: HULL.into(),
                 fleet: crate::lockstep::FleetRoster::default(),
                 game_start_entity_uuids: vec![crate::snapshot::GameStartEntityUuid {
+                    authored_slot_id: None,
                     authored_index: 0,
                     entity_uuid: "00000000-0000-8000-8000-000000000000".into(),
                 }],

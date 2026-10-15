@@ -134,6 +134,8 @@ pub fn handle_dispatch_repair_team(
     mut ship_query: Query<
         (
             &AdmittedCommands,
+            Option<&crate::entities::spawner::EntityUuid>,
+            Option<&crate::ship_slots::AuthoredShipSlotId>,
             &crate::ship_plugin::ShipConfigComponent,
             &mut ShipRepairTeams,
             Option<&crate::entities::spawner::EntitySystemHull>,
@@ -150,10 +152,37 @@ pub fn handle_dispatch_repair_team(
         With<crate::server_app::Ship>,
     >,
     mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
+    mut world_runtime: Option<ResMut<crate::world::server::WorldContentRuntime>>,
+    tick: Option<Res<crate::sim_tick::SimTick>>,
+    base_world: Option<Res<crate::world::config::WorldConfig>>,
 ) {
-    for (admitted, ship_config, mut teams, hull_opt, _external_dispatch, physical) in
+    for (admitted, actor, slot, ship_config, mut teams, hull_opt, _external_dispatch, physical) in
         ship_query.iter_mut()
     {
+        if let (Some(runtime), Some(actor), Some(tick), Some(base)) = (
+            world_runtime.as_deref_mut(),
+            actor,
+            tick.as_ref(),
+            base_world.as_deref(),
+        ) {
+            crate::world::activities::arm_for_actor(
+                runtime,
+                base,
+                &actor.0,
+                slot.map(|id| id.0.as_str()),
+                tick.0,
+                |binding| {
+                    let Some(damage) = physical else { return false };
+                    crate::world::activities::repair_binding_supported(
+                        binding,
+                        &ship_config.0,
+                        damage,
+                        &teams.0.job_state().jobs.owner,
+                        teams.0.job_state().jobs.teams.len(),
+                    )
+                },
+            );
+        }
         let abroad = teams.0.external_team();
         // Look up a human-readable display name for a SystemId. Prefer the
         // ship's `EntitySystemHull` entry (populated from TOML with the
@@ -229,9 +258,27 @@ pub fn handle_dispatch_repair_team(
                         RepairTarget::Work(target) => Some(target.clone()),
                         _ => None,
                     };
-                    teams
-                        .0
-                        .dispatch_physical(*team_idx as usize, sid, exact, display)
+                    let accepted = teams.0.dispatch_physical_job(
+                        *team_idx as usize,
+                        sid,
+                        exact.clone(),
+                        display,
+                    );
+                    if let (Some(job), Some(runtime), Some(actor), Some(tick)) =
+                        (accepted, world_runtime.as_deref_mut(), actor, tick.as_ref())
+                    {
+                        if let Err(error) = runtime.situations.accept_repair(
+                            &actor.0,
+                            &teams.0.job_state().jobs.owner,
+                            u32::from(*team_idx),
+                            repair_target,
+                            job,
+                            tick.0,
+                        ) {
+                            warn!(%error, "Accepted Repair job could not bind its activity");
+                        }
+                    }
+                    accepted.is_some()
                 } else {
                     teams.0.dispatch(*team_idx as usize, sid, display);
                     true
@@ -250,7 +297,7 @@ pub fn handle_dispatch_repair_team(
     }
 }
 
-fn resolve_physical_repair_target(
+pub(crate) fn resolve_physical_repair_target(
     target: &RepairTarget,
     config: &crate::ship::config::ShipConfig,
     damage: &crate::ship::compartment_damage::ShipDamage,

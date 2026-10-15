@@ -6,6 +6,7 @@ use super::*;
 /// gate is what refuses, not a `match` arm here.
 pub(super) fn world_event_from_record(row: &WorldEventRecord) -> Option<WorldEvent> {
     Some(match row.kind {
+        13 => WorldEvent::Activity(row.activity.clone()?),
         12 => {
             let valid = |value: &str| {
                 !value.is_empty() && value.len() <= 128 && !value.chars().any(char::is_control)
@@ -701,6 +702,7 @@ pub(super) fn restore_scenario(
             .iter()
             .map(|(uuid, fraction)| (uuid.clone(), *fraction))
             .collect();
+        runtime.situations = stored.situations.clone();
         runtime.pending_world_events = stored
             .pending_events
             .iter()

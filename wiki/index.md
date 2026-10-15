@@ -56,6 +56,7 @@ Current implementation orientation only. For intended design use
 - [Science Plugin](./concepts/science-plugin.md)
 - [Modifier Coordination](./concepts/modifier-coordination.md)
 - [Objectives](./concepts/objectives.md)
+- [Activity Contracts](./concepts/activity-contracts.md) — scoped committed Repair/delivery evidence and Scenario effect frontiers
 - [Red Alert Runtime](./concepts/red-alert-intent.md)
 - [Asteroid Field](./concepts/asteroid-field.md)
 - [Information Parity](./concepts/information-parity-audit.md)

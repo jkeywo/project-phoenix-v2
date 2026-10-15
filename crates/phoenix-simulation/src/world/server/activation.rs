@@ -381,6 +381,9 @@ pub(crate) fn init_world_runtime(
     let Some(world_config) = world_config else {
         return;
     };
+    runtime.situations = Default::default();
+    runtime.situation_definitions = world_config.situation_definitions.clone();
+    runtime.situation_configs = world_config.situations.clone();
 
     // The mission clock is NOT anchored here. Loading the world and starting
     // the mission are different moments - the lobby sits between them - and

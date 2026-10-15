@@ -348,6 +348,7 @@ pub(super) fn capture_scenario(world: &World) -> Option<ScenarioState> {
     observed_hull_fractions.sort_by(|a, b| a.0.cmp(&b.0));
 
     Some(ScenarioState {
+        situations: runtime.situations.clone(),
         mission_elapsed,
         triggers,
         entity_groups,
@@ -449,6 +450,10 @@ pub(super) fn capture_comms(world: &World) -> Option<CommsState> {
 pub(super) fn world_event_record(event: &WorldEvent) -> WorldEventRecord {
     let mut row = WorldEventRecord::default();
     match event {
+        WorldEvent::Activity(fact) => {
+            row.kind = 13;
+            row.activity = Some(fact.clone());
+        }
         WorldEvent::Enquiry {
             target_uuid,
             observer_uuid,

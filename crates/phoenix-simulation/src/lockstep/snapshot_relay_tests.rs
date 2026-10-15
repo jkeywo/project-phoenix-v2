@@ -74,6 +74,7 @@ fn reconnect_record_stages_exact_game_start_ids_before_requesting_the_phase() {
     source.insert_resource(crate::lockstep::FleetRoster::default());
     source.insert_resource(crate::server_app::GameStartEntityUuids(vec![
         crate::snapshot::GameStartEntityUuid {
+            authored_slot_id: None,
             authored_index: 0,
             entity_uuid: entity_uuid.clone(),
         },
@@ -119,6 +120,7 @@ fn reconnect_record_stages_exact_game_start_ids_before_requesting_the_phase() {
     assert_eq!(
         boot.game_start_entity_uuids,
         vec![crate::snapshot::GameStartEntityUuid {
+            authored_slot_id: None,
             authored_index: 0,
             entity_uuid,
         }]

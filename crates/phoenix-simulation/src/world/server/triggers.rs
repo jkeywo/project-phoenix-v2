@@ -118,12 +118,16 @@ pub(crate) fn collect_world_events(
     mut runtime: ResMut<WorldContentRuntime>,
     mut buffer: ResMut<WorldEventBuffer>,
     time: Option<Res<bevy::time::Time>>,
+    tick: Option<Res<crate::sim_tick::SimTick>>,
     hulls: Query<(
         &crate::entities::spawner::EntityUuid,
         Option<&crate::entities::spawner::EntitySystemHull>,
         Option<&crate::ship::compartment_damage::ShipDamage>,
     )>,
 ) {
+    if let Some(tick) = tick {
+        crate::world::activities::acknowledge_pending(&mut runtime, tick.0);
+    }
     let mut world_events: Vec<WorldEvent> = Vec::new();
     for ev in ai_events.attacked.read() {
         world_events.push(WorldEvent::Attacked {
@@ -184,7 +188,13 @@ pub(crate) fn collect_world_events(
     // is a read: it keeps event-free ticks from marking WorldContentRuntime
     // changed via a no-op DerefMut.
     if !runtime.pending_world_events.is_empty() {
-        world_events.append(&mut runtime.pending_world_events);
+        for event in std::mem::take(&mut runtime.pending_world_events) {
+            if crate::world::activities::is_activity(&event) {
+                runtime.pending_world_events.push(event);
+            } else {
+                world_events.push(event);
+            }
+        }
     }
     let elapsed_secs = time.as_ref().and_then(|t| {
         runtime
@@ -254,6 +264,7 @@ pub(crate) fn tick_trigger_pipeline(
     // filesystem — reproducing the old cfg-split inline block on both targets.
     let template_loader = crate::entities::loader::WasmTemplateLoader;
     if buffer.0.is_empty()
+        && runtime.situations.ready(&runtime.situation_definitions).is_empty()
         && runtime.pending_delayed_actions.is_empty()
         && runtime.pending_gm_event_fires.is_empty()
         && runtime.pending_gm_spawns.is_empty()
@@ -559,12 +570,44 @@ pub(crate) fn tick_trigger_pipeline(
             ));
         }
 
-        if fired.is_empty() {
+        // Scenario lowering joins the same dispatch/application body. Its
+        // private evidence never appears as an event for legacy callbacks.
+        let mut dispatches: Vec<_> = fired.into_iter().map(|fired| (fired, None)).collect();
+        for activation in runtime.situations.ready(&runtime.situation_definitions) {
+            if let Some(call) = &activation.call {
+                dispatches.push((
+                    phoenix_sim_world::world::trigger_registry::FiredWorldTrigger {
+                        trigger_id: None,
+                        handler: Some(
+                            phoenix_sim_world::world::trigger_registry::ScriptHandlerRef {
+                                script_path: call.script.clone(),
+                                fn_name: call.function.clone(),
+                            },
+                        ),
+                        context: crate::world::content::FiredTrigger {
+                            origin_layer: None,
+                            entity_name: None,
+                        },
+                    },
+                    Some(activation),
+                ));
+            } else {
+                runtime
+                    .situations
+                    .finish_activation(
+                        &activation,
+                        phoenix_sim_world::world::activities::ScenarioCallResult::Applied,
+                        &runtime.situation_definitions,
+                    )
+                    .expect("ready closed Scenario transition");
+            }
+        }
+        if dispatches.is_empty() {
             break;
         }
 
         let mut next_events: Vec<WorldEvent> = Vec::new();
-        for fired in fired {
+        for (fired, activation) in dispatches {
             let handler = fired.handler;
             let ft = fired.context;
             let origin = handler
@@ -609,21 +652,35 @@ pub(crate) fn tick_trigger_pipeline(
                         script_path: &h.script_path,
                         function: &h.fn_name,
                     };
-                    let effects = match sr.invoke_effects(
-                        &context,
-                        runtime,
-                        world_layers.layer_map.as_deref(),
-                    ) {
-                        Ok(effects) => Some(effects),
-                        Err(_) => {
-                            bevy::log::warn!(
-                                "tick_trigger_pipeline: scripted handler '{}' names a missing unit '{}'",
-                                    h.fn_name, h.script_path
-                            );
-                            None
+                    let effects = if let Some(activation) = &activation {
+                        match sr.invoke_situation_effects(
+                            &context,
+                            runtime,
+                            world_layers.layer_map.as_deref(),
+                            activation,
+                        ) {
+                            Ok(effects) => effects,
+                            Err(error) => {
+                                bevy::log::warn!(instance=%activation.instance,%error,"Scenario call refused; buffered effects discarded");
+                                runtime.situations.finish_activation(activation, phoenix_sim_world::world::activities::ScenarioCallResult::Refused, &runtime.situation_definitions).expect("ready Scenario refusal");
+                                None
+                            }
+                        }
+                    } else {
+                        match sr.invoke_effects(
+                            &context,
+                            runtime,
+                            world_layers.layer_map.as_deref(),
+                        ) {
+                            Ok(effects) => Some(effects),
+                            Err(_) => {
+                                bevy::log::warn!("tick_trigger_pipeline: scripted handler '{}' names a missing unit '{}'",h.fn_name,h.script_path);
+                                None
+                            }
                         }
                     };
                     if let Some(effects) = effects {
+                        let completed = effects.completed;
                         apply_script_call(
                             effects,
                             context,
@@ -655,8 +712,23 @@ pub(crate) fn tick_trigger_pipeline(
                                 .unwrap_or(&empty_anchors),
                             &mut effect_queues.out(),
                         );
+                        if completed {
+                            if let Some(activation) = &activation {
+                                runtime.situations.finish_activation(activation, phoenix_sim_world::world::activities::ScenarioCallResult::Applied, &runtime.situation_definitions).expect("applied Scenario activation");
+                            }
+                        }
                     }
                 }
+            } else if let Some(activation) = &activation {
+                bevy::log::warn!(instance=%activation.instance,"Scenario call refused: no accepted script runtime");
+                runtime
+                    .situations
+                    .finish_activation(
+                        activation,
+                        phoenix_sim_world::world::activities::ScenarioCallResult::Refused,
+                        &runtime.situation_definitions,
+                    )
+                    .expect("ready Scenario missing-runtime refusal");
             }
         }
 

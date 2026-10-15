@@ -1300,6 +1300,11 @@ pub struct LayerFlags {
 /// them by re-running the same layer loads.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ScenarioState {
+    #[serde(
+        default,
+        skip_serializing_if = "phoenix_sim_world::world::activities::SituationInstances::is_empty"
+    )]
+    pub situations: phoenix_sim_world::world::activities::SituationInstances,
     /// Exact mission age; None before the mission clock is anchored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mission_elapsed: Option<std::time::Duration>,
@@ -1568,6 +1573,9 @@ pub struct ScenarioState {
 /// [`ControlState::impulse_phase`] states.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WorldEventRecord {
+    /// Tag13 is a retained bound physical activity fact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<phoenix_model::activity::ActivityFact>,
     /// `0` Destroyed, `1` Attacked, `2` HullDroppedBelow, `3` TimerElapsed,
     /// `4` Hailed, `5` FlagSet, `6` FlagCleared, `7` WorldLoaded,
     /// `8` EnteredRegion, `9` ExitedRegion, `10` WaypointReached, `11` Disabled.
@@ -1800,6 +1808,9 @@ pub struct SnapshotReportRow {
 pub struct GameStartEntityUuid {
     pub authored_index: u32,
     pub entity_uuid: String,
+    /// Immutable actual launch placement, including after this actor is gone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authored_slot_id: Option<String>,
 }
 
 /// The choices that determine which authored player-ship world is built before

@@ -39,6 +39,11 @@ impl MissionClock {
 /// `crate::comms::server::CommsRuntime` (issue #816).
 #[derive(Resource, Default)]
 pub struct WorldContentRuntime {
+    /// Scenario-private bindings/evidence; no physical machinery copies.
+    pub situations: phoenix_sim_world::world::activities::SituationInstances,
+    /// Immutable authored definitions, rebuilt from accepted content.
+    pub situation_definitions: Vec<phoenix_sim_world::world::activities::SituationDefinition>,
+    pub situation_configs: Vec<phoenix_sim_world::world::activities::SituationConfig>,
     /// Ordered continuation/handler pairs and their observer generation.
     pub triggers: crate::world::trigger_registry::WorldTriggerRegistry,
     /// Named-entity → UUID mapping (populated from `WorldConfig.name_to_uuid`).

@@ -93,6 +93,7 @@ fn run_in_scenario(tick: u64, scenario: &str, current: vellum_save::Versions) ->
                 selected_ship: "assets/entities/alliance_cruiser.toml".into(),
                 fleet: crate::lockstep::FleetRoster::default(),
                 game_start_entity_uuids: vec![crate::snapshot::GameStartEntityUuid {
+                    authored_slot_id: None,
                     authored_index: 0,
                     entity_uuid: "00000000-0000-8000-8000-000000000000".into(),
                 }],

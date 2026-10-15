@@ -515,7 +515,7 @@ pub fn tick_repair_teams(
                 .zip(personnel_state)
                 .map(|(profile, state)| state.repair_work_multipliers(profile, teams.0.job_state()))
                 .unwrap_or_default();
-            teams.0.tick_physical_with_expertise(
+            let committed = teams.0.tick_physical_with_expertise(
                 dt * modifiers.get(&ModifierSlot::RepairRate),
                 &mut damage.state,
                 &blocked,
@@ -555,6 +555,17 @@ pub fn tick_repair_teams(
                     })
                 },
             );
+            if let (Some(runtime), Some(uuid), Some(tick)) =
+                (world_runtime.as_deref_mut(), ship_uuid, tick.as_ref())
+            {
+                crate::world::activities::record(
+                    runtime,
+                    &uuid.0,
+                    &teams.0.job_state().jobs.owner,
+                    tick.0,
+                    committed.outcomes,
+                );
+            }
             observed_rooms.extend(physical_on_site_rooms(&teams.0));
             if let (Some(queue), Some(config)) = (queue.as_deref_mut(), config) {
                 for (id, room) in &damage.definition.interior.placements {
@@ -1862,3 +1873,7 @@ fn physical_on_site_rooms(teams: &RepairTeams) -> std::collections::BTreeSet<Str
 #[cfg(test)]
 #[path = "physical_server_tests.rs"]
 mod physical_tests;
+
+#[cfg(test)]
+#[path = "activity_tests.rs"]
+mod activity_tests;

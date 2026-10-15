@@ -1,4 +1,5 @@
 pub use phoenix_sim_contracts::flags;
+pub mod activities;
 pub mod commitments;
 pub mod config;
 pub mod contact_render_config;

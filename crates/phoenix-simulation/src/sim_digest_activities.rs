@@ -1,0 +1,185 @@
+//! The same World evidence and progression owner as the snapshot payload.
+use super::*;
+use phoenix_model::{
+    activity::*,
+    damage::{ComponentCondition, RepairWorkTarget},
+    job::JobOutcome,
+};
+use phoenix_sim_world::world::activities::*;
+fn outcome(acc: u64, value: JobOutcome) -> u64 {
+    fold_u64(
+        acc,
+        match value {
+            JobOutcome::Completed => 0,
+            JobOutcome::Cancelled => 1,
+            JobOutcome::Failed => 2,
+        },
+    )
+}
+fn target(mut acc: u64, value: &RepairWorkTarget) -> u64 {
+    match value {
+        RepairWorkTarget::Compartment { compartment } => {
+            acc = fold_u64(acc, 0);
+            fold_str(acc, compartment)
+        }
+        RepairWorkTarget::Component { system, component } => {
+            acc = fold_u64(acc, 1);
+            acc = fold_str(acc, &system.0);
+            fold_str(acc, component)
+        }
+    }
+}
+fn condition(mut acc: u64, value: &ComponentCondition) -> u64 {
+    match value {
+        ComponentCondition::Healthy => fold_u64(acc, 0),
+        ComponentCondition::Damaged => fold_u64(acc, 1),
+        ComponentCondition::Destroyed => fold_u64(acc, 2),
+        ComponentCondition::Patched { factor } => {
+            acc = fold_u64(acc, 3);
+            fold_f32(acc, *factor)
+        }
+    }
+}
+fn scope(mut acc: u64, value: &ActivityJob) -> u64 {
+    acc = fold_str(acc, &value.actor);
+    acc = fold_str(acc, &value.owner.0);
+    fold_u64(acc, value.job.0)
+}
+fn request_target(mut acc: u64, value: &phoenix_model::messages::RepairTarget) -> u64 {
+    use phoenix_model::messages::RepairTarget;
+    match value {
+        RepairTarget::Work(work) => target(fold_u64(acc, 0), work),
+        RepairTarget::Station(id) => {
+            acc = fold_u64(acc, 1);
+            fold_str(acc, &id.0)
+        }
+        RepairTarget::Console(id) => {
+            acc = fold_u64(acc, 2);
+            fold_str(acc, &id.0)
+        }
+        RepairTarget::System(id) => {
+            acc = fold_u64(acc, 3);
+            fold_str(acc, &id.0)
+        }
+        RepairTarget::Core => fold_u64(acc, 4),
+        RepairTarget::External => fold_u64(acc, 5),
+    }
+}
+pub(super) fn fact(mut acc: u64, value: &ActivityFact) -> u64 {
+    acc = fold_str(acc, &value.instance);
+    acc = scope(acc, &value.scope);
+    acc = fold_u64(acc, value.tick);
+    match &value.outcome {
+        ActivityOutcome::RepairAchieved {
+            stage,
+            target: work,
+            remedy,
+            result,
+        } => {
+            acc = fold_u64(acc, 0);
+            acc = fold_u64(acc, *stage);
+            acc = target(acc, work);
+            acc = fold_str(acc, remedy);
+            match result {
+                RepairAchievement::Structure { restored_hp } => {
+                    acc = fold_u64(acc, 0);
+                    fold_u64(acc, restored_hp.to_bits())
+                }
+                RepairAchievement::Component { before, after } => {
+                    acc = fold_u64(acc, 1);
+                    acc = condition(acc, before);
+                    condition(acc, after)
+                }
+            }
+        }
+        ActivityOutcome::RepairSettled { outcome: value } => outcome(fold_u64(acc, 1), *value),
+        ActivityOutcome::Delivery {
+            source,
+            destination,
+            commodity,
+            amount,
+            returned,
+            outcome: value,
+        } => {
+            acc = fold_u64(acc, 2);
+            acc = fold_str(acc, source);
+            acc = fold_str(acc, destination);
+            acc = fold_str(acc, commodity);
+            acc = fold_u64(acc, *amount as u64);
+            acc = fold_u64(acc, u64::from(*returned));
+            outcome(acc, *value)
+        }
+    }
+}
+pub(super) fn instances(mut acc: u64, values: &SituationInstances) -> u64 {
+    acc = fold_str(acc, "scenario-activities");
+    acc = fold_u64(acc, values.instances.len() as u64);
+    for (id, value) in &values.instances {
+        acc = fold_str(acc, id);
+        acc = fold_str(acc, &value.definition);
+        acc = fold_str(acc, value.request.actor());
+        acc = fold_str(acc, &value.request.owner().0);
+        match &value.request {
+            ActivityRequest::Repair {
+                team,
+                request,
+                target: work,
+                goal,
+                ..
+            } => {
+                acc = fold_u64(acc, 0);
+                acc = fold_u64(acc, *team as u64);
+                acc = request_target(acc, request);
+                acc = target(acc, work);
+                acc = fold_u64(
+                    acc,
+                    match goal {
+                        RepairGoal::Structure => 0,
+                        RepairGoal::Patch => 1,
+                        RepairGoal::Full => 2,
+                    },
+                );
+            }
+            ActivityRequest::Delivery {
+                source,
+                destination,
+                commodity,
+                amount,
+                ..
+            } => {
+                acc = fold_u64(acc, 1);
+                acc = fold_str(acc, source);
+                acc = fold_str(acc, destination);
+                acc = fold_str(acc, commodity);
+                acc = fold_u64(acc, *amount as u64);
+            }
+        }
+        acc = fold_u64(acc, value.armed_tick);
+        acc = fold_optional_u64(acc, value.accepted_tick);
+        if let Some(value) = &value.accepted {
+            acc = scope(fold_u64(acc, 1), value);
+        } else {
+            acc = fold_u64(acc, 0);
+        }
+        for value in [&value.achieved, &value.settled] {
+            if let Some(value) = value {
+                acc = fact(fold_u64(acc, 1), value);
+            } else {
+                acc = fold_u64(acc, 0);
+            }
+        }
+        acc = fold_optional_str(acc, value.state.as_deref());
+        acc = fold_u64(acc, value.activations.len() as u64);
+        for (state, result) in &value.activations {
+            acc = fold_str(acc, state);
+            acc = fold_u64(
+                acc,
+                match result {
+                    ScenarioCallResult::Applied => 0,
+                    ScenarioCallResult::Refused => 1,
+                },
+            );
+        }
+    }
+    acc
+}

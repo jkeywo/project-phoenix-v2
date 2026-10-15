@@ -763,6 +763,9 @@ pub(crate) fn spawn_game_start_entities(
         game_start_entity_uuids.push(crate::snapshot::GameStartEntityUuid {
             authored_index,
             entity_uuid: uuid,
+            authored_slot_id: placement
+                .as_ref()
+                .and_then(|placement| placement.authored_slot_id.map(str::to_owned)),
         });
 
         // The authored narrative mark (issue #1338), attached on this path for

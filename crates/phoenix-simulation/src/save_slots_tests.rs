@@ -128,6 +128,7 @@ fn stored_run(
                 selected_ship: "assets/entities/alliance_cruiser.toml".into(),
                 fleet: crate::lockstep::FleetRoster::default(),
                 game_start_entity_uuids: vec![crate::snapshot::GameStartEntityUuid {
+                    authored_slot_id: None,
                     authored_index: 0,
                     entity_uuid: "00000000-0000-8000-8000-000000000000".into(),
                 }],
@@ -183,11 +184,13 @@ fn current_format_refuses_malformed_game_start_identity_maps() {
     let mut out_of_order = base.clone();
     boot_identity_mut(&mut out_of_order).game_start_entity_uuids = vec![
         crate::snapshot::GameStartEntityUuid {
+            authored_slot_id: None,
             authored_index: 2,
             entity_uuid: crate::world_id::WorldId::new(crate::world_id::IdNamespace::Entity, 0, 2)
                 .render(),
         },
         crate::snapshot::GameStartEntityUuid {
+            authored_slot_id: None,
             authored_index: 1,
             entity_uuid: crate::world_id::WorldId::new(crate::world_id::IdNamespace::Entity, 0, 1)
                 .render(),
@@ -202,6 +205,7 @@ fn current_format_refuses_malformed_game_start_identity_maps() {
     boot_identity_mut(&mut repeated)
         .game_start_entity_uuids
         .push(crate::snapshot::GameStartEntityUuid {
+            authored_slot_id: None,
             authored_index: 1,
             entity_uuid: repeated_uuid,
         });
@@ -619,6 +623,7 @@ fn listing_filters_sidecars_and_is_stably_ordered_from_run_ticks() {
                 selected_ship: "assets/entities/alliance_cruiser.toml".into(),
                 fleet: crate::lockstep::FleetRoster::default(),
                 game_start_entity_uuids: vec![crate::snapshot::GameStartEntityUuid {
+                    authored_slot_id: None,
                     authored_index: 0,
                     entity_uuid: "00000000-0000-8000-8000-000000000000".into(),
                 }],

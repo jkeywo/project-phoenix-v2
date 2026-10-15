@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "activity_snapshot_tests.rs"]
+mod activities;
+
 fn fixture() -> (World, Entity, PhoenixSnapshot) {
     let config = crate::entities::include_resolve::load_entity_config(
         "assets/entities/personnel_cruiser.toml",

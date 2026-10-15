@@ -7,6 +7,9 @@ use crate::lobby::LobbyPlugin;
 use crate::world::content::TriggerCondition;
 use crate::world_id::InstallWorldIdMint;
 
+#[path = "activity_server_tests.rs"]
+mod activities;
+
 // ── Embedded Rhai script fixtures (issues #984/#1033, hoisted #1191) ──────
 //
 // Each constant is the exact literal a test used to author inline —

@@ -348,6 +348,11 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     "phoenix_simulation::ship::state::ShipViewMode",
     "phoenix_simulation::world::server::PendingScenarioLoad",
     "phoenix_simulation::world::server::WorldContentRuntime",
+    // 22A adds fields, not ECS owners: situations holds accepted bindings,
+    // fixed evidence slots and activation frontiers; pending_world_events
+    // retains bound facts until acknowledgement. Both are captured and folded
+    // by the existing Scenario payload/schedule walk. situation_definitions
+    // and situation_configs are immutable accepted content, rebuilt at boot.
     // The Rhai scripting seam (issue #984, Rhai M6 phase 2a/2b). Both are
     // authoritative and PARTLY folded since issue #1086 — see the paragraph at
     // the end of this block for exactly which fields moved into the fold and why

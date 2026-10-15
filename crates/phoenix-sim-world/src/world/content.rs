@@ -29,6 +29,9 @@ use crate::world::flags::FlagStore;
 /// A world event that triggers can react to.
 #[derive(Clone, Debug, PartialEq)]
 pub enum WorldEvent {
+    /// Bound physical commit; retained pending until its situation acknowledges.
+    /// Legacy trigger callbacks never receive this private adapter fact.
+    Activity(phoenix_model::activity::ActivityFact),
     Enquiry {
         target_uuid: String,
         observer_uuid: String,

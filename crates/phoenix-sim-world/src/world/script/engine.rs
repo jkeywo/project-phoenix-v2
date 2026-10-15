@@ -474,6 +474,49 @@ impl RuntimeHost {
         }
     }
 
+    /// Scenario calls require a declared refusal result instead of the legacy
+    /// dev panic policy. The same sandbox, buffers and shared budget apply.
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_call_scoped_budgeted(
+        &self,
+        budget: &mut TickBudget,
+        clock: &SchedClock,
+        ast: &AST,
+        path: &str,
+        fn_name: &str,
+        flag_chain: &[FlagStore],
+        base_deadlines: &DeadlineTable,
+        base_commitments: &CommitmentLedger,
+        base_evidence: &EvidenceLog,
+        origin_layer: Option<&str>,
+        extra: Map,
+    ) -> Result<Option<CallEffects>, vellum_script::CallError> {
+        if !budget.admit_call() {
+            return Ok(None);
+        }
+        match self.try_call_scoped(
+            clock,
+            ast,
+            path,
+            fn_name,
+            flag_chain,
+            base_deadlines,
+            base_commitments,
+            base_evidence,
+            origin_layer,
+            extra,
+        ) {
+            Ok((effects, ops)) => {
+                budget.charge_ops(ops);
+                Ok(Some(effects))
+            }
+            Err(error) => {
+                budget.charge_ops(self.ops_counter.load(Ordering::Relaxed));
+                Err(error)
+            }
+        }
+    }
+
     /// Like [`call`](RuntimeHost::call) but without the budget or the
     /// panic/discard policy: returns the error, and — on success — the call's
     /// effects plus the operation count it consumed (for the caller to charge to

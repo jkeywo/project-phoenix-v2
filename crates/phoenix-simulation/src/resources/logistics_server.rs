@@ -215,7 +215,7 @@ fn dispatch_order(
     mut inventory: Option<&mut InfrastructureCondition>,
     mut torpedoes: Option<&mut TorpedoSystemResource>,
     flags: &mut Vec<FlagChange>,
-) -> Result<(), String> {
+) -> Result<phoenix_model::job::JobId, String> {
     let stocks = endpoint_view(profile, inventory.as_deref(), torpedoes.as_deref())?;
     let destination = profile.store(&request.destination)?;
     let current = &stocks[&destination.endpoint];
@@ -230,25 +230,23 @@ fn dispatch_order(
     if amount <= 0 {
         return Err("local stock target has no remaining deficit".into());
     }
-    state
-        .dispatch(
-            profile,
-            tick,
-            &request.source,
-            &request.destination,
-            amount,
-            |action| {
-                let (quantity, edges) = transact(
-                    profile,
-                    action,
-                    inventory.as_deref_mut(),
-                    torpedoes.as_deref_mut(),
-                )?;
-                flags.extend(edges);
-                Ok(quantity)
-            },
-        )
-        .map(|_| ())
+    state.dispatch(
+        profile,
+        tick,
+        &request.source,
+        &request.destination,
+        amount,
+        |action| {
+            let (quantity, edges) = transact(
+                profile,
+                action,
+                inventory.as_deref_mut(),
+                torpedoes.as_deref_mut(),
+            )?;
+            flags.extend(edges);
+            Ok(quantity)
+        },
+    )
 }
 
 /// Additional load room after all capacity and shared-compartment commitments.
@@ -378,9 +376,11 @@ pub(crate) fn tick(
     tick: Res<crate::sim_tick::SimTick>,
     time: Res<Time>,
     mut runtime: Option<ResMut<crate::world::server::WorldContentRuntime>>,
+    base_world: Option<Res<crate::world::config::WorldConfig>>,
     mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
     mut ships: Query<(
         &crate::entities::spawner::EntityUuid,
+        Option<&crate::ship_slots::AuthoredShipSlotId>,
         &CompiledShipLogistics,
         &mut ShipLogistics,
         &AdmittedCommands,
@@ -399,6 +399,7 @@ pub(crate) fn tick(
     for uuid in order {
         let Some((
             _,
+            slot,
             profile,
             mut owner,
             admitted,
@@ -414,7 +415,19 @@ pub(crate) fn tick(
         else {
             continue;
         };
+        if let (Some(runtime), Some(base)) = (runtime.as_deref_mut(), base_world.as_deref()) {
+            crate::world::activities::arm_for_actor(
+                runtime,
+                base,
+                &uuid,
+                slot.map(|id| id.0.as_str()),
+                tick.0,
+                |binding| crate::world::activities::delivery_binding_supported(binding, &profile.0),
+            );
+        }
+        let mut accepted = Vec::new();
         let mut next = owner.0.clone();
+        let prior_batches = next.batches.clone();
         let mut next_inventory = inventory.as_deref().cloned();
         let mut next_torpedoes = torpedoes.as_deref().cloned();
         let mut next_power = power.as_deref().cloned();
@@ -470,10 +483,13 @@ pub(crate) fn tick(
                 })
             },
         );
-        if let Err(error) = advanced {
-            warn!(%uuid, %error, "Logistics step refused; staged stock and energy discarded");
-            continue;
-        }
+        let completed = match advanced {
+            Ok(result) => result.completed,
+            Err(error) => {
+                warn!(%uuid, %error, "Logistics step refused; staged stock and energy discarded");
+                continue;
+            }
+        };
         if offline || factor <= 0.0 {
             next.blocked = next
                 .batches
@@ -531,6 +547,9 @@ pub(crate) fn tick(
                             next_torpedoes.as_mut(),
                             &mut flags,
                         )
+                        .map(|job| {
+                            accepted.push(job);
+                        })
                     }
                 }
                 Control::ReturnDelivery { job } if target == &next.owner => {
@@ -562,7 +581,7 @@ pub(crate) fn tick(
             let permitted = config.0.observations_for_system(&next.owner, &boards.0);
             if let Some(SystemBlackboard::Logistics(board)) = permitted.get(&next.owner) {
                 if let Some(request) = &board.next_delivery {
-                    let _ = dispatch_order(
+                    if let Ok(job) = dispatch_order(
                         &profile.0,
                         &mut next,
                         tick.0,
@@ -570,7 +589,9 @@ pub(crate) fn tick(
                         next_inventory.as_mut(),
                         next_torpedoes.as_mut(),
                         &mut flags,
-                    );
+                    ) {
+                        accepted.push(job);
+                    }
                 }
             }
         }
@@ -585,6 +606,40 @@ pub(crate) fn tick(
             *owner = next;
         }
         if let Some(runtime) = runtime.as_deref_mut() {
+            for job in accepted {
+                if let Some(batch) = owner.0.batches.get(&job) {
+                    if let Ok(destination) = profile.0.store(&batch.original_destination) {
+                        if let Err(error) = runtime.situations.accept_delivery(
+                            &uuid,
+                            &owner.0.owner,
+                            &batch.source,
+                            &batch.original_destination,
+                            &destination.resource,
+                            batch.amount,
+                            job,
+                            tick.0,
+                        ) {
+                            warn!(%uuid, %error, "Accepted delivery could not bind its activity");
+                        }
+                    }
+                }
+            }
+            let outcomes = completed.into_iter().filter_map(|outcome| {
+                let batch = prior_batches.get(&outcome.id)?;
+                let destination = profile.0.store(&batch.original_destination).ok()?;
+                Some((
+                    outcome.id,
+                    phoenix_model::activity::ActivityOutcome::Delivery {
+                        source: batch.source.clone(),
+                        destination: outcome.destination,
+                        commodity: destination.resource.clone(),
+                        amount: outcome.amount,
+                        returned: outcome.returned,
+                        outcome: outcome.outcome,
+                    },
+                ))
+            });
+            crate::world::activities::record(runtime, &uuid, &owner.0.owner, tick.0, outcomes);
             if let Some(inventory) = inventory.as_deref() {
                 for capacity in inventory.0.capacities() {
                     runtime.flags.set_flag_value(&capacity.id, capacity.level);

@@ -1155,6 +1155,8 @@ fn a_beams_drawn_cooldown_survives_capture_and_restore() {
                 remaining_secs: DRAWN_REMAINING,
                 damage_accumulator: 0.125,
                 pending_cooldown_secs: DRAWN_COOLDOWN,
+                impact_sample: None,
+                impact_sample_target: None,
             },
         )]);
 

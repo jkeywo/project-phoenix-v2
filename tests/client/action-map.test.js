@@ -10,6 +10,7 @@ describe('ACTION_MAP', () => {
 
   it('contains exactly the supported action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
+      'cancel_craft_handling',
       'cancel_focused_scan',
       'cancel_impulse',
       'charge_blaster_cancel',
@@ -26,11 +27,13 @@ describe('ACTION_MAP', () => {
       'fire_torpedo',
       'hail',
       'helm_input',
+      'launch_craft',
       'load_tube',
       'order_civilian',
       'recall_external_repair',
       'recall_repair_team',
       'recall_security_team',
+      'recover_craft',
       'release_ship_slot',
       'release_tractor',
       'respond_to_message',

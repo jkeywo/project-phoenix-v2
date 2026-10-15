@@ -687,7 +687,7 @@ fn actual_paid_formation_acceptance_has_no_status_report_and_late_older_cannot_r
         .unwrap();
     let heard = messages(&app, "receiver")
         .into_iter()
-        .filter(|message| is_request(message))
+        .filter(|message| crate::comms::requests::is_request(message))
         .collect::<Vec<_>>();
     assert_eq!(heard.len(), 2);
     assert_eq!(

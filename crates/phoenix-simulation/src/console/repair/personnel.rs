@@ -11,15 +11,18 @@ pub(crate) fn register(app: &mut App) {
     use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
     app.declare_state::<CompiledPersonnel>(StateClass::Derived, "accepted-personnel-roster")
         .declare_state::<PersonnelState>(StateClass::Folded, "officer-physical-custody");
-    for payload in [
-        SystemControlPayloadDiscriminants::SetDutyOfficerPosting,
-        SystemControlPayloadDiscriminants::TreatDutyOfficer,
+    for payloads in [
+        &[SystemControlPayloadDiscriminants::SetDutyOfficerPosting]
+            as &'static [SystemControlPayloadDiscriminants],
+        &[SystemControlPayloadDiscriminants::TreatDutyOfficer]
+            as &'static [SystemControlPayloadDiscriminants],
     ] {
+        let payload = payloads[0];
         app.register_admitted_consumer(
             ConsumerMatcher::kind_payload(crate::ship::system_registry::REPAIR_KIND, payload)
                 .with_feedback(
                     crate::command_admission::FeedbackAddress::DeclaredKindOnly,
-                    &[payload],
+                    payloads,
                 ),
         );
     }

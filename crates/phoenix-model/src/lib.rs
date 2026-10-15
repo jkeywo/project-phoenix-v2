@@ -24,6 +24,8 @@ pub mod job;
 pub mod logistics;
 pub mod production;
 pub mod production_ui;
+pub mod ports;
+pub mod ports_ui;
 pub mod recovery;
 pub mod recovery_ui;
 

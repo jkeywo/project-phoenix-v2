@@ -6,7 +6,7 @@ name = "Partial entity include regression"
 
 [pack.requires]
 content_id = "phoenix-base"
-content_epoch = 3
+content_epoch = 4
 
 [[scenario]]
 id = "partial_include"

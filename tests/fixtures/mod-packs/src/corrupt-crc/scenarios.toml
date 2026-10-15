@@ -18,7 +18,7 @@ name = "Corrupt CRC"
 
 [pack.requires]
 content_id = "phoenix-base"
-content_epoch = 3
+content_epoch = 4
 
 [[scenario]]
 id = "corrupt_arena"

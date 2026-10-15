@@ -871,12 +871,21 @@ fn ac5_reviewer_answers_match_the_pasm_record() {
         authoritative.contains("ShipAiTreeRuntime"),
         "reactor and shield private tree continuation must remain in the authoritative fold"
     );
+    assert!(
+        authoritative.contains("PortProviderState"),
+        "per-visitor physical port quotas must remain in the authoritative fold"
+    );
     let excluded = census_excluded_short_names(&app);
     assert!(
         excluded.contains("ShipAiTreePrograms"),
         "immutable compiled reactor/shield programs must be declared derived, not unclassified"
     );
     assert!(!authoritative.contains("ShipAiTreePrograms"));
+    assert!(
+        excluded.contains("CompiledPortService"),
+        "port terms are reconstructed from authored content"
+    );
+    assert!(!authoritative.contains("CompiledPortService"));
     // RenderInterp OUT: it must never be declared authoritative. It is declared
     // `Presentation` at `RendererPlugin::build`, a plugin the headless run never
     // adds, so it never registers here (see `census_excluded_short_names` above),

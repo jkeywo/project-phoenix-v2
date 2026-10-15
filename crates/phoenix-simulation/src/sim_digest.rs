@@ -426,6 +426,7 @@ pub fn state_digest(app: &App) -> u64 {
 /// its world from Rust literals — folds to precisely the number it folded before
 /// the widening, so `tests/fixtures/cross-target-ledger.json` is untouched.
 pub fn world_digest(world: &World) -> u64 {
+    crate::snapshot::assert_ports_settled(world);
     let mut acc = FOLD_SEED;
     for (_, fold) in FOLD_STAGES {
         acc = fold(world, acc);
@@ -461,6 +462,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("logistics", fold_logistics_namespace),
     ("production", fold_production_namespace),
     ("recovery", fold_recovery_namespace),
+    ("ports", fold_ports_namespace),
     ("physical-damage", fold_physical_damage_namespace),
     ("disablement-observation", fold_disablement_namespace),
 ];
@@ -2188,24 +2190,26 @@ fn fold_umbilical_namespace(world: &World, acc: u64) -> u64 {
         acc,
         "umbilical-namespace",
         |umbilical: &TransferUmbilical| {
+            let state = umbilical.save_state();
+            state
+                .port_order
+                .validate_settlement()
+                .expect("port order receipts must settle before deterministic fold");
+            if let Some(flow) = &state.port_flow {
+                flow.validate_settlement()
+                    .expect("free port receipts must settle before deterministic fold");
+            }
             (umbilical.running
                 || umbilical.carry != 0.0
                 || umbilical.selected_resource != umbilical.config.capacity
-                || umbilical.selected_direction != umbilical.config.direction)
-                .then_some((
-                    umbilical.running,
-                    umbilical.carry,
-                    umbilical.selected_resource.clone(),
-                    umbilical.selected_direction,
-                ))
+                || umbilical.selected_direction != umbilical.config.direction
+                || umbilical.selected_store.is_some()
+                || umbilical.port_maintenance
+                || umbilical.port_order != Default::default()
+                || umbilical.port_flow.is_some())
+            .then_some(state)
         },
-        |acc, (running, carry, resource, direction)| {
-            let acc = fold_serde(acc, &direction);
-            fold_str(
-                fold_f32(fold_u64(acc, u64::from(running)), carry),
-                &resource,
-            )
-        },
+        |acc, state| fold_serde(acc, &state),
     )
 }
 
@@ -2544,6 +2548,15 @@ fn fold_recovery_namespace(world: &World, acc: u64) -> u64 {
                 .expect("recovery receipts must settle before deterministic fold");
             Some(owner.0.clone())
         },
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+fn fold_ports_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "ports",
+        |owner: &crate::resources::ports_server::PortProviderState| Some(owner.0.clone()),
         |acc, state| fold_serde(acc, &state),
     )
 }

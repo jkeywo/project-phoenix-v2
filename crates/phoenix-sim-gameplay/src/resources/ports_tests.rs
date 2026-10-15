@@ -315,6 +315,12 @@ fn malformed_approval_is_atomic_and_positive_costs_do_not_create_authority() {
     let json = serde_json::to_value(&state).unwrap();
     assert!(json.get("stock").is_none());
     assert!(json.get("authority").is_none());
+    let mut invented = order();
+    invented.lines[0].delivered_lots = 1;
+    assert!(
+        invented.validate(&profile(), 3).is_err(),
+        "no execution/receipt frontier can never have delivered goods"
+    );
 }
 
 #[test]

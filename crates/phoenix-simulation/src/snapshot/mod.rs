@@ -339,7 +339,11 @@ use application::restore_npc_frequency_matches;
 use application::restore_run_scope;
 use application::validate_entity_repair_jobs;
 
+mod ports;
 mod preflight;
+pub(crate) use ports::assert_settled as assert_ports_settled;
+#[cfg(test)]
+mod ports_tests;
 use preflight::inactive_layer_paths;
 use preflight::layer_topology_gap;
 use preflight::live_layer_topology;

@@ -46,6 +46,7 @@ pub(super) fn reduce_dialogue_node(message_id: &str, dialogue: &ActiveDialogue) 
 /// step have drawn and others have not, so "all six streams right now" is not a
 /// point any system agrees on.
 pub fn capture(world: &World) -> PhoenixSnapshot {
+    super::assert_ports_settled(world);
     let paused = world
         .get_resource::<crate::gm::actions::action::SimulationPaused>()
         .is_some_and(|paused| paused.0);
@@ -968,6 +969,14 @@ pub(super) fn capture_umbilicals(
     let state = entity
         .get::<crate::umbilical::TransferUmbilical>()?
         .save_state();
+    state
+        .port_order
+        .validate_settlement()
+        .expect("port order receipts must settle before snapshot capture");
+    if let Some(flow) = &state.port_flow {
+        flow.validate_settlement()
+            .expect("free port receipts must settle before snapshot capture");
+    }
     (state != crate::umbilical::UmbilicalSaveState::default()).then_some(state)
 }
 
@@ -1410,6 +1419,9 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                         .then(|| capture_arc_requests(entity))
                         .flatten(),
                     power: capture_power(entity),
+                    port_provider: entity
+                        .get::<crate::resources::ports_server::PortProviderState>()
+                        .map(|owner| owner.0.clone()),
                     recovery: entity
                         .get::<crate::resources::recovery_server::ShipRecovery>()
                         .map(|owner| {

@@ -330,6 +330,11 @@ impl PortOrderState {
     pub fn validate(&self, profile: &PortServiceConfig, snapshot_tick: u64) -> Result<(), String> {
         profile.validate()?;
         self.validate_settlement()?;
+        if self.last_tick == 0
+            && (self.fraction != 0.0 || self.lines.iter().any(|line| line.delivered_lots != 0))
+        {
+            return Err("unstarted port order cannot contain paid work or delivered lots".into());
+        }
         if self.last_tick > snapshot_tick
             || !self.fraction.is_finite()
             || !(0.0..1.0).contains(&self.fraction)

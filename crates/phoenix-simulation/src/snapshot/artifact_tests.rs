@@ -1,6 +1,64 @@
 use super::*;
 
 #[test]
+fn pre_port_snapshots_refuse_before_decoding_current_required_visits() {
+    let current = Versions::new(SNAPSHOT_FORMAT, SIMULATION_RULES, 0);
+    assert_eq!(SNAPSHOT_FORMAT, 49);
+    assert_eq!(SIMULATION_RULES, "0.21");
+    assert!(matches!(
+        Versions::new(48, SIMULATION_RULES, 0).check(&current),
+        Err(vellum_save::Moved::Format { .. })
+    ));
+    assert!(matches!(
+        Versions::new(SNAPSHOT_FORMAT, "0.20", 0).check(&current),
+        Err(vellum_save::Moved::Rules { .. })
+    ));
+    #[derive(serde::Serialize)]
+    struct PreviousFlow {
+        running: bool,
+        carry: f32,
+        selected_resource: String,
+        selected_direction: crate::umbilical::UmbilicalDirection,
+    }
+    #[derive(serde::Serialize)]
+    struct PreviousEntity {
+        uuid: String,
+        umbilical: PreviousFlow,
+    }
+    #[derive(serde::Serialize)]
+    struct PreviousSnapshot {
+        entities: Vec<PreviousEntity>,
+    }
+    let previous = Run::<LoggedCommand, PreviousSnapshot> {
+        versions: Versions::new(48, "0.20", 0),
+        scenario: "previous-port".into(),
+        seed: 1,
+        snapshot: Some(vellum_save::Snapshot {
+            tick: 1,
+            digest: 0,
+            state: PreviousSnapshot {
+                entities: vec![PreviousEntity {
+                    uuid: "previous-visitor".into(),
+                    umbilical: PreviousFlow {
+                        running: true,
+                        carry: 0.5,
+                        selected_resource: "machinery_parts".into(),
+                        selected_direction: crate::umbilical::UmbilicalDirection::Collect,
+                    },
+                }],
+            },
+        }),
+        commands: Vec::new(),
+        ledger: Default::default(),
+    };
+    let store = TransferStore::holding(DEFAULT_SLOT, ron::ser::to_string(&previous).unwrap());
+    assert!(matches!(
+        load_from(&store, DEFAULT_SLOT, &current),
+        Err(LoadRefusal::Moved(vellum_save::Moved::Format { .. }))
+    ));
+}
+
+#[test]
 fn legacy_scalar_capacity_payload_reports_format_refusal_before_schema_decoding() {
     #[derive(serde::Serialize)]
     struct LegacyCapacity {

@@ -448,6 +448,12 @@ pub(super) fn validate_entity_resources(
     entity: Entity,
     row: &EntityState,
 ) -> Result<(), String> {
+    crate::dock::server::validate_saved_entity(
+        world,
+        entity,
+        row.dock.as_ref(),
+        row.physics.as_ref(),
+    )?;
     super::fitting::validate_entity(world, entity, row)?;
     super::guided_source::validate_entity(world, Some(entity), row, u64::MAX)?;
     super::helm_movement::validate_live(world, entity, row, u64::MAX)?;

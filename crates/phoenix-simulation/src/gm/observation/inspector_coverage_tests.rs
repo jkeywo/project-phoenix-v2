@@ -1206,6 +1206,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         dock_schema,
         crate::dock::DockConfig,
+        moves_body,
         range,
         engage_distance,
         approach_speed,

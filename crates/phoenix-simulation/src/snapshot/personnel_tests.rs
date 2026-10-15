@@ -325,7 +325,7 @@ fn removed_origin_population_provenance_and_terminal_closure_are_preflighted() {
     let (mut fresh, _, _) = fixture();
     let before = capture(&fresh);
     let digest = crate::sim_digest::world_digest(&fresh);
-    for fault in 0..8 {
+    for fault in 0..9 {
         let mut bad = saved.clone();
         match fault {
             0 => {
@@ -388,11 +388,18 @@ fn removed_origin_population_provenance_and_terminal_closure_are_preflighted() {
                     .unwrap()
                     .changed_tick = 24;
             }
-            _ => {
+            7 => {
                 let origin = bad.personnel.origins["personnel-ship"].clone();
                 bad.personnel
                     .origins
                     .insert("invented-origin".into(), origin);
+            }
+            _ => {
+                bad.personnel
+                    .origins
+                    .get_mut("personnel-ship")
+                    .unwrap()
+                    .accepted_tick = 1;
             }
         }
         let report = restore(&mut fresh, &bad);

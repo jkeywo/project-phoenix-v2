@@ -180,11 +180,12 @@ pub(super) fn validate_roster(
                     "retained personnel definition differs from accepted source".into(),
                 ));
             }
-        } else if !known
-            .and_then(|known| known.origins.get(actor))
-            .is_some_and(|accepted| {
-                accepted.source.is_none() && accepted.definition == origin.definition
-            })
+        } else if origin.accepted_tick != 0
+            || !known
+                .and_then(|known| known.origins.get(actor))
+                .is_some_and(|accepted| {
+                    accepted.source.is_none() && accepted.definition == origin.definition
+                })
         {
             return Err(fail(
                 actor,

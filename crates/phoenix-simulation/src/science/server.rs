@@ -198,6 +198,7 @@ pub struct SciencePlugin;
 
 impl Plugin for SciencePlugin {
     fn build(&self, app: &mut App) {
+        super::focused_ai::register(app);
         super::passive::register(app);
         super::broad::register(app);
         app.add_systems(

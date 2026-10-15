@@ -16,6 +16,7 @@
 //! the ship's `scan` blackboard channel for `gui/destroyer/captain.html`.
 
 pub mod focused;
+mod focused_ai;
 pub mod passive;
 /// The pure, Bevy-free derivation: the authored `[scan]` vocabulary, the
 /// fidelity ladder, the refusal reasons, and the rule that there is no authored

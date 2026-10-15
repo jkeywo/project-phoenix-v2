@@ -5794,3 +5794,11 @@ workshop.sensing.point.observed_subject,Subject observation authoring,Observed s
 workshop.sensing.precision,Subject observation authoring,Continuous measurement step,Schrittweite kontinuierlicher Messungen,Continuous measurement step,machine
 workshop.sensing.add-property,Subject observation authoring,Add observation rule,Beobachtungsregel hinzufügen,Add observation rule,machine
 workshop.sensing.save-observation,Subject observation authoring,Save observation rules,Beobachtungsregeln speichern,Save observation rules,machine
+workshop.helm_projection.title,Helm display authoring,Helm approach estimates,Anflugschätzungen am Steuer,Helm approach estimates,machine
+workshop.helm_projection.hint,Helm display authoring,Configure estimates from held observations. Preview and Test use the accepted draft.,Schätzungen aus gespeicherten Beobachtungen konfigurieren. Vorschau und Test verwenden den akzeptierten Entwurf.,Configure estimates from held observations. Preview and Test use the accepted draft.,machine
+workshop.helm_projection.template,Helm display authoring,Entity template,Entitätsvorlage,Entity template,machine
+workshop.helm_projection.enabled,Helm display authoring,Enable approach estimates,Anflugschätzungen aktivieren,Enable approach estimates,machine
+workshop.helm_projection.horizon,Helm display authoring,Forecast horizon (seconds),Prognosehorizont (Sekunden),Forecast horizon (seconds),machine
+workshop.helm_projection.materialise,Helm display authoring,Override inherited projection,Geerbte Projektion überschreiben,Override inherited projection,machine
+workshop.helm_projection.save,Helm display authoring,Save Helm projection,Steuerprojektion speichern,Save Helm projection,machine
+workshop.helm_projection.refused,Helm display authoring,Helm projection refused: {reason},Steuerprojektion abgelehnt: {reason},Helm projection refused: {reason},machine

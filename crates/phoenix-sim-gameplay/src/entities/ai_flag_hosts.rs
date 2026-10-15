@@ -634,6 +634,7 @@ pub const DEBRIS_UNASSESSED: FactId = FactId("debris_unassessed");
 pub const DEBRIS_CONFIRMED: FactId = FactId("debris_confirmed");
 pub const REACHABLE: FactId = FactId("reachable");
 pub const SOURCE_NAV_OBJECTIVE: FactId = FactId("source_nav_objective");
+pub const SOURCE_RECEIVED_FORMATION: FactId = FactId("source_received_formation");
 pub const OBJECTIVE_SCORE: FactId = FactId("objective_score");
 pub const SOURCE_CHART_CONTACT: FactId = FactId("source_chart_contact");
 pub const TIER_ORDINAL: FactId = FactId("tier_ordinal");
@@ -754,6 +755,7 @@ pub const FACT_CATALOGUE: &[FactId] = &[
     DEBRIS_CONFIRMED,
     REACHABLE,
     SOURCE_NAV_OBJECTIVE,
+    SOURCE_RECEIVED_FORMATION,
     OBJECTIVE_SCORE,
     SOURCE_CHART_CONTACT,
     TIER_ORDINAL,
@@ -1665,6 +1667,13 @@ const TACTICAL_SELECTOR_FACTS: &[FactDescriptor] = &[
 ];
 
 const NAVIGATION_SELECTOR_FACTS: &[FactDescriptor] = &[
+    cand(
+        SOURCE_RECEIVED_FORMATION,
+        "navigation selector",
+        "1.0 for independently correlated received formation coordination",
+        "false — not that source",
+        "console::navigation::operate_navigation_ai",
+    ),
     cand(
         REACHABLE,
         "navigation selector",

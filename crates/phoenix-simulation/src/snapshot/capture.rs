@@ -1274,8 +1274,14 @@ pub(super) fn capture_navigation_continuation(
     let clearance_issue = entity.get::<crate::console::navigation::NavClearanceIssueState>();
     let helm_clearance = entity.get::<crate::ship_plugin::HelmWaypointClearance>();
     let waypoint = waypoint.map(|waypoint| {
-        let snapshot = waypoint.snapshot();
+        let snapshot = waypoint.canonical_snapshot();
         NavigationWaypointState {
+            formation: match waypoint.mode() {
+                Some(crate::console::navigation::WaypointMode::Formation { course }) => {
+                    Some(course.clone())
+                }
+                _ => None,
+            },
             accepted_requests: waypoint.accepted_requests.clone(),
             position: snapshot.as_ref().map(|point| [point.x, point.z]),
             source_uuid: snapshot.and_then(|point| point.source_uuid),

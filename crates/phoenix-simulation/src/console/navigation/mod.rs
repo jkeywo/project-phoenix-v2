@@ -4,6 +4,7 @@
 //! follow. Everything is re-exported so `crate::console::navigation::X` paths
 //! keep resolving.
 
+pub(crate) mod formation;
 pub mod knowledge;
 pub mod server;
 pub mod sharing;

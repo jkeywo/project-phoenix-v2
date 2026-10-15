@@ -261,6 +261,15 @@ pub(crate) fn tick(
             })
             .collect();
         let waypoint = match waypoint.mode() {
+            Some(WaypointMode::Formation { course }) => course
+                .measurement
+                .slot_point(&course.request)
+                .map(|position| NavigationSamplePoint {
+                    kind: NavigationSharedKind::Waypoint,
+                    position,
+                    observed_tick: Some(course.measurement.observed_tick),
+                    observer_position: None,
+                }),
             Some(WaypointMode::Free { x, z }) => Some(NavigationSamplePoint {
                 kind: NavigationSharedKind::Waypoint,
                 position: [*x, *z],

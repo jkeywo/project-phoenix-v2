@@ -2382,6 +2382,10 @@ pub enum SystemControlPayload {
         source_uuid: Option<String>,
     },
     ClearNavigationWaypoint,
+    SelectFormationCourse {
+        request_id: String,
+        leader: String,
+    },
     /// Order a civilian craft to hold, divert or dock (issue #1028).
     ///
     /// Targets the `navigation` system, so it is admitted exactly like the
@@ -5894,6 +5898,8 @@ pub struct NavigationBlackboard {
     /// target measurement. Consumers freeze it only with the permitted point.
     #[serde(default)]
     pub course_generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formation: Option<crate::formation::FormationNavigationView>,
     /// Deliberate own-faction sharing intent for this actual Navigation owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sharing: Option<crate::sensing_sharing::RadarSharingView>,
@@ -5993,6 +5999,7 @@ impl Default for NavigationBlackboard {
     fn default() -> Self {
         Self {
             course_generation: 0,
+            formation: None,
             sharing: None,
             received_chart: Vec::new(),
             nav_chart_range: default_nav_chart_range(),

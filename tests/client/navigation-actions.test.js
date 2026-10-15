@@ -9,6 +9,7 @@ import {
   NAVIGATION_ACTIONS,
   NAVIGATION_SHARED_WAYPOINT_ACTION_ID,
   NAVIGATION_WORLD_ROUTE_ACTION_ID,
+  NAVIGATION_FORMATION_ACTION_ID,
   NAVIGATION_CHART_ACTION_ID,
   NAVIGATION_CIVILIAN_ORDER_ACTION_ID,
   NAVIGATION_CONTACT_ACTION_ID,
@@ -163,7 +164,7 @@ function idsFor(catalogue, context) {
 
 describe('Navigation semantic actions', () => {
   it('publishes every shipped Navigation intent in its real host contexts with two device slots', () => {
-    expect(NAVIGATION_ACTIONS).toHaveLength(14);
+    expect(NAVIGATION_ACTIONS).toHaveLength(15);
     expect(NAVIGATION_ACTION_CONTEXTS).toEqual(['navigation', 'comms', 'captain']);
     for (const action of NAVIGATION_ACTIONS) {
       if (action.id === NAVIGATION_CHART_ACTION_ID
@@ -173,7 +174,7 @@ describe('Navigation semantic actions', () => {
         expect(action.contexts).toEqual(NAVIGATION_ACTION_CONTEXTS);
       }
       expect(action.bindings).toHaveLength(2);
-      if([NAVIGATION_SHARED_WAYPOINT_ACTION_ID,NAVIGATION_WORLD_ROUTE_ACTION_ID].includes(action.id)){expect(action.bindings).toEqual([null,null]);continue;}
+      if([NAVIGATION_SHARED_WAYPOINT_ACTION_ID,NAVIGATION_WORLD_ROUTE_ACTION_ID,NAVIGATION_FORMATION_ACTION_ID].includes(action.id)){expect(action.bindings).toEqual([null,null]);continue;}
       expect(action.bindings[0]?.type).toBe('keyboard');
       expect(action.bindings[1]?.type).toBe('gamepad');
       if (action.id === NAVIGATION_CONTACT_ACTION_ID
@@ -235,6 +236,7 @@ describe('Navigation semantic actions', () => {
       'captain.red-alert',
       'captain.view',
       'navigation.contact-selection',
+      'navigation.formation-course',
       'navigation.map-pan-down',
       'navigation.map-pan-left',
       'navigation.map-pan-right',
@@ -294,6 +296,7 @@ describe('Navigation semantic actions', () => {
       'comms.select-message',
       'comms.show-on-screen',
       'navigation.contact-selection',
+      'navigation.formation-course',
       'navigation.map-pan-down',
       'navigation.map-pan-left',
       'navigation.map-pan-right',

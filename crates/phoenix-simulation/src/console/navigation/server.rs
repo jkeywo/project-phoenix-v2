@@ -74,6 +74,7 @@ impl Plugin for NavigationPlugin {
                 &[
                     Payload::SetNavigationWaypoint,
                     Payload::ClearNavigationWaypoint,
+                    Payload::SelectFormationCourse,
                     Payload::OrderCivilian,
                 ],
             ),
@@ -356,6 +357,9 @@ impl NavClearanceIssueState {
 /// Storage variant of the navigation waypoint.
 #[derive(Clone, Debug, PartialEq)]
 pub enum WaypointMode {
+    Formation {
+        course: phoenix_model::formation::FormationCourse,
+    },
     /// Tap-to-place: the waypoint is a fixed world position and never moves.
     Free { x: f32, z: f32 },
     /// Anchored to an entity by UUID. `last_x` / `last_z` mirror the entity's
@@ -380,6 +384,9 @@ pub enum WaypointMode {
 /// follow it.
 fn same_waypoint(a: &WaypointMode, b: &WaypointMode) -> bool {
     match (a, b) {
+        (WaypointMode::Formation { course: a }, WaypointMode::Formation { course: b }) => {
+            a.same_intent(b)
+        }
         (WaypointMode::Free { x: ax, z: az }, WaypointMode::Free { x: bx, z: bz }) => {
             ax == bx && az == bz
         }
@@ -440,7 +447,17 @@ impl NavigationWaypoint {
     pub fn set(&mut self, mode: WaypointMode) {
         match &mut self.mode {
             // Same waypoint: refresh the anchor cache in place, no bump.
-            Some(current) if same_waypoint(current, &mode) => *current = mode,
+            Some(current) if same_waypoint(current, &mode) => {
+                let mut next = mode;
+                if let (
+                    WaypointMode::Formation { course: held },
+                    WaypointMode::Formation { course: updated },
+                ) = (&*current, &mut next)
+                {
+                    updated.selected_tick = held.selected_tick;
+                }
+                *current = next;
+            }
             _ => {
                 self.mode = Some(mode);
                 self.generation = self.generation.wrapping_add(1);
@@ -460,7 +477,21 @@ impl NavigationWaypoint {
     /// Returns the broadcast-shaped snapshot for the current waypoint, or
     /// `None` if no waypoint is set.
     pub fn snapshot(&self) -> Option<WaypointSnapshot> {
+        if matches!(&self.mode, Some(WaypointMode::Formation {course}) if course.paused) {
+            return None;
+        }
+        self.canonical_snapshot()
+    }
+    pub(crate) fn canonical_snapshot(&self) -> Option<WaypointSnapshot> {
         match &self.mode {
+            Some(WaypointMode::Formation { course }) => {
+                let [x, z] = course.measurement.slot_point(&course.request)?;
+                Some(WaypointSnapshot {
+                    x,
+                    z,
+                    source_uuid: None,
+                })
+            }
             None => None,
             Some(WaypointMode::Free { x, z }) => Some(WaypointSnapshot {
                 x: *x,
@@ -540,6 +571,7 @@ pub(super) fn handle_navigation_waypoint(
                 cmd.payload,
                 SystemControlPayload::SetNavigationWaypoint { .. }
                     | SystemControlPayload::ClearNavigationWaypoint
+                    | SystemControlPayload::SelectFormationCourse { .. }
             ) {
                 continue;
             }
@@ -602,6 +634,36 @@ pub(super) fn handle_navigation_waypoint(
                         &mut outbound,
                         ActionFeedbackOutcome::Refused,
                     );
+                }
+                SystemControlPayload::SelectFormationCourse { request_id, leader } => {
+                    let course = super::formation::request_for_command(
+                        &knowledge,
+                        entity,
+                        config,
+                        boards,
+                        &cmd.target,
+                        request_id,
+                        leader,
+                    );
+                    let applied = course.filter(|_| {
+                        power.as_deref_mut().is_some_and(|power| {
+                            power.0.try_work_discrete(&cmd.target).unwrap_or(false)
+                        })
+                    });
+                    if let Some(course) = applied {
+                        waypoint.set(WaypointMode::Formation { course });
+                        finish_waypoint_action_feedback(
+                            cmd,
+                            &mut outbound,
+                            ActionFeedbackOutcome::Applied,
+                        );
+                    } else {
+                        finish_waypoint_action_feedback(
+                            cmd,
+                            &mut outbound,
+                            ActionFeedbackOutcome::Refused,
+                        );
+                    }
                 }
                 SystemControlPayload::ClearNavigationWaypoint => {
                     // Clearing needs no clearance message: the waypoint has no
@@ -772,6 +834,18 @@ fn refresh_anchored_waypoint(
             power.map(|power| &power.0),
             crate::ship::system_registry::NAVIGATION_KIND,
         );
+        if let Some(WaypointMode::Formation { course }) = waypoint.mode.as_mut() {
+            if let (Some(config), Some(boards), Some(actor)) =
+                (config, boards, knowledge.actor(entity))
+            {
+                let requests = super::formation::requests(config, boards, &owner, actor);
+                let readings = knowledge.formation_readings(entity, config, boards, &owner);
+                super::formation::refresh(course, &requests, &readings, fraction > 0.0);
+            } else {
+                course.paused = true;
+            }
+            continue;
+        }
         if fraction <= 0.0 {
             continue;
         }
@@ -872,6 +946,15 @@ pub(crate) fn publish_navigation_blackboard(
             continue;
         };
         let navigation_waypoint = waypoint.snapshot();
+        let formation = config
+            .zip(knowledge.actor(entity))
+            .and_then(|(config, actor)| {
+                super::formation::view(
+                    super::formation::requests(config, &bbs, &nav_id, actor),
+                    &knowledge.formation_readings(entity, config, &bbs, &nav_id),
+                    waypoint.mode(),
+                )
+            });
         let picture = knowledge.picture(entity, config, &nav_id, Some(&bbs), profile);
         let visible_civilians = if picture.configured {
             let received = config.map(|config| {
@@ -888,6 +971,7 @@ pub(crate) fn publish_navigation_blackboard(
         let mut bb = if is_local {
             NavigationBlackboard {
                 course_generation: waypoint.generation(),
+                formation: formation.clone(),
                 transit_routes: transit
                     .as_deref()
                     .map_or_else(Vec::new, |scopes| scopes.views()),
@@ -903,6 +987,7 @@ pub(crate) fn publish_navigation_blackboard(
         } else {
             NavigationBlackboard {
                 course_generation: waypoint.generation(),
+                formation: formation.clone(),
                 transit_routes: transit
                     .as_deref()
                     .map_or_else(Vec::new, |scopes| scopes.views()),
@@ -1262,6 +1347,39 @@ pub fn operate_navigation_ai(
             }
         }
 
+        if let (Some(config), Some(uuid), Some(now)) = (ship_config, entity_uuid, knowledge.now()) {
+            let readings =
+                knowledge.formation_readings(ship_entity, config, blackboards, &navigation_owner);
+            for request in
+                super::formation::requests(config, blackboards, &navigation_owner, &uuid.0)
+            {
+                let Some(leader) = super::formation::correlated(&request, &readings) else {
+                    continue;
+                };
+                let Some(course) =
+                    super::formation::select(&navigation_owner, &request, leader, &readings, now)
+                else {
+                    continue;
+                };
+                let Some([x, z]) = course.measurement.slot_point(&course.request) else {
+                    continue;
+                };
+                let key = super::formation::key(&course);
+                let mut facts = crate::world::flags::AiFacts::new();
+                facts.set_fact(crate::entities::ai_flag_hosts::REACHABLE, 1.0);
+                facts.set_fact(
+                    crate::entities::ai_flag_hosts::SOURCE_RECEIVED_FORMATION,
+                    1.0,
+                );
+                candidates.push(SelectorCandidate {
+                    uuid: key.clone(),
+                    position: [x, ship_physics.y, z],
+                    facts,
+                });
+                modes.insert(key, WaypointMode::Formation { course });
+            }
+        }
+
         // Source: chart-contacts. Every live chart entity is surfaced as an
         // entity-anchored candidate. Under the canonical policy they lack the
         // `reachable` marker (default eligibility admits only `reachable`), so
@@ -1316,6 +1434,7 @@ pub fn operate_navigation_ai(
                 }
             }
             Some(WaypointMode::Free { x, z }) => Some(free_candidate_key(*x, *z)),
+            Some(WaypointMode::Formation { course }) => Some(super::formation::key(course)),
             None => None,
         };
 
@@ -1335,6 +1454,10 @@ pub fn operate_navigation_ai(
             desired = waypoint.mode().cloned();
         }
 
+        if desired.is_none() && matches!(waypoint.mode(), Some(WaypointMode::Formation { .. })) {
+            desired = waypoint.mode().cloned();
+        }
+
         // ── Emit on change only (issue #828 shape) ───────────────────────────
         // Compare against the current waypoint by identity (`same_waypoint`):
         // an anchored waypoint whose parent has merely moved is the same
@@ -1350,6 +1473,12 @@ pub fn operate_navigation_ai(
         }
 
         let payload = match &desired {
+            Some(WaypointMode::Formation { course }) => {
+                SystemControlPayload::SelectFormationCourse {
+                    request_id: course.request.message_id.clone(),
+                    leader: course.leader.clone(),
+                }
+            }
             Some(WaypointMode::Free { x, z }) => SystemControlPayload::SetNavigationWaypoint {
                 x: *x,
                 z: *z,

@@ -562,3 +562,37 @@ including its existing duplicate-rating refusal. Target updates use exact leaf
 edits so nested and inline target tables both remain supported. Native source
 regressions retain their source/comment assertions and additionally cover these
 representations; the corrected native run remains integrator-owned.
+
+
+## Formation Navigation source checkpoint
+
+The existing Navigation course now carries a genuine accepted received request,
+an earned observer-local leader handle and a dated measured World-plane slot.
+Own Navigation admission and actual discrete reserve work select it. The
+ordinary selector can rank the same candidate without mission-objective score;
+AI identity correlation refuses missing or ambiguous matured public names.
+Current paid observations refresh its cache without changing course generation.
+Information or funding loss pauses execution and retains the dated intent.
+
+The optional formation_cruiser preserves Cruiser equipment and crew seats. It
+adds an explicit Comms feed to Navigation and uses its existing TacticalRadar
+motion feed; the ordinary authored selector weights mission goals above the
+received coordination source. Existing Workshop Console/feed and AI-selector
+editors author these same definitions. The shared Navigation controls expose
+only current received requests and earned aliases, with exact own-Human
+semantic rechecking. They never send a sender route UUID or supplied position.
+
+Canonical capture/digest retain the course. Whole restore validates candidate
+Comms provenance before writes; single-row rewind checks the live inbox instead.
+A dated cache cannot contradict a retained canonical sample at the same sample
+tick. Carried actors retain historical intent while their operational updates
+are disabled. Ordinary Comms dismissal retains structured request lineage.
+
+Targeted JavaScript passed 21 tests across four files; strings 6338 and layer
+checks passed. Independent UI source review passed. The actual owner witness
+uses paid radio, separately paid Broad acquisition, own paid selection,
+ordinary Navigation AI, fresh JSON restore with an empty bootstrap inbox,
+malformed no-write candidates and ordinary Comms dismissal. Its native execution
+remains integrator-owned. Human Helm follow demand, completed physical formation
+movement, full-host JSON continuation and device acceptance remain open; this
+source checkpoint does not close increment 18.

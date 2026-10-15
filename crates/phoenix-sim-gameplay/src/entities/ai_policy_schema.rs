@@ -634,12 +634,14 @@ pub const SELECTOR_SOURCE_NAV_OBJECTIVE: &str = "navigation-objectives";
 /// coincident objective destination rather than independently steering the
 /// ship; an author may re-tune the selector's eligibility to admit them.
 pub const SELECTOR_SOURCE_CHART_CONTACTS: &str = "chart-contacts";
+pub const SELECTOR_SOURCE_RECEIVED_FORMATIONS: &str = "received-formations";
 
 /// The registered candidate sources the Navigation target selector may union
 /// (issue #778).
 pub const NAVIGATION_SELECTOR_SOURCES: &[&str] = &[
     SELECTOR_SOURCE_NAV_OBJECTIVE,
     SELECTOR_SOURCE_CHART_CONTACTS,
+    SELECTOR_SOURCE_RECEIVED_FORMATIONS,
 ];
 
 /// Candidate source: stations the ship's coordination-delivered

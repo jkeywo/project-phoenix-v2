@@ -27,6 +27,7 @@ pub mod equipment_recovery_ui;
 pub mod field;
 pub mod fitting;
 pub mod focused_enquiry;
+pub mod formation;
 pub mod guided_guidance;
 pub mod guided_orders;
 pub mod guided_round;

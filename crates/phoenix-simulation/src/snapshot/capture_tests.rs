@@ -79,6 +79,7 @@ fn capture_preserves_group_registration_and_explicit_default_continuations() {
     assert_eq!(
         row.navigation_waypoint,
         Some(NavigationWaypointState {
+            formation: None,
             accepted_requests: Default::default(),
             position: None,
             source_uuid: None,

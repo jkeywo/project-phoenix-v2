@@ -8443,6 +8443,7 @@ fn navigation_continuation_round_trips_anchor_and_exact_generations() {
     let ship_uuid = navigation_uuids[0].clone();
     let anchor_uuid = navigation_uuids[1].clone();
     let waypoint = NavigationWaypointState {
+        formation: None,
         accepted_requests: Default::default(),
         position: Some([137.25, -41.5]),
         source_uuid: Some(anchor_uuid),
@@ -8536,6 +8537,7 @@ fn default_navigation_continuation_replaces_non_default_bootstrap() {
         boot_to_restore_point(&args(DUEL, ("cruiser", "destroyer")), &default_payload);
     let mut non_default = default_payload.clone();
     let seeded_waypoint = NavigationWaypointState {
+        formation: None,
         accepted_requests: Default::default(),
         position: Some([88.0, -23.0]),
         source_uuid: None,

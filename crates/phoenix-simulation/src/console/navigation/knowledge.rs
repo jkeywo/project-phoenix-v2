@@ -31,6 +31,8 @@ pub(crate) fn register(app: &mut App) {
 pub struct Environment<'w, 's> {
     world: Option<Res<'w, crate::lobby::WorldResource>>,
     runtime: Option<Res<'w, crate::world::server::WorldContentRuntime>>,
+    tick: Option<Res<'w, crate::sim_tick::SimTick>>,
+    fixed: Option<Res<'w, Time<Fixed>>>,
     scopes: Query<
         'w,
         's,
@@ -41,10 +43,102 @@ pub struct Environment<'w, 's> {
             Option<&'static crate::entities::spawner::EntityUuid>,
             Option<&'static crate::ship::state::ShipPhysics>,
             Option<&'static Transform>,
+            Option<&'static crate::science::broad::BroadProfile>,
         ),
     >,
 }
 impl Environment<'_, '_> {
+    pub(crate) fn now(&self) -> Option<u64> {
+        self.tick.as_ref().map(|tick| tick.0)
+    }
+    pub(crate) fn actor(&self, entity: Entity) -> Option<&str> {
+        self.scopes.get(entity).ok()?.3.map(|uuid| uuid.0.as_str())
+    }
+    pub(crate) fn formation_readings(
+        &self,
+        entity: Entity,
+        config: &ShipConfigComponent,
+        boards: &ShipSystemBlackboards,
+        owner: &SystemId,
+    ) -> BTreeMap<String, super::formation::LeaderReading> {
+        let mut readings = BTreeMap::new();
+        let mut ambiguous = std::collections::BTreeSet::new();
+        let (Some(now), Some(fixed)) = (self.now(), self.fixed.as_ref()) else {
+            return readings;
+        };
+        let dt = fixed.timestep().as_secs_f64();
+        if !dt.is_finite() || dt <= 0.0 {
+            return readings;
+        }
+        let Ok((Some(tracks), _, _, Some(uuid), _, _, Some(profiles))) = self.scopes.get(entity)
+        else {
+            return readings;
+        };
+        let permitted = config.0.observations_for_system(owner, &boards.0);
+        for (instrument, state) in &tracks.0 {
+            let Some(profile) = profiles.0.get(instrument) else {
+                continue;
+            };
+            let maximum_age = f64::from(profile.profile.sample_interval_secs) * 2.0 + dt;
+            let Some(records) = permitted
+                .get(instrument)
+                .and_then(crate::science::contact_routing::observations)
+            else {
+                continue;
+            };
+            for record in records {
+                if record.predicted
+                    || !record.selectable
+                    || record.observed_tick > now
+                    || (now - record.observed_tick) as f64 * dt > maximum_age
+                {
+                    continue;
+                }
+                let Some(source) = state.resolve_current(&record.contact_id) else {
+                    continue;
+                };
+                if self.runtime.as_ref().is_some_and(|runtime| {
+                    crate::gm::operations::contact::mode(
+                        &runtime.contact_overrides,
+                        &uuid.0,
+                        source,
+                    ) == crate::gm::operations::contact::ContactMode::Conceal
+                }) {
+                    continue;
+                }
+                let Some(velocity) = record.velocity else {
+                    continue;
+                };
+                let measurement = phoenix_model::formation::FormationMeasurement {
+                    position: record.position,
+                    velocity,
+                    observed_tick: record.observed_tick,
+                };
+                if !measurement.valid_at(now) {
+                    continue;
+                }
+                let reading = super::formation::LeaderReading {
+                    name: record
+                        .identity
+                        .as_ref()
+                        .map(|identity| identity.name.clone()),
+                    measurement,
+                };
+                if readings
+                    .get(&record.contact_id)
+                    .is_some_and(|held| held != &reading)
+                {
+                    ambiguous.insert(record.contact_id.clone());
+                }
+                readings.insert(record.contact_id.clone(), reading);
+            }
+        }
+        for alias in ambiguous {
+            readings.remove(&alias);
+        }
+        readings
+    }
+
     pub(crate) fn picture(
         &self,
         entity: Entity,
@@ -53,7 +147,7 @@ impl Environment<'_, '_> {
         boards: Option<&ShipSystemBlackboards>,
         sharing: Option<&NavigationSharingProfile>,
     ) -> Picture {
-        let (tracks, controls, chart, uuid, physics, transform) =
+        let (tracks, controls, chart, uuid, physics, transform, _) =
             self.scopes.get(entity).unwrap_or_default();
         let pose = physics
             .map(|physics| Vec3::new(physics.x, physics.y, physics.z))

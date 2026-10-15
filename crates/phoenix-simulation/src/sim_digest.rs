@@ -3006,7 +3006,13 @@ fn fold_navigation_request_namespace(world: &World, acc: u64) -> u64 {
         acc,
         "navigation-request",
         |owner: &crate::console::navigation::NavigationWaypoint| {
-            Some(owner.accepted_requests.clone())
+            let formation = match owner.mode() {
+                Some(crate::console::navigation::WaypointMode::Formation { course }) => {
+                    Some(course.clone())
+                }
+                _ => None,
+            };
+            Some((owner.accepted_requests.clone(), formation))
         },
         |acc, receipt| fold_serde(acc, &receipt),
     )

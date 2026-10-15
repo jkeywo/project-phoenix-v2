@@ -1,0 +1,55 @@
+# Optional communication-led coordination example. Same ship and seat count.
+includes = ["alliance_cruiser.toml"]
+name = "entity.formation_cruiser.name"
+
+# Explicit information access; neither co-hosting nor a received request grants it.
+[[console]]
+id = "navigation"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[[console.feed]]
+source = "command"
+kind = "Command"
+
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+
+[[console.feed]]
+source = "comms"
+kind = "Comms"
+
+[navigation_console.selector]
+sources = ["navigation-objectives", "chart-contacts", "received-formations"]
+horizon = 1e9
+switch_margin = 0.0
+eligibility = "candidate_fact(reachable) > 0"
+[[navigation_console.selector.score]]
+when = "candidate_fact(source_nav_objective) > 0"
+weight = 100.0
+[[navigation_console.selector.score]]
+when = "candidate_fact(source_chart_contact) > 0"
+weight = 1.0
+[[navigation_console.selector.score]]
+when = "candidate_fact(source_received_formation) > 0"
+weight = 10.0

@@ -366,7 +366,8 @@ pub(crate) fn cleared_nav_waypoint_anchor(
         crate::console::navigation::WaypointMode::Anchored { source_uuid, .. } => {
             uuid::Uuid::parse_str(source_uuid).ok()
         }
-        crate::console::navigation::WaypointMode::Free { .. } => None,
+        crate::console::navigation::WaypointMode::Free { .. }
+        | crate::console::navigation::WaypointMode::Formation { .. } => None,
     }
 }
 

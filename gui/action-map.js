@@ -842,6 +842,15 @@ export const ACTION_MAP = Object.freeze({
     }
   },
 
+  select_formation_course: (a, send) => {
+    if(typeof a.control_system_id!=='string' || !a.control_system_id || typeof a.request_id!=='string' || !a.request_id || typeof a.leader!=='string' || !a.leader)return;
+    const correlated=typeof a.correlation==='string'&&a.correlation;
+    send(correlated?'ControlSystemCorrelated':'ControlSystem',{
+      ...(correlated?{correlation:a.correlation}:{}), target:a.control_system_id,
+      payload:{type:'SelectFormationCourse',data:{request_id:a.request_id,leader:a.leader}},
+    });
+  },
+
   /** Clear the shared custom navigation waypoint. */
   clear_navigation_waypoint: (a, send) => {
     const correlated = typeof a.correlation === 'string' && a.correlation;

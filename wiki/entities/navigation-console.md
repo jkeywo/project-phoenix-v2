@@ -2,7 +2,7 @@
 title: Navigation Console
 type: entity
 tags: [console, navigation, waypoint, map, radar, ship]
-sources: [gui/workshop-world-routes-panel.js, editor/workshop-world-routes.js, gui/components/navigation-sharing-controls.js, gui/transit.js, gui/battleship/navigation.html, gui/cruiser/comms.html, gui/courier/captain.html, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/stations/navigation-actions.js, gui/stations/navigation-action-control.js, gui/semantic-action-registry.js, gui/gamepad-input.js, gui/console-state.js, gui/sim-state.js, gui/action-map.js, gui/hero-bar.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/navigation/mod.rs, crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-sim-gameplay/src/civilian/traffic.rs, crates/phoenix-simulation/src/civilian/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, assets/entities/alliance_battleship.toml, assets/entities/alliance_cruiser.toml, assets/entities/alliance_courier.toml, assets/entities/alliance_destroyer.toml]
+sources: [crates/phoenix-model/src/formation.rs, crates/phoenix-simulation/src/console/navigation/formation.rs, crates/phoenix-simulation/src/console/navigation/knowledge.rs, crates/phoenix-simulation/src/snapshot/navigation_formation.rs, gui/formation.js, gui/components/formation-course-controls.js, assets/entities/formation_cruiser.toml, gui/workshop-world-routes-panel.js, editor/workshop-world-routes.js, gui/components/navigation-sharing-controls.js, gui/transit.js, gui/battleship/navigation.html, gui/cruiser/comms.html, gui/courier/captain.html, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/stations/navigation-actions.js, gui/stations/navigation-action-control.js, gui/semantic-action-registry.js, gui/gamepad-input.js, gui/console-state.js, gui/sim-state.js, gui/action-map.js, gui/hero-bar.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/navigation/mod.rs, crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-sim-gameplay/src/civilian/traffic.rs, crates/phoenix-simulation/src/civilian/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, assets/entities/alliance_battleship.toml, assets/entities/alliance_cruiser.toml, assets/entities/alliance_courier.toml, assets/entities/alliance_destroyer.toml]
 updated: 2026-10-15
 ---
 
@@ -25,7 +25,7 @@ The chart is overhead, north-up, and world-anchored. It draws region hulls — s
 
 The product registry includes chart, free waypoint placement, selected-contact
 anchor, clear waypoint, contact selection, civilian order, map pan and zoom,
-shared-waypoint acceptance and authored World-route selection.
+shared-waypoint acceptance, authored World-route selection and formation-course selection.
 Each has two context-scoped binding slots. The parent gamepad runtime routes by
 the actual claimed Station iframe, so composite hosts retain their real
 `captain` or `comms` context. Horizontal pan uses the left stick, vertical pan
@@ -54,18 +54,30 @@ gamepad inputs all enter the same semantic adapter. Pan, zoom and contact
 selection settle immediately through the shared local-feedback lifecycle;
 waypoint and civilian operations wait for authoritative terminal feedback.
 
-The server owns one waypoint per ship:
+The server owns one NavigationWaypoint per ship. Free points remain fixed.
+An Anchored mode retains its last permitted measured point; fitted Navigation
+updates it from explicit observations and holds it on information loss. Only
+unconfigured legacy consumers track a live Transform and clear on despawn.
+Non-finite coordinates are rejected.
 
-```rust
-pub enum WaypointMode {
-    Free { x: f32, z: f32 },
-    Anchored { source_uuid: String, last_x: f32, last_z: f32 },
-}
+Formation mode retains an actual received and locally accepted Comms request,
+an earned observer-local leader handle, and dated measured position/velocity.
+Human Navigation selects a currently offered request and earned alias through
+its own paid command. Ordinary Navigation AI can rank the same candidate and
+correlates only a unique matured public name. Sender route UUIDs never identify
+a sensor contact. The optional formation_cruiser authors the required Comms feed alongside its existing
+TacticalRadar motion feed and gives mission destinations priority over coordination.
+Existing source, rating and Console authority still decide who can operate it.
 
-pub struct NavigationWaypoint(pub Option<WaypointMode>);
-```
-
-An anchored waypoint follows the source entity's live transform. If the source despawns, `refresh_anchored_waypoint` clears it. A free waypoint remains fixed. Non-finite coordinates are rejected.
+New leader measurements update the same semantic course generation. Missing,
+stale or unpaid measurements pause the course and retain its dated cache;
+they do not reveal or chase a private actor. The Navigation GUI distinguishes
+selection from Helm operation. Generation-bound explicit Human Helm assistance
+and the completed formation movement journey are subsequent implementation work.
+Canonical capture and digest retain the intent, and preflight checks actual
+Navigation ownership and candidate received-request provenance before writes.
+A one-row rewind instead checks the live inbox. Ordinary Comms dismissal keeps
+structured lineage and does not erase the selected Navigation intent.
 
 ## Authority and sharing
 
@@ -90,6 +102,7 @@ The human control surface is finite and authored. A civilian's optional `[civili
 
 - `SystemControlPayload::SetNavigationWaypoint { x, z, source_uuid }` sets a free or anchored waypoint.
 - `SystemControlPayload::ClearNavigationWaypoint` clears it.
+- `SystemControlPayload::SelectFormationCourse { request_id, leader }` selects genuine received coordination and an earned own alias; it does not operate Helm.
 - `SystemControlPayload::OrderCivilian { target, order }` orders a civilian to hold, divert or dock.
 - `ServerMessage::CivilianOrderRejected { target, reason }` is the rejection-only reply for an order that could not be delivered.
 - `ServerMessage::ActionFeedback { correlation, result, response_token }` settles a correlated waypoint or civilian-order input at its actual owning consumer.

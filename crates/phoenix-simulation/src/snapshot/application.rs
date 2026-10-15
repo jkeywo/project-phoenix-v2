@@ -1295,6 +1295,14 @@ pub(crate) fn apply_entity_state(world: &mut World, entity: Entity, row: &Entity
         bevy::log::error!("refused guided source restore for {}: {}", row.uuid, reason);
         return;
     }
+    if let Err(reason) = super::navigation_formation::validate_live(world, entity, row) {
+        bevy::log::error!(
+            "refused Formation course restore for {}: {}",
+            row.uuid,
+            reason
+        );
+        return;
+    }
     if let Err(reason) = super::preflight::validate_entity_resources(world, entity, row) {
         bevy::log::error!("refused resource restore for {}: {}", row.uuid, reason);
         return;
@@ -1834,6 +1842,15 @@ pub(super) fn apply_navigation_waypoint(
             },
         )
     });
+    let mode = stored
+        .formation
+        .as_ref()
+        .map(
+            |course| crate::console::navigation::WaypointMode::Formation {
+                course: course.clone(),
+            },
+        )
+        .or(mode);
     if let Some(mut waypoint) = entity.get_mut::<crate::console::navigation::NavigationWaypoint>() {
         waypoint.replace_continuation(mode, stored.generation);
         waypoint.accepted_requests = stored.accepted_requests.clone();

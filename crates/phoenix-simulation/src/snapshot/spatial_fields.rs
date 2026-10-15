@@ -6,6 +6,7 @@ pub(super) fn validate_roster(
     snapshot: &PhoenixSnapshot,
 ) -> Result<(), (String, String)> {
     super::shield_enquiry::validate_roster(world, snapshot)?;
+    super::navigation_formation::validate_roster(world, snapshot)?;
     let evidence = snapshot
         .scenario
         .as_ref()

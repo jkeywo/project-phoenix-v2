@@ -6388,3 +6388,10 @@ personnel.transfer.blocked,Actual owned carrier personnel transfer,[Waiting for 
 craft.bay.personnel_transfer,Actual owned carrier personnel transfer,[Crew handoff in progress],,,
 workshop.personnel.personnel_transport,Actual owned carrier personnel transfer,[Personnel transport],,,
 personnel.competency.personnel_transport,Actual owned carrier personnel transfer,[Personnel transport],,,
+navigation.formation.select,Actual Navigation formation intent,Select formation course,Select formation course,Select formation course,source
+navigation.formation.request,Actual Navigation formation intent,Accepted coordination request,Accepted coordination request,Accepted coordination request,source
+navigation.formation.leader,Actual Navigation formation intent,Measured leader contact,Measured leader contact,Measured leader contact,source
+navigation.formation.suggestion,Actual Navigation formation intent,{name}: slot {x} / {z},{name}: slot {x} / {z},{name}: slot {x} / {z},source
+navigation.formation.paused,Actual Navigation formation intent,Leader measurement unavailable; course paused,Leader measurement unavailable; course paused,Leader measurement unavailable; course paused,source
+navigation.formation.selected,Actual Navigation formation intent,Leader selected; Helm controls movement,Leader selected; Helm controls movement,Leader selected; Helm controls movement,source
+entity.formation_cruiser.name,Optional formation coordination ship,Formation Cruiser,Formation Cruiser,Formation Cruiser,source

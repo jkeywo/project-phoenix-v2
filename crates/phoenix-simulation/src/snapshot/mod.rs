@@ -380,6 +380,7 @@ mod helm_movement;
 #[cfg(test)]
 mod mission_clock_tests;
 mod mounts;
+mod navigation_formation;
 #[cfg(test)]
 mod navigation_sharing_tests;
 mod personnel;

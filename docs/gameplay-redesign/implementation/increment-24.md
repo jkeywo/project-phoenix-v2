@@ -1,7 +1,7 @@
 # Increment 24 — Opportunity discovery, adaptive direction and final integration
 
-Approved future plan, 14 October 2026. Start after [increment 23](increment-23.md)'s
-verified playable exit. Reuse [increment 22](increment-22.md)'s activity contracts,
+Approved future plan, 14 October 2026. Full completion follows [increment 23](increment-23.md)'s
+verified playable exit. The 15 October [parallel-work contract](parallel-work.md) permits bounded search alongside 23 after 22's operator contracts and actual consumer settle. Reuse [increment 22](increment-22.md)'s activity contracts,
 HTN and scheduler; do not introduce another execution or physical simulation model.
 See [architecture decisions](../architecture/README.md#mission-planning-increments-22-24)
 and [PASM design](../../../pasm/spec/design/gameplay-redesign.yaml).

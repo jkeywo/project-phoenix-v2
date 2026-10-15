@@ -263,3 +263,20 @@ only after the same complete carrier-roster validation used by restore. Ordinary
 missing actors still require their accepted SpawnOrigin. Do not create a launcher,
 equipment or new flight vector to satisfy readiness. The actual PDC launcher-loss
 journey uses this existing rebuild route and retains complete continuation checks.
+
+### Optional missile/PDC resolution reference
+
+The actual two-tube probe exposed coincident legacy ship-centre launches. Keep
+that legacy behaviour for shipped hulls. The optional Missile Cruiser explicitly
+authors each tube's existing barrel marker, using the established rig/origin
+mechanism. Its paired fore rounds then have physical separation rather than a
+private identity exception in sensing.
+
+The optional PDC Cruiser uses a finer Tactical broad instrument: position error
+0.05 instead of 2, with continuous work cost 1.5 instead of 1. All other sensing
+and energy-profile fields, finite ammunition, generation, timed classification,
+weapon cadence and damage remain equivalent. Materialise complete atomic profiles
+through the existing include resolver; do not introduce partial profile merging.
+These are provisional equipment choices, not a balance claim. Current measured
+association, ambiguity, paid acquisition and ordinary AI remain mandatory, and
+the real larger-salvo interception/conservation/continuation checks remain strict.

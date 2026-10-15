@@ -679,18 +679,14 @@ fn actual_officer_posting_improves_paid_repair_and_preserves_custody_through_jso
     );
     let saved: PhoenixSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
-    let officer_row = saved
-        .entities
-        .iter()
-        .position(|row| row.personnel.is_some())
-        .unwrap();
+    let officer_origin = live
+        .world()
+        .get::<project_phoenix::entities::spawner::EntityUuid>(actor)
+        .unwrap()
+        .0
+        .clone();
     assert_eq!(
-        saved.entities[officer_row]
-            .personnel
-            .as_ref()
-            .unwrap()
-            .officers["repair-chief"]
-            .location,
+        saved.personnel.origins[&officer_origin].state.officers["repair-chief"].location,
         OfficerLocation::WithRepairTeam { team_idx: 0 }
     );
     let (mut resumed, restored) = boot_hull(PERSONNEL);
@@ -699,22 +695,29 @@ fn actual_officer_posting_improves_paid_repair_and_preserves_custody_through_jso
     let digest_before = world_digest(resumed.world());
     for fault in 0..3 {
         let mut forged = saved.clone();
-        let row = &mut forged.entities[officer_row];
         match fault {
-            0 => row.personnel = None,
+            0 => {
+                forged.personnel.origins.remove(&officer_origin);
+            }
             1 => {
-                row.personnel
-                    .as_mut()
+                forged
+                    .personnel
+                    .origins
+                    .get_mut(&officer_origin)
                     .unwrap()
+                    .state
                     .officers
                     .get_mut("repair-chief")
                     .unwrap()
                     .changed_tick = saved.tick + 1
             }
             _ => {
-                row.personnel
-                    .as_mut()
+                forged
+                    .personnel
+                    .origins
+                    .get_mut(&officer_origin)
                     .unwrap()
+                    .state
                     .officers
                     .get_mut("repair-chief")
                     .unwrap()
@@ -770,10 +773,8 @@ fn actual_officer_posting_improves_paid_repair_and_preserves_custody_through_jso
     assert_same(&live, &resumed, 364);
     let final_snapshot = capture(live.world());
     assert_eq!(
-        final_snapshot.entities[officer_row]
-            .personnel
-            .as_ref()
-            .unwrap()
+        final_snapshot.personnel.origins[&officer_origin]
+            .state
             .officers["repair-chief"]
             .location,
         OfficerLocation::AtCompartment {

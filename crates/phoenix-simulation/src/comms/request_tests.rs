@@ -596,7 +596,7 @@ fn clearing_an_inbox_id_cannot_cancel_a_distinct_planned_reading_with_the_same_t
         vec![],
         "plot".into(),
         true,
-        Default::default(),
+        crate::core::messages::CommsPriority::Routine,
     );
     message.recipient_ship = Some(phoenix_model::wire::ShipKey("source".into()));
     app.world_mut()

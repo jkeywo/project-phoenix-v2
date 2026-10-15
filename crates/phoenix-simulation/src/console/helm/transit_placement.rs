@@ -63,7 +63,7 @@ pub(super) fn solution(
     TransitArrivalSolution::resolve(order, offset, direction.map(|value| value as f32), bodies).ok()
 }
 
-pub(super) fn validate_saved(
+pub(crate) fn validate_saved(
     state: &TransitState,
     uuid: &str,
     owner: &SystemId,

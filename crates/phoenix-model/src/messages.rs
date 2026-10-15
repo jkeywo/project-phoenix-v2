@@ -34,7 +34,8 @@ use uuid::Uuid;
 /// and acquired combat evidence; older clients cannot represent those views.
 /// Revision 18 carries actual controlled Dock separation and remaining distance.
 /// Revision 20 carries independently addressed jammer controls and own receiver notices.
-pub const PROTOCOL_VERSION: u32 = 20;
+/// Revision 21 carries the independent Transit drive view and accepted course generation.
+pub const PROTOCOL_VERSION: u32 = 21;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).

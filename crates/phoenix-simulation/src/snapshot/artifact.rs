@@ -444,7 +444,8 @@ use super::*;
 // 59 retains typed Comms requests, actual-ship response ownership and partial reading.
 // 60 retains real activity outcomes/situations and explicit bootstrap slot provenance.
 // 61 retains independent jammer command intent; paid current influence is derived.
-pub const SNAPSHOT_FORMAT: u32 = 61;
+// 62 retains actual Transit order phases, accepted-course/fuel and arrival receipts.
+pub const SNAPSHOT_FORMAT: u32 = 62;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -566,7 +567,9 @@ pub const SNAPSHOT_FORMAT: u32 = 61;
 /// uncertainty, retaining current/fresh/evidence-only weapon decisions.
 /// "0.40" settles paid jammer influence before Input hails and shares that
 /// actual current-step result with radio, receipts and observation links.
-pub const SIMULATION_RULES: &str = "0.40";
+/// "0.41" advances one actual paid local Transit order per ship, with fixed
+/// accepted navigation and static arrival policy through the existing physics owner.
+pub const SIMULATION_RULES: &str = "0.41";
 
 /// The authored data, computed rather than remembered.
 ///

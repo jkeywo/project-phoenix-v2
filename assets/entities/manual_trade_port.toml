@@ -1,0 +1,33 @@
+# Optional explicit barter, never automatic purchase. Alloy0 gives real receiving room.
+includes = [ "station_axiom.toml" ]
+name = "entity.manual_trade_port.name"
+
+[[infrastructure.capacity]]
+id = "alloy"
+amount = 0
+ceiling = 10000
+label = "production.alloy"
+
+[port_service]
+policy = "manual_offer"
+eligible_factions = [ "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa" ]
+
+[[port_service.offer]]
+id = "machinery-for-alloy"
+resource = "machinery_parts"
+unit_amount = 5
+quota = 20
+
+[[port_service.offer.cost]]
+resource = "alloy"
+amount = 1
+
+[[port_service.offer]]
+id = "torpedoes-for-alloy"
+resource = "torpedoes"
+unit_amount = 1
+quota = 20
+
+[[port_service.offer.cost]]
+resource = "alloy"
+amount = 1

@@ -1464,6 +1464,19 @@ amount = 10000
 ceiling = 10000
 label = "production.alloy"
 
+# Port service endpoints; claim arithmetic and timing remain unchanged.
+[[entity.overrides.infrastructure.capacity]]
+id = "reserve_fuel"
+amount = 0
+ceiling = 10000
+label = "console.umbilical.reserve_fuel"
+
+[[entity.overrides.infrastructure.capacity]]
+id = "torpedoes"
+amount = 1000
+ceiling = 1000
+label = "coordination.weapon_family.torpedoes"
+
 [[entity.overrides.infrastructure.capacity]]
 id = "skyway_claim_havelock"
 amount = 22

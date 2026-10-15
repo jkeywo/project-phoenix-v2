@@ -11,7 +11,14 @@ min = [ -14.226287305355072, -0.2, -17.05310618877411 ]
 max = [ 14.2324697971344, 14.125019598007203, 17.03184163570404 ]
 size = [ 28.45875710248947, 14.325019598007202, 34.08494782447815 ]
 
-[markers]
+# Passive port berths clear the complete mated Cruiser collider.
+[markers.dock_port]
+position = [ -1.6, 0.011111111111111112, 0 ]
+direction = [ -1, 0, 0 ]
+
+[markers.dock_starboard]
+position = [ 1.6, 0.011111111111111112, 0 ]
+direction = [ 1, 0, 0 ]
 
 [[lod]]
 max_distance = 15.0

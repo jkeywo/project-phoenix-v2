@@ -1,3 +1,4 @@
+import { PORT_ACTIONS, registerPortActions } from './port-actions.js';
 import { RECOVERY_ACTIONS, registerRecoveryActions } from './recovery-actions.js';
 import { PRODUCTION_ACTIONS, registerProductionActions } from './production-actions.js';
 import { LOGISTICS_ACTIONS, registerLogisticsActions } from './logistics-actions.js';
@@ -61,6 +62,7 @@ export const ENGINEERING_ACTION_REGISTRATION_CONTEXTS = Object.freeze([
   ENGINEERING_ACTION_CONTEXT,
   'production',
   'recovery',
+  'umbilical',
 ]);
 
 function action(id, contexts, family, label, keyboardBinding, gamepadBinding) {
@@ -142,7 +144,7 @@ export const ENGINEERING_ACTIONS = Object.freeze([
   ...ENERGY_ACTIONS,
   ...LOGISTICS_ACTIONS,
   ...PRODUCTION_ACTIONS,
-  ...RECOVERY_ACTIONS,
+  ...RECOVERY_ACTIONS, ...PORT_ACTIONS,
   defineStationAction({ id: UMBILICAL_DIRECTION_ACTION_ID, contexts: ENGINEERING_CONTEXTS,
     labelKey: 'engineering.transfer_direction', bindings: [null, null] }),
   defineStationAction({ id: UMBILICAL_RESOURCE_ACTION_ID, contexts: ENGINEERING_CONTEXTS,
@@ -332,6 +334,7 @@ export function registerEngineeringActions(registry, options = {}) {
   registerLogisticsActions(registry, { ...options, getState, sendAction });
   registerProductionActions(registry, { ...options, getState, sendAction });
   registerRecoveryActions(registry, { ...options, getState, sendAction });
+  registerPortActions(registry, { ...options, getState, sendAction });
 
   const power = (direction) => ({ actionId, correlation, inputMs, detail } = {}) => {
     const state = getState();

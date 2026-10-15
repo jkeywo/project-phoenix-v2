@@ -65,6 +65,10 @@ function logisticsCommand(type, fields) {
 }
 
 export const ACTION_MAP = Object.freeze({
+  port_maintenance: logisticsCommand('SetPortMaintenance', ['enabled']),
+  port_start: logisticsCommand('StartPortOrder', ['partner_uuid', 'visit', 'lines']),
+  port_stop: logisticsCommand('StopPortOrder', []),
+  port_store: logisticsCommand('SetTransferStore', ['store']),
   logistics_enabled: logisticsCommand('SetLogisticsEnabled', ['enabled']),
   recovery_enabled: logisticsCommand('SetRecoveryEnabled', ['enabled']),
   recovery_selection: logisticsCommand('SetRecoverySelection', ['target_uuid', 'resource', 'destination_store']),

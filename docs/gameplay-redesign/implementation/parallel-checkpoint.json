@@ -256,5 +256,25 @@
     "running": "Full12target headless --no-fail-fast batch at3e580c79: .phoenix/resumed-twelve-host-integration.log. No result claimed while compiling.",
     "worktrees": "Removed clean integrated resumed-integration, facility-actors and pdc-saturation worktrees after checking absolute paths, clean state and patch equivalence. Branches preserved. Active Comms, craft, planner and personnel trees remain isolated.",
     "remaining": "Actual12target outcomes/fixes, new owner tests and Presentation privacy proof, remaining16-24 implementation including full23Patrol→War→Sandbox and24opportunity/admission/pacing, all crew-size/device/multiplayer/workload/performance/balance evidence and final integrated gates. No full increment exit, PRD closure or push."
+  },
+  "resumed_twelve_host_result": {
+    "source": "Compiled runtime/test3e580c79; actual assets636cdb24/9bd61743. Later source commits are not covered by these native outcomes.",
+    "initial": "All12 targets initially refused boot on equal-priority fleet Comms response rules. Next data-only retry refused incomplete atomic logistics in optional facility_supply_cruiser. Both source-reviewed content fixes retain normal validation and full resources.",
+    "log": ".phoenix/resumed-twelve-host-composed-content-retry.log",
+    "result": "15 passed,5 failed across12 targets; NOT a green full batch.",
+    "passed": "Activity3; relay1; local/hardenedJump2; Medical2; PDC2; physicalProbe1; plannedComms2; Protection1; Security1. Actual paid work/finite stocks, current authority and complete JSON continuation assertions retained.",
+    "failed": "Commitment2 (synthetic _self sender not admitted to physical response); hazard1 (wrong Flags.set arity); facility2 (uncharted ports and Captain retaining visiting Human Navigation).",
+    "corrections": "def2205b uses actual hailable sender/real selected response and typed integer flag.313adfcd charts only fixed ports and releases/reclaims actual crew control with explicit AI-source assertions. Fresh native retry pending."
+  },
+  "identity_retained_roster_integration": {
+    "source": "32aa19c9; protocol29/snapshot73/rules0.53",
+    "identity": "de424432/44ce5c0b/b7ac8f91: real paid physical identity, ordinary per-System tree/admitted toggle, acquired-only Broad substitution, exact candidate ownership, shared permitted status, derived claim cleared on restore. Independent source PASS after complete three-step Input ordering correction.",
+    "personnel": "c15ff6ec/6c505d15/5ff69a49/03550acc: one global finite roster, immutable accepted actor/source identity and terminal loss, existing care/posting/bonus consumers, global persistence/preflight/fold. Independent source PASS; no per-entity duplicate state or wreck-lifetime protection. Actual Activity/Medical proofs migrated to global owner.",
+    "compile": "Simulation tests no-default-features PASS33.78s, .phoenix/resumed-retained-roster-identity-check-retry.log. All13 headless host targets check PASS48.63s, .phoenix/resumed-roster-thirteen-host-target-check.log. Initial roster String validation error fixed5ff69a49; original log retained.",
+    "client": "Identity/Workshop/action-map128PASS3files1.04s; .phoenix/resumed-identity-client-retry.log. New supported action explicitly added to exact inventory after initial failure. Strict strings6312/0errors/0warnings.",
+    "builds": "Client and Workshop build PASS; client stamp29/phoenix-base/4. Wiki75pages/73indexed/2133refs/no findings; ledger216entries25dependencyorderedincrements PASS.",
+    "running": "Actual13target headless --no-fail-fast at32aa19c9: .phoenix/resumed-thirteen-host-roster-identity-native.log. No result claimed while compiling. Clean pinned32aa PASM validation pending.",
+    "owner_checks": "New Content destination selection first failed to compile an older exhaustive ActivityRequest fixture after Communication was added.2c5f2cf4 extends the exact actor reassignment to that closed variant; fresh owner retry pending. Latest Simulation owner/digest/Security/snapshot fixture corrections and Presentation privacy still need actual fresh execution.",
+    "remaining": "Actual13 outcomes/fixes; sector/formation execution; carried personnel; Comms media/decode and remaining electronic operations; optional HTN real discovery/acceptance/work; full authored continuing modes and generation/pacing; crew-size/device/multiplayer/workload/balance/performance and final integrated gates. No full increment exit, closure or push."
   }
 }

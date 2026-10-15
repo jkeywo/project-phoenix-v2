@@ -168,6 +168,22 @@ pub fn ai_helm_boost(
         if !cfg.enabled {
             continue;
         }
+        let owner = if let Some(config) = ship_config {
+            let mut owners = config
+                .0
+                .systems
+                .iter()
+                .filter(|system| system.kind == crate::ship::system_registry::HELM_BOOST_KIND);
+            let first = owners.next().map(|system| system.id.clone());
+            if owners.next().is_none() {
+                first
+            } else {
+                None
+            }
+        } else {
+            Some(BoostAxis::system_id())
+        };
+        let Some(owner) = owner else { continue };
         let cx = HelmAxisCtx {
             physics: Some(physics),
             max_speed: physics_cfg.map(|c| c.0.max_speed).unwrap_or(0.0),
@@ -190,9 +206,10 @@ pub fn ai_helm_boost(
         // The scenario flag chain, anchored at the layer that spawned this ship
         // (issue #891 stage 2).
         let flag_chain = ai_env.flag_chain(entity);
-        if let Some(payload) = run_helm_axis::<BoostAxis>(
+        if let Some(payload) = run_helm_axis_for::<BoostAxis>(
+            owner.clone(),
             sources,
-            fine_policies.and_then(|p| p.0.get(&BoostAxis::system_id())),
+            fine_policies.and_then(|p| p.0.get(&owner)),
             boost_state.map(|s| &s.0),
             clock.0,
             &flag_chain,
@@ -201,7 +218,7 @@ pub fn ai_helm_boost(
         ) {
             emit_ai_command(
                 entity_uuid,
-                BoostAxis::system_id(),
+                owner,
                 payload,
                 sources,
                 ship_config,

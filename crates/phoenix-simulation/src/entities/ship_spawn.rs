@@ -458,6 +458,20 @@ fn insert_ai_policies(config: &EntityConfig, cmds: &mut EntityCommands) {
             crate::core::messages::SystemId,
             crate::ai::policy::AiPolicy,
         > = std::collections::BTreeMap::new();
+        let boost_owner = if let Some(config) = &config.ship_config {
+            let mut owners = config
+                .systems
+                .iter()
+                .filter(|system| system.kind == sr::HELM_BOOST_KIND);
+            let first = owners.next().map(|system| system.id.clone());
+            if owners.next().is_none() {
+                first
+            } else {
+                None
+            }
+        } else {
+            Some(sr::helm_boost_system_id())
+        };
         for (block, system_id) in [
             (
                 hc.engines_ai.as_ref(),
@@ -485,7 +499,10 @@ fn insert_ai_policies(config: &EntityConfig, cmds: &mut EntityCommands) {
             ),
             (hc.vertical_ai.as_ref(), sr::vertical_thrust_system_id()),
             (hc.impulse_ai.as_ref(), sr::helm_impulse_system_id()),
-            (hc.boost_ai.as_ref(), sr::helm_boost_system_id()),
+            (
+                hc.boost_ai.as_ref().filter(|_| boost_owner.is_some()),
+                boost_owner.unwrap_or_else(sr::helm_boost_system_id),
+            ),
         ] {
             if let Some(ai) = block {
                 fine_policies.insert(system_id, ai.to_policy().unwrap_or_default());

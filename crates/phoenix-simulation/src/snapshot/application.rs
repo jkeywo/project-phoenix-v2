@@ -1491,6 +1491,12 @@ pub(super) fn apply_entity_state_with(
             boost.0.active = drive.boost_active;
             boost.0.battery = drive.boost_battery;
         }
+        if let Some(mut actuation) =
+            entity_mut
+                .get_mut::<phoenix_sim_gameplay::ship::impulse_boost_systems::BoostActuation>()
+        {
+            actuation.0 = 0.0;
+        }
     }
     if let Some(waypoint) = &row.navigation_waypoint {
         apply_navigation_waypoint(&mut entity_mut, waypoint);

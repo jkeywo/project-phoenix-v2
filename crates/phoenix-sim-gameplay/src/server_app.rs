@@ -121,6 +121,7 @@ pub struct ShipImpulse(pub ImpulseState);
 /// source of truth; no Resource fallback). Both spawn paths insert a
 /// `ShipBoost::default()` Component on every ship.
 #[derive(Component, Default)]
+#[require(crate::ship::impulse_boost_systems::BoostActuation)]
 pub struct ShipBoost(pub crate::ship::boost::BoostState);
 
 /// Per-ship marker set to `true` by phaser/torpedo fire systems when that

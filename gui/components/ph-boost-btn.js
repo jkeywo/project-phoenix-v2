@@ -146,6 +146,7 @@ export class PhBoostBtn extends PhElement {
     const active = !!s.active;
     const batteryPct = s.recharge_pct != null ? Math.max(0, Math.min(100, Number(s.recharge_pct))) : 100;
     const auto = !!s.auto;
+    const applied = s.work_fraction == null ? active : Number(s.work_fraction) > 0;
 
     const root = this.shadowRoot;
     const btn = root.getElementById('btn');
@@ -157,20 +158,21 @@ export class PhBoostBtn extends PhElement {
     const recharging = !active && batteryPct < 100;
 
     if (active) {
-      btn.textContent = batteryPct < 100
+      btn.textContent = !applied ? t('component.boost.engaged_waiting') : batteryPct < 100
         ? t('component.boost.boosting', { pct: Math.round(batteryPct) })
         : t('component.boost.boosting_full');
       btn.className = 'btn active';
-      btn.disabled = false;
+      btn.disabled = auto;
     } else if (recharging) {
-      btn.textContent = t('component.boost.recharging', { pct: Math.round(batteryPct) });
+      btn.textContent = t('component.boost.reserve', { pct: Math.round(batteryPct) });
       btn.className = 'btn recharging';
-      btn.disabled = true;
+      btn.disabled = auto || !available || batteryPct <= 0;
     } else {
       btn.textContent = t('component.boost.ready');
       btn.className = 'btn available';
-      btn.disabled = auto;
+      btn.disabled = auto || !available || batteryPct <= 0;
     }
+    btn.title = `${t('component.boost.work_fraction', { pct: Math.round(Math.max(0, Math.min(1, Number(s.work_fraction) || 0)) * 100) })}`;
 
     // Battery bar visible when not full (shows drain during boost, fill during recharge)
     if (draining || recharging) {

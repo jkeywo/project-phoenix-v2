@@ -26,6 +26,34 @@ fn movement_axis_online(
         && sources.0.source_for(owner) != crate::ship::control_source::ControlSource::Offline
 }
 
+fn boost_work_fraction(
+    sources: &ShipSystemControlSources,
+    damage: Option<&crate::ship::physical_damage::ShipDamage>,
+    power: Option<&mut crate::modifiers::power_system::PowerSystem>,
+    dt: f32,
+    activity: f32,
+) -> f32 {
+    if !crate::ship::impulse_boost_systems::boost_can_operate(
+        Some(sources),
+        damage,
+        power.as_deref(),
+    ) || activity <= 0.0
+    {
+        return 0.0;
+    }
+    let power = power.expect("operable boost has its actual consumer");
+    let owner = crate::ship::impulse_boost_systems::boost_owner(power)
+        .expect("operable boost has one owner")
+        .clone();
+    let operation = damage.map_or(1.0, |damage| {
+        damage.factor(&owner, phoenix_model::damage::DamageBinding::Operation)
+    });
+    power
+        .work_continuous(&owner, dt, activity)
+        .map_or(0.0, |grant| grant.fraction)
+        * operation
+}
+
 pub fn sync_ship_position(mut ship_query: Query<(&ShipPhysics, &mut Transform)>) {
     for (physics, mut transform) in ship_query.iter_mut() {
         transform.translation.x = physics.x;
@@ -179,6 +207,7 @@ pub fn integrate_ship_physics(
             (
                 Option<&crate::ship::helm_control::CompiledHelmControl>,
                 Option<&crate::ship::helm_control::HelmControlState>,
+                Option<&mut crate::ship::impulse_boost_systems::BoostActuation>,
             ),
         ),
         With<crate::ai::server::AiHighFidelity>,
@@ -223,7 +252,7 @@ pub fn integrate_ship_physics(
         lateral_in,
         vertical_in,
         (impulse, boost),
-        (movement_profile, movement_state),
+        (movement_profile, movement_state, mut boost_actuation),
     ) in ships.iter_mut()
     {
         // Debug-only single-writer tripwire (issue #699). The guard arrives
@@ -265,6 +294,9 @@ pub fn integrate_ship_physics(
             vertical_speed: physics.vertical_speed,
         };
 
+        if let Some(actuation) = boost_actuation.as_deref_mut() {
+            actuation.0 = 0.0;
+        }
         let physical = physical_q.get(_entity).ok();
         let mut power = power_q.get_mut(_entity).ok();
         // Configured hulls have exactly one retained intent map. Missing state
@@ -335,24 +367,16 @@ pub fn integrate_ship_physics(
                     } else {
                         0.0
                     };
-                    let fraction = if activity > 0.0 {
-                        crate::ship::energy_work::continuous_for_kind(
-                            power.as_deref_mut().map(|power| &mut power.0),
-                            crate::ship::system_registry::HELM_BOOST_KIND,
-                            dt,
-                            activity,
-                        )
-                    } else {
-                        0.0
-                    };
-                    let fraction = fraction
-                        * power.as_deref().map_or(0.0, |power| {
-                            crate::ship::physical_damage::operation_for_kind(
-                                physical,
-                                power.0.ship_config(),
-                                crate::ship::system_registry::HELM_BOOST_KIND,
-                            )
-                        });
+                    let fraction = boost_work_fraction(
+                        sources,
+                        physical,
+                        power.as_deref_mut().map(|power| &mut power.0),
+                        dt,
+                        activity,
+                    );
+                    if let Some(actuation) = boost_actuation.as_deref_mut() {
+                        actuation.0 = fraction;
+                    }
                     let multiplier = 1.0 + (boost_cfg.multiplier - 1.0) * fraction;
                     config.max_speed *= multiplier;
                     config.max_reverse_speed *= multiplier;
@@ -637,24 +661,16 @@ pub fn integrate_ship_physics(
         let boost_active = boost.map(|b| b.0.is_active()).unwrap_or(false);
         if movement_config.is_none() && boost_cfg.enabled && boost_active {
             let activity = scaled_input.thrust.abs() + scaled_input.steering.abs();
-            let fraction = if activity > 0.0 {
-                crate::ship::energy_work::continuous_for_kind(
-                    power.as_deref_mut().map(|p| &mut p.0),
-                    crate::ship::system_registry::HELM_BOOST_KIND,
-                    dt,
-                    activity,
-                )
-            } else {
-                0.0
-            };
-            let fraction = fraction
-                * power.as_deref().map_or(0.0, |power| {
-                    crate::ship::physical_damage::operation_for_kind(
-                        physical,
-                        power.0.ship_config(),
-                        crate::ship::system_registry::HELM_BOOST_KIND,
-                    )
-                });
+            let fraction = boost_work_fraction(
+                sources,
+                physical,
+                power.as_deref_mut().map(|power| &mut power.0),
+                dt,
+                activity,
+            );
+            if let Some(actuation) = boost_actuation.as_deref_mut() {
+                actuation.0 = fraction;
+            }
             let multiplier = 1.0 + (boost_cfg.multiplier - 1.0) * fraction;
             config.max_speed *= multiplier;
             config.max_reverse_speed *= multiplier;

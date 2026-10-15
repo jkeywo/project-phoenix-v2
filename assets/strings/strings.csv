@@ -6034,3 +6034,6 @@ workshop.guided.seeker-minimum_transmission,Shared guided equipment authoring,Se
 workshop.guided.receiver-range,Shared guided equipment authoring,Receiver range,Empfängerreichweite,Receiver range,machine
 workshop.guided.receiver-minimum_transmission,Shared guided equipment authoring,Receiver minimum transmission,Empfänger-Mindestübertragung,Receiver minimum transmission,machine
 workshop.guided.receiver-maximum_sample_age_secs,Shared guided equipment authoring,Maximum original sample age (s),Höchstalter der ursprünglichen Messung (s),Maximum original sample age (s),machine
+component.boost.work_fraction,Last actual condition-scaled boost physics grant. {pct} is percent,Last applied boost: {pct}%,Zuletzt angewandter Schub: {pct}%,Last applied boost: {pct}%,machine
+component.boost.reserve,Actual local Boost reserve fraction. {pct} is percent,BOOST RESERVE {pct}%,BOOST-RESERVE {pct}%,BOOST RESERVE {pct}%,machine
+component.boost.engaged_waiting,Engagement retained but no applied boost work,BOOST ENGAGED - WAITING,BOOST AKTIVIERT - WARTET,BOOST ENGAGED - WAITING,machine

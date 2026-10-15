@@ -1315,6 +1315,11 @@ export function buildHelmConsoleState(state, systemIds = []) {
     boost_enabled:           !!boostEnabled,
     boost_battery:           boostBattery,
     boost_active:            !!boostActive,
+    boost_can_operate:       bb.boost_can_operate ?? Number(boostBattery) > 0,
+    boost_work_fraction:     bb.boost_work_fraction ?? 0,
+    boost_auto:              state.controlSources && Object.keys(state.controlSources).length
+      ? state.controlSources[authoredSystemIdOfKind(state, 'helm_boost', systemIds)] !== 'Human'
+      : state.stationRatings?.['helm'] === 'Backfill',
     helm_auto:               state.stationRatings?.['helm'] === 'Backfill',
     // Fine-system engine state (issue #511): read from per-system blackboards.
     engine_port_thrust:  engineBlackboards[0]?.data?.thrust_fraction ?? 0,

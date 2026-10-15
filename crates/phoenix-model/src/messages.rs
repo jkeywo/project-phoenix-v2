@@ -4354,6 +4354,12 @@ pub struct HelmBlackboard {
     /// Boost battery charge fraction (0.0 empty → 1.0 full).
     pub boost_battery: f32,
     pub boost_active: bool,
+    /// Current exact equipment/source/condition/reserve availability, not intent.
+    #[serde(default)]
+    pub boost_can_operate: bool,
+    /// Last actual condition-scaled physics grant; never projected affordability.
+    #[serde(default)]
+    pub boost_work_fraction: f32,
     /// True when this ship's TOML includes a boost drive config.
     pub boost_enabled: bool,
     /// Live detection range for the helm radar widget, in world units —

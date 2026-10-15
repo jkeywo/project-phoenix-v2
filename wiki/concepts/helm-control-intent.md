@@ -52,10 +52,4 @@ restoring that command as Changed would re-engage it on the next tick. The
 six-peer recovery regression keeps boost on through exhaustion before restoring
 the divergent GM and compares subsequent digest checkpoints.
 
-Boost depletion in `crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs::tick_boost` advances every
-ship's `ShipBoost` using its admitted `ThrustInput` and `SteeringInput`; active
-impulse drains as full-forward thrust. The local HUD cache and crew sessions do
-not enter that calculation. `tests/lockstep_six_peer.rs` compares all four ship
-batteries across four ship hosts and two GM replicas through exhaustion and
-recharge, as well as the resulting physics fold. A LocalShip-only drain let
-remote replicas keep accelerating after the owning ship exhausted its battery.
+Boost work is paid in `crates/phoenix-sim-gameplay/src/ship/physics_systems.rs::integrate_ship_physics` for every actual ship. The exact accepted Boost owner supplies its source, Operation and local reserve/thermal limits. `tick_boost` only projects that reserve into the compatibility battery field. `BoostActuation` is a required derived last-applied fraction written at integration and cleared on restore; it is neither engagement intent nor saved work credit. The phone can re-engage with partial reserve, and distinguishes retained engagement from current availability and the last applied grant. Existing individual Boost AI policies and normal admission use the same actual owner, including custom IDs. Owner regressions live in `crates/phoenix-simulation/src/console/helm/boost_control_tests.rs`; full-host and human acceptance remain separate.

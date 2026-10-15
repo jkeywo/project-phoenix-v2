@@ -410,3 +410,23 @@ describe('Helm semantic actions', () => {
     ]);
   });
 });
+
+
+describe('sustained boost reserve and exact authority', () => {
+  it('re-engages with partial reserve and releases after reserve becomes unavailable', () => {
+    const sendAction = vi.fn();
+    const state = { helm_auto: true, boost_auto: false, boost_enabled: true, boost_active: false,
+      boost_can_operate: true, boost_battery: 0.25, boost_system_id: 'own-boost' };
+    const registry = helmRegistry({ getState: () => state, sendAction });
+    const activate = pressed => registry.activate(HELM_BOOST_ACTION_ID, {
+      context: HELM_ACTION_CONTEXT, source: 'control', detail: { holdSource: 'pointer' }, pressed,
+    });
+    expect(activate(true).handled).toBe(true);
+    state.boost_can_operate = false; state.boost_battery = 0; state.boost_auto = true;
+    expect(activate(false).handled).toBe(true);
+    expect(sendAction.mock.calls.map(([,data]) => [data.control_system_id, data.active])).toEqual([
+      ['own-boost',true], ['own-boost',false],
+    ]);
+    expect(activate(true).handled).toBe(false);
+  });
+});

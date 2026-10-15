@@ -183,7 +183,10 @@ pub(crate) fn publish_helm_blackboard(
             Option<&crate::ship::power::ShipPowerSystem>,
             Option<&BoostConfigResource>,
             Option<&ShipImpulse>,
-            Option<&ShipBoost>,
+            (
+                Option<&ShipBoost>,
+                Option<&phoenix_sim_gameplay::ship::impulse_boost_systems::BoostActuation>,
+            ),
             (
                 Option<&crate::entities::spawner::EntitySystemHull>,
                 Option<&crate::ship::compartment_damage::ShipDamage>,
@@ -225,7 +228,7 @@ pub(crate) fn publish_helm_blackboard(
         power,
         boost_config,
         impulse,
-        boost,
+        (boost, boost_actuation),
         (hull, damage),
         last_input,
         modifiers,
@@ -425,6 +428,13 @@ pub(crate) fn publish_helm_blackboard(
             impulse_charge,
             boost_battery,
             boost_active,
+            boost_can_operate: boost_enabled
+                && phoenix_sim_gameplay::ship::impulse_boost_systems::boost_can_operate(
+                    sources,
+                    damage,
+                    power.map(|power| &power.0),
+                ),
+            boost_work_fraction: boost_actuation.map_or(0.0, |fraction| fraction.0),
             boost_enabled,
             radar_range,
             lateral_speed: physics.lateral_speed,

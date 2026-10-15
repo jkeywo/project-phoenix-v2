@@ -71,13 +71,13 @@ describe('PhBoostBtn', () => {
     expect(btn.disabled).toBe(false);
   });
 
-  it('renders recharging state with percentage text and disabled button', () => {
+  it('allows re-engagement with a partial real reserve', () => {
     const { el } = setup();
     el.state = { available: true, active: false, recharge_pct: 45, system_id: '', auto: false };
     const btn = el.shadowRoot.getElementById('btn');
-    expect(btn.textContent.trim()).toBe(t('component.boost.recharging', { pct: 45 }));
+    expect(btn.textContent.trim()).toBe(t('component.boost.reserve', { pct: 45 }));
     expect(btn.className).toContain('recharging');
-    expect(btn.disabled).toBe(true);
+    expect(btn.disabled).toBe(false);
   });
 
   it('shows battery bar at correct width when recharging', () => {
@@ -129,10 +129,10 @@ describe('PhBoostBtn', () => {
     });
   });
 
-  it('holding button when recharging does not dispatch action', () => {
+  it('holding button with empty reserve does not dispatch action', () => {
     const activateSemanticAction = vi.fn(() => ({ handled: true }));
     const { el } = setup({ activateSemanticAction });
-    el.state = { available: true, active: false, recharge_pct: 30, system_id: '', auto: false };
+    el.state = { available: true, active: false, recharge_pct: 0, system_id: '', auto: false };
     const btn = el.shadowRoot.getElementById('btn');
     btn.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1 }));
     expect(activateSemanticAction).not.toHaveBeenCalled();
@@ -159,4 +159,18 @@ describe('PhBoostBtn', () => {
     expect(btn.textContent.trim()).toBe(t('component.boost.ready'));
     expect(btn.className).toContain('available');
   });
+});
+
+
+it('withholds empty or unavailable equipment while allowing release of retained engagement', () => {
+  const { el } = setup();
+  const btn = el.shadowRoot.getElementById('btn');
+  el.state = { available: true, active: false, recharge_pct: 0, auto: false };
+  expect(btn.disabled).toBe(true);
+  el.state = { available: false, active: false, recharge_pct: 80, auto: false };
+  expect(btn.disabled).toBe(true);
+  el.state = { available: false, active: true, recharge_pct: 0, work_fraction: 0, auto: false };
+  expect(btn.disabled).toBe(false);
+  expect(btn.title).toBe(t('component.boost.work_fraction', { pct: 0 }));
+  expect(btn.textContent).toBe(t('component.boost.engaged_waiting'));
 });

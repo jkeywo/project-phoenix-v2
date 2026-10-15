@@ -531,3 +531,6 @@ fn renamed_actual_owner_runs_the_existing_compiled_ai_and_normal_admission() {
         })
     );
 }
+
+#[path = "boost_control_tests.rs"]
+mod boost_tests;

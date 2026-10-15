@@ -5770,6 +5770,8 @@ fn midgame_reconnect_resets_blackboard_cache() {
         impulse_charge: 0.5,
         boost_battery: 0.8,
         boost_active: false,
+        boost_can_operate: false,
+        boost_work_fraction: 0.0,
         boost_enabled: true,
         radar_range: 0.0,
         lateral_speed: 0.0,

@@ -95,7 +95,11 @@ impl Plugin for ShipPlugin {
         // `tests/authoritative_state_enumeration.rs`; inert to the digest.
         {
             use crate::authoritative::{DeclareState, StateClass};
-            app.declare_state::<CoordinationEnqueueCursor>(
+            app.declare_state::<phoenix_sim_gameplay::ship::impulse_boost_systems::BoostActuation>(
+                StateClass::Derived,
+                "helm-movement-profile",
+            )
+            .declare_state::<CoordinationEnqueueCursor>(
                 StateClass::DeferredFold,
                 "coordination-enqueue-staging-state",
             )

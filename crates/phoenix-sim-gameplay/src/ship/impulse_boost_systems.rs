@@ -105,6 +105,47 @@ pub fn tick_impulse(
 // `ai_helm_boost` (#780) emits for a non-local `AiHighFidelity` NPC never
 // reached `BoostCommand`. `BoostCommand` now has exactly one writer.
 
+/// Actual supported Boost owner; ambiguous or absent equipment grants nothing.
+pub fn boost_owner(
+    power: &crate::modifiers::power_system::PowerSystem,
+) -> Option<&crate::core::messages::SystemId> {
+    let mut owners = power
+        .ship_config()
+        .systems
+        .iter()
+        .filter(|system| system.kind == crate::ship::system_registry::HELM_BOOST_KIND);
+    let owner = &owners.next()?.id;
+    owners.next().is_none().then_some(owner)
+}
+
+/// Current capability, distinct from retained operator engagement and past work.
+pub fn boost_can_operate(
+    sources: Option<&ShipSystemControlSources>,
+    damage: Option<&crate::ship::physical_damage::ShipDamage>,
+    power: Option<&crate::modifiers::power_system::PowerSystem>,
+) -> bool {
+    let Some(power) = power else { return false };
+    let Some(owner) = boost_owner(power) else {
+        return false;
+    };
+    sources.is_some_and(|sources| {
+        sources.0.entries().any(|(id, _)| id == owner)
+            && !sources.0.is_offline(owner)
+            && sources.0.source_for(owner) != crate::ship::control_source::ControlSource::Offline
+    }) && damage.is_none_or(|damage| {
+        damage.factor(owner, phoenix_model::damage::DamageBinding::Operation) > 0.0
+    }) && power
+        .network()
+        .consumers
+        .get(owner)
+        .is_some_and(|reserve| reserve.energy > 0.0 && !reserve.thermal_stopped)
+}
+
+/// Last actual condition-scaled grant applied by the sole physics integrator.
+/// Reconstructed diagnostic only: never intent, work credit, snapshot or digest.
+#[derive(Component, Default, Clone, Copy)]
+pub struct BoostActuation(pub f32);
+
 /// The old boost battery field is a compatibility readout of the owning local
 /// reserve. Work is paid at physics integration; this observer neither recharges
 /// another battery nor clears the saved engagement intent on exhaustion.
@@ -125,13 +166,7 @@ pub fn tick_boost(
         }
         boost.0.battery = power
             .and_then(|p| {
-                let id = &p
-                    .0
-                    .ship_config()
-                    .systems
-                    .iter()
-                    .find(|system| system.kind == crate::ship::system_registry::HELM_BOOST_KIND)?
-                    .id;
+                let id = boost_owner(&p.0)?;
                 let state = p.0.network().consumers.get(id)?;
                 let profile =
                     p.0.config()

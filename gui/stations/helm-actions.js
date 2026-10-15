@@ -177,9 +177,9 @@ export function registerHelmActions(registry, options = {}) {
           : `${source || 'control'}:default`;
     if (pressed !== false) {
       const view = helmActionView(getState());
-      if (!view || view.helm_auto || !hasBoostControl() || !view.boost_enabled
+      if (!view || (view.boost_auto ?? view.helm_auto) || !hasBoostControl() || !view.boost_enabled
           || typeof view.boost_system_id !== 'string' || !view.boost_system_id
-          || (!view.boost_active && Number(view.boost_battery) < 1)) return false;
+          || (!view.boost_active && (view.boost_can_operate === false || !(Number(view.boost_battery) > 0)))) return false;
       if (boostHolds.has(sourceId)) return false;
       const alreadyHeld = boostHolds.size > 0;
       if (alreadyHeld) {

@@ -113,9 +113,10 @@ export function makeHelmRender(variant) {
     const boostEl = doc.getElementById(ids.boost);
     if (boostEl) {
       updateControl(boostEl, {
-        available: !!s.boost_enabled, active: !!s.boost_active,
+        available: !!s.boost_enabled && s.boost_can_operate !== false, active: !!s.boost_active,
         recharge_pct: s.boost_battery != null ? s.boost_battery * 100 : 100,
-        auto: !!s.helm_auto,
+        work_fraction: s.boost_work_fraction,
+        auto: !!(s.boost_auto ?? s.helm_auto),
       });
     }
 

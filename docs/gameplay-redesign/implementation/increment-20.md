@@ -614,3 +614,39 @@ compatibility joins and integration gates remain root-owned and pending; source
 review is being queued. The receiving-ship rescue consumer and full20 exit remain
 open. This slice changes no station layout, authored finite roster or Workshop
 capability.
+
+
+## Next bounded consumer: negotiated occupied-craft reception
+
+The adopted PASM decision `redesign-occupied-craft-negotiated-bay-reception`
+uses the existing physical Bay recovery path. A receiving facility accepts one
+proposed craft through ordinary generic Comms; acceptance does not operate a
+Human Bay. The receiving Bay needs explicit Comms and sensor feeds, and resolves
+its own currently earned contact before a Human or its ordinary System AI emits
+the normal admitted recovery command with the exact accepted order. A claimed
+UUID is neither an observed contact nor machinery authority.
+
+The same Bay Job performs finite paid recovery and changes the actual deployed
+craft to Carried only at its normal physical commit. People remain in the sole
+roster as AboardCraft with the same accepted berths, including after origin loss.
+The first reference facility recovers only explicit accepted targets through its
+existing authored tree; no arbitrary-contact controller or passenger pool is
+introduced. Foreign disembarkation and captured-vessel control stay separate.
+
+A typed receipt is written only after actual custody handoff and completion of
+that same Job. It retains the immutable original Comms reference/decision tick,
+actual receiver/Bay/Job scope, craft, handoff tick and sorted stable PersonRefs.
+The existing recipient request progress then records the completed reception;
+its ordinary paid reverse outcome carries that dated evidence to the sender.
+There is no new message queue or Activity variant: `CommunicationReturned` can
+carry the genuine nested physical result. Existing ReportStatus-only planner
+validation continues refusing unsupported receiving work until its real operator
+is implemented. Job paid execution, physical handoff and later reported arrival
+are distinct clocks; no team-return phase is invented for Bay equipment.
+
+Implementation scope includes an actual equipped fixed receiving facility,
+finite capacity/access/energy, the normal Human and ordinary AI controls,
+Workshop editing and validation, strict whole-candidate graph continuation and
+fresh JSON proofs for source/origin/receiver loss. No runtime reception or full
+Patrol acceptance is claimed by this contract commit. Root owns compatibility
+versions, central integration, Cargo and final gates.

@@ -6,6 +6,7 @@ use crate::ship::system_registry::DOCK_SYSTEM_ID;
 
 fn config() -> DockConfig {
     DockConfig {
+        moves_body: true,
         range: 200.0,
         engage_distance: 400.0,
         approach_speed: 60.0,
@@ -40,6 +41,8 @@ fn fitted_focus_only_dock_refuses_unobserved_available_target_but_undock_remains
             )]),
         ))
         .id();
+    install_actual_dock_equipment(&mut world, operator);
+    world.entity_mut(operator).insert(own_marker());
     world.run_system_once(handle_dock_commands).unwrap();
     let dock = world.get::<DockControl>(operator).unwrap();
     assert!(!dock.engaged());
@@ -58,6 +61,44 @@ fn fitted_focus_only_dock_refuses_unobserved_available_target_but_undock_remains
     let dock = world.get::<DockControl>(operator).unwrap();
     assert!(!dock.engaged() && !dock.docked);
     assert!(dock.undock_target.is_some());
+}
+
+fn install_actual_dock_equipment(world: &mut World, entity: Entity) {
+    let config =
+        crate::entities::include_resolve::load_entity_config("assets/entities/dock_probe.toml")
+            .unwrap();
+    let mut sources = crate::ship_plugin::ShipSystemControlSources::default();
+    for system in &config.ship_config.as_ref().unwrap().systems {
+        sources.0.set(
+            system.id.clone(),
+            crate::ship::control_source::ControlSource::Human,
+        );
+    }
+    let damage = ShipDamage::from_config(&config).unwrap().unwrap();
+    let power = ShipPowerSystem(
+        crate::modifiers::power_system::PowerSystem::from_energy(
+            config.energy.unwrap(),
+            config.ship_config.clone().unwrap(),
+        )
+        .unwrap(),
+    );
+    if world.get::<ShipPhysics>(entity).is_none() {
+        let transform = world.get::<Transform>(entity).copied().unwrap_or_default();
+        let (yaw, _, _) = transform.rotation.to_euler(EulerRot::YXZ);
+        world.entity_mut(entity).insert(ShipPhysics {
+            x: transform.translation.x,
+            y: transform.translation.y,
+            z: transform.translation.z,
+            yaw: -yaw,
+            ..Default::default()
+        });
+    }
+    world.entity_mut(entity).insert((
+        crate::ship_plugin::ShipConfigComponent(config.ship_config.unwrap()),
+        sources,
+        damage,
+        power,
+    ));
 }
 
 fn correlated_dock_command(payload: SystemControlPayload, correlation: &str) -> AdmittedCommand {
@@ -535,6 +576,7 @@ fn engage_world() -> (App, Entity) {
             crate::core::messages::AdmittedCommands::default(),
         ))
         .id();
+    install_actual_dock_equipment(app.world_mut(), operator);
     app.world_mut().spawn((
         EntityUuid(TARGET.into()),
         Transform::from_xyz(100.0, 0.0, 0.0),
@@ -972,3 +1014,6 @@ fn funded_power() -> crate::ship::power::ShipPowerSystem {
         .unwrap(),
     )
 }
+
+#[path = "separation_tests.rs"]
+mod separation_tests;

@@ -5061,6 +5061,11 @@ pub struct TractorBlackboard {
 /// (#1160) gates on.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct DockBlackboard {
+    /// Own accepted physical clearance, including when work is temporarily paused.
+    #[serde(default)]
+    pub separating: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub separation_remaining: Option<f32>,
     /// The authored dock range, so the console can show the crew how close a
     /// berth must be. Authored content, not live state.
     #[serde(default)]

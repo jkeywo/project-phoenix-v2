@@ -64,7 +64,7 @@ state; it does not run either state machine locally.
 
 A hull whose Helm owns a `kind = "dock"` System carries a Dock control, and only
 that hull: the control is a panel the shared renderer keeps hidden until the
-payload carries a dock view that is available, engaged or docked, so a Helm with
+payload carries a dock view that is available, engaged, docked or separating, so a Helm with
 no dock system renders nothing extra. The Alliance destroyer and the Alliance
 cruiser author one; the battleship does not.
 
@@ -74,6 +74,7 @@ boolean engagement and entity-target channels hold its shared command intent.
 The rig sidecar supplies `dock`-prefixed mating plates; the shipped-content walk
 in `crates/phoenix-simulation/src/entities/config_tests.rs` verifies those plates.
 Spawn resolves the composition and markers into `DockControl` and `DockMarkers`.
+`moves_body` explicitly opts moving Dock equipment into approach/clearance; it defaults false so installing a stationary berth or provider does not grant propulsion. Controlled moving nonship equipment shares `ShipPhysics` for its captured pose without gaining a Ship marker or another integrator. Normal release accepts the actual mating marker's away direction and retains one clear destination; lost power, Operation or source availability holds that destination without free movement. Stationary providers can release their existing coupling without moving. The phone keeps own separation progress visible while paused.
 Passive berths retain a top-level `[dock]` endpoint declaration without an active
 System; active Systems reject that competing legacy tuning table.
 

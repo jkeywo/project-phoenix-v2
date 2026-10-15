@@ -951,6 +951,7 @@ fn installed_owners_settle_authored_actions_once_after_delayed_admission() {
     let mut dock = crate::dock::server::DockControl::new(
         SystemId("custom-dock".into()),
         crate::dock::mating::DockConfig {
+            moves_body: true,
             range: 200.0,
             engage_distance: 400.0,
             approach_speed: 60.0,

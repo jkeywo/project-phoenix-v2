@@ -2859,6 +2859,8 @@ fn system_blackboard_dock_round_trips_and_is_additive() {
     use crate::core::messages::{DockBlackboard, SystemBlackboard};
     // A docked control carries the relationship the umbilical (#1160) reads.
     let docked = SystemBlackboard::Dock(DockBlackboard {
+        separating: false,
+        separation_remaining: None,
         range: 200.0,
         available: false,
         available_target: None,

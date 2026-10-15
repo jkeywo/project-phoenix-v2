@@ -92,3 +92,13 @@ it('stages illumination enabled/target bindings with finite component fields and
  change(el('field-config-link_range'),'125');el('apply').click();
  expect(apply.mock.calls[0][0]()).toMatchObject({id:'science-light',components:[{kind:'power_input'},{kind:'illumination_emitter',target_channel:'subject',config:{link_range:125}}],channels:[{kind:'boolean'},{name:'subject',kind:'entity_target'}]});
 });
+
+it('edits explicit moving Dock capability with a boolean control rather than text', () => {
+  document.body.innerHTML='<main></main>'; const editor=mountSystemComponents({root:document.querySelector('main'),apply:vi.fn()});
+  const closed={component_fields:{...schema.component_fields,dock_mating:[...schema.component_fields.dock_mating,{name:'config.moves_body',kind:'boolean'}]}};
+  editor.refresh(system,closed,false); el('list').value='1'; el('list').dispatchEvent(new Event('change'));
+  const control=el('field-config-moves_body'); expect(control.type).toBe('checkbox'); expect(control.checked).toBe(false);
+  control.checked=true; control.dispatchEvent(new Event('input')); expect(editor.value().components[1].config.moves_body).toBe(true);
+  control.checked=false; control.dispatchEvent(new Event('input')); expect(editor.value().components[1].config.moves_body).toBe(false);
+  document.body.innerHTML = "";
+});

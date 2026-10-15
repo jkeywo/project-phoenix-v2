@@ -244,6 +244,7 @@ pub fn ship_schema() -> WorkshopShipSchema {
                     ("config.approach_speed", "number"),
                     ("config.mate_tolerance", "number"),
                     ("config.undock_clear_distance", "number"),
+                    ("config.moves_body", "boolean"),
                     ("config.min_power_level", "integer"),
                 ]
                 .into_iter()

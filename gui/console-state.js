@@ -1438,6 +1438,8 @@ export function buildHelmDockView(state, systemIds = []) {
     docked: !!bb.docked,
     docked_to: bb.docked_to ?? null,
     docked_to_name: bb.docked_to_name ?? null,
+    separating: !!bb.separating,
+    separation_remaining: Number.isFinite(bb.separation_remaining) && bb.separation_remaining >= 0 ? bb.separation_remaining : null,
     refusal: bb.refusal ?? null,
   };
 }

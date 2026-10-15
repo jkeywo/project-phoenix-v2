@@ -39,12 +39,13 @@ export function mountSystemComponents({ root, apply }) {
     for (const field of schema?.component_fields?.[row?.kind] || []) {
       const input = node('input', null, { id: `workshop-component-field-${field.name.replaceAll('.', '-')}` });
       const numeric = ['number', 'integer'].includes(field.kind);
-      input.type = numeric ? 'number' : 'text'; if (numeric) input.step = field.kind === 'integer' ? '1' : 'any';
-      input.value = field.name.split('.').reduce((obj, key) => obj?.[key], row) ?? '';
+      input.type = field.kind === 'boolean' ? 'checkbox' : numeric ? 'number' : 'text'; if (numeric) input.step = field.kind === 'integer' ? '1' : 'any';
+      const value = field.name.split('.').reduce((obj, key) => obj?.[key], row);
+      if (field.kind === 'boolean') input.checked = value === true; else input.value = value ?? '';
       input.oninput = () => {
         const parts = field.name.split('.'); let target = row;
         for (const part of parts.slice(0, -1)) target = target[part] ||= {};
-        target[parts.at(-1)] = numeric ? Number(input.value) : input.value;
+        target[parts.at(-1)] = field.kind === 'boolean' ? input.checked : numeric ? Number(input.value) : input.value;
       };
       const name = node('label', null, { for: input.id }); name.textContent = `${field.name} (${field.kind})`;
       fields.append(name, input);

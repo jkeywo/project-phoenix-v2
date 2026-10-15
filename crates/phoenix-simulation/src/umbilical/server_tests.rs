@@ -132,6 +132,7 @@ fn umbilical_feedback_waits_for_the_authoritative_flow_verdict() {
     let mut dock = DockControl::new(
         crate::ship::system_registry::dock_system_id(),
         crate::dock::DockConfig {
+            moves_body: true,
             range: 100.0,
             engage_distance: 100.0,
             approach_speed: 1.0,
@@ -345,6 +346,7 @@ const PARTNER: &str = "partner-1";
 
 fn dock_config() -> DockConfig {
     DockConfig {
+        moves_body: true,
         range: 200.0,
         engage_distance: 400.0,
         approach_speed: 60.0,

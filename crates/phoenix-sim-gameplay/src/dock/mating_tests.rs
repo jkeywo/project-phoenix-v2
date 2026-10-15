@@ -190,6 +190,7 @@ fn mate_yaw_opposes_the_target_plate_from_any_start_heading() {
 
 fn good_config() -> DockConfig {
     DockConfig {
+        moves_body: true,
         range: 200.0,
         engage_distance: 400.0,
         approach_speed: 60.0,
@@ -207,6 +208,7 @@ fn a_well_formed_dock_config_validates() {
 #[test]
 fn bad_dock_configs_are_rejected() {
     assert!(DockConfig {
+        moves_body: true,
         range: 0.0,
         ..good_config()
     }
@@ -232,6 +234,54 @@ fn bad_dock_configs_are_rejected() {
     .is_err());
     assert!(DockConfig {
         approach_speed: -1.0,
+        ..good_config()
+    }
+    .validate()
+    .is_err());
+}
+
+#[test]
+fn controlled_release_uses_the_actual_marker_and_refuses_ambiguous_or_missing_geometry() {
+    let pose = Pose {
+        translation: Vec3::new(8.0, 2.0, 4.0),
+        rotation: Quat::IDENTITY,
+    };
+    let starboard = DockMarker {
+        position: Vec3::ZERO,
+        direction: Vec3::X,
+    };
+    assert_eq!(
+        separation_destination(pose, &[starboard], None, 10.0),
+        Some(Vec3::new(-2.0, 2.0, 4.0))
+    );
+    assert_eq!(separation_destination(pose, &[], None, 10.0), None);
+    let aft = DockMarker {
+        position: Vec3::new(0.0, 0.0, 100.0),
+        direction: Vec3::Z,
+    };
+    assert_eq!(
+        separation_destination(pose, &[starboard, aft], None, 10.0),
+        None
+    );
+    let partner = DockMarker {
+        position: Vec3::ZERO,
+        direction: Vec3::NEG_X,
+    };
+    assert_eq!(
+        separation_destination(pose, &[starboard, aft], Some((pose, &[partner])), 10.0),
+        Some(Vec3::new(-2.0, 2.0, 4.0))
+    );
+}
+#[test]
+fn dock_terms_refuse_infinite_distances_and_speeds() {
+    assert!(DockConfig {
+        approach_speed: f32::INFINITY,
+        ..good_config()
+    }
+    .validate()
+    .is_err());
+    assert!(DockConfig {
+        undock_clear_distance: f32::INFINITY,
         ..good_config()
     }
     .validate()

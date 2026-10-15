@@ -242,10 +242,61 @@ impl DockControl {
 /// Authoritative command intent and mechanical mating/clearance state.
 /// Channel bindings and tuning are restored from the validated entity template.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DockSaveState {
     pub channels: SystemCommandChannels,
     pub docked: bool,
     pub undock_target: Option<[f32; 3]>,
+}
+
+/// Shared full-candidate and single-row preflight. No owner is written here.
+pub(crate) fn validate_saved_entity(
+    world: &World,
+    entity: Entity,
+    saved: Option<&DockSaveState>,
+    physics: Option<&[f32; 8]>,
+) -> Result<(), String> {
+    match (world.get::<DockControl>(entity), saved) {
+        (None, None) => Ok(()),
+        (Some(control), Some(saved)) => {
+            if control.channels.0.keys().ne(saved.channels.0.keys())
+                || control.channels.0.iter().any(|(key, value)| {
+                    std::mem::discriminant(value) != std::mem::discriminant(&saved.channels.0[key])
+                })
+            {
+                return Err("saved Dock channels disagree with actual equipment".into());
+            }
+            let engaged = saved.channels.boolean(&control.enabled_channel);
+            let target = saved.channels.target(&control.target_channel);
+            if target.is_some_and(|target| {
+                target.trim().is_empty() || target.chars().any(char::is_control)
+            }) || engaged != target.is_some()
+                || saved.docked && !engaged
+            {
+                return Err("saved Dock relationship disagrees with its accepted intent".into());
+            }
+            if control.config.moves_body
+                && !physics.is_some_and(|pose| pose.iter().all(|value| value.is_finite()))
+            {
+                return Err("moving Dock requires its one finite canonical physical pose".into());
+            }
+            if let Some(clear) = saved.undock_target {
+                if !control.config.moves_body
+                    || engaged
+                    || saved.docked
+                    || target.is_some()
+                    || clear.iter().any(|value| !value.is_finite())
+                {
+                    return Err(
+                        "saved controlled Dock clearance has invalid equipment, phase or geometry"
+                            .into(),
+                    );
+                }
+            }
+            Ok(())
+        }
+        _ => Err("saved Dock continuation disagrees with actual equipment presence".into()),
+    }
 }
 
 /// Registers the dock systems and its admitted-command consumer (issue #1159).
@@ -307,6 +358,30 @@ impl Plugin for DockPlugin {
     }
 }
 
+fn physical_pose(transform: &Transform, physics: Option<&ShipPhysics>) -> Pose {
+    physics.map_or(
+        Pose {
+            translation: transform.translation,
+            rotation: transform.rotation,
+        },
+        |physics| Pose {
+            translation: Vec3::new(physics.x, physics.y, physics.z),
+            rotation: Quat::from_euler(EulerRot::YXZ, -physics.yaw, 0.0, physics.roll),
+        },
+    )
+}
+fn has_dock_equipment(
+    config: Option<&crate::ship_plugin::ShipConfigComponent>,
+    owner: &SystemId,
+) -> bool {
+    config
+        .and_then(|config| config.0.system(owner))
+        .is_some_and(|system| {
+            system.kind == crate::ship::system_registry::DOCK_KIND
+                && dock_composition(&system.components).is_some()
+        })
+}
+
 // ── The dock / undock commands ───────────────────────────────────────────────
 
 /// Runs in `SimSet::Input` and reads `AdmittedCommands` for the dock system
@@ -329,19 +404,23 @@ pub fn handle_dock_commands(
         Option<&crate::server_app::ShipSystemBlackboards>,
         Option<&crate::science::broad::BroadTracks>,
         Option<&crate::science::broad::SensingControls>,
+        Option<&ShipPhysics>,
+        Option<&DockMarkers>,
     )>,
+    partners: Query<(&EntityUuid, &Transform, &DockMarkers, Option<&ShipPhysics>)>,
     mut outbound: Option<
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
     >,
 ) {
-    for (admitted, transform, mut dock, uuid, config, boards, tracks, controls) in ships.iter_mut()
+    for (admitted, transform, mut dock, uuid, config, boards, tracks, controls, physics, markers) in
+        ships.iter_mut()
     {
         // Clone the resolved target string before mutating the component below.
         // The id itself remains authored topology, not a per-command decision.
         let system_id = dock.system_id.0.clone();
         for cmd in admitted.for_target(&system_id) {
             let outcome = match &cmd.payload {
-                SystemControlPayload::Dock if !dock.engaged() => {
+                SystemControlPayload::Dock if !dock.engaged() && dock.config.moves_body => {
                     match dock.available_target.clone().filter(|target| {
                         crate::science::contact_routing::machinery_alias(
                             config.map(|config| &config.0),
@@ -373,6 +452,47 @@ pub fn handle_dock_commands(
                     }
                 }
                 SystemControlPayload::Undock if dock.engaged() || dock.docked => {
+                    let clear = if dock.docked && dock.config.moves_body {
+                        if !has_dock_equipment(config, &dock.system_id) {
+                            dock.last_refusal = Some(DockRefusal::Disabled);
+                            crate::command_admission::finish_action_feedback(
+                                cmd,
+                                &mut outbound,
+                                ActionFeedbackOutcome::Refused,
+                            );
+                            continue;
+                        }
+                        let own = physical_pose(transform, physics);
+                        let partner = dock
+                            .docking_target()
+                            .and_then(|target| {
+                                partners.iter().find(|(uuid, _, _, _)| uuid.0 == target)
+                            })
+                            .map(|(_, transform, markers, physics)| {
+                                (
+                                    physical_pose(transform, physics),
+                                    markers.markers.as_slice(),
+                                )
+                            });
+                        let clear = crate::dock::mating::separation_destination(
+                            own,
+                            markers.map_or(&[], |markers| markers.markers.as_slice()),
+                            partner,
+                            dock.config.undock_clear_distance,
+                        );
+                        let Some(clear) = clear else {
+                            dock.last_refusal = Some(DockRefusal::NoDockMarkers);
+                            crate::command_admission::finish_action_feedback(
+                                cmd,
+                                &mut outbound,
+                                ActionFeedbackOutcome::Refused,
+                            );
+                            continue;
+                        };
+                        Some(clear)
+                    } else {
+                        None
+                    };
                     // Report the cancel BEFORE clearing intent, so a release of an
                     // idle dock (a stale-UI double tap) reports nothing at all
                     // (issue #1345). A live activation exists only once
@@ -388,16 +508,10 @@ pub fn handle_dock_commands(
                             reason: TaskTerminalReason::Released,
                         },
                     );
-                    // Back straight out along the ship's own heading, away from
-                    // the berth, then return to ordinary flight. The clear pose is
-                    // fixed now, while the ship still sits on the mate, so the
-                    // manoeuvre needs no further reference to the target.
-                    let back = transform.rotation * Vec3::new(0.0, 0.0, 1.0); // local +Z = astern
-                    let clear = transform.translation + back * dock.config.undock_clear_distance;
                     dock.set_engaged(false);
                     dock.docked = false;
                     dock.set_docking_target(None);
-                    dock.undock_target = Some(clear);
+                    dock.undock_target = clear;
                     dock.last_refusal = None;
                     ActionFeedbackOutcome::Applied
                 }
@@ -675,9 +789,16 @@ pub fn tick_dock(
             Option<&EntitySystemHull>,
             Option<&ShipDamage>,
             &EntityUuid,
+            (
+                Option<&ShipPhysics>,
+                Option<&crate::ship_plugin::ShipSystemControlSources>,
+                Option<&crate::ship_plugin::ShipConfigComponent>,
+                Option<&crate::resources::fitting_server::CompiledShipFitting>,
+                Option<&crate::resources::fitting_server::ShipFitting>,
+            ),
         )>,
         // Every hull carrying dock markers, to resolve candidates and targets.
-        Query<(&EntityUuid, &Transform, &DockMarkers)>,
+        Query<(&EntityUuid, &Transform, &DockMarkers, Option<&ShipPhysics>)>,
         // Apply the verdict and any placement.
         Query<(
             &mut DockControl,
@@ -693,24 +814,29 @@ pub fn tick_dock(
     let candidates: Vec<Candidate> = set
         .p1()
         .iter()
-        .filter(|(_, _, m)| !m.is_empty())
-        .map(|(uuid, transform, markers)| Candidate {
+        .filter(|(_, _, m, _)| !m.is_empty())
+        .map(|(uuid, transform, markers, physics)| Candidate {
             uuid: uuid.0.clone(),
-            pose: Pose {
-                translation: transform.translation,
-                rotation: transform.rotation,
-            },
+            pose: physical_pose(transform, physics),
             markers: markers.markers.clone(),
         })
         .collect();
 
     // Decide each own ship without holding the write borrow.
     let mut outcomes: Vec<DockOutcome> = Vec::new();
-    for (entity, dock, transform, markers, mut power, hull, damage, uuid) in set.p0().iter_mut() {
-        let own_pose = Pose {
-            translation: transform.translation,
-            rotation: transform.rotation,
-        };
+    for (
+        entity,
+        dock,
+        transform,
+        markers,
+        mut power,
+        hull,
+        damage,
+        uuid,
+        (physics, sources, config, fitting_profile, fitting_state),
+    ) in set.p0().iter_mut()
+    {
+        let own_pose = physical_pose(transform, physics);
         let own_markers: &[DockMarker] = markers.map(|m| m.markers.as_slice()).unwrap_or(&[]);
         // Allocation is incoming flow, not equipment availability. Geometry is
         // checked before paying, so impossible/idle attempts consume no energy.
@@ -728,6 +854,102 @@ pub fn tick_dock(
             &candidates,
             dt,
         );
+        if dock.config.moves_body && physics.is_none() {
+            // Missing the accepted physical owner cannot fall back to an unsaved
+            // Transform path. Keep the existing work until the owner is repaired.
+            outcome.engaged = dock.engaged();
+            outcome.docked = dock.docked;
+            outcome.docking_target = dock.docking_target().map(str::to_owned);
+            outcome.new_pose = None;
+            outcome.undock_target = dock.undock_target;
+            outcome.last_refusal = Some(DockRefusal::Disabled);
+            outcomes.push(outcome);
+            continue;
+        }
+        if !dock.config.moves_body {
+            // A berth may retain/release an existing coupling but never moves.
+            outcome.new_pose = None;
+            outcome.available_target = None;
+            if dock.undock_target.is_some() {
+                outcome.undock_target = None;
+            }
+            outcomes.push(outcome);
+            continue;
+        }
+        if let Some(clear) = dock.undock_target {
+            let online = has_dock_equipment(config, &dock.system_id)
+                && sources.is_some_and(|sources| {
+                    sources.0.entries().any(|(id, _)| id == &dock.system_id)
+                        && !sources.0.is_offline(&dock.system_id)
+                        && sources.0.source_for(&dock.system_id)
+                            != crate::ship::control_source::ControlSource::Offline
+                })
+                && match (fitting_profile, fitting_state) {
+                    (Some(profile), Some(state)) => !crate::resources::fitting_server::unavailable(
+                        profile,
+                        state,
+                        &dock.system_id,
+                    ),
+                    (None, None) => true,
+                    _ => false,
+                };
+            let operation = damage.map_or(0.0, |damage| {
+                damage.factor(
+                    &dock.system_id,
+                    phoenix_model::damage::DamageBinding::Operation,
+                )
+            });
+            let distance = planar_distance(own_pose.translation, clear);
+            let work_secs = (f64::from(dt) * f64::from(operation))
+                .min(distance / f64::from(dock.config.approach_speed))
+                as f32;
+            let fraction = if online && !disabled && work_secs > 0.0 {
+                power.as_deref_mut().map_or(0.0, |power| {
+                    power
+                        .0
+                        .work_continuous(&dock.system_id, work_secs, 1.0)
+                        .map_or(0.0, |grant| grant.fraction)
+                })
+            } else {
+                0.0
+            };
+            if fraction > 0.0 {
+                outcome = decide_dock(
+                    entity,
+                    &uuid.0,
+                    dock,
+                    own_pose,
+                    own_markers,
+                    power_level,
+                    false,
+                    &candidates,
+                    work_secs * fraction,
+                );
+            } else if distance > 0.0 {
+                outcome.new_pose = None;
+                outcome.undock_target = Some(clear);
+                outcome.last_refusal = Some(if !online || disabled || operation <= 0.0 {
+                    DockRefusal::Disabled
+                } else {
+                    DockRefusal::Unpowered
+                });
+            } else {
+                // Already at the accepted clear point: settling needs no travel work.
+                outcome = decide_dock(
+                    entity,
+                    &uuid.0,
+                    dock,
+                    own_pose,
+                    own_markers,
+                    power_level,
+                    false,
+                    &candidates,
+                    0.0,
+                );
+            }
+            outcomes.push(outcome);
+            continue;
+        }
         if outcome.new_pose.is_some() && !disabled {
             let moving = outcome.new_pose.as_ref().is_some_and(|pose| {
                 pose.translation != own_pose.translation || pose.rotation != own_pose.rotation
@@ -846,7 +1068,7 @@ pub fn tick_dock(
                 physics.y = pose.translation.y;
                 physics.z = pose.translation.z;
                 let (yaw, _, _) = pose.rotation.to_euler(EulerRot::YXZ);
-                physics.yaw = yaw;
+                physics.yaw = -yaw;
                 // A ship parked on (or backing off) a berth carries no residual
                 // velocity — the same reason the tractor zeroes a released load.
                 physics.forward_speed = 0.0;
@@ -910,6 +1132,19 @@ fn decide_dock(
 
     // ── Undocking: back straight out, then return to ordinary flight ──────────
     if let Some(clear) = dock.undock_target {
+        if disabled {
+            return DockOutcome {
+                entity,
+                engaged: false,
+                docked: false,
+                docking_target: None,
+                undock_target: Some(clear),
+                available_target: None,
+                last_refusal: Some(DockRefusal::Disabled),
+                new_pose: None,
+            };
+        }
+
         let (stepped, arrived) = step_toward(own_pose.translation, clear, cfg.approach_speed, dt);
         if arrived {
             // Clear of the berth; resume ordinary flight and re-offer the control
@@ -1028,15 +1263,37 @@ fn decide_dock(
 /// Step a point toward a goal at `speed` units/second for `dt` seconds, bounded
 /// so it never overshoots. Returns the new point and whether the goal was
 /// reached this tick. Planar — the vertical is carried straight through.
+fn planar_distance(from: Vec3, to: Vec3) -> f64 {
+    let dx = f64::from(to.x) - f64::from(from.x);
+    let dz = f64::from(to.z) - f64::from(from.z);
+    let scale = dx.abs().max(dz.abs());
+    if scale == 0.0 {
+        return 0.0;
+    }
+    scale
+        * f64::from(crate::simmath::hypot(
+            (dx / scale) as f32,
+            (dz / scale) as f32,
+        ))
+}
 fn step_toward(from: Vec3, to: Vec3, speed: f32, dt: f32) -> (Vec3, bool) {
-    let delta = to - from;
-    let planar = Vec3::new(delta.x, 0.0, delta.z);
-    let dist = planar.length();
-    let step = (speed * dt).max(0.0);
-    if dist <= step || dist <= 1e-4 {
+    let distance = planar_distance(from, to);
+    let step = (f64::from(speed) * f64::from(dt)).max(0.0);
+    if distance <= step {
         return (Vec3::new(to.x, from.y, to.z), true);
     }
-    (from + planar / dist * step, false)
+    if step == 0.0 {
+        return (from, false);
+    }
+    let fraction = step / distance;
+    (
+        Vec3::new(
+            (f64::from(from.x) + (f64::from(to.x) - f64::from(from.x)) * fraction) as f32,
+            from.y,
+            (f64::from(from.z) + (f64::from(to.z) - f64::from(from.z)) * fraction) as f32,
+        ),
+        false,
+    )
 }
 
 /// The world-space unit direction the close-in docking manoeuvre would drive the
@@ -1084,6 +1341,8 @@ pub fn publish_dock_blackboard(
         Option<&crate::ship_plugin::ShipConfigComponent>,
         Option<&crate::science::broad::BroadTracks>,
         Option<&crate::science::broad::SensingControls>,
+        Option<&ShipPhysics>,
+        Option<&Transform>,
     )>,
     named: Query<(&EntityUuid, &EntityName)>,
 ) {
@@ -1095,7 +1354,7 @@ pub fn publish_dock_blackboard(
                 .map(|(_, name)| name.0.clone())
         })
     };
-    for (dock, mut blackboards, config, tracks, controls) in ships.iter_mut() {
+    for (dock, mut blackboards, config, tracks, controls, physics, transform) in ships.iter_mut() {
         let key = &dock.system_id;
         let measured = crate::science::contact_routing::measured_machinery(tracks, controls);
         let known = |target: &str| {
@@ -1128,8 +1387,17 @@ pub fn publish_dock_blackboard(
             }
         };
         let blackboard = SystemBlackboard::Dock(DockBlackboard {
+            separating: dock.undock_target.is_some(),
+            separation_remaining: dock.undock_target.and_then(|clear| {
+                physics
+                    .map(|physics| Vec3::new(physics.x, physics.y, physics.z))
+                    .or_else(|| transform.map(|transform| transform.translation))
+                    .map(|position| {
+                        planar_distance(position, clear).min(f64::from(f32::MAX)) as f32
+                    })
+            }),
             range: dock.config.range,
-            available: available.is_some() && !dock.docked,
+            available: dock.config.moves_body && available.is_some() && !dock.docked,
             available_target: available.clone(),
             available_target_name: name(available.as_deref()),
             engaged: dock.engaged(),

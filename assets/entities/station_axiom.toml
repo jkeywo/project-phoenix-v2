@@ -818,6 +818,7 @@ enabled_channel = "enabled"
 target_channel = "target"
 power_input = "power"
 [system.component.config]
+moves_body = false
 range = 200
 engage_distance = 400
 approach_speed = 60

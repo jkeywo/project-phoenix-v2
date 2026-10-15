@@ -74,6 +74,21 @@ pub(super) fn install(
             crate::ship::shields::ShieldsDamageHistory::default(),
         ));
         insert_power_state(config, &[], cmds);
+        if config.ship_config.as_ref().is_some_and(|ship| {
+            ship.systems.iter().any(|system| {
+                crate::ship::composition::dock_composition(&system.components)
+                    .is_some_and(|dock| dock.config.moves_body)
+            })
+        }) {
+            // Controlled mechanical equipment shares the existing captured pose;
+            // this adds no Ship, crew, AI or ordinary propulsion integrator.
+            cmds.insert(crate::ship::state::ShipPhysics {
+                x: position.x,
+                y: position.y,
+                z: position.z,
+                ..Default::default()
+            });
+        }
     }
     // These capabilities also belong to independently authored nonship entities.
     if let Some(layout) = &config.interior {

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import { parse } from 'smol-toml';
-import { writeSystemComposition, initialTurret, validateTurretComposition } from '../workshop-system-composition.js';
+import { writeSystemComposition, initialTurret, validateTurretComposition, validateDockMovement } from '../workshop-system-composition.js';
 import { mergeComposeFragments, resolveTemplate } from '../entity-includes.js';
 
 const source = `# untouched header
@@ -84,5 +84,28 @@ it('resolves the actual Cruiser and inherited Dynasty with one forebank and one 
     const receiver = value.sensing.passive.find(row => row.system === 'passive-receiver');
     expect(receiver.mount).toEqual({ facing_deg: 0, arc_deg: 120, range: 100 });
     expect(mounted.find(row => row.id === 'phaser-fore').component.find(row => row.kind === 'turret').config.traverse_deg_per_sec).toBe(45);
+  }
+});
+
+it('roundtrips inherited explicit moving-Dock disable without changing other equipment', () => {
+  const effective = parse(source).system[0]; effective.component[0].config.moves_body = true;
+  const local = '[[system]]\nid="dock"\nconsole="helm"\n';
+  const components = structuredClone(effective.component); components[0].config.moves_body = false;
+  validateDockMovement(components);
+  const after = writeSystemComposition(local,'dock',{components,channels:effective.channel,materialise:true},effective);
+  const merged = mergeComposeFragments({system:[effective]},parse(after));
+  expect(merged.system[0].component[0].config.moves_body).toBe(false);
+  expect(merged.system[0].component[1]).toEqual(effective.component[1]);
+  for (const value of ['false',null,0]) { const bad=structuredClone(components); bad[0].config.moves_body=value; expect(()=>validateDockMovement(bad)).toThrow(); }
+});
+
+it('keeps actual mobile Dock body movement explicit while Axiom remains a stationary service berth', () => {
+  const resolve = path => resolveTemplate(path, { read: path => fs.existsSync(path) ? fs.readFileSync(path,'utf8') : null }, parse).resolved.value;
+  for (const name of ['alliance_cruiser','alliance_destroyer','alliance_tender','dynasty_player_cruiser','dock_probe','umbilical_probe']) {
+    const hull=resolve(`assets/entities/${name}.toml`); const mates=hull.system.flatMap(system=>system.component || []).filter(row=>row.kind==='dock_mating');
+    expect(mates.length,name).toBeGreaterThan(0); expect(mates.every(row=>row.config.moves_body===true),name).toBe(true);
+  }
+  for (const name of ['station_axiom','manual_trade_port']) {
+    const hull=resolve(`assets/entities/${name}.toml`); expect(hull.system.find(row=>row.id==='dock').component.find(row=>row.kind==='dock_mating').config.moves_body,name).toBe(false);
   }
 });

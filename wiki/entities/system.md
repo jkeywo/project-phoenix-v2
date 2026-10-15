@@ -75,6 +75,7 @@ passive berths retain their endpoint declaration. Current docking supports one
 active Dock System per entity. Other System kinds retain their existing shape.
 `crates/phoenix-simulation/src/dock/server.rs` carries mating and undocking
 clearance separately from intent, with both persisted and included in digests.
+Its explicit `moves_body` equipment flag separates paid moving Dock machinery from stationary berth/service markers. Whole-candidate and single-row Dock validation checks accepted channel shape, phase, finite clearance and the existing physical pose before application; the helper is `dock::server::validate_saved_entity`. No additional saved timer or pose is introduced.
 
 ## Common status
 

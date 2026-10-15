@@ -44,6 +44,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DockConfig {
+    /// Explicit controlled own-body movement. Stationary berths default false.
+    #[serde(default)]
+    pub moves_body: bool,
     /// The furthest a viable dock-marker pair may sit and still offer the dock
     /// control, and the separation past which a forming or held dock parts, in
     /// world units. The contextual control appears only while the nearest viable
@@ -59,7 +62,7 @@ pub struct DockConfig {
     /// The marker-pair separation under which the two hulls count as mated and
     /// the docked relationship forms, in world units.
     pub mate_tolerance: f32,
-    /// How far the own ship backs straight out along its dock marker's outward
+    /// How far the own body clears away from the accepted marker's outward
     /// direction on undock before it returns to ordinary flight, in world units.
     pub undock_clear_distance: f32,
     /// The lowest power-group level at which the dock manoeuvre runs. Below it a
@@ -82,7 +85,7 @@ impl DockConfig {
             ("mate_tolerance", self.mate_tolerance),
             ("undock_clear_distance", self.undock_clear_distance),
         ] {
-            if value.is_nan() || value <= 0.0 {
+            if !value.is_finite() || value <= 0.0 {
                 return Err(format!(
                     "[dock] {name} must be a positive distance, got {value}"
                 ));
@@ -185,6 +188,39 @@ pub struct MatingSolution {
     /// The current world distance between the two chosen markers, before the
     /// mate. This is what the range test and the nearest-pair selection read.
     pub separation: f32,
+}
+
+/// Accept one physical release direction, then retain only the clear point.
+/// A surviving mate selects its actual marker. Without that mate, only one
+/// viable authored own marker is unambiguous. Never invent a default actuator.
+pub fn separation_destination(
+    own: Pose,
+    markers: &[DockMarker],
+    partner: Option<(Pose, &[DockMarker])>,
+    distance: f32,
+) -> Option<Vec3> {
+    if !distance.is_finite() || distance <= 0.0 {
+        return None;
+    }
+    let marker = if let Some((pose, other)) = partner {
+        markers.get(nearest_viable_pair(own, markers, pose, other)?.own_marker)?
+    } else {
+        let mut viable = markers
+            .iter()
+            .filter(|marker| horizontal_yaw(marker.direction).is_some());
+        let marker = viable.next()?;
+        if viable.next().is_some() {
+            return None;
+        }
+        marker
+    };
+    let normal = own.rotation * marker.direction;
+    let away = Vec3::new(-normal.x, 0.0, -normal.z).normalize_or_zero();
+    if away.length_squared() == 0.0 {
+        return None;
+    }
+    let clear = own.translation + away * distance;
+    clear.is_finite().then_some(clear)
 }
 
 /// The yaw of a horizontal direction, in the ship convention `0 = -Z forward`

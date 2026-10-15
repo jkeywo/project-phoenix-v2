@@ -69,7 +69,7 @@ export function renderDockPanel(s, doc, tr) {
   const dockBtn = doc.getElementById('dock-btn');
   if (dockBtn) dockBtn.dataset.systemId = d?.system_id || '';
   if (!dockPanel) return;
-  if (!d || (!d.available && !d.engaged && !d.docked)) {
+  if (!d || (!d.available && !d.engaged && !d.docked && !d.separating)) {
     dockPanel.hidden = true;
     return;
   }
@@ -77,11 +77,12 @@ export function renderDockPanel(s, doc, tr) {
   const docked = !!d.docked;
   if (dockBtn) {
     dockBtn.classList.toggle('docked', docked);
+    dockBtn.disabled = !!d.separating;
     dockBtn.textContent = tr(docked ? 'console.dock.undock' : 'console.dock.dock');
   }
   const dockStatus = doc.getElementById('dock-status');
   if (dockStatus) {
-    dockStatus.textContent = docked
+    dockStatus.textContent = d.separating ? tr('console.dock.separating', { distance: Number.isFinite(d.separation_remaining) ? Math.round(d.separation_remaining) : '?' }) : docked
       ? tr('console.dock.docked') + (d.docked_to_name ? ' · ' + tr(d.docked_to_name) : '')
       : tr('console.dock.available') + (d.available_target_name ? ' · ' + tr(d.available_target_name) : '');
   }

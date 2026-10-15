@@ -698,6 +698,7 @@ fn spawn_docker(world: &mut World, uuid: &str, docked_to: Option<&str>) {
     let mut control = DockControl::new(
         crate::ship::system_registry::dock_system_id(),
         crate::dock::DockConfig {
+            moves_body: true,
             range: 200.0,
             engage_distance: 400.0,
             approach_speed: 60.0,

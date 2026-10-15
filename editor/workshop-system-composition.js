@@ -56,6 +56,11 @@ export function validateTurretComposition(system, components, channels) {
   }
 }
 
+export function validateDockMovement(components) {
+  for (const row of components) if (row.kind === 'dock_mating' && row.config?.moves_body !== undefined && typeof row.config.moves_body !== 'boolean')
+    throw new Error('Dock moves_body must be a supported boolean; stationary berths default false.');
+}
+
 /** Replace only the selected System's composition, as one accepted transaction.
  * Nested identities are scoped to that System; inherited data requires an
  * explicit materialisation action, never a write into its supplying include. */

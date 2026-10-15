@@ -96,3 +96,13 @@ it('shows collection direction and parts labels, retaining exact-owner selectors
   expect(el('umbilical-status').textContent).toContain('←');
   delete window.sendAction;
 });
+
+it('keeps accepted own separation visible while paused and withholds another dock activation', () => {
+  document.body.innerHTML = '<section id="dock-panel"><button id="dock-btn"></button><span id="dock-status"></span><span id="dock-refusal"></span></section>';
+  renderDockPanel({ dock: { system_id: 'dock', separating: true, separation_remaining: 12.5, refusal: 'dock.refused.unpowered' } }, document, t);
+  expect(document.getElementById('dock-panel').hidden).toBe(false);
+  expect(document.getElementById('dock-btn').disabled).toBe(true);
+  expect(document.getElementById('dock-status').textContent).toBe(t('console.dock.separating', { distance: 13 }));
+  renderDockPanel({ dock: { system_id: 'dock', available: true } }, document, t);
+  expect(document.getElementById('dock-btn').disabled).toBe(false);
+});

@@ -867,6 +867,10 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             StateClass::DeferredFold,
             "active-station-rating-state",
         )
+        .declare_state::<crate::lobby::crew_replication::ShipCrewPresence>(
+            StateClass::Folded,
+            "actual-crew-presence-state",
+        )
         .declare_state::<crate::ship::components::CoordinationQueue>(
             StateClass::DeferredFold,
             "coordination-lag-queue-state",

@@ -1007,6 +1007,39 @@ fn prepare_ship_seed(
     }
 
     crate::entities::ship_spawn::ShipSpawnSeed {
+        // This map was just seeded from actual available local participants or
+        // the identical frozen fleet crew. Backfill/default seats grant none.
+        crew_presence: crate::lobby::crew_replication::ShipCrewPresence(
+            if placement.uses_live_sessions {
+                sessions
+                    .as_ref()
+                    .map(|sessions| {
+                        sessions
+                            .0
+                            .players()
+                            .iter()
+                            .filter(|player| {
+                                player.connected
+                                    && !sessions.0.is_afk(&player.token)
+                                    && !sessions.0.is_spectator(&player.token)
+                            })
+                            .filter_map(|player| player.station.clone())
+                            .filter(|station| ship_config.0.station(station).is_some())
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            } else {
+                placement
+                    .crew
+                    .iter()
+                    .filter(|(station, rating)| {
+                        rating != crate::ship::rating::BACKFILL_RATING
+                            && ship_config.0.station(station).is_some()
+                    })
+                    .map(|(station, _)| station.clone())
+                    .collect()
+            },
+        ),
         ship_config,
         control_sources: initial_control_sources,
         active_ratings: initial_active_ratings,

@@ -2116,6 +2116,10 @@ pub enum SystemControlPayload {
     AssignStationRating {
         station: StationId,
         rating: String,
+        /// Actual post-handler occupied/available seat, replicated on the same
+        /// admitted crew transition. Rating-only callers cannot create crew.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        occupied: Option<bool>,
     },
     /// Host-validated Console presentation update, replicated through ordinary
     /// admission so save/replay and fleet peers retain the same working view.

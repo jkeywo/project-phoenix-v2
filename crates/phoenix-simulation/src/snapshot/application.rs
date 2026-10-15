@@ -2278,13 +2278,16 @@ pub(crate) fn restore_mesh_crew(world: &mut World, snapshot: &PhoenixSnapshot) {
     use crate::ship::control_source::ControlSource;
     use crate::ship_plugin::{ActiveStationRatings, ShipConfigComponent, ShipSystemControlSources};
     let mut query = world.query::<(
+        Entity,
         &EntityUuid,
         &ShipConfigComponent,
         &mut ActiveStationRatings,
         &mut ShipSystemControlSources,
         Option<&mut crate::console::command::server::LastDirectedControl>,
+        Option<&mut crate::lobby::crew_replication::ShipCrewPresence>,
     )>();
-    for (uuid, config, mut ratings, mut sources, last) in query.iter_mut(world) {
+    let mut missing_presence = Vec::new();
+    for (entity, uuid, config, mut ratings, mut sources, last, presence) in query.iter_mut(world) {
         let Some(crew) = snapshot
             .entities
             .iter()
@@ -2321,6 +2324,14 @@ pub(crate) fn restore_mesh_crew(world: &mut World, snapshot: &PhoenixSnapshot) {
         restored.replace_gm_disabled_systems(sources.0.gm_disabled_entries().cloned());
         ratings.0 = captured_ratings;
         sources.0 = restored;
+        let restored_presence = crate::lobby::crew_replication::ShipCrewPresence(
+            crew.occupied.iter().cloned().map(StationId).collect(),
+        );
+        if let Some(mut presence) = presence {
+            *presence = restored_presence;
+        } else {
+            missing_presence.push((entity, restored_presence));
+        }
         // Ordinary restore seeded this edge detector against bootstrap crew.
         // Reseed after the mesh authority frontier replaces that policy.
         if let Some(mut last) = last {
@@ -2334,6 +2345,9 @@ pub(crate) fn restore_mesh_crew(world: &mut World, snapshot: &PhoenixSnapshot) {
                 last.0.insert(target, ai);
             }
         }
+    }
+    for (entity, presence) in missing_presence {
+        world.entity_mut(entity).insert(presence);
     }
 }
 

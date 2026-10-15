@@ -36,6 +36,7 @@ pub struct LobbyResultApplier<'w, 's> {
             &'static ShipConfigComponent,
             &'static mut ShipSystemControlSources,
             &'static mut ActiveStationRatings,
+            Option<&'static mut crate::lobby::crew_replication::ShipCrewPresence>,
         ),
         With<crate::server_app::LocalShip>,
     >,
@@ -48,7 +49,7 @@ impl LobbyResultApplier<'_, '_> {
     pub fn identify_ratings(&self, sessions: &SessionManager) -> HashMap<StationId, String> {
         self.ship
             .single()
-            .map(|(entity, uuid, _, _, ratings)| self.project_ratings(entity, uuid, ratings))
+            .map(|(entity, uuid, _, _, ratings, _)| self.project_ratings(entity, uuid, ratings))
             .unwrap_or_else(|_| sessions.pending_ratings().clone())
     }
 
@@ -57,7 +58,7 @@ impl LobbyResultApplier<'_, '_> {
     pub fn afk_ratings(&self) -> HashMap<StationId, String> {
         self.ship
             .single()
-            .map(|(entity, uuid, _, _, ratings)| self.project_ratings(entity, uuid, ratings))
+            .map(|(entity, uuid, _, _, ratings, _)| self.project_ratings(entity, uuid, ratings))
             .unwrap_or_default()
     }
 
@@ -86,7 +87,7 @@ impl LobbyResultApplier<'_, '_> {
     /// messages in their existing order. Before spawn, the pure handlers own
     /// pending choices in SessionManager; no temporary ActiveStationRatings
     /// component pretends to retain a projection which has no Ship yet.
-    pub fn apply(&mut self, result: LobbyHandlerResult) {
+    pub fn apply(&mut self, result: LobbyHandlerResult, sessions: &SessionManager) {
         if let Some(action) = result.countdown_action {
             if let Some(timer) = self.countdown.as_deref_mut() {
                 match action {
@@ -119,12 +120,24 @@ impl LobbyResultApplier<'_, '_> {
             self.next_state.set(phase);
         }
         if let Some((station, name)) = result.station_rating_update {
-            if let Ok((_, _, config, mut sources, mut ratings)) = self.ship.single_mut() {
+            let occupied = sessions
+                .holder_for_station(&station)
+                .is_some_and(|token| !sessions.is_afk(token) && !sessions.is_spectator(token));
+            if let Ok((_, _, config, mut sources, mut ratings, presence)) = self.ship.single_mut() {
                 if self.fleet.is_some() {
-                    self.intents.push(station, name);
+                    self.intents.push_presence(station, name, occupied);
                 } else {
+                    let mut next = presence.as_deref().cloned().unwrap_or_default();
+                    if occupied {
+                        next.0.insert(station.clone());
+                    } else {
+                        next.0.remove(&station);
+                    }
                     rating::apply_rating(&config.0, &station, &name, &mut sources.0);
                     ratings.0.insert(station, name);
+                    if let Some(mut presence) = presence {
+                        *presence = next;
+                    }
                 }
             }
         }
@@ -155,6 +168,6 @@ impl LobbyResultApplier<'_, '_> {
         } else {
             handler::process_disconnect(token, sessions, phase, preload_complete)
         };
-        self.apply(result);
+        self.apply(result, sessions);
     }
 }

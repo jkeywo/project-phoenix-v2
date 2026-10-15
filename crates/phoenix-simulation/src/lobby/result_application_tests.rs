@@ -42,6 +42,7 @@ console = "helm-console"
                 ShipConfigComponent(config),
                 ShipSystemControlSources(sources),
                 ActiveStationRatings(ratings),
+                crate::lobby::crew_replication::ShipCrewPresence::default(),
             ))
             .id()
     });
@@ -177,12 +178,19 @@ fn complete_result_claim_afk_release_and_spectator_update_all_loaded_projections
         assert_projection(&app, ship, "Backfill", ControlSource::Ai);
         command(&mut app, "crew", ClientMessage::SetReady { ready: true });
         assert_projection(&app, ship, "Std", ControlSource::Human);
+        assert_presence(&app, ship, true);
+        // Lobby readiness is not an in-play authority switch.
+        command(&mut app, "crew", ClientMessage::SetReady { ready: false });
+        assert_projection(&app, ship, "Std", ControlSource::Human);
+        assert_presence(&app, ship, true);
         command(&mut app, "crew", ClientMessage::SetAfk { afk: true });
         assert_projection(&app, ship, "Backfill", ControlSource::Ai);
+        assert_presence(&app, ship, false);
         let resumed = command(&mut app, "crew", ClientMessage::SetAfk { afk: false });
         let expected = if loaded { "Std" } else { "Backfill" };
         assert!(resumed.iter().any(|m| matches!(&m.msg, ServerMessage::RatingChanged { rating_name, .. } if rating_name == expected)));
         assert_projection(&app, ship, "Std", ControlSource::Human);
+        assert_presence(&app, ship, true);
         for message in [
             ClientMessage::ReleaseStation,
             ClientMessage::SetSpectator { spectator: true },
@@ -195,6 +203,7 @@ fn complete_result_claim_afk_release_and_spectator_update_all_loaded_projections
                 .station_for_token("crew")
                 .is_none());
             assert_projection(&app, ship, "Backfill", ControlSource::Ai);
+            assert_presence(&app, ship, false);
             command(
                 &mut app,
                 "crew",
@@ -255,6 +264,18 @@ fn complete_result_disconnect_precedes_same_tick_identify_and_reconnect_yields_t
             .unwrap();
         assert!(left < welcome);
         assert_projection(&app, ship, "Std", ControlSource::Human);
+        assert_presence(&app, ship, true);
+        assert!(
+            !app.world()
+                .resource::<Sessions>()
+                .0
+                .players()
+                .iter()
+                .find(|player| player.token == "crew")
+                .unwrap()
+                .ready,
+            "ordinary reconnect restores controls without a Lobby ready acknowledgement"
+        );
         assert!(
             app.world()
                 .resource::<Sessions>()
@@ -271,6 +292,7 @@ fn complete_result_disconnect_precedes_same_tick_identify_and_reconnect_yields_t
                 token: "crew".into(),
             });
         tick(&mut app);
+        assert_presence(&app, ship, false);
         identify(&mut app, "replacement");
         command(
             &mut app,
@@ -292,5 +314,19 @@ fn complete_result_disconnect_precedes_same_tick_identify_and_reconnect_yields_t
             Some(&StationId("helm".into()))
         );
         assert_projection(&app, ship, "Std", ControlSource::Human);
+        assert_presence(&app, ship, true);
+    }
+}
+
+fn assert_presence(app: &App, ship: Option<Entity>, expected: bool) {
+    if let Some(ship) = ship {
+        assert_eq!(
+            app.world()
+                .get::<crate::lobby::crew_replication::ShipCrewPresence>(ship)
+                .unwrap()
+                .0
+                .contains(&StationId("helm".into())),
+            expected
+        );
     }
 }

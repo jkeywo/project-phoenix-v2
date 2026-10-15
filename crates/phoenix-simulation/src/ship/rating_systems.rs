@@ -25,13 +25,18 @@ pub fn handle_station_rating_change(
             &ShipConfigComponent,
             &mut ShipSystemControlSources,
             &mut ActiveStationRatings,
+            Option<&mut crate::lobby::crew_replication::ShipCrewPresence>,
         ),
         With<LocalShip>,
     >,
     mut outbox: ResMut<crate::lobby::LobbyOutbox>,
 ) {
     let messages: Vec<_> = reader.read().collect();
-    for (ship_config, mut control_sources, mut active_ratings) in ship_components.iter_mut() {
+    for (ship_config, mut control_sources, mut active_ratings, presence) in
+        ship_components.iter_mut()
+    {
+        let mut next_presence = presence.as_deref().cloned().unwrap_or_default();
+        let mut changed_presence = false;
         for ev in messages.iter() {
             let ClientMessage::SetStationRating { rating_name } = &ev.msg else {
                 continue;
@@ -41,7 +46,10 @@ pub fn handle_station_rating_change(
             let Some(station_id) = station_id else {
                 continue;
             };
-            if sessions.0.is_afk(&ev.token) {
+            if sessions.0.is_afk(&ev.token)
+                || sessions.0.is_spectator(&ev.token)
+                || sessions.0.holder_for_station(&station_id) != Some(ev.token.as_str())
+            {
                 continue;
             }
 
@@ -53,7 +61,7 @@ pub fn handle_station_rating_change(
             }
 
             if fleet.is_some() {
-                intents.push(station_id.clone(), rating_name.clone());
+                intents.push_presence(station_id.clone(), rating_name.clone(), true);
             } else {
                 rating::apply_rating(
                     &ship_config.0,
@@ -65,6 +73,8 @@ pub fn handle_station_rating_change(
                 active_ratings
                     .0
                     .insert(station_id.clone(), rating_name.clone());
+                next_presence.0.insert(station_id.clone());
+                changed_presence = true;
             }
 
             outbox.0.push((
@@ -74,6 +84,11 @@ pub fn handle_station_rating_change(
                     rating_name: rating_name.clone(),
                 },
             ));
+        }
+        if changed_presence {
+            if let Some(mut presence) = presence {
+                *presence = next_presence;
+            }
         }
     }
 }

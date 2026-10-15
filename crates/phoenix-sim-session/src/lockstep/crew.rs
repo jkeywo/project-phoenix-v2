@@ -1,5 +1,10 @@
 use phoenix_model::messages::StationId;
 
+/// Replicated available human seats, not control intent or a roster of people.
+/// Only bootstrap participation and the admitted crew transition may write it.
+#[derive(bevy::prelude::Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct ShipCrewPresence(pub std::collections::BTreeSet<StationId>);
+
 pub const MAX_FLEET_CREW_SEATS: usize = 128;
 
 pub const MAX_FLEET_CREW_FIELD_BYTES: usize = 128;

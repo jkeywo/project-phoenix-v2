@@ -146,6 +146,13 @@ fn planning_frontier(
                 return Err("saved plan choice/explanations disagree with accepted immutable capability selection".into());
             }
             let graph = compiled.validate_history(choice, &stored.situations, snapshot.tick)?;
+            if let Some(temporal) = &choice.temporal {
+                let ship = recipe
+                    .ship_config
+                    .as_ref()
+                    .ok_or("historical forecast has no accepted owning ship recipe")?;
+                crate::world::planning::validate_forecast_input(&temporal.input, ship)?;
+            }
             for definition in graph.definitions.values() {
                 if definitions.iter().any(|row| row.id == definition.id) {
                     return Err("duplicate plan Scenario identity".into());

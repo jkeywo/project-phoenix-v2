@@ -104,6 +104,16 @@ pub enum OwnerInput {
     Human { station: StationId, rating: String },
     Ai {},
     Simplified {},
+    Unavailable { reason: UnavailableReason },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnavailableReason {
+    MissingSource,
+    Offline,
+    Unoccupied,
+    MissingHost,
+    InvalidRating,
 }
 impl OwnerInput {
     fn station(&self) -> Option<&StationId> {
@@ -116,6 +126,7 @@ impl OwnerInput {
         if let Self::Human { station, rating } = self {
             if !super::compile::identifier(&station.0)
                 || rating.trim().is_empty()
+                || rating == "Backfill"
                 || rating.len() > 128
                 || rating.chars().any(char::is_control)
             {
@@ -144,7 +155,28 @@ pub struct TemporalCommitment {
     pub input: ForecastInput,
     pub profile_index: u8,
     pub deadline_tick: u64,
-    pub nodes: BTreeMap<String, ForecastInterval>,
+    pub outcome: TemporalOutcome,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TemporalOutcome {
+    Committed {
+        nodes: BTreeMap<String, ForecastInterval>,
+    },
+    Refused {
+        reason: String,
+    },
+}
+impl TemporalCommitment {
+    pub fn nodes(&self) -> Option<&BTreeMap<String, ForecastInterval>> {
+        match &self.outcome {
+            TemporalOutcome::Committed { nodes } => Some(nodes),
+            _ => None,
+        }
+    }
+    pub fn refused(&self) -> bool {
+        matches!(self.outcome, TemporalOutcome::Refused { .. })
+    }
 }
 /// Derived minute-area summary. Exact overload checks use phase boundaries.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -242,12 +274,12 @@ fn fits(windows: impl Iterator<Item = AttentionWindow>) -> bool {
 }
 
 impl CompiledPlanning {
-    pub fn schedule(
+    fn original_input(
         &self,
         graph: &Decomposition,
         chosen_tick: u64,
-        input: ForecastInput,
-    ) -> Result<TemporalCommitment, String> {
+        input: &ForecastInput,
+    ) -> Result<(u8, u64), String> {
         let policy = self
             .config
             .temporal
@@ -290,18 +322,36 @@ impl CompiledPlanning {
             .filter_map(OwnerInput::station)
             .collect::<BTreeSet<_>>()
             .len();
-        let profile_index = policy
+        let profile = policy
             .profiles
             .iter()
             .rposition(|row| usize::from(row.min_operators) <= human_count)
             .ok_or("no applicable temporal profile")?;
-        let deadline_tick = add(
-            chosen_tick,
-            ticks(
-                policy.profiles[profile_index].deadline_secs,
-                input.tick_nanos,
+        Ok((
+            profile as u8,
+            add(
+                chosen_tick,
+                ticks(policy.profiles[profile].deadline_secs, input.tick_nanos)?,
             )?,
-        )?;
+        ))
+    }
+    pub fn schedule(
+        &self,
+        graph: &Decomposition,
+        chosen_tick: u64,
+        input: ForecastInput,
+    ) -> Result<TemporalCommitment, String> {
+        let (profile_index, deadline_tick) = self.original_input(graph, chosen_tick, &input)?;
+        if input
+            .owners
+            .values()
+            .any(|value| matches!(value, OwnerInput::Unavailable { .. }))
+        {
+            return Err(
+                "actual owner control/participation is unavailable for the original forecast"
+                    .into(),
+            );
+        }
         if graph.forecasts.len() != graph.leaves.len() {
             return Err(
                 "temporal plan requires a forecast for every selected physical leaf".into(),
@@ -397,10 +447,47 @@ impl CompiledPlanning {
         }
         Ok(TemporalCommitment {
             input,
-            profile_index: profile_index as u8,
+            profile_index,
             deadline_tick,
-            nodes,
+            outcome: TemporalOutcome::Committed { nodes },
         })
+    }
+    /// One historical decision, including a bounded truthful refusal. Structural
+    /// input/clock errors cannot be laundered into an accepted refusal record.
+    pub fn schedule_decision(
+        &self,
+        graph: &Decomposition,
+        chosen_tick: u64,
+        input: ForecastInput,
+    ) -> Result<TemporalCommitment, String> {
+        let (profile_index, deadline_tick) = self.original_input(graph, chosen_tick, &input)?;
+        match self.schedule(graph, chosen_tick, input.clone()) {
+            Ok(committed) => Ok(committed),
+            Err(reason) => Ok(TemporalCommitment {
+                input,
+                profile_index,
+                deadline_tick,
+                outcome: TemporalOutcome::Refused {
+                    reason: reason
+                        .chars()
+                        .filter(|ch| !ch.is_control())
+                        .take(super::MAX_EXPLANATION_CHARS)
+                        .collect(),
+                },
+            }),
+        }
+    }
+    pub fn record_schedule_decision(
+        &self,
+        choice: &mut PlanChoice,
+        input: ForecastInput,
+    ) -> Result<(), String> {
+        if choice.temporal.is_some() || !choice.released.is_empty() {
+            return Err("forecast can be decided only once before mission release".into());
+        }
+        let graph = self.derive(choice)?;
+        choice.temporal = Some(self.schedule_decision(&graph, choice.chosen_tick, input)?);
+        Ok(())
     }
     pub fn commit_schedule(
         &self,
@@ -423,7 +510,9 @@ impl CompiledPlanning {
         match (&self.config.temporal, &choice.temporal) {
             (None, None) => Ok(()),
             (Some(_), Some(saved)) => {
-                if &self.schedule(graph, choice.chosen_tick, saved.input.clone())? != saved {
+                if &self.schedule_decision(graph, choice.chosen_tick, saved.input.clone())? != saved
+                    || (saved.refused() && !choice.released.is_empty())
+                {
                     return Err(
                         "saved temporal commitment disagrees with original inputs/source".into(),
                     );
@@ -439,9 +528,12 @@ impl CompiledPlanning {
         let Some(saved) = &choice.temporal else {
             return Ok(Vec::new());
         };
+        let Some(nodes) = saved.nodes() else {
+            return Ok(Vec::new());
+        };
         let mut buckets = BTreeMap::<(StationId, u16), u128>::new();
         const MINUTE_NANOS: u128 = 60_000_000_000;
-        for (node, interval) in &saved.nodes {
+        for (node, interval) in nodes {
             let Some(station) = saved.input.owners[owner(&graph.leaves[node].request)].station()
             else {
                 continue;

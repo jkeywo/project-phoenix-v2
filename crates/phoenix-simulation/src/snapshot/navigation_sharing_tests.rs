@@ -30,6 +30,7 @@ fn fixture() -> (World, Entity, PhoenixSnapshot) {
         crate::ship::rating::BACKFILL_RATING.to_string()
     });
     let seed = crate::entities::ship_spawn::ShipSpawnSeed {
+        crew_presence: Default::default(),
         ship_config: crate::ship_plugin::ShipConfigComponent(ship),
         control_sources: crate::ship_plugin::ShipSystemControlSources(resolver),
         active_ratings: crate::ship_plugin::ActiveStationRatings(ratings),

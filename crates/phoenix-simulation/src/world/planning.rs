@@ -1,6 +1,9 @@
 //! Imported maintenance HTN consumer at the existing World fact boundary.
 use super::{config::WorldConfig, server::WorldContentRuntime};
 use phoenix_sim_world::world::activities::{ActivityRequest, SituationConfig};
+#[path = "planning_inputs.rs"]
+mod inputs;
+pub(crate) use inputs::{validate_original as validate_forecast_input, ForecastSources};
 
 pub(crate) const UNSUPPORTED_PRIMITIVE: &str =
     "primitive unsupported by this actor's actual accepted equipment";
@@ -50,12 +53,26 @@ fn matches_actor(base: &WorldConfig, requested: &str, actor: &str, slot: Option<
 }
 /// Immutable supported equipment selects the method once. Current damage,
 /// stock and AI preference never enter decomposition. No physical command runs.
+#[cfg(test)]
 pub(crate) fn advance_for_actor(
     runtime: &mut WorldContentRuntime,
     base: &WorldConfig,
     actor: &str,
     slot: Option<&str>,
     tick: u64,
+    mut supports: impl FnMut(&ActivityRequest) -> bool,
+) -> Result<(), String> {
+    advance_with_forecast(runtime, base, actor, slot, tick, None, &mut supports)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn advance_with_forecast(
+    runtime: &mut WorldContentRuntime,
+    base: &WorldConfig,
+    actor: &str,
+    slot: Option<&str>,
+    tick: u64,
+    forecast: Option<&ForecastSources<'_>>,
     mut supports: impl FnMut(&ActivityRequest) -> bool,
 ) -> Result<(), String> {
     let Some(compiled) = base.compiled_planning.as_ref() else {
@@ -70,13 +87,28 @@ pub(crate) fn advance_for_actor(
             compiled.validate_history(choice, &runtime.situations, tick)?,
         )
     } else {
-        let selected = compiled.choose(actor, tick, |request| {
+        // A missing bootstrap owner is a readiness barrier before choosing,
+        // never an accepted default-Human refusal or a method retry.
+        if compiled.config().temporal.is_some() && forecast.is_none() {
+            return Ok(());
+        }
+        let mut selected = compiled.choose(actor, tick, |request| {
             if supports(request) {
                 Ok(())
             } else {
                 Err(UNSUPPORTED_PRIMITIVE.into())
             }
         })?;
+        if compiled.config().temporal.is_some() {
+            let input = forecast
+                .expect("checked bootstrap readiness")
+                .project(&selected.graph);
+            validate_forecast_input(
+                &input,
+                &forecast.expect("checked bootstrap readiness").config.0,
+            )?;
+            compiled.record_schedule_decision(&mut selected.choice, input)?;
+        }
         (selected.choice, selected.graph)
     };
     // An unavailable recipe does not trigger a different method or erase

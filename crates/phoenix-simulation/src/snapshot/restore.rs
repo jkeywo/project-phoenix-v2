@@ -54,6 +54,12 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
         });
         return report;
     }
+    if let Err((uuid, reason)) = super::crew_presence::validate(world, snapshot) {
+        report
+            .gaps
+            .push(RestoreGap::ResourceStateInvalid { uuid, reason });
+        return report;
+    }
     if let (Some(boot), Some(config)) = (
         snapshot.boot_identity.as_ref(),
         world.get_resource::<crate::world::config::WorldConfig>(),

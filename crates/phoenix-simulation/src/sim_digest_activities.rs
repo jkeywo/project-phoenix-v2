@@ -238,6 +238,42 @@ pub(super) fn plan(mut acc: u64, value: &phoenix_sim_world::world::planning::Pla
     for reason in &value.refused_methods {
         acc = fold_str(acc, reason);
     }
+    if let Some(saved) = &value.temporal {
+        use phoenix_sim_world::world::planning::temporal::{OwnerInput, TemporalOutcome};
+        acc = fold_str(acc, "temporal-maintenance-choice");
+        acc = fold_u64(acc, saved.input.tick_nanos);
+        acc = fold_u64(acc, u64::from(saved.profile_index));
+        acc = fold_u64(acc, saved.deadline_tick);
+        acc = fold_u64(acc, saved.input.owners.len() as u64);
+        for (owner, input) in &saved.input.owners {
+            acc = fold_str(acc, &owner.0);
+            acc = match input {
+                OwnerInput::Human { station, rating } => {
+                    fold_str(fold_str(fold_str(acc, "human"), &station.0), rating)
+                }
+                OwnerInput::Ai {} => fold_str(acc, "ai"),
+                OwnerInput::Simplified {} => fold_str(acc, "simplified"),
+                OwnerInput::Unavailable { reason } => {
+                    fold_serde(fold_str(acc, "unavailable"), reason)
+                }
+            };
+        }
+        match &saved.outcome {
+            TemporalOutcome::Refused { reason } => {
+                acc = fold_str(fold_str(acc, "refused"), reason);
+            }
+            TemporalOutcome::Committed { nodes } => {
+                acc = fold_str(acc, "committed");
+                acc = fold_u64(acc, nodes.len() as u64);
+                for (node, interval) in nodes {
+                    acc = fold_u64(
+                        fold_u64(fold_str(acc, node), interval.start_tick),
+                        interval.end_tick,
+                    );
+                }
+            }
+        }
+    }
     acc = fold_u64(acc, value.released.len() as u64);
     for (node, tick) in &value.released {
         acc = fold_str(acc, node);

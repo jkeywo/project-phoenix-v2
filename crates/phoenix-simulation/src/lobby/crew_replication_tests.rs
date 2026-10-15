@@ -47,6 +47,7 @@ fn assign(station: &str, rating: &str) -> AdmittedCommand {
     AdmittedCommand {
         target: SystemId(ASSIGN_STATION_RATING_SYSTEM_ID.to_string()),
         payload: SystemControlPayload::AssignStationRating {
+            occupied: None,
             station: StationId(station.into()),
             rating: rating.into(),
         },
@@ -75,8 +76,84 @@ fn spawn_ship(app: &mut App, cmd: AdmittedCommand, seed: ControlSource) -> Entit
             ShipConfigComponent(config),
             ShipSystemControlSources(sources),
             ActiveStationRatings::default(),
+            ShipCrewPresence::default(),
         ))
         .id()
+}
+
+#[test]
+fn actual_admitted_presence_is_idempotent_and_rating_only_human_cannot_invent_participation() {
+    let mut app = App::new();
+    let ship = spawn_ship(&mut app, assign("captain", "Manual"), ControlSource::Ai);
+    app.world_mut()
+        .run_system_cached(apply_assigned_station_rating)
+        .unwrap();
+    assert_eq!(source_of(&app, ship, "red-alert"), ControlSource::Human);
+    assert!(app
+        .world()
+        .get::<ShipCrewPresence>(ship)
+        .unwrap()
+        .0
+        .is_empty());
+    let mut occupied = assign("captain", "Manual");
+    if let SystemControlPayload::AssignStationRating {
+        occupied: value, ..
+    } = &mut occupied.payload
+    {
+        *value = Some(true);
+    }
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(AdmittedCommands(vec![occupied.clone(), occupied]));
+    app.world_mut()
+        .run_system_cached(apply_assigned_station_rating)
+        .unwrap();
+    assert_eq!(
+        app.world().get::<ShipCrewPresence>(ship).unwrap().0.len(),
+        1
+    );
+    let mut away = assign("captain", "Backfill");
+    if let SystemControlPayload::AssignStationRating { occupied, .. } = &mut away.payload {
+        *occupied = Some(false);
+    }
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(AdmittedCommands(vec![away]));
+    app.world_mut()
+        .run_system_cached(apply_assigned_station_rating)
+        .unwrap();
+    assert!(app
+        .world()
+        .get::<ShipCrewPresence>(ship)
+        .unwrap()
+        .0
+        .is_empty());
+    let before = app
+        .world()
+        .get::<ActiveStationRatings>(ship)
+        .unwrap()
+        .0
+        .clone();
+    let mut invalid = assign("missing-station", "Manual");
+    if let SystemControlPayload::AssignStationRating { occupied, .. } = &mut invalid.payload {
+        *occupied = Some(true);
+    }
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(AdmittedCommands(vec![invalid]));
+    app.world_mut()
+        .run_system_cached(apply_assigned_station_rating)
+        .unwrap();
+    assert_eq!(
+        app.world().get::<ActiveStationRatings>(ship).unwrap().0,
+        before
+    );
+    assert!(app
+        .world()
+        .get::<ShipCrewPresence>(ship)
+        .unwrap()
+        .0
+        .is_empty());
 }
 
 #[test]

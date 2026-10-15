@@ -23,16 +23,21 @@ use crate::core::messages::{ClientMessage, StationId, SystemControlPayload, Syst
 use crate::lobby::server::InboundMessage;
 use crate::ship::components::ActiveStationRatings;
 use crate::ship::system_registry::ASSIGN_STATION_RATING_SYSTEM_ID;
+pub use phoenix_sim_session::lockstep::crew::ShipCrewPresence;
 
 /// Host-local crew requests not yet submitted to ordinary command admission.
 /// This is ingress bookkeeping, not a second queue of accepted commands.
 /// Preserve arrival order, including A -> B -> A before either applies.
 #[derive(Resource, Default)]
-pub struct PendingCrewRatingChanges(Vec<(StationId, String)>);
+pub struct PendingCrewRatingChanges(Vec<(StationId, String, Option<bool>)>);
 
 impl PendingCrewRatingChanges {
     pub fn push(&mut self, station: StationId, rating: String) {
-        self.0.push((station, rating));
+        self.0.push((station, rating, None));
+    }
+
+    pub fn push_presence(&mut self, station: StationId, rating: String, occupied: bool) {
+        self.0.push((station, rating, Some(occupied)));
     }
 
     /// Project the crew's latest choice for reconnect/AFK bookkeeping without
@@ -49,14 +54,15 @@ impl PendingCrewRatingChanges {
                 uuid.map_or(command.route == entity, |uuid| command.ship.0 == uuid.0)
                     && command.command.target.0 == ASSIGN_STATION_RATING_SYSTEM_ID
             }) {
-                if let SystemControlPayload::AssignStationRating { station, rating } =
-                    &command.command.payload
+                if let SystemControlPayload::AssignStationRating {
+                    station, rating, ..
+                } = &command.command.payload
                 {
                     ratings.insert(station.clone(), rating.clone());
                 }
             }
         }
-        for (station, rating) in &self.0 {
+        for (station, rating, _) in &self.0 {
             ratings.insert(station.clone(), rating.clone());
         }
     }
@@ -80,12 +86,16 @@ pub fn replicate_local_crew_ratings(
         pending.0.clear();
         return;
     }
-    for (station, rating) in pending.0.drain(..) {
+    for (station, rating, occupied) in pending.0.drain(..) {
         inbound.write(InboundMessage {
             token: crate::console_bridge::LOCAL_CONSOLE_TOKEN.to_string(),
             msg: ClientMessage::ControlSystem {
                 target: SystemId(ASSIGN_STATION_RATING_SYSTEM_ID.to_string()),
-                payload: SystemControlPayload::AssignStationRating { station, rating },
+                payload: SystemControlPayload::AssignStationRating {
+                    station,
+                    rating,
+                    occupied,
+                },
             },
         });
     }
@@ -105,17 +115,51 @@ pub fn apply_assigned_station_rating(
             &crate::ship_plugin::ShipConfigComponent,
             &mut crate::ship_plugin::ShipSystemControlSources,
             &mut ActiveStationRatings,
+            Option<&mut ShipCrewPresence>,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
-    for (admitted, config, mut sources, mut ratings) in ships.iter_mut() {
+    for (admitted, config, mut sources, mut ratings, presence) in ships.iter_mut() {
+        let mut next_presence = presence.as_deref().cloned().unwrap_or_default();
+        let mut presence_changed = false;
         for cmd in admitted.for_target(ASSIGN_STATION_RATING_SYSTEM_ID) {
-            let SystemControlPayload::AssignStationRating { station, rating } = &cmd.payload else {
+            let SystemControlPayload::AssignStationRating {
+                station,
+                rating,
+                occupied,
+            } = &cmd.payload
+            else {
                 continue;
             };
+            // The same accepted authored Station/rating frontier gates both
+            // writes. Unsupported commands cannot create a phantom seat.
+            if crate::ship::rating::resolve_automated_systems(&config.0, station, rating).is_none()
+            {
+                continue;
+            }
+            if *occupied == Some(true)
+                && !next_presence.0.contains(station)
+                && next_presence.0.len()
+                    >= phoenix_sim_session::lockstep::crew::MAX_FLEET_CREW_SEATS
+            {
+                continue;
+            }
             crate::ship::rating::apply_rating(&config.0, station, rating, &mut sources.0);
             ratings.0.insert(station.clone(), rating.clone());
+            if let Some(occupied) = occupied {
+                if *occupied {
+                    next_presence.0.insert(station.clone());
+                } else {
+                    next_presence.0.remove(station);
+                }
+                presence_changed = true;
+            }
+        }
+        if presence_changed {
+            if let Some(mut presence) = presence {
+                *presence = next_presence;
+            }
         }
     }
 }

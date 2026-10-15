@@ -85,7 +85,8 @@ fn independent_operators_overlap_but_cohosted_operators_do_not_hide_overload_in_
     let parallel = selected.choice.temporal.as_ref().unwrap();
     assert_eq!(parallel.profile_index, 1);
     assert!(parallel
-        .nodes
+        .nodes()
+        .unwrap()
         .values()
         .all(|interval| interval.start_tick == 100 && interval.end_tick == 220));
     let buckets = compiled.workload(&selected.choice).unwrap();
@@ -101,16 +102,19 @@ fn independent_operators_overlap_but_cohosted_operators_do_not_hide_overload_in_
     compiled.commit_schedule(&mut shared, inputs(true)).unwrap();
     let serial = shared.temporal.as_ref().unwrap();
     assert_eq!(serial.profile_index, 0);
-    assert_eq!(serial.nodes["root/repair"].start_tick, 100);
-    assert_eq!(serial.nodes["root/supply"].start_tick, 200);
-    assert_eq!(serial.nodes["root/supply"].end_tick, 320);
+    assert_eq!(serial.nodes().unwrap()["root/repair"].start_tick, 100);
+    assert_eq!(serial.nodes().unwrap()["root/supply"].start_tick, 200);
+    assert_eq!(serial.nodes().unwrap()["root/supply"].end_tick, 320);
     assert_eq!(
         compiled.workload(&shared).unwrap()[0].attention_nanos,
         11_000_000_000_000
     );
     // A minute-area average alone would permit both four-second full-attention
     // decisions at the same instant. The exact interval test refused that.
-    assert!(serial.nodes["root/supply"].start_tick > serial.nodes["root/repair"].start_tick);
+    assert!(
+        serial.nodes().unwrap()["root/supply"].start_tick
+            > serial.nodes().unwrap()["root/repair"].start_tick
+    );
     let (tight, mut selected) = timed(false, 12);
     let before = selected.choice.clone();
     assert!(tight
@@ -121,6 +125,64 @@ fn independent_operators_overlap_but_cohosted_operators_do_not_hide_overload_in_
         selected.choice, before,
         "no partial commitment after refusal"
     );
+}
+
+#[test]
+fn refused_decision_is_historical_and_never_releases_or_launders_invalid_inputs() {
+    let (compiled, mut selected) = timed(false, 12);
+    compiled
+        .record_schedule_decision(&mut selected.choice, inputs(true))
+        .unwrap();
+    let saved = selected.choice.temporal.as_ref().unwrap();
+    assert!(
+        matches!(&saved.outcome,TemporalOutcome::Refused{reason} if reason.contains("infeasible"))
+    );
+    let mut instances = SituationInstances::default();
+    assert!(compiled
+        .release(&mut selected.choice, &mut instances, "actual-crew", 100)
+        .unwrap()
+        .is_empty());
+    assert!(instances.instances.is_empty());
+    let decoded: PlanChoice =
+        serde_json::from_slice(&serde_json::to_vec(&selected.choice).unwrap()).unwrap();
+    for now in 100..460 {
+        compiled
+            .validate_history(&decoded, &instances, now)
+            .unwrap();
+    }
+    let mut forged = decoded.clone();
+    forged.temporal.as_mut().unwrap().outcome = TemporalOutcome::Refused {
+        reason: "forged explanation".into(),
+    };
+    assert!(compiled.validate_history(&forged, &instances, 460).is_err());
+    let mut unavailable = inputs(true);
+    unavailable.owners.insert(
+        SystemId("logistics".into()),
+        OwnerInput::Unavailable {
+            reason: UnavailableReason::Offline,
+        },
+    );
+    let decision = compiled
+        .schedule_decision(&selected.graph, 100, unavailable)
+        .unwrap();
+    assert!(
+        matches!(decision.outcome,TemporalOutcome::Refused{reason} if reason.contains("unavailable"))
+    );
+    let mut invalid = inputs(true);
+    invalid.tick_nanos = 0;
+    assert!(compiled
+        .schedule_decision(&selected.graph, 100, invalid)
+        .is_err());
+    for state in ["committed", "refused"] {
+        let mut value = if state == "committed" {
+            serde_json::json!({"state":state,"nodes":{}})
+        } else {
+            serde_json::json!({"state":state,"reason":"bounded"})
+        };
+        assert!(serde_json::from_value::<TemporalOutcome>(value.clone()).is_ok());
+        value["hidden"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<TemporalOutcome>(value).is_err());
+    }
 }
 #[test]
 fn forecast_elapsed_is_not_acknowledged_work_and_early_work_does_not_release_before_earliest() {
@@ -228,7 +290,15 @@ fn original_inputs_and_deadline_survive_json_and_forged_frontiers_never_mutate_h
         match fault {
             0 => saved.deadline_tick += 1,
             1 => saved.profile_index = 1,
-            2 => saved.nodes.get_mut("root/supply").unwrap().start_tick = 100,
+            2 => {
+                match &mut saved.outcome {
+                    TemporalOutcome::Committed { nodes } => nodes,
+                    _ => unreachable!(),
+                }
+                .get_mut("root/supply")
+                .unwrap()
+                .start_tick = 100
+            }
             3 => {
                 saved.input.owners.remove(&SystemId("repair".into()));
             }
@@ -272,7 +342,7 @@ fn bounds_recovery_and_exact_large_tick_arithmetic_refuse_before_release() {
     let saved = late.temporal.as_ref().unwrap();
     assert_eq!(saved.deadline_tick, late.chosen_tick + 240);
     assert_eq!(
-        saved.nodes["root/supply"].start_tick,
+        saved.nodes().unwrap()["root/supply"].start_tick,
         late.chosen_tick + 100
     );
     let mut overflow = compiled

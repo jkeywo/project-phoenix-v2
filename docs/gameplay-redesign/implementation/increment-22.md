@@ -454,6 +454,15 @@ GM or NPC command omits the field and cannot create participation. Voluntary
 Backfill can retain actual presence, but contributes no Human budget until actual
 source/rating supports Human operation. No new network message or admission route
 is added. Solo uses the same accepted local result boundary, without a fake fleet.
+Availability follows the established in-play operative holder, not the Lobby
+`ready` flag. Ordinary reconnect restores the previous controls while that flag
+is false, and in-play unready does not relinquish authority; both retain actual
+participation. A disconnected, AFK, spectator or superseded token cannot create
+presence by sending a rating change. Historical Human forecast bindings must
+use that owner's actual controlling Console's authored home or human-seeking
+host candidates, as well as a supported Station/rating; another valid Station
+is not interchangeable. Empty presence is still a real bootstrap owner and
+folds distinctly from an absent owner, because absence withholds plan choice.
 
 `MeshCrewState` captures/restores the bounded sorted Station set with existing
 ratings/sources. Validate actual authored Station membership, uniqueness and

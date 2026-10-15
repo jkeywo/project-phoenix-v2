@@ -40,8 +40,8 @@ impl Decomposition {
             }
             if choice.temporal.as_ref().is_some_and(|saved| {
                 saved
-                    .nodes
-                    .get(node)
+                    .nodes()
+                    .and_then(|nodes| nodes.get(node))
                     .is_none_or(|interval| *tick < interval.start_tick)
             }) {
                 return Err("HTN leaf released before its committed forecast start".into());
@@ -118,11 +118,11 @@ impl CompiledPlanning {
             if next_choice.released.contains_key(node) || !graph.ready(node, &next_instances) {
                 continue;
             }
-            if next_choice
-                .temporal
-                .as_ref()
-                .is_some_and(|saved| now < saved.nodes[node].start_tick)
-            {
+            if next_choice.temporal.as_ref().is_some_and(|saved| {
+                saved
+                    .nodes()
+                    .is_none_or(|nodes| now < nodes[node].start_tick)
+            }) {
                 continue;
             }
             let config = graph.bound(node, choice);

@@ -1689,7 +1689,15 @@ pub(super) fn capture_mesh_crew(entity: EntityRef<'_>) -> Option<MeshCrewState> 
         .collect();
     sources.sort_by(|a, b| a.0.cmp(&b.0));
 
-    Some(MeshCrewState { ratings, sources })
+    let occupied = entity
+        .get::<crate::lobby::crew_replication::ShipCrewPresence>()
+        .map(|presence| presence.0.iter().map(|station| station.0.clone()).collect())
+        .unwrap_or_default();
+    Some(MeshCrewState {
+        ratings,
+        sources,
+        occupied,
+    })
 }
 
 #[cfg(test)]

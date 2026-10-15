@@ -13,6 +13,8 @@ use crate::{
 };
 use bevy::{ecs::system::RunSystemOnce, prelude::*};
 const ROOT: &str = "tests/fixtures/maintenance-htn-world.toml";
+#[path = "planning_temporal_tests.rs"]
+mod temporal;
 fn setup(count: u32) -> (App, Entity) {
     let reader = crate::world::load::OverlayFsReader;
     let mut base = crate::world::load::load(crate::world::load::LoadRequest::new(

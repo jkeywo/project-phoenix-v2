@@ -162,6 +162,7 @@ fn the_hosts_own_station_rating_replication_is_not_somebody_working() {
     assert!(!counts_as_worked_control(&command(
         "command",
         SystemControlPayload::AssignStationRating {
+            occupied: None,
             station: crate::core::messages::StationId("helm".into()),
             rating: "Backfill".into(),
         },

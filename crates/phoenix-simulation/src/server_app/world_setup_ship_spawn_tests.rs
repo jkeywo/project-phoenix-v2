@@ -47,6 +47,7 @@ fn spawn_pair(config: &EntityConfig) -> (App, Entity, Entity) {
             "player".into(),
             None,
             Some(crate::entities::ship_spawn::ShipSpawnSeed {
+                crew_presence: Default::default(),
                 ship_config: ShipConfigComponent(player_topology),
                 control_sources: crate::ship_plugin::ShipSystemControlSources(resolver),
                 active_ratings: crate::ship_plugin::ActiveStationRatings(ratings),

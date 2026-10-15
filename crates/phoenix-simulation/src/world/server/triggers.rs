@@ -120,6 +120,7 @@ pub(crate) fn collect_world_events(
     time: Option<Res<bevy::time::Time>>,
     tick: Option<Res<crate::sim_tick::SimTick>>,
     base_world: Option<Res<crate::world::config::WorldConfig>>,
+    fixed: Option<Res<Time<Fixed>>>,
     planning_actors: Query<(
         &crate::entities::spawner::EntityUuid,
         Option<&crate::ship_slots::AuthoredShipSlotId>,
@@ -127,6 +128,10 @@ pub(crate) fn collect_world_events(
         Option<&crate::ship::compartment_damage::ShipDamage>,
         Option<&crate::console::repair::server::ShipRepairTeams>,
         Option<&crate::resources::logistics_server::CompiledShipLogistics>,
+        Option<&crate::ship_plugin::ShipSystemControlSources>,
+        Option<&crate::ship_plugin::ActiveStationRatings>,
+        Option<&crate::lobby::crew_replication::ShipCrewPresence>,
+        Option<&crate::ship_plugin::HumanSeekingHosts>,
     )>,
     hulls: Query<(
         &crate::entities::spawner::EntityUuid,
@@ -139,13 +144,30 @@ pub(crate) fn collect_world_events(
         if let Some(base) = base_world.as_deref() {
             let mut actors = planning_actors.iter().collect::<Vec<_>>();
             actors.sort_by(|left, right| left.0 .0.cmp(&right.0 .0));
-            for (uuid, slot, config, damage, teams, logistics) in actors {
-                let result = crate::world::planning::advance_for_actor(
+            for (uuid, slot, config, damage, teams, logistics, sources, ratings, presence, hosts) in
+                actors
+            {
+                let forecast = sources
+                    .zip(ratings)
+                    .zip(presence)
+                    .zip(fixed.as_deref())
+                    .and_then(|(((sources, ratings), presence), fixed)| {
+                        Some(crate::world::planning::ForecastSources {
+                            config,
+                            sources,
+                            ratings,
+                            presence,
+                            hosts,
+                            tick_nanos: u64::try_from(fixed.timestep().as_nanos()).ok()?,
+                        })
+                    });
+                let result = crate::world::planning::advance_with_forecast(
                     &mut runtime,
                     base,
                     &uuid.0,
                     slot.map(|id| id.0.as_str()),
                     tick.0,
+                    forecast.as_ref(),
                     |request| match request {
                         phoenix_sim_world::world::activities::ActivityRequest::Repair {
                             ..

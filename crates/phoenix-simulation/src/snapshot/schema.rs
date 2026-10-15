@@ -2122,6 +2122,8 @@ pub struct MotionPlanState {
 pub struct MeshCrewState {
     pub ratings: Vec<(String, String)>,
     pub sources: Vec<(String, MeshControlSource)>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub occupied: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

@@ -1122,7 +1122,7 @@ pub fn handle_identify_system(
             .outbound
             .iter()
             .any(|(_, m)| matches!(m, ServerMessage::Welcome { .. }));
-        results.apply(result);
+        results.apply(result, &sessions.0);
         if sent_welcome {
             results.send(
                 Target::Token(token.clone()),
@@ -1148,7 +1148,7 @@ pub fn handle_set_name_system(
             continue;
         };
         let result = handler::handle_set_name(&ev.token, name, &mut sessions.0);
-        results.apply(result);
+        results.apply(result, &sessions.0);
     }
 }
 
@@ -1196,7 +1196,7 @@ pub fn handle_return_to_lobby_system(
         let authority = handler::return_to_lobby_authority(&ev.token);
         let result = handler::handle_return_to_lobby(&mut sessions.0, phase.clone(), authority);
         returned |= result.new_phase == Some(GamePhase::Lobby);
-        results.apply(result);
+        results.apply(result, &sessions.0);
     }
     if returned {
         // Clear the complete per-run lane synchronously before MeshSet. An old
@@ -1317,7 +1317,7 @@ pub fn handle_select_station_system(
             phase.clone(),
             stations,
         );
-        results.apply(result);
+        results.apply(result, &sessions.0);
     }
 }
 
@@ -1342,7 +1342,7 @@ pub fn handle_release_station_system(
         };
         let result =
             handler::handle_release_station(&ev.token, &mut sessions.0, phase.clone(), stations);
-        results.apply(result);
+        results.apply(result, &sessions.0);
     }
 }
 
@@ -1382,7 +1382,7 @@ pub fn handle_set_ready_system(
             preload_complete,
             stations,
         );
-        results.apply(result);
+        results.apply(result, &sessions.0);
     }
 }
 
@@ -1418,7 +1418,7 @@ pub fn handle_set_spectator_system(
             phase.clone(),
             stations,
         );
-        results.apply(result);
+        results.apply(result, &sessions.0);
     }
 }
 
@@ -1442,7 +1442,7 @@ pub fn handle_set_afk_system(
         };
         let result =
             handler::handle_set_afk(&ev.token, *afk, &mut sessions.0, &results.afk_ratings());
-        results.apply(result);
+        results.apply(result, &sessions.0);
     }
 }
 
@@ -1477,7 +1477,7 @@ pub fn handle_set_station_rating_system(
             phase.clone(),
             stations,
         );
-        results.apply(result);
+        results.apply(result, &sessions.0);
     }
 }
 

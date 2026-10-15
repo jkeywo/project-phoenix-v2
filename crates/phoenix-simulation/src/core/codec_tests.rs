@@ -1752,6 +1752,7 @@ fn assign_station_rating_control_system_round_trips() {
     let msg = ClientMessage::ControlSystem {
         target: SystemId("command".into()),
         payload: SystemControlPayload::AssignStationRating {
+            occupied: None,
             station: StationId("captain".into()),
             rating: "Human".into(),
         },
@@ -1764,6 +1765,19 @@ fn assign_station_rating_control_system_round_trips() {
         r#"{"type":"ControlSystem","data":{"target":"command","payload":{"type":"AssignStationRating","data":{"station":"captain","rating":"Human"}}}}"#,
         "AssignStationRating wire shape stays stable for the fleet mesh replay"
     );
+    let mut occupied = msg;
+    if let ClientMessage::ControlSystem {
+        payload: SystemControlPayload::AssignStationRating { occupied, .. },
+        ..
+    } = &mut occupied
+    {
+        *occupied = Some(true);
+    }
+    assert_client_roundtrip(occupied.clone());
+    assert!(JsonCodec
+        .encode_client(&occupied)
+        .unwrap()
+        .contains("\"occupied\":true"));
 }
 
 /// Torpedo fire as a ControlSystem payload (issue #846).

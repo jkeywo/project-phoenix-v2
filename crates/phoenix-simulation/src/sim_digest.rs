@@ -592,6 +592,21 @@ fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
         }
     }
 
+    if let Some(mut query) = world.try_query::<(
+        &EntityUuid,
+        &crate::lobby::crew_replication::ShipCrewPresence,
+    )>() {
+        let mut occupied: Vec<_> = query
+            .iter(world)
+            .map(|(uuid, presence)| (&uuid.0, &presence.0))
+            .collect();
+        occupied.sort_by(|left, right| left.0.cmp(right.0));
+        if !occupied.is_empty() {
+            acc = fold_str(acc, "actual-crew-presence");
+            acc = fold_serde(acc, &occupied);
+        }
+    }
+
     // Typed GM control becomes current authoritative state at its application
     // boundary, not when a transport happens to deliver a future owner commit.
     // Fold only the actually-applied canonical prefix; every field in that

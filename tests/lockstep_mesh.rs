@@ -450,11 +450,9 @@ fn afk_return_before_backfill_applies_preserves_both_ordered_transitions() {
             .entries()
             .iter()
             .filter_map(|entry| match &entry.payload {
-                SystemControlPayload::AssignStationRating { station, rating }
-                    if station.0 == CREWED_STATION =>
-                {
-                    Some((entry.tick, rating.as_str()))
-                }
+                SystemControlPayload::AssignStationRating {
+                    station, rating, ..
+                } if station.0 == CREWED_STATION => Some((entry.tick, rating.as_str())),
                 _ => None,
             })
             .collect();
@@ -524,11 +522,9 @@ fn disconnect_saves_a_rating_requested_in_input_before_its_delayed_apply() {
             .entries()
             .iter()
             .filter_map(|entry| match &entry.payload {
-                SystemControlPayload::AssignStationRating { station, rating }
-                    if station.0 == CREWED_STATION =>
-                {
-                    Some(rating.as_str())
-                }
+                SystemControlPayload::AssignStationRating {
+                    station, rating, ..
+                } if station.0 == CREWED_STATION => Some(rating.as_str()),
                 _ => None,
             })
             .collect();

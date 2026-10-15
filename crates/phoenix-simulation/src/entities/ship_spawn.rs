@@ -10,6 +10,7 @@ pub(crate) struct ShipSpawnSeed {
     pub(crate) ship_config: crate::ship_plugin::ShipConfigComponent,
     pub(crate) control_sources: crate::ship_plugin::ShipSystemControlSources,
     pub(crate) active_ratings: crate::ship_plugin::ActiveStationRatings,
+    pub(crate) crew_presence: crate::lobby::crew_replication::ShipCrewPresence,
     pub(crate) initial_yaw: f32,
 }
 
@@ -32,6 +33,7 @@ impl ShipSpawnSeed {
             ship_config,
             control_sources: crate::ship_plugin::ShipSystemControlSources(resolver),
             active_ratings: crate::ship_plugin::ActiveStationRatings(ratings),
+            crew_presence: Default::default(),
             initial_yaw: 0.0,
         }
     }
@@ -68,6 +70,7 @@ pub(super) fn install(
             seed.ship_config,
             seed.control_sources,
             seed.active_ratings,
+            seed.crew_presence,
             crate::server_app::ShipSystemBlackboards::default(),
             crate::core::messages::AdmittedCommands::default(),
             crate::ship_plugin::CoordinationQueue::default(),
@@ -134,8 +137,10 @@ fn insert_ship_config_and_core_bundle(
         ship_config,
         control_sources,
         active_ratings,
+        crew_presence,
         initial_yaw,
     } = seed;
+    cmds.insert(crew_presence);
     cmds.insert(crate::server_app::ShipSystemBlackboards::default());
     // Seed the reactor from the ship's authored power groups (issue #762)
     // BEFORE `ship_config` is moved into the entity, so authored groups

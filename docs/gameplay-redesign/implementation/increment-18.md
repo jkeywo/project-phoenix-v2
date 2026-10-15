@@ -196,7 +196,12 @@ ordinary propulsion and static orbital bodies remain unchanged.
 First supported sources use typed optional `arrival_gravity` on the normally
 resolved EntityConfig, explicitly authored through the static World row's
 ordinary overrides. Require an unambiguous finite absolute position and an
-ordinary non-movable resolved actor. Relative, random, conditional and movable
+ordinary non-movable resolved actor. The initial supported source set is the base
+World only; additive/layer gravity requires a later explicit composition extension
+and refuses rather than silently omitting a configured body. Existing static spawn-reference
+validation rejects gravity-bearing action/script templates; the existing runtime
+SpawnEntity dispatcher also refuses a resolved gravity policy before minting,
+covering computed overrides without another registry or lifecycle. Relative, random, conditional and movable
 sources refuse with an actionable error. At commitment, the actual physical
 source must still agree with that accepted fixed policy and pose; a moved source
 refuses instead of applying its obsolete authored location. Keep the original

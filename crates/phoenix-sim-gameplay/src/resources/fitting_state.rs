@@ -178,8 +178,8 @@ impl FittingState {
         })
     }
 
-    /// Initial supported refits use a locker in the actual work compartment.
-    /// Distant equipment requires a real hauling adapter, never a teleport.
+    /// Same-room convenience for the original fitting adapter. Distant items
+    /// must first be collected by the actual team at their locker.
     pub fn stored_to_work(
         &mut self,
         profile: &CompiledFitting,
@@ -204,6 +204,53 @@ impl FittingState {
                 job,
                 compartment: room,
             };
+            Ok(())
+        })
+    }
+
+    /// Caller proves the committed team is physically at this locker. The
+    /// assembly changes owner/location once; its actual condition is retained.
+    pub fn pick_up_from_locker(
+        &mut self,
+        profile: &CompiledFitting,
+        item: &str,
+        job: u64,
+        actual_compartment: &str,
+    ) -> Result<(), String> {
+        self.transaction(profile, |next| {
+            let item = next
+                .assemblies
+                .get_mut(item)
+                .ok_or("equipment assembly is absent")?;
+            let EquipmentLocation::Stored { locker } = &item.location else {
+                return Err("equipment is already installed or committed to work".into());
+            };
+            if profile.locker(locker)?.compartment != actual_compartment {
+                return Err("team is not at the actual equipment locker".into());
+            }
+            item.location = EquipmentLocation::InWork {
+                job,
+                compartment: actual_compartment.into(),
+            };
+            Ok(())
+        })
+    }
+
+    /// Called only after this same team's real route reaches the new room.
+    /// Moving a carried assembly does not install it or change its condition.
+    pub fn move_in_work(
+        &mut self,
+        profile: &CompiledFitting,
+        item: &str,
+        job: u64,
+        actual_compartment: &str,
+    ) -> Result<(), String> {
+        self.transaction(profile, |next| {
+            let item = next.assemblies.get_mut(item).ok_or("equipment assembly is absent")?;
+            if !matches!(&item.location, EquipmentLocation::InWork { job: owner, .. } if *owner == job) {
+                return Err("assembly is not carried by this refit job".into());
+            }
+            item.location = EquipmentLocation::InWork { job, compartment: actual_compartment.into() };
             Ok(())
         })
     }

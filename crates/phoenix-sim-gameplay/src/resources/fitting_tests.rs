@@ -15,6 +15,151 @@ fn healthy() -> ComponentState {
         last_source: None,
     }
 }
+
+#[test]
+fn actual_team_fetches_support_spare_to_weapons_without_duplicate_or_early_install() {
+    use crate::jobs::repair::RepairTeams;
+    use crate::ship::interior::{InteriorGraph, TeamLocation};
+    let (config, profile, mut state) = fixture();
+    let item = "fore-beam-spare";
+    let condition = ComponentState {
+        condition: ComponentCondition::Damaged,
+        dose: 0.5,
+        last_source: Some("retained-salvage-damage".into()),
+    };
+    let spare = state.assemblies.get_mut(item).unwrap();
+    spare.location = EquipmentLocation::Stored {
+        locker: "support-equipment".into(),
+    };
+    spare.condition = Some(condition.clone());
+    state.validate(&profile).unwrap();
+    let mut teams = RepairTeams::new(config.interior.as_ref().unwrap().team_homes.len());
+    teams.install_layout(
+        InteriorGraph::compile(
+            config.interior.as_ref().unwrap(),
+            config.ship_config.as_ref().unwrap(),
+            config.interior.as_ref().unwrap().team_homes.len(),
+        )
+        .unwrap(),
+    );
+    let id = teams
+        .claim_refit(
+            0,
+            17,
+            profile.slot("fore-beam").unwrap().system.clone(),
+            "Fore beam".into(),
+        )
+        .unwrap();
+    assert!(teams.visit_refit_compartment(id, "support"));
+    let mut witnessed = false;
+    for _ in 0..400 {
+        teams.tick_refits(0.125, &BTreeSet::new());
+        witnessed |= matches!(
+            teams.refit_location(id),
+            Some(TeamLocation::Crossing { .. })
+        );
+        if teams.refit_effect_enabled(id) {
+            break;
+        }
+    }
+    assert!(witnessed);
+    assert!(teams.refit_effect_enabled(id));
+    assert!(
+        matches!(teams.refit_location(id), Some(TeamLocation::Compartment { compartment }) if compartment == "support")
+    );
+    let before = state.clone();
+    assert!(state
+        .stored_to_work(&profile, item, id.0, "fore-beam")
+        .is_err());
+    assert!(state
+        .pick_up_from_locker(&profile, item, id.0, "weapons")
+        .is_err());
+    assert_eq!(state, before);
+    state
+        .pick_up_from_locker(&profile, item, id.0, "support")
+        .unwrap();
+    assert!(state
+        .install_from_work(&profile, "fore-beam", item, id.0)
+        .is_err());
+    assert!(teams.visit_refit_compartment(id, "weapons"));
+    teams.tick_refits(0.125, &BTreeSet::new());
+    assert!(matches!(
+        teams.refit_location(id),
+        Some(TeamLocation::Crossing { .. })
+    ));
+    let route = teams.save_state();
+    let items: FittingState =
+        serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+    let mut resumed = teams.clone();
+    resumed
+        .restore_state(&serde_json::from_str(&serde_json::to_string(&route).unwrap()).unwrap())
+        .unwrap();
+    state = items;
+    for _ in 0..400 {
+        teams.tick_refits(0.125, &BTreeSet::new());
+        resumed.tick_refits(0.125, &BTreeSet::new());
+        assert_eq!(teams.save_state(), resumed.save_state());
+        if teams.refit_effect_enabled(id) {
+            break;
+        }
+    }
+    assert!(teams.refit_effect_enabled(id));
+    assert!(
+        matches!(teams.refit_location(id), Some(TeamLocation::Compartment { compartment }) if compartment == "weapons")
+    );
+    state.move_in_work(&profile, item, id.0, "weapons").unwrap();
+    let count = state.assemblies.len();
+    let old = state
+        .remove_installed(&profile, "fore-beam", id.0, healthy())
+        .unwrap();
+    assert_eq!(
+        state
+            .install_from_work(&profile, "fore-beam", item, id.0)
+            .unwrap(),
+        condition
+    );
+    state
+        .return_to_locker(&profile, &old, id.0, "weapons-equipment")
+        .unwrap();
+    assert_eq!(state.assemblies.len(), count);
+    assert_eq!(state.installed("fore-beam").unwrap().id, item);
+    assert!(state.installed("fore-beam").unwrap().condition.is_none());
+    assert!(teams.finish_refit(id));
+}
+
+#[test]
+fn portable_fetch_rejects_wrong_job_room_and_owner_before_writes() {
+    let (_, profile, mut state) = fixture();
+    let item = "fore-beam-spare";
+    for (job, room) in [(0, "weapons"), (1, "support"), (1, "absent")] {
+        let before = state.clone();
+        assert!(state
+            .pick_up_from_locker(&profile, item, job, room)
+            .is_err());
+        assert_eq!(state, before);
+    }
+    state
+        .pick_up_from_locker(&profile, item, 3, "weapons")
+        .unwrap();
+    let before = state.clone();
+    assert!(state
+        .pick_up_from_locker(&profile, item, 3, "weapons")
+        .is_err());
+    assert!(state.move_in_work(&profile, item, 4, "support").is_err());
+    assert!(state.move_in_work(&profile, item, 3, "absent").is_err());
+    assert!(state
+        .move_in_work(&profile, "reactor-installed", 3, "support")
+        .is_err());
+    assert_eq!(state, before);
+    state.move_in_work(&profile, item, 3, "support").unwrap();
+    assert!(
+        matches!(&state.assemblies[item].location, EquipmentLocation::InWork { job: 3, compartment } if compartment == "support")
+    );
+    assert_eq!(
+        state.assemblies[item].condition,
+        before.assemblies[item].condition
+    );
+}
 fn swap(
     profile: &CompiledFitting,
     state: &mut FittingState,

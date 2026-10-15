@@ -31,6 +31,8 @@ pub enum RepairActivity {
     Refit {
         request: u64,
         target: SystemId,
+        #[serde(default)]
+        destination_compartment: Option<String>,
         phase: TeamSlot,
         cancelled: bool,
     },

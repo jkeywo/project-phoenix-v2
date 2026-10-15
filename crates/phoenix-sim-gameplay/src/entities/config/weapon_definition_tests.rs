@@ -159,7 +159,7 @@ fn generic_identity_is_unique_but_strategy_identity_keeps_family_namespaces() {
 
 #[test]
 fn generic_and_shorthand_cannot_create_two_controllers_for_one_bank() {
-    let source = format!("{BEAM}\n[[weapons_console.phaser_banks]]\nid='fore'\nimpact={damage_type='laser',penetration=0}\nfacing_deg=0.0\nfire_arc_deg=90.0\nauto_arc_deg=90.0\n");
+    let source = format!("{BEAM}\n[[weapons_console.phaser_banks]]\nid='fore'\nimpact={{damage_type='laser',penetration=0}}\nfacing_deg=0.0\nfire_arc_deg=90.0\nauto_arc_deg=90.0\n");
     assert!(parse(&source)
         .unwrap_err()
         .to_string()

@@ -427,7 +427,7 @@ fn actual_hardened_drive_uses_original_gravity_and_keeps_paid_json360_continuati
             .0
             .get_mut(&id("local-jump"))
             .unwrap();
-        let phoenix_sim_gameplay::ship::transit::TransitPhase::Preparing { order, .. } =
+        let project_phoenix::ship::transit::TransitPhase::Preparing { order, .. } =
             &mut state.phase
         else {
             panic!("actual partial drive")

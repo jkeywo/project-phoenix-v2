@@ -11,3 +11,5 @@ pub mod server;
 pub mod host;
 
 pub mod state_tree;
+
+pub mod text_reading;

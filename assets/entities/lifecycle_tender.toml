@@ -665,6 +665,7 @@ id = "machinery_parts"
 
 # Explicit timed focused suite; preserves the previous one-second accepted migration tuning.
 [[sensing.focused]]
+reading_ticks = 120
 system = "sensors"
 work_secs = 1
 history_limit = 32

@@ -282,6 +282,7 @@ pub enum ActionCmd<SpawnConfig> {
         text: String,
         provenance: crate::dossier::evidence::EvidenceProvenance,
         gathered_at_tick: u64,
+        reference: Option<phoenix_model::sensing_references::KnownReferenceMetadata>,
     },
     /// Add or update a float modifier on the entity with `uuid`.
     ApplyModifier {
@@ -556,11 +557,13 @@ impl ActionCmd<std::convert::Infallible> {
                 text,
                 provenance,
                 gathered_at_tick,
+                reference,
             } => ActionCmd::RecordDossierEvidence {
                 subject,
                 text,
                 provenance,
                 gathered_at_tick,
+                reference,
             },
             Self::ApplyModifier {
                 uuid,

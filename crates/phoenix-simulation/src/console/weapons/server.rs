@@ -458,31 +458,31 @@ use super::{blaster, shared, torpedo};
 // Shared weapons utilities extracted to `shared.rs` (issue #721). Re-exported
 // so `use super::*;` in the test module keeps resolving them.
 pub(crate) use super::shared::{
-    any_tactical_system_operates_ai, live_entity_xz, BeamContext, DirectFireGeometry,
-    TorpedoTargetSnapshot,
+    BeamContext, DirectFireGeometry, TorpedoTargetSnapshot, any_tactical_system_operates_ai,
+    live_entity_xz,
 };
 
 // Blaster systems extracted to `blaster.rs` (issue #726). `BlasterSystemResource`
 // stays `pub` here for external consumers (`crates/phoenix-presentation/src/server/pfx.rs`,
 // `crates/phoenix-simulation/src/entities/spawner.rs` via the `weapons_plugin` alias); the systems are
 // re-exported so the plugin build fn and the test module keep resolving them.
+pub use super::blaster::{BlasterBankAiPolicies, BlasterSystemResource, seed_blaster_bank_facts};
 pub(crate) use super::blaster::{
     handle_blaster_hits, handle_fire_blaster, tick_blaster_auto_fire, tick_blaster_system,
 };
-pub use super::blaster::{seed_blaster_bank_facts, BlasterBankAiPolicies, BlasterSystemResource};
 
 // Beam (phaser) types and systems extracted to `beam.rs` (issue #727). The
 // public types stay re-exported here for external consumers; the systems are
 // re-exported so the plugin build fn and the test module keep resolving them.
+pub use super::beam::{
+    ActiveBeam, BEAM_DAMAGE_PER_SEC, BeamEndedEvent, BeamStartedEvent, CurrentPhaserMode,
+    LastShipAttacker, PhaserBankAiPolicies, PhaserCombatConfigResource, PhaserCooldown,
+    TacticalRadarSelection, TacticalTargetSelector, seed_phaser_bank_facts,
+};
 pub(crate) use super::beam::{
     ai_phaser_auto_fire, handle_fire_phaser, handle_set_phaser_frequency, handle_set_phaser_mode,
     handle_set_target, on_beam_ended, on_beam_started, tick_beams_apply_damage, tick_beams_prepare,
     tick_beams_tick_lifetimes,
-};
-pub use super::beam::{
-    seed_phaser_bank_facts, ActiveBeam, BeamEndedEvent, BeamStartedEvent, CurrentPhaserMode,
-    LastShipAttacker, PhaserBankAiPolicies, PhaserCombatConfigResource, PhaserCooldown,
-    TacticalRadarSelection, TacticalTargetSelector, BEAM_DAMAGE_PER_SEC,
 };
 
 // Torpedo systems extracted to `torpedo.rs` (issue #728). `TorpedoSystemResource`
@@ -491,17 +491,17 @@ pub use super::beam::{
 // `crates/phoenix-simulation/src/entities/spawner.rs`, `crates/phoenix-simulation/src/console_ai/server.rs`, and friends); the
 // other systems are re-exported so the plugin build fn and the test module
 // keep resolving them.
-pub(crate) use super::torpedo::{
-    build_torpedo_target_snapshot, handle_fire_torpedo, handle_load_tube,
-    handle_set_torpedo_volley_target, handle_unload_tube, tick_torpedo_lifecycle,
-};
 pub use super::torpedo::{
+    TorpedoMagazineAiPolicy, TorpedoSystemResource, TorpedoTubeAiPolicies,
     handle_torpedo_magazine_inter_system, seed_torpedo_conservation_facts,
     seed_torpedo_magazine_facts, seed_torpedo_tube_launch_facts, seed_torpedo_tube_load_facts,
     torpedo_conservation_declared, torpedo_conservation_policy_fires,
     torpedo_magazine_grant_policy_fires, torpedo_tube_launch_policy_fires,
-    torpedo_tube_load_policy_fires, TorpedoMagazineAiPolicy, TorpedoSystemResource,
-    TorpedoTubeAiPolicies,
+    torpedo_tube_load_policy_fires,
+};
+pub(crate) use super::torpedo::{
+    build_torpedo_target_snapshot, handle_fire_torpedo, handle_load_tube,
+    handle_set_torpedo_volley_target, handle_unload_tube, tick_torpedo_lifecycle,
 };
 
 // Blackboard publish systems, broadcaster, and cache resources extracted to
@@ -512,7 +512,7 @@ pub use super::torpedo::{
 // The publish systems are re-exported so the plugin build fn and test module
 // keep resolving them.
 pub use super::blackboard::{
-    compute_current_weapons_update, weapons_update_broadcaster, LastWeaponsUpdate,
+    LastWeaponsUpdate, compute_current_weapons_update, weapons_update_broadcaster,
 };
 pub(crate) use super::blackboard::{
     publish_phaser_bank_blackboards, publish_tactical_radar_blackboard,
@@ -1742,7 +1742,22 @@ fn ai_target_selection(
             let shared = permitted
                 .get(&crate::ship::system_registry::viewscreen_system_id())
                 .is_some()
-                .then_some(&*blackboards);
+                .then_some(&*blackboards)
+                .filter(|_| {
+                    ai_trees
+                        .get(ship_entity)
+                        .ok()
+                        .and_then(|(_, runtimes)| runtimes.0.get(&consumer))
+                        .is_some_and(|runtime| {
+                            crate::science::reading::mission_text_ready(
+                                runtime,
+                                &ship_config.0,
+                                &blackboards,
+                                &consumer,
+                                sim_tick.as_deref().map_or(0, |tick| tick.0),
+                            )
+                        })
+                });
             let destroy = top_destroy_objective_target(shared);
             let defend = top_defend_objective_target(shared);
             let operate = top_operate_objective_target(shared).map(|(target, _)| target);

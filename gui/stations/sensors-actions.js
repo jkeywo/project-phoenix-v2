@@ -16,6 +16,7 @@ import { createSemanticActionRegistry } from '../semantic-action-registry.js';
 export const SENSORS_TARGET_ACTION_ID = 'sensors.target-selection';
 export const SENSORS_SCAN_ACTION_ID = 'sensors.scan';
 export const SENSORS_CANCEL_SCAN_ACTION_ID = 'sensors.cancel-scan';
+export const SENSORS_ATTACH_REFERENCE_ACTION_ID = 'sensors.attach-reference';
 export const SENSORS_PASSIVE_ACTION_ID = 'sensors.passive-enabled';
 export const SENSORS_VIEWSCREEN_ACTION_ID = 'sensors.viewscreen';
 export const SENSORS_CANCEL_IMPULSE_ACTION_ID = 'sensors.cancel-impulse';
@@ -58,6 +59,9 @@ export const SENSORS_CANCEL_SCAN_ACTION = defineStationAction({ id: SENSORS_CANC
   contexts: ['captain', 'science', 'sensors'], labelKey: 'sensors.cancel_scan', bindings: [null, null] });
 export const SENSORS_PASSIVE_ACTION = defineStationAction({ id: SENSORS_PASSIVE_ACTION_ID,
   contexts: ['captain', 'science', 'sensors'], labelKey: 'sensors.passive_enabled', bindings: [null, null] });
+
+export const SENSORS_ATTACH_REFERENCE_ACTION = defineStationAction({ id: SENSORS_ATTACH_REFERENCE_ACTION_ID,
+  contexts: ['captain', 'science', 'sensors', 'tactical'], labelKey: 'sensing.reference.attach', bindings: [null, null] });
 
 export const SENSORS_VIEWSCREEN_ACTION = action(
   SENSORS_VIEWSCREEN_ACTION_ID,
@@ -103,6 +107,7 @@ export const SENSOR_SCIENCE_ACTIONS = Object.freeze([
   SENSORS_SCAN_ACTION,
   SENSORS_CANCEL_SCAN_ACTION,
   SENSORS_PASSIVE_ACTION,
+  SENSORS_ATTACH_REFERENCE_ACTION,
   SENSORS_VIEWSCREEN_ACTION,
   SENSORS_CANCEL_IMPULSE_ACTION,
   SCIENCE_SHIELD_FOCUS_ACTION,
@@ -201,6 +206,11 @@ export function registerSensorScienceActions(registry, options = {}) {
     return send(actionId, correlation, inputMs, 'set_passive_enabled', { control_system_id: row.system_id, enabled: detail.enabled });
   });
 
+  registry.register(SENSORS_ATTACH_REFERENCE_ACTION, ({ actionId, correlation, inputMs, detail } = {}) => {
+    const row = sensorsActionView(getState())?.reference_controls?.find(row => row.system_id === detail?.system_id);
+    if (!row?.controllable || !row.contacts?.includes(detail?.contact) || !row.records?.some(record => record.reference?.id === detail?.reference)) return false;
+    return send(actionId, correlation, inputMs, 'attach_sensor_reference', { control_system_id: row.system_id, contact: detail.contact, reference: detail.reference });
+  });
   registry.register(SENSORS_VIEWSCREEN_ACTION, ({ actionId, correlation, inputMs } = {}) => {
     const view = sensorsActionView(getState());
     return view

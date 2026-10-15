@@ -4,6 +4,52 @@ fn log() -> EvidenceLog {
     EvidenceLog::default()
 }
 
+#[test]
+fn reference_metadata_has_one_immutable_held_finding_and_keeps_original_age() {
+    let mut log = log();
+    let marked = phoenix_model::sensing_references::KnownReferenceMetadata {
+        id: "unusual-register".into(),
+        unusual: true,
+        reading_ticks: 120,
+    };
+    assert_eq!(
+        log.append_reference(
+            "subject",
+            "reference.text",
+            EvidenceProvenance::Records,
+            10,
+            Some(marked.clone())
+        ),
+        Ok(true)
+    );
+    let first = log.clone();
+    assert_eq!(
+        log.append_reference(
+            "subject",
+            "reference.text",
+            EvidenceProvenance::Records,
+            200,
+            Some(marked.clone())
+        ),
+        Ok(false)
+    );
+    assert_eq!(log, first);
+    assert!(
+        log.append_reference(
+            "other",
+            "reference.other",
+            EvidenceProvenance::Records,
+            200,
+            Some(marked)
+        )
+        .is_err()
+    );
+    assert_eq!(log, first);
+    let restored: EvidenceLog =
+        serde_json::from_str(&serde_json::to_string(&log).unwrap()).unwrap();
+    assert_eq!(restored, first);
+}
+
 /// **AC1.** An entry carries all four: what was learned, how, about whom,
 /// and when.
 #[test]
@@ -18,6 +64,7 @@ fn an_entry_carries_its_text_its_provenance_its_subject_and_its_tick() {
     assert_eq!(
         log.entries,
         vec![EvidenceEntry {
+            reference: None,
             subject_uuid: "skyhook-1".into(),
             text: "world.probe.evidence.stress_fracture".into(),
             provenance: EvidenceProvenance::Scan,

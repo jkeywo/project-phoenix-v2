@@ -30,13 +30,16 @@ pub mod server;
 pub mod sharing;
 
 pub use scan::{
-    derive, quantise, scanned_flag, ScanBandConfig, ScanConditions, ScanConfig, ScanReading,
-    ScanRefusal, ScanSubject,
+    ScanBandConfig, ScanConditions, ScanConfig, ScanReading, ScanRefusal, ScanSubject, derive,
+    quantise, scanned_flag,
 };
 pub use server::{
-    publish_scan_blackboard, scan_blackboard_key_for, scan_owner_from_blackboard_key, tick_scans,
     FocusedSaveState, FocusedScanRecord, ScanSaveState, SciencePlugin, ShipScanRecord,
+    publish_scan_blackboard, scan_blackboard_key_for, scan_owner_from_blackboard_key, tick_scans,
 };
 
 #[cfg(test)]
 mod test_support;
+
+pub mod reading;
+pub mod references;

@@ -1,13 +1,15 @@
 use super::{
+    Program, TreeError,
     compile::{descend, fail, path},
     schema::*,
-    Program, TreeError,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TreeRuntime {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reading: Option<crate::ai::text_reading::TextReading>,
     pub root: Option<FrameRuntime>,
     pub last_tick: Option<u64>,
 }
@@ -320,6 +322,11 @@ impl Context<'_> {
 }
 /// Validate private continuation without evaluating tasks or producing effects.
 pub fn validate_runtime(program: &Program, runtime: &TreeRuntime) -> Result<(), TreeError> {
+    if let Some(reading) = &runtime.reading {
+        reading
+            .validate(reading.last_tick.unwrap_or(0))
+            .map_err(fail)?;
+    }
     if let Some(root) = &runtime.root {
         validate(root, &program.root, program, 0, &mut 0)?;
     } else if runtime.last_tick.is_some() {

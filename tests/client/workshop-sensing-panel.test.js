@@ -64,7 +64,7 @@ describe('Workshop structured sensing controls', () => {
     control('broad-remove').click(); control('save').click(); await settle();
     expect(parse(draft.read(path)).sensing.broad).toEqual(original.broad.slice(1));
     control('broad-add').click(); const last = control('broad').lastElementChild;
-    last.querySelector('select').value = 'sensor-radar'; last.querySelector('input').value = '3';
+    last.querySelector('select').value = 'sensor-radar'; last.querySelector('input[id$="-sample_interval_secs"]').value = '3';
     control('save').click(); await settle(); const restored = parse(draft.read(path)).sensing.broad;
     expect(restored.slice(0,2)).toEqual(original.broad.slice(1)); expect(restored[2]).toMatchObject({ system:'sensor-radar', sample_interval_secs:3 }); panel.dispose();
   });

@@ -28,6 +28,7 @@ fn labels(facts: &[DossierFactSnapshot]) -> Vec<&str> {
 
 fn finding(text: &str, provenance: EvidenceProvenance, tick: u64) -> EvidenceEntry {
     EvidenceEntry {
+        reference: None,
         subject_uuid: "skyhook-1".into(),
         text: text.into(),
         provenance,

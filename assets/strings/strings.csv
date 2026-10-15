@@ -5747,3 +5747,12 @@ component.scan.instrument,Focused enquiry picker,Instrument,Instrument,Instrumen
 component.scan.forecast.heading,Conditional scan forecast,[Conditional forecast +{seconds}s from samples {first}–{last}],,,
 component.scan.forecast.linear,Conditional scan forecast,[Assumes the recent observed trend continues; changed causes can invalidate this forecast.],,,
 component.scan.forecast.quantisation,Conditional scan forecast,[Condition ranges include measurement precision; resource changes use observed net flow only.],,,
+
+workshop.sensing.reading_ticks,Workshop sensing authoring,AI reading ticks,KI-Lesezeit in Ticks,AI reading ticks,machine
+sensing.reference.title,Sensors held reference correlation,Known references,Bekannte Referenzen,Known references,machine
+sensing.reference.hypothesis,Sensors held reference correlation,"Reference attachments are hypotheses, not verified current facts.","Referenzzuordnungen sind Hypothesen, keine bestätigten aktuellen Fakten.","Reference attachments are hypotheses, not verified current facts.",machine
+sensing.reference.search,Sensors held reference correlation,Search held records,Vorliegende Einträge durchsuchen,Search held records,machine
+sensing.reference.choose,Sensors held reference correlation,Held record,Vorliegender Eintrag,Held record,machine
+sensing.reference.attach,Sensors held reference correlation,Attach reference,Referenz zuordnen,Attach reference,machine
+sensing.reference.unusual,Sensors held reference correlation,Unusual record,Ungewöhnlicher Eintrag,Unusual record,machine
+sensing.reference.sample_tick,Sensors held reference correlation,Original finding tick {tick},Ursprünglicher Erfassungstick {tick},Original finding tick {tick},machine

@@ -1224,6 +1224,7 @@ pub(crate) fn apply_dispatch_result(
                 text,
                 provenance,
                 gathered_at_tick,
+                reference,
             } => {
                 let Some(uuid) = runtime.name_to_uuid.get(&subject).cloned() else {
                     bevy::log::warn!(
@@ -1232,10 +1233,21 @@ pub(crate) fn apply_dispatch_result(
                     );
                     continue;
                 };
-                if !runtime
-                    .evidence
-                    .append(&uuid, &text, provenance, gathered_at_tick)
-                {
+                let appended = runtime.evidence.append_reference(
+                    &uuid,
+                    &text,
+                    provenance,
+                    gathered_at_tick,
+                    reference,
+                );
+                let appended = match appended {
+                    Ok(value) => value,
+                    Err(error) => {
+                        bevy::log::warn!("{log_ctx}: invalid dossier reference: {error}");
+                        continue;
+                    }
+                };
+                if !appended {
                     // AC3, and a no-op the author is told about rather than one
                     // that disappears: a scenario reaching the same finding
                     // twice is legitimate (a re-scan), so this is a debug line

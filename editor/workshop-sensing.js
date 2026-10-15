@@ -7,8 +7,8 @@ import { acceptWorkshopChanges } from './workshop-acceptance.js';
 import { prepareShipOperation } from './workshop-ship-authoring.js';
 
 export const sensingRoles = {
-  focused: { kind: 'sensors', fields: ['work_secs', 'history_limit', 'unfinished_retention_secs'] },
-  broad: { kinds: ['helm_radar', 'tactical_radar', 'sensor_radar'], fields: ['sample_interval_secs', 'identity_secs', 'classification_secs', 'assessment_secs', 'position_error', 'drift_error_per_sec', 'track_retention_secs'] },
+  focused: { kind: 'sensors', fields: ['reading_ticks', 'work_secs', 'history_limit', 'unfinished_retention_secs'] },
+  broad: { kinds: ['helm_radar', 'tactical_radar', 'sensor_radar'], fields: ['reading_ticks', 'sample_interval_secs', 'identity_secs', 'classification_secs', 'assessment_secs', 'position_error', 'drift_error_per_sec', 'track_retention_secs'] },
   passive: { kind: 'passive_receiver', fields: ['sample_interval_secs', 'min_signal_strength', 'bearing_error_rad'] },
 };
 export const initialPassiveTree = () => ({ root: 'passive', tree: [{ id: 'passive', initial: 'receive', state: [{ id: 'receive', task: [
@@ -51,6 +51,7 @@ export function validateSensing(profile, value) {
     seen.add(row.system);
     if (!value.damage || !value.interior?.placements?.[system.id] || !value.energy?.consumer?.some(consumer => consumer.system === system.id)
       || !system.damage_component?.some(component => component.binding === 'operation')) throw new Error('Instruments require real local reserves, Operation hardware and physical rooms.');
+    if (role !== 'passive' && (!Number.isInteger(row.reading_ticks ?? 0) || (row.reading_ticks ?? 0) < 0 || (row.reading_ticks ?? 0) > 4294967295)) throw new Error('Sensing semantic reading ticks must be a u32 integer.');
     if (role === 'focused') {
       if (row.forecast != null && (!closed(row.forecast, ['horizon_secs']) || !positive(row.forecast.horizon_secs))) throw new Error('Focused forecast horizon must be finite and positive.');
       if (!positive(row.work_secs) || !Number.isInteger(row.history_limit) || row.history_limit < 1 || row.history_limit > 65535 || !finite(row.unfinished_retention_secs) || !value.scan)
@@ -58,7 +59,7 @@ export function validateSensing(profile, value) {
     } else if (role === 'broad') {
       const radar = { helm_radar: value.helm_console?.radar, tactical_radar: value.weapons_console?.radar, sensor_radar: value.sensors_console?.long_range_radar }[system.kind];
       if (!radar || !positive(radar.range)) throw new Error('Broad sensing requires its actual fitted radar coverage.');
-      if (!positive(row.sample_interval_secs) || !spec.fields.every(key => finite(row[key]))
+      if (!positive(row.sample_interval_secs) || !spec.fields.every(key => finite(key === "reading_ticks" ? row[key] ?? 0 : row[key]))
         || Math.fround(row.identity_secs) > Math.fround(row.classification_secs) || Math.fround(row.classification_secs) > Math.fround(row.assessment_secs))
         throw new Error('Broad sensing requires finite cadence/errors and ordered cumulative assessment times.');
     } else {

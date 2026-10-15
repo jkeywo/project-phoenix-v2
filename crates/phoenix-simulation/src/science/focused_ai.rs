@@ -69,7 +69,7 @@ fn contact_for_request(
 }
 
 #[allow(clippy::type_complexity)]
-fn operate(
+pub(crate) fn operate(
     tick: Res<crate::sim_tick::SimTick>,
     sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<(
@@ -85,7 +85,7 @@ fn operate(
         &mut AdmittedCommands,
     )>,
 ) {
-    use phoenix_sim_gameplay::ai::host::{decide_tree, TreeHostOutcome};
+    use phoenix_sim_gameplay::ai::host::{TreeHostOutcome, decide_tree};
     for (
         uuid,
         records,
@@ -124,6 +124,19 @@ fn operate(
                 }
                 _ => None,
             };
+            let requested = requested.filter(|request| {
+                runtimes.0.get(owner).is_some_and(|runtime| {
+                    super::reading::request_ready(
+                        runtime,
+                        &config.0,
+                        boards,
+                        owner,
+                        request,
+                        tick.0,
+                        records.0[owner].policy.reading_ticks,
+                    )
+                })
+            });
             // Only an explicitly permitted currently measured return can route
             // a request. Missing observations never become a world search.
             let target = tracks.and_then(|tracks| {

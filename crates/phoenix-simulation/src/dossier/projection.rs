@@ -220,6 +220,7 @@ pub fn project(subject: &DossierSubject) -> DossierSnapshot {
             .evidence
             .iter()
             .map(|entry| DossierEvidenceSnapshot {
+                reference: entry.reference.clone(),
                 observation: Some(phoenix_model::observation::ObservationMetadata::at(
                     entry.gathered_at_tick,
                     phoenix_model::observation::ObservationSubject::Entity {

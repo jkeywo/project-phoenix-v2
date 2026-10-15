@@ -165,6 +165,8 @@ impl EvidenceProvenance {
 /// inspecting it cannot reveal anything the crew were not already shown.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvidenceEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<phoenix_model::sensing_references::KnownReferenceMetadata>,
     /// The subject's UUID.
     ///
     /// A UUID here, where a promise's `made_to` is deliberately a *name*,
@@ -200,6 +202,21 @@ pub struct EvidenceLog {
 }
 
 impl EvidenceLog {
+    pub fn validate_references(&self, tick: u64) -> Result<(), String> {
+        let mut ids = std::collections::BTreeSet::new();
+        for entry in &self.entries {
+            if let Some(reference) = &entry.reference {
+                reference.validate()?;
+                if entry.text.is_empty()
+                    || entry.gathered_at_tick > tick
+                    || !ids.insert(&reference.id)
+                {
+                    return Err("invalid held reference identity or original finding clock".into());
+                }
+            }
+        }
+        Ok(())
+    }
     /// Whether the crew have found out anything at all.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
@@ -218,16 +235,53 @@ impl EvidenceLog {
         provenance: EvidenceProvenance,
         now_tick: u64,
     ) -> bool {
-        if self.holds(subject_uuid, text, provenance) {
-            return false;
+        self.append_reference(subject_uuid, text, provenance, now_tick, None)
+            .unwrap_or(false)
+    }
+
+    /// The same append, with explicit library metadata on the existing finding.
+    /// IDs are immutable across the log; duplicate delivery keeps the first stamp.
+    pub fn append_reference(
+        &mut self,
+        subject_uuid: &str,
+        text: &str,
+        provenance: EvidenceProvenance,
+        now_tick: u64,
+        reference: Option<phoenix_model::sensing_references::KnownReferenceMetadata>,
+    ) -> Result<bool, String> {
+        if let Some(reference) = &reference {
+            reference.validate()?;
+            if self.entries.iter().any(|entry| {
+                entry
+                    .reference
+                    .as_ref()
+                    .is_some_and(|held| held.id == reference.id)
+                    && (entry.subject_uuid != subject_uuid
+                        || entry.text != text
+                        || entry.provenance != provenance
+                        || entry.reference.as_ref() != Some(reference))
+            }) {
+                return Err("reference id already belongs to a different held finding".into());
+            }
+        }
+        if let Some(entry) = self.entries.iter().find(|entry| {
+            entry.subject_uuid == subject_uuid
+                && entry.text == text
+                && entry.provenance == provenance
+        }) {
+            if entry.reference != reference {
+                return Err("held finding reference metadata is immutable".into());
+            }
+            return Ok(false);
         }
         self.entries.push(EvidenceEntry {
+            reference,
             subject_uuid: subject_uuid.to_string(),
             text: text.to_string(),
             provenance,
             gathered_at_tick: now_tick,
         });
-        true
+        Ok(true)
     }
 
     /// Whether this exact finding is already on file — the identity duplicate

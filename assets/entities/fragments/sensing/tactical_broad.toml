@@ -1,5 +1,6 @@
 # [ai] Independent paid acquisition uses each actual fitted radar and its own authored coverage/filter.
 [[sensing.broad]]
+reading_ticks = 120
 system = "tactical-radar"
 sample_interval_secs = 0.5
 identity_secs = 1

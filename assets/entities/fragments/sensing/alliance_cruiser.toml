@@ -21,6 +21,7 @@ condition_step = 0.25
 report_capacities = false
 
 [[sensing.focused]]
+reading_ticks = 120
 system = "sensors"
 work_secs = 2
 history_limit = 64
@@ -29,6 +30,7 @@ unfinished_retention_secs = 0
 forecast = { horizon_secs = 120 }
 
 [[sensing.broad]]
+reading_ticks = 120
 system = "sensor-radar"
 sample_interval_secs = 0.5
 identity_secs = 1
@@ -106,6 +108,7 @@ physical = 1
 laser = 1
 
 [[sensing.broad]]
+reading_ticks = 120
 system = "tactical-radar"
 sample_interval_secs = 0.5
 identity_secs = 1
@@ -116,6 +119,7 @@ drift_error_per_sec = 0.5
 track_retention_secs = 60
 
 [[sensing.broad]]
+reading_ticks = 120
 system = "helm-radar"
 sample_interval_secs = 0.5
 identity_secs = 1

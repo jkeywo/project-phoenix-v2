@@ -409,11 +409,13 @@ fn low_fidelity_frequency_hint_respects_sensors_console_feed() {
     let mut states = app
         .world_mut()
         .query_filtered::<&SensorsFrequencyState, With<crate::server_app::LocalShip>>();
-    assert!(states
-        .single(app.world())
-        .unwrap()
-        .last_sent_target
-        .is_none());
+    assert!(
+        states
+            .single(app.world())
+            .unwrap()
+            .last_sent_target
+            .is_none()
+    );
 }
 
 #[test]
@@ -949,6 +951,7 @@ fn scan_suite(max_range: f32) -> crate::science::server::ShipScanRecord {
                 ..Default::default()
             },
             policy: phoenix_model::sensing::FocusedConfig {
+                reading_ticks: 0,
                 system: SystemId("sensors".into()),
                 work_secs: 1.0,
                 history_limit: 32,
@@ -2981,12 +2984,13 @@ fn concealed_contact_stops_low_fidelity_frequency_hints_until_normal() {
     );
     set_local_weapons_target(&mut app, Some("target".into()));
     tick(&mut app);
-    assert!(!app
-        .world()
-        .resource::<EnqueueLog>()
-        .0
-        .iter()
-        .any(|row| matches!(row.payload, CoordinationPayload::FrequencyHint { .. })));
+    assert!(
+        !app.world()
+            .resource::<EnqueueLog>()
+            .0
+            .iter()
+            .any(|row| matches!(row.payload, CoordinationPayload::FrequencyHint { .. }))
+    );
     crate::gm::operations::contact::set(
         &mut app
             .world_mut()
@@ -2997,10 +3001,11 @@ fn concealed_contact_stops_low_fidelity_frequency_hints_until_normal() {
         crate::gm::operations::contact::ContactMode::Normal,
     );
     tick(&mut app);
-    assert!(app
-        .world()
-        .resource::<EnqueueLog>()
-        .0
-        .iter()
-        .any(|row| matches!(row.payload, CoordinationPayload::FrequencyHint { .. })));
+    assert!(
+        app.world()
+            .resource::<EnqueueLog>()
+            .0
+            .iter()
+            .any(|row| matches!(row.payload, CoordinationPayload::FrequencyHint { .. }))
+    );
 }

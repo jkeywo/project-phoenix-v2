@@ -5198,6 +5198,7 @@ id = "machinery_parts"
 
 # [ai] Independent paid acquisition uses each actual fitted radar and its own authored coverage/filter.
 [[sensing.broad]]
+reading_ticks = 120
 system = "sensor-radar"
 sample_interval_secs = 0.5
 identity_secs = 1
@@ -5208,6 +5209,7 @@ drift_error_per_sec = 0.5
 track_retention_secs = 60
 
 [[sensing.broad]]
+reading_ticks = 120
 system = "tactical-radar"
 sample_interval_secs = 0.5
 identity_secs = 1
@@ -5218,6 +5220,7 @@ drift_error_per_sec = 0.5
 track_retention_secs = 60
 
 [[sensing.broad]]
+reading_ticks = 120
 system = "helm-radar"
 sample_interval_secs = 0.5
 identity_secs = 1
@@ -5230,6 +5233,7 @@ track_retention_secs = 60
 
 # Explicit timed focused suite; preserves the previous one-second accepted migration tuning.
 [[sensing.focused]]
+reading_ticks = 120
 system = "sensors"
 work_secs = 1
 history_limit = 32

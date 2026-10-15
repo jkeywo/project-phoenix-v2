@@ -3,6 +3,7 @@
 // table is loaded, so the constructor's template t() calls never see an
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
+import './ph-sensor-references.js';
 import { t } from '../strings.js';
 import { sensorTrackText } from '../sensor-tracks.js';
 import { SENSORS_TARGET_ACTION_ID } from '../stations/sensors-actions.js';
@@ -97,6 +98,7 @@ export class PhSensorPanel extends PhElement {
     </div>
   </div>
   <div class="scan-data" id="scan-data"></div>
+  <ph-sensor-references id="references"></ph-sensor-references>
   <section id="tracks" hidden aria-label="${t('sensing.track.list')}"></section>
 `;
   }
@@ -106,6 +108,7 @@ export class PhSensorPanel extends PhElement {
     const root = this.shadowRoot;
     if (!this.#sharing) { this.#sharing = mountRadarSharingControls(this.ownerDocument); root.append(this.#sharing.node); }
     this.#sharing.update(s.radar_sharing || []);
+    root.getElementById('references').state = s;
 
     root.getElementById('range-val').textContent = s.scan_range || 0;
 

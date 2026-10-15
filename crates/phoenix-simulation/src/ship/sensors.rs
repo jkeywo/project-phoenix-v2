@@ -1469,6 +1469,26 @@ pub fn operate_sensors_ai(
                 }
                 _ => None,
             };
+            let required_reading = scan_record
+                .and_then(|records| records.0.get(&consumer))
+                .map_or(0, |record| record.policy.reading_ticks);
+            let requested_scan = requested_scan.filter(|request| {
+                ai_trees
+                    .get(ship_entity)
+                    .ok()
+                    .and_then(|(_, runtimes)| runtimes.0.get(&consumer))
+                    .is_some_and(|runtime| {
+                        crate::science::reading::request_ready(
+                            runtime,
+                            &config.0,
+                            blackboards,
+                            &consumer,
+                            request,
+                            now_tick,
+                            required_reading,
+                        )
+                    })
+            });
             let mut scan_contact = None;
             let mut candidates = Vec::new();
             for owner in tracks.0.keys() {

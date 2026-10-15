@@ -431,6 +431,13 @@ export const ACTION_MAP = Object.freeze({
       payload: { type: 'CancelFocusedScan' },
     });
   },
+  attach_sensor_reference: (a, send) => {
+    if (!a.control_system_id || typeof a.contact !== 'string' || !a.contact || typeof a.reference !== 'string' || !a.reference) return;
+    send(a.correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(a.correlation ? { correlation: a.correlation } : {}), target: a.control_system_id,
+      payload: { type: 'AttachSensorReference', data: { contact: a.contact, reference: a.reference } },
+    });
+  },
   set_passive_enabled: (a, send) => {
     if (!a.control_system_id || typeof a.enabled !== 'boolean') return;
     send(a.correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {

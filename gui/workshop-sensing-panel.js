@@ -14,7 +14,7 @@ export function mountWorkshopSensing({ root, provider, runtime, draft: getDraft,
   const bindings = Object.fromEntries(["combat_lock","science_target"].map(key=>[key,el("select",key)]));
   const rows = {}; let inspection = null, dependencies = null, disposed = false, loading = false, observed = null, generation = 0;
   node.append(el('h3', null, 'title'), el('p', null, 'hint'), label(template, 'template'), label(materialise, 'materialise'), ...Object.entries(bindings).map(([key,control])=>label(control,key)), status);
-  const defaults = { focused: { work_secs: 1, history_limit: 32, unfinished_retention_secs: 0 }, broad: { sample_interval_secs: .5, identity_secs: 1, classification_secs: 3, assessment_secs: 6, position_error: 2, drift_error_per_sec: .5, track_retention_secs: 60 }, passive: { sample_interval_secs: .5, min_signal_strength: .01, bearing_error_rad: .15, mount: { facing_deg: 0, arc_deg: 360, range: 100 } } };
+  const defaults = { focused: { reading_ticks: 120, work_secs: 1, history_limit: 32, unfinished_retention_secs: 0 }, broad: { reading_ticks: 120, sample_interval_secs: .5, identity_secs: 1, classification_secs: 3, assessment_secs: 6, position_error: 2, drift_error_per_sec: .5, track_retention_secs: 60 }, passive: { sample_interval_secs: .5, min_signal_strength: .01, bearing_error_rad: .15, mount: { facing_deg: 0, arc_deg: 360, range: 100 } } };
   const hosts = {}, sequences = {};
   function addInstrument(role, value = defaults[role]) {
     const spec = sensingRoles[role], index = sequences[role]++, key = index === 0 ? role : role + '-' + index;
@@ -24,6 +24,7 @@ export function mountWorkshopSensing({ root, provider, runtime, draft: getDraft,
     for (const field of [...spec.fields, ...(role === 'passive' ? ['facing_deg', 'arc_deg', 'range'] : [])]) {
       const control = input(key + '-' + field, 'number'); control.value = value[field] ?? value.mount?.[field] ?? defaults[role][field] ?? defaults[role].mount?.[field];
       if (field === 'facing_deg') control.removeAttribute('min');
+      if (field === 'reading_ticks') { control.step = '1'; control.max = '4294967295'; }
       if (field === 'history_limit') { control.step = '1'; control.min = '1'; control.max = '65535'; }
       fields[field] = control; container.append(label(control, field));
     }

@@ -5,6 +5,34 @@ use rhai::Dynamic;
 
 const TICK: u64 = 600;
 
+#[test]
+fn append_optional_reference_is_closed_typed_metadata_on_the_existing_effect() {
+    let commands = run(
+        r#"fn on_x(ctx) { ctx.dossier.append(#{subject:"known",text:"reference.text",provenance:"records",reference:#{id:"unusual-record",unusual:true,reading_ticks:120}}); }"#,
+    );
+    let [
+        ActionCmd::RecordDossierEvidence {
+            reference: Some(reference),
+            gathered_at_tick,
+            ..
+        },
+    ] = &commands[..]
+    else {
+        panic!("existing append effect expected")
+    };
+    assert_eq!(reference.id, "unusual-record");
+    assert!(reference.unusual);
+    assert_eq!(reference.reading_ticks, 120);
+    assert_eq!(*gathered_at_tick, TICK);
+    for extra in [
+        "reading_ticks:-1",
+        "reading_ticks:4294967296",
+        "reading_ticks:1,unknown:true",
+    ] {
+        assert!(!err(&format!("fn on_x(ctx) {{ ctx.dossier.append(#{{subject:\"known\",text:\"reference.text\",provenance:\"records\",reference:#{{id:\"bad\",unusual:true,{extra}}}}}); }}")).is_empty());
+    }
+}
+
 /// Run `source`'s `on_x` and return the commands it emitted in authored
 /// order. `flags` shares the one sink exactly as the live host wires it,
 /// which is what lets a test assert an append lands BETWEEN a handler's own
@@ -92,6 +120,7 @@ fn an_append_buffers_the_subject_name_the_text_the_provenance_and_the_tick() {
     assert_eq!(
         cmds,
         vec![ActionCmd::RecordDossierEvidence {
+            reference: None,
             subject: "skyway_hook".into(),
             text: "world.probe.evidence.fracture".into(),
             provenance: EvidenceProvenance::Scan,
@@ -113,9 +142,11 @@ fn every_provenance_is_authorable_under_its_own_name() {
             provenance.as_str()
         ));
         match &cmds[..] {
-            [ActionCmd::RecordDossierEvidence {
-                provenance: got, ..
-            }] => {
+            [
+                ActionCmd::RecordDossierEvidence {
+                    provenance: got, ..
+                },
+            ] => {
                 assert_eq!(*got, provenance)
             }
             other => panic!("expected one append, got {other:?}"),

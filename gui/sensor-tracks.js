@@ -52,7 +52,7 @@ export function projectSensorTracks(tracks, { x = 0, z = 0, yaw = 0, range = 0, 
     target_disabled: track?.assessment?.disabled ?? null,
     target_kind: null, target_stance: null, target_hull_pct: null, target_threat: null,
     target_shield_freq: null, target_shields: null, target_shield_fraction: null, target_report: null,
-    target_projection: null,
+    target_projection: null, target_references: Array.isArray(track?.references) ? track.references : [],
   };
 }
 

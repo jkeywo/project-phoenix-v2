@@ -118,8 +118,8 @@ use rhai::{EvalAltResult, Map};
 
 use crate::dossier::evidence::{EvidenceLog, EvidenceProvenance};
 use crate::world::dispatch::ActionCmd;
-use crate::world::script::effects::{map_str, raise, EffectSink};
-use crate::world::script::registry::{host_fn, HostRegistry};
+use crate::world::script::effects::{EffectSink, map_str, raise};
+use crate::world::script::registry::{HostRegistry, host_fn};
 
 /// The `dossier` custom type handed to a script call.
 ///
@@ -214,11 +214,47 @@ impl Dossier {
         // downstream has to re-validate.
         let provenance = EvidenceProvenance::parse(&provenance)
             .map_err(|e| raise(format!("dossier.append: {e}")))?;
+        let reference = match spec.get("reference") {
+            None => None,
+            Some(value) => {
+                let row = value
+                    .clone()
+                    .try_cast::<Map>()
+                    .ok_or_else(|| raise("dossier reference must be a map".into()))?;
+                if row
+                    .keys()
+                    .any(|key| !["id", "unusual", "reading_ticks"].contains(&key.as_str()))
+                {
+                    return Err(raise("unknown dossier reference field".into()));
+                }
+                let id =
+                    map_str(&row, "id").ok_or_else(|| raise("reference requires id".into()))?;
+                let unusual = row
+                    .get("unusual")
+                    .and_then(|value| value.clone().try_cast::<bool>())
+                    .ok_or_else(|| raise("reference requires boolean unusual".into()))?;
+                let reading_ticks = row
+                    .get("reading_ticks")
+                    .and_then(|value| value.clone().try_cast::<rhai::INT>())
+                    .and_then(|value| u32::try_from(value).ok())
+                    .ok_or_else(|| {
+                        raise("reference requires nonnegative u32 reading_ticks".into())
+                    })?;
+                let metadata = phoenix_model::sensing_references::KnownReferenceMetadata {
+                    id,
+                    unusual,
+                    reading_ticks,
+                };
+                metadata.validate().map_err(raise)?;
+                Some(metadata)
+            }
+        };
         self.sink.push(ActionCmd::RecordDossierEvidence {
             subject,
             text,
             provenance,
             gathered_at_tick: self.now_tick,
+            reference,
         });
         Ok(())
     }
@@ -239,7 +275,7 @@ pub fn register_dossier(engine: &mut HostRegistry) {
         category = "effect",
         params = ["spec"],
         summary = "Write one finding onto a subject's dossier: \
-                  `#{ subject, text, provenance }`, where `subject` is an \
+                  `#{ subject, text, provenance, reference?: #{id, unusual, reading_ticks} }`, where `subject` is an \
                   `[[entity]] id`, `text` is a strings.csv id and `provenance` is \
                   one of scan / dialogue / records / briefing. Appending the same \
                   finding twice keeps the first stamp; an unknown subject is a \

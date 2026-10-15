@@ -31,6 +31,9 @@ pub struct BroadTrack {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observer_position: Option<[f32; 2]>,
     pub contact_id: String,
+    /// Deliberate links to held evidence, not observed identity or confidence.
+    #[serde(default)]
+    pub attached_references: BTreeMap<String, u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observation: Option<ObservationMetadata>,
     pub selectable: bool,
@@ -150,7 +153,16 @@ impl BroadTrackState {
                     .ok()
                     .filter(|sequence| sequence.to_string() == n)
             });
-            if &track.contact_id != id
+            if track
+                .attached_references
+                .iter()
+                .any(|(reference, attached)| {
+                    reference.is_empty()
+                        || reference.len() > 128
+                        || reference.chars().any(char::is_control)
+                        || *attached > tick
+                })
+                || &track.contact_id != id
                 || sequence.is_none_or(|n| n == 0 || n >= self.next_contact)
                 || !ids.insert(id)
                 || (if track.received.is_some() {
@@ -430,6 +442,7 @@ impl BroadTrackState {
                             received: None,
                             observer_position: None,
                             contact_id: id.clone(),
+                            attached_references: BTreeMap::new(),
                             observation: None,
                             selectable: sample.selectable,
                             observed_tick: tick,
@@ -605,6 +618,7 @@ impl BroadTrackState {
                         .as_ref()
                         .map(|received| vec![received.provenance.clone()])
                         .unwrap_or_default(),
+                    references: Vec::new(),
                     contact_id: track.contact_id.clone(),
                     observation: track.observation.clone().map(|mut observation| {
                         observation.subject = ObservationSubject::Entity {

@@ -41,6 +41,8 @@ pub struct SensingControlBindings {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FocusedConfig {
+    #[serde(default)]
+    pub reading_ticks: u32,
     pub system: SystemId,
     pub work_secs: f32,
     pub history_limit: u16,
@@ -51,6 +53,8 @@ pub struct FocusedConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BroadConfig {
+    #[serde(default)]
+    pub reading_ticks: u32,
     pub system: SystemId,
     pub sample_interval_secs: f32,
     /// Cumulative supported observation time, in nondecreasing order.

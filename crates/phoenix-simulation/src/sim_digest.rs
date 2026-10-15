@@ -128,7 +128,7 @@
 //! folds exactly as it did before. See [`fold_scenario_scope`], and
 //! [`fold_scenario_records`] for the six `WorldContentRuntime` fields
 //! deliberately left out — `name_to_uuid`, `observed_hull_fractions`,
-//! `mission_clock_anchor_secs`, `pending_delayed_actions`,
+//! `mission_clock`, `pending_delayed_actions`,
 //! `triggers.generation()` and `loaded_scenario_paths` — plus the authored
 //! row fields that go with them, each with its reason.
 //!
@@ -1016,30 +1016,22 @@ fn fold_flag_store(mut acc: u64, pairs: &[(&str, i64)]) -> u64 {
 /// sorts it for the same reason. Nothing else here needs a sort — the table's
 /// order is a deterministic replay of the same load on every host.
 ///
-/// # `last_fired_elapsed` folds as present-or-absent, never as its value
-///
-/// The third field is the mission-elapsed reading a `repeat` trigger's
-/// `cooldown_secs` is measured from, and it is the one piece of scenario state
-/// a restore **reconstructs** rather than copies. `restore_scenario` rebuilds
-/// `mission_clock_anchor_secs` as `now - captured_elapsed` in `f32`, so every
-/// later reading in a resumed world can land an ULP away from the live one's:
-/// measured on `assets/worlds/probe_evidence.toml`, a trigger that fired at
-/// `5.0` in the live run stamps `5.0000005` in the resumed one. Folding the
-/// value would therefore report a divergence between a run and its own resume
-/// that no simulation ever made, and this module forbids the quantisation that
-/// would paper over it.
-///
-/// Losing it costs nothing a peer needs. `None` versus `Some` is folded, which
-/// is what a `ResetTrigger` moves; and two hosts that fired the same repeat
-/// trigger on *different ticks* have already disagreed about that trigger's
-/// EFFECTS — the flags it set, the entities it spawned, the threads it opened —
-/// every one of which this scope now folds, on the earlier of the two ticks.
-/// The stamp would restate a divergence a tick after something else caught it.
+/// The exact mission age and cooldown readings now survive save/resume.
+/// Process-local Duration anchors are excluded; only elapsed age is folded.
 fn fold_scenario_triggers(world: &World, mut acc: u64) -> u64 {
     let Some(runtime) = world.get_resource::<WorldContentRuntime>() else {
         return acc;
     };
 
+    if let Some((clock, now)) = runtime
+        .mission_clock
+        .zip(world.get_resource::<Time<Fixed>>())
+    {
+        acc = fold_str(acc, "mission-clock");
+        let elapsed = clock.elapsed(now.elapsed());
+        acc = fold_u64(acc, elapsed.as_secs());
+        acc = fold_u64(acc, u64::from(elapsed.subsec_nanos()));
+    }
     // Guarded per BLOCK rather than by one early return (issue #1305): the GM
     // blocks below belong to a world that may author no trigger at all, and a
     // world with an empty table and nothing armed still folds nothing, so every
@@ -1052,7 +1044,7 @@ fn fold_scenario_triggers(world: &World, mut acc: u64) -> u64 {
             acc = fold_u64(acc, trigger_condition_code(&state.trigger.condition));
             acc = fold_u64(acc, u64::from(state.fired));
             acc = fold_optional_str(acc, state.origin_layer.as_deref());
-            acc = fold_u64(acc, u64::from(state.last_fired_elapsed.is_some()));
+            acc = fold_optional_f32(acc, state.last_fired_elapsed);
             let mut disabled: Vec<_> = state.seen_disabled.iter().collect();
             disabled.sort();
             acc = fold_u64(acc, disabled.len() as u64);
@@ -1357,11 +1349,8 @@ fn fold_world_event(mut acc: u64, event: &WorldEvent) -> u64 {
 ///   divergence a second time, at the cost of sorting a map every tick.
 /// * **`WorldContentRuntime::observed_hull_fractions`** — a one-tick-lagged copy
 ///   of hull state the entity namespace already folds per system.
-/// * **`WorldContentRuntime::mission_clock_anchor_secs`** — a reading of
-///   `Time<Fixed>`, which is a function of the folded `SimTick`. It is also the
-///   one scenario field a restore *reconstructs* rather than copies (`anchor =
-///   now - captured_elapsed`), so folding it would compare an `f32`
-///   round-trip rather than a state.
+/// * **`WorldContentRuntime::mission_clock`** — its process-local anchor is
+///   not folded; `fold_scenario_triggers` folds the exact elapsed age instead.
 /// * **`WorldContentRuntime::pending_delayed_actions`** — authoritative, and the
 ///   one genuine hole this issue leaves. The payload deliberately does not carry
 ///   it: storing it means giving `TriggerAction`'s 22 variants a serde derive and

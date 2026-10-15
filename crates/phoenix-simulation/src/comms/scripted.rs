@@ -165,8 +165,8 @@ pub(crate) fn open_scripted_comms_threads(
     // shape `tick_script_callbacks` builds.
     let elapsed_secs = aux.time.as_ref().and_then(|t| {
         runtime
-            .mission_clock_anchor_secs
-            .map(|loaded| (t.elapsed_secs() - loaded).max(0.0))
+            .mission_clock
+            .map(|clock| clock.elapsed_secs(t.elapsed()))
     });
     let script_clock = SchedClock {
         tick: now_tick,

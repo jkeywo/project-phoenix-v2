@@ -613,7 +613,7 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // still carries `pending_delayed_actions` (authoritative, and deliberately
     // out of both the payload and the fold — see `fold_scenario_records`),
     // `name_to_uuid` and `observed_hull_fractions` (re-derived), the
-    // `mission_clock_anchor_secs` reading, `WorldTriggerRegistry::generation` (the
+    // `mission_clock` process-local anchor (its exact age is captured/folded), `WorldTriggerRegistry::generation` (the
     // cache token four bullets up) and `loaded_scenario_paths` (the layer-load
     // dedup set, which the payload does not carry). `WorldScriptRuntime` is
     // mostly compiled ASTs, the per-tick budget and the content hash, none of

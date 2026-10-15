@@ -62,3 +62,33 @@ fn layered_flag_chain_from_the_base_world_is_the_base_store_alone() {
     assert_eq!(flags2.len(), 1);
     assert!(crate::world::flags::flag_in_chain(&flags2, "base_flag"));
 }
+
+#[test]
+fn mission_age_rebases_exactly_across_a_younger_bootstrap_clock() {
+    use std::time::Duration;
+    let origin = Duration::from_nanos(16_666_667);
+    let clock = MissionClock::new(origin);
+    let captured_at = Duration::from_nanos(1_150_000_023);
+    let age = clock.elapsed(captured_at);
+    let bootstrap_at = Duration::from_nanos(800_000_016);
+    let resumed = MissionClock::resume(bootstrap_at, age);
+    for step in 0..10_000 {
+        let dt = Duration::from_nanos(step * 16_666_667);
+        assert_eq!(
+            clock.elapsed(captured_at + dt),
+            resumed.elapsed(bootstrap_at + dt)
+        );
+        assert_eq!(
+            clock.elapsed_secs(captured_at + dt),
+            resumed.elapsed_secs(bootstrap_at + dt)
+        );
+    }
+}
+
+#[test]
+fn representable_mission_age_cannot_overflow_on_the_next_tick() {
+    use std::time::Duration;
+    let clock = MissionClock::resume(Duration::ZERO, Duration::MAX);
+    assert_eq!(clock.elapsed(Duration::from_millis(17)), Duration::MAX);
+    assert!(clock.elapsed_secs(Duration::from_millis(17)).is_finite());
+}

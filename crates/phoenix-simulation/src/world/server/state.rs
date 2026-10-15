@@ -3,6 +3,32 @@ use super::*;
 
 // -- Resources --------------------------------------------------------------
 
+/// A process-local fixed-time anchor plus an exact previously elapsed age.
+/// Only the age is persisted; a fresh host may have a younger fixed clock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MissionClock {
+    anchored_at: std::time::Duration,
+    prior_elapsed: std::time::Duration,
+}
+impl MissionClock {
+    pub fn new(now: std::time::Duration) -> Self {
+        Self::resume(now, std::time::Duration::ZERO)
+    }
+    pub fn resume(now: std::time::Duration, elapsed: std::time::Duration) -> Self {
+        Self {
+            anchored_at: now,
+            prior_elapsed: elapsed,
+        }
+    }
+    pub fn elapsed(self, now: std::time::Duration) -> std::time::Duration {
+        self.prior_elapsed
+            .saturating_add(now.saturating_sub(self.anchored_at))
+    }
+    pub fn elapsed_secs(self, now: std::time::Duration) -> f32 {
+        self.elapsed(now).as_secs_f32()
+    }
+}
+
 /// Server-side runtime state for the currently active world content.
 ///
 /// Populated at `Startup` from the unified `WorldConfig` resource (which is
@@ -40,22 +66,11 @@ pub struct WorldContentRuntime {
     /// entity only emits an event on a downward crossing; healing never re-arms
     /// a scenario's single-shot `on_hull_below` templates.
     pub observed_hull_fractions: HashMap<String, f32>,
-    /// Time zero for the mission clock: the `Time::elapsed_secs()` reading taken
-    /// on the first simulation tick of `GamePhase::InProgress`. `on_timer`
-    /// triggers fire when `time.elapsed_secs() - mission_clock_anchor_secs >=
-    /// after_secs`, and `action_delays` schedule `fire_at_elapsed` against the
-    /// same origin. (#475, re-anchored in #960)
-    ///
-    /// `None` means "not anchored yet" — no world loaded at all, or a mission
-    /// that has not started. `collect_world_events` emits no `TimerElapsed`
-    /// while it is `None`, and `tick_delayed_actions` dispatches nothing.
-    ///
-    /// **Written by [`anchor_mission_clock`], cleared by [`arm_mission_clock`],
-    /// and by nothing else.** It is deliberately NOT stamped at `Startup`: the
-    /// world is loaded then, but `Time` keeps running through the whole lobby,
-    /// so a boot anchor made `after_secs` an offset from app launch rather than
-    /// from mission start — see [`anchor_mission_clock`] for what that cost.
-    pub mission_clock_anchor_secs: Option<f32>,
+    /// Exact mission age rebased against this process's fixed clock. The public
+    /// seconds used by authored timers are projected only after integer elapsed
+    /// arithmetic, so save/resume cannot change their rounding phase.
+    /// Anchored once by `anchor_mission_clock`, cleared by `arm_mission_clock`.
+    pub mission_clock: Option<MissionClock>,
     /// Maps named groups to the set of entity names currently in that group.
     pub entity_groups: HashMap<String, HashSet<String>>,
     /// Actions queued for deferred dispatch (via `action_delays` on triggers).

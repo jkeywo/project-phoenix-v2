@@ -309,13 +309,10 @@ pub(super) fn capture_coordination_staging(world: &World) -> Vec<CoordinationEnq
 pub(super) fn capture_scenario(world: &World) -> Option<ScenarioState> {
     let runtime = world.get_resource::<WorldContentRuntime>()?;
 
-    // The anchor is a reading of THIS process's clock; the distance from it is
-    // what a resumed run needs. See `ScenarioState`.
-    let mission_elapsed_secs = match (runtime.mission_clock_anchor_secs, fixed_elapsed_secs(world))
-    {
-        (Some(anchor), Some(now)) => Some((now - anchor).max(0.0)),
-        _ => None,
-    };
+    let mission_elapsed = runtime
+        .mission_clock
+        .zip(world.get_resource::<Time<Fixed>>())
+        .map(|(clock, now)| clock.elapsed(now.elapsed()));
 
     let triggers = runtime.triggers.capture();
 
@@ -351,7 +348,7 @@ pub(super) fn capture_scenario(world: &World) -> Option<ScenarioState> {
     observed_hull_fractions.sort_by(|a, b| a.0.cmp(&b.0));
 
     Some(ScenarioState {
-        mission_elapsed_secs,
+        mission_elapsed,
         triggers,
         entity_groups,
         // Which entity each authored name means (issue #863) — see

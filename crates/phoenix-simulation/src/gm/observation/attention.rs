@@ -801,10 +801,8 @@ pub fn publish_attention_projection(
         // from zero is the same answer the pipeline would give.
         let elapsed = sim_time
             .as_deref()
-            .zip(runtime.mission_clock_anchor_secs)
-            .map_or(0.0, |(time, anchor)| {
-                (time.elapsed_secs() - anchor).max(0.0)
-            });
+            .zip(runtime.mission_clock)
+            .map_or(0.0, |(time, anchor)| anchor.elapsed_secs(time.elapsed()));
         let beats = collect_beats(runtime, layers.as_deref(), elapsed);
         // A new occurrence begins when the previous one ENDED — the beat fired
         // (its stamp moved), or it stopped being eligible and came back. A beat

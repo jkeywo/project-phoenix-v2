@@ -38,6 +38,10 @@ impl RestoreReport {
 /// what tell a host which world that is.
 pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
     let mut report = RestoreReport::default();
+    if let Some(gap) = super::preflight::mission_clock_gap(world, snapshot) {
+        report.gaps.push(gap);
+        return report;
+    }
 
     // Layer ASTs and handlers are derived state, and trigger progress is stored
     // by index. Refuse the whole overwrite while the fresh bootstrap still has

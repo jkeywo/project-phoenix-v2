@@ -364,3 +364,6 @@ use materialization::restore_asteroids;
 use materialization::restore_entities;
 pub(crate) use materialization::spawn_from_origin;
 pub use materialization::LayerReconcileStatus;
+
+#[cfg(test)]
+mod mission_clock_tests;

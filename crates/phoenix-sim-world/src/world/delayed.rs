@@ -9,7 +9,7 @@
 // # Purity boundaries
 //
 // * **Time is injected.** The elapsed-seconds value is derived by the applier
-//   from `Time::elapsed_secs()` and `WorldContentRuntime::mission_clock_anchor_secs`
+//   from the exact Duration age in `WorldContentRuntime::mission_clock`
 //   (a Bevy resource read); this module only compares plain floats.
 // * **Ordering is preserved.** Both partitions keep the queue's original
 //   relative order, so two actions authored with the same delay dispatch in

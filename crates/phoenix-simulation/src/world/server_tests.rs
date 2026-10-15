@@ -338,7 +338,7 @@ fn dispatch_delayed_actions(
     app.add_systems(Update, tick_delayed_actions.after(tick_trigger_pipeline));
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-        runtime.mission_clock_anchor_secs = Some(0.0);
+        runtime.mission_clock = Some(MissionClock::new(std::time::Duration::ZERO));
         for action in actions {
             runtime.pending_delayed_actions.push(DelayedAction {
                 action,
@@ -423,7 +423,7 @@ fn delayed_action_dispatches_and_queues_event_for_next_tick() {
 
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-        runtime.mission_clock_anchor_secs = Some(0.0);
+        runtime.mission_clock = Some(MissionClock::new(std::time::Duration::ZERO));
         runtime.pending_delayed_actions.push(DelayedAction {
             action: TriggerAction::SetWorldFlag {
                 name: "aphelion_armed".to_string(),
@@ -507,7 +507,7 @@ fn scripted_in_seconds_effect_routes_through_tick_delayed_actions() {
     );
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-        runtime.mission_clock_anchor_secs = Some(0.0);
+        runtime.mission_clock = Some(MissionClock::new(std::time::Duration::ZERO));
         // The route: the script-scheduled DelayedAction goes onto the SAME
         // `pending_delayed_actions` queue a TOML `action_delays` entry uses.
         runtime.pending_delayed_actions.extend(effects.delayed);
@@ -590,7 +590,8 @@ fn complete_script_call_applies_all_six_collections_with_clock_and_owner_context
             }
             {
                 let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-                runtime.mission_clock_anchor_secs = anchored.then_some(0.0);
+                runtime.mission_clock =
+                    anchored.then_some(MissionClock::new(std::time::Duration::ZERO));
                 let queued = runtime.deadlines.arm_scoped(
                     &[crate::world::deadlines::Deadline {
                         id: "window".into(),
@@ -8729,7 +8730,7 @@ fn on_world_loaded_fires_again_after_unload_and_reload() {
         .add_systems(Update, apply_world_layer_changes);
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-        runtime.mission_clock_anchor_secs = Some(0.0);
+        runtime.mission_clock = Some(MissionClock::new(std::time::Duration::ZERO));
         runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnWorldLoaded,
@@ -9824,11 +9825,7 @@ fn mission_clock_anchors_once_per_mission_and_rearms_for_the_next() {
         .init_resource::<WorldContentRuntime>()
         .add_systems(Update, anchor_mission_clock);
 
-    let anchor = |app: &App| {
-        app.world()
-            .resource::<WorldContentRuntime>()
-            .mission_clock_anchor_secs
-    };
+    let anchor = |app: &App| app.world().resource::<WorldContentRuntime>().mission_clock;
 
     // No world loaded: nothing anchors, so `collect_world_events` goes on
     // emitting no `TimerElapsed` at all in a fixture that never asked for a
@@ -9864,14 +9861,14 @@ fn mission_clock_anchors_once_per_mission_and_rearms_for_the_next() {
     let second = anchor(&app).expect("the second mission anchors too");
     assert!(
         second > first,
-        "round two must measure from ITS own start ({second}), not inherit \
-         round one's ({first}) - inheriting means every trigger the first \
+        "round two must measure from ITS own start ({second:?}), not inherit \
+         round one's ({first:?}) - inheriting means every trigger the first \
          round outlived has already expired when the second begins"
     );
 }
 
-/// (#475) `on_timer` triggers fire when `time.elapsed_secs() -
-/// runtime.mission_clock_anchor_secs >= after_secs`. Pins the producer in
+/// (#475) `on_timer` triggers fire when the exact mission age, projected to
+/// authored seconds, reaches `after_secs`. Pins the producer in
 /// `tick_trigger_pipeline`: it must emit `TimerElapsed` events against the
 /// mission-clock anchor, or an `after_secs = 0` trigger would never fire.
 ///
@@ -9886,7 +9883,7 @@ fn on_timer_trigger_fires() {
     // with `after_secs = 0.0` so it should fire on the first tick.
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-        runtime.mission_clock_anchor_secs = Some(0.0);
+        runtime.mission_clock = Some(MissionClock::new(std::time::Duration::ZERO));
         runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnTimer { after_secs: 0.0 },
@@ -9910,7 +9907,7 @@ fn on_timer_trigger_fires() {
     assert!(
         state.fired,
         "on_timer after_secs=0 must fire — tick_trigger_pipeline must emit \
-         TimerElapsed events when mission_clock_anchor_secs is set"
+         TimerElapsed events when mission_clock is set"
     );
     assert!(
         state.last_fired_elapsed.is_some(),
@@ -9926,7 +9923,7 @@ fn on_timer_trigger_does_not_fire_before_after_secs_elapses() {
 
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-        runtime.mission_clock_anchor_secs = Some(0.0);
+        runtime.mission_clock = Some(MissionClock::new(std::time::Duration::ZERO));
         runtime.triggers.replace_declarative(vec![TriggerState {
             trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnTimer { after_secs: 100.0 },

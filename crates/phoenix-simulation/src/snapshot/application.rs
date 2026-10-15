@@ -604,17 +604,16 @@ pub(super) fn restore_scenario(
     let Some(stored) = snapshot.scenario.as_ref() else {
         return;
     };
-    let now = fixed_elapsed_secs(world);
+    let now = world.get_resource::<Time<Fixed>>().map(Time::elapsed);
 
     if let Some(mut runtime) = world.get_resource_mut::<WorldContentRuntime>() {
-        // The anchor that reproduces the captured mission elapsed against THIS
-        // app's clock. Left alone when either side has no clock reading to work
-        // from, rather than guessed at.
-        runtime.mission_clock_anchor_secs = match (stored.mission_elapsed_secs, now) {
-            (Some(elapsed), Some(now)) => Some(now - elapsed),
-            (Some(_), None) => runtime.mission_clock_anchor_secs,
-            (None, _) => None,
-        };
+        // Rebase exact age, with no subtraction or rounding through f32.
+        runtime.mission_clock = stored.mission_elapsed.map(|elapsed| {
+            crate::world::server::MissionClock::resume(
+                now.expect("mission clock preflight requires fixed time"),
+                elapsed,
+            )
+        });
 
         if let Err(error) = runtime.triggers.restore(&stored.triggers) {
             use crate::world::trigger_registry::TriggerRestoreError;

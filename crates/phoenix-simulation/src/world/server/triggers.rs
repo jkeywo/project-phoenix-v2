@@ -94,7 +94,7 @@ pub(super) fn handle_region_exited_event(
 ///    observers, and `tick_delayed_actions` on the previous tick).
 /// 3. (#475) A synthesised `TimerElapsed` event once the mission clock is
 ///    anchored. `on_timer` triggers fire when `elapsed_secs >= after_secs`,
-///    measured from `mission_clock_anchor_secs` - which [`anchor_mission_clock`]
+///    measured from `mission_clock` - which [`anchor_mission_clock`]
 ///    stamps on the first simulation tick of `GamePhase::InProgress`, one place
 ///    earlier in this same chain. So `after_secs = 0` fires on that first
 ///    mission tick, and `after_secs = 300` fires 300s into the MISSION however
@@ -188,8 +188,8 @@ pub(crate) fn collect_world_events(
     }
     let elapsed_secs = time.as_ref().and_then(|t| {
         runtime
-            .mission_clock_anchor_secs
-            .map(|loaded_at| (t.elapsed_secs() - loaded_at).max(0.0))
+            .mission_clock
+            .map(|clock| clock.elapsed_secs(t.elapsed()))
     });
     if let Some(es) = elapsed_secs {
         world_events.push(WorldEvent::TimerElapsed { elapsed_secs: es });
@@ -281,8 +281,8 @@ pub(crate) fn tick_trigger_pipeline(
     // value `collect_world_events` used earlier in the chain.
     let elapsed_secs = time.as_ref().and_then(|t| {
         runtime
-            .mission_clock_anchor_secs
-            .map(|loaded_at| (t.elapsed_secs() - loaded_at).max(0.0))
+            .mission_clock
+            .map(|clock| clock.elapsed_secs(t.elapsed()))
     });
 
     // Scripting seam (issue #984, Rhai M6 phase 2a): the clock a scripted
@@ -679,7 +679,7 @@ pub(crate) fn tick_trigger_pipeline(
 /// `tick_trigger_pipeline` uses.
 ///
 /// Registered after `tick_trigger_pipeline` in `SimSet::Physics` so that it sees
-/// the same tick's `mission_clock_anchor_secs` anchor.
+/// the same tick's `mission_clock` anchor.
 pub(crate) fn tick_delayed_actions(
     mut runtime: ResMut<WorldContentRuntime>,
     time: Option<Res<bevy::time::Time>>,
@@ -718,8 +718,8 @@ pub(crate) fn tick_delayed_actions(
 ) {
     let Some(elapsed) = time.as_ref().and_then(|t| {
         runtime
-            .mission_clock_anchor_secs
-            .map(|loaded| (t.elapsed_secs() - loaded).max(0.0))
+            .mission_clock
+            .map(|clock| clock.elapsed_secs(t.elapsed()))
     }) else {
         return;
     };
@@ -908,8 +908,8 @@ pub(crate) fn tick_script_callbacks(
     // callback-scheduled `after` callback.
     let elapsed_secs = time.as_ref().and_then(|t| {
         runtime
-            .mission_clock_anchor_secs
-            .map(|loaded| (t.elapsed_secs() - loaded).max(0.0))
+            .mission_clock
+            .map(|clock| clock.elapsed_secs(t.elapsed()))
     });
     let script_clock = SchedClock {
         tick: now_tick,

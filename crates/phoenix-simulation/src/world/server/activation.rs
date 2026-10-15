@@ -385,7 +385,7 @@ pub(crate) fn init_world_runtime(
     // The mission clock is NOT anchored here. Loading the world and starting
     // the mission are different moments - the lobby sits between them - and
     // every `after_secs` in a world TOML is authored against the second one.
-    // `anchor_mission_clock` stamps `mission_clock_anchor_secs` on the first
+    // `anchor_mission_clock` stamps `mission_clock` on the first
     // simulation tick of `GamePhase::InProgress`; see that system for what a
     // boot anchor cost.
 
@@ -562,7 +562,7 @@ pub(crate) fn load_extra_worlds(
 /// still lands on the frame-level site, and the deferral is what keeps the
 /// mission clock right for those too.
 pub(crate) fn arm_mission_clock(mut runtime: ResMut<WorldContentRuntime>) {
-    runtime.mission_clock_anchor_secs = None;
+    runtime.mission_clock = None;
 }
 
 /// Stamp time zero for the mission clock on the first simulation tick of the
@@ -626,13 +626,13 @@ pub(crate) fn anchor_mission_clock(
 ) {
     // Both reads go through an immutable deref, so an already-anchored tick
     // does not mark `WorldContentRuntime` changed.
-    if world_config.is_none() || runtime.mission_clock_anchor_secs.is_some() {
+    if world_config.is_none() || runtime.mission_clock.is_some() {
         return;
     }
     // `Time` is optional so test apps without `TimePlugin` keep working: they
     // never anchor, and therefore never see `TimerElapsed` - same as before.
     if let Some(t) = time {
-        runtime.mission_clock_anchor_secs = Some(t.elapsed_secs());
+        runtime.mission_clock = Some(MissionClock::new(t.elapsed()));
     }
 }
 

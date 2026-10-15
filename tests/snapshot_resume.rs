@@ -4022,11 +4022,11 @@ fn a_scripted_trigger_that_already_fired_does_not_fire_again_after_a_resume() {
         "the capture should record the timer trigger as fired"
     );
     let captured_elapsed = scenario
-        .mission_elapsed_secs
+        .mission_elapsed
         .expect("a running mission has an anchored clock");
     assert!(
-        captured_elapsed > 1.0,
-        "the capture should be past the 1 s timer threshold, got {captured_elapsed}"
+        captured_elapsed > std::time::Duration::from_secs(1),
+        "the capture should be past the 1 s timer threshold, got {captured_elapsed:?}"
     );
     assert_eq!(world_counter(&live, "beacon_pulses"), 1);
 
@@ -4050,12 +4050,12 @@ fn a_scripted_trigger_that_already_fired_does_not_fire_again_after_a_resume() {
     // temptation real rather than theoretical.
     let after = capture(resumed.world());
     let resumed_elapsed = scenario_of(&after)
-        .mission_elapsed_secs
+        .mission_elapsed
         .expect("the restore re-anchored the mission clock");
     assert!(
-        (resumed_elapsed - captured_elapsed).abs() < 1e-3,
-        "the resumed mission clock reads {resumed_elapsed}s, the capture's was \
-         {captured_elapsed}s"
+        resumed_elapsed == captured_elapsed,
+        "the resumed mission clock reads {resumed_elapsed:?}, the capture's was \
+         {captured_elapsed:?}"
     );
     assert_eq!(
         scenario_of(&after).triggers,
@@ -4197,7 +4197,7 @@ fn a_script_free_world_captures_scenario_state_without_a_script_runtime() {
         "a script-free world has no triggers at all: the `[[trigger]]` front-end          that was their only source went in issue #985"
     );
     assert!(
-        scenario.mission_elapsed_secs.is_some(),
+        scenario.mission_elapsed.is_some(),
         "a running mission has an anchored clock whether or not it is scripted"
     );
 

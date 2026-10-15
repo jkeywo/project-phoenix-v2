@@ -1210,15 +1210,9 @@ pub struct LayerFlags {
 /// and the mission clock those firings are measured against has been rewound to
 /// the age of whatever fresh app was booted to restore into.
 ///
-/// That last one is the piece the rest hangs off, and it is stored **relative**
-/// rather than absolute for the reason [`AsteroidWindowState`] stores the
-/// streamer's anchor: `mission_clock_anchor_secs` is a reading of
-/// `Time<Fixed>::elapsed_secs()` taken in *this process*, and a fresh app's
-/// clock started at a different moment. What is authoritative is not the anchor
-/// but the distance from it — the mission-elapsed seconds every `on_timer`
-/// threshold and every `action_delays` fire time is authored against — so the
-/// capture stores the distance and the restore re-derives an anchor that
-/// reproduces it against the resumed app's own clock.
+/// Mission age is stored as an exact Duration (integer seconds and nanoseconds). The runtime rebases that age
+/// against the resumed process's own fixed clock using Duration arithmetic;
+/// authored seconds remain ordinary f32 projections of that one exact age.
 ///
 /// # Honestly not covered
 ///
@@ -1245,11 +1239,9 @@ pub struct LayerFlags {
 /// them by re-running the same layer loads.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ScenarioState {
-    /// Mission-elapsed seconds at the capture — see the type docs for why this
-    /// is a distance and not the anchor itself. `None` when the mission clock
-    /// was not yet anchored (no world, or a run that had not started).
+    /// Exact mission age; None before the mission clock is anchored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mission_elapsed_secs: Option<f32>,
+    pub mission_elapsed: Option<std::time::Duration>,
     /// One row per live trigger state, in `WorldContentRuntime::triggers`
     /// order — see [`TriggerRuntimeState`]. Every row is written, not just the
     /// fired ones, so the count is itself the alignment check the restore makes.

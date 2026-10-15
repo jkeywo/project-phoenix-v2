@@ -64,6 +64,8 @@ pub fn validate_boot_identity_for_world(
 /// at, which is strictly worse than a restore that says what it could not do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RestoreGap {
+    /// Exact saved mission age requires both the world and fixed-time owners.
+    MissionClockUnavailable,
     /// A captured `EntityUuid` no entity in the target world carries.
     MissingEntity(String),
     /// Canonical assignments cannot resume against the authored crew/workflow.
@@ -148,6 +150,7 @@ pub enum RestoreGap {
 impl std::fmt::Display for RestoreGap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            RestoreGap::MissionClockUnavailable => f.write_str("saved mission age requires WorldContentRuntime and Time<Fixed> before restore"),
             RestoreGap::ResourceStateInvalid { uuid, reason } => write!(f, "resource state for {uuid} cannot be restored: {reason}"),
             RestoreGap::RepairJobsInvalid { uuid, reason } => write!(f, "repair jobs for {uuid} cannot be restored: {reason}"),
             RestoreGap::MissingEntity(uuid) => {
@@ -768,4 +771,15 @@ pub(super) fn validate_cross_entity_repairs(
         }
     }
     Ok(())
+}
+
+/// Clock shape is required before any entity or global continuation is written.
+pub(super) fn mission_clock_gap(world: &World, snapshot: &PhoenixSnapshot) -> Option<RestoreGap> {
+    (snapshot
+        .scenario
+        .as_ref()
+        .is_some_and(|scenario| scenario.mission_elapsed.is_some())
+        && (!world.contains_resource::<WorldContentRuntime>()
+            || !world.contains_resource::<Time<Fixed>>()))
+    .then_some(RestoreGap::MissionClockUnavailable)
 }

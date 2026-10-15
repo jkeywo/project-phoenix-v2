@@ -10,7 +10,9 @@ use project_phoenix::{
     resources::recovery_server::{RecoverableSource, ShipRecovery},
     server_app::LocalShip,
     ship::power::ShipPowerSystem,
-    ship_plugin::{HumanSeekingHosts, ShipConfigComponent, ShipSystemControlSources},
+    ship_plugin::{
+        ActiveStationRatings, HumanSeekingHosts, ShipConfigComponent, ShipSystemControlSources,
+    },
     sim_digest::world_digest,
     sim_tick::{sim_tick_period, SimTick},
     snapshot::{capture, ready_to_restore, restore, PhoenixSnapshot},
@@ -147,7 +149,16 @@ fn assert_operator(app: &mut App, token: &str, msg: &ClientMessage) {
         Some(token)
     );
     let sources = app.world().get::<ShipSystemControlSources>(ship).unwrap();
-    assert!(sources.0.policy_for(target).accept_human_input);
+    assert!(
+        sources.0.policy_for(target).accept_human_input,
+        "target={target:?}, source={:?}, ratings={:?}, phase={:?}, tick={}",
+        sources.0.source_for(target),
+        app.world().get::<ActiveStationRatings>(ship).unwrap().0,
+        app.world()
+            .resource::<State<project_phoenix::core::messages::GamePhase>>()
+            .get(),
+        app.world().resource::<SimTick>().0
+    );
     assert!(!sources.0.policy_for(target).operate_ai);
     assert!(
         project_phoenix::command_admission::policy::is_command_authorized(
@@ -199,6 +210,39 @@ fn mid_work() -> (App, Entity) {
     }
     panic!("ordinary recovery tree must acquire a permitted Science selection and perform paid fractional work after an actual finite transfer");
 }
+fn first_json_difference(
+    left: &serde_json::Value,
+    right: &serde_json::Value,
+    path: &str,
+) -> Option<String> {
+    use serde_json::Value;
+    if left == right {
+        return None;
+    }
+    match (left, right) {
+        (Value::Object(a), Value::Object(b)) => {
+            let keys: BTreeSet<_> = a.keys().chain(b.keys()).collect();
+            for key in keys {
+                if let Some(diff) = first_json_difference(
+                    &a.get(key).cloned().unwrap_or(Value::Null),
+                    &b.get(key).cloned().unwrap_or(Value::Null),
+                    &format!("{path}.{key}"),
+                ) {
+                    return Some(diff);
+                }
+            }
+        }
+        (Value::Array(a), Value::Array(b)) if a.len() == b.len() => {
+            for (index, (a, b)) in a.iter().zip(b).enumerate() {
+                if let Some(diff) = first_json_difference(a, b, &format!("{path}[{index}]")) {
+                    return Some(diff);
+                }
+            }
+        }
+        _ => {}
+    }
+    Some(format!("{path}: live={left}, resumed={right}"))
+}
 #[test]
 fn actual_recovery_json_restore_preserves_paid_fraction_and_finite_goods() {
     let (mut live, entity) = mid_work();
@@ -214,10 +258,12 @@ fn actual_recovery_json_restore_preserves_paid_fraction_and_finite_goods() {
             world_digest(resumed.world()),
             "step {step}"
         );
-        assert_eq!(
-            serde_json::to_value(capture(live.world())).unwrap(),
-            serde_json::to_value(capture(resumed.world())).unwrap(),
-            "step {step}"
+        let live_snapshot = serde_json::to_value(capture(live.world())).unwrap();
+        let resumed_snapshot = serde_json::to_value(capture(resumed.world())).unwrap();
+        assert!(
+            live_snapshot == resumed_snapshot,
+            "step {step}: {}",
+            first_json_difference(&live_snapshot, &resumed_snapshot, "$").unwrap_or_default()
         );
         assert_eq!(conservation(&mut live), conservation(&mut resumed));
         let tick = live.world().resource::<SimTick>().0;
@@ -362,6 +408,22 @@ fn actual_recovery_competes_for_one_finite_source_on_both_local_ship_peers() {
             } = &mut msg
             {
                 *identify_token = token.clone();
+            }
+            if let ClientMessage::ControlSystem { target, .. } = &msg {
+                for _ in 0..120 {
+                    let ship = local(&mut hosts[index]);
+                    if hosts[index]
+                        .world()
+                        .get::<ShipSystemControlSources>(ship)
+                        .unwrap()
+                        .0
+                        .policy_for(target)
+                        .accept_human_input
+                    {
+                        break;
+                    }
+                    mesh_step(&mut hosts);
+                }
             }
             assert_operator(&mut hosts[index], &token, &msg);
             send(&mut hosts[index], &token, msg);

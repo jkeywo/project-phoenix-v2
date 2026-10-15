@@ -44,6 +44,7 @@ pub use state::layered_flag_chain;
 pub use state::layered_flag_chain_with_paths;
 pub(crate) use state::project_layer_views;
 pub use state::BridgeWorldSource;
+pub use state::MissionClock;
 pub use state::ObjectiveInstanceManagerRes;
 pub use state::ObjectiveManagerRes;
 pub use state::PendingScenarioLoad;

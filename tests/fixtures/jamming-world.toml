@@ -1,0 +1,26 @@
+# Optional Comms support reference: independent request, ordinary backfill.
+[global]
+seed = 156215
+[player_spawn]
+position = [0,0,0]
+[[entity]]
+template_path = "assets/entities/jamming_cruiser.toml"
+id = "player-ship"
+name = "player-ship"
+spawn_on = "game_start"
+transform = { position = [0,0,0] }
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "support-target"
+name = "support-target"
+spawn_on = "game_start"
+transform = { position = [0,3,-90] }
+[script]
+setup = """
+on_world_loaded("request_support");
+fn request_support(ctx) {
+    ctx.effects.add_objective(#{id:"comms-support",text:"jamming.mission.support",
+        mandatory:false,source:"mission",base_priority:50,
+        directive_kind:"Jam",target:"support-target",targets:["support-target"]});
+}
+"""

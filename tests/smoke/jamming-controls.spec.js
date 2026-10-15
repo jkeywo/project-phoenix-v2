@@ -4,7 +4,7 @@ import {test,expect} from '@playwright/test';
 const publish=(page,state)=>page.evaluate(value=>window.__updateConsole('comms',JSON.stringify(value)),state);
 const view={enabled:false,target:null,emitting:false,controllable:true,targets:[{contact:'held-contact',name:'Observed relay'}]};
 const row={system_id:'actual-jammer',display_name:'Interference equipment',availability:'normal',reasons:[],delegated:false,jamming:view};
-const base={system_ids:['comms','actual-jammer'],system_families:{comms:'comms','actual-jammer':'jamming'},comms_auto:false,channels:[{id:'public',range:200,work_units:1,protected:false}],contacts:[],messages:[],system_status:[row]};
+const base={system_ids:['comms','actual-jammer'],system_families:{comms:'comms','actual-jammer':'comms'},comms_auto:false,channels:[{id:'public',range:200,work_units:1,protected:false}],contacts:[],messages:[],system_status:[row]};
 test('Comms operator selects its own measured jammer aim and stops emission through correlated controls',{tag:'@core'},async({page})=>{
  await page.goto('/gui/cruiser/comms.html');await page.waitForFunction(()=>typeof window.__updateConsole==='function');
  await page.evaluate(async()=>{const{dispatchConsoleAction}=await import('/gui/action-map.js');window.__wire=[];window.__sendAction=json=>dispatchConsoleAction(JSON.parse(json),(type,data)=>window.__wire.push({type,...data}));});

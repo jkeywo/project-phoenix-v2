@@ -106,7 +106,7 @@ entities:
         - "[ai] Human controls and the one ordinary per-System closed state tree share the exact enabled/target admission. The tree may retain a selected target or service an explicitly permitted mission request; it never receives a global Tactical selection or hidden physical roster. Science and Tactical can act independently. Workshop edits the supported component/channel/mount/tree data through the existing document transaction."
   - state: ship-illumination-intent
     core:
-      status: planned
+      status: accepted
       confidence: confirmed
       origin: ai
       title: Independent Illumination Command Channels

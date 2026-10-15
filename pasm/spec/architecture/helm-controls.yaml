@@ -127,6 +127,7 @@ entities:
       owns:
         - last-helm-input-state
         - authoritative-ship-motion-state
+        - helm-movement-intent-state
         - impulse-drive-state
         - boost-drive-state
       reads:

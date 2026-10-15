@@ -146,9 +146,7 @@ pub(crate) fn register(app: &mut App) {
         FixedUpdate,
         advance
             .in_set(crate::sim_sets::SimSet::Input)
-            .before(crate::ship::sensors::operate_sensors_ai)
-            .before(super::focused_ai::operate)
-            .before(crate::sim_sets::FixedStep::AiTargetSelection),
+            .in_set(crate::sim_sets::FixedStep::ReadSystemText),
     );
 }
 

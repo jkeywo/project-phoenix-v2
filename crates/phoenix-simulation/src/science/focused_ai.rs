@@ -18,6 +18,7 @@ pub(crate) fn register(app: &mut App) {
         FixedUpdate,
         operate
             .in_set(crate::sim_sets::SimSet::Input)
+            .in_set(crate::sim_sets::FixedStep::OperateFocusedSensorsAi)
             .run_if(crate::ai::cadence::ai_tick_ready),
     );
 }
@@ -85,7 +86,7 @@ pub(crate) fn operate(
         &mut AdmittedCommands,
     )>,
 ) {
-    use phoenix_sim_gameplay::ai::host::{TreeHostOutcome, decide_tree};
+    use phoenix_sim_gameplay::ai::host::{decide_tree, TreeHostOutcome};
     for (
         uuid,
         records,

@@ -29,6 +29,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
     sequence(
         &mut order,
         &[
+            ReadSystemText,
             AiTorpedoLoad,
             TickFrequencyHintHighFidelity,
             OperateCaptainAi,
@@ -63,6 +64,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             TrackShieldDamageHistory,
             EmitShieldsCoordination,
             OperateSensorsAi,
+            OperateFocusedSensorsAi,
             TickSensorsFrequencyHint,
             TickSensorsThreatWarning,
             OperateCivilianOrderAi,

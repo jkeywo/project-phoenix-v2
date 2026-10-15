@@ -1,0 +1,14 @@
+# Quiet positive facility journey: the crew must actually dock and pay for work.
+[global]
+seed = 156215
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+id = "refit-facility"
+transform = { position = [80.0, 0.0, 0.0] }

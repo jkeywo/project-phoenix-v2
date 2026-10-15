@@ -1,0 +1,14 @@
+# Quiet intact-equipment journey; no inventory, condition or controller is supplied at runtime.
+[global]
+seed = 156216
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+[[entity]]
+template_path = "tests/fixtures/fitting-salvage-cruiser.toml"
+id = "player"
+spawn_on = "game_start"
+transform = { position = [0.0, 0.0, 0.0] }
+[[entity]]
+template_path = "tests/fixtures/fitting-salvage-source.toml"
+id = "salvage-source"
+transform = { position = [6.0, 0.0, 0.0] }

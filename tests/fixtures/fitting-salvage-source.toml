@@ -1,0 +1,152 @@
+# Purpose-built disabled-source layout: ordinary GM engineering incident disables all actual machinery; other rooms survive.
+includes = ["../../assets/entities/alliance_cruiser.toml"]
+
+# [ai] Increment 13 first supported fitting adapters. Defaults copy the existing
+# hardware exactly; optional alternatives are provisional sidegrade tuning.
+# Fixed-slot energy buffers, links and damage remain their current owners.
+[fitting]
+
+[[fitting.slot]]
+id = "fore-beam"
+system = "phaser-fore"
+family = "beam"
+interface = "cruiser-beam"
+size = 1
+default_equipment = "recovered-beam"
+operation_component = "operation"
+
+[[fitting.slot]]
+id = "reactor"
+system = "power-reactor"
+family = "reactor"
+interface = "cruiser-reactor"
+size = 1
+default_equipment = "cruiser-reactor-standard"
+operation_component = "operation"
+
+[[fitting.locker]]
+id = "weapons-equipment"
+compartment = "weapons"
+space = 2
+
+[[fitting.locker]]
+id = "engineering-equipment"
+compartment = "engineering"
+space = 2
+
+# [ai] Dedicated finite receiving space at the actual fitted Recovery tool.
+# This does not enlarge fungible cargo or move equipment to installation rooms.
+[[fitting.locker]]
+id = "support-equipment"
+compartment = "support"
+space = 2
+
+[[fitting.equipment]]
+id = "cruiser-beam-standard"
+interface = "cruiser-beam"
+size = 1
+storage_space = 1
+work = { class = "field", work_secs = 8, manual_work_fraction = 0.25, requirements = [{ resource = "machinery_parts", service = "machinery_parts", amount = 1 }] }
+hardware = { kind = "beam", beam_range = 40, auto_arc_deg = 270, beam_damage_per_sec = 32, beam_duration_secs = 6, cooldown_secs = 6, cycle_jitter = 0.33, shield_pierce = 0, impact = {damage_type = "laser", penetration = 20}, continuous_cost_per_sec = 1 }
+
+[[fitting.equipment]]
+id = "cruiser-beam-pulse"
+interface = "cruiser-beam"
+size = 1
+storage_space = 1
+# More intense short bursts cost more local work and have a narrower automatic
+# window and longer rest. This is an option, not an automatic baseline upgrade.
+work = { class = "field", work_secs = 8, manual_work_fraction = 0.25, requirements = [{ resource = "machinery_parts", service = "machinery_parts", amount = 1 }] }
+hardware = { kind = "beam", beam_range = 40, auto_arc_deg = 120, beam_damage_per_sec = 40, beam_duration_secs = 4, cooldown_secs = 8, cycle_jitter = 0.33, shield_pierce = 0, impact = {damage_type = "laser", penetration = 20}, continuous_cost_per_sec = 1.5 }
+
+[[fitting.equipment]]
+id = "cruiser-reactor-standard"
+interface = "cruiser-reactor"
+size = 1
+storage_space = 1
+work = { class = "facility", work_secs = 30, manual_work_fraction = 0.25, requirements = [{ resource = "machinery_parts", service = "machinery_parts", amount = 1 }] }
+hardware = { kind = "reactor", sustainable_output_per_sec = 31.7, max_output_per_sec = 47.55, ramp_per_sec = 7.925, charge_heat_per_unit = 0.1, discharge_heat_per_unit = 0.1 }
+
+[[fitting.equipment]]
+id = "cruiser-reactor-responsive"
+interface = "cruiser-reactor"
+size = 1
+storage_space = 1
+# Same capacitor/export ceiling, faster response, less sustained generation and
+# hotter discharge. No new or refilled energy/coolant stock accompanies fitting.
+work = { class = "facility", work_secs = 30, manual_work_fraction = 0.25, requirements = [{ resource = "machinery_parts", service = "machinery_parts", amount = 1 }] }
+hardware = { kind = "reactor", sustainable_output_per_sec = 28.53, max_output_per_sec = 47.55, ramp_per_sec = 11.8875, charge_heat_per_unit = 0.08, discharge_heat_per_unit = 0.15 }
+
+[[fitting.equipment]]
+id = "recovered-beam"
+interface = "cruiser-beam"
+size = 1
+storage_space = 1
+work = { class = "field", work_secs = 8, manual_work_fraction = 0.25, requirements = [{ resource = "machinery_parts", service = "machinery_parts", amount = 1 }] }
+hardware = { kind = "beam", beam_range = 40, auto_arc_deg = 270, beam_damage_per_sec = 32, beam_duration_secs = 6, cooldown_secs = 6, cycle_jitter = 0.33, shield_pierce = 0, impact = {damage_type = "laser", penetration = 20}, continuous_cost_per_sec = 1 }
+
+
+[[fitting.assembly]]
+id = "fore-beam-installed"
+definition = "recovered-beam"
+location = { kind = "installed", slot = "fore-beam" }
+
+[[fitting.assembly]]
+id = "fore-beam-spare"
+definition = "cruiser-beam-pulse"
+location = { kind = "stored", locker = "weapons-equipment" }
+condition = { condition = { kind = "healthy" }, dose = 0 }
+
+[[fitting.assembly]]
+id = "reactor-installed"
+definition = "cruiser-reactor-standard"
+location = { kind = "installed", slot = "reactor" }
+
+[[fitting.assembly]]
+id = "reactor-spare"
+definition = "cruiser-reactor-responsive"
+location = { kind = "stored", locker = "engineering-equipment" }
+condition = { condition = { kind = "healthy" }, dose = 0 }
+
+[interior.placements]
+logistics = "engineering"
+dock = "engineering"
+captain = "engineering"
+command = "engineering"
+red-alert = "engineering"
+helm-thrust = "engineering"
+helm-steering = "engineering"
+helm-joystick = "engineering"
+helm-engine-port = "engineering"
+helm-engine-starboard = "engineering"
+helm-radar = "engineering"
+tactical-radar = "engineering"
+phaser-control = "engineering"
+helm-impulse = "engineering"
+helm-boost = "engineering"
+helm-lateral-thrust = "engineering"
+phaser-fore = "engineering"
+phaser-aft = "engineering"
+torpedo-magazine = "engineering"
+torpedo-tube-fore-port = "engineering"
+torpedo-tube-fore-starboard = "engineering"
+torpedo-tube-aft = "engineering"
+sensors = "engineering"
+sensor-radar = "engineering"
+shields-system = "engineering"
+navigation = "engineering"
+power-reactor = "engineering"
+power-battery = "engineering"
+repair = "engineering"
+tractor = "engineering"
+umbilical = "engineering"
+comms = "engineering"
+viewscreen = "engineering"
+security = "engineering"
+shield-arc-fore = "engineering"
+shield-arc-port = "engineering"
+shield-arc-aft = "engineering"
+shield-arc-starboard = "engineering"
+weapons-access = "engineering"
+fabrication = "engineering"
+resource-recovery = "engineering"

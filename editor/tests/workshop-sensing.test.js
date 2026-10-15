@@ -10,6 +10,18 @@ const path = 'assets/entities/test.toml', base = 'assets/entities/base.toml', de
 const make = text => new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: '[pack]\nformat=1\nid="test"\nname="Test"\nversion="1"\n' }, { path, text }]));
 function fixture() { const out = damageFixture(); out.schema.console_instance_publication_kinds.passive_receiver = 'Passive'; return out; }
 describe('accepted-source independent sensing instruments', () => {
+  it('keeps curated sharing off by choice and refuses unsupported owner or malformed policy', () => {
+    for(const hull of ['alliance_cruiser','dynasty_player_cruiser']) {
+      const value=resolveTemplate(`assets/entities/${hull}.toml`,{read:file=>fs.existsSync(file)?fs.readFileSync(file,'utf8'):null},parse).resolved.value;
+      validateSensing(value.sensing,value);
+      expect(value.sensing.sharing).toEqual([{system:'sensor-radar',share_own_faction:false,receive:true},{system:'tactical-radar',share_own_faction:false,receive:true}]);
+      for(const update of [{system:'helm-radar',share_own_faction:true,receive:true},{system:'sensor-radar',share_own_faction:'yes',receive:true}]) {
+        expect(()=>validateSensing({...value.sensing,sharing:[update]},value)).toThrow(/Sharing/);
+      }
+      const profile=structuredClone(value.sensing);profile.focused[0].forecast={horizon_secs:Infinity};
+      expect(()=>validateSensing(profile,value)).toThrow(/forecast/);
+    }
+  });
   it('requires explicit real actuator ownership and closed controller trees', () => {
     const {value}=fixture(), profile=structuredClone(value.sensing);
     delete profile.control.science_target;expect(()=>validateSensing(profile,value)).toThrow(/science_target/);

@@ -26,6 +26,10 @@ pub struct BroadMeasurement {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BroadTrack {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub received: Option<super::sharing::ReceivedRadarSample>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observer_position: Option<[f32; 2]>,
     pub contact_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observation: Option<ObservationMetadata>,
@@ -47,6 +51,10 @@ pub struct BroadTrack {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BroadTrackState {
+    #[serde(default)]
+    pub share_own_faction: bool,
+    #[serde(default = "phoenix_model::sensing_sharing::receive_by_default")]
+    pub receive_shared: bool,
     pub owner: SystemId,
     pub last_tick: Option<u64>,
     pub last_sample_tick: Option<u64>,
@@ -59,6 +67,8 @@ pub struct BroadTrackState {
 impl BroadTrackState {
     pub fn new(profile: &BroadConfig) -> Self {
         Self {
+            share_own_faction: false,
+            receive_shared: true,
             owner: profile.system.clone(),
             last_tick: None,
             last_sample_tick: None,
@@ -83,10 +93,32 @@ impl BroadTrackState {
         self.current
             .iter()
             .find_map(|(source, id)| (id == contact).then_some(source.as_str()))
+            .or_else(|| {
+                self.tracks
+                    .get(contact)?
+                    .received
+                    .as_ref()
+                    .filter(|_| self.receive_shared)
+                    .filter(|received| Some(received.last_delivery_tick) == self.last_tick)?
+                    .route
+                    .as_deref()
+            })
     }
     pub fn contact_for_source(&self, source: &str) -> Option<&str> {
-        let id = self.current.get(source)?;
-        self.resolve_current(id).map(|_| id.as_str())
+        if let Some(id) = self.current.get(source) {
+            return self.resolve_current(id).map(|_| id.as_str());
+        }
+        let mut contacts = self
+            .current_routes()
+            .filter(|(route, _)| *route == source)
+            .map(|(_, id)| id);
+        let first = contacts.next()?;
+        contacts.next().is_none().then_some(first)
+    }
+    pub fn current_routes(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.tracks
+            .keys()
+            .filter_map(|id| self.resolve_current(id).map(|source| (source, id.as_str())))
     }
     pub fn validate(&self, profile: &BroadConfig, tick: u64, fixed_dt: f32) -> Result<(), String> {
         profile_valid(profile, fixed_dt)?;
@@ -101,7 +133,8 @@ impl BroadTrackState {
             || self.sample_elapsed < 0.0
             || self.sample_elapsed >= f64::from(profile.sample_interval_secs)
             || self.last_sample_tick.is_none()
-                && (!self.tracks.is_empty() || !self.current.is_empty())
+                && (self.tracks.values().any(|track| track.received.is_none())
+                    || !self.current.is_empty())
             || self.last_tick.is_none()
                 && (self.last_sample_tick.is_some()
                     || self.next_contact != 1
@@ -120,16 +153,24 @@ impl BroadTrackState {
             if &track.contact_id != id
                 || sequence.is_none_or(|n| n == 0 || n >= self.next_contact)
                 || !ids.insert(id)
-                || self
-                    .last_sample_tick
-                    .is_none_or(|sample| track.observed_tick > sample)
+                || (if track.received.is_some() {
+                    self.last_tick
+                } else {
+                    self.last_sample_tick
+                })
+                .is_none_or(|sample| track.observed_tick > sample)
+                || track
+                    .observer_position
+                    .is_some_and(|pose| pose.iter().any(|x| !x.is_finite()))
                 || !track.position.iter().all(|value| value.is_finite())
                 || track
                     .velocity
                     .is_some_and(|velocity| !velocity.iter().all(|value| value.is_finite()))
                 || !track.velocity_error.is_finite()
                 || track.velocity_error < 0.0
-                || track.position_error != profile.position_error
+                || !track.position_error.is_finite()
+                || track.position_error < 0.0
+                || track.received.is_none() && track.position_error != profile.position_error
                 || !track.supported_secs.is_finite()
                 || track.supported_secs < 0.0
                 || track.supported_secs > f64::from(profile.assessment_secs)
@@ -148,6 +189,7 @@ impl BroadTrackState {
                 || track.supported_secs < f64::from(profile.identity_secs)
                     && track.identity.is_some()
                     && track.observation.is_none()
+                    && track.received.is_none()
                 || track.identity.as_ref().is_some_and(|identity| {
                     identity.name.is_empty()
                         || identity.references.iter().any(|reference| {
@@ -160,14 +202,40 @@ impl BroadTrackState {
                 })
                 || track.supported_secs < f64::from(profile.classification_secs)
                     && track.classification.is_some()
+                    && track.received.is_none()
                 || track.supported_secs < f64::from(profile.assessment_secs)
                     && track.assessment.is_some()
+                    && track.received.is_none()
+                || track.received.as_ref().is_some_and(|received| {
+                    !super::sharing::provenance_valid(&received.provenance, tick)
+                        || received.provenance.observed_tick != track.observed_tick
+                        || self
+                            .last_tick
+                            .is_none_or(|last| received.last_delivery_tick > last)
+                        || received
+                            .provenance
+                            .received_tick
+                            .is_none_or(|first| first > received.last_delivery_tick)
+                        || received
+                            .route
+                            .as_ref()
+                            .is_some_and(|route| !valid_source(route))
+                        || received.route.is_some() && (!received.available || !track.selectable)
+                        || track.observer_position != received.provenance.observer_position
+                        || track.velocity_error != received.provenance.velocity_error
+                        || track.supported_secs != 0.0
+                        || track.refresh_secs != 0.0
+                })
                 || track.observation.as_ref().is_some_and(|observation| {
                     !report_metadata_valid(observation, tick)
                         || observation.observed_tick != Some(track.observed_tick)
-                        || observation.provenance.system.as_ref() != Some(&self.owner)
-                        || (observation.subject
-                            != (ObservationSubject::Entity { uuid: id.clone() })
+                        || observation.provenance.system.as_ref()
+                            != Some(
+                                track.received.as_ref().map_or(&self.owner, |received| {
+                                    &received.provenance.origin.system
+                                }),
+                            )
+                        || (observation.subject != (ObservationSubject::Entity { uuid: id.clone() })
                             && observation.subject != ObservationSubject::Unknown)
                         || observation.subject == ObservationSubject::Unknown && track.selectable
                         || track.classification.is_some()
@@ -189,7 +257,13 @@ impl BroadTrackState {
         }
         let mut associations = BTreeSet::new();
         for (source, id) in &self.current {
-            if !valid_source(source) || !self.tracks.contains_key(id) || !associations.insert(id) {
+            if !valid_source(source)
+                || self
+                    .tracks
+                    .get(id)
+                    .is_none_or(|track| track.received.is_some())
+                || !associations.insert(id)
+            {
                 return Err("invalid current broad contact association".into());
             }
             if source.starts_with("ghost/")
@@ -303,7 +377,8 @@ impl BroadTrackState {
                         .tracks
                         .iter()
                         .filter(|(id, track)| {
-                            !claimed.contains(*id)
+                            track.received.is_none()
+                                && !claimed.contains(*id)
                                 && (tick - track.observed_tick) as f64 * f64::from(fixed_dt)
                                     <= f64::from(profile.track_retention_secs)
                                 && distance(prediction(track, tick, fixed_dt).0, position)
@@ -351,6 +426,8 @@ impl BroadTrackState {
                     next.tracks.insert(
                         id.clone(),
                         BroadTrack {
+                            received: None,
+                            observer_position: None,
                             contact_id: id.clone(),
                             observation: None,
                             selectable: sample.selectable,
@@ -522,6 +599,11 @@ impl BroadTrackState {
                 let (position, error) = prediction(track, tick, fixed_dt);
                 let age = (tick - track.observed_tick) as f64 * f64::from(fixed_dt);
                 SensorTrackSnapshot {
+                    samples: track
+                        .received
+                        .as_ref()
+                        .map(|received| vec![received.provenance.clone()])
+                        .unwrap_or_default(),
                     contact_id: track.contact_id.clone(),
                     observation: track.observation.clone().map(|mut observation| {
                         observation.subject = ObservationSubject::Entity {
@@ -529,14 +611,26 @@ impl BroadTrackState {
                         };
                         observation
                     }),
-                    selectable: track.selectable && current.contains(&track.contact_id),
+                    selectable: track.selectable
+                        && self.resolve_current(&track.contact_id).is_some(),
                     observed_tick: track.observed_tick,
                     position,
                     velocity: track.velocity,
                     position_error: bounded_float(
-                        f64::from(error) + age * f64::from(profile.drift_error_per_sec),
+                        f64::from(error)
+                            + age
+                                * f64::from(
+                                    track
+                                        .received
+                                        .as_ref()
+                                        .map_or(profile.drift_error_per_sec, |received| {
+                                            received.provenance.drift_error_per_sec
+                                        }),
+                                ),
                     ),
-                    stage: if track.observation.is_some() {
+                    stage: if let Some(received) = &track.received {
+                        received.stage
+                    } else if track.observation.is_some() {
                         if track.identity.is_some() {
                             TrackStage::Identified
                         } else {
@@ -557,7 +651,13 @@ impl BroadTrackState {
                     classification_tick: track.classification_tick,
                     assessment: track.assessment.clone(),
                     assessment_tick: track.assessment_tick,
-                    predicted: !current.contains(&track.contact_id),
+                    predicted: if let Some(received) = &track.received {
+                        !self.receive_shared
+                            || !received.available
+                            || Some(received.last_delivery_tick) != self.last_tick
+                    } else {
+                        !current.contains(&track.contact_id)
+                    },
                 }
             })
             .collect())

@@ -1,4 +1,18 @@
 id,context,en,de,de_source,de_provenance
+sensing.sharing.title,Radar sharing,Faction radar sharing,Fraktionsradar teilen,Faction radar sharing,machine
+sensing.sharing.share,Radar sharing,Share with own faction,Mit eigener Fraktion teilen,Share with own faction,machine
+sensing.sharing.receive,Radar sharing,Receive faction feeds,Fraktionsmeldungen empfangen,Receive faction feeds,machine
+sensing.sharing.hint,Radar sharing,Sharing requires an actual Comms link. Lost links retain dated observations.,Teilen erfordert eine tatsächliche Kommunikationsverbindung. Bei Verbindungsverlust bleiben datierte Beobachtungen erhalten.,Sharing requires an actual Comms link. Lost links retain dated observations.,machine
+sensing.sharing.summary,Radar sharing,Sharing {share} · Reception {receive} · {count} received samples,Teilen {share} · Empfang {receive} · {count} empfangene Messungen,Sharing {share} · Reception {receive} · {count} received samples,machine
+sensing.sharing.on,Radar sharing,on,an,on,machine
+sensing.sharing.off,Radar sharing,off,aus,off,machine
+sensing.sharing.received,Radar sharing,Received · {count} independent sources,Empfangen · {count} unabhängige Quellen,Received · {count} independent sources,machine
+sensing.sharing.origin,Radar sharing,{source} / {instrument} · sample tick {tick},{source} / {instrument} · Messtakt {tick},{source} / {instrument} · sample tick {tick},machine
+workshop.sensing.share_own_faction,Workshop sensing,Initially share with own faction,Anfangs mit eigener Fraktion teilen,Initially share with own faction,machine
+workshop.sensing.receive,Workshop sensing,Receive own faction feeds,Messungen der eigenen Fraktion empfangen,Receive own faction feeds,machine
+workshop.sensing.sharing-hint,Workshop sensing,Sharing applies to Sensors and Tactical radar observations.,Teilen gilt für Beobachtungen des Sensoren- und Taktikradars.,Sharing applies to Sensors and Tactical radar observations.,machine
+workshop.sensing.forecast-enabled,Workshop sensing,Forecast from chronological readings,Prognose aus chronologischen Messungen,Forecast from chronological readings,machine
+workshop.sensing.forecast-horizon,Workshop sensing,Forecast horizon (seconds),Prognosehorizont (Sekunden),Forecast horizon (seconds),machine
 workshop.shield.title,Workshop shield authoring,Shields,Schilde,Shields,machine
 workshop.shield.hint,Workshop shield authoring,"Edit protection geometry and physical work costs. New arcs add a local reserve and allocation group using provisional tuning. Configure the reactor and real coolant store in Energy and Resources first. Recovery destinations receive energy for ordinary timed recharge.","Schutzgeometrie und physische Arbeitskosten bearbeiten. Neue Schildbögen erhalten eine lokale Reserve und Regelgruppe mit vorläufigen Werten. Zuerst Reaktor und echten Kühlmittelvorrat unter Energie und Ressourcen einrichten. Rückgewinnungsziele erhalten Energie für das normale zeitabhängige Aufladen.","Edit protection geometry and physical work costs. New arcs add a local reserve and allocation group using provisional tuning. Configure the reactor and real coolant store in Energy and Resources first. Recovery destinations receive energy for ordinary timed recharge.",machine
 workshop.shield.template,Workshop shield authoring,Entity template,Entitätsvorlage,Entity template,machine

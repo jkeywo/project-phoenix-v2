@@ -60,6 +60,7 @@ import { t } from '../strings.js';
 import { setAutoState } from '../console-ui.js';
 import { TACTICAL_RESTRAINT_ACTION_ID } from './tactical-actions.js';
 import { activateTacticalAction } from './tactical-action-control.js';
+import { mountRadarSharingControls } from '../components/radar-sharing-controls.js';
 
 /**
  * Build a Tactical `renderStation(s, doc)` for one hull from its `variant`.
@@ -89,6 +90,10 @@ export function makeTacticalRender(variant) {
     // highlight ring. Setting only the latter — the pre-#1234 bug on three
     // hulls — left the inner radar blind to the lock.
     const radarEl = doc.getElementById(ids.radar);
+    if (radarEl) {
+      if (!radarEl._sharingControls) { radarEl._sharingControls = mountRadarSharingControls(doc); radarEl.before(radarEl._sharingControls.node); }
+      radarEl._sharingControls.update(w.radar_sharing || []);
+    }
     let restraintControl = radarEl?.parentElement.querySelector('[data-weapons-restraint]');
     if (restraintControl) restraintControl.hidden = typeof w.weapons_restrained !== 'boolean';
     if (radarEl && typeof w.weapons_restrained === 'boolean') {

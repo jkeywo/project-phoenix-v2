@@ -22,9 +22,18 @@ export function inspectSensing(draft, dependencies, path) {
   return { ...inspection, sensing: structuredClone(inspection.resolved.value.sensing || null), systems: authoredAndGeneratedSystems(inspection.resolved.value) };
 }
 export function validateSensing(profile, value) {
-  if (!closed(profile, [...Object.keys(sensingRoles), "control"]) || Object.keys(sensingRoles).some(role => profile[role] != null && !Array.isArray(profile[role]))
+  if (!closed(profile, [...Object.keys(sensingRoles), 'control', 'sharing']) || (profile.sharing != null && !Array.isArray(profile.sharing)) || Object.keys(sensingRoles).some(role => profile[role] != null && !Array.isArray(profile[role]))
     || !Object.keys(sensingRoles).some(role => profile[role]?.length)) throw new Error('Sensing requires closed instrument profiles and instrument arrays.');
   const systems = authoredAndGeneratedSystems(value), seen = new Set();
+  const shared = new Set();
+  for (const row of profile.sharing || []) {
+    if (!closed(row, ['system', 'share_own_faction', 'receive']) || shared.has(row.system)
+      || !profile.broad?.some(broad => broad.system === row.system)
+      || !systems.some(system => system.id === row.system && ['sensor_radar', 'tactical_radar'].includes(system.kind))
+      || (row.share_own_faction !== undefined && typeof row.share_own_faction !== 'boolean')
+      || (row.receive !== undefined && typeof row.receive !== 'boolean')) throw new Error('Sharing needs a distinct actual Sensors or Tactical radar kind, own-faction intent and boolean reception.');
+    shared.add(row.system);
+  }
   if (profile.control != null && !closed(profile.control,['combat_lock','science_target'])) throw new Error('Sensing control bindings must be closed.');
   for (const [binding,kind] of [['combat_lock','tactical_radar'],['science_target','sensors']]) {
     const owner=profile.control?.[binding];
@@ -37,12 +46,13 @@ export function validateSensing(profile, value) {
   for (const [role, spec] of Object.entries(sensingRoles)) {
     for (const row of profile[role] || []) {
     const system = systems.find(system => system.id === row.system);
-    if (!closed(row, ['system', ...spec.fields, ...(role === 'passive' ? ['mount'] : [])]) || !system || !(spec.kinds || [spec.kind]).includes(system.kind) || seen.has(row.system)
+    if (!closed(row, ['system', ...spec.fields, ...(role === 'passive' ? ['mount'] : []), ...(role === 'focused' ? ['forecast'] : [])]) || !system || !(spec.kinds || [spec.kind]).includes(system.kind) || seen.has(row.system)
       || !value.console?.some(console => console.id === system.console)) throw new Error('Each instrument needs its distinct actual System kind and owning Console.');
     seen.add(row.system);
     if (!value.damage || !value.interior?.placements?.[system.id] || !value.energy?.consumer?.some(consumer => consumer.system === system.id)
       || !system.damage_component?.some(component => component.binding === 'operation')) throw new Error('Instruments require real local reserves, Operation hardware and physical rooms.');
     if (role === 'focused') {
+      if (row.forecast != null && (!closed(row.forecast, ['horizon_secs']) || !positive(row.forecast.horizon_secs))) throw new Error('Focused forecast horizon must be finite and positive.');
       if (!positive(row.work_secs) || !Number.isInteger(row.history_limit) || row.history_limit < 1 || row.history_limit > 65535 || !finite(row.unfinished_retention_secs) || !value.scan)
         throw new Error('Focused sensing requires positive work/history, finite retention and actual Scan bands.');
     } else if (role === 'broad') {

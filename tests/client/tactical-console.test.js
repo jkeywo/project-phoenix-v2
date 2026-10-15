@@ -168,7 +168,7 @@ describe('battleship tactical renderStation', () => {
     expect(radar.blips).toEqual(base.blips);
     expect(radar.phaser_arcs).toEqual(base.phaser_arcs);
     expect(el('phasers-controls').state).toEqual({ banks: [{ id: 'fore' }], target_valid: true, mode: 'Manual' });
-    expect(el('torpedo-controls').state).toEqual({ tubes: [{ id: 't1' }], magazine: { current: 4, max: 12 }, target_uuid: 'enemy-1' });
+    expect(el('torpedo-controls').state).toEqual({ tubes: [{ id: 't1' }], magazine: { current: 4, max: 12 }, target_uuid: 'enemy-1', stock_control: null });
     expect(el('footer-target').textContent).toBe('Raider');
   });
 

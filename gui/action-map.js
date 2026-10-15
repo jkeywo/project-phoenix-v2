@@ -438,6 +438,13 @@ export const ACTION_MAP = Object.freeze({
       payload: { type: 'SetPassiveEnabled', data: { enabled: a.enabled } },
     });
   },
+  set_radar_sharing: (a, send) => {
+    if (!a.control_system_id || typeof a.share_own_faction !== 'boolean' || typeof a.receive !== 'boolean') return;
+    send(a.correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(a.correlation ? {correlation:a.correlation} : {}),target:a.control_system_id,
+      payload:{type:'SetRadarSharing',data:{share_own_faction:a.share_own_faction,receive:a.receive}},
+    });
+  },
 
   /** Send helm thrust / steering inputs.
    *

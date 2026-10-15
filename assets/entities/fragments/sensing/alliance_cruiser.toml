@@ -128,3 +128,13 @@ track_retention_secs = 60
 [sensing.control]
 combat_lock = "tactical-radar"
 science_target = "sensors"
+# Sharing is an explicit operator choice; reception alone does not publish a feed.
+[[sensing.sharing]]
+system = "sensor-radar"
+share_own_faction = false
+receive = true
+
+[[sensing.sharing]]
+system = "tactical-radar"
+share_own_faction = false
+receive = true

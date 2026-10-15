@@ -1,7 +1,7 @@
 //! Accepted instrument composition. Geometry delegates to actual weapon mounts.
 use crate::entities::config::EntityConfig;
 use crate::ship::system_registry::{
-    HELM_RADAR_KIND, PASSIVE_RECEIVER_KIND, SENSORS_KIND, SENSOR_RADAR_KIND, TACTICAL_RADAR_KIND,
+    HELM_RADAR_KIND, PASSIVE_RECEIVER_KIND, SENSOR_RADAR_KIND, SENSORS_KIND, TACTICAL_RADAR_KIND,
 };
 pub use phoenix_model::sensing::*;
 
@@ -19,6 +19,18 @@ pub fn validate_sensing(profile: &SensingConfig, entity: &EntityConfig) -> Resul
         .ship_config
         .as_ref()
         .ok_or("sensing requires actual System composition")?;
+    for sharing in &profile.sharing {
+        if ship.system(&sharing.system).is_none_or(|system| {
+            !matches!(
+                system.kind.as_str(),
+                SENSOR_RADAR_KIND | TACTICAL_RADAR_KIND
+            )
+        }) {
+            return Err(
+                "sharing currently supports actual Sensors and Tactical radar owners".into(),
+            );
+        }
+    }
     for (binding, kind, label) in [
         (
             &profile.control.combat_lock,

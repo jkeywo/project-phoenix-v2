@@ -7,6 +7,8 @@ sources:
   - crates/phoenix-model/src/sensing_forecast.rs
   - crates/phoenix-sim-gameplay/src/science/forecast.rs
   - crates/phoenix-sim-gameplay/src/science/tracks.rs
+  - crates/phoenix-sim-gameplay/src/science/sharing.rs
+  - crates/phoenix-simulation/src/science/sharing.rs
   - crates/phoenix-sim-gameplay/src/science/sensing.rs
   - crates/phoenix-simulation/src/science/broad.rs
   - crates/phoenix-simulation/src/science/contact_routing.rs
@@ -65,6 +67,16 @@ Generated gameplay rocks participate using their existing `AsteroidUuid`, actual
 physical pose and authored roster tags. Visibility follows the scanner's `shows`
 filter; selection separately follows the rock template's `target.tags` and the
 scanner's `selects`. Their measured returns use the same paid range/path rules.
+
+`SensingConfig.sharing` configures each actual Sensors or Tactical radar's
+own-faction sharing and independent reception intent. Received originals live
+in that instrument's existing `BroadTrackState`, preserving their public origin,
+sample time, measuring pose and first receipt. Delivery uses actual fictional
+Comms reach; a lost link retains evidence without renewing its age or actuator
+route. The public projection may narrow compatible, reciprocally unambiguous
+independent error discs; exports retain the original samples. Copies and relays
+never add independent support. `radar-sharing-controls.js` presents the exact
+owned radar's controls, while foreign feeds remain informational.
 
 An observer's substituted Sensors reports enter that same instrument-owned track
 lifecycle. They retain the reported position, permitted label and original sample

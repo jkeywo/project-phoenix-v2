@@ -27,15 +27,36 @@ export function mountWorkshopSensing({ root, provider, runtime, draft: getDraft,
       if (field === 'history_limit') { control.step = '1'; control.min = '1'; control.max = '65535'; }
       fields[field] = control; container.append(label(control, field));
     }
+    if (role === 'broad') {
+      const initial = inspection.sensing?.sharing?.find(row => row.system === value.system);
+      for (const [key, checked] of [['share_own_faction', initial?.share_own_faction ?? false], ['receive', initial?.receive ?? true]]) {
+        fields[key] = input(key + '-' + index, 'checkbox'); fields[key].checked = checked;
+        container.append(label(fields[key], key));
+      }
+      container.append(el('p', null, 'sharing-hint'));
+    }
+    if (role === 'focused') {
+      fields.forecast_enabled = input(key + '-forecast-enabled', 'checkbox'); fields.forecast_enabled.checked = !!value.forecast;
+      fields.forecast_horizon_secs = input(key + '-forecast-horizon', 'number'); fields.forecast_horizon_secs.value = value.forecast?.horizon_secs ?? 1;
+      container.append(label(fields.forecast_enabled, 'forecast-enabled'), label(fields.forecast_horizon_secs, 'forecast-horizon'));
+    }
     const remove = el('button', key + '-remove', 'remove-instrument'); remove.type = 'button';
     remove.addEventListener('click', () => { rows[role].delete(key); container.remove(); });
     container.append(remove); rows[role].set(key, { system, fields }); hosts[role].append(container);
+    system.addEventListener('change',controls);
   }
   for (const role of Object.keys(sensingRoles)) {
     hosts[role] = el('fieldset', role); hosts[role].append(el('legend', null, role)); rows[role] = new Map(); sequences[role] = 0;
     const add = el('button', role + '-add', 'add-instrument'); add.type = 'button'; add.addEventListener('click', () => { addInstrument(role); controls(); }); node.append(hosts[role], add);
   }
-  function controls() { for (const control of node.querySelectorAll('input,select,button')) control.disabled = disposed || loading || busy() || !inspection; }
+  function controls() {
+    const blocked=disposed || loading || busy() || !inspection;
+    for (const control of node.querySelectorAll('input,select,button')) control.disabled = blocked;
+    for(const row of rows.broad?.values() || []) {
+      const eligible=inspection?.systems.some(system=>system.id===row.system.value && ['sensor_radar','tactical_radar'].includes(system.kind));
+      for(const key of ['share_own_faction','receive']) { row.fields[key].parentElement.hidden=!eligible;row.fields[key].disabled=blocked||!eligible; }
+    }
+  }
   function paint() {
     for(const [binding,kind] of [["combat_lock","tactical_radar"],["science_target","sensors"]]) fill(bindings[binding],["",...inspection.systems.filter(system=>system.kind===kind).map(system=>system.id)],inspection.sensing?.control?.[binding] || "");
     for (const role of Object.keys(sensingRoles)) {
@@ -49,8 +70,13 @@ export function mountWorkshopSensing({ root, provider, runtime, draft: getDraft,
   function readRow(role, row, system = row.system.value) { return { system,
     ...Object.fromEntries(sensingRoles[role].fields.map(field => [field, row.fields[field].valueAsNumber])),
     ...(role === 'passive' ? { mount: Object.fromEntries(['facing_deg', 'arc_deg', 'range'].map(field => [field, row.fields[field].valueAsNumber])) } : {}),
+    ...(role === 'focused' && row.fields.forecast_enabled.checked ? {forecast:{horizon_secs:row.fields.forecast_horizon_secs.valueAsNumber}} : {}),
   }; }
-  function read() { return {control:Object.fromEntries(Object.entries(bindings).filter(([,control])=>control.value).map(([key,control])=>[key,control.value])),...Object.fromEntries(Object.keys(sensingRoles).map(role => [role, [...rows[role].values()].filter(row => row.system.value).map(row => readRow(role, row))]))}; }
+  function read() { return {
+    control:Object.fromEntries(Object.entries(bindings).filter(([,control])=>control.value).map(([key,control])=>[key,control.value])),
+    sharing:[...rows.broad.values()].filter(row=>inspection.systems.some(system=>system.id===row.system.value && ['sensor_radar','tactical_radar'].includes(system.kind)))
+      .map(row=>({system:row.system.value,share_own_faction:row.fields.share_own_faction.checked,receive:row.fields.receive.checked})),
+    ...Object.fromEntries(Object.keys(sensingRoles).map(role => [role, [...rows[role].values()].filter(row => row.system.value).map(row => readRow(role, row))]))}; }
   async function apply(extra = {}) {
     if (busy() || !inspection) return; const token = ++generation, value = read();
     if (extra.type) {

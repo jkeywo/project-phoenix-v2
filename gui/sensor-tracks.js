@@ -19,7 +19,11 @@ export function projectSensorTracks(tracks, { x = 0, z = 0, yaw = 0, range = 0, 
     const age = Number.isSafeInteger(tick) && tick >= track.observed_tick ? tick - track.observed_tick : null;
     const reported = track.observation?.provenance?.kind === 'sensors_report';
     const visible = validRange && (reported || Math.hypot(dx, dz) <= range);
+    const samples = Array.isArray(track.samples) ? track.samples.filter(sample => sample?.origin && typeof sample.sample_id === 'string') : [];
+    const independent = new Set(samples.map(sample => JSON.stringify([sample.origin.source,sample.origin.system])));
     const row = { id: track.contact_id, name, stage: track.stage, predicted: track.predicted === true,
+      received: samples.some(sample => Number.isSafeInteger(sample.received_tick)), source_count: independent.size,
+      source_details: samples.map(sample => t('sensing.sharing.origin',{source:wireText(sample.origin.source),instrument:wireText(sample.origin.system),tick:sample.observed_tick})),
       error: track.position_error, age, selectable: track.selectable === true && track.predicted === false && visible };
     rows.push(row);
     if (visible) blips.push({
@@ -56,5 +60,6 @@ export function sensorTrackText(row) {
   return [row.name, t(`sensing.track.stage.${row.stage}`),
     t(row.predicted ? 'sensing.track.predicted' : 'sensing.track.measured'),
     t('sensing.track.error', { radius: Math.round(row.error * 10) / 10 }),
-    row.age === null ? t('observation.unknown') : t('observation.ticks', { ticks: row.age })].join(' · ');
+    row.age === null ? t('observation.unknown') : t('observation.ticks', { ticks: row.age }),
+    ...(row.received ? [t('sensing.sharing.received',{count:row.source_count})] : [])].join(' · ');
 }

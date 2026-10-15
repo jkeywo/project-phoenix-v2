@@ -30,6 +30,10 @@ pub struct TrackAssessment {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SensorTrackSnapshot {
+    /// Original independent samples supporting this projection. Fusion is a
+    /// derived view and does not create another sample identity.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub samples: Vec<crate::sensing_sharing::RadarSampleProvenance>,
     pub contact_id: String,
     /// A substituted report retains its original sample time and public source.
     /// Its subject is this instrument's contact handle, never a routing UUID.

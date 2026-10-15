@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildSensorsConsoleState, buildWeaponsConsoleState, buildHelmConsoleState, buildTargetBlip } from '../../gui/console-state.js';
 import { consoleReadState } from '../../gui/console-topology.js';
-import { projectSensorTracks } from '../../gui/sensor-tracks.js';
+import { projectSensorTracks, sensorTrackText } from '../../gui/sensor-tracks.js';
 import { createSensorScienceActionRegistry, SENSORS_TARGET_ACTION_ID, SENSORS_SCAN_ACTION_ID } from '../../gui/stations/sensors-actions.js';
 import '../../gui/components/ph-sensor-panel.js';
 import { t } from '../../gui/strings.js';
@@ -46,6 +46,18 @@ describe('permitted broad track radar', () => {
     const legacy = buildTargetBlip('reported', [{ uuid: 'reported', position: [1000, 0, 0] }], 0, 0, 0, 100, { edgeClamp: true });
     expect([view.blips[0].radar_x, view.blips[0].radar_y]).toEqual([legacy.radar_x, legacy.radar_y]);
     expect(projectSensorTracks([{ ...contact, observation: undefined }], { range: 100 }).blips).toEqual([]);
+  });
+  it('shows original received sample provenance without counting relays as new sources', () => {
+    const origin = { source: 'radar-origin-0000000000000001', system: 'sensor-a' };
+    const copy = { origin, sample_id: 'original-sample', observed_tick: 7, received_tick: 10 };
+    const view = projectSensorTracks([sample({ samples: [copy, { ...copy, received_tick: 11 }, {
+      origin: { source: 'radar-origin-0000000000000002', system: 'sensor-b' },
+      sample_id: 'independent-sample', observed_tick: 7, received_tick: 10,
+    }] })], { range: 100, tick: 30 });
+    const row = view.tracks[0];
+    expect(row).toMatchObject({ received: true, source_count: 2, age: 20 });
+    expect(row.source_details[0]).toBe(t('sensing.sharing.origin', { source: origin.source, instrument: origin.system, tick: 7 }));
+    expect(sensorTrackText(row)).toContain(t('sensing.sharing.received', { count: 2 }));
   });
   it('uses measured contact IDs and circles without entity identity or hull geometry fallback', () => {
     const view = buildSensorsConsoleState(raw(), ['focus', 'broad']);

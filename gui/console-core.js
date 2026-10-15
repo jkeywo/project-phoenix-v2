@@ -98,6 +98,7 @@ import {
   SENSOR_SCIENCE_ACTION_CONTEXTS,
   registerSensorScienceActions,
 } from './stations/sensors-actions.js';
+import { registerRadarSharingActions, RADAR_SHARING_CONTEXTS } from './stations/radar-sharing-actions.js';
 import {
   NAVIGATION_ACTION_CONTEXT,
   registerNavigationActions,
@@ -317,6 +318,9 @@ export function initConsole({
         : null,
       sendAction: sendAction,
     });
+  }
+  if (RADAR_SHARING_CONTEXTS.some(context => _actionContexts.has(context))) {
+    registerRadarSharingActions(_semanticActions, {getState:()=>_latestState,sendAction});
   }
   if (SENSOR_SCIENCE_ACTION_CONTEXTS.some((context) => _actionContexts.has(context))) {
     registerSensorScienceActions(_semanticActions, {

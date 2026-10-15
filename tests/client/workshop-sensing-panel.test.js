@@ -29,6 +29,18 @@ function fixture(withoutPassive = false, dual = false) {
   return { draft, runtime, panel, source };
 }
 describe('Workshop structured sensing controls', () => {
+  it('edits own-faction sharing and optional forecast on canonical accepted profiles', async () => {
+    const {draft,panel}=fixture();await settle();
+    control('share_own_faction-0').checked=true;control('receive-0').checked=false;
+    control('focused-forecast-enabled').checked=true;control('focused-forecast-horizon').value='12';
+    control('save').click();await settle();
+    const value=parse(draft.read(path));
+    expect(value.sensing.sharing.find(row=>row.system==='sensor-radar')).toEqual({system:'sensor-radar',share_own_faction:true,receive:false});
+    expect(value.sensing.sharing.some(row=>row.system==='helm-radar')).toBe(false);
+    expect(value.sensing.focused[0].forecast).toEqual({horizon_secs:12});
+    control('focused-forecast-enabled').checked=false;control('save').click();await settle();
+    expect(parse(draft.read(path)).sensing.focused[0].forecast).toBeUndefined();panel.dispose();
+  });
   it('edits and removes a focused instrument without overwriting another receiver or its bindings', async () => {
     const {draft,panel}=fixture(false,true);await settle();
     const before=parse(draft.read(path)).sensing;

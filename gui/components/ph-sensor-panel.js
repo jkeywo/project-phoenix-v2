@@ -9,6 +9,7 @@ import { SENSORS_TARGET_ACTION_ID } from '../stations/sensors-actions.js';
 import { observationDetails } from '../observation-details.js';
 import { renderSensorReport } from '../sensor-report.js';
 import { PhElement, phDefine } from './ph-element.js';
+import { mountRadarSharingControls } from './radar-sharing-controls.js';
 
 /**
  * `hide-shield-rows` (boolean attribute): suppresses the SHIELD and SHIELD
@@ -30,6 +31,7 @@ export class PhSensorPanel extends PhElement {
   #brgEl = null;
   #rngEl = null;
   #trackRows = new Map();
+  #sharing = null;
 
   static get observedAttributes() { return ['hide-shield-rows']; }
 
@@ -102,6 +104,8 @@ export class PhSensorPanel extends PhElement {
   render(state) {
     const s = state || {};
     const root = this.shadowRoot;
+    if (!this.#sharing) { this.#sharing = mountRadarSharingControls(this.ownerDocument); root.append(this.#sharing.node); }
+    this.#sharing.update(s.radar_sharing || []);
 
     root.getElementById('range-val').textContent = s.scan_range || 0;
 
@@ -120,7 +124,7 @@ export class PhSensorPanel extends PhElement {
           { source: 'control', detail: { uuid: track.id } }));
         this.#trackRows.set(track.id, row); trackList.append(row);
       }
-      row.textContent = sensorTrackText(track); row.disabled = !track.selectable;
+      row.textContent = sensorTrackText(track); row.title = (track.source_details || []).join('\n'); row.disabled = !track.selectable;
       row.setAttribute('aria-pressed', String(s.target_uuid === track.id));
     }
     for (const [id, row] of this.#trackRows) if (!present.has(id)) { row.remove(); this.#trackRows.delete(id); }

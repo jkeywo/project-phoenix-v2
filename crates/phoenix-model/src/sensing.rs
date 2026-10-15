@@ -20,6 +20,8 @@ pub fn scan_owner_from_blackboard_key(key: &SystemId) -> Option<SystemId> {
 #[serde(deny_unknown_fields)]
 pub struct SensingConfig {
     #[serde(default)]
+    pub sharing: Vec<crate::sensing_sharing::RadarSharingConfig>,
+    #[serde(default)]
     pub control: SensingControlBindings,
     #[serde(default)]
     pub focused: Vec<FocusedConfig>,
@@ -86,6 +88,18 @@ fn system_valid(system: &SystemId) -> bool {
 }
 impl SensorMountConfig {
     pub fn validate(&self) -> Result<(), String> {
+        let mut sharing = std::collections::BTreeSet::new();
+        for row in &self.sharing {
+            if !system_valid(&row.system)
+                || !sharing.insert(&row.system)
+                || !self
+                    .broad
+                    .iter()
+                    .any(|profile| profile.system == row.system)
+            {
+                return Err("radar sharing requires distinct actual broad owners".into());
+            }
+        }
         if !self.facing_deg.is_finite()
             || !positive(self.range)
             || !positive(self.arc_deg)

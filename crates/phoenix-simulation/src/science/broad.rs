@@ -94,7 +94,20 @@ pub(crate) fn install(
     if let Some(profile) =
         BroadProfile::from_config(config).expect("accepted broad instrument composition")
     {
-        let state = BroadTracks::new(&profile);
+        let mut state = BroadTracks::new(&profile);
+        for sharing in &config
+            .sensing
+            .as_ref()
+            .expect("broad sensing profile")
+            .sharing
+        {
+            let owner = state
+                .0
+                .get_mut(&sharing.system)
+                .expect("validated sharing owner");
+            owner.share_own_faction = sharing.share_own_faction;
+            owner.receive_shared = sharing.receive;
+        }
         commands.insert((profile, state));
     }
 }
@@ -159,7 +172,7 @@ pub(crate) fn tick(
         .map(|row| (row.uuid.as_str(), row))
         .collect();
     let mut observers: Vec<_> = observers.iter_mut().collect();
-    observers.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
+    observers.sort_by(|a, b| a.0.0.cmp(&b.0.0));
     for (
         observer,
         transform,
@@ -425,6 +438,11 @@ pub(crate) fn tick(
             state
                 .advance(profile, tick.0, dt, paid.clamp(0.0, 1.0), &measurements)
                 .expect("compiled broad profile and fixed physical observation must validate");
+            phoenix_sim_gameplay::science::sharing::record_observer_pose(
+                state,
+                tick.0,
+                [origin.x, origin.z],
+            );
         }
     }
 }

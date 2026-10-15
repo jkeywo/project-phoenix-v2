@@ -730,7 +730,7 @@ fn auto_clear_on_screen_message(
 /// front-end this is the roster's ONLY source; the union rule and the
 /// deterministic append order still live in `crate::comms::roster`, where they
 /// now keep the per-tick re-derivation idempotent.
-fn signal_comms_in_range(
+pub(crate) fn signal_comms_in_range(
     signals: &crate::regions::signal_path::RegionSignalQuery,
     start: Vec3,
     end: Vec3,

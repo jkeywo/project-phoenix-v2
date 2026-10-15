@@ -1,0 +1,56 @@
+entities:
+  - decision: layered-combat-equipment-and-engagement-choice
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Equipment Creates Several Viable Engagement Styles
+      summary: "Increment15 adopts G048–54/S001–16: useful long-range slower missiles, finite dual-purpose PDC interception, sustained/projectile weapon configurations and distinct broadside geometry extend the shared weapon machinery. The missile/PDC/broadside example is not a mandatory sequence, universal transit lock or new combat-load meter."
+      rationale:
+        - "User authorised increments7–18 and the pinned validation pipeline. docs/gameplay-redesign/implementation/increment-15.md fixes the implementation slices and exit evidence before runtime work; it does not claim completion."
+        - "[ai] Extend existing beam/bolt/guided, common mounts/barrels, resources and physical damage owners. Static mounts, fixed active periods and independent loaders remain supported configurations. Shared finite loaders, kinetic rounds/recoil and richer beam operation are real consumers, not competing state or new mandatory crew seats."
+  - decision: layered-combat-targets-and-support-authority
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Tactical Chooses Targets and Science Allocates Assistance
+      summary: "G048/G105/S015/S055/S096 retain primary-target play with explicit prepared group/System assignments and persistent individual overrides. Science makes persistent illumination assignments; ordinary System AI maintains tracking. Illumination assists without selecting Tactical targets or granting/vetoing firing permission. Helm retains motion authority."
+      rationale:
+        - "Unassigned delegated offence prefers the primary; authored doctrine may permit secondary targets or strict concentration. A group command cannot overwrite an active individual override. Group membership is authored/saved rather than a general live regrouping task."
+        - "[ai] Shared finite-traverse mounts are one physical aim owner reused by weapons/sensors; multiple components do not create independent hidden barrels. Explicit Console feeds convey information only. Closed per-System trees emit normal typed commands and replace each migrated controller rather than run beside it."
+  - decision: layered-combat-observed-ordnance-and-guidance
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Finite Ordnance and Interception Use Real Evidence and Links
+      summary: "S003/S008/G051 select finite guided flight and ordinary AI interception of observed ordnance, including protection of other assets inside actual reach/coverage. Suitable rounds accept supported post-launch intent over working equipment links; independent/fixed-intent variants remain. Full3D small-ordnance flight preserves planar capital ships."
+      rationale:
+        - "PDC offence and interception compete for the same tracking, ammunition, local energy and heat. Saturation is an actual shortfall, not guaranteed defence or compulsory manual aiming. Helm projections use observed motion/uncertainty, never future guidance or hidden impact truth."
+        - "[ai] Freeze actual payload properties and resources at launch. Link loss follows supported receiver/seeker intent rules; ship upgrades or later targeting messages cannot change payload damage, mint ammunition or provide a perfect global target feed. Expanded channel/relay/security remains increment16 and electronic attack/protection17."
+  - decision: layered-combat-physical-payloads-and-temporary-conditions
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Common Payload Effects Preserve Physical Consequences
+      summary: "S009–12 extend existing impact/condition mechanisms with supported recoil, area exposure, penetration, EMP and limited physical marking observations. Area effects may harm eligible allies/civilians. EMP refresh retains max(remaining, new resistance-adjusted duration); longer-lived resistance stacks and reduces subsequent duration, with automatic expiry and no repair requirement."
+      rationale:
+        - "[ai] Keep temporary effect/resistance lifetime distinct from physical component condition/HP; apply shared status presentation. Author finite duration/stack/decay parameters and deterministic order when implementing, without inventing universal immunity or assuming a numerical interruption bound from the selected design."
+        - "Penetration retains weighted decks and the 2D compartment path/material model. Components have no precise internal coordinates/HP. Scan-derived compartment/angle advice uses delivered findings and neither bypasses intervening structure nor steers Helm."
+        - "A marking payload leaves actual finite/vulnerable equipment reporting supported observations while powered and linked, not a permanent tracking/aim flag. Reuse ordinary entity/resource/observation owners. General deploy/recover/mines and carried craft remain increment19; incomplete marking prerequisites must be recorded rather than claimed delivered."
+  - decision: layered-combat-optional-investigated-shield-counterplay
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Shield Probing Is Optional Equipment-Supported Investigation
+      summary: "G050/S005 select optional focused scanner work that can support configured weapon tuning. Benefits are usually modest and more consequential against suitable special shields/penetrating equipment. Findings generally persist for the observed configuration; special equipment may rotate shield/beam configurations. Broad assessment is not unconditional protected weakness intelligence."
+      rationale:
+        - "This supersedes any interpretation of the older automatic frequency-hint path as a universal free shield answer or compulsory recurring retune. Retain ordinary target designation and explicit finding delivery; migrate frequency consumers to actual acquired permitted evidence before15 closes."
+        - "[ai] Human and ordinary delegated probing/tuning share geometry, work, knowledge and consequences. Observable charging/preparation supports inference, not exact enemy intention or target/timer disclosure. Default combat remains viable without investigation."
+  - decision: layered-combat-authoring-and-continuation-exit
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Each Combat Slice Is Authorable and Continuable
+      summary: "Every selected combat slice includes accepted data, actual human/delegated operation, closed AI, Workshop history/validation/Preview/Test and immediate deterministic snapshot/restore integration. Existing networking and System-addressed admission remain intact. Prepared source and initial commits are not verified exits."
+      rationale:
+        - "[ai] Preflight finite timers, identities/targets, assignments, mounted state, actual stocks/claims, flight/link intent, effects and observations before writes. Test active continuation plus different LocalShip fleet peers and the complete host phase graph. Advance compatibility explicitly and remove temporary data adapters before closing15."
+        - "Retain 2/4/6/8 hull rosters and whole-System complexity/delegation. Validate concurrent combat/non-combat activity, communication, resource margin, waiting and overload; browser/native and human acceptance remain separate from automated evidence. The integrator owns final gates and push."

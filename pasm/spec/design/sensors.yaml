@@ -25,7 +25,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Sensors Target Intelligence
-      summary: Sensors provides Tactical with a level-3 target designation and shield-frequency intelligence for the selected contact without taking Tactical target authority.
+      summary: "Sensors provides Tactical with permitted target/designation findings without taking target authority. G050/S005 and increment15 require actual optional scanner-supported shield investigation before protected weakness/frequency intelligence can assist tuning; routine broad assessment does not supply an unconditional shield answer."
     game_design:
       enforcement_links: [sensors-target-designation, sensors-frequency-advisor]
       visibility: team-visible
@@ -37,7 +37,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: AI Sensors Tactical Intelligence
-      summary: Backfill Sensors selects an appropriate hostile inside its effective horizon, then uses the existing designation and frequency-intelligence paths to advise Tactical.
+      summary: "Backfill Sensors selects an appropriate observed hostile and advises Tactical through permitted designation/findings. Optional shield investigation and frequency tuning use the same fitted equipment, time, knowledge and opportunities as human operation; older instant frequency-hint behaviour is a migration input superseded by layered-combat-optional-investigated-shield-counterplay."
     game_design:
       architecture_links: [sensors-target-selection-ai, sensors-target-designation, sensors-frequency-advisor]
       participating_roles: [sensors-ai-operator-role, tactical-operator]

@@ -34,6 +34,7 @@ pub mod scan;
 pub mod server;
 pub mod sharing;
 pub mod shield_enquiry;
+pub use phoenix_sim_gameplay::science::signatures;
 
 pub use scan::{
     derive, quantise, scanned_flag, ScanBandConfig, ScanConditions, ScanConfig, ScanReading,

@@ -17,7 +17,7 @@ use project_phoenix::{
     lobby::{server::InboundMessage, Sessions},
     science::broad::BroadTracks,
     server_app::{LocalShip, ShipSystemBlackboards},
-    ship::{power::ShipPowerSystem, state::ShipPhysics},
+    ship::power::ShipPowerSystem,
     ship_plugin::{HumanSeekingHosts, ShipConfigComponent, ShipSystemControlSources},
     sim_digest::world_digest,
     sim_tick::sim_tick_period,

@@ -50,7 +50,7 @@ fn observe(
         } else {
             0.0
         };
-        let emission = phoenix_sim_gameplay::science::signatures::observed_signature(
+        let emission = project_phoenix::science::signatures::observed_signature(
             output,
             config
                 .0

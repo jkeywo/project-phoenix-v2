@@ -134,8 +134,12 @@ impl TorpedoConfig {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Torpedo {
+    /// Actual previous pose for this Physics/Damage interval only. The normal
+    /// collision owner clears it after relative CCD; saves/folds keep current
+    /// canonical pose rather than a competing flight/history copy.
+    pub previous_position: Option<[f32; 3]>,
     pub profile: GuidedRoundProfile,
     pub durability_remaining: f32,
     pub strike_damage_bonus: f32,
@@ -169,6 +173,9 @@ pub struct Torpedo {
 
 impl Torpedo {
     pub fn tick(&mut self, dt: f32, target_pos: Option<(f32, f32, f32)>) {
+        if dt.is_finite() && dt > 0.0 {
+            self.previous_position = Some([self.x, self.y, self.z]);
+        }
         if self.target_uuid.is_some() {
             if let Some((tx, ty, tz)) = target_pos {
                 let dx = tx - self.x;
@@ -1019,6 +1026,7 @@ impl TorpedoSystem {
         self.tubes[idx].active_barrels = vec![barrel0];
         self.tubes[idx].pattern_step = step0;
         self.in_flight.push(Torpedo {
+            previous_position: None,
             profile,
             durability_remaining: profile.durability,
             strike_damage_bonus: 0.0,
@@ -1219,6 +1227,7 @@ impl TorpedoSystem {
                 burst.next_shot_index += 1;
                 pattern_updates.push((burst.tube_id.clone(), barrel, step));
                 burst_torpedoes.push(Torpedo {
+                    previous_position: None,
                     profile: burst.profile,
                     durability_remaining: burst.profile.durability,
                     strike_damage_bonus: 0.0,
@@ -1278,6 +1287,14 @@ impl TorpedoSystem {
         }
         self.in_flight.retain(|t| !t.is_expired());
         result
+    }
+
+    /// Close the actual collision interval after ordinary Damage. No payload,
+    /// guidance intent, fuel, durability or current physical pose is changed.
+    pub fn finish_collision_interval(&mut self) {
+        for round in &mut self.in_flight {
+            round.previous_position = None;
+        }
     }
 
     /// Resolve a paid physical interception against the actual vector owner.

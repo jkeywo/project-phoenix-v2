@@ -2013,6 +2013,7 @@ pub(super) fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponStat
             .torpedoes_in_flight
             .iter()
             .map(|t| Torpedo {
+                previous_position: None,
                 profile: t.profile,
                 durability_remaining: t.durability_remaining,
                 strike_damage_bonus: t.strike_damage_bonus,

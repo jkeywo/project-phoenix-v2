@@ -9818,6 +9818,7 @@ fn set_torpedoes_in_flight(app: &mut App, n: usize) {
             .0
             .in_flight
             .push(crate::weapons::torpedo::Torpedo {
+                previous_position: None,
                 profile,
                 durability_remaining: profile.durability,
                 strike_damage_bonus: 0.0,

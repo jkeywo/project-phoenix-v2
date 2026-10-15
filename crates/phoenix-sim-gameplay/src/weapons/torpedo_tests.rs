@@ -633,6 +633,7 @@ fn find_detonation_hits_handles_multiple_torpedoes_independently() {
     // Manually push a second torpedo so the test can focus on detonation
     // matching rather than tube load state.
     sys.in_flight.push(Torpedo {
+        previous_position: None,
         profile: sys.config.round_profile(Default::default()),
         durability_remaining: sys.config.durability,
         strike_damage_bonus: 0.0,

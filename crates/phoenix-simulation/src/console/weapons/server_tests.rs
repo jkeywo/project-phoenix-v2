@@ -4177,6 +4177,7 @@ fn torpedo_hit_reduces_ship_shields_on_local_ship() {
     // and the resource to stay in sync.
     let profile = torpedo_test_profile(&app, player_entity, 30.0, 0.0);
     let torpedo = Torpedo {
+        previous_position: None,
         profile,
         durability_remaining: profile.durability,
         strike_damage_bonus: 0.0,
@@ -4335,6 +4336,7 @@ fn torpedo_hit_from_astern_damages_the_astern_arc_not_the_fore_arc() {
 
     let profile = torpedo_test_profile(&app, player_entity, 30.0, 0.0);
     let torpedo = Torpedo {
+        previous_position: None,
         profile,
         durability_remaining: profile.durability,
         strike_damage_bonus: 0.0,
@@ -4502,6 +4504,7 @@ fn launch_astern(app: &mut App, ship: Entity, shield_pierce: f32) {
     use crate::weapons::torpedo::Torpedo;
     let profile = torpedo_test_profile(app, ship, 30.0, shield_pierce);
     let torpedo = Torpedo {
+        previous_position: None,
         profile,
         durability_remaining: profile.durability,
         strike_damage_bonus: 0.0,
@@ -11145,6 +11148,7 @@ fn torpedo_in_flight_count_is_published_as_a_public_fact() {
     let mut app = test_app();
     let mut ts = TorpedoSystem::new(TorpedoConfig::default());
     ts.in_flight.push(crate::weapons::torpedo::Torpedo {
+        previous_position: None,
         profile: ts.config.round_profile(Default::default()),
         durability_remaining: ts.config.durability,
         strike_damage_bonus: 0.0,
@@ -11859,6 +11863,7 @@ fn torpedo_kill_on_the_local_ship_latches_game_over() {
     enemy_torpedoes
         .in_flight
         .push(crate::weapons::torpedo::Torpedo {
+            previous_position: None,
             profile,
             durability_remaining: profile.durability,
             strike_damage_bonus: 0.0,

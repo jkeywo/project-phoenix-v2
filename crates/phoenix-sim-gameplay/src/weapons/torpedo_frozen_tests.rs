@@ -134,3 +134,46 @@ fn physical_interception_uses_frozen_finite_durability_and_removes_payload_once(
     );
     assert_eq!(system.rounds_aboard(), 5);
 }
+
+#[test]
+fn actual_guided_motion_exposes_one_relative_collision_interval_without_saved_shadow() {
+    let mut system = loaded(1);
+    assert_eq!(system.in_flight[0].previous_position, None);
+    let first = [
+        system.in_flight[0].x,
+        system.in_flight[0].y,
+        system.in_flight[0].z,
+    ];
+    let targets = HashMap::from([("target".into(), (10.0, 6.0, -20.0))]);
+    system.tick_with_work(
+        0.2,
+        &targets,
+        &mut |_| panic!("already launched flight buys no machinery work"),
+        &mut || unreachable!(),
+    );
+    assert_eq!(system.in_flight[0].previous_position, Some(first));
+    system.in_flight[0].tick(0.0, None);
+    assert_eq!(
+        system.in_flight[0].previous_position,
+        Some(first),
+        "a zero-time machinery opportunity cannot erase the physical interval"
+    );
+    let current = system.in_flight[0].clone();
+    assert_ne!([current.x, current.y, current.z], first);
+    system.finish_collision_interval();
+    let mut expected = current;
+    expected.previous_position = None;
+    assert_eq!(system.in_flight[0], expected);
+    system.tick_with_work(
+        0.1,
+        &targets,
+        &mut |_| panic!("already launched flight buys no machinery work"),
+        &mut || unreachable!(),
+    );
+    assert_eq!(
+        system.in_flight[0].previous_position,
+        Some([expected.x, expected.y, expected.z])
+    );
+    system.finish_collision_interval();
+    assert_eq!(system.in_flight[0].previous_position, None);
+}

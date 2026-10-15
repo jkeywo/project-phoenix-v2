@@ -1,0 +1,209 @@
+# Increment 16 — Shared Comms channels and remote requests
+
+Adopted contract preparation, 15 October 2026. The user approved continuation
+through24 and dependency-ready parallel work. Runtime entry requires15's initial
+integrated implementation and targeted checks; full completion depends on14/15's
+verified exits. This document changes no ledger status or acceptance result.
+The integrator's [parallel-work contract](parallel-work.md) governs dispatch.
+
+## Outcome and selected scope
+
+Let human and AI crews converse, request useful action and learn what a distant
+recipient actually acknowledged, through equipment-supported in-world channels.
+Keep concurrent persistent threads and preserve local specialist authority.
+Phoenix signalling, peer topology, delivery classes and command admission remain
+the transport foundation. Gameplay links and receipts are game state, not
+transport acknowledgements or a second connection protocol.
+
+The selected catalogue, architecture AD70–74 and
+[Comms contracts](../../../pasm/spec/design/comms-channels.yaml) govern scope.
+Research is motivation; no competitor timings or additional mechanics are adopted.
+
+| Selected entries | Delivery and limits |
+|---|---|
+| S065; G022 refinement | Concurrent persistent plot and generic conversations, urgency, human text and selected human audio/video focus. Every supported ship can receive contextual generic requests independently of plot dialogue. AI uses text and ordinary urgency cues; no AI voices. |
+| S069; G043 | Individual, own-fleet, per-faction and all-ship audiences. Each recipient independently receives, considers and responds. No arbitrary custom groups, remote actuator control or guaranteed obedience. |
+| S066; G024 | Systemic supported traffic plus authored transmissions; automatic public chatter and finite prioritised listening/search coverage. Reception must actually occur; no retrospective uncaptured-message retrieval. Enemy player text is interceptable under the same supported gameplay rules. |
+| S067; G024 | Protected channels and decoding constrained by actual capability and held keys. Time cannot defeat every protection. Ordinary AI handles feasible work; no cipher puzzle or change to transport security. Audio/video interception remains unselected detail, not an automatic plaintext/media grant. |
+| S101; AD72–74 | Equipment-backed automatic relay routing, explicit pending-order validity/supersession and returned delivery/decision receipts. No message-capacity, traffic-budget or volume-congestion resource. |
+| G040/G041; S068 | Known actor/faction relationships affect supported willingness; retain dated attributed interactions and content-authored terms/settlement. Generic chat does not create a universal contract, morality score or automatic commitment-risk warning. |
+| G042/G044/G109 | Surrender can change supported intent without magical compliance, capture or despawn. Claims, acceptance and actual conduct remain distinct. Pursuit information follows transmitted evidence, not hidden destinations; transit and broader capture consumers join18/20/23. |
+
+Reference Cruiser Comms owns conversation, requests and signal interpretation;
+Engineering retains stocks/service priorities, Tactical physical commitments,
+and each receiving specialist its own machinery. Later17 assigns jamming and
+disruption to Comms and electronic protection to Science through authored data.
+Preserve2/4/6/8-seat hull targets, visiting/human-seeking authority and Captain's
+lack of a private map. Simple Comms prioritises conversation/requests; later
+middle/detailed electronic-operation controls do not become16 prerequisites.
+
+## Extend actual owners
+
+Current `console/comms/server.rs` applies admitted hails/replies and publishes the
+ship audience; `console/comms/inbox.rs` owns chronological messages/read state.
+`comms/server.rs`, `range.rs` and `roster.rs` own endpoints/reach; `scripted.rs`
+and World `comms/content.rs` retain authored dialogue and pending opens.
+`recipients.rs` already resolves addressed audiences. Extend these owners and
+their existing snapshot continuation rather than adding a second inbox or
+scenario engine. An equipment/channel ledger may be a new leaf of this same
+Comms owner; it must not shadow existing message/thread/decision state.
+
+Model owns closed channel/request/receipt/protection vocabulary and DTOs.
+Gameplay owns pure link/order/decoding rules and per-System tree bindings.
+World owns authored dialogue, actor objectives and content-specific effects;
+Session owns participation/admission. Simulation joins actual equipment,
+resources, fields, terrain and recipients without sibling-domain imports.
+Browser controls render permitted projections and emit ordinary correlated
+System commands. The host composes existing Phoenix transport; it does not
+interpret player prose as structured machinery commands.
+
+Migrate existing hail, reply, addressed script dialogue and shared14 information
+links first with equivalent behaviour. Preserve explicit synthetic narrative/GM
+delivery separately from physically emitted traffic; it must not manufacture a
+physical emitter or universal link bypass for ordinary requests.
+
+## Channel, evidence and delivery contract
+
+Each transmission has one stable causal identity, actual issuing endpoint/System,
+origin audience/channel, emission tick, immutable content/protection and optional
+structured request. Copies retain original identity, source and observation time.
+Private routing IDs are not automatically public identities; communicate only
+permitted endpoint labels/contact references and held payload evidence. A relay
+cannot upgrade a claim to observation or turn decoding into physical identity.
+
+Author supported channels/security and actual transceiver/listener/decoder/relay
+capabilities on existing Systems, with real energy, condition, placement and
+Console scope. First consumers may reuse the existing Comms System; distinct
+fitted instruments require their own actual owners, not virtual claimable gear.
+Physical sampling uses canonical position, existing signal-path attenuation and
+terrain tests. Every hop checks both endpoints' current operability, reach,
+compatible channel/protection and permissions. Conceal/deliberate disclosure
+retain their relevant current observation rules; a known endpoint does not grant
+its private scene state. Central host knowledge is not receipt evidence.
+
+Routing chooses a deterministic viable equipment-backed path, with stable tie
+breaking and cycle prevention. Retry pending supported traffic when paths change;
+do not mint duplicate deliveries or side effects. Relay forwarding preserves
+origin/security and does not expose protected contents to a relay without actual
+reception/decoding permission. Technical payload bounds are validation limits,
+not a simulated per-second bandwidth pool. Resource payment is actual operation
+of equipment/work, never message-volume rationing.
+
+Listening coverage limits which simultaneous signals/channels/areas an instrument
+can acquire, not how many messages its inbox can hold. Unsupported/ciphertext
+findings remain dated evidence. Decode only captured material under its authored
+capability/key policy and paid work. New keys can enable retained captured work;
+they cannot recover traffic never received. Specify tuning with the first real
+equipment and mark it provisional; do not invent a universal decode delay here.
+
+Human text uses the same channel eligibility/history as AI text. Human media is
+an explicitly selected live conversation using the existing host/session and
+Phoenix connection architecture; microphone/camera consent remains local. Signal
+loss ends/pauses actual media delivery without erasing text/history. Do not save
+media streams or replay camera/microphone permissions on restore. Media focus is
+presentation intent, not authority over recipient Systems. Any necessary media
+transport envelope must be reviewed against current Phoenix capabilities before
+implementation; it cannot silently add another broker, authority or gameplay bus.
+
+## Structured requests, decisions and receipts
+
+Use one closed request definition per supported real action. Initial verbs reuse
+existing hold/divert/assist/retreat or report consumers where actually supported;
+do not expose an action without an ordinary receiving consumer. Each definition
+declares parameters, eligible audience, validity, supersession scope and actual
+receiving owner. Content-specific surrender terms remain separate authored work.
+
+On send, resolve fixed audience membership deterministically once and create
+separate recipient envelopes/outcomes. Later faction/roster changes cannot rewrite
+old audiences. A fleet send does not disclose hidden members or readiness. Each
+receiver rechecks current authority, willingness, objectives, knowledge, relevant
+reading time and feasibility before accepting. Human-held authority requires the
+normal human decision; an AI recipient uses its ordinary individual System tree.
+Accepting a request may set permitted local intent, never bypass real jobs,
+resources, access, protected choices or another human's controls.
+
+Persist origin request ID, recipient, issuing sequence, known supersession scope,
+emission tick and authored expiry/persistence. Newer intent supersedes only where
+it has arrived and the scope/version is known. Reject duplicate/reordered older
+effects idempotently. An unseen replacement/cancellation cannot alter remote
+work. Expiry applies to undelivered/unaccepted intent; already accepted onboard
+work continues under its existing rules on link loss. A durable mission order
+can explicitly persist; players need not choose timeout numbers for every send.
+
+Keep these outcomes separate in ordinary records:
+
+1. Local pending/sent/expired facts describe the sender's own queue.
+2. Delivery receipt means the recipient accepted the envelope, not interpreted it.
+3. Reading/interpretation is recipient-owned progress, using authored semantic
+   ticks and existing per-System reading/tree continuation.
+4. Accepted/refused is the recipient's dated decision with a supported reason.
+5. Completion/failure is a later actual consumer report or observation.
+
+Return each receipt through a currently viable permitted link; retain pending
+return information across outages. Missing receipt leaves remote state unconfirmed,
+including where the recipient already acted. Transport acknowledgements, local
+timeouts and host-private job state cannot substitute. Receipt replay never repeats
+acceptance or completion effects. Group displays retain per-recipient outcomes.
+
+## Ordered implementation and parallel seams
+
+1. **Shared threads and equipment links.** Preserve actual current hails/dialogue;
+   add human text and one AI generic request to a real existing recipient. Prove
+   concurrent plot/generic threads, dated history, explicit audience and field/
+   terrain/range failure. Consolidate the current two Comms policy entry points
+   under one existing per-System tree evaluation, not two competing controllers.
+2. **Requests and returned receipts.** Exercise one real consumer, ordinary Human
+   acceptance/refusal and delegated AI with authored reading time, pending expiry,
+   known supersession and asymmetric return loss. Expose shared status/feedback.
+3. **Public/protected traffic and decoding.** Author actual finite coverage,
+   compatible protected channels, a captured undecodable transmission and a real
+   key/capability-assisted case; test player text with the same rules.
+4. **Relay and human media.** A real powered relay restores a blocked route; loss
+   stops new delivery without undoing accepted work. Exercise text plus selected
+   audio/video focus using supported current connections and actual permissions.
+5. **Shipped integration and actor knowledge.** Migrate authored/NPC/PC/GM/thread
+   routes without plot regressions; show contextual willingness and behavioural
+   surrender without inventing capture or an omniscient faction response.
+
+An integrated16 channel/link/request consumer and fixed shared contract unblock17
+electronic operations and18 formation delivery before16's full exit.19 later uses
+the same remote order/receipt/link-loss contract; no temporary craft controller.
+20/21/22 may add real action adapters without changing Comms into a planner.
+Coordinate Model dispatch, central schedules, snapshot schema/digest and shared
+Workshop wiring through the integrator. Fix explicit same-tick sample/send/
+deliver/read/decide/receipt/publication edges in code; Workshop does not schedule
+processors. Existing AI cadence and one controller per actual System remain.
+
+## Authoring, continuation and exit evidence
+
+Workshop must add/edit/remove supported channel, coverage, protection/key,
+request validity and relay capabilities through accepted source/history, with
+strict finite/closed validation, includes/materialisation, Preview and actual Test.
+World scripts author dialogue/public traffic/contextual request policies and known
+relationship/commitment outcomes through existing effects; no embedded arbitrary
+runtime program or universal negotiation planner.
+
+Capture canonical envelopes/order frontiers, recipient decisions, pending return
+receipts, captured evidence, paid decode/reading work, held keys and actual dated
+trust events in their owners. Derived route/reach/presentation caches rebuild
+before first command after restore. Preserve queue order and per-recipient audience.
+Full-candidate preflight validates owners, channels/scopes, sequences/deduplication,
+time/expiry/evidence/work frontiers and immutable capability bindings before any
+write, including materialised/missing actors. Versions change coherently with the
+integrator; old incompatible saves/packs are refused or explicitly converted.
+
+Required proof includes actual Human/AI same-command paths; no guessed hidden
+recipient/action; duplicate/reordered/expired request refusal; asymmetric links;
+relay cycles/ties/loss; captured-versus-never-received decoding; permissions/key
+changes; concurrent threads and protected choices; accepted work after link loss;
+and receipt/knowledge distinctions. Save paid reading/decoding and pending orders/
+receipts, JSON-restore fresh hosts and compare complete captures/digests for at
+least360 subsequent fixed steps; prove two peers with different LocalShips agree.
+Tampered candidate owners/scopes/clocks/outcomes must refuse without live writes.
+
+Record authored corpus/Workshop round trips, native renderer-independent owner
+tests, built browser text/media journeys, unchanged networking/layer checks and
+appropriate activity/performance comparisons. Test2/4/6/8-human layouts and
+delegation, simultaneous conversation/other duties and known overload. Automated
+or source-only proof cannot claim physical-device/media or human workload
+acceptance. Initial16 integration is not its verified exit, nor completion of17–24.

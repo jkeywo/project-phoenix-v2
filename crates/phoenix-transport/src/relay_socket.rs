@@ -50,7 +50,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::sync::{mpsc, Arc};
 
-use crate::socket::{RelaySocket, RelaySocketEvent};
+use crate::socket::{IngressClass, IngressClassifier, RelaySocket, RelaySocketEvent};
 
 /// A `tungstenite` client socket, pumped by a reader thread and a writer thread.
 pub struct WsRelaySocket {
@@ -58,8 +58,9 @@ pub struct WsRelaySocket {
     /// resource and every resource must be, while `mpsc::Receiver` is `Send`
     /// and not `Sync`. Nothing ever contends for it — the only reader is
     /// `poll(&mut self)`, which takes it with `get_mut` and never locks.
-    inbound: std::sync::Mutex<Receiver<RelaySocketEvent>>,
-    outbound: Sender<String>,
+    inbound: std::sync::Mutex<Receiver<QueuedRelayEvent>>,
+    ingress: Arc<IngressGate>,
+    outbound: Sender<QueuedText>,
     open: Arc<AtomicBool>,
     /// Bytes handed to the writer thread and not yet written. The backpressure
     /// signal `RelayTransport` sheds snapshot frames against.
@@ -159,11 +160,12 @@ impl WsRelaySocket {
         // accept it.
         let socket = dial(&url, origin)?;
 
-        let (inbound_tx, inbound_rx) = mpsc::channel::<RelaySocketEvent>();
-        let (outbound_tx, outbound_rx) = mpsc::channel::<String>();
+        let (inbound_tx, inbound_rx) = mpsc::channel::<QueuedRelayEvent>();
+        let (outbound_tx, outbound_rx) = mpsc::channel::<QueuedText>();
         let open = Arc::new(AtomicBool::new(true));
         let queued = Arc::new(AtomicUsize::new(0));
         let shutdown = Arc::new(AtomicBool::new(false));
+        let ingress = Arc::new(IngressGate::default());
 
         // One thread owns the socket, because `tungstenite`'s is not `Sync` and
         // splitting it would need a lock held across a blocking read. It
@@ -172,6 +174,7 @@ impl WsRelaySocket {
             url,
             origin: origin.to_string(),
             inbound: inbound_tx,
+            ingress: Arc::clone(&ingress),
             outbound: outbound_rx,
             open: Arc::clone(&open),
             queued: Arc::clone(&queued),
@@ -186,6 +189,7 @@ impl WsRelaySocket {
 
         Ok(Self {
             inbound: std::sync::Mutex::new(inbound_rx),
+            ingress,
             outbound: outbound_tx,
             open,
             queued,
@@ -240,8 +244,9 @@ enum PumpEnd {
 struct Supervisor {
     url: String,
     origin: String,
-    inbound: Sender<RelaySocketEvent>,
-    outbound: Receiver<String>,
+    inbound: Sender<QueuedRelayEvent>,
+    ingress: Arc<IngressGate>,
+    outbound: Receiver<QueuedText>,
     open: Arc<AtomicBool>,
     queued: Arc<AtomicUsize>,
     shutdown: Arc<AtomicBool>,
@@ -254,19 +259,20 @@ impl Supervisor {
         loop {
             if let Some(s) = socket.take() {
                 self.open.store(true, Ordering::Relaxed);
-                if self.inbound.send(RelaySocketEvent::Opened).is_err() {
+                if !self.ingress.emit(&self.inbound, RelaySocketEvent::Opened) {
                     return;
                 }
                 attempt = 0;
                 let end = pump(
                     s,
                     &self.inbound,
+                    &self.ingress,
                     &self.outbound,
                     &self.queued,
                     &self.shutdown,
                 );
                 self.open.store(false, Ordering::Relaxed);
-                if self.inbound.send(RelaySocketEvent::Closed).is_err() {
+                if !self.ingress.emit(&self.inbound, RelaySocketEvent::Closed) {
                     return;
                 }
                 if end == PumpEnd::Finished {
@@ -310,8 +316,9 @@ const PUMP_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(
 
 fn pump(
     mut socket: WsStream,
-    inbound: &Sender<RelaySocketEvent>,
-    outbound: &Receiver<String>,
+    inbound: &Sender<QueuedRelayEvent>,
+    ingress: &IngressGate,
+    outbound: &Receiver<QueuedText>,
     queued: &Arc<AtomicUsize>,
     shutdown: &Arc<AtomicBool>,
 ) -> PumpEnd {
@@ -323,40 +330,36 @@ fn pump(
         let _ = tls.get_ref().set_read_timeout(Some(PUMP_READ_TIMEOUT));
     }
 
+    let mut pending = std::collections::VecDeque::new();
     loop {
         if shutdown.load(Ordering::Relaxed) {
             let _ = socket.close(None);
             return PumpEnd::Finished;
         }
-        // Everything waiting to go out, before blocking on a read.
+        // Re-check newly queued ordinary work before choosing EACH optional
+        // packet, rather than holding a media batch ahead of later commands.
         loop {
-            match outbound.try_recv() {
-                Ok(text) => {
-                    let len = text.len();
-                    if socket
-                        .send(tungstenite::Message::Text(text.into()))
-                        .is_err()
-                    {
-                        return PumpEnd::SocketDied;
-                    }
-                    queued.fetch_sub(len.min(queued.load(Ordering::Relaxed)), Ordering::Relaxed);
-                }
-                Err(TryRecvError::Empty) => break,
-                // The transport was dropped; nothing more will ever be sent,
-                // so there is nothing left to redial FOR.
-                Err(TryRecvError::Disconnected) => {
+            let (next, disconnected) = outbound_next(outbound, &mut pending);
+            let Some(text) = next else {
+                if disconnected {
                     let _ = socket.close(None);
                     return PumpEnd::Finished;
                 }
+                break;
+            };
+            let len = text.len();
+            if socket
+                .send(tungstenite::Message::Text(text.into()))
+                .is_err()
+            {
+                return PumpEnd::SocketDied;
             }
+            queued.fetch_sub(len.min(queued.load(Ordering::Relaxed)), Ordering::Relaxed);
         }
 
         match socket.read() {
             Ok(tungstenite::Message::Text(text)) => {
-                if inbound
-                    .send(RelaySocketEvent::Text(text.to_string()))
-                    .is_err()
-                {
+                if !ingress.emit(inbound, RelaySocketEvent::Text(text.to_string())) {
                     return PumpEnd::Finished;
                 }
             }
@@ -375,6 +378,13 @@ fn pump(
 }
 
 impl RelaySocket for WsRelaySocket {
+    fn set_ingress_classifier(&mut self, classifier: IngressClassifier) {
+        *self
+            .ingress
+            .classifier
+            .lock()
+            .expect("ingress classifier poisoned") = Some(classifier);
+    }
     fn poll(&mut self) -> Vec<String> {
         self.poll_events()
             .into_iter()
@@ -390,7 +400,10 @@ impl RelaySocket for WsRelaySocket {
         let inbound = self.inbound.get_mut().expect("relay inbox poisoned");
         loop {
             match inbound.try_recv() {
-                Ok(text) => out.push(text),
+                Ok(item) => {
+                    self.ingress.release(&item);
+                    out.push(item.event);
+                }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     self.open.store(false, Ordering::Relaxed);
@@ -403,11 +416,47 @@ impl RelaySocket for WsRelaySocket {
 
     fn send(&mut self, text: String) {
         self.queued.fetch_add(text.len(), Ordering::Relaxed);
-        if self.outbound.send(text).is_err() {
+        if self
+            .outbound
+            .send(QueuedText {
+                text,
+                optional: false,
+            })
+            .is_err()
+        {
             self.open.store(false, Ordering::Relaxed);
         }
     }
 
+    fn snapshot_only_supported(&self) -> bool {
+        self.is_open()
+    }
+    fn try_send_snapshot(&mut self, text: String, max_buffered_bytes: usize) -> bool {
+        if !self.is_open()
+            || self
+                .queued
+                .load(Ordering::Relaxed)
+                .saturating_add(text.len())
+                > max_buffered_bytes
+        {
+            return false;
+        }
+        let len = text.len();
+        self.queued.fetch_add(len, Ordering::Relaxed);
+        if self
+            .outbound
+            .send(QueuedText {
+                text,
+                optional: true,
+            })
+            .is_err()
+        {
+            self.queued.fetch_sub(len, Ordering::Relaxed);
+            self.open.store(false, Ordering::Relaxed);
+            return false;
+        }
+        true
+    }
     fn buffered_bytes(&self) -> usize {
         self.queued.load(Ordering::Relaxed)
     }
@@ -419,9 +468,87 @@ impl RelaySocket for WsRelaySocket {
     fn close(&mut self) {
         self.shutdown.store(true, Ordering::Relaxed);
         self.open.store(false, Ordering::Relaxed);
+        let inbound = self.inbound.get_mut().expect("relay inbox poisoned");
+        while let Ok(item) = inbound.try_recv() {
+            self.ingress.release(&item);
+        }
     }
 }
 
 #[cfg(test)]
 #[path = "relay_socket_tests.rs"]
 mod tests;
+
+#[derive(Debug, PartialEq, Eq)]
+struct QueuedText {
+    text: String,
+    optional: bool,
+}
+fn outbound_next(
+    outbound: &Receiver<QueuedText>,
+    pending: &mut std::collections::VecDeque<QueuedText>,
+) -> (Option<String>, bool) {
+    let mut disconnected = false;
+    loop {
+        match outbound.try_recv() {
+            Ok(item) => pending.push_back(item),
+            Err(TryRecvError::Empty) => break,
+            Err(TryRecvError::Disconnected) => {
+                disconnected = true;
+                break;
+            }
+        }
+    }
+    let index = pending.iter().position(|item| !item.optional).unwrap_or(0);
+    let next = pending.remove(index).map(|item| item.text);
+    let finished = next.is_none() && disconnected;
+    (next, finished)
+}
+
+struct QueuedRelayEvent {
+    event: RelaySocketEvent,
+    scoped: bool,
+}
+#[derive(Default)]
+struct IngressGate {
+    classifier: std::sync::Mutex<Option<IngressClassifier>>,
+    scoped: AtomicUsize,
+}
+impl IngressGate {
+    fn emit(&self, sender: &Sender<QueuedRelayEvent>, event: RelaySocketEvent) -> bool {
+        let classification = match &event {
+            RelaySocketEvent::Text(text) => self
+                .classifier
+                .lock()
+                .expect("ingress classifier poisoned")
+                .map_or(IngressClass::Ordinary, |classify| classify(text)),
+            _ => IngressClass::Ordinary,
+        };
+        let scoped = match classification {
+            IngressClass::Refuse => return true,
+            IngressClass::Ordinary => false,
+            IngressClass::Scoped => {
+                if self
+                    .scoped
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+                        (count < 64).then_some(count + 1)
+                    })
+                    .is_err()
+                {
+                    return true;
+                }
+                true
+            }
+        };
+        if let Err(error) = sender.send(QueuedRelayEvent { event, scoped }) {
+            self.release(&error.0);
+            return false;
+        }
+        true
+    }
+    fn release(&self, item: &QueuedRelayEvent) {
+        if item.scoped {
+            self.scoped.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+}

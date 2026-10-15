@@ -75,6 +75,8 @@ pub struct JoinCode {
 /// rather than shedding a snapshot.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RelayLimits {
+    #[serde(default)]
+    pub snapshot_drop_only: bool,
     #[serde(default = "default_max_frame_bytes")]
     pub max_frame_bytes: usize,
     #[serde(default = "default_max_send_buffer_bytes")]
@@ -92,6 +94,7 @@ fn default_max_send_buffer_bytes() -> usize {
 impl Default for RelayLimits {
     fn default() -> Self {
         Self {
+            snapshot_drop_only: false,
             max_frame_bytes: default_max_frame_bytes(),
             max_send_buffer_bytes: default_max_send_buffer_bytes(),
         }
@@ -133,6 +136,8 @@ impl CodeField {
 /// about what is inside it.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct RendezvousFrame {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drop_only: Option<bool>,
     pub v: u32,
     #[serde(rename = "type")]
     pub kind: String,

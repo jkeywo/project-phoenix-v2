@@ -79,3 +79,27 @@ hook requirements. Actual two-host/two-human direct and native/fallback calls
 with simultaneous commands and gameplay snapshots are required before claiming
 the full media exit. Shared Snapshot pressure, pane semantics and authenticated
 mesh routing must be measured rather than inferred from a same-host demo.
+
+
+## Negotiated drop-only Snapshot queue policy
+
+The existing relay advertises `limits.snapshot_drop_only = true` only when its
+ordinary Snapshot mailbox implements optional drop-only work. The same existing
+relay frame can then carry `drop_only: true` with class `snapshot`. A full mailbox
+drops an incoming optional frame. An ordinary snapshot displaces optional work
+first and is drained before all queued optional work, across senders. There is
+no third delivery class, retained stream or media-aware service parser. Older or
+unadvertised policies refuse optional sends; ordinary delivery is unchanged.
+Deploy the service capability before enabling relayed media clients.
+
+Native sockets expose an opt-in bounded send against the actual queue/open
+state. Native bridge callers with no synchronous backlog must use an explicit
+bounded staging/ready/receipt seam, rather than claiming a zero backlog. The
+same physical links remain authoritative for source connection incarnation.
+Generic scoped ingress keeps that incarnation for selected ephemeral inputs;
+unknown adapters refuse them. Full encoded media bounds apply before general
+browser/native staging, including reordered, escaped and malformed envelopes.
+
+Root delegated media-only central integration to this lane on 2026-10-15;
+root retains final compatibility versions, state census and integrated native
+validation. The native fleet bridge is an independent coordinated donor.

@@ -607,3 +607,24 @@ describe('what a host says it can answer on', () => {
     expect(h.last('peer-1', 'joined').transports).toEqual(['webrtc', 'ws-relay']);
   });
 });
+
+describe('generic drop-only Snapshot queue policy',()=>{
+  it('keeps ordinary snapshots and drains them ahead of optional work across senders',()=>{
+    const hub=createRelayHub({limits:{max_relay_queue_snapshot:2,max_relay_frame_bytes:64}});
+    hub.attach('receiver','record');
+    expect(hub.enqueue('receiver','source','snapshot',{id:'optional-1'},'one',true).dropped).toBe(0);
+    expect(hub.enqueue('receiver','source','snapshot',{id:'game-1'},'two').dropped).toBe(0);
+    expect(hub.enqueue('receiver','source','snapshot',{id:'optional-refused'},'three',true).dropped).toBe(1);
+    // The full queue evicts optional work, preserving the older game state.
+    expect(hub.enqueue('receiver','source','snapshot',{id:'game-2'},'four').dropped).toBe(1);
+    hub.enqueue('receiver','other','snapshot',{id:'other-optional'},'five',true);
+    hub.enqueue('receiver','third','snapshot',{id:'other-game'},'six');
+    hub.setWritable('receiver',true);
+    const frames=hub.drain('receiver');
+    expect(frames.map(frame=>frame.id)).toEqual(['game-1','game-2','other-game','other-optional']);
+  });
+  it('keeps exactly two classes and refuses optional policy on Reliable',()=>{
+    const hub=createRelayHub();hub.attach('receiver','record');
+    expect(hub.enqueue('receiver','source','reliable',{},'command',true)).toEqual({ok:false,reason:'malformed'});
+  });
+});

@@ -68,16 +68,17 @@ fn lifecycle_edges_survive_a_redial_that_finishes_before_poll() {
     let (outbound, _send_queue) = mpsc::channel();
     let mut socket = WsRelaySocket {
         inbound: std::sync::Mutex::new(receive),
+        ingress: Arc::new(IngressGate::default()),
         outbound,
         open: Arc::new(AtomicBool::new(true)),
         queued: Arc::new(AtomicUsize::new(0)),
         shutdown: Arc::new(AtomicBool::new(false)),
     };
-    inbound.send(RelaySocketEvent::Closed).unwrap();
-    inbound.send(RelaySocketEvent::Opened).unwrap();
-    inbound
-        .send(RelaySocketEvent::Text("ready".into()))
-        .unwrap();
+    socket.ingress.emit(&inbound, RelaySocketEvent::Closed);
+    socket.ingress.emit(&inbound, RelaySocketEvent::Opened);
+    socket
+        .ingress
+        .emit(&inbound, RelaySocketEvent::Text("ready".into()));
     assert!(socket.is_open());
     assert_eq!(
         socket.poll_events(),
@@ -88,4 +89,107 @@ fn lifecycle_edges_survive_a_redial_that_finishes_before_poll() {
         ]
     );
     assert!(socket.poll_events().is_empty());
+}
+
+#[test]
+fn ordinary_work_arriving_between_optional_sends_is_next_eligible_packet() {
+    let (send, receive) = mpsc::channel();
+    let mut pending = std::collections::VecDeque::new();
+    send.send(QueuedText {
+        text: "optional-1".into(),
+        optional: true,
+    })
+    .unwrap();
+    send.send(QueuedText {
+        text: "optional-2".into(),
+        optional: true,
+    })
+    .unwrap();
+    assert_eq!(
+        outbound_next(&receive, &mut pending),
+        (Some("optional-1".into()), false)
+    );
+    send.send(QueuedText {
+        text: "late-command".into(),
+        optional: false,
+    })
+    .unwrap();
+    send.send(QueuedText {
+        text: "late-game-snapshot".into(),
+        optional: false,
+    })
+    .unwrap();
+    assert_eq!(
+        outbound_next(&receive, &mut pending),
+        (Some("late-command".into()), false)
+    );
+    assert_eq!(
+        outbound_next(&receive, &mut pending),
+        (Some("late-game-snapshot".into()), false)
+    );
+    assert_eq!(
+        outbound_next(&receive, &mut pending),
+        (Some("optional-2".into()), false)
+    );
+}
+#[test]
+fn optional_socket_send_uses_actual_open_state_and_queued_bytes() {
+    let (_in_tx, in_rx) = mpsc::channel();
+    let (out_tx, out_rx) = mpsc::channel();
+    let mut socket = WsRelaySocket {
+        inbound: std::sync::Mutex::new(in_rx),
+        ingress: Arc::new(IngressGate::default()),
+        outbound: out_tx,
+        open: Arc::new(AtomicBool::new(true)),
+        queued: Arc::new(AtomicUsize::new(4)),
+        shutdown: Arc::new(AtomicBool::new(false)),
+    };
+    assert!(!socket.try_send_snapshot("12345".into(), 8));
+    assert!(socket.try_send_snapshot("1234".into(), 8));
+    assert_eq!(socket.buffered_bytes(), 8);
+    assert_eq!(
+        out_rx.try_recv().unwrap(),
+        QueuedText {
+            text: "1234".into(),
+            optional: true
+        }
+    );
+    socket.open.store(false, Ordering::Relaxed);
+    assert!(!socket.snapshot_only_supported());
+    assert!(!socket.try_send_snapshot("x".into(), 100));
+}
+
+#[test]
+fn genuine_scoped_flood_is_bounded_before_inbound_channel_and_ordinary_work_survives() {
+    fn classify(raw: &str) -> IngressClass {
+        match raw {
+            "media" => IngressClass::Scoped,
+            "invalid-media" => IngressClass::Refuse,
+            _ => IngressClass::Ordinary,
+        }
+    }
+    let gate = IngressGate::default();
+    *gate.classifier.lock().unwrap() = Some(classify);
+    let (send, receive) = mpsc::channel();
+    for _ in 0..1000 {
+        assert!(gate.emit(&send, RelaySocketEvent::Text("media".into())));
+    }
+    assert_eq!(gate.scoped.load(Ordering::Relaxed), 64);
+    gate.emit(&send, RelaySocketEvent::Text("invalid-media".into()));
+    gate.emit(&send, RelaySocketEvent::Closed);
+    gate.emit(&send, RelaySocketEvent::Opened);
+    gate.emit(&send, RelaySocketEvent::Text("Identify".into()));
+    gate.emit(&send, RelaySocketEvent::Text("command".into()));
+    let mut events = Vec::new();
+    for item in receive.try_iter() {
+        gate.release(&item);
+        events.push(item.event);
+    }
+    assert_eq!(events.len(), 68);
+    assert_eq!(gate.scoped.load(Ordering::Relaxed), 0);
+    assert!(matches!(&events[66],RelaySocketEvent::Text(text) if text=="Identify"));
+    assert!(matches!(&events[67],RelaySocketEvent::Text(text) if text=="command"));
+    drop(receive);
+    assert!(!gate.emit(&send, RelaySocketEvent::Text("media".into())));
+    assert_eq!(gate.scoped.load(Ordering::Relaxed), 0);
 }

@@ -37,6 +37,7 @@ struct FakeSocket {
     outbound: Arc<Mutex<Vec<String>>>,
     buffered: Arc<Mutex<usize>>,
     open: Arc<Mutex<bool>>,
+    classifier: Arc<Mutex<Option<phoenix_transport::socket::IngressClassifier>>>,
 }
 
 impl FakeSocket {
@@ -79,6 +80,9 @@ impl FakeSocket {
 }
 
 impl RelaySocket for FakeSocket {
+    fn set_ingress_classifier(&mut self, classifier: phoenix_transport::socket::IngressClassifier) {
+        *self.classifier.lock().unwrap() = Some(classifier);
+    }
     fn poll_events(&mut self) -> Vec<phoenix_transport::socket::RelaySocketEvent> {
         let mut events: Vec<_> = self.lifecycle.lock().unwrap().drain(..).collect();
         events.extend(
@@ -97,6 +101,17 @@ impl RelaySocket for FakeSocket {
         self.outbound.lock().unwrap().push(text);
     }
 
+    fn snapshot_only_supported(&self) -> bool {
+        self.is_open()
+    }
+    fn try_send_snapshot(&mut self, text: String, max_buffered_bytes: usize) -> bool {
+        if !self.is_open() || self.buffered_bytes().saturating_add(text.len()) > max_buffered_bytes
+        {
+            return false;
+        }
+        self.send(text);
+        true
+    }
     fn buffered_bytes(&self) -> usize {
         *self.buffered.lock().unwrap()
     }
@@ -539,6 +554,7 @@ fn the_service_s_authored_limits_beat_this_builds_defaults() {
     socket.arrive(&RendezvousFrame {
         peer: Some("peer-1".to_string()),
         limits: Some(RelayLimits {
+            snapshot_drop_only: false,
             max_frame_bytes: 8,
             max_send_buffer_bytes: 16,
         }),
@@ -848,6 +864,7 @@ fn an_oversized_reliable_message_fails_the_link_rather_than_vanishing() {
     socket.arrive(&RendezvousFrame {
         peer: Some("peer-2".to_string()),
         limits: Some(RelayLimits {
+            snapshot_drop_only: false,
             max_frame_bytes: 4,
             max_send_buffer_bytes: 262_144,
         }),
@@ -1257,4 +1274,119 @@ fn a_complete_redial_between_polls_registers_again_and_retires_old_crew() {
         1
     );
     assert!(transport.poll().is_empty());
+}
+
+#[test]
+fn ephemeral_ingress_keeps_actual_incarnation_across_same_token_replacement() {
+    let (mut host, socket) = transport();
+    admit(&mut host, &socket, "old-peer", "actual-operator");
+    let old = host.current_connection("actual-operator").unwrap();
+    socket.arrive(&relayed(
+        "old-peer",
+        r#"{"type":"CommsMediaStart","data":{"call_origin_id":"accepted-call"}}"#,
+    ));
+    let frames = host.poll();
+    assert!(frames.iter().any(|event|matches!(event,TransportEvent::ReceivedScoped{token,connection,msg:ClientMessage::CommsMediaStart(_)} if token=="actual-operator"&&*connection==old)));
+    admit(&mut host, &socket, "new-peer", "actual-operator");
+    assert_ne!(host.current_connection("actual-operator"), Some(old));
+    socket.arrive(&relayed(
+        "old-peer",
+        r#"{"type":"CommsMediaStart","data":{"call_origin_id":"accepted-call"}}"#,
+    ));
+    assert!(!host
+        .poll()
+        .iter()
+        .any(|event| matches!(event, TransportEvent::ReceivedScoped { .. })));
+}
+
+#[test]
+fn optional_dispatch_bounds_the_escaping_expanded_full_relay_envelope() {
+    let (mut host, socket) = transport();
+    admit(&mut host, &socket, "peer", "crew");
+    let message = ServerMessage::NameChanged {
+        token: "crew".into(),
+        name: "\\\"".repeat(100),
+    };
+    let payload = JsonCodec.encode_server(&message).unwrap();
+    let mut wire = RendezvousFrame::relay("peer", CLASS_SNAPSHOT, payload.clone());
+    wire.drop_only = Some(true);
+    let wire_len = encode_rendezvous_frame(&wire).unwrap().len();
+    assert!(wire_len > payload.len());
+    let target = Target::Token("crew".into());
+    let bounds = phoenix_transport::SnapshotBounds {
+        max_bytes: payload.len(),
+        max_buffered_bytes: wire_len,
+    };
+    // An older relay advertises no queue policy.
+    assert!(!host.dispatch_snapshot_only(&target, &message, bounds));
+    socket.arrive(&RendezvousFrame {
+        limits: Some(RelayLimits {
+            snapshot_drop_only: true,
+            max_frame_bytes: payload.len(),
+            ..Default::default()
+        }),
+        ..peer_joined("peer")
+    });
+    host.poll();
+    assert!(!host.dispatch_snapshot_only(&target, &message, bounds));
+    socket.arrive(&RendezvousFrame {
+        limits: Some(RelayLimits {
+            snapshot_drop_only: true,
+            max_frame_bytes: wire_len,
+            ..Default::default()
+        }),
+        ..peer_joined("peer")
+    });
+    host.poll();
+    assert!(!host.dispatch_snapshot_only(
+        &target,
+        &message,
+        phoenix_transport::SnapshotBounds {
+            max_buffered_bytes: wire_len - 1,
+            ..bounds
+        }
+    ));
+    assert!(host.dispatch_snapshot_only(&target, &message, bounds));
+    assert_eq!(
+        socket.sent_of("relay").last().unwrap().drop_only,
+        Some(true)
+    );
+}
+
+#[test]
+fn actual_profile_classifier_rejects_malformed_media_before_the_socket_queue_without_trusting_flags(
+) {
+    use phoenix_transport::socket::IngressClass;
+    let (_host, socket) = transport();
+    let classify = socket.classifier.lock().unwrap().unwrap();
+    let valid_start = encode_rendezvous_frame(&relayed(
+        "peer",
+        r#"{"type":"CommsMediaStart","data":{"call_origin_id":"actual-call"}}"#,
+    ))
+    .unwrap();
+    assert_eq!(classify(&valid_start), IngressClass::Scoped);
+    let invalid = encode_rendezvous_frame(&relayed(
+        "peer",
+        r#"{"data":{"data":"bad"},"type":"CommsMediaFrame"}"#,
+    ))
+    .unwrap();
+    assert_eq!(classify(&invalid), IngressClass::Refuse);
+    let large = format!(
+        r#"{{"data":{{"data":"{}"}},"type":"CommsMediaFrame"}}"#,
+        "x".repeat(20481)
+    );
+    assert_eq!(
+        classify(&encode_rendezvous_frame(&relayed("peer", &large)).unwrap()),
+        IngressClass::Refuse
+    );
+    let ordinary = encode_rendezvous_frame(&relayed(
+        "peer",
+        r#"{"type":"Identify","data":{"token":"ordinary","name":"Human"}}"#,
+    ))
+    .unwrap();
+    assert_eq!(classify(&ordinary), IngressClass::Ordinary);
+    assert_eq!(
+        classify(&encode_rendezvous_frame(&frame("ready")).unwrap()),
+        IngressClass::Ordinary
+    );
 }

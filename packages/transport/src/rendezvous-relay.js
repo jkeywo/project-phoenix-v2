@@ -81,6 +81,7 @@ export const RELAY_SNAPSHOT_LABEL = SHARED_SNAPSHOT;
  * stays BELOW the authored `max_relay_frame_bytes` rather than tracking it.
  */
 export const RELAY_LIMIT_DEFAULTS = {
+  snapshotDropOnly: false,
   maxFrameBytes: 65536,
   maxSendBufferBytes: 262144,
 };
@@ -93,6 +94,7 @@ export const RELAY_LIMIT_DEFAULTS = {
 export function relayLimitsFromFrame(limits) {
   const l = limits || {};
   return {
+    snapshotDropOnly: l.snapshot_drop_only === true,
     maxFrameBytes: l.max_frame_bytes || RELAY_LIMIT_DEFAULTS.maxFrameBytes,
     maxSendBufferBytes: l.max_send_buffer_bytes || RELAY_LIMIT_DEFAULTS.maxSendBufferBytes,
   };
@@ -118,6 +120,7 @@ export function relayLimitsFromFrame(limits) {
  */
 export function createRelayChannelPair({
   send,
+  trySendSnapshot = null,
   to = null,
   bufferedAmount = () => 0,
   writable = () => true,
@@ -153,15 +156,22 @@ export function createRelayChannelPair({
       // Same actual physical backlog used by ordinary relay shedding. Optional
       // drop-only callers must never substitute a fabricated empty buffer.
       get bufferedAmount() { return writable() ? bufferedAmount() : Infinity; },
+      get snapshotOnlySupported() {return cls === RELAY_SNAPSHOT_LABEL && bounds.snapshotDropOnly === true;},
+      sendDropOnly(payload) {return channel.send(payload, true);},
       sendByteLength(payload) {
-        return measureFrame({type: 'relay', class: cls, payload, ...(to ? {to} : {})});
+        return measureFrame({type: 'relay', class: cls, payload, drop_only: true, ...(to ? {to} : {})});
       },
+      ...(typeof trySendSnapshot === 'function' ? {trySendSnapshot(payload, packetBounds) {
+        if (!channel.snapshotOnlySupported || channel.readyState !== 'open' || !writable() || channel.sendByteLength(payload)>bounds.maxFrameBytes) return false;
+        return trySendSnapshot({type:'relay',class:cls,payload,drop_only:true,...(to?{to}:{})}, packetBounds) === true;
+      }} : {}),
       readyState: 'connecting',
       onopen: null,
       onmessage: null,
       onclose: null,
       onerror: null,
-      send(payload) {
+      send(payload, dropOnly = false) {
+        if (dropOnly && (!channel.snapshotOnlySupported || channel.sendByteLength(payload)>bounds.maxFrameBytes)) return false;
         if (channel.readyState !== 'open' || !writable()) return false;
         const text = typeof payload === 'string' ? payload : String(payload);
         // Measured by the SAME function the service measures with, so a
@@ -176,7 +186,7 @@ export function createRelayChannelPair({
           failLink('relay-too-large', relayPayloadBytes(text));
           return false;
         }
-        if (cls === RELAY_SNAPSHOT_LABEL && bufferedAmount() > bounds.maxSendBufferBytes) {
+        if (cls === RELAY_SNAPSHOT_LABEL && Number.isFinite(bufferedAmount()) && bufferedAmount() > bounds.maxSendBufferBytes) {
           // The lossy class staying lossy. Queuing this behind an existing
           // backlog is exactly the head-of-line blocking the snapshot class
           // exists to avoid, and the next tick supersedes it anyway.
@@ -184,7 +194,7 @@ export function createRelayChannelPair({
           onDegraded({ dropped, reason: 'send-buffer' });
           return false;
         }
-        return send({ type: 'relay', class: cls, payload: text, ...(to ? { to } : {}) }) !== false;
+        return send({ type: 'relay', class: cls, payload: text, ...(dropOnly ? {drop_only: true} : {}), ...(to ? { to } : {}) }) !== false;
       },
       close() {
         if (channel.readyState === 'closed') return;

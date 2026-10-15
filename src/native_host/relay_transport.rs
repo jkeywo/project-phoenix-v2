@@ -19,6 +19,9 @@ impl RelayProtocol for PhoenixProtocol {
         })
     }
     fn decode_client(payload: &str) -> Result<ClientMessage, String> {
+        if let Some(media) = crate::core::codec::bounded_media_client(payload)? {
+            return Ok(media);
+        }
         JsonCodec.decode_client(payload).map_err(|e| e.to_string())
     }
     fn identity(message: &ClientMessage) -> Option<&str> {

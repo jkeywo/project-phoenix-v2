@@ -1,3 +1,12 @@
+/// Pure application classification before a generic socket stages inbound text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IngressClass {
+    Ordinary,
+    Scoped,
+    Refuse,
+}
+pub type IngressClassifier = fn(&str) -> IngressClass;
+
 /// Socket transitions and text frames retained in arrival order.
 #[derive(Debug, PartialEq, Eq)]
 pub enum RelaySocketEvent {
@@ -16,6 +25,7 @@ pub trait RelaySocket: Send + Sync + 'static {
     /// Every text frame that has arrived since the last poll, in order.
     /// Returns empty rather than blocking when nothing has.
     fn poll(&mut self) -> Vec<String>;
+    fn set_ingress_classifier(&mut self, _classifier: IngressClassifier) {}
 
     /// Ordered lifecycle edges and frames. Redialling adapters retain edges
     /// even when an entire disconnect/reconnect occurs between game frames.
@@ -30,6 +40,13 @@ pub trait RelaySocket: Send + Sync + 'static {
     /// [`RelaySocket::is_open`] — a send that cannot happen is a dead link, not
     /// an error the simulation can act on mid-frame.
     fn send(&mut self, text: String);
+    /// Optional bounded, drop-only send. Unknown actual backlog support refuses.
+    fn snapshot_only_supported(&self) -> bool {
+        false
+    }
+    fn try_send_snapshot(&mut self, _text: String, _max_buffered_bytes: usize) -> bool {
+        false
+    }
 
     /// Bytes queued and not yet on the wire. The real backpressure signal, and
     /// the one thing that makes the snapshot class genuinely lossy over a

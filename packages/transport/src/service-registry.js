@@ -1080,6 +1080,7 @@ export function createRegistry({
       max_queue_reliable: relay.limits.maxReliable,
       max_queue_snapshot: relay.limits.maxSnapshot,
       max_send_buffer_bytes: relay.limits.maxSendBufferBytes,
+      snapshot_drop_only: true,
     };
   }
 
@@ -1101,14 +1102,15 @@ export function createRegistry({
     if (isHost && relay.keyFor(target) !== record.key) {
       return [fail(connId, 'relay', 'no-peer')];
     }
-    if (!isRelayClass(frame.class)) return [fail(connId, 'relay', 'malformed')];
+    if (!isRelayClass(frame.class) || (frame.drop_only != null && (typeof frame.drop_only !== 'boolean' || frame.class !== 'snapshot'))) return [fail(connId, 'relay', 'malformed')];
 
     const queued = relay.enqueue(target, connId, frame.class, {
       type: 'relay',
+      ...(frame.drop_only === true ? {drop_only:true} : {}),
       from: connId,
       class: frame.class,
       payload: frame.payload,
-    }, frame.payload);
+    }, frame.payload, frame.drop_only === true);
     if (!queued.ok) return [fail(connId, 'relay', queued.reason)];
 
     const frames = flushRelay(target);

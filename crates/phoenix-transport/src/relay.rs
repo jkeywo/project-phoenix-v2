@@ -135,7 +135,10 @@ pub enum RelayNotice {
 
 impl<P: RelayProtocol> RelayTransport<P> {
     /// Build a transport over `socket` and register as a host at once.
-    pub fn new(socket: impl RelaySocket, config: RelayHostConfig<P::Stamp>) -> Self {
+    pub fn new(mut socket: impl RelaySocket, config: RelayHostConfig<P::Stamp>) -> Self {
+        if P::scoped_ingress_enabled() {
+            socket.set_ingress_classifier(classify_ingress::<P>);
+        }
         Self {
             connections: ConnectionLeg::default(),
             socket: Box::new(socket),
@@ -298,7 +301,23 @@ impl<P: RelayProtocol> RelayTransport<P> {
         else {
             return;
         };
-        out.push(Event::Received { token, msg });
+        if P::scoped_ingress(&msg) {
+            if out
+                .iter()
+                .filter(|event| matches!(event, Event::ReceivedScoped { .. }))
+                .count()
+                >= 64
+            {
+                return;
+            }
+            out.push(Event::ReceivedScoped {
+                token,
+                connection: connection.incarnation,
+                msg,
+            });
+        } else {
+            out.push(Event::Received { token, msg });
+        }
     }
 
     /// Refuse this peer at the transport: tell it why in the same in-band
@@ -519,6 +538,15 @@ impl<P: RelayProtocol> Transport<P> for RelayTransport<P> {
         self.connections = ConnectionLeg::new(connections);
     }
 
+    fn current_connection(&self, token: &str) -> Option<u64> {
+        self.connections
+            .shared
+            .lock()
+            .recipients(&crate::Target::Token(token.into()))
+            .first()
+            .map(|id| id.incarnation)
+    }
+
     fn poll(&mut self) -> Vec<Event<P::Inbound>> {
         self.retire_superseded();
         let mut out = Vec::new();
@@ -657,7 +685,56 @@ impl<P: RelayProtocol> Transport<P> for RelayTransport<P> {
         }
     }
 
+    fn dispatch_snapshot_only(
+        &mut self,
+        target: &crate::Target,
+        message: &P::Outbound,
+        bounds: crate::SnapshotBounds,
+    ) -> bool {
+        if !self.socket.is_open() || !self.limits.snapshot_drop_only || bounds.max_bytes == 0 {
+            return false;
+        }
+        let Ok(payload) = P::encode_server(message) else {
+            return false;
+        };
+        if payload.len() > bounds.max_bytes || payload.len() > self.limits.max_frame_bytes {
+            return false;
+        }
+        let mut accepted = false;
+        for peer in self.audience(target) {
+            let mut frame = RendezvousFrame::relay(&peer, CLASS_SNAPSHOT, payload.clone());
+            frame.drop_only = Some(true);
+            if let Ok(text) = encode_rendezvous_frame(&frame) {
+                if text.len() > self.limits.max_frame_bytes {
+                    continue;
+                }
+                accepted |= self
+                    .socket
+                    .try_send_snapshot(text, bounds.max_buffered_bytes);
+            }
+        }
+        accepted
+    }
+
     fn name(&self) -> &'static str {
         "ws-relay"
+    }
+}
+
+fn classify_ingress<P: RelayProtocol>(raw: &str) -> crate::socket::IngressClass {
+    use crate::socket::IngressClass;
+    let Ok(frame) = decode_rendezvous_frame(raw) else {
+        return IngressClass::Refuse;
+    };
+    if frame.kind != "relay" {
+        return IngressClass::Ordinary;
+    }
+    let Some(payload) = frame.payload else {
+        return IngressClass::Refuse;
+    };
+    match P::decode_client(&payload) {
+        Ok(message) if P::scoped_ingress(&message) => IngressClass::Scoped,
+        Ok(_) => IngressClass::Ordinary,
+        Err(_) => IngressClass::Refuse,
     }
 }

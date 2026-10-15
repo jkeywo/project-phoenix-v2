@@ -269,7 +269,8 @@ export function createRelayHub({ limits } = {}) {
      *   always, and a readout showing "1" forever while hundreds are lost is
      *   worse than no readout.
      */
-    enqueue(owner, from, cls, frame, payload) {
+    enqueue(owner, from, cls, frame, payload, dropOnly = false) {
+      if (dropOnly && cls !== RELAY_SNAPSHOT) return {ok: false, reason: 'malformed'};
       if (!participants.has(owner)) return { ok: false, reason: 'not-relaying' };
       if (!isRelayClass(cls)) return { ok: false, reason: 'malformed' };
       if (relayPayloadBytes(payload) > bounds.maxFrameBytes) {
@@ -277,10 +278,16 @@ export function createRelayHub({ limits } = {}) {
       }
       const box = boxFor(owner, from);
       if (cls === RELAY_SNAPSHOT) {
-        box.snapshot.push(frame);
         let dropped = 0;
+        if (dropOnly && box.snapshot.length >= bounds.maxSnapshot) {
+          box.dropped += 1;
+          return {ok: true, dropped: 1, totalDropped: box.dropped};
+        }
+        box.snapshot.push({frame, dropOnly});
         while (box.snapshot.length > bounds.maxSnapshot) {
-          box.snapshot.shift();
+          // Ordinary work displaces optional work before older ordinary work.
+          const optional = box.snapshot.findIndex(item => item.dropOnly);
+          box.snapshot.splice(optional < 0 ? 0 : optional, 1);
           dropped += 1;
         }
         box.dropped += dropped;
@@ -327,7 +334,8 @@ export function createRelayHub({ limits } = {}) {
       const held = boxesOwnedBy(owner);
       const frames = [
         ...held.flatMap((b) => b.reliable),
-        ...held.flatMap((b) => b.snapshot),
+        ...held.flatMap((b) => b.snapshot.filter(item => !item.dropOnly).map(item => item.frame)),
+        ...held.flatMap((b) => b.snapshot.filter(item => item.dropOnly).map(item => item.frame)),
       ];
       for (const b of held) {
         b.reliable = [];

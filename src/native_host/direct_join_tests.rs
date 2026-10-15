@@ -30,6 +30,8 @@ fn budgeted_service(budgets: AdmissionBudgets) -> (Arc<Record>, Receiver<String>
         table,
         code,
         to_host: Mutex::new(tx),
+        optional_to_host: AtomicUsize::new(0),
+        ingress_classifier: Mutex::new(None),
         joined: AtomicUsize::new(0),
         admissions: Admissions::new(budgets),
         peers: Mutex::new(HashMap::new()),
@@ -997,4 +999,94 @@ fn the_source_table_is_bounded_and_the_breaker_carries_what_it_cannot_track() {
         j.throttle > Duration::ZERO,
         "and the flood is answered by the breaker instead"
     );
+}
+
+#[test]
+fn optional_snapshot_push_never_evicts_and_ordinary_snapshots_are_next() {
+    let (record, _) = service();
+    let mut limits = record.table.limits.clone();
+    limits.max_relay_queue_snapshot = 2;
+    let queue = PeerOutbox::new(&limits, &AdmissionBudgets::default());
+    assert!(queue.push_drop_only("optional-1".into(), 128));
+    assert!(matches!(
+        queue.push(CLASS_SNAPSHOT, "game-1".into()),
+        Enqueued::Ok { dropped: 0 }
+    ));
+    assert!(!queue.push_drop_only("optional-refused".into(), 128));
+    assert!(matches!(
+        queue.push(CLASS_SNAPSHOT, "game-2".into()),
+        Enqueued::Ok { dropped: 1 }
+    ));
+    assert_eq!(queue.drain(), vec!["game-1", "game-2"]);
+    assert!(queue.push_drop_only("optional-2".into(), 128));
+    queue.push(CLASS_SNAPSHOT, "game-3".into());
+    queue.push(CLASS_RELIABLE, "command".into());
+    assert_eq!(queue.drain(), vec!["command", "game-3", "optional-2"]);
+    assert!(!queue.push_drop_only("too-large".into(), 1));
+}
+
+#[test]
+fn actual_scope_cannot_bypass_native_staging_by_omitting_optional_flag() {
+    fn classify(raw: &str) -> phoenix_transport::socket::IngressClass {
+        let frame = decode_rendezvous_frame(raw).unwrap();
+        if frame.payload.as_deref() == Some("scope") {
+            phoenix_transport::socket::IngressClass::Scoped
+        } else {
+            phoenix_transport::socket::IngressClass::Ordinary
+        }
+    }
+    let (record, receive) = service();
+    *record.ingress_classifier.lock().unwrap() = Some(classify);
+    for _ in 0..1000 {
+        record.tell_host(&RendezvousFrame {
+            class: Some(CLASS_RELIABLE.into()),
+            payload: Some("scope".into()),
+            ..RendezvousFrame::new("relay")
+        });
+    }
+    record.tell_host(&RendezvousFrame {
+        payload: Some("ordinary-command".into()),
+        ..RendezvousFrame::new("relay")
+    });
+    let frames: Vec<_> = receive
+        .try_iter()
+        .map(|raw| decode_rendezvous_frame(&raw).unwrap())
+        .collect();
+    assert_eq!(frames.len(), 17);
+    assert!(frames[..16]
+        .iter()
+        .all(|frame| frame.drop_only == Some(true)));
+    assert_eq!(frames[16].payload.as_deref(), Some("ordinary-command"));
+}
+
+#[test]
+fn reliable_relay_refuses_both_optional_flag_values() {
+    let (record, receive) = service();
+    let mut joined = joiner(&record);
+    send_client(
+        &record,
+        &mut joined,
+        &RendezvousFrame {
+            code: Some(CodeField::Typed(record.code.full.clone())),
+            ..client("join")
+        },
+    );
+    told(&mut joined);
+    send_client(&record, &mut joined, &client("relay-open"));
+    told(&mut joined);
+    host_saw(&receive);
+    for flag in [false, true] {
+        send_client(
+            &record,
+            &mut joined,
+            &RendezvousFrame {
+                class: Some(CLASS_RELIABLE.into()),
+                drop_only: Some(flag),
+                payload: Some("ordinary-opaque".into()),
+                ..client("relay")
+            },
+        );
+        assert_eq!(told(&mut joined)[0].reason.as_deref(), Some("malformed"));
+        assert!(host_saw(&receive).is_empty());
+    }
 }

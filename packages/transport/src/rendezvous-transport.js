@@ -759,6 +759,7 @@ export function createRendezvousHost(opts) {
     }
 
     const pair = createRelayChannelPair({
+      ...(typeof socket?.trySendSnapshot === 'function' ? {trySendSnapshot: (body, bounds) => socket.trySendSnapshot(frame(body.type, body), bounds)} : {}),
       send: (body) => {
         if (!socket || socket.readyState !== 1) return false;
         socket.send(frame(body.type, body)); return true;
@@ -1482,6 +1483,7 @@ export function createRendezvousJoiner(opts) {
   function relayAttach(gen, readyFrame) {
     if (gen !== generation) return;
     relay = createRelayChannelPair({
+      ...(typeof socket?.trySendSnapshot === 'function' ? {trySendSnapshot: (body, bounds) => socket.trySendSnapshot(frame(body.type, body), bounds)} : {}),
       send: (body) => {
         if (!socket || socket.readyState !== 1) return false;
         socket.send(frame(body.type, body)); return true;

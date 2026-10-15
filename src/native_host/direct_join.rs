@@ -736,7 +736,7 @@ struct PeerOutbox {
 #[derive(Default)]
 struct OutQueue {
     reliable: VecDeque<String>,
-    snapshot: VecDeque<String>,
+    snapshot: VecDeque<QueuedSnapshot>,
     /// Bytes held in [`Self::reliable`] alone — the memory the backpressure
     /// bounds are measured against, tracked incrementally so a push never sums
     /// the whole queue.
@@ -748,6 +748,11 @@ struct OutQueue {
 }
 
 /// What enqueuing one frame did.
+struct QueuedSnapshot {
+    text: String,
+    drop_only: bool,
+}
+
 enum Enqueued {
     /// Queued; this many snapshot frames were displaced by it.
     Ok { dropped: u64 },
@@ -774,12 +779,20 @@ impl PeerOutbox {
         let len = text.len();
         let mut queue = self.queue.lock().unwrap_or_else(|e| e.into_inner());
         if class == CLASS_SNAPSHOT {
-            queue.snapshot.push_back(text);
+            queue.snapshot.push_back(QueuedSnapshot {
+                text,
+                drop_only: false,
+            });
             let mut dropped = 0u64;
             while queue.snapshot.len() > self.max_snapshot {
-                if let Some(old) = queue.snapshot.pop_front() {
+                let optional = queue
+                    .snapshot
+                    .iter()
+                    .position(|item| item.drop_only)
+                    .unwrap_or(0);
+                if let Some(old) = queue.snapshot.remove(optional) {
                     self.queued.fetch_sub(
-                        old.len().min(self.queued.load(Ordering::Relaxed)),
+                        old.text.len().min(self.queued.load(Ordering::Relaxed)),
                         Ordering::Relaxed,
                     );
                 }
@@ -815,6 +828,25 @@ impl PeerOutbox {
         Enqueued::Ok { dropped: 0 }
     }
 
+    fn push_drop_only(&self, text: String, max_buffered_bytes: usize) -> bool {
+        let mut queue = self.queue.lock().unwrap_or_else(|error| error.into_inner());
+        if self.is_closed()
+            || queue.snapshot.len() >= self.max_snapshot
+            || self
+                .queued
+                .load(Ordering::Relaxed)
+                .saturating_add(text.len())
+                > max_buffered_bytes
+        {
+            return false;
+        }
+        self.queued.fetch_add(text.len(), Ordering::Relaxed);
+        queue.snapshot.push_back(QueuedSnapshot {
+            text,
+            drop_only: true,
+        });
+        true
+    }
     /// Everything waiting, reliable first.
     ///
     /// The classes drain in a fixed order rather than interleaved, and reliable
@@ -827,7 +859,19 @@ impl PeerOutbox {
     fn drain(&self) -> Vec<String> {
         let mut queue = self.queue.lock().unwrap_or_else(|e| e.into_inner());
         let mut out: Vec<String> = queue.reliable.drain(..).collect();
-        out.extend(queue.snapshot.drain(..));
+        let snapshots: Vec<_> = queue.snapshot.drain(..).collect();
+        out.extend(
+            snapshots
+                .iter()
+                .filter(|item| !item.drop_only)
+                .map(|item| item.text.clone()),
+        );
+        out.extend(
+            snapshots
+                .into_iter()
+                .filter(|item| item.drop_only)
+                .map(|item| item.text),
+        );
         let bytes: usize = out.iter().map(String::len).sum();
         self.queued.fetch_sub(
             bytes.min(self.queued.load(Ordering::Relaxed)),
@@ -857,6 +901,8 @@ struct Record {
     code: JoinCode,
     /// Frames for the host half, drained by [`DirectJoinService::poll`].
     to_host: Mutex<Sender<String>>,
+    optional_to_host: AtomicUsize,
+    ingress_classifier: Mutex<Option<phoenix_transport::socket::IngressClassifier>>,
     /// Joiner sockets that have RESOLVED THE CODE — the count
     /// `max_peers_per_record` bounds.
     ///
@@ -880,6 +926,7 @@ struct Record {
 impl Record {
     fn limits_frame(&self) -> RelayLimits {
         RelayLimits {
+            snapshot_drop_only: true,
             max_frame_bytes: self.table.limits.max_relay_frame_bytes,
             max_send_buffer_bytes: self.table.limits.max_relay_send_buffer_bytes,
         }
@@ -888,12 +935,53 @@ impl Record {
     /// Hand one frame to the host half. Silently dropped once the host end has
     /// gone, which is a process on its way out rather than an error to report.
     fn tell_host(&self, frame: &RendezvousFrame) {
-        if let Ok(text) = encode_rendezvous_frame(frame) {
-            let _ = self
-                .to_host
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .send(text);
+        use phoenix_transport::socket::IngressClass;
+        let Ok(mut text) = encode_rendezvous_frame(frame) else {
+            return;
+        };
+        let classification = self
+            .ingress_classifier
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .map_or(IngressClass::Ordinary, |classify| classify(&text));
+        if classification == IngressClass::Refuse {
+            return;
+        }
+        let optional = classification == IngressClass::Scoped || frame.drop_only == Some(true);
+        if optional {
+            if !self.open.load(Ordering::Relaxed) {
+                return;
+            }
+            if self
+                .optional_to_host
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+                    (count < 16).then_some(count + 1)
+                })
+                .is_err()
+            {
+                return;
+            }
+            // Internal queue metadata follows ACTUAL classification, never a
+            // sender's omission. The reusable host strips no authority facts.
+            if frame.drop_only != Some(true) {
+                let mut marked = frame.clone();
+                marked.drop_only = Some(true);
+                match encode_rendezvous_frame(&marked) {
+                    Ok(encoded) => text = encoded,
+                    Err(_) => {
+                        self.optional_to_host.fetch_sub(1, Ordering::Relaxed);
+                        return;
+                    }
+                }
+            }
+        }
+        let result = self
+            .to_host
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .send(text);
+        if optional && result.is_err() {
+            self.optional_to_host.fetch_sub(1, Ordering::Relaxed);
         }
     }
 
@@ -963,6 +1051,8 @@ impl DirectJoinService {
             table,
             code: code.clone(),
             to_host: Mutex::new(tx),
+            optional_to_host: AtomicUsize::new(0),
+            ingress_classifier: Mutex::new(None),
             joined: AtomicUsize::new(0),
             admissions: Admissions::new(budgets),
             peers: Mutex::new(HashMap::new()),
@@ -998,6 +1088,13 @@ impl DirectJoinService {
 }
 
 impl RelaySocket for DirectJoinService {
+    fn set_ingress_classifier(&mut self, classifier: phoenix_transport::socket::IngressClassifier) {
+        *self
+            .record
+            .ingress_classifier
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(classifier);
+    }
     fn poll(&mut self) -> Vec<String> {
         let mut out = Vec::new();
         let rx = self
@@ -1017,6 +1114,17 @@ impl RelaySocket for DirectJoinService {
                 }
             }
         }
+        let mut optional = Vec::new();
+        out.retain(|text| {
+            if decode_rendezvous_frame(text).is_ok_and(|frame| frame.drop_only == Some(true)) {
+                self.record.optional_to_host.fetch_sub(1, Ordering::Relaxed);
+                optional.push(text.clone());
+                false
+            } else {
+                true
+            }
+        });
+        out.extend(optional);
         out
     }
 
@@ -1100,6 +1208,46 @@ impl RelaySocket for DirectJoinService {
         }
     }
 
+    fn snapshot_only_supported(&self) -> bool {
+        self.is_open()
+    }
+    fn try_send_snapshot(&mut self, text: String, max_buffered_bytes: usize) -> bool {
+        if !self.is_open() {
+            return false;
+        }
+        let Ok(frame) = decode_rendezvous_frame(&text) else {
+            return false;
+        };
+        if frame.kind != "relay"
+            || frame.class.as_deref() != Some(CLASS_SNAPSHOT)
+            || frame.drop_only != Some(true)
+        {
+            return false;
+        }
+        let (Some(to), Some(payload)) = (frame.to, frame.payload) else {
+            return false;
+        };
+        let outbox = self
+            .record
+            .peers
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get(&to)
+            .cloned();
+        let Some(outbox) = outbox else {
+            return false;
+        };
+        let carried = RendezvousFrame {
+            from: Some(HOST_PEER.into()),
+            class: Some(CLASS_SNAPSHOT.into()),
+            payload: Some(payload),
+            ..RendezvousFrame::new("relay")
+        };
+        let Ok(carried) = encode_rendezvous_frame(&carried) else {
+            return false;
+        };
+        outbox.push_drop_only(carried, max_buffered_bytes)
+    }
     fn buffered_bytes(&self) -> usize {
         self.record
             .peers
@@ -1116,6 +1264,7 @@ impl RelaySocket for DirectJoinService {
 
     fn close(&mut self) {
         self.record.open.store(false, Ordering::Relaxed);
+        let _ = self.poll();
         for outbox in self
             .record
             .peers
@@ -1772,7 +1921,12 @@ fn on_client_frame(record: &Arc<Record>, joiner: &mut Joiner, text: &str) {
                 fail(joiner, "relay", "relay-too-large");
                 return;
             }
+            if frame.drop_only.is_some() && class != CLASS_SNAPSHOT {
+                fail(joiner, "relay", "malformed");
+                return;
+            }
             record.tell_host(&RendezvousFrame {
+                drop_only: frame.drop_only,
                 from: Some(joiner.id.clone()),
                 class: Some(class),
                 payload: Some(payload),

@@ -27,7 +27,7 @@ describe('opaque Snapshot-only send', () => {
   it('uses the relay socket backlog and preserves ordinary Reliable commands', () => {
     let backlog = 0;
     const sent = [];
-    const pair = createRelayChannelPair({send: frame => sent.push(frame), bufferedAmount: () => backlog});
+    const pair = createRelayChannelPair({limits:{snapshotDropOnly:true,maxFrameBytes:65536,maxSendBufferBytes:262144},send: frame => sent.push(frame), bufferedAmount: () => backlog});
     pair.open();
     expect(sendSnapshotOnly(pair.snapshot, 'first', bounds)).toBe(true);
     backlog = 8193;
@@ -46,7 +46,7 @@ describe('opaque Snapshot-only send', () => {
     let writable = true;
     const send = vi.fn(() => true);
     const measureFrame = body => new TextEncoder().encode(JSON.stringify({v: 1, ...body})).byteLength;
-    const pair = createRelayChannelPair({send, writable: () => writable,
+    const pair = createRelayChannelPair({limits:{snapshotDropOnly:true,maxFrameBytes:65536,maxSendBufferBytes:262144},send, writable: () => writable,
       bufferedAmount: () => 10, measureFrame, to: 'actual-peer'});
     pair.open();
     const packet = '{"type":"opaque"}';
@@ -58,7 +58,30 @@ describe('opaque Snapshot-only send', () => {
     expect(sendSnapshotOnly(pair.snapshot, packet, bounds)).toBe(false);
     expect(pair.snapshot.send(packet)).toBe(false);
     expect(send).toHaveBeenCalledTimes(1);
-    const failed = createRelayChannelPair({send: () => false}); failed.open();
+    const failed = createRelayChannelPair({limits:{snapshotDropOnly:true,maxFrameBytes:65536,maxSendBufferBytes:262144},send: () => false}); failed.open();
     expect(sendSnapshotOnly(failed.snapshot, packet, bounds)).toBe(false);
   });
+});
+
+it('refuses old or unadvertised relay queue policy while ordinary traffic remains available',()=>{
+  const send=vi.fn();const pair=createRelayChannelPair({send,bufferedAmount:()=>0});pair.open();
+  expect(sendSnapshotOnly(pair.snapshot,'optional',bounds)).toBe(false);
+  pair.snapshot.send('ordinary snapshot');pair.reliable.send('command');expect(send).toHaveBeenCalledTimes(2);
+});
+
+it('lets only an explicit bounded native bridge replace unknown backlog',()=>{
+  let ready=false,outstanding=false;const staged=[];
+  const pair=createRelayChannelPair({limits:{snapshotDropOnly:true,maxFrameBytes:20480,maxSendBufferBytes:32768},
+    bufferedAmount:()=>Infinity,send:()=>{throw new Error('ordinary route forbidden for optional');},
+    trySendSnapshot:(body,limits)=>{if(!ready||outstanding)return false;outstanding=true;staged.push({body,limits});return true;}});
+  pair.open();expect(sendSnapshotOnly(pair.snapshot,'packet',bounds)).toBe(false);
+  ready=true;expect(sendSnapshotOnly(pair.snapshot,'packet',bounds)).toBe(true);
+  expect(sendSnapshotOnly(pair.snapshot,'backlog',bounds)).toBe(false);
+  expect(staged[0].body).toMatchObject({class:'snapshot',drop_only:true,payload:'packet'});
+  outstanding=false;expect(sendSnapshotOnly(pair.snapshot,'next',bounds)).toBe(true);
+});
+it('refuses a relay envelope expanded past the negotiated ceiling by escaping',()=>{
+  const send=vi.fn(),payload='\\"'.repeat(40),measureFrame=body=>new TextEncoder().encode(JSON.stringify({v:1,...body})).byteLength;
+  const pair=createRelayChannelPair({limits:{snapshotDropOnly:true,maxFrameBytes:payload.length+1,maxSendBufferBytes:32768},send,measureFrame,bufferedAmount:()=>0});pair.open();
+  expect(sendSnapshotOnly(pair.snapshot,payload,{maxBytes:1000,maxBufferedBytes:32768})).toBe(false);expect(send).not.toHaveBeenCalled();
 });

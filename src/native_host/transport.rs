@@ -42,6 +42,17 @@ impl phoenix_transport::Profile for PhoenixProtocol {
     type Inbound = ClientMessage;
     type Outbound = ServerMessage;
     type Connections = SharedConnections;
+    fn scoped_ingress_enabled() -> bool {
+        true
+    }
+    fn scoped_ingress(message: &ClientMessage) -> bool {
+        matches!(
+            message,
+            ClientMessage::CommsMediaStart(_)
+                | ClientMessage::CommsMediaStop(_)
+                | ClientMessage::CommsMediaFrame(_)
+        )
+    }
 }
 pub type TransportEvent = phoenix_transport::Event<ClientMessage>;
 pub type TransportDispatch<'a> = phoenix_transport::Dispatch<'a, ServerMessage>;
@@ -117,6 +128,9 @@ fn drain_native_inbound(
             continue;
         }
         match event {
+            // This generic transport donor refuses transient operation until
+            // the bounded Session media edge is joined in the next donor.
+            TransportEvent::ReceivedScoped { .. } => {}
             TransportEvent::Received { token, msg } => {
                 if crate::lobby::handler::is_reserved_token(&token) {
                     crate::pwarn!(

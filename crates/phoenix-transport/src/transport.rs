@@ -16,13 +16,36 @@ pub trait Profile: 'static {
     type Inbound;
     type Outbound;
     type Connections: Clone + Default;
+    /// Opt-in transient inputs retain the actual adapter-owned incarnation.
+    fn scoped_ingress_enabled() -> bool {
+        false
+    }
+    fn scoped_ingress(_message: &Self::Inbound) -> bool {
+        false
+    }
 }
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event<M> {
-    Received { token: String, msg: M },
-    Disconnected { token: String },
+    Received {
+        token: String,
+        msg: M,
+    },
+    ReceivedScoped {
+        token: String,
+        connection: u64,
+        msg: M,
+    },
+    Disconnected {
+        token: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SnapshotBounds {
+    pub max_bytes: usize,
+    pub max_buffered_bytes: usize,
 }
 
 pub struct Dispatch<'a, M> {
@@ -35,7 +58,20 @@ pub struct Dispatch<'a, M> {
 pub trait Transport<P: Profile>: Send + Sync + 'static {
     fn share_connections(&mut self, _connections: P::Connections) {}
     fn poll(&mut self) -> Vec<Event<P::Inbound>>;
+    /// None means this adapter cannot attest a current physical owner.
+    fn current_connection(&self, _token: &str) -> Option<u64> {
+        None
+    }
     fn dispatch(&mut self, dispatch: Dispatch<'_, P::Outbound>);
+    /// Explicit lossy refusal, never ordinary-send fallback.
+    fn dispatch_snapshot_only(
+        &mut self,
+        _target: &Target,
+        _message: &P::Outbound,
+        _bounds: SnapshotBounds,
+    ) -> bool {
+        false
+    }
     fn name(&self) -> &'static str {
         "native"
     }
@@ -48,8 +84,19 @@ impl<P: Profile, T: Transport<P> + ?Sized> Transport<P> for Box<T> {
     fn poll(&mut self) -> Vec<Event<P::Inbound>> {
         (**self).poll()
     }
+    fn current_connection(&self, token: &str) -> Option<u64> {
+        (**self).current_connection(token)
+    }
     fn dispatch(&mut self, dispatch: Dispatch<'_, P::Outbound>) {
         (**self).dispatch(dispatch);
+    }
+    fn dispatch_snapshot_only(
+        &mut self,
+        target: &Target,
+        message: &P::Outbound,
+        bounds: SnapshotBounds,
+    ) -> bool {
+        (**self).dispatch_snapshot_only(target, message, bounds)
     }
     fn name(&self) -> &'static str {
         (**self).name()
@@ -84,6 +131,11 @@ impl<P: Profile, A: Transport<P>, B: Transport<P>> Transport<P> for PairedTransp
         events.extend(self.second.poll());
         events
     }
+    fn current_connection(&self, token: &str) -> Option<u64> {
+        self.first
+            .current_connection(token)
+            .or_else(|| self.second.current_connection(token))
+    }
     fn dispatch(&mut self, dispatch: Dispatch<'_, P::Outbound>) {
         self.first.dispatch(Dispatch {
             target: dispatch.target,
@@ -91,6 +143,16 @@ impl<P: Profile, A: Transport<P>, B: Transport<P>> Transport<P> for PairedTransp
             delivery: dispatch.delivery,
         });
         self.second.dispatch(dispatch);
+    }
+    fn dispatch_snapshot_only(
+        &mut self,
+        target: &Target,
+        message: &P::Outbound,
+        bounds: SnapshotBounds,
+    ) -> bool {
+        let first = self.first.dispatch_snapshot_only(target, message, bounds);
+        let second = self.second.dispatch_snapshot_only(target, message, bounds);
+        first || second
     }
     fn name(&self) -> &'static str {
         "paired"

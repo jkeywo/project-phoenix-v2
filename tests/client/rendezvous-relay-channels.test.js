@@ -222,11 +222,12 @@ describe('the advertised limits', () => {
       max_frame_bytes: 4096,
       max_send_buffer_bytes: 1024,
     });
-    expect(limits).toEqual({ maxFrameBytes: 4096, maxSendBufferBytes: 1024 });
+    expect(limits).toEqual({ snapshotDropOnly:false, maxFrameBytes: 4096, maxSendBufferBytes: 1024 });
   });
 
   it('falls back per field, so a partial advertisement is still usable', () => {
     expect(relayLimitsFromFrame({ max_frame_bytes: 4096 })).toEqual({
+      snapshotDropOnly:false,
       maxFrameBytes: 4096,
       maxSendBufferBytes: RELAY_LIMIT_DEFAULTS.maxSendBufferBytes,
     });

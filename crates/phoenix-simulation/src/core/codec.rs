@@ -1272,3 +1272,44 @@ mod mesh_frame_tests;
 #[cfg(test)]
 #[path = "codec_wire_tests.rs"]
 mod wire_tests;
+
+/// Inspect the complete envelope without allocating an ignored media body. This
+/// recognizes reordered/escaped tags and refuses duplicate/malformed envelopes.
+/// Used before any unbounded general inbound queue, not after staging.
+pub fn media_client_json(json: &str) -> Result<bool, serde_json::Error> {
+    #[derive(serde::Deserialize)]
+    struct Kind<'a> {
+        #[serde(rename = "type", borrow)]
+        kind: std::borrow::Cow<'a, str>,
+    }
+    let kind: Kind<'_> = serde_json::from_str(json)?;
+    Ok(matches!(
+        kind.kind.as_ref(),
+        "CommsMediaStart" | "CommsMediaStop" | "CommsMediaFrame"
+    ))
+}
+pub fn bounded_media_client(json: &str) -> Result<Option<ClientMessage>, String> {
+    let media = media_client_json(json).map_err(|error| error.to_string())?;
+    if !media {
+        return Ok(None);
+    }
+    if json.len() > phoenix_model::comms_media::MAX_MEDIA_JSON_BYTES {
+        return Err("media envelope exceeds bounded ingress".into());
+    }
+    let message = JsonCodec
+        .decode_client(json)
+        .map_err(|error| error.to_string())?;
+    match &message {
+        ClientMessage::CommsMediaFrame(packet) => packet.validate().map_err(str::to_owned)?,
+        ClientMessage::CommsMediaStart(start)
+            if !phoenix_model::comms_channel::identity(&start.call_origin_id) =>
+        {
+            return Err("invalid media call identity".into())
+        }
+        ClientMessage::CommsMediaStop(stop) if stop.lease_generation == 0 => {
+            return Err("invalid media lease generation".into())
+        }
+        _ => {}
+    }
+    Ok(Some(message))
+}

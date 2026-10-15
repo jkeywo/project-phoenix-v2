@@ -6970,3 +6970,18 @@ fn media_packet() -> phoenix_model::comms_media::MediaPacket {
         data: "AAAA".into(),
     }
 }
+
+#[test]
+fn media_envelope_bounds_apply_before_general_staging_with_reordered_and_escaped_tags() {
+    let large = "x".repeat(phoenix_model::comms_media::MAX_MEDIA_JSON_BYTES + 1);
+    let reordered = format!(r#"{{"data":{{"data":"{large}"}},"type":"CommsMediaFrame"}}"#);
+    assert!(super::media_client_json(&reordered).unwrap());
+    assert!(super::bounded_media_client(&reordered).is_err());
+    let escaped = reordered.replace("CommsMediaFrame", r#"CommsMediaFr\u0061me"#);
+    assert!(super::bounded_media_client(&escaped).is_err());
+    assert!(super::bounded_media_client(
+        r#"{"type":"SetName","data":{},"type":"CommsMediaFrame"}"#
+    )
+    .is_err());
+    assert!(super::bounded_media_client(r#"{"type":"CommsMediaFrame","data": "#).is_err());
+}

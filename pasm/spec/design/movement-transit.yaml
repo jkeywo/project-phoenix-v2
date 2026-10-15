@@ -125,3 +125,26 @@ entities:
         - "[ai] Default response is omitted from JSON to preserve unchanged original keyed scatter. Smaller response reduces gravity displacement; zero does not bypass physical colliders. Original body policies and dated evidence remain immutable, with no extra arrival state or RNG stream."
         - "[ai] Snapshot preflight recomputes arrival from accepted response/profile and actual static recipes. No-placement retains the existing waiting phase and cannot partially consume fuel or energy. Existing Workshop accepted-source/history fields edit the same supported profile."
         - "[ai] Optional gravity-hardened LocalJump Cruiser uses response 0.25 with existing System, finite fuel/energy/preparation/feeds/AI unchanged. Tuning is provisional. Native/continuation/authoring proof is required; this is neither formation nor inter-system completion."
+
+  - decision: tracked-world-transit-consumer
+    core:
+      status: accepted
+      confidence: confirmed
+      title: First Sector Transit Uses Existing Anchored World Layers
+      summary: "Closed authored destination IDs bind accepted supporting-world paths and finite arrival anchors in the existing unified anchored World space. The same actual Transit System/order owns preparation and paid handoff; tracked World layers own materialisation, scripts, origin, minting and content binding."
+      rationale:
+        - "[ai] Explicit drive destination domain and the permitted Navigation route view gate Human/ordinary AI admission. Commands never name arbitrary files, reveal private destination actors or let Scenario/HTN place a ship directly. No second universe, spatial identity, transport, content loader or background sector simulation is introduced."
+        - "[ai] The existing layer queue is the sole pending load owner. Parse/content/placement refusal waits or refuses without half fuel commitment. Fixed-boundary actual arrival is once, at rest with heading retained, using the accepted destination, frozen drive profile and original static gravity inputs. Restore cannot mint or pay twice."
+        - "[ai] Destination load preserves actual source actors, craft, crew, stocks, ordnance and obligations. First implementation leaves source layers resident; return reuses their live state and scripts. Subsequent explicit unloading must respect remaining actors/obligations. Own typed route/status/actual receipt joins continuing modes and planner without granting foreign knowledge."
+        - "[ai] Actual departure/return, finite conservation, no-write, complete fresh JSON360 continuation, multiplayer symmetry and accepted Workshop authoring are required. Formation later uses actually received/acknowledged Comms orders and each member's ordinary equipment/authority. This contract alone is not an implementation or full increment18 exit."
+
+  - decision: received-formation-intent-stages
+    core:
+      status: accepted
+      confidence: confirmed
+      title: FormUp Separates Comms Acceptance from Own Navigation and Helm Execution
+      summary: "First FormUp carries a finite two-integer World-x/z slot, with the genuine heard sender as leader. Actual Comms reading/choice/outcomes express coordination acceptance; independently authorised Navigation selects an earned leader and own Helm explicitly engages or makes its ordinary AI decision."
+      rationale:
+        - "[ai] Human selects an earned own contact alias; AI requires uniquely matured independently observed identity/name and genuinely held faction/reference evidence. Private Broad source UUID maps cannot correlate a Comms sender. Missing/ambiguous evidence stays pending, and explicit supported Console feeds grant only genuinely heard suggestions."
+        - "[ai] Navigation owns slot intent; Helm owns assistance/motion. Execute only from own current earned leader position/velocity, pause/report stale or absent evidence, preserve source/rating authority and manual breakaway. World-axis offset requires no hidden heading, snapping or guaranteed station keeping. No Comms/Scenario/planner foreign actuator write."
+        - "Actual status distinguishes received, coordination acceptance, leader selection, awaiting Helm, executing, paused and broken away. Source learns stages only through real paid Comms reports; accepting a request proves no machinery or jump readiness. Formation travel later binds real acknowledgements and each member's own paid drive. Contract only, no runtime/exit evidence."

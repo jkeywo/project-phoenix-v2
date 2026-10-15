@@ -305,3 +305,106 @@ It must pass actual profile/placement/continuation and authoring checks before t
 capability is considered verified. Formation and sector travel remain the
 following consumers; their best-stat and actual World/content transitions cannot
 be claimed from this local extension.
+
+
+## Adopted first World transit consumer
+
+Use the existing shared anchored World space and tracked World layer owner for
+first inter-system travel. An authored closed destination ID binds one accepted
+supporting-world path and one named finite arrival anchor from that accepted
+composition. Paths, templates and script units pass the existing content closure,
+composition, load and ledger gates; a player's command names the destination ID,
+never an arbitrary content path. The untracked PendingScenarioLoad merge is not
+a transit loader. Do not add a parallel universe, sector-coordinate registry,
+transport, scene owner or always-running sector simulation.
+
+Extend the same installed Transit System/profile/order machinery with an explicit
+World destination domain. A local-only drive cannot accept that domain. The
+concrete optional long-distance drive declares real fuel/preparation/energy and
+its own accuracy/gravity response; it does not grant ordinary engines free travel.
+The ship's permitted Navigation route view publishes the authorised destination
+ID, label and arrival-point intent. That view does not reveal destination actors,
+private gravity recipes or undiscovered mission facts. Human and ordinary drive
+AI consume the same route and existing System-addressed admission.
+
+World resolves the authored binding and materialises the supporting world through
+its existing tracked layer load, compiled AST, origin/lifecycle and deterministic
+minting path. The existing order retains its accepted binding while preparation
+and loading proceed; it waits truthfully if required content or physical placement
+is unavailable. The ordinary World layer queue is the only pending load owner.
+Repeated input/restore cannot mint a second layer or charge fuel twice. Load/parse
+refusal leaves the actual ship at its source with no indivisible fuel commitment.
+Extend original static gravity provenance from accepted base rows to accepted
+tracked-layer rows: preserve the owning path, immutable authored recipe and actual
+fixed pose through the existing content/snapshot binding. Do not infer gravity
+from visual scale or introduce a mutable body registry.
+At the fixed handoff boundary, require the accepted layer, original static gravity
+inputs and representable physical arrival to agree; commit actual finite fuel and
+energy and place the same ship once. World transit arrives at rest in its selected
+navigation frame with heading retained, matching the explicit first LocalJump rule.
+No Scenario/HTN action directly writes the ship's physics or simulates a journey.
+
+Keep existing actors, launched ordnance, carried craft, crew, stocks, damage and
+accepted obligations in their actual owners. Loading a destination does not unload
+the source or imply all fleet players departed. In the first consumer, leave the
+source layer resident; subsequent unloading remains an explicit normal World
+operation that must respect actual remaining actors and obligations. Return travel
+reuses a resident layer and its real state rather than refreshing its stores or
+restarting its scripts. This consumer does not introduce coarse offscreen state.
+
+Publish own accepted route, loading/preparation/commit/arrival status and a typed
+actual arrival receipt through existing observations/reports. Receipts identify the
+accepted destination and actual completed order, not a predicted arrival or foreign
+success oracle. This is the join available to the authored continuing modes and
+mission planner. Preserve existing World layer/script/content and Transit snapshot
+owners; preflight the complete candidate binding and roster before any write.
+Actual two-destination departure/return, finite conservation, no-write refusals,
+fresh JSON 360-step continuation, multiplayer/local-ship symmetry and Workshop
+accepted history/Preview/Test evidence are required before claiming this consumer.
+Formation remains a later consumer of genuinely received and acknowledged Comms
+orders, preserving every participant's own authority, readiness and paid equipment.
+
+
+## Adopted first received formation request
+
+The first closed `FormUp` request carries a two-integer slot offset in the existing
+World x/z plane. Its leader is the genuine sender of the physically received
+Comms request, not an arbitrary UUID supplied in its payload. Existing reading,
+Human choice/ordinary AI decision and real outcome delivery apply. Comms accepting
+the request records coordination intent; that receipt does not claim Navigation
+accepted a leader, Helm engaged, the ship reached its slot or a jump is ready.
+
+Navigation accepts only under its own ordinary System/source/rating authority.
+A Human explicitly selects an earned own Broad contact handle as the leader.
+An ordinary Navigation AI can correlate the received sender callsign/identity to
+independently matured observed identity/name and genuinely held faction/reference
+evidence only when the result is unambiguous. The private Broad source-route map
+is never association evidence: matching a hidden actual UUID to the Comms sender
+cannot select a contact or prove identity. Missing or ambiguous correlation leaves
+the request pending with an honest reason. An explicit supported information feed
+carries only genuinely received formation suggestions into Navigation; co-hosting
+Consoles grants no additional knowledge.
+
+Navigation owns the accepted finite slot intent and its held request/leader
+reference. Helm owns whether its ordinary assistance executes that intent.
+Human Helm retains control until it engages assistance; AI Helm makes its ordinary
+own-System decision using permitted onboard intent. Every machinery command still
+passes the existing owning System admission. Shared screens may combine controls
+only when their operator actually holds each required authority. No Comms action,
+remote sender, plot callback or planner writes another System's physics directly.
+
+Execution uses the receiver's current earned leader position/velocity measurement
+and supported own motion limits. The first slot is in World axes; no unobserved
+leader heading or guaranteed hull-relative orientation is invented. Missing/stale
+measurement pauses the same accepted intent and reports its actual reason; it
+does not query the actor's private pose. Manual Helm intervention breaks away
+through the existing control handoff. Physical holds and collision/acceleration
+limits can make the slot infeasible. No snapping or perfect station keeping.
+
+Local status distinguishes received, coordination accepted, leader selected,
+awaiting Helm, executing, paused and broken away. Source knowledge of those stages
+requires actual ordinary returned Comms reports; an accepted request is not a
+foreign readiness oracle. Formation jump membership/readiness subsequently binds
+these real acknowledgements and each member's own paid drive, with best admitted
+range/accuracy/gravity stats and one shared reference displacement as already
+specified. This contract alone implements neither movement nor formation travel.

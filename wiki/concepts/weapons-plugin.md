@@ -169,3 +169,11 @@ a destroyed round without its detonation payload. Interval-local previous bolt
 position is consumed once during Damage and omitted from settled snapshots and
 digests. Restore starts with no pending segment; the next Physics step derives
 it from persisted current XYZ. Detached flight carriers use the same vectors.
+
+Guided interception compares only the common live time of the two actual flight
+segments. Previous position and live interval seconds are paired Damage scratch;
+new emissions have no travelled interval and cannot retrospectively intercept a
+round that passed their muzzle earlier in the step. The first interception check
+follows their next positive Physics advance. Static physical bodies can still
+block the zero-length muzzle point. Both scratch fields clear after Damage and
+are reconstructed, rather than persisted, at the supported settled boundary.

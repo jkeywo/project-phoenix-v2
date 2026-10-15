@@ -108,6 +108,7 @@ fn actual_authored_emp_bolt_collision_uses_frozen_payload_and_temporary_componen
                 pitch: 0.0,
                 visual_scale: 1.0,
                 previous_position: Some([0.0, 0.0, 0.0]),
+                collision_interval_secs: None,
                 heading: 0.0,
                 speed: 1.0,
                 lifespan_remaining: 1.0,

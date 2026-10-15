@@ -22,6 +22,20 @@ pub(crate) fn advance_carrier_bolts(
     }
 }
 
+/// Read the same current ship pose as sync_ship_position, without waiting for
+/// presentation Transform propagation. Bare physical bodies retain their pose.
+pub(super) fn physical_pose(
+    transform: &Transform,
+    physics: Option<&crate::ship::state::ShipPhysics>,
+) -> (Vec3, Quat) {
+    physics.map_or((transform.translation, transform.rotation), |pose| {
+        (
+            Vec3::new(pose.x, pose.y, pose.z),
+            Quat::from_euler(EulerRot::YXZ, -pose.yaw, 0.0, pose.roll),
+        )
+    })
+}
+
 pub(crate) fn collider_fraction(
     start: [f32; 3],
     end: [f32; 3],

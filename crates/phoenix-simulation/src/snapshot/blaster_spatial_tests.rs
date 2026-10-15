@@ -60,6 +60,9 @@ fn settled_xyz_json_continuation_uses_frozen_flight_and_never_replays_damage() {
     )
     .unwrap();
     application::apply_weapons(&mut world.entity_mut(owner), &decoded);
+    let restored = &world.get::<BlasterSystemResource>(owner).unwrap().0[0].in_flight[0];
+    assert_eq!(restored.previous_position, None);
+    assert_eq!(restored.collision_interval_secs, None);
     let bodies = [("already-passed".into(), [0.0, 5.5, -0.5], 0.1)];
     assert!(world.get::<BlasterSystemResource>(owner).unwrap().0[0]
         .find_hits_3d(&bodies)
@@ -137,6 +140,7 @@ fn emitted_altitude_is_causal_but_the_consumed_interval_is_not_folded() {
     let mut banks = world.get_mut::<BlasterSystemResource>(owner).unwrap();
     banks.0[0].in_flight[0].y -= 1.0;
     banks.0[0].in_flight[0].previous_position = Some([999.0; 3]);
+    banks.0[0].in_flight[0].collision_interval_secs = Some(999.0);
     assert_eq!(
         crate::sim_digest::world_digest(&world),
         before,

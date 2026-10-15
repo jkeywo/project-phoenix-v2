@@ -2074,6 +2074,7 @@ pub(super) fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponStat
                     visual_scale: p.visual_scale,
                     // Snapshot boundary is settled after Damage; no pending interval.
                     previous_position: None,
+                    collision_interval_secs: None,
                     z: p.z,
                     heading: p.heading,
                     speed: p.speed,

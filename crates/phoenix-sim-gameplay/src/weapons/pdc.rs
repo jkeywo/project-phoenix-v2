@@ -111,6 +111,56 @@ pub fn moving_sphere_fraction(
     )
 }
 
+/// Intersect only the common live part of two same-step travelled segments.
+/// The result is a fraction of the original bolt segment, so static body hits
+/// and guided hits share one ordering. New emissions have no travelled interval
+/// yet and cannot collide retrospectively with the other object's earlier path.
+#[allow(clippy::too_many_arguments)]
+pub fn moving_sphere_interval_fraction(
+    start: [f32; 3],
+    end: [f32; 3],
+    radius: f32,
+    seconds: f32,
+    target_start: [f32; 3],
+    target_end: [f32; 3],
+    target_radius: f32,
+    target_seconds: f32,
+) -> Option<f32> {
+    if !start
+        .into_iter()
+        .chain(end)
+        .chain(target_start)
+        .chain(target_end)
+        .all(f32::is_finite)
+        || !seconds.is_finite()
+        || seconds <= 0.0
+        || !target_seconds.is_finite()
+        || target_seconds <= 0.0
+        || !radius.is_finite()
+        || radius < 0.0
+        || !target_radius.is_finite()
+        || target_radius < 0.0
+    {
+        return None;
+    }
+    let common = f64::from(seconds.min(target_seconds));
+    let bolt_fraction = common / f64::from(seconds);
+    let target_fraction = common / f64::from(target_seconds);
+    let relative_start = std::array::from_fn(|i| f64::from(start[i]) - f64::from(target_start[i]));
+    let relative_end = std::array::from_fn(|i| {
+        let bolt = f64::from(start[i]) + (f64::from(end[i]) - f64::from(start[i])) * bolt_fraction;
+        let target = f64::from(target_start[i])
+            + (f64::from(target_end[i]) - f64::from(target_start[i])) * target_fraction;
+        bolt - target
+    });
+    relative_sphere_fraction(
+        relative_start,
+        relative_end,
+        f64::from(radius) + f64::from(target_radius),
+    )
+    .map(|fraction| fraction * bolt_fraction as f32)
+}
+
 fn relative_sphere_fraction(start: [f64; 3], end: [f64; 3], radius: f64) -> Option<f32> {
     let d = std::array::from_fn::<_, 3, _>(|i| end[i] - start[i]);
     let r = start.map(|value| -value);

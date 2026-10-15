@@ -62,6 +62,7 @@ fn app() -> App {
 fn incoming() -> super::super::TorpedoSystemResource {
     use crate::weapons::torpedo::{Torpedo, TorpedoConfig, TorpedoSystem};
     let config = TorpedoConfig {
+        speed: 1.0,
         durability: 24.0,
         detonation_radius: 0.2,
         ..Default::default()
@@ -80,6 +81,7 @@ fn incoming() -> super::super::TorpedoSystemResource {
             heading: 0.0,
             pitch: 0.0,
             previous_position: None,
+            collision_interval_secs: None,
             lifespan_remaining: profile.lifespan,
             target_uuid: None,
             source_uuid: Some("remote-launcher".into()),
@@ -134,6 +136,15 @@ fn finite_paid_existing_battery_intercepts_two_rounds_but_a_larger_salvo_saturat
         .id();
     let mut minted = 0;
     for index in 0..3 {
+        for round in &mut app
+            .world_mut()
+            .get_mut::<super::super::TorpedoSystemResource>(provider)
+            .unwrap()
+            .0
+            .in_flight
+        {
+            round.tick(0.4, None);
+        }
         {
             let mut banks = app
                 .world_mut()
@@ -390,4 +401,94 @@ fn an_authored_body_without_its_actual_collider_does_not_gain_a_point_adapter() 
             .len(),
         1
     );
+}
+
+#[test]
+fn newly_emitted_bolt_cannot_retroactively_hit_a_missile_crossing_its_muzzle() {
+    use super::super::BlasterSystemResource;
+    use crate::weapons::blaster::{BlasterBankConfig, BlasterSystem};
+    let mut app = app();
+    let mut guided = incoming();
+    guided.0.in_flight.truncate(1);
+    let missile = &mut guided.0.in_flight[0];
+    missile.x = -10.0;
+    missile.z = 0.0;
+    missile.heading = std::f32::consts::FRAC_PI_2;
+    missile.profile.speed = 20.0;
+    missile.tick(1.0, None);
+    let provider = app.world_mut().spawn(guided).id();
+    let mut bank = BlasterSystem::new(BlasterBankConfig {
+        volley_count: 1,
+        damage: 100,
+        ..Default::default()
+    });
+    bank.request_fire();
+    bank.tick_with_origins_3d(
+        0.1,
+        0.0,
+        &[Some([0.0, 10.0, 0.0])],
+        0.0,
+        [0.0, 10.0, -10.0],
+        [0.0; 3],
+        "shooter",
+        &mut |_| true,
+        &mut || "new-at-end".into(),
+    );
+    let shooter = app
+        .world_mut()
+        .spawn(BlasterSystemResource(vec![bank]))
+        .id();
+    app.update();
+    assert_eq!(
+        app.world()
+            .get::<super::super::TorpedoSystemResource>(provider)
+            .unwrap()
+            .0
+            .in_flight
+            .len(),
+        1
+    );
+    assert_eq!(
+        app.world().get::<BlasterSystemResource>(shooter).unwrap().0[0]
+            .in_flight
+            .len(),
+        1
+    );
+    assert_eq!(
+        app.world().get::<BlasterSystemResource>(shooter).unwrap().0[0].in_flight[0]
+            .collision_interval_secs,
+        None
+    );
+}
+
+#[test]
+fn an_asymmetric_body_uses_current_canonical_yaw_instead_of_mirrored_or_stale_pose() {
+    let body = Collider::cuboid(0.2, 1.0, 4.0);
+    let pose = crate::ship::state::ShipPhysics {
+        yaw: std::f32::consts::FRAC_PI_4,
+        ..Default::default()
+    };
+    let stale = Transform::from_xyz(900.0, 0.0, 900.0);
+    let (position, rotation) = physical_pose(&stale, Some(&pose));
+    assert!(collider_fraction(
+        [2.0, -2.0, -2.0],
+        [2.0, 2.0, -2.0],
+        0.01,
+        position,
+        rotation,
+        &body
+    )
+    .is_some());
+    assert!(collider_fraction(
+        [2.0, -2.0, -2.0],
+        [2.0, 2.0, -2.0],
+        0.01,
+        position,
+        Quat::from_rotation_y(pose.yaw),
+        &body
+    )
+    .is_none());
+    let (position, rotation) = physical_pose(&stale, None);
+    assert_eq!(position, stale.translation);
+    assert_eq!(rotation, stale.rotation);
 }

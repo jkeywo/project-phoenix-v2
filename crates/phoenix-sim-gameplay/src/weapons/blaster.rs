@@ -174,6 +174,8 @@ pub struct BlasterProjectile {
     /// Interval-local collision segment, never another pose owner. Physics
     /// sets it; Damage consumes it once. Settled restore starts with None.
     pub previous_position: Option<[f32; 3]>,
+    /// Actual live travel seconds in this interval; paired transient scratch.
+    pub collision_interval_secs: Option<f32>,
     pub pitch: f32,
     pub visual_scale: f32,
     /// Heading in radians. Convention: atan2(dx, -dz) — ship forward is -Z.
@@ -214,9 +216,11 @@ impl BlasterProjectile {
             // Retire an unrepresentable path without fabricating a hit.
             self.lifespan_remaining = 0.0;
             self.previous_position = None;
+            self.collision_interval_secs = None;
             return;
         }
         self.previous_position = Some(previous);
+        self.collision_interval_secs = Some(flight_dt);
         [self.x, self.y, self.z] = next;
         self.lifespan_remaining = (self.lifespan_remaining - dt).max(0.0);
     }
@@ -619,6 +623,7 @@ impl BlasterSystem {
                     y: origin_y,
                     z: origin_z,
                     previous_position: Some([origin_x, origin_y, origin_z]),
+                    collision_interval_secs: None,
                     pitch,
                     visual_scale: self.config.visual_scale,
                     heading,
@@ -730,6 +735,7 @@ impl BlasterSystem {
     pub fn finish_collision_interval(&mut self) {
         for projectile in &mut self.in_flight {
             projectile.previous_position = None;
+            projectile.collision_interval_secs = None;
         }
         self.in_flight.retain(|projectile| !projectile.is_expired());
     }

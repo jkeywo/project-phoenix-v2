@@ -1078,6 +1078,7 @@ pub(crate) fn handle_blaster_hits(
                         .unwrap_or([round.x, round.y, round.z]),
                     [round.x, round.y, round.z],
                     round.profile.detonation_radius,
+                    round.collision_interval_secs,
                 )
             })
         })
@@ -1156,13 +1157,7 @@ pub(crate) fn handle_blaster_hits(
                     if body == shooter || id.is_some_and(|id| id == &projectile.source_uuid) {
                         continue;
                     }
-                    let (position, rotation) =
-                        physics.map_or((transform.translation, transform.rotation), |pose| {
-                            (
-                                Vec3::new(pose.x, pose.y, pose.z),
-                                Quat::from_rotation_y(pose.yaw),
-                            )
-                        });
+                    let (position, rotation) = super::pdc::physical_pose(transform, physics);
                     if let Some(fraction) = super::pdc::collider_fraction(
                         start,
                         end,
@@ -1192,14 +1187,21 @@ pub(crate) fn handle_blaster_hits(
                         contacts.push((fraction, id.clone(), Contact::Body(Some(id.clone()))));
                     }
                 }
-                for (id, previous, position, radius) in &guided_targets {
-                    if let Some(fraction) = crate::weapons::pdc::moving_sphere_fraction(
+                for (id, previous, position, radius, seconds) in &guided_targets {
+                    let Some((bolt_seconds, target_seconds)) =
+                        projectile.collision_interval_secs.zip(*seconds)
+                    else {
+                        continue;
+                    };
+                    if let Some(fraction) = crate::weapons::pdc::moving_sphere_interval_fraction(
                         start,
                         end,
                         projectile.collision_radius,
+                        bolt_seconds,
                         *previous,
                         *position,
                         *radius,
+                        target_seconds,
                     ) {
                         contacts.push((fraction, id.clone(), Contact::Guided(id.clone())));
                     }

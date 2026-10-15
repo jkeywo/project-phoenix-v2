@@ -95,3 +95,57 @@ fn moving_relative_sweep_uses_common_time_instead_of_the_missile_endpoint() {
         Some(0.0)
     );
 }
+
+#[test]
+fn unequal_live_intervals_refuse_late_false_crossings_and_keep_original_bolt_order() {
+    assert!(moving_sphere_interval_fraction(
+        [-10.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        0.1,
+        1.0,
+        [0.0, -2.0, 0.0],
+        [0.0, 2.0, 0.0],
+        0.1,
+        0.2
+    )
+    .is_none());
+    assert!(moving_sphere_interval_fraction(
+        [-2.0, 0.0, 0.0],
+        [2.0, 0.0, 0.0],
+        0.1,
+        0.2,
+        [0.0, -10.0, 0.0],
+        [0.0, 10.0, 0.0],
+        0.1,
+        1.0
+    )
+    .is_none());
+    let fraction = moving_sphere_interval_fraction(
+        [-10.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        0.0,
+        1.0,
+        [-7.5, -2.0, 0.0],
+        [-7.5, 2.0, 0.0],
+        0.0,
+        0.25,
+    )
+    .unwrap();
+    assert!((fraction - 0.125).abs() <= f32::EPSILON);
+    // Muzzle-origin overlap with an old crossing segment is not an interval.
+    assert!(moving_sphere_interval_fraction(
+        [0.0; 3],
+        [0.0; 3],
+        1.0,
+        0.0,
+        [-2.0, 0.0, 0.0],
+        [2.0, 0.0, 0.0],
+        1.0,
+        1.0
+    )
+    .is_none());
+    assert!(moving_sphere_interval_fraction(
+        [0.0; 3], [1.0; 3], 1.0, 1.0, [0.0; 3], [0.0; 3], 1.0, 0.0
+    )
+    .is_none());
+}

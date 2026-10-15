@@ -35,6 +35,7 @@ fn elevated_launch_has_one_paid_round_and_frozen_config_independent_flight() {
     );
     assert_eq!((paid, minted, events.len()), (1, 1, 1));
     assert_eq!(events[0].y, 5.0);
+    assert_eq!(bank.in_flight[0].collision_interval_secs, None);
     assert!((events[0].pitch - std::f32::consts::FRAC_PI_4).abs() < 1e-6);
     let frozen = bank.in_flight[0].clone();
     bank.config = BlasterBankConfig::default();
@@ -45,6 +46,7 @@ fn elevated_launch_has_one_paid_round_and_frozen_config_independent_flight() {
     assert!((bolt.y - (5.0 + 10.0 / 2.0_f32.sqrt())).abs() < 1e-5);
     assert!((bolt.z + 10.0 / 2.0_f32.sqrt()).abs() < 1e-5);
     assert_eq!(bolt.previous_position, Some([0.0, 5.0, 0.0]));
+    assert_eq!(bolt.collision_interval_secs, Some(1.0));
     assert_eq!((paid, minted), (1, 1));
 }
 
@@ -92,7 +94,10 @@ fn swept_xyz_chooses_first_physical_body_and_consumes_the_interval_once() {
         bank.find_hits_3d(&bodies),
         vec![("bolt".into(), "near-friendly".into())]
     );
+    bank.advance_flight_only(0.0);
+    assert_eq!(bank.in_flight[0].collision_interval_secs, Some(1.0));
     bank.finish_collision_interval();
+    assert_eq!(bank.in_flight[0].collision_interval_secs, None);
     assert!(
         bank.find_hits_3d(&bodies).is_empty(),
         "paused Damage cannot replay"
@@ -101,6 +106,7 @@ fn swept_xyz_chooses_first_physical_body_and_consumes_the_interval_once() {
     assert!(bank.find_hits_3d(&bodies).is_empty());
     bank.in_flight[0].lifespan_remaining = 0.1;
     bank.advance_flight_only(100.0);
+    assert_eq!(bank.in_flight[0].collision_interval_secs, Some(0.1));
     assert!(
         (bank.in_flight[0].z + 11.0).abs() < 1e-5,
         "last segment stops at actual range"

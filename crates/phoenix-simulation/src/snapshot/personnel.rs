@@ -40,14 +40,16 @@ fn validate_active(
         .as_ref()
         .and_then(|repair| repair.jobs.as_ref())
         .ok_or("personnel requires its actual candidate Repair owner")?;
-    origin.state.validate(profile, jobs, tick)?;
+    origin.state.validate(profile, jobs, &row.uuid, tick)?;
     for (officer, request) in &row
         .repair
         .as_ref()
         .expect("validated Repair owner")
         .personnel_destinations
     {
-        if !origin.state.officers.contains_key(officer)
+        if officer.origin != row.uuid
+            || officer.validate().is_err()
+            || !origin.state.officers.contains_key(&officer.officer)
             || request.requested_tick > tick
             || matches!(&request.destination,phoenix_model::personnel::PersonnelDestination::Craft {craft} if craft.trim().is_empty())
         {

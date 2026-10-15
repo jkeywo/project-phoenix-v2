@@ -29,6 +29,7 @@ fn projection(
         profile,
         teams.0.job_state(),
         teams.0.layout().unwrap(),
+        "owner",
         20,
     );
     decorate_view(
@@ -89,7 +90,7 @@ fn remote_deployed_foreign_carried_and_lost_variants_are_identical_permitted_fac
         assert!(view
             .officers
             .iter()
-            .all(|person| person.id != "repair-chief"));
+            .all(|person| person.person.officer != "repair-chief"));
         assert!(view.carried_destinations.is_empty());
         if let Some(expected) = &expected {
             assert_eq!(&view, expected);
@@ -129,7 +130,7 @@ fn only_current_owned_stored_pod_and_explicit_feed_offer_actual_finite_berths() 
         profile,
         roster,
         teams,
-        "repair-chief",
+        &phoenix_model::personnel::PersonRef::new("owner", "repair-chief"),
         &request,
         20,
         &BTreeSet::new()
@@ -141,7 +142,7 @@ fn only_current_owned_stored_pod_and_explicit_feed_offer_actual_finite_berths() 
         profile,
         roster,
         teams,
-        "repair-chief",
+        &phoenix_model::personnel::PersonRef::new("owner", "repair-chief"),
         &request,
         21,
         &permitted
@@ -153,7 +154,7 @@ fn only_current_owned_stored_pod_and_explicit_feed_offer_actual_finite_berths() 
         profile,
         roster,
         teams,
-        "repair-chief",
+        &phoenix_model::personnel::PersonRef::new("owner", "repair-chief"),
         &request,
         20,
         &permitted
@@ -165,7 +166,7 @@ fn only_current_owned_stored_pod_and_explicit_feed_offer_actual_finite_berths() 
         profile,
         roster,
         teams,
-        "repair-chief",
+        &phoenix_model::personnel::PersonRef::new("owner", "repair-chief"),
         &request,
         20,
         &permitted
@@ -188,7 +189,7 @@ fn only_current_owned_stored_pod_and_explicit_feed_offer_actual_finite_berths() 
         profile,
         &occupied,
         teams,
-        "repair-chief",
+        &phoenix_model::personnel::PersonRef::new("owner", "repair-chief"),
         &request,
         20,
         &permitted
@@ -274,7 +275,10 @@ fn actual_admitted_dispatch_refuses_changed_intent_before_any_claim_or_mint() {
             .get_mut::<RepairRequestQueue>(actor)
             .unwrap()
             .personnel_destinations
-            .insert("repair-chief".into(), current.clone());
+            .insert(
+                phoenix_model::personnel::PersonRef::new("owner", "repair-chief"),
+                current.clone(),
+            );
         let mut stale = current.clone();
         stale.requested_tick = 19;
         world
@@ -282,7 +286,7 @@ fn actual_admitted_dispatch_refuses_changed_intent_before_any_claim_or_mint() {
             .insert(AdmittedCommands(vec![AdmittedCommand {
                 target: SystemId("repair".into()),
                 payload: SystemControlPayload::DispatchOfficerTransfer {
-                    officer: "repair-chief".into(),
+                    officer: phoenix_model::personnel::PersonRef::new("owner", "repair-chief"),
                     team_idx: 0,
                     request: stale,
                 },
@@ -302,7 +306,7 @@ fn actual_admitted_dispatch_refuses_changed_intent_before_any_claim_or_mint() {
         assert_eq!(crate::sim_digest::world_digest(&world), digest);
         world.get_mut::<AdmittedCommands>(actor).unwrap().0[0].payload =
             SystemControlPayload::DispatchOfficerTransfer {
-                officer: "repair-chief".into(),
+                officer: phoenix_model::personnel::PersonRef::new("owner", "repair-chief"),
                 team_idx: 0,
                 request: current.clone(),
             };

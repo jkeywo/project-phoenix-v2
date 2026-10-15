@@ -1,3 +1,4 @@
+import { personKey } from '../personnel.js';
 import { t } from '../strings.js';
 import { activateEngineeringAction } from '../stations/engineering-action-control.js';
 import { PERSONNEL_POST_ACTION_ID, PERSONNEL_TREAT_ACTION_ID, PERSONNEL_DESTINATION_ACTION_ID, PERSONNEL_TRANSFER_ACTION_ID } from '../stations/personnel-actions.js';
@@ -14,9 +15,9 @@ export function renderPersonnelControls(container, state, owner) {
     container.append(heading, list); mount = { list, rows: new Map(), view, owner }; mounts.set(container, mount);
   }
   mount.view = view; mount.owner = owner;
-  for (const [id, row] of mount.rows) if (!view.officers.some(officer => officer.id === id)) { row.root.remove(); mount.rows.delete(id); }
+  for (const [id, row] of mount.rows) if (!view.officers.some(officer => personKey(officer.person) === id)) { row.root.remove(); mount.rows.delete(id); }
   for (const officer of view.officers) {
-    let row = mount.rows.get(officer.id);
+    let row = mount.rows.get(personKey(officer.person));
     if (!row) {
       const root = document.createElement('div'); root.className = 'personnel-row';
       const name = document.createElement('strong'), status = document.createElement('span');
@@ -26,38 +27,38 @@ export function renderPersonnelControls(container, state, owner) {
       const escort = document.createElement('select'), transfer = document.createElement('button');
       destination.dataset.personnelDestination = ''; escort.dataset.personnelEscort = ''; careSelect.dataset.personnelCare = '';
       root.append(name, status, select, post, release, destination, request, cancel, escort, transfer, careSelect, treat); mount.list.append(root);
-      row = { root, name, status, select, post, release, careSelect, treat, destination, request, cancel, escort, transfer }; mount.rows.set(officer.id, row);
+      row = { root, name, status, select, post, release, careSelect, treat, destination, request, cancel, escort, transfer }; mount.rows.set(personKey(officer.person), row);
       const activate = team_idx => {
-        const current = mount.view.officers.find(item => item.id === officer.id);
+        const current = mount.view.officers.find(item => personKey(item.person) === personKey(officer.person));
         if (!current || !mount.view.controllable) return;
         if (row.armed && (row.armed.owner !== mount.view.system_id || row.armed.tick !== current.changed_tick)) { row.armed = null; return; }
         row.armed = null;
         activateEngineeringAction(mount.owner, PERSONNEL_POST_ACTION_ID,
-          { officer: current.id, team_idx, changed_tick: current.changed_tick, control_system_id: mount.view.system_id }, 'set_duty_officer_posting');
+          { officer: {...current.person}, team_idx, changed_tick: current.changed_tick, control_system_id: mount.view.system_id }, 'set_duty_officer_posting');
       };
       post.addEventListener('click', () => { if (select.value !== '') activate(Number(select.value)); });
       release.addEventListener('click', () => activate(null));
-      const arm = () => { const current = mount.view.officers.find(item => item.id === officer.id); row.armed = { owner: mount.view.system_id, tick: current?.changed_tick, request: JSON.stringify(current?.destination_request), destination:row.destination.value }; };
+      const arm = () => { const current = mount.view.officers.find(item => personKey(item.person) === personKey(officer.person)); row.armed = { owner: mount.view.system_id, tick: current?.changed_tick, request: JSON.stringify(current?.destination_request), destination:row.destination.value }; };
       treat.addEventListener('click', () => {
-        const current = mount.view.officers.find(item => item.id === officer.id);
+        const current = mount.view.officers.find(item => personKey(item.person) === personKey(officer.person));
         if (!current || !mount.view.controllable || careSelect.value === '') return;
         if (row.armed && (row.armed.owner !== mount.view.system_id || row.armed.tick !== current.changed_tick)) { row.armed = null; return; }
         row.armed = null;
         activateEngineeringAction(mount.owner, PERSONNEL_TREAT_ACTION_ID,
-          { officer: current.id, team_idx: Number(careSelect.value), changed_tick: current.changed_tick, control_system_id: mount.view.system_id }, 'treat_duty_officer');
+          { officer: {...current.person}, team_idx: Number(careSelect.value), changed_tick: current.changed_tick, control_system_id: mount.view.system_id }, 'treat_duty_officer');
       });
       const sendTransfer = (action, wire, detail) => {
-        const current = mount.view.officers.find(item => item.id === officer.id);
+        const current = mount.view.officers.find(item => personKey(item.person) === personKey(officer.person));
         if (!current || !mount.view.controllable) return;
         if (row.armed && (row.armed.owner !== mount.view.system_id || row.armed.tick !== current.changed_tick)) { row.armed = null; return; }
         if (row.armed && (row.armed.request !== JSON.stringify(current.destination_request)
           || action === PERSONNEL_DESTINATION_ACTION_ID && detail.destination !== null && row.armed.destination !== row.destination.value)) {row.armed=null;return;}
         row.armed = null;
-        activateEngineeringAction(mount.owner, action, {officer:current.id,changed_tick:current.changed_tick,control_system_id:mount.view.system_id,...detail},wire);
+        activateEngineeringAction(mount.owner, action, {officer:{...current.person},changed_tick:current.changed_tick,control_system_id:mount.view.system_id,...detail},wire);
       };
       request.addEventListener('click', () => { if (destination.value) sendTransfer(PERSONNEL_DESTINATION_ACTION_ID,'set_duty_officer_destination',{destination:destination.value === 'home' ? {kind:'home'} : {kind:'craft',craft:destination.value}}); });
       cancel.addEventListener('click', () => sendTransfer(PERSONNEL_DESTINATION_ACTION_ID,'set_duty_officer_destination',{destination:null}));
-      transfer.addEventListener('click', () => { if (escort.value !== '') sendTransfer(PERSONNEL_TRANSFER_ACTION_ID,'dispatch_officer_transfer',{team_idx:Number(escort.value),request:structuredClone(mount.view.officers.find(item=>item.id===officer.id)?.destination_request)}); });
+      transfer.addEventListener('click', () => { if (escort.value !== '') sendTransfer(PERSONNEL_TRANSFER_ACTION_ID,'dispatch_officer_transfer',{team_idx:Number(escort.value),request:structuredClone(mount.view.officers.find(item=>personKey(item.person)===personKey(officer.person))?.destination_request)}); });
       for (const button of [post, release, treat, request, cancel, transfer]) button.addEventListener('pointerdown', arm);
       for (const input of [select, post, release, careSelect, treat, destination, request, cancel, escort, transfer]) input.addEventListener('keydown', event => {
         if (event.key === ' ' || event.key === 'Enter') arm();

@@ -20,7 +20,7 @@ fn fixture() -> (RepairTeams, CompiledPersonnel, PersonnelState) {
         "officer":[{"id":"chief","label":"Chief","home_compartment":"clinic","competencies":["mechanical_repair"],"repair_work_multiplier":1.25,"initial_condition":"minor"}],
         "care":{"system":"repair","minor_work_secs":3,"severe_work_secs":6,"requirement":[{"resource":"medication","service":"medication","amount":1}]}})).unwrap();
     let profile = CompiledPersonnel::compile(&config, &interior, 2).unwrap();
-    let state = PersonnelState::new(&profile);
+    let state = PersonnelState::new(&profile, "ship");
     let mut teams = RepairTeams::new(2);
     teams.install_layout(InteriorGraph::compile(&interior, &ship, 2).unwrap());
     (teams, profile, state)
@@ -38,6 +38,7 @@ fn tick(
     teams.tick_treatments(
         profile,
         state,
+        "ship",
         tick,
         dt,
         blocked,
@@ -57,7 +58,11 @@ fn tick(
 fn actual_care_reserves_same_team_travels_then_consumes_once_and_returns() {
     let (mut teams, profile, mut state) = fixture();
     assert_eq!(
-        state.treatment_teams(&profile, teams.job_state(), "chief"),
+        state.treatment_teams(
+            &profile,
+            teams.job_state(),
+            &crate::personnel::PersonRef::new("ship", "chief")
+        ),
         vec![0]
     );
     assert!(state
@@ -65,12 +70,19 @@ fn actual_care_reserves_same_team_travels_then_consumes_once_and_returns() {
             &profile,
             teams.job_state(),
             teams.layout().unwrap(),
-            "chief",
+            &crate::personnel::PersonRef::new("ship", "chief"),
             Some(1),
             0
         )
         .is_err());
-    let id = teams.claim_treatment(&profile, &state, "chief", 0).unwrap();
+    let id = teams
+        .claim_treatment(
+            &profile,
+            &state,
+            &crate::personnel::PersonRef::new("ship", "chief"),
+            0,
+        )
+        .unwrap();
     assert!(!teams.claim_external(0, "other-ship".into()));
     assert!(teams
         .claim_refit(1, 2, SystemId("repair".into()), "Repair".into())
@@ -80,7 +92,12 @@ fn actual_care_reserves_same_team_travels_then_consumes_once_and_returns() {
         .is_none());
     assert!(!teams.dispatch_physical(0, SystemId("repair".into()), None, "Repair".into()));
     assert!(teams
-        .claim_treatment(&profile, &state, "chief", 1)
+        .claim_treatment(
+            &profile,
+            &state,
+            &crate::personnel::PersonRef::new("ship", "chief"),
+            1
+        )
         .is_none());
     let mut stock = 1;
     tick(
@@ -155,12 +172,21 @@ fn actual_care_reserves_same_team_travels_then_consumes_once_and_returns() {
     );
     assert_eq!(stock, 0);
     assert_eq!(teams.work_list()[0].outcome, Some(JobOutcome::Completed));
-    state.validate(&profile, teams.job_state(), 6).unwrap();
+    state
+        .validate(&profile, teams.job_state(), "ship", 6)
+        .unwrap();
 }
 #[test]
 fn recall_json_retains_custody_and_committed_medication_without_refund() {
     let (mut teams, profile, mut state) = fixture();
-    teams.claim_treatment(&profile, &state, "chief", 0).unwrap();
+    teams
+        .claim_treatment(
+            &profile,
+            &state,
+            &crate::personnel::PersonRef::new("ship", "chief"),
+            0,
+        )
+        .unwrap();
     let mut stock = 2;
     tick(
         &mut teams,
@@ -188,7 +214,9 @@ fn recall_json_retains_custody_and_committed_medication_without_refund() {
         serde_json::from_slice(&serde_json::to_vec(teams.job_state()).unwrap()).unwrap();
     let mut restored = fixture().0;
     restored.restore_state(&saved).unwrap();
-    state.validate(&profile, restored.job_state(), 2).unwrap();
+    state
+        .validate(&profile, restored.job_state(), "ship", 2)
+        .unwrap();
     tick(
         &mut restored,
         &profile,
@@ -206,7 +234,14 @@ fn recall_json_retains_custody_and_committed_medication_without_refund() {
 #[test]
 fn missing_medication_waits_and_candidate_work_or_custody_forgery_refuses() {
     let (mut teams, profile, mut state) = fixture();
-    teams.claim_treatment(&profile, &state, "chief", 0).unwrap();
+    teams
+        .claim_treatment(
+            &profile,
+            &state,
+            &crate::personnel::PersonRef::new("ship", "chief"),
+            0,
+        )
+        .unwrap();
     let mut stock = 0;
     tick(
         &mut teams,
@@ -239,7 +274,7 @@ fn missing_medication_waits_and_candidate_work_or_custody_forgery_refuses() {
         };
         match mode {
             0 => work.work_secs = 0.001,
-            1 => work.patient = "missing".into(),
+            1 => work.patient = crate::personnel::PersonRef::new("ship", "missing"),
             2 => work.condition = PersonnelCondition::Severe,
             3 => work.progress = 2.0,
             _ => {
@@ -248,7 +283,7 @@ fn missing_medication_waits_and_candidate_work_or_custody_forgery_refuses() {
                 };
             }
         }
-        assert!(state.validate(&profile, &bad, 2).is_err());
+        assert!(state.validate(&profile, &bad, "ship", 2).is_err());
         assert_eq!(teams.save_state(), original);
     }
 }
@@ -270,7 +305,14 @@ fn actual_completed_care_survives_a_supported_failing_return_tree_and_still_goes
         },
     });
     teams.program = repair_workflow::compile_workflow(Some(&config)).unwrap();
-    teams.claim_treatment(&profile, &state, "chief", 0).unwrap();
+    teams
+        .claim_treatment(
+            &profile,
+            &state,
+            &crate::personnel::PersonRef::new("ship", "chief"),
+            0,
+        )
+        .unwrap();
     let mut stock = 1;
     tick(
         &mut teams,
@@ -304,7 +346,9 @@ fn actual_completed_care_survives_a_supported_failing_return_tree_and_still_goes
         1.0,
     );
     assert!(teams.work_list()[0].workflow_error);
-    state.validate(&profile, teams.job_state(), 3).unwrap();
+    state
+        .validate(&profile, teams.job_state(), "ship", 3)
+        .unwrap();
     let saved: RepairJobState =
         serde_json::from_slice(&serde_json::to_vec(teams.job_state()).unwrap()).unwrap();
     let mut restored = fixture().0;
@@ -328,7 +372,14 @@ fn actual_completed_care_survives_a_supported_failing_return_tree_and_still_goes
 #[test]
 fn forged_extra_treatment_team_is_rejected_before_navigation_or_home_indexing() {
     let (mut teams, profile, state) = fixture();
-    teams.claim_treatment(&profile, &state, "chief", 0).unwrap();
+    teams
+        .claim_treatment(
+            &profile,
+            &state,
+            &crate::personnel::PersonRef::new("ship", "chief"),
+            0,
+        )
+        .unwrap();
     let original = teams.save_state();
     let mut bad = original.clone();
     let mut extra = bad.teams[0].clone().unwrap();

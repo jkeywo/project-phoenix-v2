@@ -19,7 +19,7 @@ fn fixture() -> (RepairTeams, CompiledPersonnel, PersonnelState) {
         "repair_team":[{"id":"escort","label":"Escort","team_idx":0,"competencies":["mechanical_repair","personnel_transport"]},{"id":"repair","label":"Repair","team_idx":1,"competencies":["mechanical_repair"]}],
         "officer":[{"id":"chief","label":"Chief","home_compartment":"home","competencies":["mechanical_repair"],"repair_work_multiplier":1.25}]})).unwrap();
     let profile = CompiledPersonnel::compile(&config, &interior, 2).unwrap();
-    let state = PersonnelState::new(&profile);
+    let state = PersonnelState::new(&profile, "origin");
     let mut teams = RepairTeams::new(2);
     teams.install_layout(InteriorGraph::compile(&interior, &ship, 2).unwrap());
     (teams, profile, state)
@@ -38,6 +38,7 @@ fn plan() -> PersonnelTransferPlan {
         berth: "one".into(),
         bay: SystemId("bay-system".into()),
         pickup: OfficerLocation::AtCompartment {
+            actor: "origin".into(),
             compartment: "home".into(),
         },
         pickup_compartment: "home".into(),
@@ -64,27 +65,47 @@ fn tick(
         |_, _| TransferAvailability::Ready,
     );
     *state = roster.state("origin").unwrap().clone();
-    state.validate(profile, teams.job_state(), tick).unwrap();
+    state
+        .validate(profile, teams.job_state(), "origin", tick)
+        .unwrap();
 }
 #[test]
 fn actual_collection_escort_handoff_and_return_keep_one_team_job_and_person() {
     let (mut teams, profile, mut state) = fixture();
     assert_eq!(
-        teams.personnel_transfer_teams(&profile, &state, "chief"),
+        teams.personnel_transfer_teams(
+            &profile,
+            &state,
+            &crate::personnel::PersonRef::new("origin", "chief")
+        ),
         vec![0]
     );
     let id = teams
-        .claim_personnel_transfer(&profile, &state, "chief", 0, order(), plan())
+        .claim_personnel_transfer(
+            &profile,
+            &state,
+            &crate::personnel::PersonRef::new("origin", "chief"),
+            0,
+            order(),
+            plan(),
+        )
         .unwrap();
     assert!(teams
-        .claim_personnel_transfer(&profile, &state, "chief", 1, order(), plan())
+        .claim_personnel_transfer(
+            &profile,
+            &state,
+            &crate::personnel::PersonRef::new("origin", "chief"),
+            1,
+            order(),
+            plan()
+        )
         .is_none());
     assert!(state
         .post(
             &profile,
             teams.job_state(),
             teams.layout().unwrap(),
-            "chief",
+            &crate::personnel::PersonRef::new("origin", "chief"),
             Some(1),
             2
         )
@@ -126,7 +147,7 @@ fn actual_collection_escort_handoff_and_return_keep_one_team_job_and_person() {
     assert_eq!(teams.work_list()[0].outcome, Some(JobOutcome::Completed));
     assert!(!teams.claims_personnel_craft("pod"));
     assert_eq!(
-        state.repair_work_multipliers(&profile, teams.job_state()),
+        state.repair_work_multipliers(&profile, teams.job_state(), "origin"),
         vec![1.0, 1.0]
     );
 }
@@ -134,7 +155,14 @@ fn actual_collection_escort_handoff_and_return_keep_one_team_job_and_person() {
 fn actual_escort_json_continuation_retains_exact_job_cursor_and_custody() {
     let (mut teams, profile, mut state) = fixture();
     teams
-        .claim_personnel_transfer(&profile, &state, "chief", 0, order(), plan())
+        .claim_personnel_transfer(
+            &profile,
+            &state,
+            &crate::personnel::PersonRef::new("origin", "chief"),
+            0,
+            order(),
+            plan(),
+        )
         .unwrap();
     for step in 1..=5 {
         tick(&mut teams, &profile, &mut state, step, &BTreeSet::new());
@@ -167,7 +195,14 @@ fn actual_escort_json_continuation_retains_exact_job_cursor_and_custody() {
 fn recall_after_collection_returns_real_officer_home_before_team_release() {
     let (mut teams, profile, mut state) = fixture();
     let id = teams
-        .claim_personnel_transfer(&profile, &state, "chief", 0, order(), plan())
+        .claim_personnel_transfer(
+            &profile,
+            &state,
+            &crate::personnel::PersonRef::new("origin", "chief"),
+            0,
+            order(),
+            plan(),
+        )
         .unwrap();
     for step in 1..=5 {
         tick(&mut teams, &profile, &mut state, step, &BTreeSet::new());
@@ -186,6 +221,7 @@ fn recall_after_collection_returns_real_officer_home_before_team_release() {
     assert_eq!(
         state.officers["chief"].location,
         OfficerLocation::AtCompartment {
+            actor: "origin".into(),
             compartment: "home".into()
         }
     );

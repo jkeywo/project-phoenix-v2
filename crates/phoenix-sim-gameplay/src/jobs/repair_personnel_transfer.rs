@@ -1,8 +1,9 @@
 //! Actual personnel escort uses the existing exclusive team and physical cursor.
 use super::*;
 use crate::personnel::{
-    CompiledPersonnel, DutyCompetency, OfficerLocation, PersonnelCondition, PersonnelDestination,
-    PersonnelDestinationRequest, PersonnelRoster, PersonnelState, PersonnelTransferStage,
+    CompiledPersonnel, DutyCompetency, OfficerLocation, PersonRef, PersonnelCondition,
+    PersonnelDestination, PersonnelDestinationRequest, PersonnelRoster, PersonnelState,
+    PersonnelTransferStage,
 };
 use crate::ship::interior::TeamLocation;
 use phoenix_model::job::JobId;
@@ -20,7 +21,7 @@ pub struct PersonnelTransferPlan {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersonnelTransferWork {
-    pub officer: String,
+    pub officer: PersonRef,
     pub request: PersonnelDestinationRequest,
     pub plan: PersonnelTransferPlan,
     pub stage: PersonnelTransferStage,
@@ -53,13 +54,16 @@ impl RepairTeams {
         &self,
         profile: &CompiledPersonnel,
         personnel: &PersonnelState,
-        officer: &str,
+        officer: &PersonRef,
     ) -> Vec<u32> {
-        let Some(person) = personnel.officers.get(officer) else {
+        if officer.validate().is_err() {
+            return Vec::new();
+        }
+        let Some(person) = personnel.officers.get(&officer.officer) else {
             return Vec::new();
         };
-        if !matches!(person.location,OfficerLocation::AtCompartment {..}|OfficerLocation::AboardCraft {..}) || self.state.teams.iter().flatten().any(|job|job.outcome.is_none() && matches!(&job.activity,RepairActivity::PersonnelTransfer {work,..} if work.officer==officer && !work.completed)) {return Vec::new();}
-        if self.state.teams.iter().flatten().any(|job|job.outcome.is_none() && matches!(&job.activity,RepairActivity::Treatment {work,..} if work.patient==officer)) {return Vec::new();}
+        if !matches!(person.location,OfficerLocation::AtCompartment {..}|OfficerLocation::AboardCraft {..}) || self.state.teams.iter().flatten().any(|job|job.outcome.is_none() && matches!(&job.activity,RepairActivity::PersonnelTransfer {work,..} if &work.officer==officer && !work.completed)) {return Vec::new();}
+        if self.state.teams.iter().flatten().any(|job|job.outcome.is_none() && matches!(&job.activity,RepairActivity::Treatment {work,..} if &work.patient==officer)) {return Vec::new();}
         let Some(layout) = self.layout.as_ref() else {
             return Vec::new();
         };
@@ -76,7 +80,7 @@ impl RepairTeams {
         &mut self,
         profile: &CompiledPersonnel,
         personnel: &PersonnelState,
-        officer: &str,
+        officer: &PersonRef,
         team: usize,
         request: PersonnelDestinationRequest,
         plan: PersonnelTransferPlan,
@@ -86,7 +90,7 @@ impl RepairTeams {
             .contains(&(team as u32))
             || self.claims_personnel_bay(&plan.bay)
             || self.refit_claims_system(&plan.bay)
-            || personnel.officers.get(officer)?.location != plan.pickup
+            || personnel.officers.get(&officer.officer)?.location != plan.pickup
         {
             return None;
         }
@@ -110,8 +114,13 @@ impl RepairTeams {
         match (&request.destination, &plan.pickup) {
             (
                 PersonnelDestination::Craft { craft },
-                OfficerLocation::AtCompartment { compartment },
-            ) if craft == &plan.craft && compartment == &plan.pickup_compartment => {}
+                OfficerLocation::AtCompartment {
+                    actor: holder,
+                    compartment,
+                },
+            ) if holder == &officer.origin
+                && craft == &plan.craft
+                && compartment == &plan.pickup_compartment => {}
             (PersonnelDestination::Home, OfficerLocation::AboardCraft { craft, berth })
                 if craft == &plan.craft && berth == &plan.berth => {}
             _ => return None,
@@ -130,7 +139,7 @@ impl RepairTeams {
                 },
                 cancelled: false,
                 work: PersonnelTransferWork {
-                    officer: officer.into(),
+                    officer: officer.clone(),
                     request,
                     plan: plan.clone(),
                     stage: PersonnelTransferStage::Collecting,
@@ -201,7 +210,7 @@ impl RepairTeams {
                 .as_ref()
                 .and_then(|rows| rows.get(index))
                 .ok_or("personnel transfer needs actual team cursor")?;
-            if work.officer.is_empty()
+            if work.officer.validate().is_err()
                 || work.plan.craft.is_empty()
                 || work.plan.berth.is_empty()
                 || work.plan.bay.0.is_empty()
@@ -219,8 +228,13 @@ impl RepairTeams {
             match (&work.request.destination, &work.plan.pickup) {
                 (
                     PersonnelDestination::Craft { craft },
-                    OfficerLocation::AtCompartment { compartment },
-                ) if craft == &work.plan.craft && compartment == &work.plan.pickup_compartment => {}
+                    OfficerLocation::AtCompartment {
+                        actor: holder,
+                        compartment,
+                    },
+                ) if holder == &work.officer.origin
+                    && craft == &work.plan.craft
+                    && compartment == &work.plan.pickup_compartment => {}
                 (PersonnelDestination::Home, OfficerLocation::AboardCraft { craft, berth })
                     if craft == &work.plan.craft && berth == &work.plan.berth => {}
                 _ => {
@@ -312,6 +326,11 @@ impl RepairTeams {
                 unreachable!()
             };
             let cursor = &mut navigation[index];
+            if work.officer.origin != actor {
+                job.workflow_error = true;
+                job.paused = true;
+                continue;
+            }
             let readiness = if work.stage == PersonnelTransferStage::Returning {
                 TransferAvailability::Ready
             } else {
@@ -319,7 +338,7 @@ impl RepairTeams {
             };
             let Some(person) = roster
                 .state_mut(actor)
-                .and_then(|state| state.officers.get_mut(&work.officer))
+                .and_then(|state| state.officers.get_mut(&work.officer.officer))
             else {
                 job.workflow_error = true;
                 job.paused = true;
@@ -329,7 +348,7 @@ impl RepairTeams {
                 .config
                 .officers
                 .iter()
-                .find(|person| person.id == work.officer)
+                .find(|person| person.id == work.officer.officer)
             else {
                 job.workflow_error = true;
                 job.paused = true;
@@ -393,6 +412,7 @@ impl RepairTeams {
                                 berth: work.plan.berth.clone(),
                             },
                             PersonnelDestination::Home => OfficerLocation::AtCompartment {
+                                actor: actor.into(),
                                 compartment: definition.home_compartment.clone(),
                             },
                         };
@@ -409,6 +429,7 @@ impl RepairTeams {
                     if carrying {
                         if graph.advance(cursor, &definition.home_compartment, dt, blocked) {
                             person.location = OfficerLocation::AtCompartment {
+                                actor: actor.into(),
                                 compartment: definition.home_compartment.clone(),
                             };
                             person.changed_tick = tick;

@@ -2,6 +2,62 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
+/// Stable identity within the single retained roster, independent of current holder.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PersonRef {
+    pub origin: String,
+    pub officer: String,
+}
+impl PersonRef {
+    pub fn new(origin: impl Into<String>, officer: impl Into<String>) -> Self {
+        Self {
+            origin: origin.into(),
+            officer: officer.into(),
+        }
+    }
+    pub fn validate(&self) -> Result<(), String> {
+        if self.origin.trim().is_empty()
+            || self.origin.trim() != self.origin
+            || self.origin.len() > 128
+            || self.origin.chars().any(char::is_control)
+            || !valid_id(&self.officer)
+        {
+            return Err(
+                "personnel reference requires an actual origin identity and accepted officer ID"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+}
+/// One canonical compound-key map, encoded as sorted rows in JSON and postcard.
+/// Duplicate/unsorted rows are refused rather than silently replacing a request.
+pub mod order_rows {
+    use super::*;
+    use serde::{Deserializer, Serializer};
+    use std::collections::BTreeMap;
+    pub fn serialize<S: Serializer>(
+        value: &BTreeMap<PersonRef, PersonnelDestinationRequest>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        value.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<PersonRef, PersonnelDestinationRequest>, D::Error> {
+        let rows = Vec::<(PersonRef, PersonnelDestinationRequest)>::deserialize(deserializer)?;
+        if rows.windows(2).any(|pair| pair[0].0 >= pair[1].0)
+            || rows.iter().any(|(person, _)| person.validate().is_err())
+        {
+            return Err(serde::de::Error::custom(
+                "personnel request rows require unique sorted accepted references",
+            ));
+        }
+        Ok(rows.into_iter().collect())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DutyCompetency {
@@ -160,10 +216,12 @@ pub enum OfficerLocation {
         actor: String,
     },
     AtCompartment {
+        actor: String,
         compartment: String,
     },
     /// Location is read through the one actual team navigation cursor.
     WithRepairTeam {
+        actor: String,
         team_idx: u32,
     },
 }
@@ -245,7 +303,7 @@ pub struct DutyTeamView {
     pub label: String,
     pub team_idx: u32,
     pub competencies: Vec<DutyCompetency>,
-    pub officer: Option<String>,
+    pub officer: Option<PersonRef>,
     pub active_work_multiplier: f32,
 }
 
@@ -271,7 +329,7 @@ pub struct DutyOfficerView {
     pub treatment_teams: Vec<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub treatment: Option<OfficerTreatmentView>,
-    pub id: String,
+    pub person: PersonRef,
     pub label: String,
     pub competencies: Vec<DutyCompetency>,
     pub location: OfficerLocation,

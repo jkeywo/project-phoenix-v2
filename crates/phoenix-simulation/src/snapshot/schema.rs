@@ -1025,9 +1025,15 @@ pub struct BlasterBolt {
 /// crew being told twice.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct RepairState {
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub personnel_destinations:
-        std::collections::BTreeMap<String, phoenix_model::personnel::PersonnelDestinationRequest>,
+    #[serde(
+        default,
+        skip_serializing_if = "std::collections::BTreeMap::is_empty",
+        with = "phoenix_model::personnel::order_rows"
+    )]
+    pub personnel_destinations: std::collections::BTreeMap<
+        phoenix_model::personnel::PersonRef,
+        phoenix_model::personnel::PersonnelDestinationRequest,
+    >,
     pub readings: Vec<(
         crate::core::messages::RepairGroup,
         Vec<crate::console::repair::server::RepairSourceReading>,

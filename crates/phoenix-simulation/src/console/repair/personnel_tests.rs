@@ -36,7 +36,7 @@ fn issue(world: &mut World, ship: Entity, target: &str, team: Option<u32>) {
     world.get_mut::<AdmittedCommands>(ship).unwrap().0 = vec![AdmittedCommand {
         target: SystemId(target.into()),
         payload: SystemControlPayload::SetDutyOfficerPosting {
-            officer: "repair-chief".into(),
+            officer: phoenix_model::personnel::PersonRef::new("personnel-owner", "repair-chief"),
             team_idx: team,
         },
         response_token: None,
@@ -73,7 +73,10 @@ fn actual_admitted_human_and_ai_posting_share_one_custody_without_payment_or_mov
         let posted = state(&world, ship).clone();
         assert_eq!(
             posted.officers["repair-chief"].location,
-            phoenix_model::personnel::OfficerLocation::WithRepairTeam { team_idx: 0 }
+            phoenix_model::personnel::OfficerLocation::WithRepairTeam {
+                actor: "personnel-owner".into(),
+                team_idx: 0
+            }
         );
         assert_eq!(posted.officers["repair-chief"].changed_tick, 12);
         world.resource_mut::<crate::sim_tick::SimTick>().0 = 13;
@@ -105,6 +108,7 @@ fn actual_admitted_human_and_ai_posting_share_one_custody_without_payment_or_mov
         assert_eq!(
             state(&world, ship).officers["repair-chief"].location,
             phoenix_model::personnel::OfficerLocation::AtCompartment {
+                actor: "personnel-owner".into(),
                 compartment: "engineering".into()
             }
         );
@@ -150,5 +154,54 @@ fn unavailable_or_away_actual_team_cannot_teleport_custody() {
                 .save_state(),
             jobs
         );
+    }
+}
+
+#[test]
+fn admitted_same_local_id_from_another_origin_cannot_post_or_claim_actual_people() {
+    use phoenix_model::personnel::PersonRef;
+    for source in [ControlSource::Human, ControlSource::Ai] {
+        let (mut world, ship) = fixture();
+        world
+            .get_mut::<ShipSystemControlSources>(ship)
+            .unwrap()
+            .0
+            .set(SystemId("repair".into()), source);
+        for reference in [
+            PersonRef::new("foreign-owner", "repair-chief"),
+            PersonRef::new("personnel-owner", "missing"),
+            PersonRef::new("", "repair-chief"),
+        ] {
+            for payload in [
+                SystemControlPayload::SetDutyOfficerPosting {
+                    officer: reference.clone(),
+                    team_idx: Some(0),
+                },
+                SystemControlPayload::TreatDutyOfficer {
+                    officer: reference.clone(),
+                    team_idx: 0,
+                },
+                SystemControlPayload::SetDutyOfficerDestination {
+                    officer: reference.clone(),
+                    destination: None,
+                },
+            ] {
+                world.get_mut::<AdmittedCommands>(ship).unwrap().0 = vec![AdmittedCommand {
+                    target: SystemId("repair".into()),
+                    payload,
+                    response_token: None,
+                    feedback_correlation: None,
+                }];
+                let before = crate::snapshot::capture(&world);
+                let digest = crate::sim_digest::world_digest(&world);
+                world.run_system_once(apply).unwrap();
+                assert_eq!(
+                    crate::snapshot::capture(&world),
+                    before,
+                    "bad reference cannot change any canonical owner"
+                );
+                assert_eq!(crate::sim_digest::world_digest(&world), digest);
+            }
+        }
     }
 }

@@ -585,3 +585,32 @@ asserts unchanged complete capture/digest, with a matching-request positive
 counter proving that the same prepared actual hardware can mint exactly one Job.
 That adapter fixture is not a substitute for normal Human admission/AI choice in
 the separate host proof; native execution remains integrator-owned.
+
+
+## Structural stable-reference source slice
+
+The local owner now carries `PersonRef { origin, officer }` through the four
+normal personnel commands, permitted rows, Treatment/PersonnelTransfer work and
+Repair destination keys. Authored IDs remain local definition keys; no person is
+recreated or moved to another roster. Compartment and posted-team custody require
+the actual holder UUID. Ordinary loss resolves actual occupants; an origin row
+alone cannot kill or boost people elsewhere. Existing local work still refuses
+foreign references before claiming a team, changing intent or minting a Job.
+
+The compound-key request map is encoded as ordered reference/request rows for
+JSON continuation, refusing duplicate or unsorted keys and the old string-key
+shape. Whole candidate checks require actual local holder, own stable work/ref
+identity and matching request; unsupported old holder fields cannot default.
+Existing owner, adapter and host fixtures retain their physical outcomes, finite
+payments, strict full capture/digest continuation and no-write assertions while
+using exact live origin UUIDs. Additional tests cover wrong holder, same-named
+foreign reference, bad request identity and closed wire shapes. The owner-level
+loss regression directly supplies offship custody to test loss routing; it does
+not claim an admitted foreign transfer.
+
+Targeted browser-module tests: four files, **201 passed**, 4.82 s. Owned Rust
+formatting and diff checks passed. Native compilation, actual host re-execution,
+compatibility joins and integration gates remain root-owned and pending; source
+review is being queued. The receiving-ship rescue consumer and full20 exit remain
+open. This slice changes no station layout, authored finite roster or Workshop
+capability.

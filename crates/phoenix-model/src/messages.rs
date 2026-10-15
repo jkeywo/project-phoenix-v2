@@ -2469,22 +2469,22 @@ pub enum SystemControlPayload {
     },
     /// A co-located physical posting to an existing finite Repair team.
     SetDutyOfficerPosting {
-        officer: String,
+        officer: crate::personnel::PersonRef,
         team_idx: Option<u32>,
     },
     /// Actual local care by one existing finite compatible team.
     TreatDutyOfficer {
-        officer: String,
+        officer: crate::personnel::PersonRef,
         team_idx: u32,
     },
     /// Persistent destination intent; setting it is not a physical handoff.
     SetDutyOfficerDestination {
-        officer: String,
+        officer: crate::personnel::PersonRef,
         destination: Option<crate::personnel::PersonnelDestination>,
     },
     /// Commit an eligible actual finite team to the current destination order.
     DispatchOfficerTransfer {
-        officer: String,
+        officer: crate::personnel::PersonRef,
         team_idx: u32,
         request: crate::personnel::PersonnelDestinationRequest,
     },

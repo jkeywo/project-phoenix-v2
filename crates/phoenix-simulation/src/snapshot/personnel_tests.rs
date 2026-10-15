@@ -72,7 +72,7 @@ fn fixture() -> (World, Entity, PhoenixSnapshot) {
             &profile,
             &jobs,
             config.interior.as_ref().unwrap(),
-            "repair-chief",
+            &phoenix_model::personnel::PersonRef::new("personnel-ship", "repair-chief"),
             Some(0),
             18,
         )
@@ -102,7 +102,10 @@ fn actual_spawn_and_json_application_preserve_one_custody_owner_and_team_frontie
         .origins
         .get_mut("personnel-ship")
         .unwrap()
-        .state = PersonnelState::new(&world.get::<CompiledPersonnel>(entity).unwrap().clone());
+        .state = PersonnelState::new(
+        &world.get::<CompiledPersonnel>(entity).unwrap().clone(),
+        "personnel-ship",
+    );
     let current = world.resource::<PersonnelRoster>().clone();
     super::super::application::apply_entity_state(
         &mut world,
@@ -130,7 +133,7 @@ fn forged_custody_refuses_before_any_global_or_entity_write() {
     let (mut world, _, saved) = fixture();
     let before = capture(&world);
     let before_digest = crate::sim_digest::world_digest(&world);
-    for fault in 0..5 {
+    for fault in 0..7 {
         let mut candidate = saved.clone();
         candidate.tick += 10;
         let row = &mut candidate.entities[0];
@@ -160,11 +163,13 @@ fn forged_custody_refuses_before_any_global_or_entity_write() {
                     .officers
                     .get_mut("repair-chief")
                     .unwrap()
-                    .location =
-                    phoenix_model::personnel::OfficerLocation::WithRepairTeam { team_idx: 99 }
+                    .location = phoenix_model::personnel::OfficerLocation::WithRepairTeam {
+                    actor: "personnel-ship".into(),
+                    team_idx: 99,
+                }
             }
             3 => row.repair.as_mut().unwrap().jobs = None,
-            _ => {
+            4 => {
                 candidate
                     .personnel
                     .origins
@@ -173,6 +178,35 @@ fn forged_custody_refuses_before_any_global_or_entity_write() {
                     .state
                     .officers
                     .clear();
+            }
+            5 => {
+                candidate
+                    .personnel
+                    .origins
+                    .get_mut("personnel-ship")
+                    .unwrap()
+                    .state
+                    .officers
+                    .get_mut("repair-chief")
+                    .unwrap()
+                    .location = OfficerLocation::WithRepairTeam {
+                    actor: "another-holder".into(),
+                    team_idx: 0,
+                }
+            }
+            _ => {
+                candidate.entities[0]
+                    .repair
+                    .as_mut()
+                    .unwrap()
+                    .personnel_destinations
+                    .insert(
+                        phoenix_model::personnel::PersonRef::new("another-origin", "repair-chief"),
+                        phoenix_model::personnel::PersonnelDestinationRequest {
+                            destination: phoenix_model::personnel::PersonnelDestination::Home,
+                            requested_tick: 20,
+                        },
+                    );
             }
         }
         let report = restore(&mut world, &candidate);
@@ -223,7 +257,12 @@ fn actual_medical_candidate_rejects_forged_site_terms_condition_and_exclusive_te
         .get_mut::<crate::console::repair::server::ShipRepairTeams>(entity)
         .unwrap()
         .0
-        .claim_treatment(&profile, &personnel, "repair-chief", 1)
+        .claim_treatment(
+            &profile,
+            &personnel,
+            &phoenix_model::personnel::PersonRef::new("medical-ship", "repair-chief"),
+            1,
+        )
         .unwrap();
     publish_fixture_observations(&mut world);
     let saved: PhoenixSnapshot =
@@ -231,7 +270,7 @@ fn actual_medical_candidate_rejects_forged_site_terms_condition_and_exclusive_te
     validate_roster(&world, &saved).unwrap();
     let before = capture(&world);
     let digest = crate::sim_digest::world_digest(&world);
-    for mode in 0..8 {
+    for mode in 0..10 {
         let mut candidate = saved.clone();
         candidate.tick += 10;
         let row = candidate
@@ -263,6 +302,7 @@ fn actual_medical_candidate_rejects_forged_site_terms_condition_and_exclusive_te
                     .get_mut("repair-chief")
                     .unwrap()
                     .location = phoenix_model::personnel::OfficerLocation::AtCompartment {
+                    actor: "medical-ship".into(),
                     compartment: "bridge".into(),
                 }
             }
@@ -284,8 +324,29 @@ fn actual_medical_candidate_rejects_forged_site_terms_condition_and_exclusive_te
                     };
                     match mode {
                         3 => work.work_secs = 0.001,
-                        4 => work.patient = "imaginary".into(),
+                        4 => {
+                            work.patient = phoenix_model::personnel::PersonRef::new(
+                                "medical-ship",
+                                "imaginary",
+                            )
+                        }
                         5 => work.progress = 1.0,
+                        8 => work.patient.origin = "another-origin".into(),
+                        9 => {
+                            candidate
+                                .personnel
+                                .origins
+                                .get_mut("medical-ship")
+                                .unwrap()
+                                .state
+                                .officers
+                                .get_mut("repair-chief")
+                                .unwrap()
+                                .location = OfficerLocation::AtCompartment {
+                                actor: "another-holder".into(),
+                                compartment: profile.care_compartment.clone().unwrap(),
+                            }
+                        }
                         _ => {
                             *phase = crate::core::messages::TeamSlot::Repairing {
                                 system_id: Some(crate::ship::system_registry::repair_system_id()),
@@ -415,6 +476,7 @@ fn removed_origin_population_provenance_and_terminal_closure_are_preflighted() {
                     .get_mut("repair-chief")
                     .unwrap()
                     .location = OfficerLocation::AtCompartment {
+                    actor: "personnel-ship".into(),
                     compartment: "engineering".into(),
                 };
             }
@@ -462,11 +524,20 @@ fn runtime_origin_recipe_is_retained_after_body_loss_and_validated_on_fresh_rest
     let (mut world, entity, _) = fixture();
     let actor = WorldId::new(IdNamespace::Entity, 20, 0).render();
     world.get_mut::<EntityUuid>(entity).unwrap().0 = actor.clone();
-    let record = world
+    let mut record = world
         .resource_mut::<PersonnelRoster>()
         .origins
         .remove("personnel-ship")
         .unwrap();
+    record
+        .state
+        .officers
+        .get_mut("repair-chief")
+        .unwrap()
+        .location = OfficerLocation::WithRepairTeam {
+        actor: actor.clone(),
+        team_idx: 0,
+    };
     world
         .resource_mut::<PersonnelRoster>()
         .origins

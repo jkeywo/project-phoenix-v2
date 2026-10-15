@@ -10,8 +10,8 @@ import { ActionFeedbackLifecycle } from '../../gui/action-feedback.js';
 import '../../gui/components/ph-repair-teams.js';
 const roster = () => ({ teams: [0, 1].map(team_idx => ({ id: `team-${team_idx}`, label: `Team ${team_idx}`,
   team_idx, competencies: ['mechanical_repair'], officer: null, active_work_multiplier: 1 })),
-  officers: [{ id: 'chief', label: 'Chief', competencies: ['mechanical_repair'],
-    location: { kind: 'at_compartment', compartment: 'engineering' }, changed_tick: 7,
+  officers: [{ person: {origin:'actual-ship',officer:'chief'}, label: 'Chief', competencies: ['mechanical_repair'],
+    location: { kind: 'at_compartment', actor:'actual-ship', compartment: 'engineering' }, changed_tick: 7,
     repair_work_multiplier: 1.25, available_teams: [0, 1], can_release: false }] });
 const payload = (owner = 'actual-repair') => personnelPayload(roster(), owner, true);
 afterEach(() => { document.body.replaceChildren(); delete window.activateSemanticAction; });
@@ -34,8 +34,8 @@ it('refuses malformed, duplicate, unavailable and stale physical posting choices
   expect(personnelPayload(initial, 'actual-repair', true)).toBeNull();
   const duplicate = roster(); duplicate.officers.push(duplicate.officers[0]);
   expect(personnelPayload(duplicate, 'actual-repair', true)).toBeNull();
-  const request = { officer: 'chief', team_idx: 0, changed_tick: 7, control_system_id: 'actual-repair' };
-  expect(personnelPosting(payload(), request)).toEqual({ officer: 'chief', team_idx: 0 });
+  const request = { officer: {origin:'actual-ship',officer:'chief'}, team_idx: 0, changed_tick: 7, control_system_id: 'actual-repair' };
+  expect(personnelPosting(payload(), request)).toEqual({ officer: {origin:'actual-ship',officer:'chief'}, team_idx: 0 });
   for (const bad of [{ ...request, changed_tick: 6 }, { ...request, team_idx: 8 },
     { ...request, team_idx: null }, { ...request, control_system_id: 'foreign-repair' }]) expect(personnelPosting(payload(), bad)).toBeNull();
 });
@@ -46,11 +46,11 @@ it('routes one correlated accepted request to the actual owner without granting 
   let sequence = 0;
   const send = vi.fn(), registry = createEngineeringActionRegistry({ getState: () => state, sendAction: send,
     actionFeedback: new ActionFeedbackLifecycle({ correlation: () => 'personnel-' + (++sequence) }) });
-  const request = { officer: 'chief', team_idx: 1, changed_tick: 7, control_system_id: 'actual-repair' };
+  const request = { officer: {origin:'actual-ship',officer:'chief'}, team_idx: 1, changed_tick: 7, control_system_id: 'actual-repair' };
   registry.activate(PERSONNEL_POST_ACTION_ID, { context: 'engineering', detail: request });
   const wire = vi.fn(); for (const [action, fields] of send.mock.calls) dispatchConsoleAction({ action, ...fields }, wire, vi.fn());
   expect(wire.mock.calls[0]).toEqual(['ControlSystemCorrelated', { correlation: 'personnel-1', target: 'actual-repair',
-    payload: { type: 'SetDutyOfficerPosting', data: { officer: 'chief', team_idx: 1 } } }]);
+    payload: { type: 'SetDutyOfficerPosting', data: { officer: {origin:'actual-ship',officer:'chief'}, team_idx: 1 } } }]);
   repair.personnel_controllable = false;
   registry.activate(PERSONNEL_POST_ACTION_ID, { context: 'engineering', detail: request });
   expect(send).toHaveBeenCalledTimes(1);
@@ -65,7 +65,7 @@ it('preserves native picker focus and edits across snapshots without automatical
   expect(container.querySelector('select')).toBe(select); expect(document.activeElement).toBe(select); expect(select.value).toBe('1');
   expect(host.sendAction).not.toHaveBeenCalled();
   container.querySelector('button').click();
-  expect(host.sendAction).toHaveBeenCalledWith('set_duty_officer_posting', expect.objectContaining({ officer: 'chief', team_idx: 1, changed_tick: 7 }));
+  expect(host.sendAction).toHaveBeenCalledWith('set_duty_officer_posting', expect.objectContaining({ officer: {origin:'actual-ship',officer:'chief'}, team_idx: 1, changed_tick: 7 }));
   renderPersonnelControls(container, { personnel: { ...payload(), controllable: false } }, host);
   expect([...container.querySelectorAll('button,select')].every(input => input.disabled)).toBe(true);
 });
@@ -92,8 +92,8 @@ it('offers care only for an actual injured patient and eligible finite team thro
   const raw = roster(); raw.officers[0].condition = 'minor'; raw.officers[0].available_teams = []; raw.officers[0].treatment_teams = [1];
   raw.teams[1].competencies.push('medical_care');
   const view = personnelPayload(raw, 'actual-repair', true);
-  const detail = { officer: 'chief', team_idx: 1, changed_tick: 7, control_system_id: 'actual-repair' };
-  expect(personnelTreatment(view, detail)).toEqual({ officer: 'chief', team_idx: 1 });
+  const detail = { officer: {origin:'actual-ship',officer:'chief'}, team_idx: 1, changed_tick: 7, control_system_id: 'actual-repair' };
+  expect(personnelTreatment(view, detail)).toEqual({ officer: {origin:'actual-ship',officer:'chief'}, team_idx: 1 });
   for (const bad of [{ ...detail, team_idx: 0 }, { ...detail, changed_tick: 6 }, { ...detail, control_system_id: 'other' }]) expect(personnelTreatment(view,bad)).toBeNull();
   expect(personnelTreatment({ ...view, controllable: false }, detail)).toBeNull();
   const repair = { system_id: 'actual-repair', repair_auto: false, personnel_controllable: true, personnel: view };
@@ -102,12 +102,12 @@ it('offers care only for an actual injured patient and eligible finite team thro
     actionFeedback: new ActionFeedbackLifecycle({ correlation: () => 'treatment-1' }) });
   registry.activate(PERSONNEL_TREAT_ACTION_ID, { context: 'engineering', detail });
   const wire = vi.fn(); for (const [action, fields] of send.mock.calls) dispatchConsoleAction({ action, ...fields }, wire, vi.fn());
-  expect(wire.mock.calls[0]).toEqual(['ControlSystemCorrelated', { correlation: 'treatment-1', target: 'actual-repair', payload: {type:'TreatDutyOfficer', data:{officer:'chief',team_idx:1}} }]);
+  expect(wire.mock.calls[0]).toEqual(['ControlSystemCorrelated', { correlation: 'treatment-1', target: 'actual-repair', payload: {type:'TreatDutyOfficer', data:{officer:{origin:'actual-ship',officer:'chief'},team_idx:1}} }]);
   const container = document.createElement('section'); document.body.append(container); const owner = {sendAction:vi.fn()};
   renderPersonnelControls(container, {personnel:view}, owner);
   const picks = container.querySelectorAll('select'); expect(picks[0].disabled).toBe(true); const carePicker=container.querySelector('[data-personnel-care]');carePicker.value='1';carePicker.dispatchEvent(new Event('change'));
   const button = [...container.querySelectorAll('button')].at(-1); button.click();
-  expect(owner.sendAction).toHaveBeenCalledWith('treat_duty_officer', expect.objectContaining({officer:'chief',team_idx:1}));
+  expect(owner.sendAction).toHaveBeenCalledWith('treat_duty_officer', expect.objectContaining({officer:{origin:'actual-ship',officer:'chief'},team_idx:1}));
   button.dispatchEvent(new Event('pointerdown'));
   renderPersonnelControls(container,{personnel:{...view,system_id:'new-repair'}},owner);button.click();expect(owner.sendAction).toHaveBeenCalledTimes(1);
 });
@@ -120,19 +120,19 @@ const transferRoster = () => {
 };
 it('routes destination intent and actual eligible escort through ordinary correlated Repair admission',()=>{
   const view=personnelPayload(transferRoster(),'actual-repair',true);
-  const detail={officer:'chief',changed_tick:7,control_system_id:'actual-repair',request:structuredClone(view.officers[0].destination_request)};
-  expect(personnelDestination(view,{...detail,destination:{kind:'craft',craft:'actual-pod'}})).toEqual({officer:'chief',destination:{kind:'craft',craft:'actual-pod'}});
+  const detail={officer:{origin:'actual-ship',officer:'chief'},changed_tick:7,control_system_id:'actual-repair',request:structuredClone(view.officers[0].destination_request)};
+  expect(personnelDestination(view,{...detail,destination:{kind:'craft',craft:'actual-pod'}})).toEqual({officer:{origin:'actual-ship',officer:'chief'},destination:{kind:'craft',craft:'actual-pod'}});
   expect(personnelDestination(view,{...detail,destination:{kind:'craft',craft:'guessed-remote'}})).toBeNull();
   expect(personnelDestination(view,{...detail,changed_tick:6,destination:null})).toBeNull();
   expect(personnelTransfer(view,{...detail,team_idx:0})).toBeNull();
-  expect(personnelTransfer(view,{...detail,team_idx:1})).toEqual({officer:'chief',team_idx:1,request:detail.request});
+  expect(personnelTransfer(view,{...detail,team_idx:1})).toEqual({officer:{origin:'actual-ship',officer:'chief'},team_idx:1,request:detail.request});
   const repair={system_id:'actual-repair',repair_auto:false,personnel_controllable:true,personnel:view};
   const state={system_ids:['actual-repair'],system_families:{'actual-repair':'repair'},systems:{'actual-repair':repair}};
   let sequence=0;const send=vi.fn(),registry=createEngineeringActionRegistry({getState:()=>state,sendAction:send,actionFeedback:new ActionFeedbackLifecycle({correlation:()=> 'escort-'+(++sequence)})});
   registry.activate(PERSONNEL_DESTINATION_ACTION_ID,{context:'engineering',detail:{...detail,destination:{kind:'home'}}});
   registry.activate(PERSONNEL_TRANSFER_ACTION_ID,{context:'engineering',detail:{...detail,team_idx:1}});
   const wire=vi.fn();for(const [action,fields] of send.mock.calls)dispatchConsoleAction({action,...fields},wire,vi.fn());
-  expect(wire.mock.calls.map(row=>row[1].payload)).toEqual([{type:'SetDutyOfficerDestination',data:{officer:'chief',destination:{kind:'home'}}},{type:'DispatchOfficerTransfer',data:{officer:'chief',team_idx:1,request:detail.request}}]);
+  expect(wire.mock.calls.map(row=>row[1].payload)).toEqual([{type:'SetDutyOfficerDestination',data:{officer:{origin:'actual-ship',officer:'chief'},destination:{kind:'home'}}},{type:'DispatchOfficerTransfer',data:{officer:{origin:'actual-ship',officer:'chief'},team_idx:1,request:detail.request}}]);
   repair.personnel_controllable=false;registry.activate(PERSONNEL_TRANSFER_ACTION_ID,{context:'engineering',detail:{...detail,team_idx:1}});expect(send).toHaveBeenCalledTimes(2);
 });
 it('keeps carried/escort readouts local and does not offer an unobserved remote berth',()=>{
@@ -162,7 +162,7 @@ it('refuses a held dispatch or cancellation when intent changed without moving t
  dispatch.dispatchEvent(new Event('pointerdown'));
  const changed=structuredClone(view);changed.officers[0].destination_request.requested_tick++;
  renderPersonnelControls(container,{personnel:changed},owner);dispatch.click();expect(owner.sendAction).not.toHaveBeenCalled();
- const detail={officer:'chief',team_idx:1,changed_tick:7,control_system_id:'actual-repair',request:view.officers[0].destination_request};
+ const detail={officer:{origin:'actual-ship',officer:'chief'},team_idx:1,changed_tick:7,control_system_id:'actual-repair',request:view.officers[0].destination_request};
  expect(personnelTransfer(changed,detail)).toBeNull();
  cancel.dispatchEvent(new Event('pointerdown'));changed.officers[0].destination_request.requested_tick++;
  renderPersonnelControls(container,{personnel:changed},owner);cancel.click();expect(owner.sendAction).not.toHaveBeenCalled();
@@ -174,4 +174,22 @@ it('refuses a held destination action when its selected stored craft disappears'
  const request=[...container.querySelectorAll('button')][2];request.dispatchEvent(new Event('pointerdown'));
  renderPersonnelControls(container,{personnel:{...view,carried_destinations:[]}},owner);expect(selector.value).toBe('home');request.click();
  expect(owner.sendAction).not.toHaveBeenCalled();
+});
+
+it('uses the full person reference and refuses old, ambiguous and same-name foreign control details',()=>{
+ const view=payload();
+ const detail={officer:{origin:'other-ship',officer:'chief'},team_idx:0,changed_tick:7,control_system_id:'actual-repair'};
+ expect(personnelPosting(view,detail)).toBeNull();
+ expect(personnelPosting(view,{...detail,officer:'chief'})).toBeNull();
+ for(const person of [{origin:'',officer:'chief'},{origin:'actual-ship',officer:'chief',holder:'other'},'chief']) {
+  const raw=roster();raw.officers[0].person=person;expect(personnelPayload(raw,'actual-repair',true)).toBeNull();
+ }
+ for(const kind of ['at_compartment','with_repair_team']) {
+  const raw=roster();raw.officers[0].location=kind==='at_compartment'?{kind,compartment:'engineering'}:{kind,team_idx:0};expect(personnelPayload(raw,'actual-repair',true)).toBeNull();
+ }
+ const duplicateName=roster();const other=structuredClone(duplicateName.officers[0]);other.person.origin='other-ship';other.available_teams=[];duplicateName.officers.push(other);
+ expect(personnelPayload(duplicateName,'actual-repair',true).officers).toHaveLength(2);
+ const container=document.createElement('section'),owner={sendAction:vi.fn()};document.body.append(container);
+ renderPersonnelControls(container,{personnel:view},owner);const old=container.querySelector('button');old.dispatchEvent(new Event('pointerdown'));
+ renderPersonnelControls(container,{personnel:personnelPayload({...roster(),officers:[other]},'actual-repair',true)},owner);old.click();expect(owner.sendAction).not.toHaveBeenCalled();
 });

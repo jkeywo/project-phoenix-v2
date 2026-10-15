@@ -138,6 +138,19 @@ pub(crate) fn apply(
                     .as_deref()
                     .ok_or("missing actual logical posting clock")?
                     .0;
+                let person = match &command.payload {
+                    SystemControlPayload::SetDutyOfficerPosting { officer, .. }
+                    | SystemControlPayload::TreatDutyOfficer { officer, .. }
+                    | SystemControlPayload::SetDutyOfficerDestination { officer, .. }
+                    | SystemControlPayload::DispatchOfficerTransfer { officer, .. } => officer,
+                    _ => unreachable!(),
+                };
+                person
+                    .validate()
+                    .map_err(|_| "invalid stable person reference")?;
+                if person.origin != actor.0 {
+                    return Err("foreign personnel work is not supported by this consumer");
+                }
                 match &command.payload {
                     SystemControlPayload::SetDutyOfficerPosting { officer, team_idx } => {
                         state
@@ -156,7 +169,7 @@ pub(crate) fn apply(
                     }
                     SystemControlPayload::TreatDutyOfficer { officer, team_idx } => {
                         state
-                            .validate(profile, teams.0.job_state(), tick)
+                            .validate(profile, teams.0.job_state(), &actor.0, tick)
                             .map_err(|_| "invalid actual personnel state")?;
                         teams
                             .0
@@ -169,7 +182,7 @@ pub(crate) fn apply(
                     } => {
                         let person = state
                             .officers
-                            .get(officer)
+                            .get(&officer.officer)
                             .ok_or("unknown actual officer")?;
                         let queue = queue
                             .as_deref_mut()
@@ -238,7 +251,7 @@ pub(crate) fn apply(
                         request: expected,
                     } => {
                         state
-                            .validate(profile, teams.0.job_state(), tick)
+                            .validate(profile, teams.0.job_state(), &actor.0, tick)
                             .map_err(|_| "invalid actual officer custody")?;
                         let request = queue
                             .as_deref()

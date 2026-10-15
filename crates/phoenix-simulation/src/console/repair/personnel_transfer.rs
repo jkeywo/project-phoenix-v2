@@ -149,23 +149,28 @@ pub(crate) fn plan(
     profile: &CompiledPersonnel,
     roster: &PersonnelRoster,
     teams: &ShipRepairTeams,
-    officer: &str,
+    officer: &PersonRef,
     request: &PersonnelDestinationRequest,
     tick: u64,
     permitted: &BTreeSet<String>,
 ) -> Option<PersonnelTransferPlan> {
-    let person = roster.state(actor)?.officers.get(officer)?;
+    if officer.origin != actor {
+        return None;
+    }
+    let person = roster.state(actor)?.officers.get(&officer.officer)?;
     let definition = profile
         .config
         .officers
         .iter()
-        .find(|person| person.id == officer)?;
+        .find(|person| person.id == officer.officer)?;
     let craft = match (&request.destination, &person.location) {
-        (PersonnelDestination::Craft { craft }, OfficerLocation::AtCompartment { compartment })
-            if compartment == &definition.home_compartment =>
-        {
-            craft
-        }
+        (
+            PersonnelDestination::Craft { craft },
+            OfficerLocation::AtCompartment {
+                actor: holder,
+                compartment,
+            },
+        ) if holder == actor && compartment == &definition.home_compartment => craft,
         (PersonnelDestination::Home, OfficerLocation::AboardCraft { craft, .. }) => craft,
         _ => return None,
     };
@@ -253,7 +258,8 @@ pub(crate) fn decorate_view(
         return;
     };
     view.officers.retain(|person| match &person.location {
-        OfficerLocation::AtCompartment { .. } | OfficerLocation::WithRepairTeam { .. } => true,
+        OfficerLocation::AtCompartment { actor: holder, .. }
+        | OfficerLocation::WithRepairTeam { actor: holder, .. } => holder == actor,
         OfficerLocation::WithTransfer { actor: carrier, .. } => carrier == actor,
         OfficerLocation::AboardCraft { craft, .. } => {
             permitted.contains(craft)
@@ -281,16 +287,28 @@ pub(crate) fn decorate_view(
         .unwrap_or_default();
     for person in &mut view.officers {
         person.destination_request = queue
-            .and_then(|queue| queue.personnel_destinations.get(&person.id))
+            .and_then(|queue| queue.personnel_destinations.get(&person.person))
             .cloned();
         person.transfer_teams = person
             .destination_request
             .as_ref()
             .and_then(|request| {
                 plan(
-                    context?, actor, profile, roster, teams, &person.id, request, tick, permitted,
+                    context?,
+                    actor,
+                    profile,
+                    roster,
+                    teams,
+                    &person.person,
+                    request,
+                    tick,
+                    permitted,
                 )?;
-                Some(teams.0.personnel_transfer_teams(profile, state, &person.id))
+                Some(
+                    teams
+                        .0
+                        .personnel_transfer_teams(profile, state, &person.person),
+                )
             })
             .unwrap_or_default();
         person.transfer = teams
@@ -304,7 +322,7 @@ pub(crate) fn decorate_view(
                 let RepairActivity::PersonnelTransfer { work, .. } = &job.activity else {
                     return None;
                 };
-                (work.officer == person.id).then_some((work.completed, index, job, work))
+                (work.officer == person.person).then_some((work.completed, index, job, work))
             })
             .min_by_key(|(completed, index, _, _)| (*completed, *index))
             .map(|(_, index, job, work)| OfficerTransferView {

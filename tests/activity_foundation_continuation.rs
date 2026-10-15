@@ -2,6 +2,10 @@
 //! The initial incident uses the existing physical Damage owner directly; this
 //! probe does not claim weapon-hit or GM admission coverage.
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+fn person_ref(app: &App, name: &str) -> phoenix_model::personnel::PersonRef {
+    let actor = app.world().try_query_filtered::<&project_phoenix::entities::spawner::EntityUuid, With<project_phoenix::server_app::LocalShip>>().unwrap().single(app.world()).unwrap();
+    phoenix_model::personnel::PersonRef::new(&actor.0, name)
+}
 use bevy::prelude::*;
 use phoenix_model::{
     activity::ActivityOutcome,
@@ -608,13 +612,14 @@ fn actual_officer_posting_improves_paid_repair_and_preserves_custody_through_jso
     let (mut live, actor) = boot_hull(PERSONNEL);
     let (mut ordinary, ordinary_actor) = boot_hull(PERSONNEL);
     for (app, posting) in [(&mut live, Some(0)), (&mut ordinary, None)] {
+        let person = person_ref(app, "repair-chief");
         control(
             app,
             TOKEN,
             "engineering",
             "repair",
             Control::SetDutyOfficerPosting {
-                officer: "repair-chief".into(),
+                officer: person.clone(),
                 team_idx: posting,
             },
         );
@@ -687,7 +692,10 @@ fn actual_officer_posting_improves_paid_repair_and_preserves_custody_through_jso
         .clone();
     assert_eq!(
         saved.personnel.origins[&officer_origin].state.officers["repair-chief"].location,
-        OfficerLocation::WithRepairTeam { team_idx: 0 }
+        OfficerLocation::WithRepairTeam {
+            actor: officer_origin.clone(),
+            team_idx: 0
+        }
     );
     let (mut resumed, restored) = boot_hull(PERSONNEL);
     assert!(ready_to_restore(resumed.world(), &saved));
@@ -721,7 +729,10 @@ fn actual_officer_posting_improves_paid_repair_and_preserves_custody_through_jso
                     .officers
                     .get_mut("repair-chief")
                     .unwrap()
-                    .location = OfficerLocation::WithRepairTeam { team_idx: 99 }
+                    .location = OfficerLocation::WithRepairTeam {
+                    actor: officer_origin.clone(),
+                    team_idx: 99,
+                }
             }
         }
         assert!(
@@ -759,13 +770,14 @@ fn actual_officer_posting_improves_paid_repair_and_preserves_custody_through_jso
     assert_eq!(parts(&live, actor), original_parts - 1);
     // A normal release is allowed only after the actual team returns home.
     for app in [&mut live, &mut resumed] {
+        let person = person_ref(app, "repair-chief");
         control(
             app,
             TOKEN,
             "engineering",
             "repair",
             Control::SetDutyOfficerPosting {
-                officer: "repair-chief".into(),
+                officer: person.clone(),
                 team_idx: None,
             },
         );
@@ -778,6 +790,7 @@ fn actual_officer_posting_improves_paid_repair_and_preserves_custody_through_jso
             .officers["repair-chief"]
             .location,
         OfficerLocation::AtCompartment {
+            actor: officer_origin.clone(),
             compartment: "engineering".into()
         }
     );

@@ -1,4 +1,14 @@
 entities:
+  - decision: paid-work-receipts-use-complete-fixed-interval
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Paid Work Receipts Span One Complete Fixed Interval
+      summary: "The existing derived per-System work-emission map clears once in FixedFirst, before Input work. Paid Input work remains visible through the later Physics energy integration and sensing consumers; it never becomes next-interval or restored credit. Canonical reserve spending, replenishment, heat and saved funded-work readings keep their existing owners."
+      rationale:
+        - "[ai] Increment17/S027 integration exposed the Physics energy tick erasing actual Input-paid identity, jammer and protection work before signature consumers. Begin the receipt interval explicitly at the existing fixed-loop boundary rather than introducing another map, counter, delayed effect or power payment. SimTick advances in the preceding FixedLast; the first interval still begins at tick zero."
+        - "[ai] Direct Gameplay drivers call begin_work_interval before the first work of each interval. Energy integration alone is not an interval boundary and does not clear receipts. Existing continuation restore and stored-equipment processing still clear derived receipts; receipts are excluded from saves and digests."
   - decision: consumer-local-energy-flow
     core:
       status: accepted

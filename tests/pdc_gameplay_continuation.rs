@@ -1,6 +1,8 @@
 //! Real-host PDC runtime probe. Reuses the production headless BootPlan and
 //! ordinary crew/admission path; no injected observation, projectile or AI state.
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+#[path = "pdc_gameplay_continuation/graph_diagnostics.rs"]
+mod graph_diagnostics;
 use bevy::prelude::*;
 use project_phoenix::{
     console::weapons::{
@@ -284,6 +286,7 @@ fn boot(world: &str) -> (App, Entity) {
             .after(FixedStep::TickTorpedoLifecycle)
             .before(FixedStep::HandleCollisions),
     );
+    graph_diagnostics::install(&mut app);
     app.finish();
     app.cleanup();
     steps(&mut app, 10);
@@ -331,11 +334,22 @@ fn boot(world: &str) -> (App, Entity) {
     control(
         &mut app,
         "engineering",
-        "power",
+        "power-reactor",
         Control::SetEnergySystemFlow {
             system: id(BANK),
             flow_per_sec: Some(0.0),
         },
+    );
+    assert_eq!(
+        app.world()
+            .get::<ShipPowerSystem>(own)
+            .unwrap()
+            .0
+            .network()
+            .fine_flows
+            .get(&id(BANK)),
+        Some(&0.0),
+        "normal actual reactor consumer must apply the zero-intake request"
     );
     control(
         &mut app,

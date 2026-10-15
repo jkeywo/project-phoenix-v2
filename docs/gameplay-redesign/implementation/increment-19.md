@@ -355,7 +355,7 @@ workload remain required; static foundations do not close full 19 or passenger 2
 Simulation retains only canonical ProbeCustody, derived Disabled membership and
 actual backend handle removal/reinitialisation. It must compile without renderer
 features. Presentation reads that same public custody owner with Allow<Disabled>
-and derives Hidden/Inherited on the same procedural entity before extraction;
+and supplies custody hide reasons to the one visibility owner before extraction;
 Visibility is neither canonical state nor a Simulation dependency. Headless
 acceptance verifies actual body/backend inactivity; a Presentation owner witness
 verifies visual projection separately. Neither test alone claims a physical

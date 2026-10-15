@@ -1822,15 +1822,6 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
                         .map(|(id, slot)| (format!("beam:{id}"), slot.strike_damage_bonus)),
                 );
             }
-            if let Some(torpedoes) =
-                world.get::<crate::console::weapons::TorpedoSystemResource>(entity)
-            {
-                attacks.extend(
-                    torpedoes.0.in_flight.iter().map(|round| {
-                        (format!("torpedo:{}", round.uuid), round.strike_damage_bonus)
-                    }),
-                );
-            }
             if let Some(blasters) =
                 world.get::<crate::console::weapons::BlasterSystemResource>(entity)
             {
@@ -1863,26 +1854,54 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
         }
         if let Some(torpedoes) = world.get::<crate::console::weapons::TorpedoSystemResource>(entity)
         {
-            let mut profiles: Vec<_> = torpedoes
+            // Processing order controls emission IDs and physical hit order.
+            let rounds: Vec<_> = torpedoes
                 .0
                 .in_flight
                 .iter()
-                .map(|round| (&round.uuid, round.impact))
+                .map(|round| {
+                    (
+                        &round.uuid,
+                        round.profile,
+                        round.durability_remaining,
+                        [round.x, round.y, round.z],
+                        round.heading,
+                        round.pitch,
+                        round.lifespan_remaining,
+                        &round.target_uuid,
+                        &round.source_uuid,
+                        &round.tube_id,
+                        round.strike_damage_bonus,
+                    )
+                })
                 .collect();
-            profiles.sort_by(|a, b| a.0.cmp(b.0));
-            if !profiles.is_empty() {
-                acc = fold_str(acc, "torpedo-physical-profiles");
-                acc = fold_serde(acc, &profiles);
+            if !rounds.is_empty() {
+                acc = fold_str(acc, "guided-round-flight");
+                acc = fold_serde(acc, &rounds);
             }
-            let mut bursts: Vec<_> = torpedoes
+            let bursts: Vec<_> = torpedoes
                 .0
                 .burst_states
                 .iter()
-                .map(|burst| (&burst.tube_id, burst.impact))
+                .map(|burst| {
+                    (
+                        &burst.tube_id,
+                        burst.profile,
+                        burst.burst_interval_secs,
+                        burst.pending,
+                        burst.timer,
+                        [burst.launch_x, burst.launch_y, burst.launch_z],
+                        burst.launch_heading,
+                        &burst.target_uuid,
+                        &burst.source_uuid,
+                        &burst.barrel_origins,
+                        &burst.barrel_sequence,
+                        burst.next_shot_index,
+                    )
+                })
                 .collect();
-            bursts.sort_by(|a, b| a.0.cmp(b.0));
             if !bursts.is_empty() {
-                acc = fold_str(acc, "torpedo-burst-physical-profiles");
+                acc = fold_str(acc, "guided-round-burst");
                 acc = fold_serde(acc, &bursts);
             }
         }

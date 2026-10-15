@@ -18,7 +18,13 @@ fn actual_in_flight_ordnance_is_measured_without_guidance_or_launcher_intelligen
         .0
         .in_flight
         .push(crate::weapons::torpedo::Torpedo {
-            impact: Default::default(),
+            profile: crate::weapons::torpedo::TorpedoConfig {
+                lifespan: 100.0,
+                shield_pierce: 0.5,
+                ..Default::default()
+            }
+            .round_profile(Default::default()),
+            durability_remaining: crate::weapons::torpedo::TorpedoConfig::default().durability,
             strike_damage_bonus: 0.0,
             uuid: "private-projectile-uuid".into(),
             x: 20.0,
@@ -30,7 +36,6 @@ fn actual_in_flight_ordnance_is_measured_without_guidance_or_launcher_intelligen
             target_uuid: Some("secret-guidance-target".into()),
             source_uuid: Some("secret-launcher".into()),
             tube_id: "secret-tube".into(),
-            shield_pierce: 0.5,
         });
     fund(&mut app, observer, &profile, 1.0);
     app.update();

@@ -782,7 +782,8 @@ pub(super) fn weapon_state(
                 s.in_flight
                     .iter()
                     .map(|t| TorpedoInFlight {
-                        impact: t.impact,
+                        profile: t.profile,
+                        durability_remaining: t.durability_remaining,
                         strike_damage_bonus: t.strike_damage_bonus,
                         uuid: t.uuid.clone(),
                         position: [t.x, t.y, t.z],
@@ -792,7 +793,6 @@ pub(super) fn weapon_state(
                         target_uuid: t.target_uuid.clone(),
                         source_uuid: t.source_uuid.clone(),
                         tube_id: t.tube_id.clone(),
-                        shield_pierce: t.shield_pierce,
                     })
                     .collect()
             })
@@ -802,7 +802,8 @@ pub(super) fn weapon_state(
                 s.burst_states
                     .iter()
                     .map(|b| BurstState {
-                        impact: b.impact,
+                        profile: b.profile,
+                        burst_interval_secs: b.burst_interval_secs,
                         tube_id: b.tube_id.clone(),
                         pending: b.pending,
                         timer: b.timer,

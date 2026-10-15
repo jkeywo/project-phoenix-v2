@@ -321,6 +321,7 @@ pub use schema::WindowSlot;
 pub use schema::WorldEventRecord;
 
 mod capture;
+mod guided_rounds;
 mod historical_clock;
 pub use capture::capture;
 pub(crate) use capture::capture_entity_state;

@@ -2004,7 +2004,8 @@ pub(super) fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponStat
             .torpedoes_in_flight
             .iter()
             .map(|t| Torpedo {
-                impact: t.impact,
+                profile: t.profile,
+                durability_remaining: t.durability_remaining,
                 strike_damage_bonus: t.strike_damage_bonus,
                 uuid: t.uuid.clone(),
                 x: t.position[0],
@@ -2016,30 +2017,6 @@ pub(super) fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponStat
                 target_uuid: t.target_uuid.clone(),
                 source_uuid: t.source_uuid.clone(),
                 tube_id: t.tube_id.clone(),
-                shield_pierce: t.shield_pierce,
-            })
-            .collect();
-        system.burst_states = stored
-            .bursts
-            .iter()
-            .map(|b| TubeBurstState {
-                impact: b.impact,
-                tube_id: b.tube_id.clone(),
-                pending: b.pending,
-                timer: b.timer,
-                launch_x: b.launch[0],
-                launch_y: b.launch[1],
-                launch_z: b.launch[2],
-                launch_heading: b.launch_heading,
-                target_uuid: b.target_uuid.clone(),
-                source_uuid: b.source_uuid.clone(),
-                barrel_origins: b
-                    .barrel_origins
-                    .iter()
-                    .map(|o| (o[0], o[1], o[2]))
-                    .collect(),
-                barrel_sequence: b.barrel_sequence.clone(),
-                next_shot_index: b.next_shot_index,
             })
             .collect();
     }
@@ -2226,11 +2203,36 @@ pub(crate) fn restore_mesh_crew(world: &mut World, snapshot: &PhoenixSnapshot) {
     }
 }
 
-/// Shared by actual restore and its non-mutating preflight.
+/// Shared by actual restore and its non-mutating preflight. Committed burst
+/// rounds belong to ammunition inventory even though they have left the tube.
 pub(super) fn apply_torpedo_inventory(
     system: &mut crate::weapons::torpedo::TorpedoSystem,
     stored: &WeaponState,
 ) {
+    system.burst_states = stored
+        .bursts
+        .iter()
+        .map(|b| TubeBurstState {
+            profile: b.profile,
+            burst_interval_secs: b.burst_interval_secs,
+            tube_id: b.tube_id.clone(),
+            pending: b.pending,
+            timer: b.timer,
+            launch_x: b.launch[0],
+            launch_y: b.launch[1],
+            launch_z: b.launch[2],
+            launch_heading: b.launch_heading,
+            target_uuid: b.target_uuid.clone(),
+            source_uuid: b.source_uuid.clone(),
+            barrel_origins: b
+                .barrel_origins
+                .iter()
+                .map(|o| (o[0], o[1], o[2]))
+                .collect(),
+            barrel_sequence: b.barrel_sequence.clone(),
+            next_shot_index: b.next_shot_index,
+        })
+        .collect();
     if let Some(magazine) = &stored.magazine {
         system.magazine = magazine.clone();
     }

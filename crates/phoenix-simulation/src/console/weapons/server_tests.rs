@@ -4173,8 +4173,10 @@ fn torpedo_hit_reduces_ship_shields_on_local_ship() {
     // Directly inject a torpedo already adjacent to the player ship so it
     // detonates on the next tick. We write into both the per-entity component
     // and the resource to stay in sync.
+    let profile = torpedo_test_profile(&app, player_entity, 30.0, 0.0);
     let torpedo = Torpedo {
-        impact: Default::default(),
+        profile,
+        durability_remaining: profile.durability,
         strike_damage_bonus: 0.0,
         uuid: "test-torp-1".into(),
         x: 1.0, // 1 m away from player at origin — within detonation_radius
@@ -4186,7 +4188,6 @@ fn torpedo_hit_reduces_ship_shields_on_local_ship() {
         target_uuid: Some("player-ship".into()),
         source_uuid: None, // no source → no self-detonation exclusion
         tube_id: "fore_port".into(),
-        shield_pierce: 0.0, // no pierce → all damage goes to shields first
     };
     // Write to the per-entity component (preferred by systems) and resource.
     {
@@ -4330,8 +4331,10 @@ fn torpedo_hit_from_astern_damages_the_astern_arc_not_the_fore_arc() {
     let astern_before = hp_of(&app, astern_arc);
     let fore_before = hp_of(&app, fore_arc);
 
+    let profile = torpedo_test_profile(&app, player_entity, 30.0, 0.0);
     let torpedo = Torpedo {
-        impact: Default::default(),
+        profile,
+        durability_remaining: profile.durability,
         strike_damage_bonus: 0.0,
         uuid: "test-torp-astern".into(),
         x: start_x,
@@ -4343,7 +4346,6 @@ fn torpedo_hit_from_astern_damages_the_astern_arc_not_the_fore_arc() {
         target_uuid: Some("player-ship".into()),
         source_uuid: None,
         tube_id: "aft".into(),
-        shield_pierce: 0.0, // no pierce → the shield arc takes it all
     };
     {
         let mut q = app
@@ -4461,6 +4463,24 @@ fn payload_probe(
 }
 
 /// Author the two damage fields on every `TorpedoSystem` the tick could read.
+fn torpedo_test_profile(
+    app: &App,
+    ship: Entity,
+    lifespan: f32,
+    shield_pierce: f32,
+) -> phoenix_model::guided_round::GuidedRoundProfile {
+    let mut profile = app
+        .world()
+        .get::<TorpedoSystemResource>(ship)
+        .unwrap()
+        .0
+        .config
+        .round_profile(Default::default());
+    profile.lifespan = lifespan;
+    profile.shield_pierce = shield_pierce;
+    profile
+}
+
 fn set_payload(app: &mut App, ship: Entity, damage_hull: i32, damage_shields: i32) {
     if let Some(mut ts) = app
         .world_mut()
@@ -4478,8 +4498,10 @@ fn set_payload(app: &mut App, ship: Entity, damage_hull: i32, damage_shields: i3
 /// Put one round astern of the fixture ship, with the given pierce fraction.
 fn launch_astern(app: &mut App, ship: Entity, shield_pierce: f32) {
     use crate::weapons::torpedo::Torpedo;
+    let profile = torpedo_test_profile(app, ship, 30.0, shield_pierce);
     let torpedo = Torpedo {
-        impact: Default::default(),
+        profile,
+        durability_remaining: profile.durability,
         strike_damage_bonus: 0.0,
         uuid: "payload-probe-round".into(),
         x: 0.0,
@@ -4491,7 +4513,6 @@ fn launch_astern(app: &mut App, ship: Entity, shield_pierce: f32) {
         target_uuid: Some("player-ship".into()),
         source_uuid: None,
         tube_id: "aft".into(),
-        shield_pierce,
     };
     if let Some(mut ts) = app
         .world_mut()
@@ -11107,7 +11128,8 @@ fn torpedo_in_flight_count_is_published_as_a_public_fact() {
     let mut app = test_app();
     let mut ts = TorpedoSystem::new(TorpedoConfig::default());
     ts.in_flight.push(crate::weapons::torpedo::Torpedo {
-        impact: Default::default(),
+        profile: ts.config.round_profile(Default::default()),
+        durability_remaining: ts.config.durability,
         strike_damage_bonus: 0.0,
         uuid: "flying-1".into(),
         x: 0.0,
@@ -11814,10 +11836,15 @@ fn torpedo_kill_on_the_local_ship_latches_game_over() {
         damage_hull: 100_000,
         ..TorpedoConfig::default()
     });
+    let profile = phoenix_model::guided_round::GuidedRoundProfile {
+        shield_pierce: 1.0,
+        ..enemy_torpedoes.config.round_profile(Default::default())
+    };
     enemy_torpedoes
         .in_flight
         .push(crate::weapons::torpedo::Torpedo {
-            impact: Default::default(),
+            profile,
+            durability_remaining: profile.durability,
             strike_damage_bonus: 0.0,
             uuid: "torpedo-uuid".into(),
             x: 0.0,

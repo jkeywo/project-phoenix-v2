@@ -674,11 +674,12 @@ pub(super) fn validate_physical_attacks(world: &World, row: &EntityState) -> Res
     let Some(stored) = &row.weapons else {
         return Ok(());
     };
+    super::guided_rounds::validate_weapon_state(stored)?;
     for profile in stored
         .torpedoes_in_flight
         .iter()
-        .map(|round| &round.impact)
-        .chain(stored.bursts.iter().map(|burst| &burst.impact))
+        .map(|round| &round.profile.impact)
+        .chain(stored.bursts.iter().map(|burst| &burst.profile.impact))
         .chain(
             stored
                 .blasters

@@ -9812,12 +9812,14 @@ fn set_torpedoes_in_flight(app: &mut App, n: usize) {
         .get_mut::<crate::console::weapons::TorpedoSystemResource>()
         .expect("the cruiser carries a torpedo system");
     torpedoes.0.in_flight.clear();
+    let profile = torpedoes.0.config.round_profile(Default::default());
     for i in 0..n {
         torpedoes
             .0
             .in_flight
             .push(crate::weapons::torpedo::Torpedo {
-                impact: Default::default(),
+                profile,
+                durability_remaining: profile.durability,
                 strike_damage_bonus: 0.0,
                 uuid: format!("salvo-{i}"),
                 x: 0.0,

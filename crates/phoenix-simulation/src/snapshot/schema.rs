@@ -763,6 +763,8 @@ pub struct CoordinationEnqueueState {
 /// firing pattern are all authored, the fresh world rebuilt them, and a save
 /// that disagreed about them is a save the content-version gate refuses. Only
 /// the load state, the counts and the last-fired markers travel.
+/// Already committed guided rounds also carry their frozen physical profiles:
+/// these are launch facts, not values re-read from a later launcher or refit.
 ///
 /// # Written as scalars
 ///
@@ -882,8 +884,10 @@ pub struct TubeState {
 
 /// One torpedo mid-flight.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TorpedoInFlight {
-    pub impact: phoenix_model::damage::DamageProfile,
+    pub profile: phoenix_model::guided_round::GuidedRoundProfile,
+    pub durability_remaining: f32,
     #[serde(default)]
     pub strike_damage_bonus: f32,
     pub uuid: String,
@@ -896,16 +900,14 @@ pub struct TorpedoInFlight {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_uuid: Option<String>,
     pub tube_id: String,
-    /// The firing tube's `shield_pierce` as it stood at launch. Carried by the
-    /// round rather than re-resolved at detonation, so it has to be stored with
-    /// it.
-    pub shield_pierce: f32,
 }
 
 /// One tube's pending burst.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BurstState {
-    pub impact: phoenix_model::damage::DamageProfile,
+    pub profile: phoenix_model::guided_round::GuidedRoundProfile,
+    pub burst_interval_secs: f32,
     pub tube_id: String,
     pub pending: u32,
     pub timer: f32,

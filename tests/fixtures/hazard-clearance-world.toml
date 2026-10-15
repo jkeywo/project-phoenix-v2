@@ -36,7 +36,7 @@ deadline_secs=25
 [script]
 setup='''
 // This authored Scenario consequence is separate from the status report itself.
-fn grant_clearance(ctx) { ctx.flags.set("clearance_granted"); }
+fn grant_clearance(ctx) { ctx.flags.set("clearance_granted", 1); }
 fn credit_clearance(ctx) { ctx.flags.increment("clearance_applied", 1); }
 fn credit_hazard(ctx) { ctx.flags.increment("hazard_stabilised", 1); }
 '''

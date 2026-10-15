@@ -26,7 +26,7 @@ import=[{path="assets/worlds/domains/committed-assistance.toml",as="contact",nam
 setup='''
 on_world_loaded("offer_assistance");
 fn offer_assistance(ctx) {
-    ctx.effects.open_comms(#{ from: "_self", node_fn: "assistance_offer" });
+    ctx.effects.open_comms(#{ from: "status-reporter", node_fn: "assistance_offer" });
 }
 fn assistance_offer(ctx) {
     #{ message: "world.committed_assistance.offer", responses: [

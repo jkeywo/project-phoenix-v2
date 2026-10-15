@@ -174,7 +174,14 @@ fn answer(app: &mut App, index: usize) {
                     app.world().resource::<Sessions>(),
                     config,
                     app.world().get::<HumanSeekingHosts>(actor),
-                ) {
+                ) && app
+                    .world()
+                    .get::<ShipPowerSystem>(actor)
+                    .is_some_and(|power| {
+                        let mut candidate = power.0.clone();
+                        matches!(candidate.try_work_discrete(&owner), Ok(true))
+                    })
+                {
                     response = Some(payload);
                     break;
                 }
@@ -190,6 +197,10 @@ fn answer(app: &mut App, index: usize) {
             .is_none(),
         "offer alone releases no root"
     );
+    let Control::RespondToMessage { message_id, .. } = &payload else {
+        unreachable!()
+    };
+    let message_id = message_id.clone();
     send(
         app,
         ClientMessage::ControlSystem {
@@ -198,15 +209,23 @@ fn answer(app: &mut App, index: usize) {
         },
     );
     let mut admitted = false;
+    let mut applied = false;
     for _ in 0..8 {
         app.update();
         admitted |= app.world().get::<project_phoenix::core::messages::AdmittedCommands>(actor).unwrap().0.iter().any(|command|
             command.response_token.as_deref() == Some(TOKEN) && matches!(&command.payload, Control::RespondToMessage { response_index, .. } if *response_index == index));
+        applied |= app
+            .world()
+            .resource::<project_phoenix::comms::server::CommsInboxRes>()
+            .0
+            .iter()
+            .any(|message| message.id == message_id && message.selected_response == Some(index));
     }
     assert!(
         admitted,
         "ordinary Human response traverses existing admission"
     );
+    assert!(applied, "the actual range-checked and paid response executes, rather than merely entering admission");
 }
 #[test]
 fn normal_comms_refusal_creates_no_promise_or_released_instruction() {

@@ -88,6 +88,11 @@ Job records performed work and spent resources are not refunded. A later explici
 assignment gets a new JobId and full handling requirement. In contrast, loss of
 condition, motion eligibility, access or power pauses the same active assignment
 and can resume its existing work; cancellation does not hold a bay indefinitely.
+Sensor-only loss remains paused/unknown. Actual physical removal of a bound craft
+settles that same active Job once as Failed through the existing removal hook,
+releasing its claim without inventing a remote destruction report or refund.
+The first optional positive Bay policy uses its own safe readiness and stable
+stored roster to emit Launch through normal admission; ordinary defaults Hold.
 
 Initial `carried_by = { parent, bay }` belongs to the ordinary authored World row,
 referencing a declared base actor and actual Bay System. Resolve and commit it

@@ -67,3 +67,28 @@ original time. Stop cancels guidance while preserving the physical flight.
 Science illumination remains a separate paid, mounted System and cannot retarget
 Tactical or gate an otherwise viable shot. These are selected contracts; runtime,
 Workshop and continuation evidence are recorded with their later checkpoints.
+
+
+## Source orders and paid links
+
+The source ship knows which IDs its actual tubes emitted, their initial orders
+and frozen endurance. Its controls and ordinary tube AI use that source record,
+not an enumeration of surviving physical flights. An issued order remains
+unresolved without a viable return-link acknowledgement; a hidden interception
+or lost contact does not remove a row or disclose a special refusal. Known
+endurance permits retirement. This is command knowledge, not another round
+simulation or a message-capacity system.
+
+Current tube equipment's paired guidance-link profile and ordinary Operation
+and work limits constrain transmission. The emitted receiver's frozen limits
+independently constrain reception; both Comms path/range thresholds must pass.
+Return acknowledgements need their own viable reverse path. Refitting away the
+source equipment removes its ability to transmit, while already emitted physical
+flights and source knowledge retain their existing owners.
+
+Target updates require permitted measured XYZ, including observed elevation,
+and retain original radar provenance/report times. Independent Science
+illumination can supply a dated matching point beyond the round's seeker reach;
+it cannot change Tactical's intent. Link loss stops new observations and leaves
+the old measured point as memory. These declarations precede the corresponding
+runtime/authoring/continuation implementation and make no exit claim.

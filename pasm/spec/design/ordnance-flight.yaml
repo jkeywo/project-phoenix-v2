@@ -65,3 +65,30 @@ entities:
         - "[ai] Remote intent changes address the actual source tube and actual emitted round, require its frozen receiver and the live source equipment's normal ownership, Operation condition and paid work, and traverse a finite Comms path. The target must be a current permitted Console measurement; receipt never renews its original sample tick. Cancelling guidance clears guidance intent without deleting or detonating the actual round, changing payload or replenishing endurance. Independent rounds refuse remote changes."
         - "[ai] Science illumination is independently authored System equipment with its own target/enabled commands, shared mount geometry and paid work. It can provide bounded assistance through explicit observation feeds and supported receiver equipment. It never changes Tactical's selected target, grants launch authority or becomes a universal firing-permission requirement. Human and ordinary per-System AI use the same admission and supported observations."
         - "[ai] Seeker/receiver fields and retained observation provenance/timing are closed, finite, saved and folded on the existing projectile record. Whole-candidate restore rejects malformed or future observations before writes. Reference equipment receives explicit finite authored profiles; unsupported old state is refused rather than given an unlimited legacy seeker. This declaration precedes its runtime, authoring and continuation checkpoints and claims no completed playable exit."
+
+  - decision: guided-source-knowledge-and-paid-links
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Source Guidance Controls Retain Own Orders Rather Than Remote Truth
+      summary: "A source ship retains its own emitted IDs, tube ownership, known launch endurance, issued orders and actual viable-link acknowledgements. This knowledge is distinct from the one physical projectile intent and never enumerates remote survival, health or pose."
+      rationale:
+        - "[ai] Human controls and ordinary individual tube AI consume the same source knowledge. Out-of-contact orders remain unresolved; retirement may use known frozen launch endurance, never a hidden death lookup. The ledger survives source capability replacement and hosting changes without granting a transmitter to removed equipment. Technical retention bounds are not simulated message capacity."
+        - "[ai] Current owning tube equipment's paired receiver profile, Operation condition and ordinary paid work bound source transmission. The actual emitted round's frozen receiver independently bounds reception. Both finite range/transmission policies and the actual Comms path must pass. Acknowledgement requires a separately viable reverse path; a missing/dead/unreachable round supplies no secret refusal detail."
+        - "[ai] A current permitted XYZ target reading requires actual observed elevation and retains the original radar samples and optional report metadata. Link delivery never renews sample age. Stop changes physical guidance intent only when actually received, without destroying the round, payload or endurance. Science illumination is an independently controlled paid observation aid for matching existing intent, never a Tactical retarget authority."
+  - state: guided-source-order-knowledge
+    core:
+      status: planned
+      confidence: confirmed
+      origin: ai
+      title: Source-Owned Guided Launch and Order Knowledge
+      summary: "Own emitted identity/tube/known endurance plus sent order and viable-return acknowledgement history. No remote health, live pose or competing physical intent."
+    architecture:
+      classification: authoritative
+      owner: shared-weapon-mount-and-delivery
+      writers: [shared-weapon-mount-and-delivery]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-model/src/guided_orders.rs, crates/phoenix-sim-gameplay/src/weapons/guided_orders.rs, crates/phoenix-simulation/src/console/weapons/guidance_link.rs]
+      symbols: [GuidedSourceKnowledge, ShipGuidanceKnowledge]
+      tests: [crates/phoenix-sim-gameplay/src/weapons/guided_orders_tests.rs, crates/phoenix-simulation/src/console/weapons/guidance_link_tests.rs]

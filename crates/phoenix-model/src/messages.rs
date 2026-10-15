@@ -2195,6 +2195,13 @@ pub enum SystemControlPayload {
     },
     /// Issue through the actual source tube; target_uuid is a permitted public contact handle.
     /// Independent mounted Science emitter; target is a permitted Console handle.
+    /// Retained intent of one actual onboard finite signal protector.
+    SetSignalProtectionEnabled {
+        enabled: bool,
+    },
+    SetSignalProtectionPriorities {
+        systems: Vec<SystemId>,
+    },
     SetJammingTarget {
         target_uuid: Option<String>,
     },

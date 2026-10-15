@@ -39,6 +39,7 @@ fn test_app() -> App {
                 host_station: None,
                 sharing: None,
                 received_chart: Vec::new(),
+                transit_routes: Vec::new(),
             },
         ),
     );

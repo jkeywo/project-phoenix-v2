@@ -277,7 +277,13 @@ nodes and 32 physical leaves, sharing the existing situation capacity with expli
 evidence or history. No 22C attention/deadline feasibility is implied by these bounds.
 
 WorldContentRuntime owns the selected root arguments, selected method identities
-and original choice tick. Immutable domain definitions compile from frozen source;
+and original choice tick, accepted actor UUID and bounded released-leaf id to
+original tick frontier. Release and SituationInstances.arm commit together at the
+existing World boundary. Released history requires its exact corresponding
+instance even after actor loss; a genuinely unreleased future leaf remains absent.
+This is mission release identity, never a copy of physical job progress. Existing
+bootstrap/slot provenance validates the accepted actor relation. Immutable domain
+definitions compile from frozen source;
 the selected graph is derived from those identities and bindings. Stable plan/node
 paths generate leaf situation ids. Existing SituationInstances remain the sole
 owner of accepted jobs, evidence, Scenario effects and execution frontiers; a plan

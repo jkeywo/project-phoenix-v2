@@ -694,9 +694,17 @@ pub fn ai_policy_state_tick(
         // All three are pure world readings with no authored threshold, so they
         // are seeded for every hull; a hull whose doctrine never asks simply
         // never reads them.
+        // Fitted Helm has no acquired facing-shield finding yet. Keep that
+        // fact unknown while retaining own rounds/tube readiness; never resolve
+        // the observed contact key back through foreign live components.
+        let shield_target = frame
+            .ships
+            .get(&entity)
+            .filter(|frame| frame.current_contact_routes.is_none())
+            .and(travel_target);
         seed_torpedo_opportunity_facts(
             &mut facts,
-            travel_target,
+            shield_target,
             physics,
             &targets,
             torpedoes.map(|t| &t.0),

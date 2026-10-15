@@ -108,10 +108,10 @@ impl HelmAxisHost for SteeringAxis {
             .map(|p| p.leg_yields_to_arc_requests(io.state.map(|s| s.current.as_str())))
             .unwrap_or(true);
         if sf.has_objective {
-            apply_arc_bearing_request(
+            apply_frame_arc_bearing_request(
                 &mut steering,
                 io.pending.as_deref_mut(),
-                &sf.merged_view,
+                sf,
                 physics,
                 leg_yields,
             );

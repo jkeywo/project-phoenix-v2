@@ -1293,6 +1293,11 @@ pub fn seed_hostile_arc_facts(
     let Some(sf) = frame_ship else {
         return;
     };
+    if sf.current_contact_routes.is_some() {
+        // No acquired foreign arc finding exists on the measured track DTO.
+        // An empty adapter vector means unknown, never known clear coverage.
+        return;
+    }
     let exposure = &sf.hostile_arc_exposure;
     facts.set(HOSTILE_ARC_EXPOSURE_FACT, exposure.covering_count as f64);
     facts.set(
@@ -1340,15 +1345,37 @@ pub fn seed_helm_travel_facts(
     );
     facts.set(TARGET_VALID_FACT, 1.0);
     facts.set(RANGE_TO_TARGET_FACT, motion.range as f64);
-    facts.set(CLOSING_RATE_FACT, motion.closing_rate as f64);
+    if sf.current_contact_routes.is_none() {
+        facts.set(CLOSING_RATE_FACT, motion.closing_rate as f64);
+    } else if let Some(velocity) = sf.observed_velocities.get(&uuid) {
+        let sin = crate::simmath::sin(physics.yaw);
+        let cos = crate::simmath::cos(physics.yaw);
+        let own = [
+            sin * physics.forward_speed + cos * physics.lateral_speed,
+            -cos * physics.forward_speed + sin * physics.lateral_speed,
+        ];
+        let dx = target.position[0] - physics.x;
+        let dz = target.position[2] - physics.z;
+        let range = (dx * dx + dz * dz).sqrt();
+        let closing = if range > f32::EPSILON {
+            ((own[0] - velocity[0]) * dx + (own[1] - velocity[1]) * dz) / range
+        } else {
+            0.0
+        };
+        if closing.is_finite() {
+            facts.set(CLOSING_RATE_FACT, f64::from(closing));
+        }
+    }
     facts.set(BEARING_TO_TARGET_FACT, motion.bearing_rad as f64);
     // How far the ship being fought can shoot (issue #788). Published on the
     // snapshot entity by `build_world_snapshot`, so it is a reading of the
     // TARGET's own online banks rather than a guess about its hull class.
-    facts.set(
-        TARGET_DIRECT_FIRE_RANGE_FACT,
-        target.direct_fire_range as f64,
-    );
+    if sf.current_contact_routes.is_none() {
+        facts.set(
+            TARGET_DIRECT_FIRE_RANGE_FACT,
+            target.direct_fire_range as f64,
+        );
+    }
     Some(uuid)
 }
 
@@ -1380,9 +1407,11 @@ pub fn seed_recovery_facts(
         facts.set(SHIELD_FRACTION_FACT, fraction as f64);
     }
 
-    let safe_range = params
-        .get(SAFE_RANGE_MARGIN_PARAM)
-        .map(|margin| facts.get(TARGET_DIRECT_FIRE_RANGE_FACT).unwrap_or(0.0) + margin);
+    let safe_range = params.get(SAFE_RANGE_MARGIN_PARAM).and_then(|margin| {
+        facts
+            .get(TARGET_DIRECT_FIRE_RANGE_FACT)
+            .map(|range| range + margin)
+    });
     if let Some(range) = safe_range {
         facts.set(SAFE_RANGE_FACT, range);
     }
@@ -1422,7 +1451,11 @@ pub fn seed_recovery_facts(
             _ => false,
         }
     };
-    facts.set(SAFE_DISTANCE_HELD_FACT, if held { 1.0 } else { 0.0 });
+    if !target_valid || safe_range.is_some() {
+        facts.set(SAFE_DISTANCE_HELD_FACT, if held { 1.0 } else { 0.0 });
+    } else {
+        history.ranges.clear();
+    }
 
     safe_range.map(|r| r as f32)
 }
@@ -1455,12 +1488,15 @@ pub fn seed_pressed_facts(
     // direct-fire reach — the same reading the standoff ring is derived from, so
     // the two halves of the doctrine cannot disagree about how far the ship
     // being fought can shoot. Always seeded, so a guard distinguishes "outside
-    // the threat" from "no reading" without either being absent.
-    let inside = target_valid
-        && range
-            .map(|r| r <= facts.get(TARGET_DIRECT_FIRE_RANGE_FACT).unwrap_or(0.0))
-            .unwrap_or(false);
-    facts.set(INSIDE_THREAT_RANGE_FACT, if inside { 1.0 } else { 0.0 });
+    // the threat" from "no reading". Unknown target reach remains absent.
+    if !target_valid {
+        facts.set(INSIDE_THREAT_RANGE_FACT, 0.0);
+    } else if let (Some(range), Some(threat)) = (range, facts.get(TARGET_DIRECT_FIRE_RANGE_FACT)) {
+        facts.set(
+            INSIDE_THREAT_RANGE_FACT,
+            if range <= threat { 1.0 } else { 0.0 },
+        );
+    }
 
     // Decline rather than invent, on ALL TEN names together — the four in
     // [`PRESSED_PARAMS`] and the six in [`RECOVERY_PARAMS`]. A declining hull

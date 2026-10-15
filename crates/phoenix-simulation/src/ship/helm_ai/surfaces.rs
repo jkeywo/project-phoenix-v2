@@ -14,6 +14,8 @@
 //! happens exactly once per tick rather than once per host.
 
 use super::*;
+#[path = "surfaces_measured.rs"]
+mod measured;
 
 /// The console-owned surfaces the AI Helm derives its goals from (issue #702).
 ///
@@ -410,6 +412,7 @@ pub(crate) fn helm_weapons_target(combat_lock: Option<&str>) -> Option<uuid::Uui
 pub(crate) fn build_helm_ai_surfaces_frame(
     world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
+    chart: Option<Res<crate::lobby::server::WorldResource>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     ship_client_config: Option<Res<crate::lobby::server::ShipClientConfigResource>>,
@@ -427,6 +430,11 @@ pub(crate) fn build_helm_ai_surfaces_frame(
             Option<&crate::entities::spawner::HelmConsoleSection>,
             Has<crate::server_app::LocalShip>,
             HelmAiSurfaces,
+            (
+                Option<&crate::science::broad::SensingControls>,
+                Option<&crate::science::broad::BroadProfile>,
+                Option<&crate::science::broad::BroadTracks>,
+            ),
             // Issue #875: the ship's own alert state, folded onto the frame so
             // every helm policy host seeds the same `posture` this tick.
             Option<&crate::ship::state::ShipRedAlert>,
@@ -464,10 +472,13 @@ pub(crate) fn build_helm_ai_surfaces_frame(
         helm_section,
         is_local,
         surfaces,
+        (sensing_controls, broad_profile, broad_tracks),
         ship_red_alert,
     ) in ships.iter()
     {
         let red_alert = ship_red_alert.is_some_and(|r| r.0);
+        let fitted =
+            sensing_controls.is_some() || broad_profile.is_some() || broad_tracks.is_some();
         // Build only for ships some helm axis is actually flying: the frame
         // is a decision surface, and a fully human-held helm makes none.
         let any_axis_ai = [
@@ -507,6 +518,7 @@ pub(crate) fn build_helm_ai_surfaces_frame(
                 HelmAiShipFrame {
                     scored,
                     has_objective,
+                    current_contact_routes: fitted.then(Default::default),
                     forward_speed: physics.forward_speed,
                     // Seeded on the objective-less path too: posture is a
                     // reading of the ship's own bridge, not of what it has been
@@ -519,44 +531,105 @@ pub(crate) fn build_helm_ai_surfaces_frame(
             continue;
         }
 
-        let mut visible_view = helm_ai_world_view(
-            physics,
-            entity_uuid,
-            faction,
-            collider,
-            helm_section,
-            blackboards,
-            ship_client_config.as_deref(),
-            is_local,
-            &frame.anchors,
-            &snapshot_entities,
-        );
-        if !blackboards
-            .0
-            .values()
-            .any(|board| matches!(board, crate::core::messages::SystemBlackboard::Helm(_)))
-        {
-            visible_view.entities.clear();
-        }
-        let (merged_view, shared_targets) = helm_shared_target_view(
-            visible_view.clone(),
-            &snapshot_entities,
-            blackboards,
-            waypoint,
-        );
-        let destroy_target = helm_destroy_target(&scored, &merged_view, &shared_targets, registry);
-        // Issue #874: reduce the hostiles' published arc sectors against this
-        // ship's own position, once, here.
-        let hostile_arc_exposure = crate::ai::hostile_arc_exposure(&merged_view, registry);
-
-        // Combat Lock from the frozen viewscreen (issue #829).
         let combat_lock = match blackboards
             .0
             .get(&crate::ship::system_registry::viewscreen_system_id())
         {
-            Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+            Some(crate::core::messages::SystemBlackboard::Viewscreen(board)) => {
+                board.combat_lock.as_deref()
+            }
             _ => None,
         };
+        let (
+            visible_view,
+            merged_view,
+            destroy_target,
+            weapons_target,
+            current_contact_routes,
+            observed_velocities,
+            nav_waypoint_anchor,
+        ) = if fitted {
+            let measured = measured::build(
+                blackboards,
+                broad_tracks,
+                sensing_controls,
+                physics,
+                entity_uuid,
+                faction,
+                collider,
+                &frame.anchors,
+                chart.as_deref(),
+                runtime.as_deref(),
+            );
+            let mut shared = Vec::new();
+            if let Some(crate::core::messages::SystemBlackboard::Viewscreen(board)) = blackboards
+                .0
+                .get(&crate::ship::system_registry::viewscreen_system_id())
+            {
+                for selected in [&board.combat_lock, &board.science_target] {
+                    if let Some(key) = measured.selection(selected.as_deref()) {
+                        if !shared.contains(&key) {
+                            shared.push(key);
+                        }
+                    }
+                }
+            }
+            let nav_anchor =
+                cleared_nav_waypoint_anchor(waypoint, surfaces.clearance).and_then(|reference| {
+                    measured
+                        .selection(Some(&reference.to_string()))
+                        .or_else(|| measured.named_target(&reference.to_string()))
+                });
+            if let Some(anchor) = nav_anchor {
+                if !shared.contains(&anchor) {
+                    shared.push(anchor);
+                }
+            }
+            let destroy = measured.destroy_target(&scored, &shared, registry);
+            let weapon = measured.selection(combat_lock);
+            (
+                measured.view.clone(),
+                measured.view,
+                destroy,
+                weapon,
+                Some(measured.routes),
+                measured.velocities,
+                nav_anchor,
+            )
+        } else {
+            let mut visible = helm_ai_world_view(
+                physics,
+                entity_uuid,
+                faction,
+                collider,
+                helm_section,
+                blackboards,
+                ship_client_config.as_deref(),
+                is_local,
+                &frame.anchors,
+                &snapshot_entities,
+            );
+            if !blackboards
+                .0
+                .values()
+                .any(|board| matches!(board, crate::core::messages::SystemBlackboard::Helm(_)))
+            {
+                visible.entities.clear();
+            }
+            let (merged, shared) =
+                helm_shared_target_view(visible.clone(), &snapshot_entities, blackboards, waypoint);
+            let destroy = helm_destroy_target(&scored, &merged, &shared, registry);
+            (
+                visible,
+                merged,
+                destroy,
+                helm_weapons_target(combat_lock),
+                None,
+                Default::default(),
+                cleared_nav_waypoint_anchor(waypoint, surfaces.clearance),
+            )
+        };
+        let hostile_arc_exposure = crate::ai::hostile_arc_exposure(&merged_view, registry);
 
         frame.ships.insert(
             entity,
@@ -566,9 +639,11 @@ pub(crate) fn build_helm_ai_surfaces_frame(
                 visible_view,
                 merged_view,
                 destroy_target,
-                weapons_target: helm_weapons_target(combat_lock.as_deref()),
+                weapons_target,
+                current_contact_routes,
+                observed_velocities,
                 nav_waypoint: cleared_nav_waypoint(waypoint, surfaces.clearance),
-                nav_waypoint_anchor: cleared_nav_waypoint_anchor(waypoint, surfaces.clearance),
+                nav_waypoint_anchor,
                 forward_speed: physics.forward_speed,
                 hostile_arc_exposure,
                 red_alert,

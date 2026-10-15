@@ -22,6 +22,13 @@ pub struct HelmAiShipFrame {
     pub destroy_target: Option<uuid::Uuid>,
     /// This ship's Tactical lock as a UUID (`helm_weapons_target`).
     pub weapons_target: Option<uuid::Uuid>,
+    /// Derived command-reference translation for fitted sensing. Some(empty)
+    /// denies unobserved actuator references; None retains legacy equipment.
+    /// No geometry, identity or authoritative intent is stored in this map.
+    pub current_contact_routes: Option<std::collections::BTreeMap<uuid::Uuid, uuid::Uuid>>,
+    /// Already-observed planar velocity keyed by the same public contact key.
+    /// Absence is unknown motion, not a measured stationary target.
+    pub observed_velocities: std::collections::BTreeMap<uuid::Uuid, [f32; 2]>,
     /// The Navigation waypoint this ship is cleared to fly
     /// (`cleared_nav_waypoint`), if any.
     pub nav_waypoint: Option<[f32; 2]>,
@@ -262,6 +269,38 @@ pub fn apply_arc_bearing_request(
             }
         }
         None => pending.target = None,
+    }
+}
+
+/// Apply ordinary own-weapon arc support through a current permitted contact.
+/// The temporary projection never replaces the authoritative physical request.
+pub fn apply_frame_arc_bearing_request(
+    steering: &mut f32,
+    pending: Option<&mut PendingArcBearingRequest>,
+    frame: &HelmAiShipFrame,
+    physics: &ShipPhysics,
+    leg_yields: bool,
+) {
+    let Some(routes) = &frame.current_contact_routes else {
+        apply_arc_bearing_request(steering, pending, &frame.merged_view, physics, leg_yields);
+        return;
+    };
+    let Some(pending) = pending else {
+        return;
+    };
+    let mut projected = pending.clone();
+    projected.target = pending
+        .target
+        .and_then(|target| routes.get(&target).copied());
+    apply_arc_bearing_request(
+        steering,
+        Some(&mut projected),
+        &frame.merged_view,
+        physics,
+        leg_yields,
+    );
+    if projected.target.is_none() {
+        pending.target = None;
     }
 }
 
@@ -684,7 +723,7 @@ pub fn build_pass_surface(
     // All SIX are required, not just the three this surface reads itself — see
     // [`RECOVERY_PARAMS`], which is also what `seed_pressed_facts` gates on.
     let (recover, reengage, orbit_speed, orbit_spiral_gain, reengage_speed) = match (
-        recovery_params_authored(&steering_policy.params),
+        recovery_params_authored(&steering_policy.params) && facts.get(SAFE_RANGE_FACT).is_some(),
         steering_policy.params.get(ORBIT_SPEED_PARAM),
         steering_policy.params.get(ORBIT_SPIRAL_GAIN_PARAM),
         steering_policy.params.get(REENGAGE_SPEED_PARAM),
@@ -882,3 +921,7 @@ pub fn build_pass_surface(
         artillery_lead_speed,
     }
 }
+
+#[cfg(test)]
+#[path = "surfaces_measured_tests.rs"]
+mod measured_tests;

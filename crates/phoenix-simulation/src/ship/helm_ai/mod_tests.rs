@@ -40,6 +40,7 @@ fn test_app() -> App {
                 sharing: None,
                 received_chart: Vec::new(),
                 transit_routes: Vec::new(),
+                formation: None,
             },
         ),
     );

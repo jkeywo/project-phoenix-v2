@@ -771,7 +771,7 @@ fn formation_publications(world: &mut World) {
 fn formation_selection_uses_actual_heard_acceptance_and_earned_measurement_with_stable_pause() {
     use crate::comms::{
         radio::tick_radio,
-        server::{CommsInboxRes, CommsRuntime},
+        server::CommsInboxRes,
     };
     use crate::console::comms::server::publish_comms_blackboard;
     use crate::core::messages::AdmittedCommand;

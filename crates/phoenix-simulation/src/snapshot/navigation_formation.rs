@@ -92,7 +92,7 @@ fn validate(
                 .into(),
         );
     }
-    let publications: std::collections::BTreeMap<_, _> = row
+    let publications: std::collections::HashMap<_, _> = row
         .blackboards
         .iter()
         .map(|(key, value)| (crate::core::messages::SystemId(key.clone()), value.clone()))

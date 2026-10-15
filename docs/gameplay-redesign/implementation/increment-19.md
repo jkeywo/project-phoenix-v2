@@ -64,8 +64,12 @@ This first consumer is one actual battery-only, engineless sensor probe handled 
 an installed compatible Bay System. Its accepted profile has no passengers, child
 craft, visual descendants or weapon capability. These are limits on this prototype,
 not restrictions on unrelated ordinary entities. Stationary turrets, moving release,
-propelled craft, passengers and emitted-ordnance joins remain later slices. The
-probe retains its ordinary sensors, finite reserves, component condition, dated
+propelled craft, passengers and emitted-ordnance joins remain later slices.
+
+A supported model-less procedural primitive may render directly on the same actual
+probe entity. Descendant-producing GLB/rig, light and celestial profiles remain
+unsupported; the materialization validator enforces that exact first visual path.
+The probe retains its ordinary sensors, finite reserves, component condition, dated
 history and existing viable Comms/sharing; the parent's bay view cannot read remote
 live state through private custody references.
 

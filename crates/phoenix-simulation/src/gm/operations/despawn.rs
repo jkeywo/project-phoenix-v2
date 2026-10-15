@@ -366,7 +366,7 @@ pub fn remove_entity(world: &mut World, entity: Entity) -> Vec<GmRemovalReferenc
             .retain(|id, _| !message_ids.contains(id));
         comms
             .pending_ai_responses
-            .retain(|key, _| !message_ids.contains(&key.message_id));
+            .retain(|key, _| key.ship_uuid != uuid && !message_ids.contains(&key.message_id));
     }
     let names: std::collections::BTreeSet<_> = world
         .get_resource::<crate::world::server::WorldContentRuntime>()

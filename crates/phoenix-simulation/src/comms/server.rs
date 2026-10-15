@@ -160,16 +160,16 @@ pub struct CommsRuntime {
     /// fleet those differ between the hulls. Keying on the message alone would
     /// make one hull's wait overwrite the other's, and the surviving entry would
     /// depend on which hull was walked last — so the map has to name the slot it
-    /// belongs to. [`crate::lockstep::FleetSlotOf`] is the host-stable name for
-    /// that ship: `server_app::components::LocalShip` says "the ship whose crew
+    /// belongs to by its actual UUID. Fleet slot is only derived decision order:
+    /// `server_app::components::LocalShip` says "the ship whose crew
     /// is on THIS machine" and is a different hull on each host, so nothing this
     /// map holds may be derived from it.
     ///
     /// A `BTreeMap` rather than a `HashMap` — unlike `active_dialogues` this map
     /// is ITERATED (to retire cancelled entries), and an unordered iteration
     /// feeding authoritative state is precisely the determinism hazard
-    /// AGENTS.md names. The key sorts by slot first, so the iteration order is
-    /// the fleet's own order on every host.
+    /// AGENTS.md names. Persistence iterates ship UUIDs; the controller retains
+    /// the original explicit fleet-slot decision/draw order on every host.
     ///
     /// Entries are armed, re-armed and retired by
     /// [`crate::console::comms::server::operate_comms_response_ai`]; nothing
@@ -178,11 +178,9 @@ pub struct CommsRuntime {
     pub pending_ai_responses: std::collections::BTreeMap<PendingAiResponseKey, PendingAiResponse>,
 }
 
-/// Which fleet console is waiting on which conversation (issue #1343).
-///
-/// Ordered slot-first so the map's iteration — which the digest fold and the
-/// snapshot both walk — is the roster's order rather than a string order that
-/// interleaves two hulls' waits.
+/// Which actual ship's Comms console waits on which conversation. The map
+/// orders persistence by UUID; decision/RNG order stays explicitly fleet-first
+/// in the existing response controller.
 #[derive(
     Clone,
     Debug,
@@ -195,20 +193,19 @@ pub struct CommsRuntime {
     serde::Deserialize,
     Default,
 )]
+#[serde(deny_unknown_fields)]
 pub struct PendingAiResponseKey {
-    /// The fleet slot whose Comms console is waiting, read from that ship's
-    /// [`crate::lockstep::FleetSlotOf`]. Host-stable by construction: the fleet
-    /// owner mints the ordinals and every host reads the same frozen roster.
-    pub host: crate::command_admission::HostSlot,
+    /// Actual operator ship, independent of local display and fleet membership.
+    pub ship_uuid: String,
     /// The [`crate::console::comms::CommsMessage`] id the wait is on.
     pub message_id: String,
 }
 
 impl PendingAiResponseKey {
     /// The key one ship's wait on one message is filed under.
-    pub fn new(host: crate::command_admission::HostSlot, message_id: impl Into<String>) -> Self {
+    pub fn new(ship_uuid: impl Into<String>, message_id: impl Into<String>) -> Self {
         Self {
-            host,
+            ship_uuid: ship_uuid.into(),
             message_id: message_id.into(),
         }
     }

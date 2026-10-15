@@ -1678,11 +1678,11 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
         // that says so rather than the tick the answer lands.
         acc = fold_u64(acc, pending_ai_len as u64);
         for (key, record) in &comms.pending_ai_responses {
-            // The fleet slot first, because the key's own ordering is slot-first
-            // and because "which hull is waiting" is half of what two peers must
+            // Actual ship identity first; persisted map order is UUID order,
+            // and "which hull is waiting" is half of what two peers must
             // agree about — a fleet whose two consoles swapped waits folds the
             // same message ids and is still diverged.
-            acc = fold_u64(acc, u64::from(key.host.0));
+            acc = fold_str(acc, &key.ship_uuid);
             acc = fold_str(acc, &key.message_id);
             acc = fold_u64(acc, record.due_tick);
             acc = fold_u64(acc, record.response_fingerprint);

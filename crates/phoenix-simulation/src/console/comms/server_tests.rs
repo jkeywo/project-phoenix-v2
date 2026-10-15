@@ -1581,6 +1581,7 @@ fn spawn_response_ai_hull(
         // the frozen roster spawns (`world_setup::spawn_game_start_entities`), so
         // a fixture hull without one is a hull the host cannot see at all.
         crate::lockstep::FleetSlotOf(slot),
+        EntityUuid(format!("response-ai-hull-{}", slot.0)),
         ShipSystemControlSources(resolver),
         crate::ship::components::load_ship_config_from_disk(),
         AdmittedCommands::default(),
@@ -2174,7 +2175,8 @@ fn pending_wait_of(
         .resource::<CommsRuntime>()
         .pending_ai_responses
         .get(&crate::comms::server::PendingAiResponseKey::new(
-            host, message_id,
+            format!("response-ai-hull-{}", host.0),
+            message_id,
         ))
         .copied()
 }
@@ -2701,6 +2703,48 @@ fn fleet_admitted_indices(app: &mut App) -> Vec<(crate::command_admission::HostS
 /// The wait map is folded by `sim_digest::fold_comms_scope`, so a schedule that
 /// depended on `LocalShip` would put two peers of one fleet on different
 /// authoritative digests from the tick the first conversation opened.
+#[test]
+fn uuid_key_migration_does_not_reorder_legacy_fleet_decisions_or_rng_draws() {
+    let mut distinct_answers = false;
+    for seed in 0..16 {
+        let mut control = weighted_fleet_app(seed, FLEET_SLOT_ONE);
+        let mut opposite_uuid_order = weighted_fleet_app(seed, FLEET_SLOT_ONE);
+        let mut query = opposite_uuid_order
+            .world_mut()
+            .query::<(&crate::lockstep::FleetSlotOf, &mut EntityUuid)>();
+        for (slot, mut uuid) in query.iter_mut(opposite_uuid_order.world_mut()) {
+            uuid.0 = if slot.0 == FLEET_SLOT_ONE {
+                "z-first-slot"
+            } else {
+                "a-second-slot"
+            }
+            .into();
+        }
+        for app in [&mut control, &mut opposite_uuid_order] {
+            tick_to(app, 0);
+            tick_to(app, skyway_delay_ticks());
+        }
+        let expected = fleet_admitted_indices(&mut control);
+        distinct_answers |= expected[0].1 != expected[1].1;
+        assert_eq!(
+            fleet_admitted_indices(&mut opposite_uuid_order),
+            expected,
+            "seed {seed}: actual UUID ordering must not swap fleet draws"
+        );
+        assert_eq!(
+            control.world().resource::<crate::sim_rng::SimRng>().state(),
+            opposite_uuid_order
+                .world()
+                .resource::<crate::sim_rng::SimRng>()
+                .state()
+        );
+    }
+    assert!(
+        distinct_answers,
+        "proof must contain distinct actual fleet choices"
+    );
+}
+
 #[test]
 fn both_fleet_hulls_arm_the_same_waits_whichever_one_this_host_projects() {
     let mut projecting_one = weighted_fleet_app(11, FLEET_SLOT_ONE);

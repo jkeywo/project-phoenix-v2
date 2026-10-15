@@ -2157,7 +2157,7 @@ pub fn operate_comms_response_ai(
     mut ships: Query<(
         Entity,
         Option<&EntityUuid>,
-        &crate::lockstep::FleetSlotOf,
+        Option<&crate::lockstep::FleetSlotOf>,
         &ShipSystemControlSources,
         Option<&crate::ship_plugin::ShipConfigComponent>,
         &mut crate::core::messages::AdmittedCommands,
@@ -2229,7 +2229,18 @@ pub fn operate_comms_response_ai(
     // stream, so two hulls answering on the same tick have to consume it in an
     // order every host computes the same way.
     let mut fleet: Vec<_> = ships.iter().collect();
-    fleet.sort_by_key(|(_, _, slot, ..)| slot.0);
+    // Preserve the old fleet decision/draw sweep exactly. New ordinary actors
+    // follow it in actual UUID order; map ordering never decides RNG order.
+    fleet.sort_by(
+        |(_, a_uuid, a_slot, ..), (_, b_uuid, b_slot, ..)| match (a_slot, b_slot) {
+            (Some(a), Some(b)) => a.0.cmp(&b.0),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a_uuid
+                .map(|id| id.0.as_str())
+                .cmp(&b_uuid.map(|id| id.0.as_str())),
+        },
+    );
     for (
         entity,
         _entity_uuid,
@@ -2245,6 +2256,11 @@ pub fn operate_comms_response_ai(
         selector_comp,
     ) in fleet
     {
+        // The structural migration retains ordinary plot behavior. The new
+        // request consumer will separately opt non-roster radio actors in.
+        let (Some(slot), Some(operator_uuid)) = (slot, _entity_uuid) else {
+            continue;
+        };
         fleet_seen = true;
         let host = slot.0;
         // Read-only for the length of the pass; the one write (`pending_next`
@@ -2276,7 +2292,7 @@ pub fn operate_comms_response_ai(
                 comms
                     .pending_ai_responses
                     .iter()
-                    .filter(|(key, _)| key.host == host)
+                    .filter(|(key, _)| key.ship_uuid == operator_uuid.0)
                     .map(|(key, record)| (key.clone(), *record)),
             );
             continue;
@@ -2339,7 +2355,7 @@ pub fn operate_comms_response_ai(
                     WeightedChoiceInputs {
                         comms,
                         inbox,
-                        host,
+                        ship_uuid: &operator_uuid.0,
                         message: &message,
                         responses,
                         sender_in_range,
@@ -2360,7 +2376,10 @@ pub fn operate_comms_response_ai(
                     // re-armed because the options moved under it.
                     WeightedChoiceOutcome::Wait(record) => {
                         pending_next.insert(
-                            crate::comms::server::PendingAiResponseKey::new(host, &message.id),
+                            crate::comms::server::PendingAiResponseKey::new(
+                                &operator_uuid.0,
+                                &message.id,
+                            ),
                             record,
                         );
                     }
@@ -2546,10 +2565,10 @@ enum WeightedChoiceOutcome {
 struct WeightedChoiceInputs<'a> {
     comms: &'a CommsRuntime,
     inbox: &'a CommsInboxRes,
-    /// The fleet slot whose console is deciding — the half of the wait's key
+    /// Actual ship whose console is deciding — the half of the wait's key
     /// that is not the message, and the reason two crewed hulls do not share
     /// (or overwrite) one schedule.
-    host: crate::command_admission::HostSlot,
+    ship_uuid: &'a str,
     message: &'a CommsMessage,
     responses: &'a [crate::comms::content::CommsResponse],
     sender_in_range: bool,
@@ -2617,7 +2636,7 @@ fn weighted_backfill_choice(
         .comms
         .pending_ai_responses
         .get(&crate::comms::server::PendingAiResponseKey::new(
-            inputs.host,
+            inputs.ship_uuid,
             &inputs.message.id,
         ))
         .filter(|record| record.response_fingerprint == fingerprint);

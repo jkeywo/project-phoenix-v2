@@ -1680,11 +1680,11 @@ pub struct CommsState {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_opens: Vec<OpenCommsRequest>,
     /// `CommsRuntime::pending_ai_responses` as `(key, record)`, already ordered
-    /// (a `BTreeMap`, slot-first) — every unmanned Comms console's running waits
+    /// (a `BTreeMap`, ship-UUID-first) — every unmanned Comms console's running waits
     /// on the weighted decisions it has been left holding (issue #1343).
     ///
-    /// The key carries the FLEET SLOT as well as the message id, because a fleet
-    /// has one inbox but a Comms console per hull: a save that flattened the two
+    /// The key carries the actual ship UUID as well as the message id, because
+    /// there is one inbox but a Comms console per actor: a save that flattened the two
     /// hulls' waits together would resume a mission whose second hull had
     /// silently adopted the first one's schedule.
     ///

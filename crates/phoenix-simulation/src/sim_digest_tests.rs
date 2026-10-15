@@ -2382,10 +2382,7 @@ fn the_backfill_choice_metadata_and_its_running_wait_move_the_digest() {
         .resource_mut::<CommsRuntime>()
         .pending_ai_responses
         .insert(
-            crate::comms::server::PendingAiResponseKey::new(
-                crate::command_admission::HostSlot::SOLO,
-                "msg-1",
-            ),
+            crate::comms::server::PendingAiResponseKey::new("waiting-crew-one", "msg-1"),
             crate::comms::server::PendingAiResponse {
                 due_tick: 300,
                 response_fingerprint: 0xabcd,
@@ -2398,7 +2395,7 @@ fn the_backfill_choice_metadata_and_its_running_wait_move_the_digest() {
         .resource_mut::<CommsRuntime>()
         .pending_ai_responses
         .get_mut(&crate::comms::server::PendingAiResponseKey::new(
-            crate::command_admission::HostSlot::SOLO,
+            "waiting-crew-one",
             "msg-1",
         ))
         .expect("armed")
@@ -2418,15 +2415,12 @@ fn the_backfill_choice_metadata_and_its_running_wait_move_the_digest() {
         let record = comms
             .pending_ai_responses
             .remove(&crate::comms::server::PendingAiResponseKey::new(
-                crate::command_admission::HostSlot::SOLO,
+                "waiting-crew-one",
                 "msg-1",
             ))
             .expect("armed");
         comms.pending_ai_responses.insert(
-            crate::comms::server::PendingAiResponseKey::new(
-                crate::command_admission::HostSlot(2),
-                "msg-1",
-            ),
+            crate::comms::server::PendingAiResponseKey::new("waiting-crew-two", "msg-1"),
             record,
         );
     }

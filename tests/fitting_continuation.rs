@@ -213,6 +213,31 @@ fn parts(app: &App, entity: Entity) -> i64 {
         .unwrap()
         .level
 }
+fn inventories(app: &mut App) -> BTreeMap<String, (i64, BTreeSet<String>)> {
+    let actors: Vec<_> = app
+        .world_mut()
+        .query::<(Entity, &EntityUuid, &ShipFitting)>()
+        .iter(app.world())
+        .map(|(entity, uuid, _)| (entity, uuid.0.clone()))
+        .collect();
+    actors
+        .into_iter()
+        .map(|(entity, uuid)| {
+            (
+                uuid,
+                (
+                    parts(app, entity),
+                    fitting(app, entity)
+                        .equipment
+                        .assemblies
+                        .keys()
+                        .cloned()
+                        .collect(),
+                ),
+            )
+        })
+        .collect()
+}
 fn checkpoint(fetch: bool, ai: bool, stage: &str) -> (App, Entity) {
     let (mut app, entity) = prepared(fetch, ai);
     for _ in 0..2400 {
@@ -339,7 +364,11 @@ fn real_human_and_ordinary_ai_field_fits_resume_active_removal_and_installation_
                 .definition,
             CHOICE
         );
-        assert!(parts(&live, entity) <= initial_parts);
+        assert_eq!(
+            parts(&live, entity),
+            initial_parts - i64::from(stage == "Removing"),
+            "the one authored machinery part is consumed exactly once across continuation"
+        );
     }
 }
 
@@ -357,6 +386,7 @@ fn accepted_source_support_spare_fetch_resumes_the_actual_team_route() {
         .keys()
         .cloned()
         .collect();
+    let initial_parts = parts(&live, entity);
     let mut carried = false;
     let mut finished_ticks = 0;
     for step in 0..1500 {
@@ -404,6 +434,54 @@ fn accepted_source_support_spare_fetch_resumes_the_actual_team_route() {
             .collect::<BTreeSet<_>>(),
         items
     );
+    assert_eq!(parts(&live, entity), initial_parts - 1);
+}
+
+#[test]
+fn a_previous_host_or_observer_cannot_request_equipment_after_the_seat_changes() {
+    let mut app = begin(false);
+    claim(&mut app, "engineering", "repair-observer");
+    claim(&mut app, "tactical", "previous-tactical");
+    send(&mut app, "previous-tactical", ClientMessage::ReleaseStation);
+    steps(&mut app, 4);
+    claim(&mut app, "tactical", "current-tactical");
+    let target = id("phaser-fore");
+    let payload = Control::RequestEquipment {
+        slot: SLOT.into(),
+        equipment: CHOICE.into(),
+    };
+    assert!(!authorised(
+        &mut app,
+        "previous-tactical",
+        "tactical",
+        &target,
+        &payload
+    ));
+    assert!(authorised(
+        &mut app,
+        "current-tactical",
+        "tactical",
+        &target,
+        &payload
+    ));
+    let entity = local(&mut app);
+    let before = fitting(&app, entity).equipment.clone();
+    for token in ["previous-tactical", "repair-observer"] {
+        // Intentionally bypass the positive helper: this real input must be
+        // refused by Admission, even though Repair receives fitting reports.
+        send(
+            &mut app,
+            token,
+            ClientMessage::ControlSystem {
+                target: target.clone(),
+                payload: payload.clone(),
+            },
+        );
+        steps(&mut app, 4);
+        assert_eq!(fitting(&app, entity).equipment, before);
+        assert!(fitting(&app, entity).requested.is_empty());
+        assert!(fitting(&app, entity).work.is_empty());
+    }
 }
 
 #[test]
@@ -521,6 +599,8 @@ fn two_actual_local_ship_peers_apply_human_requests_and_ordinary_ai_fits_identic
     for _ in 0..10 {
         mesh_step(&mut hosts);
     }
+    let initial = inventories(&mut hosts[0]);
+    assert_eq!(initial, inventories(&mut hosts[1]));
     let mut journeys: Vec<_> = hosts
         .each_mut()
         .into_iter()
@@ -630,6 +710,19 @@ fn two_actual_local_ship_peers_apply_human_requests_and_ordinary_ai_fits_identic
         "both actual Repair tools must perform paid fitting on both peers"
     );
     for app in &mut hosts {
+        let actual = inventories(app);
+        assert_eq!(actual.len(), initial.len());
+        for (uuid, (initial_parts, initial_items)) in &initial {
+            assert_eq!(
+                actual[uuid].0,
+                initial_parts - 1,
+                "one real part per fleet fit"
+            );
+            assert_eq!(
+                &actual[uuid].1, initial_items,
+                "fleet fitting cannot mint or lose an assembly"
+            );
+        }
         let states: Vec<_> = app
             .world_mut()
             .query::<&ShipFitting>()

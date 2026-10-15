@@ -31,3 +31,13 @@ it('resolves the optional actual drive onto finite existing Power/Stock owners w
     expect({...console,feed:original.feed}).toEqual(original);
   }
 });
+
+it('changes only the optional hardened drive response and display name through keyed includes',()=>{
+  const read=path=>fs.existsSync(path)?fs.readFileSync(path,'utf8'):null;
+  const resolve=path=>{const result=resolveTemplate(path,{read},parse);expect(result.ok).toBe(true);return result.resolved.value;};
+  const base=resolve('assets/entities/local_jump_cruiser.toml'),hardened=resolve('assets/entities/gravity_hardened_jump_cruiser.toml');
+  const drive=hardened.system.find(row=>row.id==='local-jump').component.find(row=>row.kind==='transit_drive');
+  expect(drive.config.gravity_response).toBe(0.25);
+  delete drive.config.gravity_response; hardened.name=base.name;
+  expect(hardened).toEqual(base);
+});

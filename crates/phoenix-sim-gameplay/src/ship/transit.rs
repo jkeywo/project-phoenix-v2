@@ -123,7 +123,8 @@ impl TransitArrivalSolution {
             }
             body.policy.validate()?;
             let separation = distance(body.position, point);
-            let radius = f64::from(body.policy.exclusion_radius);
+            let radius = f64::from(body.policy.exclusion_radius)
+                * f64::from(order.profile.config.gravity_response);
             if separation >= radius {
                 continue;
             }
@@ -140,11 +141,11 @@ impl TransitArrivalSolution {
                 return Err("gravity placement has no finite representable result".into());
             }
         }
-        if self
-            .gravity
-            .iter()
-            .any(|body| distance(body.position, point) < f64::from(body.policy.exclusion_radius))
-        {
+        if self.gravity.iter().any(|body| {
+            distance(body.position, point)
+                < f64::from(body.policy.exclusion_radius)
+                    * f64::from(order.profile.config.gravity_response)
+        }) {
             return Err(
                 "deterministic placement remains inside an accepted gravity exclusion".into(),
             );

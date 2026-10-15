@@ -6239,3 +6239,5 @@ semantic_action.craft.bay.cancel.label,Craft bay,[Cancel handling],,,
 semantic_action.craft.bay.cancel.accessibility,Craft bay,[Cancel handling],,,
 settings.debug.scenario.planning.original_schedule,Privileged Scenario plan inspection,[Original schedule decision],,,
 settings.debug.scenario.planning.reconsideration,Privileged Scenario plan inspection,[Dated reconsideration cause and decision],,,
+workshop.transit.gravity_response,LocalJump accepted authoring,Gravity response,Gravity response,Gravity response,source
+entity.gravity_hardened_jump_cruiser.name,Optional LocalJump reference,Gravity-hardened Cruiser,Gravity-hardened Cruiser,Gravity-hardened Cruiser,source

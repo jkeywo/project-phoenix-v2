@@ -100,3 +100,18 @@ it('refuses a multiline source layout that resembles a System header instead of 
   expect(() => prepareTransitOperation(f.draft, f.dependencies, operation(f))).toThrow();
   expect(f.draft.snapshot()).toEqual(before);
 });
+
+it('accepts finite gravity response through the same drive history and rejects invalid edits without writing', async () => {
+  const f=fixture(),before=inspectTransit(f.draft,f.dependencies,path).resolved.value;
+  for(const response of [-1,Infinity,NaN,'0.25',1e100]) {
+    expect(()=>prepareTransitOperation(f.draft,f.dependencies,operation(f,{gravity_response:response}))).toThrow();
+    expect(f.draft.read(path)).toBe(f.source);
+  }
+  for(const response of [0,0.25,2]) {
+    await applyTransitOperation({...f,operation:operation(f,{gravity_response:response})});
+    const after=inspectTransit(f.draft,f.dependencies,path).resolved.value;
+    expect(after.system.find(row=>row.id==='local-jump').component[1].config.gravity_response).toBe(response);
+    expect(after.energy).toEqual(before.energy);expect(after.logistics).toEqual(before.logistics);
+    f.draft.undo();expect(f.draft.read(path)).toBe(f.source);
+  }
+});

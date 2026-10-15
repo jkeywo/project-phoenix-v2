@@ -60,6 +60,7 @@ fn profile() -> AcceptedLocalJumpProfile {
             preparation_work_secs: 2.0,
             max_distance: 1000.0,
             scatter_radius: 5.0,
+            gravity_response: 1.0,
             fuel: TransitFuel {
                 store: "drive-fuel".into(),
                 amount: 2,
@@ -168,4 +169,30 @@ fn closed_geometry_and_identity_do_not_default_to_a_world_or_zero_point() {
         r#"{"exclusion_radius":10,"visual_mass":20}"#
     )
     .is_err());
+}
+
+#[test]
+fn gravity_response_defaults_without_changing_legacy_serialized_scatter_inputs() {
+    let legacy = serde_json::to_value(profile()).unwrap();
+    assert!(legacy["config"].get("gravity_response").is_none());
+    let restored: AcceptedLocalJumpProfile = serde_json::from_value(legacy.clone()).unwrap();
+    assert_eq!(restored.config.gravity_response, 1.0);
+    assert_eq!(serde_json::to_value(restored).unwrap(), legacy);
+    for response in [0.0, 0.25, 2.0] {
+        let mut selected = profile();
+        selected.config.gravity_response = response;
+        selected.validate().unwrap();
+        assert_eq!(
+            serde_json::from_slice::<AcceptedLocalJumpProfile>(
+                &serde_json::to_vec(&selected).unwrap()
+            )
+            .unwrap(),
+            selected
+        );
+    }
+    for response in [-1.0, f32::NAN, f32::INFINITY] {
+        let mut selected = profile();
+        selected.config.gravity_response = response;
+        assert!(selected.validate().is_err());
+    }
 }

@@ -10,8 +10,8 @@ export function mountWorkshopTransit({ root, provider, runtime, draft: getDraft,
   const label = (control, key) => { const node = el('label', null, key); node.htmlFor = control.id; node.append(control); return node; };
   const node = el('section', 'panel'), template = el('select', 'template'), owner = el('select', 'owner'), nav = el('select', 'navigation'), fuel = el('select', 'fuel');
   const materialise = el('input', 'materialise'); materialise.type = 'checkbox';
-  const numbers = Object.fromEntries(['preparation_work_secs', 'max_distance', 'scatter_radius', 'amount', 'reading_ticks'].map(key => {
-    const input = el('input', key); input.type = 'number'; input.step = ['amount', 'reading_ticks'].includes(key) ? '1' : 'any'; input.min = ['scatter_radius', 'reading_ticks'].includes(key) ? '0' : '0.000001'; return [key, input];
+  const numbers = Object.fromEntries(['preparation_work_secs', 'max_distance', 'scatter_radius', 'gravity_response', 'amount', 'reading_ticks'].map(key => {
+    const input = el('input', key); input.type = 'number'; input.step = ['amount', 'reading_ticks'].includes(key) ? '1' : 'any'; input.min = ['scatter_radius', 'gravity_response', 'reading_ticks'].includes(key) ? '0' : '0.000001'; return [key, input];
   }));
   const gravity = el('input', 'gravity'), radius = el('input', 'radius'); gravity.type = 'checkbox'; radius.type = 'number'; radius.step = 'any'; radius.min = '0.000001';
   const save = el('button', 'save', 'save'), saveGravity = el('button', 'save-gravity', 'save_gravity');
@@ -38,7 +38,7 @@ export function mountWorkshopTransit({ root, provider, runtime, draft: getDraft,
     options(nav, (entity?.system || []).filter(row => row.kind === 'navigation').map(row => row.id));
     options(fuel, (entity?.logistics?.store || []).filter(row => row.system === owner.value && row.role === 'local' && row.endpoint?.kind === 'capacity').map(row => row.id));
     nav.value = component?.navigation_source || ''; fuel.value = component?.config.fuel.store || '';
-    for (const [key, input] of Object.entries(numbers)) input.value = component ? String(key === 'amount' ? component.config.fuel.amount : component.config[key] ?? 0) : '';
+    for (const [key, input] of Object.entries(numbers)) input.value = component ? String(key === 'amount' ? component.config.fuel.amount : component.config[key] ?? (key === 'gravity_response' ? 1 : 0)) : '';
     controls();
   }
   function inspect(force = false) {
@@ -78,7 +78,7 @@ export function mountWorkshopTransit({ root, provider, runtime, draft: getDraft,
     if (!inspection?.drives.length) return;
     commit({ path: template.value, owner: owner.value, navigation_source: nav.value, materialise: materialise.checked,
       config: { preparation_work_secs: Number(numbers.preparation_work_secs.value), max_distance: Number(numbers.max_distance.value),
-        scatter_radius: Number(numbers.scatter_radius.value), reading_ticks: Number(numbers.reading_ticks.value), fuel: { store: fuel.value, amount: Number(numbers.amount.value) } } });
+        scatter_radius: Number(numbers.scatter_radius.value), gravity_response: Number(numbers.gravity_response.value), reading_ticks: Number(numbers.reading_ticks.value), fuel: { store: fuel.value, amount: Number(numbers.amount.value) } } });
   });
   saveGravity.addEventListener('click', () => commit({ type: 'gravity', path: template.value, materialise: materialise.checked,
     value: gravity.checked ? { exclusion_radius: Number(radius.value) } : false }));

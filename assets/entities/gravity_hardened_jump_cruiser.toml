@@ -1,0 +1,11 @@
+# Optional drive variant: unchanged work, fuel, scatter and actual collision clearance.
+includes = ["local_jump_cruiser.toml"]
+name = "entity.gravity_hardened_jump_cruiser.name"
+
+[[system]]
+id = "local-jump"
+[[system.component]]
+kind = "transit_drive"
+id = "drive"
+[system.component.config]
+gravity_response = 0.25

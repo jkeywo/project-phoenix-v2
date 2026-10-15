@@ -59,3 +59,13 @@ it('refuses an old pending validation after the active same-revision document is
   expect(f.changed).not.toHaveBeenCalled(); expect(old.read(path)).toBe(f.source);
   expect(f.draft.read(path)).toContain('max_distance = 250'); f.panel.dispose();
 });
+
+it('displays the legacy response as one and edits it through ordinary accepted history', async () => {
+  const f=fixture();await settle();
+  expect(control('gravity_response').value).toBe('1');
+  control('gravity_response').value='0.25';control('save').click();await settle();
+  expect(parse(f.draft.read(path)).system[0].component[1].config.gravity_response).toBe(0.25);
+  f.draft.undo();f.panel.refresh();expect(control('gravity_response').value).toBe('1');
+  f.draft.redo();f.panel.refresh();expect(control('gravity_response').value).toBe('0.25');
+  f.panel.dispose();
+});

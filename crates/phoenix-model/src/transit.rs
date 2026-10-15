@@ -140,10 +140,22 @@ pub struct LocalJumpConfig {
     pub preparation_work_secs: f32,
     pub max_distance: f32,
     pub scatter_radius: f32,
+    /// Scales fixed-body arrival exclusion without changing physical collision clearance.
+    #[serde(
+        default = "unit_gravity_response",
+        skip_serializing_if = "is_unit_gravity_response"
+    )]
+    pub gravity_response: f32,
     pub fuel: TransitFuel,
     /// Existing per-System text reading; zero is immediate compatibility tuning.
     #[serde(default)]
     pub reading_ticks: u32,
+}
+fn unit_gravity_response() -> f32 {
+    1.0
+}
+fn is_unit_gravity_response(value: &f32) -> bool {
+    *value == 1.0
 }
 impl LocalJumpConfig {
     pub fn validate(&self) -> Result<(), String> {
@@ -153,9 +165,11 @@ impl LocalJumpConfig {
             || self.max_distance <= 0.0
             || !self.scatter_radius.is_finite()
             || self.scatter_radius < 0.0
+            || !self.gravity_response.is_finite()
+            || self.gravity_response < 0.0
         {
             return Err(
-                "LocalJump requires finite positive work/range and nonnegative scatter".into(),
+                "LocalJump requires finite positive work/range and nonnegative scatter/gravity response".into(),
             );
         }
         self.fuel.validate()

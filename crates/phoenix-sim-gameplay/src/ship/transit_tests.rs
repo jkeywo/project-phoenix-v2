@@ -11,6 +11,7 @@ fn order(now: u64, request: Option<(&str, u64)>) -> TransitOrder {
                 preparation_work_secs: 2.0,
                 max_distance: 50.0,
                 scatter_radius: 1.0,
+                gravity_response: 1.0,
                 fuel: TransitFuel {
                     store: "local-fuel".into(),
                     amount: 2,
@@ -478,4 +479,35 @@ fn stable_body_pass_refuses_reentry_into_an_earlier_exclusion_before_any_commit(
             .unwrap(),
         TransitAdvance::Waiting(TransitWait::NoPlacement)
     );
+}
+
+#[test]
+fn drive_response_scales_original_gravity_without_mutating_body_evidence() {
+    let mut selected = order(1, None);
+    let body = TransitGravityBody {
+        body_id: "fixed-body".into(),
+        position: selected.destination.point(),
+        policy: ArrivalGravityConfig {
+            exclusion_radius: 8.0,
+        },
+    };
+    for (response, expected_x) in [(1.0, 18.0), (0.25, 12.0), (0.0, 10.0), (2.0, 26.0)] {
+        selected.profile.config.gravity_response = response;
+        let receipt = TransitArrivalSolution::resolve(
+            &selected,
+            [0.0; 3],
+            [1.0, 0.0, 0.0],
+            vec![body.clone()],
+        )
+        .unwrap();
+        assert_eq!(receipt.point, [expected_x, 2.0, 0.0]);
+        assert_eq!(receipt.gravity, vec![body.clone()]);
+        receipt.validate(&selected).unwrap();
+        let mut forged = selected.clone();
+        forged.profile.config.gravity_response = response + 1.0;
+        assert!(receipt.validate(&forged).is_err());
+        let resumed: TransitArrivalSolution =
+            serde_json::from_slice(&serde_json::to_vec(&receipt).unwrap()).unwrap();
+        resumed.validate(&selected).unwrap();
+    }
 }

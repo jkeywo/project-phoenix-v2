@@ -1,0 +1,217 @@
+# Quiet runtime proof. No threats/deadlines or stock grants. Only magazine demand starts at zero; normal Gunner demand later enables actual Logistics AI work.
+[global]
+seed = 156223
+
+[player_spawn]
+position = [ 0, 0, 0 ]
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "maintenance-ship"
+name = "maintenance-ship"
+spawn_on = "game_start"
+
+[entity.transform]
+position = [ 0, 0, 0 ]
+
+[[entity.overrides.logistics.store]]
+id = "hold-ammunition"
+resource = "torpedoes"
+compartment = "support"
+role = "main"
+target = 4
+reserve = 0
+priority = 2
+
+[entity.overrides.logistics.store.endpoint]
+kind = "capacity"
+id = "hold-ammunition"
+
+[[entity.overrides.logistics.store]]
+id = "magazine"
+resource = "torpedoes"
+compartment = "weapons"
+role = "local"
+target = 0
+reserve = 0
+priority = 2
+system = "torpedo-magazine"
+source = "hold-ammunition"
+
+[entity.overrides.logistics.store.endpoint]
+kind = "torpedo_magazine"
+
+[[entity.overrides.logistics.store]]
+id = "hold-machinery-parts"
+resource = "machinery_parts"
+compartment = "support"
+role = "main"
+target = 102
+reserve = 20
+priority = 1
+
+[entity.overrides.logistics.store.endpoint]
+kind = "capacity"
+id = "hold-machinery-parts"
+
+[[entity.overrides.logistics.store]]
+id = "repair-machinery"
+resource = "machinery_parts"
+compartment = "engineering"
+role = "local"
+target = 12
+reserve = 0
+priority = 1
+system = "repair"
+source = "hold-machinery-parts"
+
+[entity.overrides.logistics.store.endpoint]
+kind = "capacity"
+id = "machinery_parts"
+
+[[entity.overrides.logistics.store]]
+id = "hold-structural-parts"
+resource = "structural_parts"
+compartment = "support"
+role = "main"
+target = 51
+reserve = 8
+priority = 1
+
+[entity.overrides.logistics.store.endpoint]
+kind = "capacity"
+id = "hold-structural-parts"
+
+[[entity.overrides.logistics.store]]
+id = "repair-structural"
+resource = "structural_parts"
+compartment = "engineering"
+role = "local"
+target = 8
+reserve = 0
+priority = 1
+system = "repair"
+source = "hold-structural-parts"
+
+[entity.overrides.logistics.store.endpoint]
+kind = "capacity"
+id = "structural_parts"
+
+[[entity.overrides.logistics.store]]
+id = "hold-coolant"
+resource = "coolant"
+compartment = "support"
+role = "main"
+target = 624
+reserve = 0
+priority = 0
+
+[entity.overrides.logistics.store.endpoint]
+kind = "capacity"
+id = "hold-coolant"
+
+[[entity.overrides.logistics.store]]
+id = "coolant-reservoir"
+resource = "coolant"
+compartment = "engineering"
+role = "local"
+target = 156
+reserve = 0
+priority = 0
+system = "power-reactor"
+source = "hold-coolant"
+
+[entity.overrides.logistics.store.endpoint]
+kind = "capacity"
+id = "coolant"
+
+[[entity.overrides.logistics.store]]
+id = "hold-alloy"
+resource = "alloy"
+compartment = "support"
+role = "main"
+target = 12
+reserve = 0
+priority = 3
+
+[entity.overrides.logistics.store.endpoint]
+kind = "capacity"
+id = "alloy"
+
+[[entity.overrides.logistics.store]]
+id = "hold-ore"
+resource = "ore"
+role = "main"
+compartment = "support"
+target = 0
+reserve = 0
+priority = 4
+
+[entity.overrides.logistics.store.endpoint]
+kind = "capacity"
+id = "ore"
+
+[[entity.overrides.logistics.store]]
+id = "hold-scrap"
+resource = "scrap"
+role = "main"
+compartment = "support"
+target = 0
+reserve = 0
+priority = 4
+
+[entity.overrides.logistics.store.endpoint]
+kind = "capacity"
+id = "scrap"
+
+[[entity.overrides.logistics.storage]]
+compartment = "support"
+space = 855
+
+[entity.overrides.logistics.storage.unit_space]
+torpedoes = 1
+machinery_parts = 1
+structural_parts = 1
+coolant = 1
+alloy = 1
+ore = 1
+scrap = 1
+
+[[entity.overrides.logistics.storage]]
+compartment = "engineering"
+space = 176
+
+[entity.overrides.logistics.storage.unit_space]
+machinery_parts = 1
+structural_parts = 1
+coolant = 1
+
+[[entity.overrides.logistics.storage]]
+compartment = "weapons"
+space = 6
+
+[entity.overrides.logistics.storage.unit_space]
+torpedoes = 1
+
+[[entity.overrides.logistics.handling]]
+system = "logistics"
+max_active = 2
+max_batch = 100
+units_per_sec = 50
+reorder_fraction = 0.5
+
+[planning]
+id = "maintenance-host-proof"
+task = "maintenance::restore-and-resupply"
+
+[planning.arguments.actor]
+kind = "actor"
+value = "maintenance-ship"
+
+[[planning.import]]
+path = "tests/fixtures/maintenance-htn-host-domain.toml"
+as = "maintenance"
+names = [ "restore-and-resupply" ]
+
+[script]
+setup = "fn credit_repair(ctx) { ctx.flags.increment(\"htn_repair_credit\", 1); }\nfn credit_return(ctx) { ctx.flags.increment(\"htn_return_credit\", 1); }\nfn credit_delivery(ctx) { ctx.flags.increment(\"htn_delivery_credit\", 1); }"

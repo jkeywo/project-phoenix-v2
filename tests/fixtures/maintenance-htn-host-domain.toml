@@ -1,0 +1,323 @@
+# Opt-in runtime proof: two independent real teams, one evidence-dependent delivery.
+[domain]
+format = 1
+id = "maintenance-host-proof"
+exports = [ "restore-and-resupply" ]
+requires = [ "repair_internal", "delivery_local" ]
+
+[[task]]
+kind = "compound"
+id = "restore-and-resupply"
+
+[[task.parameters]]
+name = "actor"
+kind = "actor"
+
+[[task.method]]
+id = "third-team-required"
+
+[[task.method.step]]
+id = "engineering"
+task = "restore-engineering"
+
+[task.method.step.arguments.actor]
+source = "parameter"
+name = "actor"
+
+[task.method.step.arguments.team]
+source = "literal"
+
+[task.method.step.arguments.team.value]
+kind = "team"
+value = 0
+
+[[task.method.step]]
+id = "bridge"
+task = "restore-bridge"
+
+[task.method.step.arguments.actor]
+source = "parameter"
+name = "actor"
+
+[task.method.step.arguments.team]
+source = "literal"
+
+[task.method.step.arguments.team.value]
+kind = "team"
+value = 2
+
+[[task.method.step]]
+id = "supply"
+task = "supply-rounds"
+
+[task.method.step.arguments.actor]
+source = "parameter"
+name = "actor"
+
+[[task.method.edge]]
+from = "engineering"
+to = "supply"
+
+[task.method.edge.when]
+kind = "achieved"
+
+[[task.method]]
+id = "two-real-teams"
+
+[[task.method.step]]
+id = "engineering"
+task = "restore-engineering"
+
+[task.method.step.arguments.actor]
+source = "parameter"
+name = "actor"
+
+[task.method.step.arguments.team]
+source = "literal"
+
+[task.method.step.arguments.team.value]
+kind = "team"
+value = 0
+
+[[task.method.step]]
+id = "bridge"
+task = "restore-bridge"
+
+[task.method.step.arguments.actor]
+source = "parameter"
+name = "actor"
+
+[task.method.step.arguments.team]
+source = "literal"
+
+[task.method.step.arguments.team.value]
+kind = "team"
+value = 1
+
+[[task.method.step]]
+id = "supply"
+task = "supply-rounds"
+
+[task.method.step.arguments.actor]
+source = "parameter"
+name = "actor"
+
+[[task.method.edge]]
+from = "engineering"
+to = "supply"
+
+[task.method.edge.when]
+kind = "achieved"
+
+[[task]]
+kind = "primitive"
+id = "restore-engineering"
+definition = "restoration"
+
+[[task.parameters]]
+name = "actor"
+kind = "actor"
+
+[[task.parameters]]
+name = "team"
+kind = "team"
+
+[task.request]
+kind = "repair"
+
+[task.request.actor]
+source = "parameter"
+name = "actor"
+
+[task.request.owner]
+source = "literal"
+
+[task.request.owner.value]
+kind = "system"
+value = "repair"
+
+[task.request.team]
+source = "parameter"
+name = "team"
+
+[task.request.request]
+source = "literal"
+
+[task.request.request.value]
+kind = "repair_request"
+
+[task.request.request.value.value]
+type = "Work"
+
+[task.request.request.value.value.data]
+kind = "compartment"
+compartment = "engineering"
+
+[task.request.target]
+source = "literal"
+
+[task.request.target.value]
+kind = "repair_target"
+
+[task.request.target.value.value]
+kind = "compartment"
+compartment = "engineering"
+
+[task.request.goal]
+source = "literal"
+
+[task.request.goal.value]
+kind = "repair_goal"
+value = "structure"
+
+[[task]]
+kind = "primitive"
+id = "restore-bridge"
+definition = "restoration"
+
+[[task.parameters]]
+name = "actor"
+kind = "actor"
+
+[[task.parameters]]
+name = "team"
+kind = "team"
+
+[task.request]
+kind = "repair"
+
+[task.request.actor]
+source = "parameter"
+name = "actor"
+
+[task.request.owner]
+source = "literal"
+
+[task.request.owner.value]
+kind = "system"
+value = "repair"
+
+[task.request.team]
+source = "parameter"
+name = "team"
+
+[task.request.request]
+source = "literal"
+
+[task.request.request.value]
+kind = "repair_request"
+
+[task.request.request.value.value]
+type = "Work"
+
+[task.request.request.value.value.data]
+kind = "compartment"
+compartment = "bridge"
+
+[task.request.target]
+source = "literal"
+
+[task.request.target.value]
+kind = "repair_target"
+
+[task.request.target.value.value]
+kind = "compartment"
+compartment = "bridge"
+
+[task.request.goal]
+source = "literal"
+
+[task.request.goal.value]
+kind = "repair_goal"
+value = "structure"
+
+[[task]]
+kind = "primitive"
+id = "supply-rounds"
+definition = "delivery"
+
+[[task.parameters]]
+name = "actor"
+kind = "actor"
+
+[task.request]
+kind = "delivery"
+
+[task.request.actor]
+source = "parameter"
+name = "actor"
+
+[task.request.owner]
+source = "literal"
+
+[task.request.owner.value]
+kind = "system"
+value = "logistics"
+
+[task.request.source]
+source = "literal"
+
+[task.request.source.value]
+kind = "store"
+value = "hold-ammunition"
+
+[task.request.destination]
+source = "literal"
+
+[task.request.destination.value]
+kind = "store"
+value = "magazine"
+
+[task.request.commodity]
+source = "literal"
+
+[task.request.commodity.value]
+kind = "commodity"
+value = "torpedoes"
+
+[task.request.amount]
+source = "literal"
+
+[task.request.amount.value]
+kind = "quantity"
+value = 4
+
+[[situation_definition]]
+id = "restoration"
+initial = "useful"
+
+[[situation_definition.state]]
+id = "useful"
+next = "returned"
+
+[situation_definition.state.when]
+kind = "achieved"
+
+[situation_definition.state.call]
+script = "tests/fixtures/maintenance-htn-host-world.toml#script.setup"
+function = "credit_repair"
+
+[[situation_definition.state]]
+id = "returned"
+
+[situation_definition.state.when]
+kind = "settled"
+outcome = "cancelled"
+
+[situation_definition.state.call]
+script = "tests/fixtures/maintenance-htn-host-world.toml#script.setup"
+function = "credit_return"
+
+[[situation_definition]]
+id = "delivery"
+initial = "received"
+
+[[situation_definition.state]]
+id = "received"
+
+[situation_definition.state.when]
+kind = "received"
+
+[situation_definition.state.call]
+script = "tests/fixtures/maintenance-htn-host-world.toml#script.setup"
+function = "credit_delivery"

@@ -141,11 +141,17 @@ fn control(app: &mut App, token: &str, station: &str, target: &str, payload: Con
 }
 
 fn boot() -> (App, Entity) {
-    boot_hull(HULL)
+    boot_world(WORLD)
 }
 fn boot_hull(hull: &str) -> (App, Entity) {
+    boot_definition(WORLD, hull)
+}
+fn boot_world(path: &str) -> (App, Entity) {
+    boot_definition(path, HULL)
+}
+fn boot_definition(path: &str, hull: &str) -> (App, Entity) {
     let mut app = build_headless_app(&HeadlessArgs {
-        world_path: WORLD.into(),
+        world_path: path.into(),
         ship_path: hull.into(),
         deterministic: true,
         seed: Some(156222),
@@ -165,11 +171,14 @@ fn runtime(app: &App) -> &WorldContentRuntime {
     app.world().resource::<WorldContentRuntime>()
 }
 fn hp(app: &App, actor: Entity) -> f64 {
+    hp_at(app, actor, "engineering")
+}
+fn hp_at(app: &App, actor: Entity, room: &str) -> f64 {
     app.world()
         .get::<ShipDamage>(actor)
         .unwrap()
         .state
-        .compartments["engineering"]
+        .compartments[room]
         .hp
 }
 fn parts(app: &App, actor: Entity) -> i64 {
@@ -219,7 +228,11 @@ fn rounds(app: &App, actor: Entity) -> i64 {
         + torpedoes.in_flight.len() as i64
 }
 fn incident(app: &mut App, actor: Entity) -> f64 {
-    let before = hp(app, actor);
+    incident_at(app, actor, "engineering")
+}
+fn incident_at(app: &mut App, actor: Entity, room: &str) -> f64 {
+    let room_name = room;
+    let before = hp_at(app, actor, room);
     // An explicit initial owner-level incident, not forged HP/job/evidence.
     app.world_mut().resource_scope(|world, rng: Mut<SimRng>| {
         let mut damage = world.get_mut::<ShipDamage>(actor).unwrap();
@@ -228,7 +241,7 @@ fn incident(app: &mut App, actor: Entity) -> f64 {
             .interior
             .compartments
             .iter()
-            .find(|room| room.id == "engineering")
+            .find(|room| room.id == room_name)
             .unwrap()
             .deck
             .clone();
@@ -239,7 +252,7 @@ fn incident(app: &mut App, actor: Entity) -> f64 {
                     incoming: [1.0, 0.0],
                     profile: DamageProfile::default(),
                     payload: 1.0,
-                    aim: Some("engineering".into()),
+                    aim: Some(room.into()),
                     source: "activity22-probe-incident".into(),
                     sample: Some(HitSample {
                         deck,
@@ -253,9 +266,9 @@ fn incident(app: &mut App, actor: Entity) -> f64 {
         assert!(outcome
             .deposits
             .iter()
-            .any(|row| row.compartment == "engineering" && row.structural_loss > 0.0));
+            .any(|row| row.compartment == room && row.structural_loss > 0.0));
     });
-    assert!(hp(app, actor) < before);
+    assert!(hp_at(app, actor, room) < before);
     before
 }
 fn first_difference(a: &serde_json::Value, b: &serde_json::Value, path: &str) -> Option<String> {
@@ -714,5 +727,240 @@ fn actual_officer_posting_improves_paid_repair_and_preserves_custody_through_jso
         OfficerLocation::AtCompartment {
             compartment: "engineering".into()
         }
+    );
+}
+
+/// The imported plan does not issue physical commands. This probe deliberately
+/// uses ordinary Human Repair dispatch, then ordinary Logistics AI after a real
+/// Gunner demand and Engineering Backfill handoff. Initial damage uses the same
+/// explicit Damage owner seam as the 22A probe above, without forged facts/jobs.
+#[test]
+fn imported_alternative_partial_order_runs_actual_human_and_ai_jobs_with_360_host_resume() {
+    const HTN_WORLD: &str = "tests/fixtures/maintenance-htn-host-world.toml";
+    let (mut live, actor) = boot_world(HTN_WORLD);
+    claim(&mut live, "tactical", "htn-gunner");
+    let healthy_engineering = incident_at(&mut live, actor, "engineering");
+    let healthy_bridge = incident_at(&mut live, actor, "bridge");
+    let original_parts = parts(&live, actor);
+    let original_rounds = rounds(&live, actor);
+    steps(&mut live, 4);
+    let choice = runtime(&live).plan_choice.as_ref().unwrap();
+    assert_eq!(choice.methods["root"].method, "two-real-teams");
+    assert_eq!(
+        choice.released.len(),
+        2,
+        "unordered Repair leaves arm together"
+    );
+    assert!(choice.released.contains_key("root/engineering"));
+    assert!(choice.released.contains_key("root/bridge"));
+    assert!(!choice.released.contains_key("root/supply"));
+    let repair_ids =
+        ["engineering", "bridge"].map(|node| format!("htn/maintenance-host-proof/root/{node}"));
+    assert_eq!(runtime(&live).situations.instances.len(), 2);
+    assert!(repair_ids
+        .iter()
+        .all(|key| runtime(&live).situations.instances.contains_key(key)));
+    assert_eq!(repair_ids.len(), 2);
+    for (team, room) in [(0, "engineering"), (1, "bridge")] {
+        control(
+            &mut live,
+            TOKEN,
+            "engineering",
+            "repair",
+            Control::DispatchRepairTeam {
+                team_idx: team,
+                target: RepairTarget::Work(RepairWorkTarget::Compartment {
+                    compartment: room.into(),
+                }),
+            },
+        );
+    }
+    let mut paid_repair = false;
+    for _ in 0..180 {
+        paid_repair |= live
+            .world()
+            .get::<ShipPowerSystem>(actor)
+            .unwrap()
+            .0
+            .emitted_work(&id("repair"))
+            > 0.0;
+        let partial = live
+            .world()
+            .get::<ShipRepairTeams>(actor)
+            .unwrap()
+            .0
+            .job_state()
+            .physical_work
+            .values()
+            .any(|work| work.reserved && work.progress > 0.0 && work.progress < 2.0);
+        if partial
+            && repair_ids
+                .iter()
+                .all(|key| runtime(&live).situations.instances[key].accepted.is_some())
+        {
+            break;
+        }
+        live.update();
+    }
+    assert!(
+        live.world()
+            .get::<ShipRepairTeams>(actor)
+            .unwrap()
+            .0
+            .job_state()
+            .physical_work
+            .values()
+            .any(|work| work.reserved && work.progress > 0.0 && work.progress < 2.0),
+        "save during paid reserved remedy work"
+    );
+    assert!(repair_ids
+        .iter()
+        .all(|key| runtime(&live).situations.instances[key].accepted.is_some()));
+    assert_eq!(runtime(&live).flags.counter("htn_repair_credit"), 0);
+    assert!(
+        !runtime(&live)
+            .plan_choice
+            .as_ref()
+            .unwrap()
+            .released
+            .contains_key("root/supply"),
+        "acceptance alone cannot satisfy Achieved dependency"
+    );
+    assert!(
+        live.world()
+            .get::<ShipLogistics>(actor)
+            .unwrap()
+            .0
+            .batches
+            .values()
+            .all(|batch| batch.original_destination != "magazine"),
+        "no invented demand before normal Gunner request"
+    );
+    let saved: PhoenixSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
+    let saved_choice = saved.scenario.as_ref().unwrap().plan_choice.clone();
+    let (mut resumed, restored) = boot_world(HTN_WORLD);
+    claim(&mut resumed, "tactical", "htn-gunner");
+    assert!(ready_to_restore(resumed.world(), &saved));
+    let report = restore(resumed.world_mut(), &saved);
+    assert!(report.is_complete(), "{:?}", report.gaps);
+    let mut recalled = BTreeSet::new();
+    let mut demand_sent = false;
+    let mut paid_delivery = false;
+    for step in 0..360 {
+        assert_same(&live, &resumed, step);
+        assert_eq!(
+            rounds(&live, actor),
+            original_rounds,
+            "finite round conservation at{step}"
+        );
+        assert_eq!(
+            runtime(&live).plan_choice.as_ref().unwrap().methods,
+            saved_choice.as_ref().unwrap().methods,
+            "no live alternative reselection"
+        );
+        let power = &live.world().get::<ShipPowerSystem>(actor).unwrap().0;
+        paid_repair |= power.emitted_work(&id("repair")) > 0.0;
+        paid_delivery |= power.emitted_work(&id("logistics")) > 0.0;
+        for key in &repair_ids {
+            let instance = &runtime(&live).situations.instances[key];
+            if instance.achieved.is_some() && !recalled.contains(key) {
+                // These are the same two explicit Human requests sent above;
+                // the World binding must already hold their actual accepted jobs.
+                let team = if key.ends_with("/engineering") { 0 } else { 1 };
+                assert!(instance.settled.is_none(), "achieved is not settled");
+                for app in [&mut live, &mut resumed] {
+                    control(
+                        app,
+                        TOKEN,
+                        "engineering",
+                        "repair",
+                        Control::RecallRepairTeam {
+                            team_idx: team as u8,
+                        },
+                    );
+                }
+                recalled.insert(key.clone());
+            }
+        }
+        let all_achieved = repair_ids
+            .iter()
+            .all(|key| runtime(&live).situations.instances[key].achieved.is_some());
+        if all_achieved && !demand_sent {
+            let runtime = runtime(&live);
+            let choice = runtime.plan_choice.as_ref().unwrap();
+            let released = *choice
+                .released
+                .get("root/supply")
+                .expect("acknowledged useful work releases dependent delivery");
+            let predecessor = &runtime.situations.instances[&repair_ids[0]];
+            assert!(released >= predecessor.achieved.as_ref().unwrap().tick);
+            for app in [&mut live, &mut resumed] {
+                control(
+                    app,
+                    "htn-gunner",
+                    "tactical",
+                    "torpedo-magazine",
+                    Control::SetStockTarget {
+                        store: "magazine".into(),
+                        amount: 6,
+                    },
+                );
+                send(
+                    app,
+                    TOKEN,
+                    ClientMessage::SetStationRating {
+                        rating_name: "Backfill".into(),
+                    },
+                );
+                steps(app, 4);
+            }
+            demand_sent = true;
+        }
+        live.update();
+        resumed.update();
+    }
+    assert_same(&live, &resumed, 360);
+    assert!(
+        paid_repair && paid_delivery,
+        "both ordinary owners must spend finite real energy"
+    );
+    assert_eq!(recalled.len(), 2);
+    assert!(demand_sent);
+    assert_eq!(hp_at(&live, actor, "engineering"), healthy_engineering);
+    assert_eq!(hp_at(&live, actor, "bridge"), healthy_bridge);
+    assert_eq!(
+        hp_at(&resumed, restored, "engineering"),
+        healthy_engineering
+    );
+    assert_eq!(hp_at(&resumed, restored, "bridge"), healthy_bridge);
+    assert_eq!(
+        parts(&live, actor),
+        original_parts - 2,
+        "two actual remedies consume two finite parts"
+    );
+    assert_eq!(rounds(&live, actor), original_rounds);
+    let world = runtime(&live);
+    assert_eq!(world.flags.counter("htn_repair_credit"), 2);
+    assert_eq!(world.flags.counter("htn_return_credit"), 2);
+    assert_eq!(world.flags.counter("htn_delivery_credit"), 1);
+    assert_eq!(world.plan_choice.as_ref().unwrap().released.len(), 3);
+    assert_eq!(world.situations.instances.len(), 3);
+    let delivery = &world.situations.instances["htn/maintenance-host-proof/root/supply"];
+    assert!(matches!(
+        delivery.settled.as_ref().unwrap().outcome,
+        ActivityOutcome::Delivery {
+            returned: false,
+            amount: 4,
+            ..
+        }
+    ));
+    assert!(
+        world
+            .situations
+            .instances
+            .values()
+            .all(|row| row.state.is_none()),
+        "each scripted terminal frontier applies once"
     );
 }

@@ -663,3 +663,78 @@ and reactor controls remain ordinary usable controls throughout. The authoring
 validator, Workshop transaction, runtime and continuation guards all use this
 same actual System binding. Central messages, registration, status mounts and
 snapshot/digest hooks remain integration-owned; a leaf alone closes no S027 exit.
+<<<<<<< HEAD
+=======
+
+### S027 leaf handoff and remaining integration
+
+The supported composition parser and canonical `EmissionIntentState` live in
+`ship/emission_profile.rs`; the Simulation Command leaf installs, admits and
+projects that exact owner. `work_cause` extracts the existing signature cause
+classification without changing strongest-cause selection. The transponder's
+existing state-tree host adds only permitted profile/alert facts. Unknown alert
+is distinct from a known normal alert, and contradictory permitted reports are
+unknown. The optional `emission_profile_cruiser.toml` extends actual inherited
+equipment and appends tasks to the existing tree; it changes no power hardware,
+interior, seats or ratings. Its accepted-source regression checks those values
+and exercises the actual merged tree. These Rust tests have not run in the lane.
+
+Integration-owned joins are still required before native execution:
+
+- Export Model `emission_profile`, Gameplay `ship::emission_profile`, and the
+  Simulation Command leaf. Run its shared `profile` validation before accepted
+  entity Preview/Test/spawn; invalid authored config must not silently disappear.
+- Add the closed `SetEmissionIntent { intent }` Command payload with ordinary
+  current System/Console ownership and correlated feedback. The existing
+  Command controller remains singular; the leaf handles only this payload.
+  Preserve the actual configured Command identity rather than substituting a
+  Captain/seat or unconditionally using a different reserved System ID.
+- Add optional `CommandBlackboard.emission: EmissionIntentView`. Publish actual
+  profile intent even when that Command owner has no stance-directed Station.
+  Key the publication and `command_system_id` by its actual owner. The Command
+  publication carries no machinery measurement collection.
+- Install `ShipEmissionIntent` for every actual supported profile, including
+  ordinary AI hulls, and capture/digest/restore its single `EmissionIntentState`.
+  Validate exact accepted owner and required/forbidden state presence across the
+  whole candidate, including Disabled/carried actors, before any writes. Rebuild
+  the permitted Command publication after restore before normal AI resumes.
+- Project each System's optional `EmissionAdvisoryView` through existing status
+  details at Publish, after current work and before FixedLast increments the
+  logical tick. Do not call the current-interval helper from a later PostUpdate
+  and date the old work with the next tick. No measurement map/history is added;
+  restore clears ordinary derived work and cannot resurrect paid warnings.
+- Connect the independent GUI payload/action/control leaves to the existing
+  Command card and common status details. Supply only that Console's permitted
+  Command intent views to `registerEmissionProfileActions`; retain current
+  ownership rechecks in the action map and authoritative admission. Warning
+  labels never receive or disable a machinery control.
+
+Workshop visual profile editing, integrated client/device/native operation,
+ordinary policy/urgency physical evidence, exact Console isolation and full
+fresh-JSON/no-write continuation remain open. Source review of the bounded Rust
+leaf passed independently; this is neither a compiled implementation nor an
+increment17 exit.
+
+### Actual concealment host proof source
+
+`tests/concealment_continuation.rs` uses the real optional field Cruiser and an
+authored independent observer. Ordinary field AI enables from false initial
+intent, then actual joined Science and Engineering holders control the field
+and reactor. Long Broad retains a permitted focused target while the existing
+narrow Helm radar, finite focused ladder and paid Passive receiver lose and
+recover acquisition from actual reactor output with cloak intent still enabled.
+The fixture authors equipment/geometry and an ordinary Scan objective; it grants
+no power, observation, scan progress or actuator work.
+
+The proof retains earned aliases and partial work, checks actual fully paid
+field operation through 360 complete fresh-JSON captures/digests, refuses three
+malformed whole candidates without writes, clears bootstrap/saved derived work,
+and rejects an Engineering attempt to control Science's field. Its finite
+reference sensing thresholds and timing establish causal coverage, not balance
+or a 2/4/6/8-seat acceptance result.
+
+Independent integration-review source review passed. A read-only resolved-source
+check passed 12 fixture range/profile/group-parent assertions. Rust is formatted;
+native execution awaits the root's central hooks and owner Cargo batch. There is
+no executed full-host or increment17 exit claim from this source handoff.
+>>>>>>> e70476d6 (feat(electronic): add owned advisory emission intent leaves)

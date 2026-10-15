@@ -1,0 +1,51 @@
+# Optional advisory profile; inherited hardware, reserves, ratings and seats stay
+# intact. The actual transponder's ordinary tree alone decides its own toggle.
+includes = ["identity_cruiser.toml"]
+name = "entity.emission_profile_cruiser.name"
+
+[[system]]
+id = "command"
+[system.config.emission_profile]
+initial = "normal"
+advisory_rate = 0.25
+
+[[system]]
+id = "identity-emitter"
+[[system.config.ai.tree]]
+id = "transponder"
+[[system.config.ai.tree.state]]
+id = "emit"
+[[system.config.ai.tree.state.task]]
+id = "quiet-normal-operation"
+when = [
+  {value={source="fact",name="emission_profile_known"},equals=true},
+  {value={source="fact",name="low_emission"},equals=true},
+  {value={source="fact",name="alert_known"},equals=true},
+  {value={source="fact",name="red_alert"},equals=false}
+]
+action = {kind="write",channel="enabled",value={source="literal",value=false}}
+[[system.config.ai.tree.state.task]]
+id = "urgent-emission"
+when = [
+  {value={source="fact",name="alert_known"},equals=true},
+  {value={source="fact",name="red_alert"},equals=true}
+]
+action = {kind="write",channel="enabled",value={source="literal",value=true}}
+
+[[console]]
+id = "comms"
+[[console.feed]]
+source = "command"
+kind = "Command"
+[[console.feed]]
+source = "comms"
+kind = "Comms"
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+[[console.feed]]
+source = "captain"
+kind = "Captain"

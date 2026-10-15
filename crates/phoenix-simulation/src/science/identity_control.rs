@@ -58,13 +58,15 @@ pub(crate) fn operate_ai(
         &ShipConfigComponent,
         &ShipSystemControlSources,
         &ShipIdentityEmitters,
+        Option<&crate::server_app::ShipSystemBlackboards>,
         &crate::ai::state_tree_runtime::ShipAiTreePrograms,
         &mut crate::ai::state_tree_runtime::ShipAiTreeRuntime,
         &mut AdmittedCommands,
     )>,
 ) {
     use phoenix_sim_gameplay::ai::host::{decide_tree, TreeHostOutcome};
-    for (uuid, config, sources, state, programs, mut runtimes, mut admitted) in &mut owners {
+    for (uuid, config, sources, state, boards, programs, mut runtimes, mut admitted) in &mut owners
+    {
         for owner in state.0.keys() {
             if !crate::ai::host::ai_operates(&sources.0, owner) {
                 continue;
@@ -80,7 +82,10 @@ pub(crate) fn operate_ai(
                 continue;
             };
             let enabled = state.enabled(&config.0, owner);
-            let facts = BTreeMap::from([("enabled".into(), enabled)]);
+            let mut facts = BTreeMap::from([("enabled".into(), enabled)]);
+            facts.extend(crate::console::command::emission::policy_facts(
+                &config.0, boards, owner,
+            ));
             let pending = BTreeMap::from([(binding.enabled_channel.into(), enabled)]);
             let Ok(TreeHostOutcome::Evaluated(result)) = decide_tree(
                 &sources.0,

@@ -5729,3 +5729,4 @@ workshop.sensing.add-instrument,Workshop sensing editor,Add instrument,Instrumen
 workshop.sensing.remove-instrument,Workshop sensing editor,Remove instrument,Instrument entfernen,Remove instrument,machine
 workshop.sensing.combat_lock,Workshop sensing editor,Combat lock controller,Kampfzielsteuerung,Combat lock controller,machine
 workshop.sensing.science_target,Workshop sensing editor,Science designation controller,Wissenschaftliche Zielsteuerung,Science designation controller,machine
+component.scan.instrument,Focused enquiry picker,Instrument,Instrument,Instrument,machine

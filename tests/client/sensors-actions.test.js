@@ -194,7 +194,7 @@ describe('Sensors authority-preserving adapters', () => {
   it('scans only the authoritative current target when the suite reports capable', () => {
     const sendAction = vi.fn();
     let sensors = {
-      blips: [{ uuid: 'selected' }], target_uuid: 'selected', scan: { capable: true, controllable: true, system_id: 'focus-array' },
+      blips: [{ uuid: 'selected' }], target_uuid: 'selected', scans: [ { capable: true, controllable: true, system_id: 'focus-array' }],
     };
     const registry = sensorRegistry({
       getState: () => keyedState({ sensors }),
@@ -209,7 +209,7 @@ describe('Sensors authority-preserving adapters', () => {
 
     expect(activate(registry, SENSORS_SCAN_ACTION_ID, 'captain', { uuid: 'other' }))
       .toMatchObject({ handled: false });
-    sensors = { ...sensors, scan: { capable: false } };
+    sensors = { ...sensors, scans: [ { capable: false }] };
     expect(activate(registry, SENSORS_SCAN_ACTION_ID, 'captain'))
       .toMatchObject({ handled: false });
     expect(sendAction).toHaveBeenCalledTimes(1);
@@ -219,7 +219,7 @@ describe('Sensors authority-preserving adapters', () => {
     const sendAction = vi.fn();
     const registry = sensorRegistry({
       getState: () => ({
-        target_uuid: 'selected', scan: { capable: true, controllable: false, system_id: 'focus-array' }, sensors_auto: true,
+        target_uuid: 'selected', scans: [ { capable: true, controllable: false, system_id: 'focus-array' }], sensors_auto: true,
       }),
       sendAction,
     });

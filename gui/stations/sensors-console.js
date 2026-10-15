@@ -48,7 +48,7 @@ export function makeSensorsRender(variant) {
     if (ids.sensorPanel) { const el = doc.getElementById(ids.sensorPanel); if (el) el.state = s; }
     if (ids.scanRange) { const el = doc.getElementById(ids.scanRange); if (el) el.textContent = String(s.scan_range || 0); }
 
-    if (ids.scanReadout) { const el = doc.getElementById(ids.scanReadout); if (el) el.state = { scan: s.scan || {}, target_uuid: s.target_uuid || null }; }
+    if (ids.scanReadout) { const el = doc.getElementById(ids.scanReadout); if (el) el.state = { scans: s.scans || [], target_uuid: s.target_uuid || null }; }
     if (ids.passiveReadout) { const el = doc.getElementById(ids.passiveReadout); if (el) el.state = { passive: s.passive || [] }; }
 
     const blipCount = (s.blips || []).length;

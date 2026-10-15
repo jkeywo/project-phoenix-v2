@@ -11,8 +11,8 @@ import { ActionFeedbackLifecycle } from '../../gui/action-feedback.js';
 const sample = (extra = {}) => ({ contact_id: 'contact-1', observed_tick: 10, position: [10, -20],
   position_error: 4, stage: 'return', predicted: false, ...extra });
 function raw(tracks = [sample()]) {
-  return { blackboards: { broad: { tracks, selected_target: 'contact-1' }, scan: { owner: 'focus', capable: true },
-    sensors: { radar_range: 100 } }, blackboardKinds: { broad: 'SensorRadar', scan: 'Scan', sensors: 'Sensors' },
+  return { blackboards: { broad: { tracks, selected_target: 'contact-1' }, 'scan/5:focus': { owner: 'focus', capable: true },
+    sensors: { radar_range: 100 } }, blackboardKinds: { broad: 'SensorRadar', 'scan/5:focus': 'Scan', sensors: 'Sensors' },
     observationTick: 30, sensorsTarget: 'secret-uuid', controlSources: { focus: 'Human' },
     asteroids: [{ uuid: 'secret-uuid', name: 'SECRET NAME', shipClass: 'SECRET CLASS', position: [2, 0, 3],
       radar_icon: 'battleship', radar_size: 999, faction: 'SECRET FACTION', shield_frequency: .9 }],

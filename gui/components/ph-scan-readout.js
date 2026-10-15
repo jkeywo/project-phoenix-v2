@@ -113,6 +113,7 @@ export class PhScanReadout extends PhElement {
     select { display:block; width:100%; max-width:100%; min-height:44px; font:inherit; color:var(--ink); background:var(--surface-void); }
   </style>
   <div class="heading" id="heading"></div>
+  <label id="instrument-label" for="instrument"><span id="instrument-text"></span><select id="instrument"></select></label>
   <label id="history-label" for="history"><span id="history-text"></span><select id="history"></select></label>
   <div id="progress" role="status"></div>
   <button id="cancel" type="button" hidden></button>
@@ -124,12 +125,19 @@ export class PhScanReadout extends PhElement {
 
   onTemplate() {
     this.$('heading').textContent = t('component.scan.heading');
+    this.$('instrument-text').textContent = t('component.scan.instrument');
+    this.$('instrument').addEventListener('change', () => {
+      this._instrument = this.$('instrument').value;
+      this.$('history').value = 'latest';
+      this.render(this.state);
+    });
+    this.$('instrument').addEventListener('keydown', event => event.stopPropagation());
     this.$('history-text').textContent = t('component.scan.history');
     this.$('cancel').textContent = t('component.scan.cancel');
     this.$('history').addEventListener('change', () => this.render(this.state));
     this.$('history').addEventListener('keydown', event => event.stopPropagation());
     this.$('cancel').addEventListener('click', () => {
-      const scan = this.state?.scan;
+      const scan = this.selectedScan;
       if (scan?.controllable && scan.system_id && scan.focused) window.activateSemanticAction?.(SENSORS_CANCEL_SCAN_ACTION_ID, { source: 'control', detail: { system_id: scan.system_id } });
     });
     this.$('action').addEventListener('click', () => this.#onAction());
@@ -141,10 +149,16 @@ export class PhScanReadout extends PhElement {
    * rather than re-deriving it.
    */
   get action() {
-    const scan = (this.state && this.state.scan) || {};
+    const scan = this.selectedScan || {};
     const uuid = (this.state && this.state.target_uuid) || null;
     if (!scan.capable || !scan.controllable || !scan.system_id || !uuid) return null;
     return { action: 'scan_target', uuid, control_system_id: scan.system_id };
+  }
+
+  get selectedScan() {
+    const records = (Array.isArray(this.state?.scans) ? this.state.scans : [])
+      .filter(row => typeof row.system_id === 'string' && row.system_id);
+    return records.find(scan => scan.system_id === this._instrument) || records[0] || null;
   }
 
   #onAction() {
@@ -158,7 +172,23 @@ export class PhScanReadout extends PhElement {
   }
 
   render(state) {
-    const scan = (state && state.scan) || {};
+    const instruments = (Array.isArray(state?.scans) ? state.scans : [])
+      .filter(row => typeof row.system_id === 'string' && row.system_id);
+    const instrument = this.$('instrument'), known = new Set(instruments.map(row => row.system_id));
+    for (const option of [...instrument.options]) if (!known.has(option.value)) option.remove();
+    for (const row of instruments) {
+      let option = [...instrument.options].find(option => option.value === row.system_id);
+      if (!option) {
+        option = this.ownerDocument.createElement('option');
+        option.value = row.system_id;
+        instrument.append(option);
+      }
+      option.textContent = wireText(row.display_name || row.system_id);
+    }
+    if (!known.has(this._instrument)) this._instrument = instruments[0]?.system_id || null;
+    instrument.value = this._instrument || '';
+    this.$('instrument-label').hidden = instruments.length < 2;
+    const scan = this.selectedScan || {};
     const picker = this.$('history'), key = reading => JSON.stringify([reading.subject_uuid, reading.taken_at_tick, reading.band]);
     const history = new Map((scan.history || []).map(reading => [key(reading), reading]));
     const choices = new Map([['latest', t('component.scan.latest')], ...[...history].map(([id, reading]) => [id,

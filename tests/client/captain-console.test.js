@@ -161,7 +161,7 @@ describe('destroyer captain renderStation', () => {
   beforeEach(() => mount(FIXTURES.destroyer));
 
   const cap = { camera_views: ['camera_fore'], view_direction: 'camera_fore', viewscreen_auto: true, red_alert: false, red_alert_auto: true, objectives: [{ id: 'o1' }], boosted_objective_id: null, deadlines: [{ id: 'd1' }] };
-  const sensors = { blips: [{ uuid: 's1' }], scan: { text: 'hull breach' }, target_uuid: 's1', target_name: 'Raider', sensors_auto: true };
+  const sensors = { blips: [{ uuid: 's1' }], scans: [{ system_id: 'sensors', text: 'hull breach' }], target_uuid: 's1', target_name: 'Raider', sensors_auto: true };
   const payload = {
     systems: { captain: cap, 'red-alert': cap, viewscreen: cap, sensors, 'sensor-radar': sensors },
     own_hull: { pct: 0.6 },
@@ -179,7 +179,7 @@ describe('destroyer captain renderStation', () => {
     expect(el('sensor-radar').state).toEqual(sensors);
     expect(el('sensor-panel').state).toEqual(sensors);
     expect(el('deadline-list').state).toEqual({ deadlines: [{ id: 'd1' }] });
-    expect(el('scan-readout').state).toEqual({ scan: { text: 'hull breach' }, target_uuid: 's1' });
+    expect(el('scan-readout').state).toEqual({ scans: [{ system_id: 'sensors', text: 'hull breach' }], target_uuid: 's1' });
   });
 
   it('shows the locked-target-name footer, not a contact count', () => {
@@ -246,6 +246,8 @@ describe('courier captain renderStation', () => {
       teams: [{ id: 't1' }], auto: false, targets: [{ id: 'x' }],
       damaged: [{ id: 'y' }],
       external_dispatch: null,
+      boundaries: [], console_id: null, console_view: null,
+      damageable_systems: [], interior: null, navigation: [],
       summary: false,
     });
   });

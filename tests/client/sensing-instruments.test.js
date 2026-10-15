@@ -16,23 +16,39 @@ import { renderStation as renderScience } from '../../gui/cruiser/science.consol
 
 const reading = tick => ({ subject_uuid: 'known-contact', subject_name: 'world.entity.skyhook_depot.name', band: 'coarse', taken_at_tick: tick, condition_fraction: .5, condition_step: .25, mass: 10 });
 const sample = { sample_id: 'opaque-sample', observed_tick: 20, bearing_rad: Math.PI / 2, bearing_error_rad: .1, strength: .4, signature: 'weapon' };
-function view() { return { target_uuid: 'known-contact', scan: { system_id: 'focused-array', controllable: true, capable: true, reading: reading(20), history: [reading(10), reading(20)], focused: { subject: 'known-contact', progress: 250, waiting: 'unpowered' }, observation_tick: 25 }, passive: [{ system_id: 'receiver-x', enabled: true, can_operate: true, controllable: true, observation_tick: 25, signals: [sample] }] }; }
+function view() { return { target_uuid: 'known-contact', scans: [ { system_id: 'focused-array', controllable: true, capable: true, reading: reading(20), history: [reading(10), reading(20)], focused: { subject: 'known-contact', progress: 250, waiting: 'unpowered' }, observation_tick: 25 }], passive: [{ system_id: 'receiver-x', enabled: true, can_operate: true, controllable: true, observation_tick: 25, signals: [sample] }] }; }
 beforeEach(() => { document.body.innerHTML = ''; window.activateSemanticAction = vi.fn(); });
 describe('scoped human sensing instruments', () => {
+  it('keeps the chosen independent instrument and exact owner action across snapshots and revocation', () => {
+    let state=view();state.scans.push({...state.scans[0],system_id:'focused-two',history:[reading(3)],focused:null});
+    document.body.innerHTML='<ph-scan-readout></ph-scan-readout>';const el=document.querySelector('ph-scan-readout');el.state=state;
+    let next=0;const sent=vi.fn(), registry=createSensorScienceActionRegistry({getState:()=>state,sendAction:sent,actionFeedback:new ActionFeedbackLifecycle({correlation:()=>"multi-"+(++next)})});
+    window.activateSemanticAction=(id,options)=>registry.activate(id,{context:'science',...options});
+    const picker=el.shadowRoot.getElementById('instrument');picker.value='focused-two';picker.dispatchEvent(new Event('change'));picker.focus();
+    el.shadowRoot.getElementById('action').click();expect(sent).toHaveBeenLastCalledWith('scan_target',expect.objectContaining({control_system_id:'focused-two'}));
+    sent.mockClear();registry.activate(SENSORS_SCAN_ACTION_ID,{context:'science'});expect(sent).not.toHaveBeenCalled();
+    state={...state,scans:state.scans.map(scan=>({...scan,observation_tick:99}))};el.state=state;
+    expect(el.shadowRoot.getElementById('instrument')).toBe(picker);expect(picker.value).toBe('focused-two');expect(el.shadowRoot.activeElement).toBe(picker);
+    state={...state,scans:state.scans.map(scan=>scan.system_id==='focused-two'?{...scan,controllable:false}:scan)};el.state=state;
+    expect(el.shadowRoot.getElementById('action').hidden).toBe(true);expect(el.selectedScan.history).toHaveLength(1);
+    registry.activate(SENSORS_SCAN_ACTION_ID,{context:'science',detail:{system_id:'focused-two'}});expect(sent).not.toHaveBeenCalled();
+    state={...state,scans:state.scans.filter(scan=>scan.system_id!=='focused-two')};el.state=state;
+    registry.activate(SENSORS_SCAN_ACTION_ID,{context:'science',detail:{system_id:'focused-two'}});expect(sent).not.toHaveBeenCalled();
+  });
   it('keeps historical picker, focused control and disclosure nodes stable across progress snapshots', () => {
     document.body.innerHTML = '<ph-scan-readout></ph-scan-readout>'; const el = document.querySelector('ph-scan-readout'), state = view(); el.state = state;
     const picker = el.shadowRoot.getElementById('history'), cancel = el.shadowRoot.getElementById('cancel');
     picker.value = JSON.stringify(['known-contact', 10, 'coarse']); picker.dispatchEvent(new Event('change')); picker.focus();
     const details = el.shadowRoot.querySelector('details'); details.open = true;
     expect(el.shadowRoot.getElementById('progress').textContent).toContain('25%');
-    el.state = { ...state, scan: { ...state.scan, history: [...state.scan.history, reading(30)], reading: reading(30), focused: { ...state.scan.focused, progress: 500 }, observation_tick: 30 } };
+    el.state = { ...state, scans: [ { ...state.scans[0], history: [...state.scans[0].history, reading(30)], reading: reading(30), focused: { ...state.scans[0].focused, progress: 500 }, observation_tick: 30 }] };
     expect(el.shadowRoot.activeElement).toBe(picker); expect(picker.value).toBe(JSON.stringify(['known-contact', 10, 'coarse'])); expect(el.shadowRoot.querySelector('details')).toBe(details);
     expect(details.open).toBe(true); expect(el.shadowRoot.getElementById('cancel')).toBe(cancel); expect(el.shadowRoot.getElementById('progress').textContent).toContain('50%');
     const key = vi.fn(); document.addEventListener('keydown', key);
     picker.dispatchEvent(new KeyboardEvent('keydown', { key: 'N', code: 'KeyN', shiftKey: true, bubbles: true, composed: true }));
     expect(key).not.toHaveBeenCalled(); document.removeEventListener('keydown', key);
     cancel.click(); expect(window.activateSemanticAction).toHaveBeenLastCalledWith(SENSORS_CANCEL_SCAN_ACTION_ID, { source: 'control', detail: { system_id: 'focused-array' } });
-    el.state = { ...state, scan: { ...state.scan, controllable: false } }; expect(cancel.hidden).toBe(true); expect(el.shadowRoot.getElementById('action').hidden).toBe(true);
+    el.state = { ...state, scans: [ { ...state.scans[0], controllable: false }] }; expect(cancel.hidden).toBe(true); expect(el.shadowRoot.getElementById('action').hidden).toBe(true);
   });
   it('shows only measured passive bearing/signature/age and retains toggle DOM across samples', () => {
     document.body.innerHTML = '<ph-passive-readout></ph-passive-readout>'; const el = document.querySelector('ph-passive-readout'), state = view(); el.state = state;
@@ -46,10 +62,10 @@ describe('scoped human sensing instruments', () => {
   it('joins exact owner and permitted feed without turning feed access into control', () => {
     const raw = { blackboards: { 'scan/13:focused-array': { owner: 'focused-array', capable: true, history: [reading(10)] }, 'receiver-x': { enabled: true, signals: [sample] }, hidden: { signals: [{ ...sample, sample_id: 'private' }] } }, blackboardKinds: { 'scan/13:focused-array': 'Scan', 'receiver-x': 'Passive', hidden: 'Passive' }, controlSources: { 'focused-array': 'Human', 'receiver-x': 'Human' }, observationTick: 30 };
     const owned = ['focused-array', 'receiver-x']; let scoped = consoleReadState(raw, { id: 'science', systems: owned, feeds: [{ source: 'scan/13:focused-array', kind: 'Scan' }] });
-    let projected = buildSensorsConsoleState(scoped, owned); expect(projected.scan.controllable).toBe(true); expect(projected.scan.system_id).toBe('focused-array'); expect(projected.passive.map(row => row.system_id)).toEqual(['receiver-x']);
+    let projected = buildSensorsConsoleState(scoped, owned); expect(projected.scans[0].controllable).toBe(true); expect(projected.scans[0].system_id).toBe('focused-array'); expect(projected.passive.map(row => row.system_id)).toEqual(['receiver-x']);
     projected = buildSensorsConsoleState(consoleReadState(raw, { id: 'visitor', systems: [], feeds: [{ source: 'scan/13:focused-array', kind: 'Scan' }, { source: 'receiver-x', kind: 'Passive' }] }), []);
-    expect(projected.scan.controllable).toBe(false); expect(projected.passive[0].controllable).toBe(false); expect(projected.scan.history).toHaveLength(1);
-    delete raw.blackboards['scan/13:focused-array'].owner; scoped = consoleReadState(raw, { id: 'science', systems: owned, feeds: [{ source: 'scan/13:focused-array', kind: 'Scan' }] }); expect(buildSensorsConsoleState(scoped, owned).scan.controllable).toBe(false);
+    expect(projected.scans[0].controllable).toBe(false); expect(projected.passive[0].controllable).toBe(false); expect(projected.scans[0].history).toHaveLength(1);
+    delete raw.blackboards['scan/13:focused-array'].owner; scoped = consoleReadState(raw, { id: 'science', systems: owned, feeds: [{ source: 'scan/13:focused-array', kind: 'Scan' }] }); expect(buildSensorsConsoleState(scoped, owned).scans.length>0).toBe(false);
   });
   it('correlates exact-owner actions, rejects stale and missing owners, and preserves authoritative refusal', () => {
     let state = view(), n = 0; const send = vi.fn(), feedback = new ActionFeedbackLifecycle({ correlation: () => 'sense-' + ++n });
@@ -58,7 +74,7 @@ describe('scoped human sensing instruments', () => {
     expect(send).toHaveBeenLastCalledWith('scan_target', expect.objectContaining({ control_system_id: 'focused-array', correlation: expect.any(String) }));
     const correlation = send.mock.calls[0][1].correlation; feedback.settle(correlation, 'Refused'); expect(feedback.get(correlation).state).toBe('Refused');
     send.mockClear(); registry.activate(SENSORS_CANCEL_SCAN_ACTION_ID, { context: 'science', detail: { system_id: 'old-owner' } }); registry.activate(SENSORS_SCAN_ACTION_ID, { context: 'science', detail: { system_id: 'old-owner' } }); registry.activate(SENSORS_PASSIVE_ACTION_ID, { context: 'science', detail: { system_id: 'hidden', enabled: false } }); expect(send).not.toHaveBeenCalled();
-    state = { ...state, scan: { ...state.scan, system_id: null }, passive: [{ ...state.passive[0], controllable: false }] };
+    state = { ...state, scans: [ { ...state.scans[0], system_id: null }], passive: [{ ...state.passive[0], controllable: false }] };
     registry.activate(SENSORS_SCAN_ACTION_ID, { context: 'science' }); registry.activate(SENSORS_PASSIVE_ACTION_ID, { context: 'science', detail: { system_id: 'receiver-x', enabled: false } }); expect(send).not.toHaveBeenCalled();
   });
   it('uses conflict-free Science/Sensors keyboard contexts and never sends an invented owner', () => {

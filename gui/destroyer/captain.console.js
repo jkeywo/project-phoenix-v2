@@ -42,7 +42,7 @@ export const renderStation = makeCaptainRender({
     // text anywhere behind it — and the button aims at whatever the captain
     // has selected on the sensor radar.
     const scanEl = doc.getElementById('scan-readout');
-    if (scanEl) scanEl.state = { scan: sensors.scan || {}, target_uuid: sensors.target_uuid || null };
+    if (scanEl) scanEl.state = { scans: sensors.scans || [], target_uuid: sensors.target_uuid || null };
 
     const footerEl = doc.getElementById('footer-target');
     if (footerEl) {

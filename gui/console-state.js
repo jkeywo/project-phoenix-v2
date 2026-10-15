@@ -1,3 +1,4 @@
+import { scanPublicationOwner } from './scan-source.js';
 import { observationTickFor } from './observation-details.js';
 import { consoleReadState } from './console-topology.js';
 import { projectSensorTracks } from './sensor-tracks.js';
@@ -1920,8 +1921,8 @@ export function buildShieldsConsoleState(state, systemIds = []) {
  *             target_shield_fraction: number|null,
  *             target_alert: boolean|null,
  *             target_weapons: 'cold'|'powered'|null,
- *             scan: {capable: boolean, reading: object|null,
- *                    refusal: string|null},
+ *             scans: Array<{system_id: string, capable: boolean, reading: object|null,
+ *                    refusal: string|null}>,
  *             own_hull: StationHullAggregate,
  *             sensors_auto: boolean }} SensorsConsolePayload
  */
@@ -1938,19 +1939,23 @@ export function buildShieldsConsoleState(state, systemIds = []) {
  * `capable`, so the console never has to guess.
  * @param {{ blackboards }} state
  */
-function scanPayload(state, systemIds = []) {
-  const entry = blackboardOfKind(state, 'Scan');
-  const bb = entry?.data || {};
-  return {
-    system_id: bb.owner ?? null,
-    controllable: typeof bb.owner === 'string' && systemIds.includes(bb.owner) && state.controlSources?.[bb.owner] === 'Human',
-    observation_tick: observationTickFor(state, entry?.systemId),
-    capable: bb.capable ?? false,
-    reading: bb.reading ?? null,
-    history: Array.isArray(bb.history) ? bb.history : [],
-    focused: bb.focused ?? null,
-    refusal: bb.refusal ?? null,
-  };
+function scansPayload(state, systemIds = []) {
+  return blackboardsOfKind(state, 'Scan').filter(entry => {
+    const owner = scanPublicationOwner(entry.systemId);
+    return owner && owner === entry.data?.owner;
+  }).map(entry => {
+    const bb = entry.data;
+    return {
+      system_id: bb.owner,
+      controllable: systemIds.includes(bb.owner) && state.controlSources?.[bb.owner] === 'Human',
+      observation_tick: observationTickFor(state, entry.systemId),
+      capable: bb.capable ?? false,
+      reading: bb.reading ?? null,
+      history: Array.isArray(bb.history) ? bb.history : [],
+      focused: bb.focused ?? null,
+      refusal: bb.refusal ?? null,
+    };
+  });
 }
 
 /**
@@ -1973,7 +1978,7 @@ export function buildSensorsConsoleState(state, systemIds = []) {
       ship_speed: state.forwardSpeed || 0, impulse_charge_progress: state.impulseChargeProgress || 0,
       on_screen: state.currentView === 'SensorsRadar' || state.currentView === 'ScienceRadar',
       regions: [], observation_tick: observationTickFor(state, trackEntry.systemId),
-      scan: scanPayload(state, systemIds),
+      scans: scansPayload(state, systemIds),
       passive: blackboardsOfKind(state, 'Passive', systemIds).map(entry => ({ ...entry.data,
         system_id: entry.systemId, controllable: systemIds.includes(entry.systemId) && state.controlSources?.[entry.systemId] === 'Human',
         observation_tick: observationTickFor(state, entry.systemId) })),
@@ -2170,7 +2175,7 @@ export function buildSensorsConsoleState(state, systemIds = []) {
     target_projection:  targetProjection,
     // The last scan reading (issue #1032) — a blackboard of its own, so it is
     // read from its own channel key rather than off the sensors one.
-    scan:               (() => { const scan = scanPayload(state, systemIds); return scan.reading && (overrides[scan.reading.subject_uuid] === 'conceal' || Object.hasOwn(reports, scan.reading.subject_uuid)) ? { ...scan, reading: null } : scan; })(),
+    scans: scansPayload(state, systemIds).map(scan => scan.reading && (overrides[scan.reading.subject_uuid] === 'conceal' || Object.hasOwn(reports, scan.reading.subject_uuid)) ? { ...scan, reading: null } : scan),
     passive: blackboardsOfKind(state, 'Passive', systemIds).map(entry => ({ ...entry.data,
       system_id: entry.systemId, controllable: systemIds.includes(entry.systemId) && state.controlSources?.[entry.systemId] === 'Human',
       observation_tick: observationTickFor(state, entry.systemId) })),

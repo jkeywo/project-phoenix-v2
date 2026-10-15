@@ -184,12 +184,14 @@ export function registerSensorScienceActions(registry, options = {}) {
     const view = sensorsActionView(getState());
     const uuid = view && typeof view.target_uuid === 'string' ? view.target_uuid : '';
     const requested = detail && detail.uuid;
-    if (!view || view.target_track?.predicted || !view.scan?.capable || !view.scan.controllable || !view.scan.system_id || !uuid
-        || (requested != null && requested !== uuid) || (detail?.system_id && detail.system_id !== view.scan.system_id)) return false;
-    return send(actionId, correlation, inputMs, 'scan_target', { uuid, control_system_id: view.scan.system_id });
+    const scans=view?.scans || [], scan=detail?.system_id ? scans.find(row=>row.system_id===detail.system_id) : scans.length===1 ? scans[0] : null;
+    if (!view || view.target_track?.predicted || !scan?.capable || !scan.controllable || !scan.system_id || !uuid
+        || (requested != null && requested !== uuid)) return false;
+    return send(actionId, correlation, inputMs, 'scan_target', { uuid, control_system_id: scan.system_id });
   });
   registry.register(SENSORS_CANCEL_SCAN_ACTION, ({ actionId, correlation, inputMs, detail } = {}) => {
-    const scan = sensorsActionView(getState())?.scan;
+    const scans = sensorsActionView(getState())?.scans || [];
+    const scan = detail?.system_id ? scans.find(row=>row.system_id===detail.system_id) : scans.length===1 ? scans[0] : null;
     if (!scan?.controllable || !scan.system_id || !scan.focused || (detail?.system_id && detail.system_id !== scan.system_id)) return false;
     return send(actionId, correlation, inputMs, 'cancel_focused_scan', { control_system_id: scan.system_id });
   });

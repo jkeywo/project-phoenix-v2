@@ -56,7 +56,7 @@ function fixtureBlackboardKind(id) {
     sensors: 'Sensors', navigation: 'Navigation', viewscreen: 'Viewscreen',
     'tactical-radar': 'TacticalRadar', 'sensor-radar': 'SensorRadar',
     'torpedo-magazine': 'TorpedoMagazine', 'power-reactor': 'PowerReactor',
-    'power-battery': 'PowerBattery', dossiers: 'Dossiers', scan: 'Scan',
+    'power-battery': 'PowerBattery', dossiers: 'Dossiers', 'scan/7:sensors': 'Scan',
     tractor: 'Tractor', umbilical: 'Umbilical', dock: 'Dock', security: 'Security',
     'helm-lateral-thrust': 'HelmLateralThrust',
   };
@@ -2208,22 +2208,21 @@ describe('buildSensorsConsoleState', () => {
       capacities: [],
     };
     const s = buildSensorsConsoleState({
-      blackboards: { scan: { capable: true, reading, refusal: null } },
+      blackboards: { 'scan/7:sensors': { owner:'sensors', capable: true, reading, refusal: null } },
     });
-    expect(s.scan).toEqual({ system_id: null, controllable: false, history: [], focused: null, observation_tick: null, capable: true, reading, refusal: null });
+    expect(s.scans).toEqual([{ system_id: 'sensors', controllable: false, history: [], focused: null, observation_tick: null, capable: true, reading, refusal: null }]);
   });
 
   it('reports a hull with no scan channel as having no survey suite', () => {
-    expect(buildSensorsConsoleState(EMPTY).scan)
-      .toEqual({ system_id: null, controllable: false, history: [], focused: null, observation_tick: null, capable: false, reading: null, refusal: null });
+    expect(buildSensorsConsoleState(EMPTY).scans).toEqual([]);
   });
 
   it('carries a scan refusal through as its string id', () => {
     const s = buildSensorsConsoleState({
-      blackboards: { scan: { capable: true, refusal: 'scan.refusal.out_of_range' } },
+      blackboards: { 'scan/7:sensors': { owner:'sensors', capable: true, refusal: 'scan.refusal.out_of_range' } },
     });
-    expect(s.scan.refusal).toBe('scan.refusal.out_of_range');
-    expect(s.scan.reading).toBeNull();
+    expect(s.scans[0].refusal).toBe('scan.refusal.out_of_range');
+    expect(s.scans[0].reading).toBeNull();
   });
 
   it('projects asteroid-field overlays with the same ship-local frame as blips', () => {

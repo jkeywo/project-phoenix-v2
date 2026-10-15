@@ -1,6 +1,7 @@
-use super::*;
 use crate::core::messages::{AdmittedCommand, AdmittedCommands, SystemControlPayload, SystemId};
 use crate::science::server::{publish_scan_blackboard, tick_scans};
+use crate::science::server::{ScanSaveState, ShipScanRecord};
+use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 
 fn rig() -> (App, Entity) {
@@ -11,12 +12,12 @@ fn rig_with(dual: bool) -> (App, Entity) {
         "assets/entities/alliance_cruiser.toml",
     )
     .unwrap();
-    config.sensing.as_mut().unwrap().broad.clear();
     if dual {
         crate::science::test_support::clone_instrument(&mut config, "sensors", "focused-two");
     }
     let mut app = App::new();
     app.insert_resource(Time::<()>::default())
+        .insert_resource(Time::<Fixed>::from_seconds(0.1))
         .insert_resource(crate::sim_tick::SimTick(0))
         .add_message::<crate::lobby::OutboundMessage>()
         .add_systems(Update, (tick_scans, publish_scan_blackboard).chain());
@@ -39,8 +40,28 @@ fn rig_with(dual: bool) -> (App, Entity) {
     app.world_mut().spawn((
         crate::entities::spawner::EntityUuid("00000000-0000-0000-0000-000000000142".into()),
         Transform::from_xyz(4.0, 0.0, 0.0),
+        crate::entities::spawner::EntityTagsSection(vec!["station".into()]),
+        crate::entities::spawner::EntityTarget(crate::entities::target::TargetSection {
+            tags: vec!["station".into()],
+            threat_level: Default::default(),
+            description: None,
+        }),
         crate::infrastructure::InfrastructureCondition(infrastructure),
     ));
+    // Establish one real paid observation before isolating focused work. No
+    // subsequent focused step may spend or replenish the independent radar.
+    app.world_mut()
+        .get_mut::<crate::ship::power::ShipPowerSystem>(observer)
+        .unwrap()
+        .0
+        .work_continuous(&SystemId("sensor-radar".into()), 0.1, 1.0)
+        .unwrap();
+    app.world_mut()
+        .run_system_once(crate::science::broad::tick)
+        .unwrap();
+    app.world_mut()
+        .run_system_once(crate::ship::sensors::publish_sensor_radar_blackboard)
+        .unwrap();
     (app, observer)
 }
 fn step(app: &mut App) {
@@ -54,15 +75,21 @@ fn request(app: &mut App, entity: Entity) {
     request_for(app, entity, "sensors");
 }
 fn request_for(app: &mut App, entity: Entity, owner: &str) {
+    let contact = app
+        .world()
+        .get::<crate::science::broad::BroadTracks>(entity)
+        .unwrap()
+        .0[&SystemId("sensor-radar".into())]
+        .contact_for_source("00000000-0000-0000-0000-000000000142")
+        .unwrap()
+        .to_owned();
     app.world_mut()
         .get_mut::<AdmittedCommands>(entity)
         .unwrap()
         .0
         .push(AdmittedCommand {
             target: SystemId(owner.into()),
-            payload: SystemControlPayload::ScanTarget {
-                uuid: "00000000-0000-0000-0000-000000000142".into(),
-            },
+            payload: SystemControlPayload::ScanTarget { uuid: contact },
             response_token: None,
             feedback_correlation: None,
         });
@@ -260,6 +287,38 @@ fn independently_fitted_focused_owners_pay_and_continue_only_their_own_enquiries
     assert!(records.0[&first].history.is_empty());
     assert_eq!(
         records.0[&owner].history[0].contact_id.as_deref(),
-        Some("00000000-0000-0000-0000-000000000142")
+        app.world()
+            .get::<crate::science::broad::BroadTracks>(observer)
+            .unwrap()
+            .0[&SystemId("sensor-radar".into())]
+            .contact_for_source("00000000-0000-0000-0000-000000000142")
+    );
+}
+
+#[test]
+fn focused_only_scope_cannot_admit_a_guessed_physical_actor() {
+    let (mut app, observer) = rig();
+    app.world_mut()
+        .entity_mut(observer)
+        .remove::<crate::science::broad::BroadTracks>();
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(observer)
+        .unwrap()
+        .0
+        .push(AdmittedCommand {
+            target: SystemId("sensors".into()),
+            payload: SystemControlPayload::ScanTarget {
+                uuid: "00000000-0000-0000-0000-000000000142".into(),
+            },
+            response_token: None,
+            feedback_correlation: None,
+        });
+    step(&mut app);
+    let record =
+        &app.world().get::<ShipScanRecord>(observer).unwrap().0[&SystemId("sensors".into())];
+    assert!(record.focused.is_none() && record.history.is_empty());
+    assert_eq!(
+        record.refusal,
+        Some(crate::science::ScanRefusal::NoSuchTarget)
     );
 }

@@ -138,6 +138,16 @@ impl BroadTrackState {
                 || track.supported_secs < f64::from(profile.identity_secs)
                     && track.identity.is_some()
                     && track.observation.is_none()
+                || track.identity.as_ref().is_some_and(|identity| {
+                    identity.name.is_empty()
+                        || identity.references.iter().any(|reference| {
+                            reference.is_empty() || reference.chars().any(char::is_control)
+                        })
+                        || identity
+                            .references
+                            .windows(2)
+                            .any(|pair| pair[0] >= pair[1])
+                })
                 || track.supported_secs < f64::from(profile.classification_secs)
                     && track.classification.is_some()
                 || track.supported_secs < f64::from(profile.assessment_secs)
@@ -334,6 +344,12 @@ impl BroadTrackState {
                 next.current.insert(sample.source.clone(), id);
             }
         }
+        let mut identity_counts = BTreeMap::<&str, usize>::new();
+        for sample in &samples {
+            if let Some(identity) = &sample.identity {
+                *identity_counts.entry(&identity.name).or_default() += 1;
+            }
+        }
         for sample in &samples {
             let Some(id) = next.current.get(&sample.source) else {
                 continue;
@@ -380,6 +396,18 @@ impl BroadTrackState {
                 track.velocity = None;
                 track.velocity_error = 0.0;
             }
+            let ambiguous_identity = sample.identity.as_ref().is_some_and(|identity| {
+                identity_counts
+                    .get(identity.name.as_str())
+                    .copied()
+                    .unwrap_or(0)
+                    > 1
+            });
+            if ambiguous_identity {
+                if let Some(identity) = &mut track.identity {
+                    identity.references.clear();
+                }
+            }
             track.supported_secs = (track.supported_secs
                 + f64::from(fixed_dt) * f64::from(paid_fraction) * f64::from(sample.support))
             .min(f64::from(profile.assessment_secs));
@@ -406,7 +434,19 @@ impl BroadTrackState {
             track.selectable = sample.selectable;
             track.observed_tick = tick;
             if track.refresh_secs >= f64::from(profile.identity_secs) && sample.identity.is_some() {
-                track.identity.clone_from(&sample.identity);
+                let mut identity = sample.identity.clone().expect("present identity");
+                if ambiguous_identity {
+                    identity.references.clear();
+                } else if let Some(held) = track
+                    .identity
+                    .as_ref()
+                    .filter(|held| held.name == identity.name && held.faction == identity.faction)
+                {
+                    identity.references.extend(held.references.iter().cloned());
+                }
+                identity.references.sort();
+                identity.references.dedup();
+                track.identity = Some(identity);
                 track.identity_tick = sample.identity.as_ref().map(|_| tick);
             }
             if track.refresh_secs >= f64::from(profile.classification_secs)

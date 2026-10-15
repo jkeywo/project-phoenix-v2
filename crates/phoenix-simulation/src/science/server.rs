@@ -350,6 +350,11 @@ pub fn tick_scans(
         let Some(mut records) = records else {
             continue;
         };
+        // Every accepted focused instrument uses explicit observation admission,
+        // including a hull with no fitted broad radar. Absence cannot grant an
+        // arbitrary physical actor reference to a focused scanner.
+        let no_observations = super::broad::BroadTracks(Default::default());
+        let tracks = Some(tracks.unwrap_or(&no_observations));
         for (owner, record) in &mut records.0 {
             let requested: Vec<AdmittedCommand> = admitted
                 .for_target(&owner.0)

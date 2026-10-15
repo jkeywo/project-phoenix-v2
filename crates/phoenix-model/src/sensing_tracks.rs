@@ -15,6 +15,10 @@ pub enum TrackStage {
 pub struct TrackIdentity {
     pub name: String,
     pub faction: Option<String>,
+    /// Routine held reference records whose published name matches this
+    /// observed identity. A routing UUID is never an identification proof.
+    #[serde(default)]
+    pub references: Vec<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

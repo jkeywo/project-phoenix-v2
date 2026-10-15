@@ -585,6 +585,13 @@ pub(crate) fn aggregate_doctrine_blackboards(
             Option<&crate::ship::state::ShipRedAlert>,
             Option<&crate::ship::combat_activity::RecentCombatActivity>,
             Option<&crate::console::weapons::LastShipAttacker>,
+            Option<&crate::science::broad::BroadTracks>,
+            (
+                Option<&crate::ship_plugin::ShipConfigComponent>,
+                Option<&crate::science::broad::SensingControls>,
+                Option<&crate::console::weapons::TacticalRadarSelection>,
+                Option<&crate::ship::sensors::SensorRadarSelection>,
+            ),
         ),
         Or<(
             With<BehaviourSection>,
@@ -612,6 +619,8 @@ pub(crate) fn aggregate_doctrine_blackboards(
         red_alert_opt,
         activity_opt,
         last_attacker_opt,
+        broad_tracks,
+        (config, controls, tactical, science),
     ) in &mut query
     {
         let hull_fraction =
@@ -733,6 +742,31 @@ pub(crate) fn aggregate_doctrine_blackboards(
                 bb.selected_target.clone()
             }
             _ => None,
+        };
+        let (combat_lock, science_target) = if let Some(tracks) = broad_tracks {
+            let resolve = |owner, selected| {
+                config.and_then(|config| {
+                    crate::science::contact_routing::machinery_control_selection(
+                        &config.0,
+                        &blackboards,
+                        tracks,
+                        owner,
+                        selected,
+                    )
+                })
+            };
+            (
+                resolve(
+                    crate::science::broad::combat_owner(controls, true),
+                    tactical.and_then(|target| target.0.as_deref()),
+                ),
+                resolve(
+                    crate::science::broad::science_owner(controls, true),
+                    science.and_then(|target| target.0.as_deref()),
+                ),
+            )
+        } else {
+            (combat_lock, science_target)
         };
         // ── `ai`-category decision trace (issue #1146) ──────────────────────
         // A read-only projection of the pool just scored. Gated on the `ai`

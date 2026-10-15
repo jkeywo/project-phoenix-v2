@@ -342,6 +342,13 @@ pub(crate) fn publish_viewscreen_blackboard(
             Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::ship::compartment_damage::ShipDamage>,
             Option<&crate::entities::spawner::EntityUuid>,
+            Option<&crate::science::broad::BroadTracks>,
+            (
+                Option<&crate::ship_plugin::ShipConfigComponent>,
+                Option<&crate::science::broad::SensingControls>,
+                Option<&crate::console::weapons::TacticalRadarSelection>,
+                Option<&crate::ship::sensors::SensorRadarSelection>,
+            ),
         ),
         With<crate::lockstep::FleetSlotOf>,
     >,
@@ -350,8 +357,18 @@ pub(crate) fn publish_viewscreen_blackboard(
     use crate::objectives::WorldConditions;
     use crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID;
 
-    for (mut entity_bbs, ra, activity, last_attacker, behaviour, hull, damage, uuid) in
-        ship_blackboards_q.iter_mut()
+    for (
+        mut entity_bbs,
+        ra,
+        activity,
+        last_attacker,
+        behaviour,
+        hull,
+        damage,
+        uuid,
+        tracks,
+        (config, controls, tactical, science),
+    ) in ship_blackboards_q.iter_mut()
     {
         // Lift Combat Lock + Science Target from THIS ship's own radar
         // blackboards (issue #829), published this tick in `SimSet::Publish`.
@@ -368,6 +385,31 @@ pub(crate) fn publish_viewscreen_blackboard(
         {
             Some(SystemBlackboard::SensorRadar(bb)) => bb.selected_target.clone(),
             _ => None,
+        };
+        let (combat_lock, science_target) = if let Some(tracks) = tracks {
+            let resolve = |owner, selected| {
+                config.and_then(|config| {
+                    crate::science::contact_routing::machinery_control_selection(
+                        &config.0,
+                        &entity_bbs,
+                        tracks,
+                        owner,
+                        selected,
+                    )
+                })
+            };
+            (
+                resolve(
+                    crate::science::broad::combat_owner(controls, true),
+                    tactical.and_then(|target| target.0.as_deref()),
+                ),
+                resolve(
+                    crate::science::broad::science_owner(controls, true),
+                    science.and_then(|target| target.0.as_deref()),
+                ),
+            )
+        } else {
+            (combat_lock, science_target)
         };
         let red_alert = ra.map(|r| r.0).unwrap_or(false);
         let last_damage_taken_secs = activity.and_then(|a| a.last_damage_taken);

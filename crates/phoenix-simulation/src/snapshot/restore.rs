@@ -131,6 +131,11 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
         use bevy::ecs::system::RunSystemOnce;
         let _ = world.run_system_once(crate::science::server::publish_scan_blackboard);
         let _ = world.run_system_once(crate::science::passive::publish);
+        let _ = world.run_system_once(crate::ship::sensors::publish_sensor_radar_blackboard);
+        let _ = world.run_system_once(crate::console::helm::server::publish_helm_blackboard);
+        let _ = world.run_system_once(
+            crate::console::weapons::blackboard::publish_tactical_radar_blackboard,
+        );
     }
 
     report

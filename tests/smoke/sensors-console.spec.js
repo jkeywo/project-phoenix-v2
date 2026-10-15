@@ -144,3 +144,38 @@ test('sensors console: cancel impulse button calls __sendAction with cancel_impu
   expect(parsed.action).toBe('cancel_impulse');
   expect(parsed.console).toBe('sensors');
 });
+
+test('sensors console: independent focused instruments retain their owner and working view', { tag: '@core' }, async ({ page }) => {
+  await page.goto(CONSOLE_URL);
+  const state = {
+    ...NOMINAL_STATE,
+    target_uuid: 'public-contact',
+    scans: [
+      { system_id: 'focus-one', capable: true, controllable: true, history: [], focused: { subject: 'public-contact', progress: 250, waiting: '' } },
+      { system_id: 'focus-two', capable: true, controllable: true, history: [], focused: null },
+    ],
+  };
+  await page.evaluate((payload) => {
+    window.__sent = [];
+    window.__sendAction = (json) => window.__sent.push(JSON.parse(json));
+    window.__updateConsole('sensors', JSON.stringify(payload));
+  }, state);
+  const readout = page.locator('ph-scan-readout');
+  await expect(readout.locator('#progress')).toContainText('25%');
+  await readout.locator('#instrument').selectOption('focus-two');
+  await readout.locator('#action').click();
+  const sent = await page.evaluate(() => window.__sent);
+  expect(sent).toHaveLength(1);
+  expect(sent[0]).toMatchObject({ action: 'scan_target', control_system_id: 'focus-two', uuid: 'public-contact' });
+  expect(sent[0].correlation).toEqual(expect.any(String));
+
+  await page.evaluate((payload) => window.__updateConsole('sensors', JSON.stringify(payload)), {
+    ...state,
+    scans: state.scans.map((scan) => scan.system_id === 'focus-two' ? { ...scan, controllable: false } : scan),
+  });
+  await expect(readout.locator('#instrument')).toHaveValue('focus-two');
+  await expect(readout.locator('#action')).toBeHidden();
+  await readout.locator('#instrument').selectOption('focus-one');
+  await expect(readout.locator('#progress')).toContainText('25%');
+  await expect(readout.locator('#cancel')).toBeVisible();
+});

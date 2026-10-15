@@ -17,7 +17,7 @@ export function projectSensorTracks(tracks, { x = 0, z = 0, yaw = 0, range = 0, 
     const name = track.stage !== 'return' && track.identity?.name ? wireText(track.identity.name) : t('console.sensors.basic_contact');
     const age = Number.isSafeInteger(tick) && tick >= track.observed_tick ? tick - track.observed_tick : null;
     const row = { id: track.contact_id, name, stage: track.stage, predicted: track.predicted === true,
-      error: track.position_error, age, selectable: track.predicted === false && validRange && Math.hypot(dx, dz) <= range };
+      error: track.position_error, age, selectable: track.selectable === true && track.predicted === false && validRange && Math.hypot(dx, dz) <= range };
     rows.push(row);
     if (validRange && Math.hypot(dx, dz) <= range) blips.push({
       uuid: row.id, radar_x: (dx * cos + dz * sin) / range, radar_y: (dx * sin - dz * cos) / range,

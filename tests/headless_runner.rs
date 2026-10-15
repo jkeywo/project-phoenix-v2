@@ -8375,8 +8375,9 @@ fn published_scan(app: &mut App) -> project_phoenix::core::messages::ScanBlackbo
         .expect("the local ship publishes");
     match boards
         .0
-        .get(&project_phoenix::science::scan_blackboard_key())
-    {
+        .get(&project_phoenix::science::scan_blackboard_key_for(
+            &project_phoenix::core::messages::SystemId("sensors".into()),
+        )) {
         Some(SystemBlackboard::Scan(bb)) => bb.clone(),
         other => panic!("expected a scan blackboard, got {other:?}"),
     }

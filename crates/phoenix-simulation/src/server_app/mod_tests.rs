@@ -5769,6 +5769,7 @@ fn midgame_reconnect_resets_blackboard_cache() {
         radar_range: 0.0,
         lateral_speed: 0.0,
         hostile_weapon_arcs: Vec::new(),
+        tracks: None,
     });
 
     {

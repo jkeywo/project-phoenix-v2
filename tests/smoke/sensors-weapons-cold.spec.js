@@ -65,16 +65,19 @@ async function waitForStation(client, timeout = 5_000) {
   );
 }
 
-// The uuid the host assigned the world entity authored with `id`.
-//
-// Read off WorldSetup rather than guessed: uuids come from the spawner, and the
-// per-tick SimState snapshot carries no authored identity to match on. Matching
-// on the authored `id` rather than on position in the list keeps the spec honest
-// if the fixture ever grows another hull.
-async function uuidOfWorldEntity(client, id) {
-  const setup = await client.lastMessage('WorldSetup');
-  const hit = ((setup?.data?.world?.entities) || []).find((e) => e.id === id);
-  return hit?.uuid || null;
+// Acquire the observer-local handle from the actual paid radar publication.
+// WorldSetup deliberately carries no foreign live actor identity.
+async function contactOfObservedName(client, name) {
+  const handle = await client.page.waitForFunction((wanted) => {
+    for (const message of [...(window.__messages || [])].reverse()) {
+      if (message.type !== 'BlackboardUpdate') continue;
+      const board = (message.data.updates || []).find(([owner]) => owner === 'sensor-radar')?.[1]?.data;
+      const track = board?.tracks?.find((track) => !track.predicted && track.selectable && track.identity?.name === wanted);
+      if (track) return track.contact_id;
+    }
+    return null;
+  }, name, { timeout: 15000 });
+  return handle.jsonValue();
 }
 
 // Designate `uuid` as the Science Target and wait for this ship's own
@@ -129,7 +132,7 @@ async function scanCardTextFor(consolePage, radarBlackboard) {
       shipZ: 0,
       shipYaw: 0,
       sensorsTarget: bb.selected_target,
-      asteroids: [{ uuid: bb.selected_target, x: 300, z: -300, tags: ['ship'], name: 'TARGET' }],
+      asteroids: [], // This builder must use measured records, not world truth.
       // The system-id -> blackboard-kind projection the host sends alongside
       // the blackboards themselves (gui/sim-state.js keeps it); the builder
       // selects by KIND, never by guessing at an id.
@@ -179,8 +182,9 @@ test("a target with explicit restraint reads WEAPONS COLD on another ship's Sens
     { timeout: 15_000 },
   );
 
-  const coldUuid = await uuidOfWorldEntity(science, 'cold-hauler');
-  const armedUuid = await uuidOfWorldEntity(science, 'armed-hauler');
+  expect(worldSetup.data.world.entities.some((entity) => entity.id === 'cold-hauler' || entity.id === 'armed-hauler')).toBe(false);
+  const coldUuid = await contactOfObservedName(science, 'cold_hauler');
+  const armedUuid = await contactOfObservedName(science, 'armed_hauler');
   expect(coldUuid, 'the cold hull must reach the client as a contact').toBeTruthy();
   expect(armedUuid, 'the armed hull must reach the client as a contact').toBeTruthy();
 

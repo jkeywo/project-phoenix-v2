@@ -15,6 +15,8 @@
 //! power and weather, stores what the pure half hands back, and publishes it on
 //! the ship's `scan` blackboard channel for `gui/destroyer/captain.html`.
 
+pub mod broad;
+pub mod contact_routing;
 pub mod focused;
 mod focused_ai;
 pub mod passive;

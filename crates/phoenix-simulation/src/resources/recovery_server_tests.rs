@@ -124,6 +124,7 @@ fn rig_with(
             &[crate::science::broad::BroadMeasurement {
                 source: "finite-source".into(),
                 selectable: true,
+                observation: None,
                 position: [6.0, 0.0],
                 support: 1.0,
                 identity: None,

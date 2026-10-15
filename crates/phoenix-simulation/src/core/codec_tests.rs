@@ -914,6 +914,7 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                 updates: vec![(
                     SystemId("helm".into()),
                     SystemBlackboard::Helm(HelmBlackboard {
+                        tracks: None,
                         yaw: 0.785,
                         forward_speed: 75.0,
                         x: 1200.5,
@@ -2859,6 +2860,7 @@ fn system_blackboard_sensor_radar_round_trips_and_is_additive() {
         selected_target_alert: Some(true),
         selected_target_relative_velocity: Some([0.0, -20.0]),
         selected_target_weapons_cold: Some(true),
+        ..Default::default()
     });
     let encoded = serde_json::to_string(&scanning).unwrap();
     assert!(
@@ -3348,7 +3350,10 @@ fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() 
         console_scope: None,
         console_scope_tick: None,
         presentation_generation: None,
-        updates: vec![(SystemId(crate::science::SCAN_BLACKBOARD_KEY.into()), bb)],
+        updates: vec![(
+            crate::science::scan_blackboard_key_for(&SystemId("sensors".into())),
+            bb,
+        )],
     };
     assert_server_roundtrip(msg.clone());
 }
@@ -5199,6 +5204,7 @@ fn hud_state_json_omits_absent_computer_message() {
 #[test]
 fn system_blackboard_helm_serde_fields() {
     let bb = SystemBlackboard::Helm(HelmBlackboard {
+        tracks: None,
         yaw: 1.5,
         forward_speed: 42.0,
         x: 10.0,

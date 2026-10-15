@@ -181,6 +181,11 @@ pub(crate) fn handle_set_target(
             Option<&crate::server_app::ShipSystemBlackboards>,
             Option<&crate::tractor::TractorBeam>,
             Option<&crate::console::repair::ExternalRepairDispatch>,
+            (
+                Option<&crate::ship_plugin::ShipConfigComponent>,
+                Option<&crate::science::broad::BroadTracks>,
+                Option<&crate::science::broad::SensingControls>,
+            ),
         ),
         With<crate::server_app::Ship>,
     >,
@@ -209,6 +214,7 @@ pub(crate) fn handle_set_target(
         blackboards,
         tractor,
         external_repair,
+        (config, broad_tracks, sensing_controls),
     ) in ship_query.iter_mut()
     {
         let radar_range_mult = modifiers
@@ -236,10 +242,47 @@ pub(crate) fn handle_set_target(
             }
         });
 
-        for cmd in admitted.for_target(crate::ship::system_registry::TACTICAL_RADAR_SYSTEM_ID) {
+        let Some(owner) =
+            crate::science::broad::combat_owner(sensing_controls, broad_tracks.is_some())
+        else {
+            continue;
+        };
+        for cmd in admitted.for_target(&owner.0) {
             let SystemControlPayload::SetTarget { uuid } = &cmd.payload else {
                 continue;
             };
+
+            let presentation_id = uuid;
+            let resolved = if sensing_controls.is_some() || broad_tracks.is_some() {
+                let no_observations = crate::science::broad::BroadTracks(Default::default());
+                let tracks = broad_tracks.unwrap_or(&no_observations);
+                if uuid.is_empty() {
+                    weapons_target.0 = None;
+                    super::finish_action_feedback(cmd, &mut outbound, WeaponActionResult::Applied);
+                    continue;
+                }
+                let resolved = config.zip(blackboards).and_then(|(config, boards)| {
+                    crate::science::contact_routing::resolve(
+                        &config.0,
+                        boards,
+                        Some(tracks),
+                        &cmd.target,
+                        uuid,
+                    )
+                });
+                let Some(resolved) = resolved else {
+                    super::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        WeaponActionResult::Refused(WeaponActionRefusal::MissingTarget),
+                    );
+                    continue;
+                };
+                resolved
+            } else {
+                uuid.clone()
+            };
+            let uuid = &resolved;
 
             let live_pos = asteroid_q
                 .iter()
@@ -291,7 +334,7 @@ pub(crate) fn handle_set_target(
                 outbox.push_reliable((
                     Target::Token(reply_token.clone()),
                     ServerMessage::TargetLock {
-                        uuid: uuid.clone(),
+                        uuid: presentation_id.clone(),
                         locked,
                     },
                 ));

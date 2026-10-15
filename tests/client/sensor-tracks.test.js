@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildSensorsConsoleState } from '../../gui/console-state.js';
+import { buildSensorsConsoleState, buildWeaponsConsoleState, buildHelmConsoleState } from '../../gui/console-state.js';
 import { consoleReadState } from '../../gui/console-topology.js';
 import { projectSensorTracks } from '../../gui/sensor-tracks.js';
 import { createSensorScienceActionRegistry, SENSORS_TARGET_ACTION_ID, SENSORS_SCAN_ACTION_ID } from '../../gui/stations/sensors-actions.js';
@@ -8,7 +8,7 @@ import '../../gui/components/ph-sensor-panel.js';
 import { t } from '../../gui/strings.js';
 import { ActionFeedbackLifecycle } from '../../gui/action-feedback.js';
 
-const sample = (extra = {}) => ({ contact_id: 'contact-1', observed_tick: 10, position: [10, -20],
+const sample = (extra = {}) => ({ contact_id: 'contact-1', selectable: true, observed_tick: 10, position: [10, -20],
   position_error: 4, stage: 'return', predicted: false, ...extra });
 function raw(tracks = [sample()]) {
   return { blackboards: { broad: { tracks, selected_target: 'contact-1' }, 'scan/5:focus': { owner: 'focus', capable: true },
@@ -20,6 +20,16 @@ function raw(tracks = [sample()]) {
 }
 beforeEach(() => { document.body.innerHTML = ''; window.activateSemanticAction = vi.fn(); });
 describe('permitted broad track radar', () => {
+  it('combines independent already-permitted SensorRadar records without a private identity join', () => {
+    const state = raw([]);
+    state.blackboards.second = { tracks: [sample({ contact_id: 'second-observation' })], selected_target: 'second-observation' };
+    state.blackboards.third = { tracks: [sample({ contact_id: 'third-observation', position: [30, -40] })], selected_target: null };
+    state.blackboardKinds.second = 'SensorRadar'; state.blackboardKinds.third = 'SensorRadar';
+    const view = buildSensorsConsoleState(state, ['broad', 'second', 'third']);
+    expect(view.tracks.map(track => track.id)).toEqual(['second-observation', 'third-observation']);
+    expect(view.target_uuid).toBe('second-observation');
+    expect(JSON.stringify(view)).not.toContain('secret-uuid');
+  });
   it('uses measured contact IDs and circles without entity identity or hull geometry fallback', () => {
     const view = buildSensorsConsoleState(raw(), ['focus', 'broad']);
     expect(view.blips).toHaveLength(1); expect(view.blips[0]).toMatchObject({ uuid: 'contact-1', radar_x: .1,
@@ -70,5 +80,46 @@ describe('permitted broad track radar', () => {
     const view = projectSensorTracks([sample({ position: [NaN, 0] }), sample()], { range: 100, selected: 'contact-1' });
     expect(view.target_range).toBeCloseTo(Math.hypot(10, 20)); expect(view.tracks).toHaveLength(1);
     expect(projectSensorTracks([sample({ position_error: -1 })], { range: 100 }).blips).toEqual([]);
+  });
+  it('requires explicit measured targeting permission even for a current identified return', () => {
+    for (const selectable of [false, undefined]) {
+      const view = projectSensorTracks([sample({ selectable, stage: 'identified', identity: { name: 'Known' } })], { range: 100 });
+      expect(view.blips).toHaveLength(1);
+      expect(view.blips[0].selectable).toBe(false);
+      expect(view.tracks[0].selectable).toBe(false);
+    }
+  });
+  it('keeps Tactical empty when the actual measured picture is empty instead of restoring raw world truth', () => {
+    const state = raw();
+    state.blackboardKinds.tactical = 'TacticalRadar';
+    state.blackboards.tactical = { tracks: [], selected_target: null };
+    state.weaponsBlips = [{ uuid: 'secret-uuid', name: 'SECRET NAME' }];
+    state.weaponsTarget = 'secret-uuid'; state.weaponsTargetName = 'SECRET NAME';
+    const view = buildWeaponsConsoleState(state, ['tactical']);
+    expect(view.blips).toEqual([]); expect(view.target_uuid).toBeNull();
+    expect(view.target_name).toBeNull(); expect(view.target_hull_pct).toBeNull();
+    expect(JSON.stringify(view)).not.toContain('SECRET');
+  });
+  it('shows Tactical uncertainty and only measured target facts', () => {
+    const state = raw(); state.blackboardKinds.tactical = 'TacticalRadar';
+    state.blackboards.tactical = { tracks: [sample()], selected_target: 'contact-1' };
+    state.weaponsRadarRange = 100;
+    const view = buildWeaponsConsoleState(state, ['tactical']);
+    expect(view.blips[0]).toMatchObject({ uuid: 'contact-1', uncertainty_radius: .04 });
+    expect(view.target_name).toBe(t('console.sensors.basic_contact'));
+    expect(view.target_hull_pct).toBeNull(); expect(view.target_shields).toBeNull();
+  });
+  it('combines only delivered Helm and Tactical records, retaining separate unresolved contact identities', () => {
+    const state = raw(); state.blackboardKinds.helm = 'Helm';
+    state.blackboardKinds.tactical = 'TacticalRadar';
+    state.blackboards.helm = { tracks: [sample({ contact_id: 'helm-contact' })], radar_range: 100 };
+    state.blackboards.tactical = { tracks: [sample({ contact_id: 'tactical-contact' })] };
+    const view = buildHelmConsoleState(state, ['helm']);
+    expect(view.blips.map(row => row.uuid)).toEqual(['helm-contact', 'tactical-contact']);
+    expect(JSON.stringify(view)).not.toContain('SECRET');
+    const read = consoleReadState(state, { id: 'helm-only', systems: ['helm'], feeds: [] });
+    expect(buildHelmConsoleState(read, ['helm']).blips.map(row => row.uuid)).toEqual(['helm-contact']);
+    state.blackboards.helm.tracks = []; state.blackboards.tactical.tracks = [];
+    expect(buildHelmConsoleState(state, ['helm']).blips).toEqual([]);
   });
 });

@@ -126,6 +126,8 @@ pub fn handle_sensors_messages(
             &crate::ship_plugin::ShipConfigComponent,
             &mut SensorRadarSelection,
             &crate::ship_plugin::ShipSystemControlSources,
+            Option<&crate::science::broad::BroadTracks>,
+            Option<&crate::science::broad::SensingControls>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -147,9 +149,19 @@ pub fn handle_sensors_messages(
         ship_config,
         mut entity_target,
         control_sources,
+        broad_tracks,
+        sensing_controls,
     ) in ship_query.iter_mut()
     {
+        let no_observations = crate::science::broad::BroadTracks(Default::default());
+        let permitted_tracks = broad_tracks.or_else(|| sensing_controls.map(|_| &no_observations));
         for cmd in admitted.0.iter().filter(|cmd| {
+            if permitted_tracks.is_some()
+                && crate::science::broad::science_owner(sensing_controls, true).as_ref()
+                    != Some(&cmd.target)
+            {
+                return false;
+            }
             ship_config
                 .0
                 .system(&cmd.target)
@@ -171,6 +183,27 @@ pub fn handle_sensors_messages(
                 _ => continue,
             };
 
+            let Some(resolved) = blackboards
+                .and_then(|boards| {
+                    crate::science::contact_routing::resolve(
+                        &ship_config.0,
+                        boards,
+                        permitted_tracks,
+                        &cmd.target,
+                        uuid,
+                    )
+                })
+                .or_else(|| permitted_tracks.is_none().then(|| uuid.clone()))
+            else {
+                crate::command_admission::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    ActionFeedbackOutcome::Refused,
+                );
+                continue;
+            };
+            let presentation_id = uuid;
+            let uuid = &resolved;
             let contact_mode = observer_uuid
                 .and_then(|observer| {
                     content.as_ref().map(|runtime| {
@@ -228,7 +261,32 @@ pub fn handle_sensors_messages(
                         })
                     })
                 });
-            let label = if contact_mode == crate::gm::operations::contact::ContactMode::Reveal
+            let label = if broad_tracks.is_some() {
+                let permitted = blackboards.map(|boards| {
+                    ship_config
+                        .0
+                        .observations_for_system(&cmd.target, &boards.0)
+                });
+                broad_tracks
+                    .and_then(|tracks| {
+                        tracks.0.keys().find_map(|owner| {
+                            let source = crate::science::contact_routing::publication_source(
+                                &ship_config.0,
+                                owner,
+                            );
+                            let tracks = crate::science::contact_routing::observations(
+                                permitted.as_ref()?.get(&source)?,
+                            )?;
+                            tracks
+                                .iter()
+                                .find(|track| &track.contact_id == presentation_id)?
+                                .identity
+                                .as_ref()
+                                .map(|identity| identity.name.clone())
+                        })
+                    })
+                    .unwrap_or_else(|| "console.sensors.basic_contact".into())
+            } else if contact_mode == crate::gm::operations::contact::ContactMode::Reveal
                 && !ordinarily_visible
             {
                 "console.sensors.basic_contact".to_string()
@@ -258,7 +316,7 @@ pub fn handle_sensors_messages(
                 sender_origin,
                 address,
                 payload: CoordinationPayload::TargetDesignation {
-                    uuid: uuid.clone(),
+                    uuid: presentation_id.clone(),
                     label,
                 },
                 presentation,
@@ -881,11 +939,16 @@ pub fn publish_sensors_blackboard(
 /// cross-system read (spec §3).
 pub fn publish_sensor_radar_blackboard(
     content: Option<Res<crate::world::server::WorldContentRuntime>>,
+    tick: Option<Res<crate::sim_tick::SimTick>>,
+    fixed: Option<Res<Time<Fixed>>>,
     mut ships_q: Query<
         (
             Option<&crate::entities::spawner::EntityUuid>,
             Option<&SensorRadarSelection>,
             Option<&crate::ship::state::ShipPhysics>,
+            Option<&crate::science::broad::BroadProfile>,
+            Option<&crate::science::broad::BroadTracks>,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
         With<crate::server_app::Ship>,
@@ -927,7 +990,57 @@ pub fn publish_sensor_radar_blackboard(
         With<crate::server_app::Ship>,
     >,
 ) {
-    for (uuid, sensors_target, own_physics, mut bbs) in ships_q.iter_mut() {
+    for (uuid, sensors_target, own_physics, broad_profile, broad_state, config, mut bbs) in
+        ships_q.iter_mut()
+    {
+        if let Some(profiles) = broad_profile {
+            for (system, instrument) in &profiles.0 {
+                if !config.is_some_and(|config| {
+                    config.0.system(system).is_some_and(|system| {
+                        system.kind == crate::ship::system_registry::SENSOR_RADAR_KIND
+                    })
+                }) {
+                    continue;
+                }
+                let profile = &instrument.profile;
+                let state = broad_state.and_then(|states| states.0.get(system));
+                // A fitted instrument publishes its recorded picture, including an
+                // honestly empty picture. Loss of power never restores live truth.
+                let tracks = state
+                    .zip(tick.as_ref())
+                    .zip(fixed.as_ref())
+                    .and_then(|((state, tick), fixed)| {
+                        state
+                            .projection(profile, tick.0, fixed.timestep().as_secs_f32())
+                            .ok()
+                    })
+                    .unwrap_or_default();
+                let selected = sensors_target
+                    .and_then(|target| target.0.as_deref())
+                    .and_then(|source| state.and_then(|state| state.contact_for_source(source)));
+                let selected_track = selected
+                    .and_then(|selected| tracks.iter().find(|track| track.contact_id == selected));
+                let own_velocity = own_physics.map(ship_world_velocity).unwrap_or([0.0; 2]);
+                let board = crate::core::messages::SensorRadarBlackboard {
+                    selected_target: selected.map(str::to_owned),
+                    selected_target_alert: selected_track
+                        .and_then(|track| track.assessment.as_ref())
+                        .and_then(|state| state.alert),
+                    selected_target_weapons_cold: selected_track
+                        .and_then(|track| track.assessment.as_ref())
+                        .and_then(|state| state.weapons_restrained),
+                    selected_target_relative_velocity: selected_track
+                        .and_then(|track| track.velocity)
+                        .map(|velocity| {
+                            [velocity[0] - own_velocity[0], velocity[1] - own_velocity[1]]
+                        }),
+                    tracks: Some(tracks),
+                };
+                bbs.0
+                    .insert(system.clone(), SystemBlackboard::SensorRadar(board));
+            }
+            continue;
+        }
         // Funding is performed once by the Power tick, not by a publisher.
         // Retain the previous observation while dark rather than refreshing
         // target details from authoritative state without a working scanner.
@@ -1023,6 +1136,7 @@ pub fn publish_sensor_radar_blackboard(
         bbs.0.insert(
             crate::ship::system_registry::sensor_radar_system_id(),
             SystemBlackboard::SensorRadar(crate::core::messages::SensorRadarBlackboard {
+                tracks: None,
                 selected_target,
                 selected_target_alert,
                 selected_target_relative_velocity,
@@ -1165,6 +1279,10 @@ fn debris_candidate(
 pub fn operate_sensors_ai(
     content: Option<Res<crate::world::server::WorldContentRuntime>>,
     sessions: Res<crate::lobby::Sessions>,
+    mut ai_trees: Query<(
+        &crate::ai::state_tree_runtime::ShipAiTreePrograms,
+        &mut crate::ai::state_tree_runtime::ShipAiTreeRuntime,
+    )>,
     mut ships: Query<
         (
             Entity,
@@ -1187,6 +1305,8 @@ pub fn operate_sensors_ai(
             // which the `SimSet` chain orders strictly.
             Option<&crate::science::server::ShipScanRecord>,
             &mut crate::core::messages::AdmittedCommands,
+            Option<&crate::science::broad::BroadTracks>,
+            Option<&crate::science::broad::SensingControls>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -1278,16 +1398,20 @@ pub fn operate_sensors_ai(
         target_selector,
         scan_record,
         mut admitted,
+        broad_tracks,
+        sensing_controls,
     ) in &mut ships
     {
         // Control-Source gate through the shared AI host spine (issue #1208): a
         // human holder (or an offline system) stands the selector down. Sensors
         // resolves a data-driven SELECTOR the spine does not model, so only its
         // gate — the one step it shares with the policy hosts — routes here.
-        if !crate::ai::host::ai_operates(
-            &sources.0,
-            &crate::ship::system_registry::sensors_system_id(),
-        ) {
+        let Some(control_owner) =
+            crate::science::broad::science_owner(sensing_controls, broad_tracks.is_some())
+        else {
+            continue;
+        };
+        if !crate::ai::host::ai_operates(&sources.0, &control_owner) {
             continue;
         }
         // No authored `[sensors_console.selector]` ⇒ no component ⇒ no science
@@ -1295,6 +1419,183 @@ pub fn operate_sensors_ai(
         let Some(selector_comp) = target_selector else {
             continue;
         };
+
+        if sensing_controls.is_some() {
+            let empty_tracks =
+                crate::science::broad::BroadTracks(std::collections::BTreeMap::new());
+            let tracks = broad_tracks.unwrap_or(&empty_tracks);
+            let Some(config) = ship_config_comp else {
+                continue;
+            };
+            let consumer = control_owner;
+            let permitted = config.0.observations_for_system(&consumer, &blackboards.0);
+            let registry = faction_registry.as_ref().map(|registry| &registry.0);
+            let requested_scan = match permitted
+                .get(&crate::ship::system_registry::viewscreen_system_id())
+            {
+                Some(SystemBlackboard::Viewscreen(board)) => {
+                    crate::objectives::top_operate_directive(
+                        &board.scored_objectives,
+                        crate::core::messages::SystemAffinity::Sensors,
+                        |directive| crate::objectives::scan_directive_target(directive).is_some(),
+                    )
+                    .and_then(crate::objectives::scan_directive_target)
+                }
+                _ => None,
+            };
+            let mut scan_contact = None;
+            let mut candidates = Vec::new();
+            for owner in tracks.0.keys() {
+                let source = crate::science::contact_routing::publication_source(&config.0, owner);
+                let Some(observations) = permitted
+                    .get(&source)
+                    .and_then(crate::science::contact_routing::observations)
+                else {
+                    continue;
+                };
+                for track in observations
+                    .iter()
+                    .filter(|track| track.selectable && !track.predicted)
+                {
+                    if requested_scan.is_some_and(|requested| {
+                        requested == track.contact_id
+                            || track.identity.as_ref().is_some_and(|identity| {
+                                identity.name == requested
+                                    || identity
+                                        .references
+                                        .iter()
+                                        .any(|reference| reference == requested)
+                            })
+                    }) {
+                        scan_contact = Some(track.contact_id.clone());
+                    }
+                    let mut facts = crate::world::flags::AiFacts::new();
+                    facts.set_fact(crate::entities::ai_flag_hosts::DETECTABLE, 1.0);
+                    let known_faction = track
+                        .identity
+                        .as_ref()
+                        .and_then(|identity| identity.faction.as_ref())
+                        .and_then(|faction| uuid::Uuid::parse_str(faction).ok());
+                    let hostile = registry.is_some_and(|registry| {
+                        crate::ai::faction::is_enemy(
+                            self_faction.map(|faction| faction.0),
+                            known_faction,
+                            registry,
+                        )
+                    });
+                    facts.set_fact(
+                        crate::entities::ai_flag_hosts::HOSTILE,
+                        if hostile { 1.0 } else { 0.0 },
+                    );
+                    facts.set_fact(crate::entities::ai_flag_hosts::SOURCE_RADAR, 1.0);
+                    candidates.push(crate::ai::selector::SelectorCandidate {
+                        uuid: track.contact_id.clone(),
+                        position: [track.position[0], 0.0, track.position[1]],
+                        facts,
+                    });
+                }
+            }
+            candidates.sort_by(|a, b| a.uuid.cmp(&b.uuid));
+            candidates.dedup_by(|a, b| a.uuid == b.uuid);
+            let mut facts = crate::world::flags::AiFacts::new();
+            if let Some(rating) = selector_comp.power_rating {
+                facts.set_fact(crate::entities::ai_flag_hosts::POWER_RATING, rating as f64);
+            }
+            let self_ctx = crate::ai::selector::SelfContext {
+                position: [physics.x, 0.0, physics.z],
+                facts,
+            };
+            let current = sensors_target.0.as_deref().and_then(|source| {
+                crate::science::contact_routing::alias_for_source(
+                    &config.0,
+                    blackboards,
+                    Some(tracks),
+                    &consumer,
+                    source,
+                )
+            });
+            let decided = selector_comp.selector.select(
+                &self_ctx,
+                &candidates,
+                current.as_deref(),
+                &ai_env.flag_chain(ship_entity),
+            );
+            let Ok((programs, mut runtimes)) = ai_trees.get_mut(ship_entity) else {
+                continue;
+            };
+            let Some(runtime) = runtimes.0.get_mut(&consumer) else {
+                continue;
+            };
+            let facts = std::collections::BTreeMap::from([
+                ("can_operate".into(), true),
+                ("request_available".into(), scan_contact.is_some()),
+                (
+                    "acquiring".into(),
+                    scan_record
+                        .and_then(|record| record.0.get(&consumer))
+                        .is_some_and(|record| record.focused.is_some()),
+                ),
+                ("has_target".into(), decided.is_some()),
+            ]);
+            let channels = ["designate", "enquire", "cancel"]
+                .into_iter()
+                .map(|channel| (channel.to_owned(), false))
+                .collect();
+            let Ok(phoenix_sim_gameplay::ai::host::TreeHostOutcome::Evaluated(tree)) =
+                phoenix_sim_gameplay::ai::host::decide_tree(
+                    &sources.0,
+                    &consumer,
+                    programs.0.get(&consumer),
+                    &facts,
+                    &channels,
+                    runtime,
+                    now_tick,
+                )
+            else {
+                continue;
+            };
+            if tree.intents.get("designate") == Some(&true)
+                && decided.as_deref() != current.as_deref()
+            {
+                let payload = decided.map_or(SystemControlPayload::ClearScienceTarget, |uuid| {
+                    SystemControlPayload::SetScienceTarget { uuid }
+                });
+                emit_ai_command(
+                    entity_uuid,
+                    consumer.clone(),
+                    payload,
+                    sources,
+                    &sessions,
+                    ship_config_comp,
+                    &mut admitted,
+                );
+            }
+            if tree.intents.get("cancel") == Some(&true) {
+                emit_ai_command(
+                    entity_uuid,
+                    consumer.clone(),
+                    SystemControlPayload::CancelFocusedScan,
+                    sources,
+                    &sessions,
+                    ship_config_comp,
+                    &mut admitted,
+                );
+            } else if let Some(uuid) =
+                scan_contact.filter(|_| tree.intents.get("enquire") == Some(&true))
+            {
+                emit_ai_command(
+                    entity_uuid,
+                    consumer,
+                    SystemControlPayload::ScanTarget { uuid },
+                    sources,
+                    &sessions,
+                    ship_config_comp,
+                    &mut admitted,
+                );
+            }
+            // Fitted observers never enter the old world-query candidate path.
+            continue;
+        }
 
         // Mission/doctrine Scan is an operate request for this same Sensors
         // host (issue #1139). Resolve the top positive Sensors-affined request
@@ -1390,7 +1691,7 @@ pub fn operate_sensors_ai(
         // XZ like the horizon tests above, and for the same reason: this seat
         // works from `ShipPhysics`, which is a plane.
         let scan_reach = |pos: [f32; 3]| {
-            let Some(record) = scan_record else {
+            let Some(record) = scan_record.and_then(|records| records.0.get(&control_owner)) else {
                 return false;
             };
             let dx = pos[0] - physics.x;

@@ -450,11 +450,31 @@ pub(super) fn validate_entity_resources(
 ) -> Result<(), String> {
     super::fitting::validate_entity(world, entity, row)?;
     match (
+        world.get::<crate::science::broad::BroadProfile>(entity),
+        &row.broad,
+    ) {
+        (None, None) => {}
+        (Some(profile), Some(saved)) => {
+            let dt = world
+                .get_resource::<Time<Fixed>>()
+                .ok_or("broad continuation requires fixed logical time")?
+                .timestep()
+                .as_secs_f32();
+            if profile.0.keys().ne(saved.keys()) {
+                return Err("broad observation owners disagree with accepted instruments".into());
+            }
+            for (system, state) in saved {
+                state.validate(&profile.0[system].profile, u64::MAX, dt)?;
+            }
+        }
+        _ => return Err("saved broad observations disagree with accepted equipment".into()),
+    }
+    match (
         world.get::<crate::science::passive::PassiveProfile>(entity),
         &row.passive,
     ) {
         (None, None) => {}
-        (Some(profile), Some(saved)) => saved.validate(&profile.0, &row.uuid, u64::MAX)?,
+        (Some(profile), Some(saved)) => saved.validate(profile, &row.uuid, u64::MAX)?,
         _ => return Err("saved passive receiver disagrees with accepted equipment".into()),
     }
     match (
@@ -463,12 +483,6 @@ pub(super) fn validate_entity_resources(
     ) {
         (Some(record), Some(saved)) => record.validate_state(saved, u64::MAX)?,
         (None, None) => {}
-        (None, Some(saved))
-            if saved.last.is_none()
-                && saved.history.is_empty()
-                && saved.focused.is_none()
-                && saved.unfinished.is_empty()
-                && saved.refusal == Some(crate::science::ScanRefusal::NotCapable) => {}
         _ => return Err("saved observations disagree with the accepted scanner".into()),
     }
     let saved_shields = row

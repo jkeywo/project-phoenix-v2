@@ -1524,6 +1524,10 @@ fn ai_target_selection(
     // registry bundled as one `SystemParam` (issue #1185). See
     // [`TargetSelectionEnv`].
     env: TargetSelectionEnv,
+    mut ai_trees: Query<(
+        &crate::ai::state_tree_runtime::ShipAiTreePrograms,
+        &mut crate::ai::state_tree_runtime::ShipAiTreeRuntime,
+    )>,
     mut ship_query: Query<
         (
             Entity,
@@ -1553,6 +1557,10 @@ fn ai_target_selection(
             // radar can see needs that source without a doctrine, so it licenses
             // the source directly (mirrors the `hostile_scan_q` `Or<>` filter).
             Has<crate::entities::spawner::StaticPointDefence>,
+            (
+                Option<&crate::science::broad::BroadTracks>,
+                Option<&crate::science::broad::SensingControls>,
+            ),
         ),
         With<crate::server_app::Ship>,
     >,
@@ -1672,6 +1680,7 @@ fn ai_target_selection(
         self_faction,
         target_selector,
         is_static_point_defence,
+        (broad_tracks, sensing_controls),
     ) in ship_query.iter_mut()
     {
         // A query of two optional components matches every live entity. Keep a
@@ -1708,10 +1717,12 @@ fn ai_target_selection(
         // radar's OWN `operate_ai`. Tactical target selection resolves a
         // data-driven SELECTOR the spine does not model, so only its gate — the
         // one step it shares with the policy hosts — routes here.
-        let radar_operates_ai = crate::ai::host::ai_operates(
-            &control_sources.0,
-            &crate::ship::system_registry::tactical_radar_system_id(),
-        );
+        let Some(control_owner) =
+            crate::science::broad::combat_owner(sensing_controls, broad_tracks.is_some())
+        else {
+            continue;
+        };
+        let radar_operates_ai = crate::ai::host::ai_operates(&control_sources.0, &control_owner);
         if radar_idle || !radar_operates_ai {
             clear_locked_target_if_present(&mut blackboards);
             continue;
@@ -1719,6 +1730,200 @@ fn ai_target_selection(
         let Some(selector_comp) = target_selector else {
             continue;
         };
+
+        if sensing_controls.is_some() {
+            let empty_tracks =
+                crate::science::broad::BroadTracks(std::collections::BTreeMap::new());
+            let tracks = broad_tracks.unwrap_or(&empty_tracks);
+            let consumer = control_owner;
+            let permitted = ship_config
+                .0
+                .observations_for_system(&consumer, &blackboards.0);
+            let shared = permitted
+                .get(&crate::ship::system_registry::viewscreen_system_id())
+                .is_some()
+                .then_some(&*blackboards);
+            let destroy = top_destroy_objective_target(shared);
+            let defend = top_defend_objective_target(shared);
+            let operate = top_operate_objective_target(shared).map(|(target, _)| target);
+            let radar_licensed =
+                matches!(destroy, Some("")) || defend.is_some() || is_static_point_defence;
+            let science = match permitted.get(&crate::ship::system_registry::viewscreen_system_id())
+            {
+                Some(SystemBlackboard::Viewscreen(board)) => {
+                    board.science_target.as_deref().and_then(|source| {
+                        crate::science::contact_routing::alias_for_source(
+                            &ship_config.0,
+                            &blackboards,
+                            Some(tracks),
+                            &consumer,
+                            source,
+                        )
+                    })
+                }
+                _ => None,
+            };
+            let attacker = last_attacker.0.as_deref().and_then(|source| {
+                crate::science::contact_routing::alias_for_source(
+                    &ship_config.0,
+                    &blackboards,
+                    Some(tracks),
+                    &consumer,
+                    source,
+                )
+            });
+            let mut candidates = Vec::new();
+            for owner in tracks.0.keys() {
+                let source =
+                    crate::science::contact_routing::publication_source(&ship_config.0, owner);
+                let Some(observations) = permitted
+                    .get(&source)
+                    .and_then(crate::science::contact_routing::observations)
+                else {
+                    continue;
+                };
+                for track in observations
+                    .iter()
+                    .filter(|track| track.selectable && !track.predicted)
+                {
+                    if track
+                        .assessment
+                        .as_ref()
+                        .is_some_and(|assessment| assessment.disabled == Some(true))
+                    {
+                        continue;
+                    }
+                    let known_faction = track
+                        .identity
+                        .as_ref()
+                        .and_then(|identity| identity.faction.as_ref())
+                        .and_then(|faction| uuid::Uuid::parse_str(faction).ok());
+                    let hostile = crate::ai::faction::is_enemy(
+                        self_faction.map(|faction| faction.0),
+                        known_faction,
+                        registry,
+                    );
+                    let mut facts = crate::world::flags::AiFacts::new();
+                    facts.set_fact(crate::entities::ai_flag_hosts::DETECTABLE, 1.0);
+                    facts.set_fact(
+                        crate::entities::ai_flag_hosts::HOSTILE,
+                        if hostile { 1.0 } else { 0.0 },
+                    );
+                    let matches = |requested: Option<&str>| {
+                        requested.is_some_and(|requested| {
+                            !requested.is_empty()
+                                && (track.contact_id == requested
+                                    || track.identity.as_ref().is_some_and(|identity| {
+                                        identity.name == requested
+                                            || identity
+                                                .references
+                                                .iter()
+                                                .any(|reference| reference == requested)
+                                    }))
+                        })
+                    };
+                    facts.set_fact(
+                        crate::entities::ai_flag_hosts::SOURCE_RADAR,
+                        if radar_licensed { 1.0 } else { 0.0 },
+                    );
+                    facts.set_fact(
+                        crate::entities::ai_flag_hosts::SOURCE_OBJECTIVE,
+                        if matches(destroy) { 1.0 } else { 0.0 },
+                    );
+                    facts.set_fact(
+                        crate::entities::ai_flag_hosts::SOURCE_OPERATE,
+                        if matches(operate) { 1.0 } else { 0.0 },
+                    );
+                    facts.set_fact(
+                        crate::entities::ai_flag_hosts::SOURCE_SENSORS_DESIGNATION,
+                        if science.as_deref() == Some(&track.contact_id) {
+                            1.0
+                        } else {
+                            0.0
+                        },
+                    );
+                    facts.set_fact(
+                        crate::entities::ai_flag_hosts::SOURCE_LAST_ATTACKER,
+                        if attacker.as_deref() == Some(&track.contact_id) {
+                            1.0
+                        } else {
+                            0.0
+                        },
+                    );
+                    candidates.push(crate::ai::selector::SelectorCandidate {
+                        uuid: track.contact_id.clone(),
+                        position: [track.position[0], 0.0, track.position[1]],
+                        facts,
+                    });
+                }
+            }
+            candidates.sort_by(|a, b| a.uuid.cmp(&b.uuid));
+            candidates.dedup_by(|a, b| a.uuid == b.uuid);
+            let mut facts = crate::world::flags::AiFacts::new();
+            if let Some(rating) = selector_comp.power_rating {
+                facts.set_fact(crate::entities::ai_flag_hosts::POWER_RATING, rating as f64);
+            }
+            let current = weapons_target.0.as_deref().and_then(|source| {
+                crate::science::contact_routing::alias_for_source(
+                    &ship_config.0,
+                    &blackboards,
+                    Some(tracks),
+                    &consumer,
+                    source,
+                )
+            });
+            let selected = selector_comp.selector.select(
+                &crate::ai::selector::SelfContext {
+                    position: [physics.x, 0.0, physics.z],
+                    facts,
+                },
+                &candidates,
+                current.as_deref(),
+                &ai_env.flag_chain(ship_entity),
+            );
+            let Ok((programs, mut runtimes)) = ai_trees.get_mut(ship_entity) else {
+                continue;
+            };
+            let Some(runtime) = runtimes.0.get_mut(&consumer) else {
+                continue;
+            };
+            let facts = std::collections::BTreeMap::from([
+                ("can_operate".into(), true),
+                ("has_target".into(), selected.is_some()),
+            ]);
+            let channels = std::collections::BTreeMap::from([("designate".into(), false)]);
+            let Ok(phoenix_sim_gameplay::ai::host::TreeHostOutcome::Evaluated(tree)) =
+                phoenix_sim_gameplay::ai::host::decide_tree(
+                    &control_sources.0,
+                    &consumer,
+                    programs.0.get(&consumer),
+                    &facts,
+                    &channels,
+                    runtime,
+                    sim_tick.as_deref().map_or(0, |tick| tick.0),
+                )
+            else {
+                continue;
+            };
+            if tree.intents.get("designate") != Some(&true) {
+                continue;
+            }
+            record_locked_target_decision(&mut blackboards, selected.clone());
+            if selected != current {
+                crate::command_admission::ai_emit::emit_ai_command(
+                    self_uuid,
+                    consumer,
+                    crate::core::messages::SystemControlPayload::SetTarget {
+                        uuid: selected.unwrap_or_default(),
+                    },
+                    control_sources,
+                    &sessions,
+                    Some(ship_config),
+                    &mut admitted,
+                );
+            }
+            continue;
+        }
 
         // Damage-scaled tactical radar range (issue #680). Scale the base
         // per-ship config range by the shared RadarRange modifier multiplier.

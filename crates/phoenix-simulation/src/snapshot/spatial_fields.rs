@@ -6,7 +6,21 @@ pub(super) fn validate_roster(
     snapshot: &PhoenixSnapshot,
 ) -> Result<(), (String, String)> {
     for row in &snapshot.entities {
-        if row.region_field.is_some()
+        if let Some(saved) = &row.broad {
+            if saved
+                .values()
+                .any(|state| state.last_tick.is_some_and(|tick| tick > snapshot.tick))
+            {
+                return Err((
+                    row.uuid.clone(),
+                    "broad observation frontier is newer than snapshot".into(),
+                ));
+            }
+        }
+        if (row.region_field.is_some()
+            || row.broad.is_some()
+            || row.scan.is_some()
+            || row.passive.is_some())
             && (!world.contains_resource::<crate::sim_tick::SimTick>()
                 || !world.contains_resource::<Time<bevy::time::Fixed>>())
         {
@@ -16,7 +30,11 @@ pub(super) fn validate_roster(
             ));
         }
         if let Some(passive) = &row.passive {
-            if passive.last_tick.is_some_and(|last| last > snapshot.tick) {
+            if passive
+                .0
+                .values()
+                .any(|state| state.last_tick.is_some_and(|last| last > snapshot.tick))
+            {
                 return Err((
                     row.uuid.clone(),
                     "passive sample is newer than the captured tick".into(),
@@ -24,16 +42,16 @@ pub(super) fn validate_roster(
             }
         }
         if let Some(scan) = &row.scan {
-            if scan
-                .history
-                .iter()
-                .any(|reading| reading.taken_at_tick > snapshot.tick)
-                || scan
-                    .focused
+            if scan.instruments.values().any(|scan| {
+                scan.history
                     .iter()
-                    .chain(scan.unfinished.values())
-                    .any(|work| work.last_tick > snapshot.tick)
-            {
+                    .any(|reading| reading.taken_at_tick > snapshot.tick)
+                    || scan
+                        .focused
+                        .iter()
+                        .chain(scan.unfinished.values())
+                        .any(|work| work.last_tick > snapshot.tick)
+            }) {
                 return Err((
                     row.uuid.clone(),
                     "recorded scan work is newer than the captured tick".into(),

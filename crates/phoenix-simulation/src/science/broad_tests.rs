@@ -182,6 +182,29 @@ fn substituted_sensor_report_gets_own_handle_without_live_geometry_or_facts() {
     );
 }
 #[test]
+fn routine_reference_correlation_requires_a_unique_display_label() {
+    let record = crate::world::config::WorldEntity {
+        name: Some("objective-ref".into()),
+        display_name: Some("Courier".into()),
+        ..Default::default()
+    };
+    assert_eq!(
+        routine_references("Courier", &[record.clone()], ["objective-ref"].into_iter()),
+        vec!["objective-ref"]
+    );
+    let unrelated = crate::world::config::WorldEntity {
+        name: Some("other-ref".into()),
+        display_name: Some("Courier".into()),
+        ..Default::default()
+    };
+    assert!(routine_references(
+        "Courier",
+        &[record, unrelated],
+        ["objective-ref"].into_iter()
+    )
+    .is_empty());
+}
+#[test]
 fn two_actual_radars_keep_paid_work_and_routing_separate_on_one_ship() {
     let (mut app, observer, _, sensor) = rig();
     let tactical = app.world().get::<BroadProfile>(observer).unwrap().0

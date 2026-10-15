@@ -182,7 +182,7 @@ fn local_battery_work_emits_without_generation_and_samples_hide_source_identity(
     invalid.last_tick = Some(2);
     assert!(invalid
         .validate(
-            &app.world().get::<PassiveProfile>(receiver).unwrap().0,
+            &app.world().get::<PassiveProfile>(receiver).unwrap().0[&owner],
             "observer",
             1
         )

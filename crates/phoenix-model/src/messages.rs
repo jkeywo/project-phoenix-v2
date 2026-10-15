@@ -4006,6 +4006,8 @@ pub struct RadarRegion {
 /// that frozen viewscreen fact rather than this live selection (spec §1/§3).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct TacticalRadarBlackboard {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracks: Option<Vec<crate::sensing_tracks::SensorTrackSnapshot>>,
     /// The Combat Lock: the tactical radar's currently selected target UUID,
     /// or `None`. Mirrors this ship's `TacticalRadarSelection` component.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4027,6 +4029,10 @@ pub struct TacticalRadarBlackboard {
 /// lifts it into `ViewscreenBlackboard::science_target`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct SensorRadarBlackboard {
+    /// Present even when empty for a fitted broad instrument. Absence identifies
+    /// a capability whose legacy publication has not adopted this projection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracks: Option<Vec<crate::sensing_tracks::SensorTrackSnapshot>>,
     /// The Science Target: the sensor radar's currently selected target UUID.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_target: Option<String>,
@@ -4239,6 +4245,8 @@ impl Default for CommandBlackboard {
 /// happens client-side in `gui/console-state.js`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct HelmBlackboard {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracks: Option<Vec<crate::sensing_tracks::SensorTrackSnapshot>>,
     pub yaw: f32,
     pub forward_speed: f32,
     pub x: f32,

@@ -625,7 +625,7 @@ pub const WEAPON_KIND_GM_DIRECT: &str = "gm.direct";
 /// swallowed another peer's grant would fold a different hull from everyone
 /// else's.
 #[allow(clippy::too_many_arguments)]
-pub fn apply_gm_direct_effects(
+pub(crate) fn apply_gm_direct_effects(
     tick: Option<Res<crate::sim_tick::SimTick>>,
     mut pending: ResMut<PendingGmDirectEffects>,
     mut targets: Query<(

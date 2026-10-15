@@ -74,7 +74,7 @@ New source files and matching owner dependency records are copied in
 field admission guards are source changes requiring their own consumer evidence.
 
 Continuation adds field and observation ownership to existing snapshots/digests.
-The compatibility boundary is protocol 13, snapshot format 51, rules 0.23;
+The compatibility boundary is protocol 13, snapshot format 52, rules 0.24;
 pre-increment state must fail explicitly rather than silently omit new work.
 Independent review identified and corrected focused path bypass, battery-powered
 emissions, hidden-source ordinal leakage and zero-strength reception. Field
@@ -101,12 +101,121 @@ main-workspace attempts were cancelled or failed sandbox access and do not count
 
 ## Remaining playable exit
 
-Automatic broad acquisition and retained uncertain tracks, permitted radar and
-command routing, explicit sharing/correlation and reference work, focused aims,
-ordinary closed-tree controllers, forecasts and complete terrain/content migration
-remain part of this increment. The initial foundations are not a substitute for
-those consumers. Complete-host continuation and opposed-order multiplayer tests,
+### Per-instrument radar integration checkpoint
+
+`6732439f` integrates independent broad profiles/states for each fitted radar,
+including Workshop array editing and explicit finite coverage for six NPC hulls.
+The source changes their former zero/unbounded AI radar horizon to the existing
+authored AI sensor ranges. This is intentional tuning requiring scenario and
+balance comparison; it is not an equivalence claim. The isolated authoring batch
+passed 113 JavaScript cases across eight suites. Rust cases were not run there.
+
+The subsequent integration adds broad state to capture, whole-candidate preflight,
+restore and deterministic folding; measured Helm/Tactical/Science publications;
+and observer-local contact routing through the consuming System's permitted
+Console observations. Target permission is measured from each radar's actual
+`selects` filter, independently of identification. An unselectable or predicted
+return cannot acquire a target. The fitted Science/Tactical decision paths consume
+their permitted recorded tracks instead of world-query candidates.
+
+The renderer-independent library check passed after nesting the extended Helm
+query within Bevy's tuple limit:
+
+```text
+cargo check -p phoenix-simulation --lib --no-default-features
+```
+
+The successful check took 20.86 seconds. Its log is
+`.phoenix/increment14-broad-routing-check-retry.log`, SHA256
+`0e6859608fdcea43daf6f1e94aca60e56997f3abf645f5e0e5abca9e41f1df2a`.
+The tracked-source patch is `.phoenix/increment14-broad-routing-checked.patch`,
+SHA256 `c7c8c274f969f85c59b947eeb96b6d0d4955d05c05206affbf74a344e4f72abc`;
+the new contact-routing modules and matching owner dependency record are retained
+in `.phoenix/increment14-broad-routing-check-proof/`. This is a compile check,
+not passing Rust test or gameplay evidence. Later aggregate-routing/restore
+joins and the outgoing disclosure projection still require integrated checks.
+
+Measured radar client integration passed 425 cases across two suites:
+
+```text
+npx vitest run tests/client/sensor-tracks.test.js tests/client/console-state.test.js
+```
+
+These include empty-picture handling, targeting permission, recorded target facts,
+uncertainty and combination of already-permitted Helm/Tactical feeds. An empty
+track array never falls back to live entity snapshots. They do not establish
+browser/native acceptance. `acf4c87c` adds reviewed browser/native outbound
+filtering and explicit chart tags; its eight new native/Simulation tests remain
+unexecuted at this checkpoint.
+
+Automatic broad acquisition, retained uncertain tracks, permitted radar and
+command routing, and ordinary closed-tree sensing controllers are now integrated
+in source. Their complete-host validation remains open. Explicit sharing/fusion,
+unusual-reference work, focused aims, forecasts and complete terrain/content
+migration remain required. Complete-host continuation and opposed-order multiplayer tests,
 shipped scenario journeys, Workshop rehearsal, browser/native operation, station
 activity, baseline performance and final integration gates remain required.
 
 Increment 15 runtime has not started. No push is requested or claimed.
+
+### Merged instrument controls
+
+The merged measured-radar and canonical `scans[]` instrument-picker controls pass
+468 tests across five suites. The command was:
+
+```text
+npx vitest run tests/client/sensor-tracks.test.js tests/client/console-state.test.js tests/client/sensing-instruments.test.js tests/client/ph-scan-readout.test.js tests/client/sensors-actions.test.js
+```
+
+The retained log is `.phoenix/increment14-radar-focused-client-tests.log`.
+This covers pure client projection and controls, independently of native Rust
+execution and human browser acceptance. A previous sandboxed attempt could not
+write its temporary transform cache and ran zero tests; its authorised retry
+passed and is recorded separately.
+
+### Integrated measured-routing owner evidence
+
+The integrated renderer-independent Simulation command passed **59 cases**:
+
+```text
+cargo test -p phoenix-simulation --lib --no-default-features -- science::contact_routing::tests science::broad::tests science::focused::tests science::focused_ai::tests console_delivery::tests server_app::entity_removal::tests resources::recovery_server::tests resources::equipment_recovery_server::tests
+```
+
+The log is `.phoenix/increment14-measured-integrated-owner-tests.log`, SHA256
+`b8e69f4f0d22d9a2c73aa229ee6f9a78418fb0fca78e32540f1166a3386b9950`.
+Compilation took 4m49s; the 59 cases ran in 0.58s. They exercise actual paid
+broad/focused instruments, report substitution, Console permission, focus-only
+guess refusal, lifecycle projection, and ordinary Human/AI Recovery execution.
+Private physical associations remain machinery inputs; public target labels come
+from held observations. Lost contact does not erase admitted Recovery work.
+
+The earlier 29/30 run exposed a fixture expecting a second Tactical instrument
+without a Science feed. The corrected test first proves refusal, then explicitly
+grants that feed and proves receipt. That corrected case passes in the 59-case
+integrated command above. No production permission rule was relaxed.
+
+The separate Gameplay track/composition command passed **27 cases**:
+
+```text
+cargo test -p phoenix-sim-gameplay --lib -- science::tracks::tests science::sensing::tests
+```
+
+Its log is `.phoenix/increment14-reported-track-composition-tests.log`. Matching
+Simulation dependency evidence, the tracked-source patch and new routing modules
+are retained under `.phoenix/increment14-measured-owner-proof/`.
+
+After combining all already-permitted SensorRadar pictures, five client suites
+pass **469 cases** (`.phoenix/increment14-multiple-radar-client-tests-retry.log`).
+The new browser `@core` focused-instrument journey passes on a freshly rebuilt
+pure-JS client, using the repository's pinned Playwright runner and its own port:
+
+```text
+cd tests/smoke
+PHOENIX_SMOKE_PORT=3096 npx --no-install playwright test sensors-console.spec.js --project chromium --grep 'independent focused'
+```
+
+The browser log is `.phoenix/increment14-focused-browser-smoke.log`, SHA256
+`f0ea40be3f940f237f3b3142d12d7dd2e34ed39db364acaa0e467b5288ec38b9`.
+It proves instrument choice, exact-owner correlated actions, delegation and stable
+working view in the actual shipped screen. It does not exercise WASM host state,
+multiplayer, native monitor displays or the full increment 14 playable exit.

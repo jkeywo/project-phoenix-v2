@@ -31,9 +31,15 @@ pub fn scan_reading_snapshot_from_reading(
     ScanReadingSnapshot {
         observation: Some(phoenix_model::observation::ObservationMetadata::at(
             reading.taken_at_tick,
-            phoenix_model::observation::ObservationSubject::Entity {
-                uuid: reading.subject_uuid.clone(),
-            },
+            reading
+                .contact_id
+                .as_ref()
+                .map(
+                    |contact| phoenix_model::observation::ObservationSubject::Entity {
+                        uuid: contact.clone(),
+                    },
+                )
+                .unwrap_or_default(),
             phoenix_model::observation::ObservationProvenance {
                 kind: phoenix_model::observation::ObservationSource::Scan,
                 system: None,
@@ -44,7 +50,7 @@ pub fn scan_reading_snapshot_from_reading(
                 step: reading.condition_step,
             },
         )),
-        subject_uuid: reading.subject_uuid.clone(),
+        subject_uuid: reading.contact_id.clone().unwrap_or_default(),
         subject_name: reading.subject_name.clone(),
         band: reading.band.clone(),
         band_label: reading.band_label.clone(),

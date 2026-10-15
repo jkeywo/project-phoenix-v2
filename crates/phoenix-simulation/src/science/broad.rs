@@ -15,11 +15,27 @@ use std::collections::BTreeMap;
 pub struct BroadInstrumentProfile {
     pub profile: BroadConfig,
     pub radar: crate::radar_config::RadarConfig,
+    pub kind: String,
 }
 #[derive(Component, Clone, Debug)]
 pub struct BroadProfile(pub BTreeMap<SystemId, BroadInstrumentProfile>);
 #[derive(Component, Clone, Debug)]
 pub struct BroadTracks(pub BTreeMap<SystemId, BroadTrackState>);
+#[derive(Component, Clone, Debug)]
+pub struct SensingControls(pub phoenix_model::sensing::SensingControlBindings);
+
+pub fn combat_owner(controls: Option<&SensingControls>, fitted: bool) -> Option<SystemId> {
+    controls.map_or_else(
+        || (!fitted).then(crate::ship::system_registry::tactical_radar_system_id),
+        |controls| controls.0.combat_lock.clone(),
+    )
+}
+pub fn science_owner(controls: Option<&SensingControls>, fitted: bool) -> Option<SystemId> {
+    controls.map_or_else(
+        || (!fitted).then(crate::ship::system_registry::sensors_system_id),
+        |controls| controls.0.science_target.clone(),
+    )
+}
 impl BroadProfile {
     pub fn from_config(
         config: &crate::entities::config::EntityConfig,
@@ -38,6 +54,13 @@ impl BroadProfile {
                 Ok((
                     profile.system.clone(),
                     BroadInstrumentProfile {
+                        kind: config
+                            .ship_config
+                            .as_ref()
+                            .and_then(|ship| ship.system(&profile.system))
+                            .expect("validated actual instrument")
+                            .kind
+                            .clone(),
                         profile: profile.clone(),
                         radar: phoenix_sim_gameplay::science::sensing::broad_radar(
                             &profile.system,
@@ -65,6 +88,9 @@ pub(crate) fn install(
     config: &crate::entities::config::EntityConfig,
     commands: &mut EntityCommands,
 ) {
+    if let Some(profile) = &config.sensing {
+        commands.insert(SensingControls(profile.control.clone()));
+    }
     if let Some(profile) =
         BroadProfile::from_config(config).expect("accepted broad instrument composition")
     {
@@ -75,6 +101,7 @@ pub(crate) fn install(
 pub(crate) fn register(app: &mut App) {
     use crate::authoritative::{DeclareState, StateClass};
     app.declare_state::<BroadProfile>(StateClass::Derived, "independent-broad-scanner")
+        .declare_state::<SensingControls>(StateClass::Derived, "sensing-control-ownership")
         .declare_state::<BroadTracks>(StateClass::Folded, "independent-broad-scanner");
     app.add_systems(
         FixedUpdate,
@@ -89,6 +116,7 @@ pub(crate) fn tick(
     tick: Res<crate::sim_tick::SimTick>,
     paths: crate::regions::signal_path::RegionSignalQuery,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
     scene: Query<(
         &EntityUuid,
         &Transform,
@@ -113,6 +141,7 @@ pub(crate) fn tick(
         Option<&crate::ship::compartment_damage::ShipDamage>,
         &crate::ship_plugin::ShipConfigComponent,
         Option<&crate::modifiers::ShipModifiers>,
+        &crate::server_app::ShipSystemBlackboards,
     )>,
 ) {
     let dt = fixed.timestep().as_secs_f32();
@@ -132,6 +161,7 @@ pub(crate) fn tick(
         damage,
         ship_config,
         modifiers,
+        boards,
     ) in observers
     {
         for (system, instrument) in &profile.0 {
@@ -290,6 +320,24 @@ pub(crate) fn tick(
                                     .is_none()
                                     .then(|| faction.map(|faction| faction.0.to_string()))
                                     .flatten(),
+                                references: world_config.as_ref().map_or_else(Vec::new, |world| {
+                                    let view =
+                                        ship_config.0.observations_for_system(system, &boards.0);
+                                    let Some(crate::core::messages::SystemBlackboard::Viewscreen(
+                                        board,
+                                    )) = view
+                                        .get(&crate::ship::system_registry::viewscreen_system_id())
+                                    else {
+                                        return Vec::new();
+                                    };
+                                    routine_references(
+                                        name,
+                                        &world.entities,
+                                        board.scored_objectives.iter().flat_map(|objective| {
+                                            objective.snapshot.targets.iter().map(String::as_str)
+                                        }),
+                                    )
+                                }),
                             }),
                             classification: Some(classification.into()),
                             assessment: Some(TrackAssessment {
@@ -305,6 +353,21 @@ pub(crate) fn tick(
                                 }),
                             }),
                         });
+                    }
+                }
+            }
+            // Equal observed labels are not proof that two returns are the
+            // same authored actor. Keep both returns, withholding correlation.
+            let mut labels = BTreeMap::<String, usize>::new();
+            for measurement in &measurements {
+                if let Some(identity) = &measurement.identity {
+                    *labels.entry(identity.name.clone()).or_default() += 1;
+                }
+            }
+            for measurement in &mut measurements {
+                if let Some(identity) = &mut measurement.identity {
+                    if labels.get(&identity.name).copied().unwrap_or(0) != 1 {
+                        identity.references.clear();
                     }
                 }
             }
@@ -357,10 +420,32 @@ fn reported_measurement(
             .then(|| TrackIdentity {
                 name: sample.name.clone(),
                 faction: None,
+                references: Vec::new(),
             }),
         classification: None,
         assessment: None,
     })
+}
+fn routine_references<'a>(
+    observed_name: &str,
+    records: &[crate::world::config::WorldEntity],
+    requested: impl Iterator<Item = &'a str>,
+) -> Vec<String> {
+    let mut matching = records
+        .iter()
+        .filter(|record| record.display_text() == observed_name);
+    let Some(record) = matching.next().filter(|_| matching.next().is_none()) else {
+        return Vec::new();
+    };
+    let mut references: Vec<_> = requested
+        .filter(|reference| {
+            record.name.as_deref() == Some(*reference) || record.id.as_deref() == Some(*reference)
+        })
+        .map(str::to_owned)
+        .collect();
+    references.sort();
+    references.dedup();
+    references
 }
 fn physical_position(physics: Option<&ShipPhysics>, transform: &Transform) -> Vec3 {
     physics.map_or(transform.translation, |physics| {

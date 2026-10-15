@@ -19,7 +19,7 @@ fn rig(shared: bool, withhold: bool) -> (App, Entity, String) {
             .find(|console| console.id.0 == "engineering")
             .unwrap()
             .feeds
-            .clear();
+            .retain(|feed| feed.kind != phoenix_model::console::ConsoleObservationKind::SensorRadar);
     }
     if withhold {
         let ai = config

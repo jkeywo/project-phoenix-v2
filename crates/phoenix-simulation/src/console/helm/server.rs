@@ -137,7 +137,7 @@ pub(crate) fn receive_helm_coordination(
 ///
 /// None of this reaches the wire for NPCs: `broadcast_blackboard_updates`
 /// is `With<LocalShip>`-filtered, so NPC blackboards add zero bandwidth.
-fn publish_helm_blackboard(
+pub(crate) fn publish_helm_blackboard(
     ship_client_config: Res<crate::lobby::server::ShipClientConfigResource>,
     queue: Res<InterSystemQueue>,
     // Issue #874: the hostile weapon-arc overlay. `build_world_snapshot` runs
@@ -155,6 +155,8 @@ fn publish_helm_blackboard(
     // helm radar range. Same producer, so AC4 holds on the sectors themselves,
     // but a courier policy can react to a hostile whose arcs the human is never
     // shown. Deliberate for now; it is a #877 design question, not a defect.
+    tick: Option<Res<crate::sim_tick::SimTick>>,
+    fixed: Option<Res<Time<Fixed>>>,
     world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     mut ship_q: Query<
@@ -179,6 +181,10 @@ fn publish_helm_blackboard(
             (
                 Option<&crate::ship::helm::ThrustInput>,
                 Option<&crate::ship::helm::LateralThrustInput>,
+                (
+                    Option<&crate::science::broad::BroadProfile>,
+                    Option<&crate::science::broad::BroadTracks>,
+                ),
             ),
         ),
         With<crate::server_app::Ship>,
@@ -205,7 +211,7 @@ fn publish_helm_blackboard(
         is_local,
         faction,
         red_alert,
-        (thrust_input, lateral_input),
+        (thrust_input, lateral_input, (broad_profile, broad_state)),
     ) in ship_q.iter_mut()
     {
         // Per-entity component path. Each fallback mirrors the pre-#824
@@ -270,7 +276,7 @@ fn publish_helm_blackboard(
         // producer output `crate::ai::hostile_arc_exposure` reduces into the
         // helm AI's facts. Nothing here recomputes an arc.
         let at_red_alert = red_alert.map(|r| r.0).unwrap_or(false);
-        let hostile_weapon_arcs = if is_local && at_red_alert {
+        let hostile_weapon_arcs = if broad_profile.is_none() && is_local && at_red_alert {
             let self_faction = faction.map(|f| f.0);
             world_snapshot
                 .as_deref()
@@ -306,6 +312,9 @@ fn publish_helm_blackboard(
         };
 
         let bb = HelmBlackboard {
+            // The motion aggregate owns no instrument's measured geometry.
+            // Presence prevents the client from restoring legacy world truth.
+            tracks: broad_profile.map(|_| Vec::new()),
             yaw: physics.yaw,
             forward_speed: physics.forward_speed,
             x: physics.x,
@@ -349,6 +358,28 @@ fn publish_helm_blackboard(
         // Console-level blackboard: keyed by the Helm STATION id (issue #801).
         // The wire string is unchanged — the client still reads
         // `blackboards['helm']` — but the key names the console, not a system.
+        if let Some(profiles) = broad_profile {
+            for (owner, profile) in &profiles.0 {
+                if profile.kind != crate::ship::system_registry::HELM_RADAR_KIND {
+                    continue;
+                }
+                let tracks = broad_state
+                    .and_then(|states| states.0.get(owner))
+                    .zip(tick.as_ref())
+                    .zip(fixed.as_ref())
+                    .and_then(|((state, tick), fixed)| {
+                        state
+                            .projection(&profile.profile, tick.0, fixed.timestep().as_secs_f32())
+                            .ok()
+                    })
+                    .unwrap_or_default();
+                let mut instrument = bb.clone();
+                instrument.radar_range = profile.radar.range * radar_mult;
+                instrument.tracks = Some(tracks);
+                bbs.0
+                    .insert(owner.clone(), SystemBlackboard::Helm(instrument));
+            }
+        }
         bbs.0.insert(helm_station_key(), SystemBlackboard::Helm(bb));
 
         // Publish per-engine entries.

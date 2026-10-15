@@ -83,7 +83,7 @@ fn fixture() -> App {
         .iter()
         .map(|system| (system.id.0.clone(), system.kind.clone()))
         .collect();
-    app.insert_resource(crate::lobby::ShipClientConfigResource(client));
+    app.insert_resource(crate::lobby::server::ShipClientConfigResource(client));
     let hosts = crate::ship::components::ConsoleHosts(
         ship.consoles
             .iter()
@@ -849,7 +849,6 @@ fn actual_reconciliation_refreshes_only_a_removed_visible_chart_landmark_once() 
     use crate::server_app::{
         LastBroadcastEntityHealth, LastBroadcastEntityPositions, SimOutbox, TrackedEntities,
     };
-    use bevy::ecs::system::RunSystemOnce;
     let mut app = fixture();
     let old = app.world().resource::<WorldResource>().0.clone();
     let mut entities = std::collections::BTreeMap::new();
@@ -1171,7 +1170,7 @@ fn unfitted_legacy_hosts_preserve_existing_delivery_and_projection_does_not_writ
         .entity_mut(local)
         .remove::<crate::science::broad::SensingControls>();
     app.world_mut()
-        .resource_mut::<crate::lobby::ShipClientConfigResource>()
+        .resource_mut::<crate::lobby::server::ShipClientConfigResource>()
         .0
         .system_kinds
         .clear();
@@ -1197,7 +1196,7 @@ fn focused_only_instruments_and_accepted_sensor_topology_never_enable_raw_delive
     // The real focused owner alone activates privacy even in a reduced host
     // that does not install the accepted client configuration resource.
     app.world_mut()
-        .remove_resource::<crate::lobby::ShipClientConfigResource>();
+        .remove_resource::<crate::lobby::server::ShipClientConfigResource>();
     let raw = packet(world_message(&app));
     let projected = capture(&mut app).project(&raw);
     assert_no_hidden(phone(&projected, "science").unwrap());
@@ -1215,7 +1214,7 @@ fn focused_only_instruments_and_accepted_sensor_topology_never_enable_raw_delive
     accepted
         .system_kinds
         .insert("actual-focused".into(), "sensors".into());
-    app.insert_resource(crate::lobby::ShipClientConfigResource(accepted));
+    app.insert_resource(crate::lobby::server::ShipClientConfigResource(accepted));
     assert_no_hidden(phone(&capture(&mut app).project(&raw), "science").unwrap());
 }
 

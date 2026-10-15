@@ -902,6 +902,11 @@ pub(crate) fn publish_weapons_core_blackboard(
             Has<crate::server_app::LocalShip>,
             Option<&crate::ship::power::ShipPowerSystem>,
             Option<&crate::ship::power::PowerConfigResource>,
+            (
+                Option<&crate::ship_plugin::ShipConfigComponent>,
+                Option<&crate::science::broad::BroadTracks>,
+                Option<&crate::science::broad::SensingControls>,
+            ),
         ),
         With<crate::server_app::Ship>,
     >,
@@ -926,6 +931,7 @@ pub(crate) fn publish_weapons_core_blackboard(
         is_local,
         power,
         power_config,
+        (config, broad_tracks, sensing_controls),
     ) in ship_q.iter_mut()
     {
         let physics = ship_physics.copied().unwrap_or_default();
@@ -1000,6 +1006,18 @@ pub(crate) fn publish_weapons_core_blackboard(
         let target_uuid = target_uuid.filter(|_| target_live_pos.is_some());
 
         let target_name: Option<String> = target_uuid.as_deref().and_then(|uuid| {
+            if sensing_controls.is_some() {
+                let config = config?;
+                let tracks = broad_tracks?;
+                let owner = crate::science::broad::combat_owner(sensing_controls, true)?;
+                return crate::science::contact_routing::identity_for_source(
+                    &config.0,
+                    &entity_bbs,
+                    tracks,
+                    &owner,
+                    uuid,
+                );
+            }
             entity_name_q
                 .iter()
                 .find_map(|(u, n)| (u.0 == uuid).then(|| n.0.clone()))
@@ -1127,6 +1145,8 @@ pub(crate) fn publish_weapons_core_blackboard(
 /// [`RadarBlip::torpedo_armed`] for the full argument — do not add a third gate
 /// here on the assumption the arc overlay's gate applies.
 pub(crate) fn publish_tactical_radar_blackboard(
+    tick: Option<Res<crate::sim_tick::SimTick>>,
+    fixed: Option<Res<Time<Fixed>>>,
     mut ship_q: Query<
         (
             Option<&TacticalRadarSelection>,
@@ -1137,6 +1157,10 @@ pub(crate) fn publish_tactical_radar_blackboard(
             &mut crate::server_app::ShipSystemBlackboards,
             Has<crate::server_app::LocalShip>,
             Option<&crate::entities::spawner::EntityUuid>,
+            (
+                Option<&crate::science::broad::BroadProfile>,
+                Option<&crate::science::broad::BroadTracks>,
+            ),
         ),
         With<crate::server_app::Ship>,
     >,
@@ -1172,6 +1196,7 @@ pub(crate) fn publish_tactical_radar_blackboard(
         mut entity_bbs,
         is_local,
         ship_id,
+        (broad_profile, broad_state),
     ) in ship_q.iter_mut()
     {
         let physics = ship_physics.copied().unwrap_or_default();
@@ -1180,6 +1205,38 @@ pub(crate) fn publish_tactical_radar_blackboard(
             .map(|m| m.get(&ModifierSlot::RadarRange))
             .unwrap_or(1.0);
         let selected_target = weapons_target.and_then(|wt| wt.0.clone());
+        if let Some(profile) = broad_profile {
+            for (owner, instrument) in &profile.0 {
+                if instrument.kind != crate::ship::system_registry::TACTICAL_RADAR_KIND {
+                    continue;
+                }
+                let state = broad_state.and_then(|states| states.0.get(owner));
+                let tracks = state
+                    .zip(tick.as_ref())
+                    .zip(fixed.as_ref())
+                    .and_then(|((state, tick), fixed)| {
+                        state
+                            .projection(&instrument.profile, tick.0, fixed.timestep().as_secs_f32())
+                            .ok()
+                    })
+                    .unwrap_or_default();
+                let selected_target = selected_target
+                    .as_deref()
+                    .and_then(|source| state?.contact_for_source(source))
+                    .map(str::to_owned);
+                entity_bbs.0.insert(
+                    owner.clone(),
+                    SystemBlackboard::TacticalRadar(
+                        crate::core::messages::TacticalRadarBlackboard {
+                            tracks: Some(tracks),
+                            selected_target,
+                            ..Default::default()
+                        },
+                    ),
+                );
+            }
+            continue;
+        }
 
         let mut blips: Vec<RadarBlip> = Vec::new();
         let mut regions: Vec<RadarRegion> = Vec::new();
@@ -1306,6 +1363,7 @@ pub(crate) fn publish_tactical_radar_blackboard(
         entity_bbs.0.insert(
             crate::ship::system_registry::tactical_radar_system_id(),
             SystemBlackboard::TacticalRadar(crate::core::messages::TacticalRadarBlackboard {
+                tracks: None,
                 selected_target,
                 blips,
                 regions,

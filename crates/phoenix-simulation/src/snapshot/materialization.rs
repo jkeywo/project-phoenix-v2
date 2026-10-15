@@ -35,6 +35,9 @@ pub(super) fn preflight_missing_entities(
         .filter(|row| !present.iter().any(|(uuid, ..)| uuid == &row.uuid) && row.spawn.is_some())
         .collect();
     let mut staging = World::new();
+    if let Some(fixed) = world.get_resource::<Time<Fixed>>() {
+        staging.insert_resource(fixed.clone());
+    }
     // Only immutable authored shape/ownership is seeded. Saved stock and job
     // payloads remain the candidate state, never mutable staging simulation.
     for (uuid, live_entity, damage, teams, services) in &present {

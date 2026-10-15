@@ -40,7 +40,7 @@ pub struct ConsoleDeliveryProjection<'w, 's> {
     >,
     world: Option<Res<'w, WorldResource>>,
     runtime: Option<Res<'w, crate::world::server::WorldContentRuntime>>,
-    accepted: Option<Res<'w, crate::lobby::ShipClientConfigResource>>,
+    accepted: Option<Res<'w, crate::lobby::server::ShipClientConfigResource>>,
 }
 
 impl ConsoleDeliveryProjection<'_, '_> {

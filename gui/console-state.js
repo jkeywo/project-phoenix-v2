@@ -781,8 +781,14 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
   // Weapons blackboard's `target_uuid` (still published for reconnect resync).
   const tacRadarEntry = blackboardOfKind(state, 'TacticalRadar', systemIds);
   const tacRadarBb = tacRadarEntry?.data || {};
-  const targetUuid   = tacRadarBb.selected_target ?? bb.target_uuid ?? state.weaponsTarget ?? null;
-  const targetName   = bb.target_name   ?? state.weaponsTargetName   ?? null;
+  const trackMode = Array.isArray(tacRadarBb.tracks);
+  const radarRange = state.weaponsRadarRange ?? WEAPONS_RADAR_RANGE;
+  const observed = trackMode ? projectSensorTracks(tacRadarBb.tracks, {
+    x: state.shipX || 0, z: state.shipZ || 0, yaw: state.shipYaw || 0,
+    range: radarRange, selected: tacRadarBb.selected_target ?? null, tick: state.observationTick,
+  }) : null;
+  const targetUuid   = trackMode ? observed.target_uuid : tacRadarBb.selected_target ?? bb.target_uuid ?? state.weaponsTarget ?? null;
+  const targetName   = trackMode ? observed.target_name : bb.target_name ?? state.weaponsTargetName ?? null;
   const bankStates   = bb.banks         ?? state.weaponsBanks        ?? [];
   const tubes        = bb.tubes         ?? state.weaponsTubes        ?? [];
   const torpedoCount = bb.torpedo_count ?? state.weaponsTorpedoCount ?? 0;
@@ -790,7 +796,7 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
   const torpedoMagBb = torpedoMagEntry?.data || {};
   const torpedoMax   = torpedoMagBb.capacity ?? torpedoCount;
   const phaserMode   = bb.phaser_mode   ?? state.weaponsPhaserMode   ?? 'Auto';
-  const regions      = tacRadarBb.regions ?? [];
+  const regions      = trackMode ? [] : tacRadarBb.regions ?? [];
   const phaserArcs   = bb.phaser_arcs   ?? state.phaserArcConfigs   ?? [];
   const torpedoArcs  = bb.torpedo_arcs  ?? state.torpedoArcConfigs  ?? [];
   // The shared Tactical renderer passes these banks unchanged to both weapon
@@ -829,11 +835,11 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
   // append the same two markers on every build — unbounded growth in the client
   // store. `buildBlips()` already returns a fresh array, so only the two
   // borrowed sources need copying.
-  let blips = tacRadarBb.blips ? tacRadarBb.blips.slice() : [];
-  if (blips.length === 0) {
+  let blips = trackMode ? observed.blips : tacRadarBb.blips ? tacRadarBb.blips.slice() : [];
+  if (!trackMode && blips.length === 0) {
     blips = (state.weaponsBlips || []).slice();
   }
-  if (blips.length === 0) {
+  if (!trackMode && blips.length === 0) {
     blips = buildBlips(
       withObjectiveTargets(state.asteroids, state.objectives),
       state.shipX || 0,
@@ -858,7 +864,7 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
   // helper shared with Sensors. Deliberately not `state.sensorsTarget` or the
   // `SensorRadar` blackboard: a Weapons operator must never learn what
   // Sensors has independently selected.
-  const targetFacts = targetFactsFor(state, targetUuid, range);
+  const targetFacts = observed || targetFactsFor(state, targetUuid, range);
 
   // Add shared target markers (science target + navigation waypoint)
   const entities = state.asteroids || [];
@@ -868,7 +874,7 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
     sciTargetUuid, entities, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0, range,
     { rotate: true, edgeClamp: true, kind: 'science-target', color: [0.2, 0.4, 1.0], label: t('console.radar.science_target') }
   );
-  if (sciMarker) blips.push(sciMarker);
+  if (!trackMode && sciMarker) blips.push(sciMarker);
   const waypoint = buildWaypointBlip(
     state.navigationWaypoint || null, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0, range,
     { rotate: true, edgeClamp: true }
@@ -1234,7 +1240,19 @@ export function buildHelmConsoleState(state, systemIds = []) {
     const tags = (e.tags || e.entity_tags || []).map(t => String(t).toLowerCase());
     return !tags.includes('objective_marker');
   });
-  const blips = buildBlips(helmEntities, shipX, shipZ, shipYaw, range, { rotate: true });
+  const trackMode = Array.isArray(bb.tracks);
+  // Only already-permitted Console feeds can contribute another radar. Never
+  // associate two observer-local IDs by looking up a private entity snapshot.
+  const delivered = trackMode ? [
+    ...blackboardsOfKind(state, 'Helm').flatMap(entry =>
+      Array.isArray(entry.data.tracks) ? entry.data.tracks : []),
+    ...blackboardsOfKind(state, 'TacticalRadar').flatMap(entry =>
+      Array.isArray(entry.data.tracks) ? entry.data.tracks : []),
+  ] : [];
+  const observed = trackMode ? projectSensorTracks(delivered, {
+    x: shipX, z: shipZ, yaw: shipYaw, range, tick: state.observationTick,
+  }) : null;
+  const blips = trackMode ? observed.blips : buildBlips(helmEntities, shipX, shipZ, shipYaw, range, { rotate: true });
   const waypoint = buildWaypointBlip(
     state.navigationWaypoint || null, shipX, shipZ, shipYaw, range,
     { rotate: true, edgeClamp: true }
@@ -1252,18 +1270,19 @@ export function buildHelmConsoleState(state, systemIds = []) {
     tacRadarBb?.selected_target ?? tacBb?.target_uuid, entities, shipX, shipZ, shipYaw, range,
     { rotate: true, edgeClamp: true, kind: 'tactical-target', color: [1.0, 0.2, 0.2], label: t('console.radar.tactical_target') }
   );
-  if (tacMarker) blips.push(tacMarker);
+  if (!trackMode && tacMarker) blips.push(tacMarker);
   const sciTargetUuid = sensBb?.science_target_uuid || state.sensorsTarget || null;
   const sciMarker = buildTargetBlip(
     sciTargetUuid, entities, shipX, shipZ, shipYaw, range,
     { rotate: true, edgeClamp: true, kind: 'science-target', color: [0.2, 0.4, 1.0], label: t('console.radar.science_target') }
   );
-  if (sciMarker) blips.push(sciMarker);
+  if (!trackMode && sciMarker) blips.push(sciMarker);
 
   const engineBlackboards = blackboardsOfKind(state, 'HelmEngine', systemIds);
   const lateralBb = blackboardOfKind(state, 'HelmLateralThrust', systemIds)?.data;
 
   return {
+    ...(trackMode ? { track_mode: true, tracks: observed.tracks } : {}),
     range,
     ship_heading:            (((shipYaw * 180 / Math.PI % 360) + 360) % 360),
     speed:                   forwardSpeed,
@@ -1311,7 +1330,7 @@ export function buildHelmConsoleState(state, systemIds = []) {
     // Pass-through, deliberately: no projection, no re-derivation. Every arc
     // the helm draws is an arc the server produced.
     red_alert:           !!state.redAlert,
-    hostile_arcs:        state.redAlert ? (bb.hostile_weapon_arcs || []) : [],
+    hostile_arcs:        !trackMode && state.redAlert ? (bb.hostile_weapon_arcs || []) : [],
     // Authored per hull in `[helm_console] hostile_arc_color` (AGENTS.md #11 —
     // a gameplay-adjacent presentation value, so TOML rather than inline JS).
     // Passed straight through. `ClientSimState` owns the one client-side
@@ -1964,13 +1983,16 @@ function scansPayload(state, systemIds = []) {
  *           regions, complexity, impulseChargeProgress }} state
  */
 export function buildSensorsConsoleState(state, systemIds = []) {
-  const trackEntry = blackboardOfKind(state, 'SensorRadar', systemIds);
+  const trackEntries = blackboardsOfKind(state, 'SensorRadar', systemIds)
+    .filter(entry => Array.isArray(entry.data?.tracks));
+  const trackEntry = trackEntries.find(entry => entry.data.tracks.some(track =>
+    track?.contact_id === entry.data.selected_target)) ?? trackEntries[0];
   // Presence, including [], is authoritative. Never fill gaps from live entity snapshots.
   if (Array.isArray(trackEntry?.data?.tracks)) {
     const sensor = blackboardOfKind(state, 'Sensors', systemIds)?.data;
     const range = sensor?.radar_range ?? state.sensorsRadarRange ?? SENSORS_RADAR_RANGE;
     return {
-      ...projectSensorTracks(trackEntry.data.tracks, { x: state.shipX || 0, z: state.shipZ || 0,
+      ...projectSensorTracks(trackEntries.flatMap(entry => entry.data.tracks), { x: state.shipX || 0, z: state.shipZ || 0,
         yaw: state.shipYaw || 0, range, selected: trackEntry.data.selected_target ?? null,
         tick: observationTickFor(state, trackEntry.systemId) }),
       scan_range: range, ship_x: state.shipX || 0, ship_z: state.shipZ || 0,

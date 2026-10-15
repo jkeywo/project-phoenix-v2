@@ -470,6 +470,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("spatial-fields", fold_spatial_fields_namespace),
     ("recorded-scans", fold_recorded_scans_namespace),
     ("passive-samples", fold_passive_samples_namespace),
+    ("broad-tracks", fold_broad_tracks_namespace),
 ];
 
 /// The running accumulator after each named stage of the fold.
@@ -2577,13 +2578,15 @@ fn fold_recorded_scans_namespace(world: &World, acc: u64) -> u64 {
         "recorded-scans",
         |owner: &crate::science::ShipScanRecord| {
             let mut state = owner.save_state();
-            for work in state
-                .focused
-                .iter_mut()
-                .chain(state.unfinished.values_mut())
-            {
-                work.progress = f32::from_bits(canon_f32(work.progress));
-                work.work_secs = f32::from_bits(canon_f32(work.work_secs));
+            for state in state.instruments.values_mut() {
+                for work in state
+                    .focused
+                    .iter_mut()
+                    .chain(state.unfinished.values_mut())
+                {
+                    work.progress = f32::from_bits(canon_f32(work.progress));
+                    work.work_secs = f32::from_bits(canon_f32(work.work_secs));
+                }
             }
             Some(state)
         },
@@ -2597,12 +2600,44 @@ fn fold_passive_samples_namespace(world: &World, acc: u64) -> u64 {
         "passive-samples",
         |owner: &crate::science::passive::PassiveState| {
             let mut state = owner.clone();
-            for sample in &mut state.signals {
-                sample.bearing_rad = f32::from_bits(canon_f32(sample.bearing_rad));
-                sample.bearing_error_rad = f32::from_bits(canon_f32(sample.bearing_error_rad));
-                sample.strength = f32::from_bits(canon_f32(sample.strength));
+            for state in state.0.values_mut() {
+                for sample in &mut state.signals {
+                    sample.bearing_rad = f32::from_bits(canon_f32(sample.bearing_rad));
+                    sample.bearing_error_rad = f32::from_bits(canon_f32(sample.bearing_error_rad));
+                    sample.strength = f32::from_bits(canon_f32(sample.strength));
+                }
             }
             Some(state)
+        },
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+fn fold_broad_tracks_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "broad-tracks",
+        |owner: &crate::science::broad::BroadTracks| {
+            let mut owners = owner.0.clone();
+            let canonical = |value| f32::from_bits(canon_f32(value));
+            for state in owners.values_mut() {
+                if state.sample_elapsed == 0.0 {
+                    state.sample_elapsed = 0.0;
+                }
+                for track in state.tracks.values_mut() {
+                    track.position = track.position.map(canonical);
+                    track.velocity = track.velocity.map(|velocity| velocity.map(canonical));
+                    track.position_error = canonical(track.position_error);
+                    track.velocity_error = canonical(track.velocity_error);
+                    if track.supported_secs == 0.0 {
+                        track.supported_secs = 0.0;
+                    }
+                    if track.refresh_secs == 0.0 {
+                        track.refresh_secs = 0.0;
+                    }
+                }
+            }
+            Some(owners)
         },
         |acc, state| fold_serde(acc, &state),
     )

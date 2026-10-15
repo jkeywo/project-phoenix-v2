@@ -25,6 +25,7 @@ fn reported(profile: &BroadConfig, observed: u64) -> BroadMeasurement {
         identity: Some(TrackIdentity {
             name: "Reported label".into(),
             faction: None,
+            references: Vec::new(),
         }),
         classification: None,
         assessment: None,
@@ -134,6 +135,36 @@ fn return_to_physical_measurement_does_not_infer_motion_from_a_displaced_report(
     );
 }
 #[test]
+fn later_duplicate_observed_identity_retracts_automatic_reference_correlation() {
+    let p = profile();
+    let mut state = BroadTrackState::new(&p);
+    let mut first = sample("first-private-source", 10.0);
+    first.identity.as_mut().unwrap().references = vec!["mission-ref".into()];
+    for tick in 0..2 {
+        state.advance(&p, tick, 0.5, 1.0, &[first.clone()]).unwrap();
+    }
+    let first_id = state
+        .contact_for_source("first-private-source")
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        state.tracks[&first_id]
+            .identity
+            .as_ref()
+            .unwrap()
+            .references,
+        vec!["mission-ref"]
+    );
+    let duplicate = sample("second-private-source", 100.0);
+    state.advance(&p, 2, 0.5, 1.0, &[first, duplicate]).unwrap();
+    assert!(state.tracks[&first_id]
+        .identity
+        .as_ref()
+        .unwrap()
+        .references
+        .is_empty());
+}
+#[test]
 fn independent_instruments_cannot_alias_contact_ids_or_refresh_each_others_work() {
     let mut first = profile();
     first.system = SystemId("a:b".into());
@@ -190,6 +221,7 @@ fn sample(source: &str, x: f32) -> BroadMeasurement {
         identity: Some(TrackIdentity {
             name: "source-name".into(),
             faction: Some("source-faction".into()),
+            references: Vec::new(),
         }),
         classification: Some("ship".into()),
         assessment: Some(TrackAssessment {

@@ -7,6 +7,11 @@ sources:
   - crates/phoenix-sim-gameplay/src/science/tracks.rs
   - crates/phoenix-sim-gameplay/src/science/sensing.rs
   - crates/phoenix-simulation/src/science/broad.rs
+  - crates/phoenix-simulation/src/science/contact_routing.rs
+  - crates/phoenix-simulation/src/science/focused_ai.rs
+  - crates/phoenix-simulation/src/console_delivery.rs
+  - crates/phoenix-simulation/src/console_delivery_references.rs
+  - gui/components/ph-scan-readout.js
   - gui/workshop-sensing-panel.js
   - crates/phoenix-simulation/src/science/server.rs
   - crates/phoenix-simulation/src/science/focused.rs
@@ -52,6 +57,23 @@ facts. Public metadata names the instrument's contact handle, while the actual
 actor remains only a private current actuator route. Other radar instruments do
 not inherit the Sensors report, and explicit synthetic ghosts remain separate
 reported evidence without an actor route.
+
+`contact_routing` resolves a current selectable public return through the consuming
+System's permitted Console view before consulting its private actuator association.
+Helm, Tactical and Science publish each actual instrument's measured records;
+an empty measured picture does not fall back to world entities. Ordinary target
+selectors use those permitted records and the configured System's closed tree.
+Additional focused controllers skip the designated Science owner. Routine reference
+matching withholds ambiguous display labels, and selecting an anonymous return
+does not supply a name from the machinery's live entity lookup.
+
+The existing browser and native outbound sinks use `ConsoleDeliveryProjection`
+to preserve own-ship data and explicitly charted landmarks while withholding
+foreign live snapshots and unseen lifecycle events. Typed target references are
+projected through their producing Console's permitted instrument observations.
+The accepted client capability roster keeps this boundary active after loss of
+the local hull. The scan readout selects actual owners from `scans[]`; its controls
+always address that selected System.
 
 Workshop edits the whole sensing profile through accepted source/history, with
 separate add/edit/remove rows for each role. Explicit `sensing.control` bindings

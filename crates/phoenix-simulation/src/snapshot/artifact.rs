@@ -431,7 +431,8 @@ use super::*;
 /// and carries exact Duration mission age in this same unreleased batch.
 /// `50` adds actual portable equipment, physical refitting and intact recovery.
 /// `51` retains exact canonical logical combat/LOD timestamps across long runs.
-pub const SNAPSHOT_FORMAT: u32 = 51;
+/// `52` adds per-instrument sensing histories and spatial-field continuation.
+pub const SNAPSHOT_FORMAT: u32 = 52;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -521,7 +522,8 @@ pub const SNAPSHOT_FORMAT: u32 = 51;
 /// and removes process-local floating cancellation from mission clocks.
 /// "0.22" adds conserved equipment changes without resetting fixed-slot reserves.
 /// "0.23" moves historical combat recency onto the shared logical tick clock.
-pub const SIMULATION_RULES: &str = "0.23";
+/// "0.24" adds paid sensing continuation and causally anchored spatial fields.
+pub const SIMULATION_RULES: &str = "0.24";
 
 /// The authored data, computed rather than remembered.
 ///

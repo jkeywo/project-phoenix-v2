@@ -80,6 +80,7 @@ fn observe_source(
             &[BroadMeasurement {
                 source: uuid,
                 selectable: true,
+                observation: None,
                 position: [4.0, 0.0],
                 support: 1.0,
                 identity: None,
@@ -323,12 +324,10 @@ fn admitted_equipment_work_keeps_progress_and_cancel_after_its_public_handle_is_
             .outcome,
         Some(JobOutcome::Cancelled)
     );
-    assert!(
-        equipment(&world, source)
-            .equipment
-            .installed("fore-beam")
-            .is_some()
-    );
+    assert!(equipment(&world, source)
+        .equipment
+        .installed("fore-beam")
+        .is_some());
 }
 
 #[test]
@@ -376,18 +375,14 @@ fn actual_paid_tool_moves_one_surviving_assembly_and_its_condition_without_refil
             .unwrap();
         assert_eq!(job.outcome, Some(JobOutcome::Completed));
         assert_eq!(job.activity.progress, job.activity.work_secs);
-        assert!(
-            equipment(&world, source)
-                .equipment
-                .installed("fore-beam")
-                .is_none()
-        );
-        assert!(
-            !equipment(&world, source)
-                .equipment
-                .assemblies
-                .contains_key(&actual)
-        );
+        assert!(equipment(&world, source)
+            .equipment
+            .installed("fore-beam")
+            .is_none());
+        assert!(!equipment(&world, source)
+            .equipment
+            .assemblies
+            .contains_key(&actual));
         let recovered = &equipment(&world, actor).equipment.assemblies[&actual];
         assert!(
             matches!(&recovered.location,EquipmentLocation::Stored { locker } if locker == "support-equipment")
@@ -416,15 +411,13 @@ fn actual_paid_tool_moves_one_surviving_assembly_and_its_condition_without_refil
             equipment(&world, source),
             &sid("phaser-fore")
         ));
-        assert!(
-            !world
-                .get::<crate::console::weapons::PhaserCombatConfigResource>(source)
-                .unwrap()
-                .0
-                .banks
-                .iter()
-                .any(|bank| bank.id == "fore")
-        );
+        assert!(!world
+            .get::<crate::console::weapons::PhaserCombatConfigResource>(source)
+            .unwrap()
+            .0
+            .banks
+            .iter()
+            .any(|bank| bank.id == "fore"));
         let completed = equipment(&world, actor).clone();
         advance(&mut world, actor, 121, 10.0);
         assert_eq!(equipment(&world, actor), &completed);
@@ -563,55 +556,49 @@ fn unknown_active_full_and_repair_claimed_sources_refuse_before_any_payment_or_i
             ),
             before
         );
-        assert!(
-            world
-                .get::<ShipEquipmentRecovery>(actor)
-                .unwrap()
-                .job
-                .is_none()
-        );
+        assert!(world
+            .get::<ShipEquipmentRecovery>(actor)
+            .unwrap()
+            .job
+            .is_none());
     }
 }
 
 #[test]
 fn distinct_component_repair_can_coexist_with_extraction_but_operation_claim_pauses_it() {
     let (mut world, actor, source) = rig();
-    assert!(
-        world
-            .get_mut::<crate::console::repair::server::ShipRepairTeams>(source)
-            .unwrap()
-            .0
-            .dispatch_physical(
-                0,
-                sid("phaser-fore"),
-                Some(phoenix_model::damage::RepairWorkTarget::Component {
-                    system: sid("phaser-fore"),
-                    component: "intake".into()
-                }),
-                "Fore intake".into()
-            )
-    );
+    assert!(world
+        .get_mut::<crate::console::repair::server::ShipRepairTeams>(source)
+        .unwrap()
+        .0
+        .dispatch_physical(
+            0,
+            sid("phaser-fore"),
+            Some(phoenix_model::damage::RepairWorkTarget::Component {
+                system: sid("phaser-fore"),
+                component: "intake".into()
+            }),
+            "Fore intake".into()
+        ));
     start_beam(&mut world, actor, source).unwrap();
     advance(&mut world, actor, 1, 0.5);
     let before = world.get::<ShipEquipmentRecovery>(actor).unwrap().clone();
     assert!(before.job.as_ref().unwrap().activity.progress > 0.0);
     let paid = power(&world, actor);
     // Same actual team/job, now explicitly claiming the replaceable hardware.
-    assert!(
-        world
-            .get_mut::<crate::console::repair::server::ShipRepairTeams>(source)
-            .unwrap()
-            .0
-            .dispatch_physical(
-                0,
-                sid("phaser-fore"),
-                Some(phoenix_model::damage::RepairWorkTarget::Component {
-                    system: sid("phaser-fore"),
-                    component: "operation".into()
-                }),
-                "Fore hardware".into()
-            )
-    );
+    assert!(world
+        .get_mut::<crate::console::repair::server::ShipRepairTeams>(source)
+        .unwrap()
+        .0
+        .dispatch_physical(
+            0,
+            sid("phaser-fore"),
+            Some(phoenix_model::damage::RepairWorkTarget::Component {
+                system: sid("phaser-fore"),
+                component: "operation".into()
+            }),
+            "Fore hardware".into()
+        ));
     advance(&mut world, actor, 2, 1.0);
     let after = world
         .get::<ShipEquipmentRecovery>(actor)
@@ -663,12 +650,10 @@ fn lost_source_or_range_pauses_without_payment_and_recovery_cannot_ignore_a_chan
         .remove(&actual);
     advance(&mut world, actor, 3, 10.0);
     assert_eq!(power(&world, actor), paid);
-    assert!(
-        !equipment(&world, actor)
-            .equipment
-            .assemblies
-            .contains_key(&actual)
-    );
+    assert!(!equipment(&world, actor)
+        .equipment
+        .assemblies
+        .contains_key(&actual));
 }
 
 #[test]

@@ -8,6 +8,8 @@ use super::*;
 /// Keyed by the uuid string, never by an ECS handle — see the module docs.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EntityState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub broad: Option<std::collections::BTreeMap<SystemId, crate::science::broad::BroadTrackState>>,
     pub uuid: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fitting: Option<crate::resources::fitting_server::ShipFitting>,

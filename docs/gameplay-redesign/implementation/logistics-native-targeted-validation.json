@@ -1,0 +1,96 @@
+{
+  "increment": 12,
+  "sub_increment": "12.1 timed internal deliveries",
+  "recorded_date": "2026-10-15",
+  "status": "selected_pinned_native_cases_pass_remaining_increment_pending",
+  "runtime_revision": "06470cf1f531d65022ea0e930f7b9aeebf25e6b5",
+  "tested_revision": "271a80bc28f9b3166f428aee8a7e8f681378ef58",
+  "worktree": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/increment-12-validation",
+  "source_clean_during_run": true,
+  "compatibility": {
+    "protocol": 9,
+    "base_content_epoch": 3,
+    "snapshot": 47,
+    "rules": "0.19"
+  },
+  "configuration": {
+    "cargo_target_dir": "C:/Coding/project-phoenix-v2/target",
+    "default_features": false,
+    "features": [
+      "headless"
+    ],
+    "test_threads": 1,
+    "deterministic": true,
+    "seed": 156212
+  },
+  "source_provenance": {
+    "artifact": ".phoenix/increment-12-validation-library-provenance.json",
+    "sha256": "2c64e9fdc88cca1f246f6db383a4f30d51ad2f5a74f818032f51561fcbe293f6"
+  },
+  "command": "cargo test -p project-phoenix --no-default-features --features headless --test logistics_continuation -- --test-threads=1 --nocapture",
+  "result": {
+    "passed": 3,
+    "failed": 0,
+    "ignored": 0,
+    "filtered_out": 0,
+    "build_seconds": 223,
+    "test_seconds": 11.89,
+    "artifact": ".phoenix/increment-12-logistics-continuation.log",
+    "sha256": "9fb25ce6a6ebd443c829ac0e63695ec1ce206faca19994f59760c00a8b1912bd"
+  },
+  "cases": [
+    {
+      "name": "actual_delivery_json_restore_preserves_claims_work_and_every_round",
+      "evidence": [
+        "Real shipped Cruiser and ordinary installed Logistics AI, with no direct job, controller, observation or stock injection.",
+        "Positive committed crossing and nonzero cargo exactly matched by actual magazine receiving claims before complete JSON capture.",
+        "Fresh genuinely different bootstrap restores, then compares complete world digest and exact Logistics, Inventory, Weapons, Power and private AI frontier for at least720 next-tick steps.",
+        "Every step conserves exactly six rounds across actual hold, magazine, tubes, pending burst and transit owners; incoming claims add no rounds.",
+        "Completion bound derives unchanged authored handling work and route travel; actual two bounded batches complete and all six rounds reside locally with no cargo or receiving claims left."
+      ]
+    },
+    {
+      "name": "corrupt_incoming_or_missing_owner_refuses_before_any_live_write",
+      "evidence": [
+        "Positive complete restore first proves the intact claim frontier with changed clock and alert fields is accepted.",
+        "Four separate JSON-persisted, individually Stock-valid mutations: remove incoming claim, replace its owner name, reduce its positive amount, or remove saved Logistics owner.",
+        "Each refuses for incoming/Logistics owner mismatch before any restored, spawned or despawned entity; full before/after snapshot, whole-world digest and entity count remain exactly unchanged.",
+        "Original live round conservation remains six after every refusal."
+      ]
+    },
+    {
+      "name": "actual_deliveries_conserve_six_rounds_on_both_local_ship_peers",
+      "evidence": [
+        "Two actual authored fleet slots and genuinely different LocalShip projections, using the normal FleetRoster and MeshInbox/Outbox exchange.",
+        "Whole-world digest equality every peer step for at least720 steps; positive crossing and actual delivery completion on both hulls on both peers (four witnesses each).",
+        "Exact six-round ownership per hull every populated step, including loaded/pending rounds and in-transit batches.",
+        "Each hull completes both bounded batches with no duplicated receiving claims; full authored completion bound extends comparisons as needed without changing route, handling, timing or balance values."
+      ]
+    }
+  ],
+  "test_source": {
+    "path": "tests/logistics_continuation.rs",
+    "sha256": "01f1430061117fe8189d313891e6af56553b64eeda45f60fee08537a61265eea",
+    "independent_review": "PASS: weapon_workshop bounded read-only source review; no gates/edits.",
+    "fixtures": [
+      "tests/fixtures/physical-route-world.toml",
+      "tests/fixtures/physical-fleet-world.toml"
+    ],
+    "fixture_changes": false
+  },
+  "scope_limits": [
+    "This is exact Increment12.1 hardware/data: batch2 and six initial rounds. Later12.2 batch100/local parts/coolant tuning and12.3 production are separate source/acceptance boundaries.",
+    "Passing this targeted command does not establish the full repository, no-default Simulation suite or default renderer configuration gates.",
+    "Multiple full Apps emit the known Bevy global logger diagnostic. The same two no-default root-library warnings remain: unused native_file import and unused PreparedWorldIngest config/config_mut methods. They did not fail these assertions; no clippy claim."
+  ],
+  "pending": [
+    "Integrate and verify later local parts/coolant storage, production, port replenishment and supported acquisition slices.",
+    "Run required final integrated gates and applicable renderer/browser/native/Workshop journeys on matching artifacts.",
+    "Record human acceptance, supported crew station workload, balance and performance separately."
+  ],
+  "receipt_review": {
+    "status": "PASS",
+    "reviewer": "weapon_workshop",
+    "scope": "Independent read-only review of both documents: parsed JSON, recomputed raw log/provenance/test source hashes, both retained dependency-record hashes and all eight library source hashes. Counts, timing, exact manifest paths, source pin, warnings and later-slice/manual/full-gate boundaries match. No gates/edits."
+  }
+}

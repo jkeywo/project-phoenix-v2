@@ -381,3 +381,6 @@ mod spatial_fields;
 #[cfg(test)]
 mod sustained_beam_tests;
 mod weapon_targets;
+
+#[cfg(test)]
+mod blaster_spatial_tests;

@@ -3495,6 +3495,10 @@ pub enum ServerMessage {
         source_uuid: String,
         projectile_id: String,
         x: f32,
+        #[serde(default)]
+        y: f32,
+        #[serde(default)]
+        pitch: f32,
         z: f32,
         heading: f32,
         /// Visual scale hint for the client renderer (issue #638).

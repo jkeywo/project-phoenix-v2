@@ -696,6 +696,33 @@ pub(super) fn validate_physical_attacks(world: &World, row: &EntityState) -> Res
     {
         return Err("invalid launched torpedo damage modifier".into());
     }
+    for bank in &stored.blasters {
+        for bolt in &bank.in_flight {
+            if ![
+                bolt.x,
+                bolt.y,
+                bolt.z,
+                bolt.heading,
+                bolt.pitch,
+                bolt.speed,
+                bolt.lifespan_remaining,
+                bolt.collision_radius,
+                bolt.visual_scale,
+                bolt.shield_pierce,
+            ]
+            .into_iter()
+            .all(f32::is_finite)
+                || bolt.pitch.abs() > std::f32::consts::FRAC_PI_2
+                || bolt.speed <= 0.0
+                || bolt.lifespan_remaining <= 0.0
+                || bolt.collision_radius < 0.0
+                || bolt.damage < 0
+                || !(0.0..=1.0).contains(&bolt.shield_pierce)
+            {
+                return Err("invalid emitted blaster flight frontier".into());
+            }
+        }
+    }
     let mut beam_banks = std::collections::BTreeSet::new();
     for (bank, target, remaining, accumulator, cooldown, operation) in &stored.beams {
         if bank.is_empty()

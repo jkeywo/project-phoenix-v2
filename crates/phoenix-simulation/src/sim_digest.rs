@@ -1823,15 +1823,6 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
                         .map(|(id, slot)| (format!("beam:{id}"), slot.strike_damage_bonus)),
                 );
             }
-            if let Some(blasters) =
-                world.get::<crate::console::weapons::BlasterSystemResource>(entity)
-            {
-                attacks.extend(blasters.0.iter().flat_map(|bank| {
-                    bank.in_flight
-                        .iter()
-                        .map(|round| (format!("blaster:{}", round.id), round.damage as f32))
-                }));
-            }
             attacks.sort_by(|a, b| a.0.cmp(&b.0));
             acc = fold_serde(acc, &attacks);
         }
@@ -1908,21 +1899,45 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
         }
         if let Some(blasters) = world.get::<crate::console::weapons::BlasterSystemResource>(entity)
         {
-            let mut profiles: Vec<_> = blasters
+            // Actual vector order decides physical interception order. Interval-local
+            // previous_position is consumed by Damage before supported capture;
+            // next Physics reconstructs it from this causal current position.
+            let flights: Vec<_> = blasters
                 .0
                 .iter()
-                .flat_map(|bank| {
-                    bank.in_flight
-                        .iter()
-                        .map(|round| (round.id.clone(), round.impact))
+                .map(|bank| {
+                    (
+                        &bank.config.id,
+                        bank.in_flight
+                            .iter()
+                            .map(|round| {
+                                (
+                                    &round.id,
+                                    round.impact,
+                                    round.x,
+                                    round.y,
+                                    round.z,
+                                    round.heading,
+                                    round.pitch,
+                                    round.speed,
+                                    round.lifespan_remaining,
+                                    round.collision_radius,
+                                    round.damage,
+                                    round.shield_pierce,
+                                    round.visual_scale,
+                                    &round.source_uuid,
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                    )
                 })
                 .collect();
-            profiles.sort_by(|a, b| a.0.cmp(&b.0));
-            if !profiles.is_empty() {
-                acc = fold_str(acc, "blaster-physical-profiles");
-                acc = fold_serde(acc, &profiles);
+            if flights.iter().any(|(_, rounds)| !rounds.is_empty()) {
+                acc = fold_str(acc, "blaster-physical-flights");
+                acc = fold_serde(acc, &flights);
             }
         }
+
         acc = match alert {
             Some(active) => fold_u64(fold_u64(acc, 1), u64::from(active)),
             None => fold_u64(acc, 0),

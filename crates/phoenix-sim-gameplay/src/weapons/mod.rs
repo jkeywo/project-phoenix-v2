@@ -5,6 +5,7 @@ pub mod blaster;
 pub mod mount;
 pub mod operation;
 pub mod pattern;
+pub mod pdc;
 pub mod phaser;
 pub mod shield;
 pub mod torpedo;

@@ -1537,7 +1537,7 @@ fn spawn_torpedo_impact_burst(
 /// torpedo-burst-on-despawn convention).
 #[allow(clippy::too_many_arguments)]
 fn sync_blaster_pfx(
-    ships_q: Query<&BlasterSystemResource, With<crate::server_app::Ship>>,
+    ships_q: Query<&BlasterSystemResource>,
     bolt_pfx_assets: Res<BlasterBoltPfxAssets>,
     phaser_pfx_assets: Res<PhaserPfxAssets>,
     mut state: ResMut<BlasterPfxState>,
@@ -1546,12 +1546,12 @@ fn sync_blaster_pfx(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut body_q: Query<&mut Transform, With<BlasterBolt>>,
 ) {
-    let mut all_in_flight: Vec<(String, f32, f32, f32, bool)> = Vec::new();
+    let mut all_in_flight: Vec<(String, f32, f32, f32, f32, f32, bool)> = Vec::new();
     for blaster_sys in ships_q.iter() {
         for bank in &blaster_sys.0 {
-            let is_heavy = bank.config.visual_scale >= BLASTER_SPHERE_VISUAL_SCALE_THRESHOLD;
             for p in &bank.in_flight {
-                all_in_flight.push((p.id.clone(), p.x, p.z, p.heading, is_heavy));
+                let is_heavy = p.visual_scale >= BLASTER_SPHERE_VISUAL_SCALE_THRESHOLD;
+                all_in_flight.push((p.id.clone(), p.x, p.y, p.z, p.heading, p.pitch, is_heavy));
             }
         }
     }
@@ -1577,13 +1577,15 @@ fn sync_blaster_pfx(
     }
 
     for uuid in to_spawn {
-        if let Some((_, x, z, heading, is_heavy)) = all_in_flight.iter().find(|(u, ..)| u == &uuid)
+        if let Some((_, x, y, z, heading, pitch, is_heavy)) =
+            all_in_flight.iter().find(|(u, ..)| u == &uuid)
         {
-            let pos = Vec3::new(*x, 0.1, *z);
+            let pos = Vec3::new(*x, *y + 0.1, *z);
             spawn_blaster_bolt(
                 uuid,
                 pos,
                 *heading,
+                *pitch,
                 *is_heavy,
                 &bolt_pfx_assets,
                 &mut state,
@@ -1594,12 +1596,13 @@ fn sync_blaster_pfx(
         }
     }
 
-    for (uuid, x, z, heading, _) in &all_in_flight {
-        let pos = Vec3::new(*x, 0.1, *z);
+    for (uuid, x, y, z, heading, pitch, _) in &all_in_flight {
+        let pos = Vec3::new(*x, *y + 0.1, *z);
         update_blaster_bolt(
             uuid,
             pos,
             *heading,
+            *pitch,
             &mut state,
             &mut commands,
             &mut meshes,
@@ -1615,6 +1618,14 @@ fn blaster_bolt_forward(heading: f32) -> Vec3 {
     Vec3::new(heading.sin(), 0.0, -heading.cos())
 }
 
+fn spatial_bolt_forward(heading: f32, pitch: f32) -> Vec3 {
+    Vec3::new(
+        heading.sin() * pitch.cos(),
+        pitch.sin(),
+        -heading.cos() * pitch.cos(),
+    )
+}
+
 /// Spawns the crossed-quad bolt body for a newly-appeared projectile, plus
 /// its muzzle flash. Called once per projectile, the tick it first shows up
 /// in `in_flight` — which is also the correct moment for the muzzle flash
@@ -1625,6 +1636,7 @@ fn spawn_blaster_bolt(
     uuid: String,
     pos: Vec3,
     heading: f32,
+    pitch: f32,
     is_heavy: bool,
     pfx_assets: &BlasterBoltPfxAssets,
     state: &mut BlasterPfxState,
@@ -1647,7 +1659,7 @@ fn spawn_blaster_bolt(
             BLASTER_BOLT_COLOR,
         )
     };
-    let forward = blaster_bolt_forward(heading);
+    let forward = spatial_bolt_forward(heading, pitch);
     let tail = pos - forward * half_len;
     let front = pos + forward * half_len;
     let cross = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
@@ -1745,6 +1757,7 @@ fn update_blaster_bolt(
     uuid: &str,
     pos: Vec3,
     heading: f32,
+    pitch: f32,
     state: &mut BlasterPfxState,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -1775,7 +1788,7 @@ fn update_blaster_bolt(
     }
     entities.last_pos = pos;
 
-    let forward = blaster_bolt_forward(heading);
+    let forward = spatial_bolt_forward(heading, pitch);
     let tail = pos - forward * entities.half_len;
     let front = pos + forward * entities.half_len;
     let glow_width = entities.glow_width;

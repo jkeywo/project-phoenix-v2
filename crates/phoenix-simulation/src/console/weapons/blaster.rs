@@ -822,6 +822,8 @@ pub(crate) fn tick_blaster_system(
                         source_uuid: source_uuid.clone(),
                         projectile_id: ev.projectile_id.clone(),
                         x: ev.x,
+                        y: ev.y,
+                        pitch: ev.pitch,
                         z: ev.z,
                         heading: ev.heading,
                         visual_scale,

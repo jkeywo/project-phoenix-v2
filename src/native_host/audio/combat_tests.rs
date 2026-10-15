@@ -163,6 +163,8 @@ fn real_combat_producers_reach_native_samples_and_muted_live_equivalents() {
             source_uuid: "public-combat-source".into(),
             projectile_id: "shot".into(),
             x: 30.0,
+            y: 0.0,
+            pitch: 0.0,
             z: 0.0,
             heading: 0.0,
             visual_scale: 1.0,

@@ -1048,6 +1048,8 @@ fn visual_events_keep_only_source_labelled_own_launches_without_hidden_targets()
         source_uuid: "own".into(),
         projectile_id: "own-bolt".into(),
         x: 1.0,
+        y: 0.0,
+        pitch: 0.0,
         z: 2.0,
         heading: 0.3,
         visual_scale: 1.0,

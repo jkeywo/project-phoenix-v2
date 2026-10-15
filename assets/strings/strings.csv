@@ -6055,3 +6055,14 @@ comms.request.reported_at,Generic Comms requests,Reported at tick {tick},Bericht
 comms.request.declined_at,Generic Comms requests,Declined at tick {tick},Abgelehnt bei Takt {tick},Declined at tick {tick},machine
 comms.request.available_at,Generic Comms requests,Comms available at tick {tick},Comms verfügbar bei Takt {tick},Comms available at tick {tick},machine
 comms.request.unavailable_at,Generic Comms requests,Comms unavailable at tick {tick},Comms nicht verfügbar bei Takt {tick},Comms unavailable at tick {tick},machine
+settings.debug.scenario.situations,Scenario activity author inspection,Physical activities,Physical activities,Physical activities,source
+settings.debug.scenario.activity.definition,Scenario activity author inspection,Definition,Definition,Definition,source
+settings.debug.scenario.activity.request,Scenario activity author inspection,Bound request,Bound request,Bound request,source
+settings.debug.scenario.activity.armed,Scenario activity author inspection,Armed tick,Armed tick,Armed tick,source
+settings.debug.scenario.activity.job,Scenario activity author inspection,Accepted job,Accepted job,Accepted job,source
+settings.debug.scenario.activity.accepted,Scenario activity author inspection,Accepted tick,Accepted tick,Accepted tick,source
+settings.debug.scenario.activity.achieved,Scenario activity author inspection,Achieved tick,Achieved tick,Achieved tick,source
+settings.debug.scenario.activity.settled,Scenario activity author inspection,Settled tick,Settled tick,Settled tick,source
+settings.debug.scenario.activity.outcome,Scenario activity author inspection,Terminal evidence,Terminal evidence,Terminal evidence,source
+settings.debug.scenario.activity.state,Scenario activity author inspection,Awaiting state,Awaiting state,Awaiting state,source
+settings.debug.scenario.activity.pending,Scenario activity author inspection,Pending {kind} at tick {tick},Pending {kind} at tick {tick},Pending {kind} at tick {tick},source

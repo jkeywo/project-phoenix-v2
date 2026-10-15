@@ -48,9 +48,9 @@ pub use payload::{
     InspectorEntity, InspectorHullEntry, InspectorPlayer, InspectorShieldFacing, IntContribution,
     IntModifierEntry, LatencySummary, LatencySurface, ModifierDebugPayload, ModifierFlagEntry,
     PredicateValue, ScenarioCommitment, ScenarioDeadline, ScenarioDelayedAction,
-    ScenarioDossierEntry, ScenarioFlag, ScenarioObjective, ScenarioStatePayload, ScenarioTrigger,
-    ShipDoctrine, StationActivityBucket, StationActivityEntry, StationActivityPayload, TriggerFire,
-    DEBUG_SCHEMA_VERSION,
+    ScenarioDossierEntry, ScenarioFlag, ScenarioObjective, ScenarioSituation, ScenarioStatePayload,
+    ScenarioTrigger, ShipDoctrine, StationActivityBucket, StationActivityEntry,
+    StationActivityPayload, TriggerFire, DEBUG_SCHEMA_VERSION,
 };
 pub use scenario::{DebugScenarioStateEnabled, ScenarioStateCapture, TriggerFireRecorder};
 pub use station_activity::{

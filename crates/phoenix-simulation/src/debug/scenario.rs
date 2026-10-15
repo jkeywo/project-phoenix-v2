@@ -40,8 +40,8 @@ use bevy::prelude::*;
 use crate::bounded_history::BoundedRing;
 use crate::debug::payload::{
     PredicateValue, ScenarioCommitment, ScenarioDeadline, ScenarioDelayedAction,
-    ScenarioDossierEntry, ScenarioFlag, ScenarioObjective, ScenarioStatePayload, ScenarioTrigger,
-    TriggerFire,
+    ScenarioDossierEntry, ScenarioFlag, ScenarioObjective, ScenarioSituation, ScenarioStatePayload,
+    ScenarioTrigger, TriggerFire,
 };
 use crate::objectives::ObjectiveManager;
 use crate::world::config::{TriggerAction, TriggerCondition, WorldConfig};
@@ -353,6 +353,27 @@ pub fn collect_scenario_state_with_fires(
     recorder: &TriggerFireRecorder,
 ) -> ScenarioStatePayload {
     let mut payload = ScenarioStatePayload::empty();
+    // BTreeMap identity order and original retained fact order. This does not
+    // acknowledge evidence, step a job, or run a Scenario transition.
+    payload.situations = runtime
+        .situations
+        .instances
+        .iter()
+        .map(|(id, lifecycle)| ScenarioSituation {
+            id: id.clone(),
+            lifecycle: lifecycle.clone(),
+            pending: runtime
+                .pending_world_events
+                .iter()
+                .filter_map(|event| match event {
+                    crate::world::content::WorldEvent::Activity(fact) if &fact.instance == id => {
+                        Some(fact.clone())
+                    }
+                    _ => None,
+                })
+                .collect(),
+        })
+        .collect();
 
     // Flags — sorted by name for a deterministic table.
     let mut flags: Vec<ScenarioFlag> = runtime
@@ -722,3 +743,7 @@ pub fn render_predicate(pred: &Predicate) -> String {
 #[cfg(test)]
 #[path = "scenario_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "scenario_activity_tests.rs"]
+mod activity_tests;

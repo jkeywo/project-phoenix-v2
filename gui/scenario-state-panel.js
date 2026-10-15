@@ -51,6 +51,7 @@ function isEmptyPayload(payload) {
     payload.deadlines,
     payload.commitments,
     payload.dossier,
+    payload.situations,
   ].every((list) => !Array.isArray(list) || list.length === 0);
 }
 
@@ -268,6 +269,41 @@ export function buildScenarioStatePanel(payload, opts = {}) {
     root.appendChild(sec);
   }
 
+  // Same canonical lifecycle; pending facts remain visibly distinct from
+  // acknowledged achievement/settlement and never imply a completed job.
+  {
+    const sec = section(doc, 'situations', 'settings.debug.scenario.situations');
+    const situations = Array.isArray(payload.situations) ? payload.situations : [];
+    if (situations.length === 0) sec.appendChild(noneRow(doc));
+    for (const {id, lifecycle: state, pending = []} of situations) {
+      if (!state || typeof state !== 'object') continue;
+      const row = el(doc, 'div', 'ss-situation');
+      row.dataset.id = String(id);
+      row.appendChild(el(doc, 'strong', 'ss-situation-id', String(id)));
+      const fields = [
+        ['definition', state.definition], ['request', JSON.stringify(state.request)],
+        ['armed', state.armed_tick], ['job', state.accepted?.job],
+        ['accepted', state.accepted_tick], ['achieved', state.achieved?.tick],
+        ['settled', state.settled?.tick], ['outcome', state.settled ? JSON.stringify(state.settled.outcome) : null],
+        ['state', state.state],
+      ];
+      for (const [key, value] of fields) {
+        const field = el(doc, 'div', `ss-situation-${key}`);
+        field.appendChild(el(doc, 'span', '', t(`settings.debug.scenario.activity.${key}`) + ': '));
+        field.appendChild(el(doc, 'span', '', value == null ? t('settings.debug.scenario.none') : String(value)));
+        row.appendChild(field);
+      }
+      for (const fact of Array.isArray(pending) ? pending : []) {
+        row.appendChild(el(doc, 'div', 'ss-situation-pending', t('settings.debug.scenario.activity.pending',
+          {tick:fact.tick, kind:fact.outcome?.kind})));
+      }
+      for (const [stateId, result] of Object.entries(state.activations || {})) {
+        row.appendChild(el(doc, 'div', 'ss-situation-activation', `${stateId}: ${result}`));
+      }
+      sec.appendChild(row);
+    }
+    root.appendChild(sec);
+  }
   return root;
 }
 

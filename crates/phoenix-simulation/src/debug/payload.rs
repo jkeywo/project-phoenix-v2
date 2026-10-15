@@ -474,6 +474,17 @@ pub struct ScenarioStatePayload {
     pub commitments: Vec<ScenarioCommitment>,
     /// The comms dossier, oldest finding first.
     pub dossier: Vec<ScenarioDossierEntry>,
+    /// Bound physical activity instances and retained, not-yet-acknowledged
+    /// facts. Author-only inspection of the existing World owners.
+    #[serde(default)]
+    pub situations: Vec<ScenarioSituation>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScenarioSituation {
+    pub id: String,
+    pub lifecycle: phoenix_sim_world::world::activities::SituationInstance,
+    pub pending: Vec<phoenix_model::activity::ActivityFact>,
 }
 
 impl Default for ScenarioStatePayload {
@@ -491,6 +502,7 @@ impl Default for ScenarioStatePayload {
             deadlines: Vec::new(),
             commitments: Vec::new(),
             dossier: Vec::new(),
+            situations: Vec::new(),
         }
     }
 }

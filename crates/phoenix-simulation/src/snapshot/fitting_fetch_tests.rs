@@ -60,7 +60,7 @@ fn fixture() -> (World, Entity, EntityState) {
     assert!(teams.0.visit_refit_compartment(job, "weapons"));
     teams.0.tick_refits(0.125, &BTreeSet::new());
     assert!(
-        matches!(teams.0.refit_location(job), Some(crate::ship::interior::TeamLocation::Crossing { from, .. }) if from == "support")
+        matches!(teams.0.refit_location(job), Some(phoenix_model::interior::TeamLocation::Crossing { from, .. }) if from == "support")
     );
     state.work.insert(
         "fore-beam".into(),

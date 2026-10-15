@@ -741,10 +741,10 @@ fn advance(world: &mut World, entity: Entity, now: u64, dt: f32) {
                     .0
                     .refit_location(work.job)
                     .and_then(|location| match location {
-                        crate::ship::interior::TeamLocation::Compartment { compartment } => {
+                        phoenix_model::interior::TeamLocation::Compartment { compartment } => {
                             Some(compartment.clone())
                         }
-                        crate::ship::interior::TeamLocation::Crossing { from, .. } => {
+                        phoenix_model::interior::TeamLocation::Crossing { from, .. } => {
                             Some(from.clone())
                         }
                         _ => None,

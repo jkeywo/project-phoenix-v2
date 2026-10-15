@@ -223,7 +223,7 @@ fn stored_salvage_is_fetched_by_actual_team_then_delivered_before_any_hardware_w
             assert_eq!(work.job, job);
             let crossing = matches!(
                 teams.0.refit_location(job),
-                Some(crate::ship::interior::TeamLocation::Crossing { .. })
+                Some(phoenix_model::interior::TeamLocation::Crossing { .. })
             );
             saw_fetch_crossing |= work.stage == RefitStage::Fetching && crossing;
             saw_delivery_crossing |= work.stage == RefitStage::Delivering && crossing;
@@ -280,7 +280,7 @@ fn cancellation_during_delivery_keeps_item_with_same_team_until_actual_storage_r
                     .unwrap()
                     .0
                     .refit_location(work.job),
-                Some(crate::ship::interior::TeamLocation::Crossing { .. })
+                Some(phoenix_model::interior::TeamLocation::Crossing { .. })
             )
         {
             break;

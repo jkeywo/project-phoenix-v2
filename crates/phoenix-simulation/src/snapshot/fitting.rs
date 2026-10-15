@@ -386,8 +386,8 @@ fn validate_state(
             .and_then(|rows| rows.get(team))
             .ok_or("refit carrier has no physical cursor")?;
         let actual_room = match &cursor.location {
-            crate::ship::interior::TeamLocation::Compartment { compartment } => compartment,
-            crate::ship::interior::TeamLocation::Crossing { from, .. } => from,
+            phoenix_model::interior::TeamLocation::Compartment { compartment } => compartment,
+            phoenix_model::interior::TeamLocation::Crossing { from, .. } => from,
             _ => return Err("refit carrier has no internal physical location".into()),
         };
         let location_valid = match &item.location {

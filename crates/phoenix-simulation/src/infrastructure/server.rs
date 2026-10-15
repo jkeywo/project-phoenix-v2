@@ -1,6 +1,6 @@
 //! Bevy adapter for infrastructure condition + capacity (issue #1025).
 //!
-//! One component, one fixed-tick system, and a mirror into the world flag
+//! One canonical component, its fixed-tick owner, and a mirror into the world flag
 //! store. The arithmetic and every threshold edge live in the pure sibling
 //! [`super::condition`]; nothing here decides anything a unit test cannot
 //! already reach.
@@ -16,6 +16,10 @@
 //! `pending_*` field on `WorldContentRuntime`) and drained here rather than
 //! written where they are authored. `#1027`'s field-repair operation feeds the
 //! same queue, one slice of progress per tick.
+//! Finite endpoint transfers settle after that drain through
+//! [`stage_resource_endpoints`], validating both sides before committing the
+//! same canonical stocks and mirroring their flags and counters. They do not
+//! defer capacity writes behind immediate magazine writes.
 //!
 //! # Where the flags become observable
 //!
@@ -68,6 +72,11 @@ impl Plugin for InfrastructurePlugin {
                 StateClass::ClearedAtFold,
                 "digest-exclusion-classes",
             )
+            .init_resource::<EffectQueue<crate::resources::server::ResourceTransferReceipt>>()
+            .declare_state::<EffectQueue<crate::resources::server::ResourceTransferReceipt>>(
+                StateClass::ClearedAtFold,
+                "digest-exclusion-classes",
+            )
             .declare_state::<crate::resources::server::ResourceServices>(
                 StateClass::Derived,
                 "infrastructure-condition-state",
@@ -88,7 +97,8 @@ impl Plugin for InfrastructurePlugin {
                 .in_set(crate::sim_sets::SimSet::Modifiers)
                 .after(crate::umbilical::tick_umbilical)
                 .after(crate::console::repair::external_server::apply_external_repair)
-                .before(tick_infrastructure_condition),
+                .after(tick_infrastructure_condition)
+                .before(crate::resources::logistics_server::tick),
         );
         app.add_systems(
             FixedUpdate,
@@ -97,6 +107,51 @@ impl Plugin for InfrastructurePlugin {
                 .in_set(crate::sim_sets::SimSet::Modifiers),
         );
     }
+}
+
+type StagedResourceEndpoints = (
+    Option<InfrastructureCondition>,
+    Option<crate::console::weapons::TorpedoSystemResource>,
+    Vec<FlagChange>,
+);
+
+/// Stage one resource owner's endpoint replacements without publishing either
+/// side of a cross-entity transfer. The caller validates all affected owners
+/// before committing these candidates and mirroring the returned flag edges.
+pub(crate) fn stage_resource_endpoints(
+    inventory: Option<&InfrastructureCondition>,
+    torpedoes: Option<&crate::console::weapons::TorpedoSystemResource>,
+    updates: &std::collections::BTreeMap<
+        crate::resources::service::ResourceEndpoint,
+        crate::resources::Stock,
+    >,
+) -> Result<StagedResourceEndpoints, String> {
+    use crate::resources::service::ResourceEndpoint;
+    let mut next_inventory = inventory.cloned();
+    let mut next_torpedoes = torpedoes.cloned();
+    let mut flags = Vec::new();
+    for (endpoint, stock) in updates {
+        stock.validate()?;
+        match endpoint {
+            ResourceEndpoint::Capacity { id } => flags.extend(
+                next_inventory
+                    .as_mut()
+                    .ok_or("missing capacity owner")?
+                    .0
+                    .replace_capacity_stock(id, stock.clone())?,
+            ),
+            ResourceEndpoint::TorpedoMagazine {} => {
+                let next = &mut next_torpedoes.as_mut().ok_or("missing magazine owner")?.0;
+                let held = next.magazine.headroom() - next.magazine_headroom();
+                if stock.ceiling != next.magazine.ceiling || stock.headroom() < held {
+                    return Err("magazine replacement exceeds actual free room".into());
+                }
+                next.magazine = stock.clone();
+                next.validate_magazine()?;
+            }
+        }
+    }
+    Ok((next_inventory, next_torpedoes, flags))
 }
 
 /// Advance every infrastructure track by one logical tick.

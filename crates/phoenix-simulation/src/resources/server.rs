@@ -3,11 +3,31 @@ use bevy::prelude::*;
 use std::collections::BTreeMap;
 
 use crate::console::weapons::torpedo::TorpedoSystemResource;
+use crate::core::messages::SystemId;
 use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::EntityUuid;
-use crate::infrastructure::{CapacityAdjustment, InfrastructureCondition};
+use crate::infrastructure::InfrastructureCondition;
+use crate::resources::logistics_server::{CompiledShipLogistics, ShipLogistics};
 use crate::resources::service::ResourceEndpoint;
 use crate::resources::{plan_transfer, Stock};
+
+/// Correlates a producer's current fixed-tick request with its settled outcome.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TransferReceiptKey {
+    pub system: SystemId,
+    pub tick: u64,
+}
+
+/// Ephemeral settlement feedback, consumed before the same tick's fold.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResourceTransferReceipt {
+    pub operator: String,
+    pub key: TransferReceiptKey,
+    pub source: String,
+    pub destination: String,
+    pub requested: i64,
+    pub moved: i64,
+}
 
 /// Authored, rederived bindings. They never carry a second inventory.
 #[derive(Component, Clone, Debug, Default)]
@@ -22,6 +42,35 @@ pub struct ResourceTransfer {
     pub destination: String,
     pub destination_endpoint: ResourceEndpoint,
     pub amount: i64,
+    pub receipt: Option<TransferReceiptKey>,
+}
+
+fn source_available(
+    stock: &Stock,
+    endpoint: &ResourceEndpoint,
+    profile: Option<&CompiledShipLogistics>,
+    state: Option<&ShipLogistics>,
+) -> i64 {
+    let main = profile.and_then(|profile| {
+        profile.0.config().stores.iter().find(|store| {
+            store.endpoint == *endpoint && store.role == phoenix_model::logistics::StoreRole::Main
+        })
+    });
+    let Some(store) = main else {
+        return stock.available();
+    };
+    let Some(floor) = state
+        .and_then(|state| state.0.floors.get(&store.id))
+        .copied()
+    else {
+        return 0;
+    };
+    if floor < 0 || floor > stock.ceiling {
+        return 0;
+    }
+    stock
+        .available()
+        .min(stock.level.saturating_sub(floor).max(0))
 }
 
 /// Snapshot the relevant stock for one transaction. Tube-held space stays occupied.
@@ -41,22 +90,22 @@ pub fn endpoint_stock(
     }
 }
 
-/// Reserve and commit a whole transfer against the current transaction view.
-/// No canonical quantity is changed until both endpoints are available.
+/// Settle after ordinary capacity effects, committing both actual owners before
+/// issuing a receipt. No intermediate quantity survives this transaction.
+#[allow(clippy::type_complexity)]
 pub fn tick_resource_transfers(
     mut transfers: ResMut<EffectQueue<ResourceTransfer>>,
-    mut capacities: ResMut<EffectQueue<CapacityAdjustment>>,
+    mut receipts: ResMut<EffectQueue<ResourceTransferReceipt>>,
+    mut runtime: ResMut<crate::world::server::WorldContentRuntime>,
     mut endpoints: Query<(
         &EntityUuid,
-        Option<&InfrastructureCondition>,
+        Option<&mut InfrastructureCondition>,
         Option<&mut TorpedoSystemResource>,
-        Option<&crate::resources::logistics_server::CompiledShipLogistics>,
+        Option<&CompiledShipLogistics>,
+        Option<&ShipLogistics>,
     )>,
 ) {
     let mut requests = std::mem::take(&mut transfers.0);
-    if requests.is_empty() {
-        return;
-    }
     requests.sort_by(|a, b| {
         (
             &a.operator,
@@ -64,6 +113,8 @@ pub fn tick_resource_transfers(
             &a.source_endpoint,
             &a.destination,
             &a.destination_endpoint,
+            &a.receipt,
+            a.amount,
         )
             .cmp(&(
                 &b.operator,
@@ -71,143 +122,117 @@ pub fn tick_resource_transfers(
                 &b.source_endpoint,
                 &b.destination,
                 &b.destination_endpoint,
+                &b.receipt,
+                b.amount,
             ))
     });
-    let mut projected: BTreeMap<(String, ResourceEndpoint), (Stock, i64)> = BTreeMap::new();
-    // Earlier queued script effects have the same order the publication drain uses.
-    // This is a temporary transaction view, not another simulation inventory.
-    let involved: std::collections::BTreeSet<_> = requests
-        .iter()
-        .flat_map(|request| [&request.source, &request.destination])
-        .collect();
-    for (uuid, infrastructure, torpedoes, profile) in endpoints.iter() {
-        if !involved.contains(&uuid.0) {
-            continue;
-        }
-        let Some(profile) = profile else { continue };
-        for store in &profile.0.config().stores {
-            if let Some((mut stock, held)) =
-                endpoint_stock(&store.endpoint, infrastructure, torpedoes)
-            {
-                if let ResourceEndpoint::Capacity { id } = &store.endpoint {
-                    for delta in capacities
-                        .0
-                        .iter()
-                        .filter(|delta| delta.uuid == uuid.0 && delta.capacity == *id)
-                    {
-                        stock.adjust(delta.delta);
-                    }
-                }
-                projected.insert((uuid.0.clone(), store.endpoint.clone()), (stock, held));
-            }
-        }
-    }
-    for request in &requests {
-        for (uuid, endpoint) in [
-            (&request.source, &request.source_endpoint),
-            (&request.destination, &request.destination_endpoint),
-        ] {
-            let key = (uuid.clone(), endpoint.clone());
-            if projected.contains_key(&key) {
-                continue;
-            }
-            let Some((_, infrastructure, torpedoes, _)) =
-                endpoints.iter().find(|(id, ..)| id.0 == *uuid)
-            else {
-                continue;
-            };
-            if let Some((mut stock, held)) = endpoint_stock(endpoint, infrastructure, torpedoes) {
-                if let ResourceEndpoint::Capacity { id } = endpoint {
-                    for delta in capacities
-                        .0
-                        .iter()
-                        .filter(|delta| delta.uuid == *uuid && delta.capacity == *id)
-                    {
-                        stock.adjust(delta.delta);
-                    }
-                }
-                projected.insert(key, (stock, held));
-            }
-        }
-    }
     for request in requests {
-        let source_key = (request.source.clone(), request.source_endpoint.clone());
-        let destination_key = (
-            request.destination.clone(),
-            request.destination_endpoint.clone(),
-        );
-        if source_key == destination_key {
-            continue;
-        }
-        let (Some((source, _)), Some((destination, held))) =
-            (projected.get(&source_key), projected.get(&destination_key))
-        else {
-            continue;
-        };
-        let profile = endpoints
-            .iter()
-            .find(|(id, ..)| id.0 == request.destination)
-            .and_then(|(_, _, _, profile)| profile);
-        let destination_stocks = projected
-            .iter()
-            .filter(|((uuid, _), _)| uuid == &request.destination)
-            .map(|((_, endpoint), (stock, held))| {
-                (
-                    endpoint.clone(),
-                    crate::resources::logistics::EndpointStock {
-                        stock: stock.clone(),
-                        held: *held,
-                    },
-                )
-            })
-            .collect();
-        let room = crate::resources::logistics_server::receiving_room(
-            profile,
-            &request.destination_endpoint,
-            &destination_stocks,
-        )
-        .unwrap_or(0);
-        let moved = plan_transfer(
-            request.amount,
-            source.available(),
-            destination.headroom().saturating_sub(*held).min(room),
-        );
-        if moved == 0 {
-            continue;
-        }
-        let claim = format!("transfer:{}", request.operator);
-        let source = &mut projected.get_mut(&source_key).expect("resolved source").0;
-        if source.reserve(&claim, moved).is_err() {
-            continue;
-        }
-        source.consume(&claim);
-        projected
-            .get_mut(&destination_key)
-            .expect("resolved destination")
-            .0
-            .adjust(moved);
-        for (uuid, endpoint, delta) in [
-            (&request.source, &request.source_endpoint, -moved),
-            (&request.destination, &request.destination_endpoint, moved),
-        ] {
-            match endpoint {
-                ResourceEndpoint::Capacity { id } => capacities.0.push(CapacityAdjustment {
-                    uuid: uuid.clone(),
-                    capacity: id.clone(),
-                    delta,
-                }),
-                ResourceEndpoint::TorpedoMagazine {} => {
-                    if let Some((_, _, Some(mut system), _)) =
-                        endpoints.iter_mut().find(|(id, ..)| id.0 == *uuid)
-                    {
-                        if delta < 0 {
-                            system.0.magazine.adjust(delta);
-                        } else {
-                            system.0.replenish(delta);
-                        }
+        let moved = (|| -> Result<i64, String> {
+            if request.source == request.destination
+                && request.source_endpoint == request.destination_endpoint
+            {
+                return Ok(0);
+            }
+            let (_, source_inventory, source_torpedoes, source_profile, source_state) = endpoints
+                .iter()
+                .find(|(id, ..)| id.0 == request.source)
+                .ok_or("missing source")?;
+            let (mut source, _) =
+                endpoint_stock(&request.source_endpoint, source_inventory, source_torpedoes)
+                    .ok_or("missing source endpoint")?;
+            let available = source_available(
+                &source,
+                &request.source_endpoint,
+                source_profile,
+                source_state,
+            );
+            let (_, inventory, torpedoes, profile, _) = endpoints
+                .iter()
+                .find(|(id, ..)| id.0 == request.destination)
+                .ok_or("missing destination")?;
+            let (mut destination, held) =
+                endpoint_stock(&request.destination_endpoint, inventory, torpedoes)
+                    .ok_or("missing destination endpoint")?;
+            let destination_stocks = match profile {
+                Some(profile) => crate::resources::logistics_server::endpoint_view(
+                    &profile.0, inventory, torpedoes,
+                )?,
+                None => BTreeMap::new(),
+            };
+            let room = crate::resources::logistics_server::receiving_room(
+                profile,
+                &request.destination_endpoint,
+                &destination_stocks,
+            )?;
+            let moved = plan_transfer(
+                request.amount,
+                available,
+                destination.headroom().saturating_sub(held).min(room),
+            );
+            if moved == 0 {
+                return Ok(0);
+            }
+            if source.adjust(-moved) != -moved || destination.adjust(moved) != moved {
+                return Err("endpoint quantities changed during staging".into());
+            }
+            let mut updates: BTreeMap<String, BTreeMap<ResourceEndpoint, Stock>> = BTreeMap::new();
+            updates
+                .entry(request.source.clone())
+                .or_default()
+                .insert(request.source_endpoint.clone(), source);
+            updates
+                .entry(request.destination.clone())
+                .or_default()
+                .insert(request.destination_endpoint.clone(), destination);
+            let mut staged = Vec::new();
+            // Validate every affected owner before writing either. Combining
+            // by UUID also handles two different endpoints on the same ship.
+            for (uuid, updates) in updates {
+                let (_, inventory, torpedoes, profile, _) = endpoints
+                    .iter()
+                    .find(|(id, ..)| id.0 == uuid)
+                    .ok_or("endpoint owner vanished")?;
+                let next = crate::infrastructure::server::stage_resource_endpoints(
+                    inventory, torpedoes, &updates,
+                )?;
+                if let Some(profile) = profile {
+                    let stocks = crate::resources::logistics_server::endpoint_view(
+                        &profile.0,
+                        next.0.as_ref(),
+                        next.1.as_ref(),
+                    )?;
+                    profile.0.validate_stocks(&stocks)?;
+                }
+                staged.push((uuid, next));
+            }
+            for (uuid, (inventory, torpedoes, flags)) in staged {
+                let (_, actual_inventory, actual_torpedoes, _, _) = endpoints
+                    .iter_mut()
+                    .find(|(id, ..)| id.0 == uuid)
+                    .expect("staged owner remains present");
+                if let (Some(mut actual), Some(next)) = (actual_inventory, inventory) {
+                    *actual = next;
+                    for capacity in actual.0.capacities() {
+                        runtime.flags.set_flag_value(&capacity.id, capacity.level);
                     }
                 }
+                if let (Some(mut actual), Some(next)) = (actual_torpedoes, torpedoes) {
+                    *actual = next;
+                }
+                crate::infrastructure::server::mirror_flags(&mut runtime, &flags, &uuid, &None);
             }
+            Ok(moved)
+        })()
+        .unwrap_or(0);
+        if let Some(key) = request.receipt {
+            receipts.0.push(ResourceTransferReceipt {
+                operator: request.operator,
+                key,
+                source: request.source,
+                destination: request.destination,
+                requested: request.amount,
+                moved,
+            });
         }
     }
 }

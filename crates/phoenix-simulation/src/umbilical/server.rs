@@ -863,6 +863,7 @@ pub fn tick_umbilical(
                                 destination,
                                 destination_endpoint,
                                 amount: delta.abs(),
+                                receipt: None,
                             })
                         }
                         _ => None,

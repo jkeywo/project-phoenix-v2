@@ -50,6 +50,7 @@ pub fn test_app() -> App {
         )
         .add_plugins(ShipPlugin)
         .add_plugins(crate::ship::power::ShipPowerPlugin)
+        .init_resource::<crate::world::server::WorldContentRuntime>()
         .add_plugins(crate::infrastructure::server::InfrastructurePlugin);
     use crate::sim_rng::InstallSimRng;
     app.insert_sim_rng(crate::sim_rng::SimRng::new(
@@ -803,6 +804,7 @@ pub fn test_app_with_engine_hull() -> App {
         )
         .add_plugins(ShipPlugin)
         .add_plugins(crate::ship::power::ShipPowerPlugin)
+        .init_resource::<crate::world::server::WorldContentRuntime>()
         .add_plugins(crate::infrastructure::server::InfrastructurePlugin);
     use crate::sim_rng::InstallSimRng;
     app.insert_sim_rng(crate::sim_rng::SimRng::new(

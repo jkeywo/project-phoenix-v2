@@ -9,6 +9,10 @@ use super::*;
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EntityState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe_custody: Option<crate::entities::craft::ProbeCustody>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bay_jobs: Option<crate::entities::craft::ShipBayJobs>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transit: Option<crate::console::helm::transit::ShipTransitDrives>,
     /// Retained movement requests survive LOD removal of actuator latches.
     #[serde(default, skip_serializing_if = "Option::is_none")]

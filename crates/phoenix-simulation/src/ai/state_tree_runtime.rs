@@ -98,6 +98,8 @@ pub fn compile_ship_trees_with_energy(
                 &definition,
                 &phoenix_sim_gameplay::resources::logistics_ai::bindings(),
             )
+        } else if system.kind == crate::ship::system_registry::CRAFT_BAY_KIND {
+            compile(&definition, &phoenix_sim_gameplay::ship::craft::bindings())
         } else if system.kind == crate::ship::system_registry::TRANSIT_DRIVE_KIND {
             compile(
                 &definition,

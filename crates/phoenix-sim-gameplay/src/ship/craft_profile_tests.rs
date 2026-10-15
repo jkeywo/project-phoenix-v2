@@ -108,6 +108,7 @@ fn actual_battery_probe_profile_cannot_gain_generator_or_propulsion_from_custody
     let mut probe =
         crate::test_fixtures::load_entity_config("assets/entities/battery_probe.toml").unwrap();
     probe.probe = Some(phoenix_model::craft::ProbeProfile { space: 1 });
+    probe.mesh = Some(toml::from_str("shape='sphere'\ncolour=[0.4,0.8,1.0]\nradius=0.5").unwrap());
     validate_entity(&probe).unwrap();
     let mut generator = probe.clone();
     generator

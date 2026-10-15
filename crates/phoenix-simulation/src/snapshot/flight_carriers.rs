@@ -5,7 +5,7 @@ use crate::console::weapons::flight_carrier::WeaponFlightCarrier;
 pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), (String, String)> {
     for row in &snapshot.entities {
         let live = world
-            .try_query::<(Entity, &EntityUuid)>()
+            .try_query_filtered::<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>()
             .and_then(|mut query| {
                 query
                     .iter(world)

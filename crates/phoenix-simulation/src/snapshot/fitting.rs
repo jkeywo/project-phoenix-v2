@@ -46,7 +46,7 @@ fn definitions(
     String,
 > {
     if let Some(entity) = world
-        .try_query::<(Entity, &EntityUuid)>()
+        .try_query_filtered::<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>()
         .and_then(|mut query| {
             query
                 .iter(world)

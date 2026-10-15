@@ -367,6 +367,11 @@ pub fn restore_precheck(
     let Some(state) = capture.state.as_deref() else {
         return Err(GmActionRefusalReason::InverseUnsupported);
     };
+    // A one-entity inverse cannot recreate contained actors or a historical
+    // cross-entity custody/claim graph. Refuse before any body is created.
+    if state.probe_custody.is_some() || state.bay_jobs.is_some() {
+        return Err(GmActionRefusalReason::InverseUnsupported);
+    }
     // Physical shots outlive the removed body and may already have hit or
     // expired. A body inverse cannot replay their captured launch state.
     if state.weapons.as_ref().is_some_and(|weapons| {

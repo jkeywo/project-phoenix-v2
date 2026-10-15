@@ -6,6 +6,7 @@ pub struct WorldPlugin;
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
         use crate::authoritative::{DeclareState, StateClass};
+        crate::entities::craft::register(app);
         app.declare_state::<ObjectiveManagerRes>(StateClass::Folded, "objective-runtime-state");
         app.declare_state::<crate::recipients::RecipientDiagnostics>(
             StateClass::Presentation,

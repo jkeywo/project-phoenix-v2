@@ -120,6 +120,12 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
             .push(RestoreGap::ResourceStateInvalid { uuid, reason });
         return report;
     }
+    if let Err((uuid, reason)) = super::craft::validate_roster(world, snapshot) {
+        report
+            .gaps
+            .push(RestoreGap::ResourceStateInvalid { uuid, reason });
+        return report;
+    }
     if let Err((uuid, reason)) = super::transit::validate_roster(world, snapshot) {
         report
             .gaps
@@ -207,7 +213,7 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
     }
 
     let present: Vec<_> = world
-        .try_query::<(Entity, &EntityUuid)>()
+        .try_query_filtered::<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>()
         .map(|mut query| {
             query
                 .iter(world)
@@ -235,9 +241,12 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
     if !report.gaps.is_empty() {
         return report;
     }
+    let prior_craft_guard = crate::entities::craft::restore_guard(world, true);
     let prior_guard = crate::console::weapons::flight_carrier::suppress(world, true);
     restore_entities(world, snapshot, &mut report);
     crate::console::weapons::flight_carrier::suppress(world, prior_guard);
+    world.flush();
+    crate::entities::craft::restore_guard(world, prior_craft_guard);
     if report.gaps.iter().any(|gap| {
         matches!(
             gap,

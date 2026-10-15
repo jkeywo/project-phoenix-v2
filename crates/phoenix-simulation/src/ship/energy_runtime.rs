@@ -89,18 +89,23 @@ pub fn tick_power_system(
     time: Res<Time>,
     rng: crate::sim_rng::LiveStream<'_, { crate::sim_rng::SimStream::PowerFlowCuts as usize }>,
     mut adjustments: ResMut<crate::effect_queue::EffectQueue<CapacityAdjustment>>,
-    mut ships: Query<(
-        Entity,
-        &EntityUuid,
-        &mut ShipPowerSystem,
-        &ResourceServices,
-        Option<&InfrastructureCondition>,
-        Option<&crate::ship_plugin::ShipSystemControlSources>,
-        Option<&mut PowerBrownoutState>,
-        Option<&crate::ship::compartment_damage::ShipDamage>,
-        Option<&crate::resources::fitting_server::CompiledShipFitting>,
-        Option<&crate::resources::fitting_server::ShipFitting>,
-    )>,
+    mut ships: Query<
+        (
+            Entity,
+            &EntityUuid,
+            &mut ShipPowerSystem,
+            &ResourceServices,
+            Option<&InfrastructureCondition>,
+            Option<&crate::ship_plugin::ShipSystemControlSources>,
+            Option<&mut PowerBrownoutState>,
+            Option<&crate::ship::compartment_damage::ShipDamage>,
+            Option<&crate::resources::fitting_server::CompiledShipFitting>,
+            Option<&crate::resources::fitting_server::ShipFitting>,
+            Option<&crate::entities::craft::ProbeCustody>,
+            Has<bevy::ecs::entity_disabling::Disabled>,
+        ),
+        Allow<bevy::ecs::entity_disabling::Disabled>,
+    >,
 ) {
     let mut order: Vec<_> = ships
         .iter_mut()
@@ -119,10 +124,26 @@ pub fn tick_power_system(
             physical,
             fitting_profile,
             fitting_state,
+            custody,
+            disabled,
         )) = ships.get_mut(entity)
         else {
             continue;
         };
+        if custody.is_some_and(|custody| {
+            matches!(
+                &custody.0,
+                phoenix_model::craft::CraftLocation::Carried { .. }
+            )
+        }) {
+            // Same energy owner ages actual reserves and thermal state while
+            // stored. No active offer, draw, routed credit or scratch survives.
+            let _ = power.0.tick_stored_energy(time.delta_secs());
+            continue;
+        }
+        if disabled {
+            continue;
+        }
         let Some(infrastructure) = infrastructure else {
             continue;
         };

@@ -9,7 +9,7 @@ pub(super) fn preflight_missing_entities(
     report: &mut RestoreReport,
 ) {
     let present: Vec<_> = world
-        .try_query::<(Entity, &EntityUuid)>()
+        .try_query_filtered::<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>()
         .map(|mut query| {
             query
                 .iter(world)
@@ -169,7 +169,10 @@ pub(super) fn restore_entities(
             .get()
             .wrapping_sub(bevy::ecs::change_detection::MAX_CHANGE_AGE),
     );
-    let Some(mut query) = world.try_query::<(Entity, &EntityUuid)>() else {
+    let Some(mut query) = world
+        .try_query_filtered::<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>(
+        )
+    else {
         return;
     };
     let present: Vec<(Entity, String)> = query
@@ -253,6 +256,7 @@ pub(super) fn restore_entities(
         );
     }
 
+    super::craft::restore_presence(world, snapshot);
     report.despawned += surplus.len();
     for entity in surplus {
         if let Ok(entity_mut) = world.get_entity_mut(entity) {

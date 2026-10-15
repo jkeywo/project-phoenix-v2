@@ -1030,6 +1030,7 @@ pub fn instance_publication_kinds(
         (RECOVERY_KIND, Kind::Recovery),
         (PASSIVE_RECEIVER_KIND, Kind::Passive),
         (TRANSIT_DRIVE_KIND, Kind::Transit),
+        (CRAFT_BAY_KIND, Kind::Bay),
     ]
     .into_iter()
     .map(|(kind, observation)| (kind.to_owned(), observation))

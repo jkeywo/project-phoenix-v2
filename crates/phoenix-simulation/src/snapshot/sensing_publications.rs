@@ -39,7 +39,7 @@ pub(super) fn restore_held(world: &mut World, snapshot: &PhoenixSnapshot) {
     let dt = fixed.timestep().as_secs_f32();
     for row in &snapshot.entities {
         let entity = world
-            .try_query::<(Entity, &EntityUuid)>()
+            .try_query_filtered::<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>()
             .and_then(|mut query| {
                 query
                     .iter(world)

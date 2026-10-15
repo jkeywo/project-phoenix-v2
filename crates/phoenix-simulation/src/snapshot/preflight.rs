@@ -304,7 +304,9 @@ impl std::fmt::Display for RestoreGap {
 /// never arrives. [`ready_to_rebuild`] is the second half of that sentence, and
 /// the caller's own deadline is what decides when to ask it.
 pub fn ready_to_restore(world: &World, snapshot: &PhoenixSnapshot) -> bool {
-    let Some(mut query) = world.try_query::<&EntityUuid>() else {
+    let Some(mut query) =
+        world.try_query_filtered::<&EntityUuid, Allow<bevy::ecs::entity_disabling::Disabled>>()
+    else {
         return false;
     };
     // Before format 14 this also waited for `ThrustInput`: a High row restored
@@ -353,7 +355,9 @@ pub fn ready_to_rebuild(world: &World, snapshot: &PhoenixSnapshot) -> bool {
     if super::flight_carriers::validate(world, snapshot).is_err() {
         return false;
     }
-    let Some(mut query) = world.try_query::<&EntityUuid>() else {
+    let Some(mut query) =
+        world.try_query_filtered::<&EntityUuid, Allow<bevy::ecs::entity_disabling::Disabled>>()
+    else {
         return false;
     };
     let present: Vec<&str> = query.iter(world).map(|uuid| uuid.0.as_str()).collect();
@@ -870,7 +874,7 @@ pub(super) fn validate_cross_entity_repairs(
         .map(|row| row.uuid.clone())
         .collect();
     let entities: BTreeMap<_, _> = world
-        .try_query::<(Entity, &EntityUuid)>()
+        .try_query_filtered::<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>()
         .map(|mut query| {
             query
                 .iter(world)

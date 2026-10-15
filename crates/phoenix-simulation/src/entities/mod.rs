@@ -17,6 +17,7 @@ pub mod ai_policy_schema;
 pub(crate) mod authored_ai_pins;
 pub mod config;
 pub mod config_cache;
+pub(crate) mod craft;
 pub mod entity_override;
 /// Ordered entity-template `includes`, resolved and merged into ONE final TOML
 /// document — with provenance — before validation and spawning (issue #869).

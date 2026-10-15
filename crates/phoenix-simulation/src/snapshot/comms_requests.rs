@@ -74,7 +74,7 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
             .find(|row| row.uuid == key.ship_uuid)
             .ok_or("pending request reading has no candidate actor")?;
         let live = world
-            .try_query::<(Entity, &EntityUuid)>()
+            .try_query_filtered::<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>()
             .and_then(|mut query| {
                 query
                     .iter(world)

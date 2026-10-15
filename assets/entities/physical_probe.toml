@@ -1,0 +1,9 @@
+# Same actual finite battery sensor equipment; no refill, propulsion or crew hull identity.
+includes=["battery_probe.toml"]
+name="entity.physical_probe.name"
+[probe]
+space=1
+[mesh]
+shape="sphere"
+colour=[0.4,0.8,1.0]
+radius=0.5

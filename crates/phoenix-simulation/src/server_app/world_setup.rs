@@ -602,6 +602,20 @@ pub(crate) fn spawn_game_start_entities(
             config
         };
 
+        let initial_custody = match crate::entities::craft::initial_game_start_location(
+            mc,
+            entity_inst,
+            &config,
+            is_fleet_ship,
+            &game_start_entity_uuids,
+        ) {
+            Ok(location) => location,
+            Err(error) => {
+                error!("GameStart carried craft refused before mint: {error}");
+                continue;
+            }
+        };
+
         // Always consume the ordinary mint, including on resume. Its counter is
         // authoritative state and the fresh bootstrap must take the identical
         // draw it would have taken without a saved run. The value attached to a
@@ -813,6 +827,8 @@ pub(crate) fn spawn_game_start_entities(
                 .entity(spawned)
                 .insert(bevy::prelude::Transform::from_translation(pos).with_rotation(q));
         }
+
+        crate::entities::craft::stage_initial(&mut commands, spawned, initial_custody);
 
         if let Some(placement) = &placement {
             if let Some(slot) = authored_slot {

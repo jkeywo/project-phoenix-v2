@@ -1538,6 +1538,7 @@ pub fn validate_supporting_world(
 ) -> Vec<WorldFinding> {
     let mut findings = Vec::new();
     findings.extend(validate_arrival_gravity(source, template_loader, false));
+    findings.extend(super::craft::findings(source, template_loader, false));
 
     let mut composed_seen = HashSet::new();
     findings.extend(validate_template_composition_in(
@@ -1825,6 +1826,7 @@ pub fn activation_findings(
     // table that does not merge onto the template it names (on every host).
     let src = WorldSource::new("", "", config);
     findings.extend(validate_arrival_gravity(&src, templates, true));
+    findings.extend(super::craft::findings(&src, templates, true));
     let mut seen = HashSet::new();
     findings.extend(validate_template_resolution_in(&src, templates, &mut seen));
     findings.extend(validate_ship_slot_capacity_in(&src, templates));
@@ -1868,8 +1870,10 @@ pub fn validate_composition_with_fragments(
 ) -> Vec<WorldFinding> {
     let mut findings = Vec::new();
     findings.extend(validate_arrival_gravity(root, template_loader, true));
+    findings.extend(super::craft::findings(root, template_loader, true));
     for child in children {
         findings.extend(validate_arrival_gravity(child, template_loader, false));
+        findings.extend(super::craft::findings(child, template_loader, false));
     }
 
     findings.extend(validate_ship_slot_capacity_in(root, template_loader));

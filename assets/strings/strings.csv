@@ -6216,3 +6216,6 @@ settings.debug.scenario.planning.operator,Privileged Scenario plan inspection,[O
 settings.debug.scenario.planning.workload,Privileged Scenario plan inspection,[Station / minute / attention permille nanoseconds],,,
 workshop.comms_radio.relay,Workshop radio channel authoring,Forward compatible traffic,,,
 entity.relay_cruiser.name,Entity name,Alliance Relay Cruiser,,,
+entity.physical_probe.name,Craft equipment,[Physical sensor probe],,,
+entity.probe_carrier.name,Craft equipment,[Probe Cruiser],,,
+entity.probe_carrier.bay,Craft equipment,[Probe bay],,,

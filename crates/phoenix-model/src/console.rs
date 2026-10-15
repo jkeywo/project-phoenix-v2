@@ -90,6 +90,7 @@ pub enum ConsoleObservationKind {
     Transporter,
     Demolition,
     Transit,
+    Bay,
 }
 
 impl ConsoleObservationKind {
@@ -129,6 +130,7 @@ impl ConsoleObservationKind {
         "Transporter",
         "Demolition",
         "Transit",
+        "Bay",
     ];
 
     pub fn of(value: &SystemBlackboard) -> Self {
@@ -168,6 +170,7 @@ impl ConsoleObservationKind {
             SystemBlackboard::Transporter(..) => Self::Transporter,
             SystemBlackboard::Demolition(..) => Self::Demolition,
             SystemBlackboard::Transit(..) => Self::Transit,
+            SystemBlackboard::Bay(..) => Self::Bay,
         }
     }
 }

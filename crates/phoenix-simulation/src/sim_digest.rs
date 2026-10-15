@@ -474,6 +474,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("system-mounts", fold_mounts_namespace),
     ("helm-movement-intent", fold_helm_movement_namespace),
     ("transit-drive-orders", fold_transit_namespace),
+    ("physical-craft", fold_craft_namespace),
     ("weapon-target-assignments", fold_weapon_targets_namespace),
     (
         "guided-source-order-knowledge",
@@ -530,7 +531,7 @@ pub fn first_divergent_scope(mine: &World, theirs: &[(&'static str, u64)]) -> Op
 fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
     acc = fold_u64(acc, world.get_resource::<SimTick>().map_or(0, |t| t.0));
     if let Some(mut query) =
-        world.try_query::<(&EntityUuid, &crate::gm::operations::npc::NpcDoctrineState)>()
+        world.try_query_filtered::<(&EntityUuid, &crate::gm::operations::npc::NpcDoctrineState), Allow<bevy::ecs::entity_disabling::Disabled>>()
     {
         let mut applied: Vec<_> = query
             .iter(world)
@@ -572,7 +573,7 @@ fn fold_run_scope(world: &World, mut acc: u64) -> u64 {
         }
     }
     if let Some(mut query) =
-        world.try_query::<(&EntityUuid, &crate::ship_plugin::ShipSystemControlSources)>()
+        world.try_query_filtered::<(&EntityUuid, &crate::ship_plugin::ShipSystemControlSources), Allow<bevy::ecs::entity_disabling::Disabled>>()
     {
         let mut latches: Vec<_> = query
             .iter(world)
@@ -1792,13 +1793,13 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
         Option<bool>,
         Option<crate::modifiers::power_system::PowerState>,
     );
-    let Some(mut query) = world.try_query::<(
+    let Some(mut query) = world.try_query_filtered::<(
         Entity,
         &EntityUuid,
         Option<&ShipPhysics>,
         Option<&EntitySystemHull>,
         Option<&ShipRedAlert>,
-    )>() else {
+    ), Allow<bevy::ecs::entity_disabling::Disabled>>() else {
         return fold_str(acc, "entity-namespace:unregistered");
     };
     let mut rows: Vec<EntityRow> = query
@@ -2011,7 +2012,7 @@ fn fold_optional_namespace<'w, C: Component, R>(
     mut select: impl FnMut(&'w C) -> Option<R>,
     mut fold_row: impl FnMut(u64, R) -> u64,
 ) -> u64 {
-    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &C)>() else {
+    let Some(mut query) = world.try_query_filtered::<(Entity, &EntityUuid, &C), Allow<bevy::ecs::entity_disabling::Disabled>>() else {
         return acc;
     };
     let mut rows: Vec<_> = query
@@ -3036,6 +3037,23 @@ fn fold_protection_namespace(world: &World, acc: u64) -> u64 {
         acc,
         "ship-signal-protection-intent",
         |owner: &crate::science::protection::ShipSignalProtection| Some(owner.0.clone()),
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+
+fn fold_craft_namespace(world: &World, acc: u64) -> u64 {
+    let acc = fold_optional_namespace(
+        world,
+        acc,
+        "probe-custody",
+        |state: &crate::entities::craft::ProbeCustody| Some(state.clone()),
+        |acc, state| fold_serde(acc, &state),
+    );
+    fold_optional_namespace(
+        world,
+        acc,
+        "bay-jobs",
+        |state: &crate::entities::craft::ShipBayJobs| Some(state.clone()),
         |acc, state| fold_serde(acc, &state),
     )
 }

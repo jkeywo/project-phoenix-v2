@@ -1378,6 +1378,29 @@ impl EntityConfig {
                     })?;
                     continue;
                 }
+                if system.kind == crate::ship::system_registry::CRAFT_BAY_KIND {
+                    let authored = authored.ok_or_else(|| {
+                        SerdeError::custom(format!(
+                            "Craft Bay '{}' requires an explicit supported config.ai state tree",
+                            system.id.0
+                        ))
+                    })?;
+                    let tree: crate::ai::state_tree::AiTreeConfig =
+                        authored.clone().try_into().map_err(|error| {
+                            SerdeError::custom(format!(
+                                "Craft Bay '{}' config.ai: {error}",
+                                system.id.0
+                            ))
+                        })?;
+                    crate::ai::state_tree::compile(&tree, &crate::ship::craft::bindings())
+                        .map_err(|error| {
+                            SerdeError::custom(format!(
+                                "Craft Bay '{}' config.ai: {error}",
+                                system.id.0
+                            ))
+                        })?;
+                    continue;
+                }
                 if system.kind == crate::ship::system_registry::TRANSIT_DRIVE_KIND {
                     let authored = authored.ok_or_else(|| SerdeError::custom(format!("Transit System '{}' requires an explicit supported config.ai state tree", system.id.0)))?;
                     let tree: crate::ai::state_tree::AiTreeConfig =

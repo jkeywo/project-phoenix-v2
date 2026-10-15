@@ -145,6 +145,8 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             IssueNavigateToClearance,
             OperateTransitAi,
             HandleTransitCommands,
+            OperateCraftBayAi,
+            HandleCraftBayCommands,
             AnchorMissionClock,
             ArmMissionDeadlines,
             ArmMissionWorkforces,
@@ -193,6 +195,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             PublishJoystickToEngines,
             SyncShipPosition,
             OperateHelmEngineAi,
+            CommitCraftHandling,
         ],
     );
     // Physics: reviewed conflicting owner sequence.
@@ -230,6 +233,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             MoveCoupledTarget,
             ApplyTowLoadPenalty,
             TickDock,
+            TickCraftHandling,
             TickInfrastructureCondition,
             TickUmbilical,
             FinishUmbilicalActionFeedback,
@@ -262,6 +266,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             PublishSensorRadarBlackboard,
             PublishNavigationBlackboard,
             PublishTransit,
+            PublishCraftBay,
             PublishCommsBlackboard,
             PublishTractorBlackboard,
             PublishDockBlackboard,

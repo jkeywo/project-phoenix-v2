@@ -565,6 +565,10 @@ pub struct DustPfxConfig {
 /// inline overrides).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct WorldEntity {
+    /// Initial base-world physical custody, resolved inside the actual spawn
+    /// transaction before any spatial operation or publication.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub carried_by: Option<phoenix_model::craft::InitialCraftCustody>,
     /// Path to the entity template TOML (relative to assets/).
     pub template_path: String,
     /// Optional human-readable identifier for this instance.
@@ -3211,6 +3215,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         script_sources: inline_script_sources(raw.script.as_ref()),
     };
     config.validate_situation_actors()?;
+    super::craft::validate_initial_rows(&config)?;
     Ok(config)
 }
 

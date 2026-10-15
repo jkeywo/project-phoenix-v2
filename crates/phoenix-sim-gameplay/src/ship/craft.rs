@@ -8,11 +8,19 @@ use phoenix_model::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BayOperation {
-    Launch,
-    Recover,
+pub use phoenix_model::craft::BayOperation;
+
+pub fn bindings() -> crate::ai::state_tree::SupportedBindings {
+    crate::ai::state_tree::SupportedBindings {
+        facts: ["can_operate", "has_stored", "has_contacts", "active"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        channels: ["launch", "recover", "cancel"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -81,7 +89,6 @@ impl BayState {
                 || job.execution_tick > now
                 || job.runtime != TreeRuntime::default()
                 || job.workflow_error
-                || job.outcome == Some(JobOutcome::Failed)
                 || job.outcome.is_some() && job.paused
                 || job.outcome == Some(JobOutcome::Completed) && !job.activity.ready()
             {
@@ -143,6 +150,18 @@ impl BayState {
         };
         job.outcome = Some(JobOutcome::Cancelled);
         job.paused = false;
+        true
+    }
+    /// Only the actual entity-removal lifecycle calls this, never a sensor gap.
+    pub fn fail_removed(&mut self, craft: &str, now: u64) -> bool {
+        let Some(job) = self.job.as_mut().filter(|job| {
+            job.outcome.is_none() && job.activity.craft_uuid == craft && now >= job.execution_tick
+        }) else {
+            return false;
+        };
+        job.outcome = Some(JobOutcome::Failed);
+        job.paused = false;
+        job.execution_tick = now;
         true
     }
     /// Return readiness for the consumer's single atomic location handoff. The

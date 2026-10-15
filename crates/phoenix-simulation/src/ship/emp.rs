@@ -45,7 +45,10 @@ pub(crate) fn install_clock(commands: &mut EntityCommands) {
 pub(crate) fn stamp_clock(
     tick: Option<Res<crate::sim_tick::SimTick>>,
     time: Option<Res<Time<Fixed>>>,
-    mut ships: Query<&mut crate::ship::compartment_damage::ShipDamage>,
+    mut ships: Query<
+        &mut crate::ship::compartment_damage::ShipDamage,
+        Allow<bevy::ecs::entity_disabling::Disabled>,
+    >,
 ) {
     let clock = tick.zip(time).and_then(|(tick, time)| {
         let period_nanos = u64::try_from(time.timestep().as_nanos()).ok()?;

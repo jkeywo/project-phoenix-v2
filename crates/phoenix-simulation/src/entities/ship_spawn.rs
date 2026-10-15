@@ -103,6 +103,7 @@ pub(super) fn install(
             cmds.insert(access);
         }
     }
+    super::craft::install(config, position, cmds);
     crate::resources::logistics_server::install(config, cmds);
     crate::resources::production_server::install(config, cmds);
     crate::resources::recovery_server::install(config, cmds);

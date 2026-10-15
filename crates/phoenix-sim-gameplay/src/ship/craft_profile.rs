@@ -22,7 +22,10 @@ pub fn validate_entity(config: &EntityConfig) -> Result<(), String> {
             || config.behaviour.is_some()
             || config.civilian.is_some()
             || config.debris.is_some()
-            || config.mesh.is_some()
+            || config
+                .mesh
+                .as_ref()
+                .is_some_and(|mesh| mesh.model.is_some())
             || config.star.is_some()
             || config.planet.is_some()
             || !config.light.is_empty()

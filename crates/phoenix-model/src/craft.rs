@@ -3,6 +3,52 @@
 use crate::identity::SystemId;
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BayOperation {
+    Launch,
+    Recover,
+}
+
+/// Own stored identities and already-permitted dated contacts only. The actual
+/// Bay Job/location owners remain private continuation state.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BayView {
+    pub can_launch: bool,
+    pub can_recover: bool,
+    pub capacity_space: u64,
+    pub occupied_space: u64,
+    pub stored: Vec<StoredCraftView>,
+    pub contacts: Vec<RecoveryContactView>,
+    pub job: Option<BayJobView>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StoredCraftView {
+    pub id: String,
+    pub space: u64,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecoveryContactView {
+    pub contact: String,
+    pub observed_tick: u64,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BayJobView {
+    pub id: u64,
+    pub operation: BayOperation,
+    /// Launch uses an own stored/handled identity. Recovery uses a current
+    /// permitted alias, or None when no such observation remains available.
+    pub craft: Option<String>,
+    pub fraction: f32,
+    pub paused: bool,
+    pub ready: bool,
+    pub outcome: Option<crate::job::JobOutcome>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProbeProfile {

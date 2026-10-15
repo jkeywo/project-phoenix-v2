@@ -97,7 +97,7 @@ pub(super) fn restore_motion_plans(world: &mut World, snapshot: &PhoenixSnapshot
         crate::ship::helm_planner::ShipMotionPlan,
     > = std::collections::HashMap::new();
     {
-        let Some(mut query) = world.try_query::<(Entity, &EntityUuid)>() else {
+        let Some(mut query) = world.try_query_filtered::<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>() else {
             return;
         };
         for (entity, uuid) in query.iter(world) {
@@ -142,7 +142,10 @@ pub(super) fn restore_npc_frequency_matches(
     let Some(stored) = &snapshot.npc_frequency_matches else {
         return;
     };
-    let Some(mut query) = world.try_query::<(Entity, &EntityUuid)>() else {
+    let Some(mut query) = world
+        .try_query_filtered::<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>(
+        )
+    else {
         return;
     };
     let entities: std::collections::HashMap<_, _> = query
@@ -187,7 +190,10 @@ pub(super) fn restore_coordination_staging(
     use crate::ship::components::{CoordinationEnqueue, CoordinationEnqueueCursor};
     use crate::ship::control_source::ControlSource;
 
-    let Some(mut query) = world.try_query::<(Entity, &EntityUuid)>() else {
+    let Some(mut query) = world
+        .try_query_filtered::<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>(
+        )
+    else {
         if !snapshot.coordination_staging.is_empty() {
             report
                 .gaps
@@ -1233,6 +1239,10 @@ pub(super) fn validate_physical_repair_claims(
 /// tick for an inverse: nothing here simulates the interval, so the value is
 /// simply the reading every age-relative continuation is measured against.
 pub(crate) fn apply_entity_state(world: &mut World, entity: Entity, row: &EntityState, tick: u64) {
+    if row.probe_custody.is_some() || row.bay_jobs.is_some() {
+        bevy::log::error!("refused single-row craft restore: full custody roster is required");
+        return;
+    }
     if let Err(reason) = super::transit::validate_live(world, entity, row, tick) {
         bevy::log::error!("refused Transit restore for {}: {}", row.uuid, reason);
         return;
@@ -1680,6 +1690,15 @@ pub(super) fn apply_entity_state_with(
         entity_mut.insert(saved.clone());
     } else {
         entity_mut.remove::<phoenix_sim_gameplay::ship::helm_control::HelmControlState>();
+    }
+    if let Some(saved) = &row.bay_jobs {
+        entity_mut.insert(saved.clone());
+    } else {
+        entity_mut.remove::<crate::entities::craft::ShipBayJobs>();
+    }
+    if let Some(saved) = &row.probe_custody {
+        // Derived presence is projected after all canonical row writes.
+        entity_mut.insert(saved.clone());
     }
     if let Some(saved) = &row.transit {
         entity_mut.insert((

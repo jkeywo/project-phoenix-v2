@@ -171,14 +171,23 @@ fn voluntary_cancel_settles_work_without_physical_handoff_refund_or_reused_job_i
 }
 
 #[test]
-fn saved_terminal_frontier_cannot_claim_unproduced_failure_or_paused_completion() {
+fn physical_removal_is_a_single_terminal_failure_and_completion_cannot_remain_paused() {
     let mut state = started();
     state.advance(&owner(), 11, 2.0, 1.0, |_, _| 1.0).unwrap();
     assert!(state.complete());
     state.validate(&owner(), 11).unwrap();
-    let mut invalid = state.clone();
-    invalid.job.as_mut().unwrap().outcome = Some(JobOutcome::Failed);
-    assert!(invalid.validate(&owner(), 11).is_err());
+    let mut removed = started();
+    let target = removed.job.as_ref().unwrap().activity.craft_uuid.clone();
+    assert!(!removed.fail_removed("another-craft", 11));
+    assert!(!removed.fail_removed(&target, 9));
+    assert!(removed.fail_removed(&target, 11));
+    assert!(!removed.fail_removed(&target, 12));
+    removed.validate(&owner(), 11).unwrap();
+    assert_eq!(
+        removed.job.as_ref().unwrap().outcome,
+        Some(JobOutcome::Failed)
+    );
+    assert!(!removed.complete());
     let mut invalid = state;
     invalid.job.as_mut().unwrap().paused = true;
     assert!(invalid.validate(&owner(), 11).is_err());

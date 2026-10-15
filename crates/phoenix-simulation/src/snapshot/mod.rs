@@ -372,6 +372,7 @@ pub use materialization::LayerReconcileStatus;
 
 mod activities;
 pub(crate) use activities::validate_single_row as validate_activity_single_row;
+mod craft;
 mod emp;
 mod helm_movement;
 #[cfg(test)]

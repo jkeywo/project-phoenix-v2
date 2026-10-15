@@ -38,7 +38,7 @@ pub(super) fn validate_candidate(
     snapshot: &PhoenixSnapshot,
 ) -> Result<(), (String, String)> {
     let entities: BTreeMap<_, _> = world
-        .try_query::<(Entity, &EntityUuid)>()
+        .try_query_filtered::<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>()
         .map(|mut query| {
             query
                 .iter(world)

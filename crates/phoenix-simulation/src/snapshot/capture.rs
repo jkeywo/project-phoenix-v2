@@ -1375,7 +1375,7 @@ impl<'w> EntityCaptureContext<'w> {
 }
 
 pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
-    let Some(mut query) = world.try_query::<(
+    let Some(mut query) = world.try_query_filtered::<(
         &EntityUuid,
         EntityRef,
         Option<&ShipPhysics>,
@@ -1383,7 +1383,7 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
         Option<&ShipRedAlert>,
         Option<&crate::console::command::server::ShipStationStances>,
         Option<&crate::ship_plugin::ShipSystemControlSources>,
-    )>() else {
+    ), Allow<bevy::ecs::entity_disabling::Disabled>>() else {
         return Vec::new();
     };
     let context = EntityCaptureContext::new(world);
@@ -1450,6 +1450,8 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                         .map(|state| state.0.clone()),
                     helm_movement: entity.get::<phoenix_sim_gameplay::ship::helm_control::HelmControlState>().cloned(),
                     transit: entity.get::<crate::console::helm::transit::ShipTransitDrives>().cloned(),
+                    probe_custody: entity.get::<crate::entities::craft::ProbeCustody>().cloned(),
+                    bay_jobs: entity.get::<crate::entities::craft::ShipBayJobs>().cloned(),
                     illumination: entity.get::<crate::console::weapons::illumination::ShipIllumination>().cloned(),
                     jamming: entity.get::<crate::comms::jamming::ShipJamming>().cloned(),
                     signal_protection: entity.get::<crate::science::protection::ShipSignalProtection>().cloned(),

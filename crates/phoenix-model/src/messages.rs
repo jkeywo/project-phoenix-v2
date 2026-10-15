@@ -2142,6 +2142,13 @@ pub enum SystemControlPayload {
         request: Option<crate::transit::TransitRequestKey>,
     },
     CancelTransit,
+    LaunchCraft {
+        craft: String,
+    },
+    RecoverCraft {
+        contact: String,
+    },
+    CancelCraftHandling,
     ToggleBoost,
     SetBoost {
         active: bool,
@@ -4847,6 +4854,7 @@ pub enum SystemBlackboard {
     /// placement as an automatic detonation.
     Demolition(DemolitionBlackboard),
     Transit(crate::transit::TransitDriveView),
+    Bay(crate::craft::BayView),
 }
 
 /// Raw sim truth for a ship's rescue transporter, published each tick under its

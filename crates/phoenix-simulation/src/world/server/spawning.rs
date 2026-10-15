@@ -242,6 +242,18 @@ pub fn spawn_immediate_entities_internal(
         if entity_inst.name.is_some() {
             config.name = entity_inst.name.clone();
         }
+        let initial_custody = match crate::entities::craft::initial_location(
+            world_config,
+            entity_inst,
+            &config,
+            false,
+        ) {
+            Ok(location) => location,
+            Err(error) => {
+                error!("Immediate carried craft refused before materialization: {error}");
+                continue;
+            }
+        };
         if let Err(reason) = config.validate_field_at_origin(pos.to_array()) {
             bevy::log::error!("spawn_world_entities: named entity '{name}': {reason}");
             continue;
@@ -259,6 +271,7 @@ pub fn spawn_immediate_entities_internal(
                 &entity_inst.template_path,
             ));
         apply_authored_spawn_transform(commands, entity, pos, entity_inst.transform.as_ref());
+        crate::entities::craft::stage_initial(commands, entity, initial_custody);
         // The authored narrative mark (issue #1338). Attached here rather than
         // in a `SpawnSection` because the payload is the WORLD's authored
         // `name` — the unique reference id triggers, comms and objectives all

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 #[path = "repair_physical.rs"]
 mod physical;
-pub use physical::{PhysicalRepairWork, RepairStockAction};
+pub use physical::{PhysicalRepairWork, RepairStockAction, RepairTickResult};
 #[path = "repair_external_physical.rs"]
 mod external_physical;
 pub use external_physical::ExternalPhysicalRepairWork;

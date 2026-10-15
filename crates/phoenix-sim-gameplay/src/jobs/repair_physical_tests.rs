@@ -5,6 +5,9 @@ use crate::ship::interior::{InteriorConfig, InteriorGraph};
 use phoenix_model::damage::DamageConfig;
 use serde_json::json;
 
+#[path = "repair_activity_tests.rs"]
+mod activity_tests;
+
 fn fixture(
     parts: i64,
 ) -> (

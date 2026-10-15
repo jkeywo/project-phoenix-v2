@@ -42,7 +42,17 @@ impl PhysicalRepairWork {
     }
 }
 
+/// Transient results returned only from this committed owner invocation.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RepairTickResult {
+    pub outcomes: Vec<(
+        phoenix_model::job::JobId,
+        phoenix_model::activity::ActivityOutcome,
+    )>,
+}
+
 impl RepairTeams {
+    /// Compatibility adapter: acceptance still comes from the same operation.
     pub fn dispatch_physical(
         &mut self,
         team: usize,
@@ -50,9 +60,19 @@ impl RepairTeams {
         target: Option<RepairWorkTarget>,
         label: String,
     ) -> bool {
-        if self.is_refit_team(team) || self.refit_claims_system(&system)
+        self.dispatch_physical_job(team, system, target, label)
+            .is_some()
+    }
+    pub fn dispatch_physical_job(
+        &mut self,
+        team: usize,
+        system: SystemId,
+        target: Option<RepairWorkTarget>,
+        label: String,
+    ) -> Option<phoenix_model::job::JobId> {
+        if self.external_team() == Some(team) || self.is_refit_team(team) || self.refit_claims_system(&system)
             || target.as_ref().is_some_and(|target| matches!(target, RepairWorkTarget::Component { system, .. } if self.refit_claims_system(system))) {
-            return false;
+            return None;
         }
         let current = self
             .state
@@ -68,7 +88,7 @@ impl RepairTeams {
                         || work.requested_target.as_ref() == Some(target))
             })
         }) {
-            return false;
+            return None;
         }
         let redirected = if target.is_some() {
             if let Some(job) = self
@@ -108,16 +128,18 @@ impl RepairTeams {
             .teams
             .get(team)
             .and_then(Option::as_ref)
-            .filter(|job| job.outcome.is_none())
+            .filter(|job| {
+                job.outcome.is_none() && matches!(job.activity, RepairActivity::Internal { .. })
+            })
         {
             self.state
                 .physical_work
                 .entry(job.id.0)
                 .or_insert_with(|| PhysicalRepairWork::new(system))
                 .requested_target = target;
-            return true;
+            return Some(job.id);
         }
-        false
+        None
     }
     pub fn install_damage_definition(&mut self, definition: DamageDefinition) {
         self.damage_definition = Some(definition);
@@ -220,7 +242,15 @@ impl RepairTeams {
         stock: impl FnMut(RepairStockAction, &str, &RemedyConfig) -> bool,
         tools: impl FnMut(&SystemId, f32) -> f32,
     ) {
-        self.tick_physical_with_expertise(dt, state, blocked, foreign_claims, &[], stock, tools);
+        let _ = self.tick_physical_with_expertise(
+            dt,
+            state,
+            blocked,
+            foreign_claims,
+            &[],
+            stock,
+            tools,
+        );
     }
     /// Expertise changes only on-site remedy progress. Real navigation, parts
     /// and the existing per-interval tool grant keep their original clocks.
@@ -234,15 +264,25 @@ impl RepairTeams {
         work_multipliers: &[f32],
         mut stock: impl FnMut(RepairStockAction, &str, &RemedyConfig) -> bool,
         mut tools: impl FnMut(&SystemId, f32) -> f32,
-    ) {
+    ) -> RepairTickResult {
+        let mut evidence = RepairTickResult::default();
+        let live_jobs: BTreeSet<_> = self
+            .state
+            .jobs
+            .teams
+            .iter()
+            .flatten()
+            .filter(|job| job.outcome.is_none())
+            .map(|job| job.id)
+            .collect();
         if !dt.is_finite() || dt <= 0.0 || state.catastrophic {
-            return;
+            return evidence;
         }
         let Some(definition) = self.damage_definition.clone() else {
-            return;
+            return evidence;
         };
         let Some(graph) = self.layout.as_ref() else {
-            return;
+            return evidence;
         };
         let mut enabled: Vec<_> = self
             .state
@@ -259,7 +299,7 @@ impl RepairTeams {
             .collect();
         let mut phases = self.phases();
         let Some(navigation) = self.state.navigation.as_mut() else {
-            return;
+            return evidence;
         };
         let mut physical_slots = phases.slots().to_vec();
         for (index, (slot, team)) in physical_slots.iter_mut().zip(navigation).enumerate() {
@@ -571,6 +611,11 @@ impl RepairTeams {
             };
             if work.progress >= recipe.work_secs {
                 let mut restored = state.clone();
+                let target = work
+                    .target
+                    .as_ref()
+                    .expect("reserved work has target")
+                    .clone();
                 let restoration = match work.target.as_ref().expect("reserved work has target") {
                     RepairWorkTarget::Compartment { compartment } => restored
                         .restore_structure(
@@ -578,7 +623,10 @@ impl RepairTeams {
                             compartment,
                             recipe.structural_hp.unwrap_or(0.0),
                         )
-                        .map(|_| ()),
+                        .map(|_| phoenix_model::activity::RepairAchievement::Structure {
+                            restored_hp: restored.compartments[compartment].hp
+                                - state.compartments[compartment].hp,
+                        }),
                     RepairWorkTarget::Component { system, component } => restored
                         .remedy_component(
                             &definition,
@@ -588,10 +636,33 @@ impl RepairTeams {
                             },
                             name,
                         )
-                        .map(|_| ()),
+                        .map(|_| phoenix_model::activity::RepairAchievement::Component {
+                            before: state.components[system][component].condition.clone(),
+                            after: restored.components[system][component].condition.clone(),
+                        }),
                 };
                 if restoration.is_err() || !stock(RepairStockAction::Consume, &claim, recipe) {
                     continue;
+                }
+                let result = restoration.expect("checked restoration");
+                let changed = match &result {
+                    phoenix_model::activity::RepairAchievement::Structure { restored_hp } => {
+                        *restored_hp > 0.0
+                    }
+                    phoenix_model::activity::RepairAchievement::Component { before, after } => {
+                        before != after
+                    }
+                };
+                if changed {
+                    evidence.outcomes.push((
+                        phoenix_model::job::JobId(id),
+                        phoenix_model::activity::ActivityOutcome::RepairAchieved {
+                            stage: work.stage,
+                            target,
+                            remedy: name.clone(),
+                            result,
+                        },
+                    ));
                 }
                 *state = restored;
                 if matches!(
@@ -617,6 +688,16 @@ impl RepairTeams {
         }
         phases.restore_slots(&slots);
         self.commit_phases(&phases);
+        for job in self.state.jobs.teams.iter().flatten() {
+            if live_jobs.contains(&job.id) {
+                if let Some(outcome) = job.outcome {
+                    evidence.outcomes.push((
+                        job.id,
+                        phoenix_model::activity::ActivityOutcome::RepairSettled { outcome },
+                    ));
+                }
+            }
+        }
         let finished: Vec<_> = self
             .state
             .physical_work
@@ -637,6 +718,7 @@ impl RepairTeams {
                 release(&work, id, &definition, &mut stock);
             }
         }
+        evidence
     }
 }
 fn target_room<'a>(

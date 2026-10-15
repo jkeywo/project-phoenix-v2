@@ -315,6 +315,16 @@ fn another_valid_station_cannot_forge_the_historical_owner_host() {
 #[test]
 fn authored_temporal_world_uses_imported_estimates_and_read_only_workload_projection() {
     let (mut app, actor) = setup(2);
+    // setup() deliberately delegates Repair for ordinary maintenance AI tests.
+    // This case instead models the explicitly occupied Human engineer below.
+    app.world_mut()
+        .get_mut::<ShipSystemControlSources>(actor)
+        .unwrap()
+        .0
+        .set(
+            SystemId("repair".into()),
+            crate::ship::control_source::ControlSource::Human,
+        );
     let reader = crate::world::load::OverlayFsReader;
     let mut base = crate::world::load::load(crate::world::load::LoadRequest::new(
         "tests/fixtures/maintenance-temporal-world.toml",
@@ -394,6 +404,16 @@ fn authored_temporal_world_uses_imported_estimates_and_read_only_workload_projec
 #[test]
 fn real_admitted_crew_arrival_reconsiders_only_the_unreleased_refusal() {
     let (mut app, actor) = temporal_fixture();
+    // The shared fixture starts Repair on AI. Refusal here specifically needs
+    // a Human-required owner without occupied provenance, not ordinary Backfill.
+    app.world_mut()
+        .get_mut::<ShipSystemControlSources>(actor)
+        .unwrap()
+        .0
+        .set(
+            SystemId("repair".into()),
+            crate::ship::control_source::ControlSource::Human,
+        );
     app.world_mut()
         .get_mut::<crate::ship_plugin::ActiveStationRatings>(actor)
         .unwrap()

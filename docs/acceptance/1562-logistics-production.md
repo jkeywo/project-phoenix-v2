@@ -85,5 +85,79 @@ remaining Workshop history case hit its unchanged five-second timeout during
 concurrent compilation. Its unchanged isolated suite then passed all eight cases.
 This is not a claim that the first 100-case run passed.
 
-Canonical transfer-settlement changes, live recovery, port services, later
-continuation coverage and full/manual acceptance still require their own evidence.
+This checkpoint predates canonical transfer settlement and live recovery. Port
+services, later continuation coverage and full/manual acceptance remain separate
+evidence boundaries.
+
+## Canonical transfer settlement
+
+At isolated checkpoint `c9c1195d` plus the two-file fixture correction committed
+as `074009cd`, the combined renderer-free owner command passed **29 tests,
+0 failed, 0 ignored**: nine resource-settlement, twelve Umbilical and eight
+Infrastructure cases. Build took 2m15s; execution took 0.26s. The final source
+bytes match the committed correction; eight owner libraries were refreshed
+without changing bytes and actual Gameplay/Simulation dependency records retained.
+
+```text
+cargo test -p phoenix-simulation --lib --no-default-features -- resources::server::tests:: umbilical::server::tests:: infrastructure::server::tests:: --test-threads=1
+```
+
+Resource cases include simultaneous finite supply, protected floors, receiving
+claims/shared space, zero receipts and a mixed magazine/capacity bay. Prior
+capacity effects settle through Infrastructure; atomic transfers then preserve
+actual quantities and issue truthful receipts. The mixed-bay regression prevents
+an earlier accepted capacity credit being rejected after a later magazine update,
+which previously could credit another endpoint without a matching debit.
+
+The retained root artifact is `.phoenix/increment-12-settlement-owner-tests.log`,
+SHA256 `71deb9de5d7721d5df9f176af942b88e9f01340cb7d1b9210ee185d6e4bfa483`.
+Immutable dependency records and provenance are under
+`.phoenix/increment-12-settlement-dependencies/` and the two matching provenance
+JSON files. Earlier CLI refusal, test integer-type compile refusal, and the
+28-pass/one-failed run remain retained separately. The latter found an isolated
+Umbilical fixture lacking the new required receipt queue; the correction installs
+that queue and the real Infrastructure-before-transfer order. No production
+assertion was weakened. This is targeted owner evidence, not full integration or
+manual/browser acceptance.
+
+## Finite recovery checkpoint
+
+At main revision `478a5c48`, the renderer-independent owner command passed
+**12 tests, 0 failed, 0 ignored** (2m07s build, 1.88s execution). Coverage includes
+seven live Recovery cases, three snapshot/preflight cases, all shipped hulls and
+the exact five-domain state inventory. Human and ordinary AI use actual admitted
+controls, explicit contact feeds, paid energy and finite source settlement.
+
+```text
+cargo test -p phoenix-simulation --lib --no-default-features -- resources::recovery_server::tests snapshot::recovery_tests complete_active_schema_inventory_is_ratcheted_across_all_five_domains strict_mode_accepts_every_shipped_hull --test-threads=1
+```
+
+The log `.phoenix/increment12-recovery-integrated-owner-retry.log` has SHA256
+`c6827101caf1d4699c8f703b3f38d3609311617c08971642dcdd9ab53c907b7b`.
+The preceding run passed eleven cases and failed the unchanged state-inventory
+pin: the new owners increased the measured Live count from 950 to 957. The retry
+uses the measured inventory and fingerprint with exhaustive classification
+checks retained. The copied dependency record under
+`.phoenix/recovery-owner-dependencies/` identifies this main source tree.
+
+At `87b44f42`, Model and Gameplay checks separately passed **14 cases**: three
+port contract cases and eleven pure Recovery/profile cases (1m23s build,
+0.12s combined execution). Log
+`.phoenix/increment12-recovery-pure-and-port-contract.log`, SHA256
+`48b4076de761d40ac3430a7514faaab473af0d7bb0203db910d595d765db4107`.
+An earlier run passed eight pure cases but could not construct three profiles:
+the test's JSON-to-TOML conversion rejected null values before assertions. The
+corrected fixture uses the actual shipped ownership, equipment and AI definitions;
+negative profile checks remain intact.
+
+Revision `0084c280` additionally prevents a recovery manifest from relabelling
+a managed stock's resource. All **three profile tests** passed (45.18s build,
+0.11s execution), including the invalid declaration and repaired positive control.
+Log `.phoenix/increment12-recovery-resource-identity-profile.log`, SHA256
+`b12b5d0436e57d73625c00447d5bc2be9fb24d8e6130f26ba0947c49e67bb512`.
+
+The first whole-host continuation run at `2649e5d6` failed all three cases:
+test participants claimed stations without the ordinary Ready step, so real
+command admission refused their controls. The corrected test journey is being
+run separately. These owner results do not establish whole-host continuation,
+browser/native acceptance, workload, performance or completion of increment 12.

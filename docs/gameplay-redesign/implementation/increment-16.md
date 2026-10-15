@@ -315,6 +315,17 @@ response decision host gains a closed `comms_request` policy output for the same
 own published request; it uses the existing per-System gate, authored policy and
 cadence. It emits that same admitted command. There is no new System controller,
 private AI latch, World automatic send or change to legacy plot weighted draws.
+Planned work also waits for the radio's positive authored reading ticks through
+the SAME existing pending-response map. Its key distinguishes an inbox message
+from a planned Situation, avoiding legal-identity collisions. Reuse the existing
+remaining/last-tick reading frontier, counting only eligible AI intervals and
+retaining partial work under Human, Offline or missing-current-contact periods.
+A completed planned reading may wait for actual payment; it does not create a
+recipient-read receipt. Successful acceptance removes that pending entry in the
+same transaction. Candidate validation binds it to its actual released,
+unaccepted Situation and accepted radio/Console owner. No extra timer map or
+private initiation latch is introduced.
+
 First selection is stable released-tick/identity order. Human or absent policy
 stands ordinary AI down; invalid/unavailable requests hold under ordinary rules.
 

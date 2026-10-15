@@ -51,15 +51,11 @@ impl RelaySocket for SnapshotWire {
     }
 }
 fn media_wire_frame() -> String {
-    let payload =
-        crate::comms::media_mesh::MediaHostFrame::encode(crate::comms::media_mesh::MediaHostBody {
-            from: 1,
-            to: 2,
-            call_origin_id: "call".into(),
-            generation: None,
-            packet: None,
-        })
-        .unwrap();
+    let body = crate::core::codec::from_json(
+        r#"{"from":1,"to":2,"call_origin_id":"call","generation":null}"#,
+    )
+    .unwrap();
+    let payload = crate::comms::media_mesh::MediaHostFrame::encode(body).unwrap();
     serde_json::json!({"type":"relay","class":"snapshot","drop_only":true,"payload":payload})
         .to_string()
 }

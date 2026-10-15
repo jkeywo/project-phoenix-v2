@@ -654,3 +654,31 @@ its actual accepted activity transmission binding. The existing sustained return
 Outcome remains distinct. An exclusive prepared binding token can be dropped on
 payment failure without writes; consuming it after ordinary paid emission commits
 the accepted reference without a fallible post-payment validation stage.
+
+
+### 22C authored permission depends on the actual Scenario application
+
+Adopted continuation, 15 October 2026. Extend the same SituationInstance's
+bounded activation history with the actual application tick for every retained
+Applied or Refused result. The result and tick have identical state keys and are
+committed together by the existing script-effect boundary. No separate permission
+store or synthetic physical outcome is introduced.
+
+An HTN predecessor condition `scenario_applied { state = "..." }` requires that
+exact predecessor's authored callback state to have completed with Applied. The
+condition uses its actual application tick, not the preceding radio receipt or
+forecast. Source validation requires the referenced state to exist and contain an
+explicit callback. A refused callback cannot release dependent work. Conditions
+inside a Scenario lifecycle may refer only to an earlier callback in that same
+acyclic lifecycle. Complete candidate validation checks key parity, original
+nonfuture and nondecreasing application ticks, and that each application follows
+its own required evidence before any writes. It retains the established limitation
+that a snapshot cannot independently prove arbitrary historical script effects.
+
+The next opt-in composition uses ordinary Repair as the hazard and an actual heard
+ReportStatus followed by an explicit authored permission callback. It distinguishes
+report evidence from that Scenario consequence. Separate operators can address
+hazard and permission concurrently; cohosted Consoles share their actual operator's
+attention budget. Declared temporal profiles and phase estimates remain provisional
+until native and human timing evidence is recorded. The original commitment and
+deadline never reset after late evidence or a callback refusal.

@@ -8,6 +8,192 @@ direction = "collect"
 [[infrastructure.capacity]]
 id = "alloy"
 amount = 0
+# Logistics is an atomic authored profile; retain the complete inherited
+# stores, routes and handling when changing this vessel's alloy stock target.
+[[logistics.store]]
+id = "hold-ammunition"
+resource = "torpedoes"
+compartment = "support"
+role = "main"
+target = 4
+reserve = 0
+priority = 2
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "hold-ammunition"
+
+[[logistics.store]]
+id = "magazine"
+resource = "torpedoes"
+compartment = "weapons"
+role = "local"
+target = 6
+reserve = 0
+priority = 2
+system = "torpedo-magazine"
+source = "hold-ammunition"
+
+[logistics.store.endpoint]
+kind = "torpedo_magazine"
+
+[[logistics.store]]
+id = "hold-machinery-parts"
+resource = "machinery_parts"
+compartment = "support"
+role = "main"
+target = 102
+reserve = 20
+priority = 1
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "hold-machinery-parts"
+
+[[logistics.store]]
+id = "repair-machinery"
+resource = "machinery_parts"
+compartment = "engineering"
+role = "local"
+target = 12
+reserve = 0
+priority = 1
+system = "repair"
+source = "hold-machinery-parts"
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "machinery_parts"
+
+[[logistics.store]]
+id = "hold-structural-parts"
+resource = "structural_parts"
+compartment = "support"
+role = "main"
+target = 51
+reserve = 8
+priority = 1
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "hold-structural-parts"
+
+[[logistics.store]]
+id = "repair-structural"
+resource = "structural_parts"
+compartment = "engineering"
+role = "local"
+target = 8
+reserve = 0
+priority = 1
+system = "repair"
+source = "hold-structural-parts"
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "structural_parts"
+
+[[logistics.store]]
+id = "hold-coolant"
+resource = "coolant"
+compartment = "support"
+role = "main"
+target = 624
+reserve = 0
+priority = 0
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "hold-coolant"
+
+[[logistics.store]]
+id = "coolant-reservoir"
+resource = "coolant"
+compartment = "engineering"
+role = "local"
+target = 156
+reserve = 0
+priority = 0
+system = "power-reactor"
+source = "hold-coolant"
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "coolant"
+
 [[logistics.store]]
 id = "hold-alloy"
+resource = "alloy"
+compartment = "support"
+role = "main"
 target = 6
+reserve = 0
+priority = 3
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "alloy"
+
+[[logistics.store]]
+id = "hold-ore"
+resource = "ore"
+role = "main"
+compartment = "support"
+target = 0
+reserve = 0
+priority = 4
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "ore"
+
+[[logistics.store]]
+id = "hold-scrap"
+resource = "scrap"
+role = "main"
+compartment = "support"
+target = 0
+reserve = 0
+priority = 4
+
+[logistics.store.endpoint]
+kind = "capacity"
+id = "scrap"
+
+[[logistics.storage]]
+compartment = "support"
+space = 855
+
+[logistics.storage.unit_space]
+torpedoes = 1
+machinery_parts = 1
+structural_parts = 1
+coolant = 1
+alloy = 1
+ore = 1
+scrap = 1
+
+[[logistics.storage]]
+compartment = "engineering"
+space = 176
+
+[logistics.storage.unit_space]
+machinery_parts = 1
+structural_parts = 1
+coolant = 1
+
+[[logistics.storage]]
+compartment = "weapons"
+space = 6
+
+[logistics.storage.unit_space]
+torpedoes = 1
+
+[[logistics.handling]]
+system = "logistics"
+max_active = 2
+max_batch = 100
+units_per_sec = 50
+reorder_fraction = 0.5
+
+# Increment 12.2: finite hold/local splits preserve each hull's original totals.

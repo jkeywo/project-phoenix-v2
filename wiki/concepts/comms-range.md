@@ -2,7 +2,7 @@
 title: Comms Range
 type: concept
 tags: [comms, range, hail, authority, contacts]
-sources: [crates/phoenix-model/src/comms_channel.rs, crates/phoenix-simulation/src/comms/radio.rs, crates/phoenix-sim-gameplay/src/entities/config/comms.rs, crates/phoenix-model/src/comms_history.rs, crates/phoenix-simulation/src/comms/mod.rs, crates/phoenix-simulation/src/comms/range.rs, crates/phoenix-simulation/src/comms/component.rs, crates/phoenix-simulation/src/comms/roster.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs, gui/comms-state.js, assets/entities/alliance_destroyer.toml]
+sources: [crates/phoenix-simulation/src/comms/request_returns.rs, crates/phoenix-simulation/src/comms/requests.rs, crates/phoenix-simulation/src/snapshot/comms_requests.rs, crates/phoenix-model/src/comms_channel.rs, crates/phoenix-simulation/src/comms/radio.rs, crates/phoenix-sim-gameplay/src/entities/config/comms.rs, crates/phoenix-model/src/comms_history.rs, crates/phoenix-simulation/src/comms/mod.rs, crates/phoenix-simulation/src/comms/range.rs, crates/phoenix-simulation/src/comms/component.rs, crates/phoenix-simulation/src/comms/roster.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs, gui/comms-state.js, assets/entities/alliance_destroyer.toml]
 updated: 2026-10-15
 ---
 
@@ -12,7 +12,11 @@ Comms endpoints opt in with an authored `[comms]` block. A contact is reachable 
 
 `crates/phoenix-simulation/src/comms/range.rs` contains the pure distance/range calculation. `crates/phoenix-simulation/src/comms/server.rs` maintains each ship's authoritative contact roster and range flags from live transforms. `crates/phoenix-simulation/src/console/comms/server.rs` enforces the same flags when a hail or reply command is applied, so stale or malicious client state cannot bypass range.
 
-`CommsContact.in_range` describes the current roster entry. Each `CommsMessage.sender_in_range` snapshots the sender's status when the message enters the inbox, allowing the UI and Backfill policy to explain why a thread can or cannot continue.
+`CommsContact.in_range` describes the current roster entry. Legacy plot/text
+message range presentation follows its existing live reply gate. Structured
+request copies retain their receipt fact instead: current remote reach does not
+prevent the receiver from reading or making a local Report/Decline decision,
+and does not disclose whether a return has been heard.
 
 Entities with no `[comms]` endpoint are not contacts. Missing range state is denied while range enforcement is active; fixtures/worlds that explicitly run without range use the documented inactive mode rather than fabricated flags.
 
@@ -31,6 +35,20 @@ identity and tick. Both remain in the existing recipient-scoped inbox. The
 source's next message identity is independent of conditional receiver count.
 Model `comms_channel::validate_transmissions` preflights the entire saved inbox
 before restore writes, and `sim_digest.rs` folds transmission metadata.
+
+Structured requests and returned outcomes use the same radio and inbox. Original
+requests are deliberate one-shot transmissions. A local returned Outcome pays
+its discrete admission cost once independently of reverse reach; its retained
+sent copy can subsequently deliver through actual continuously paid endpoints,
+matching protection and the physical path. Reception is idempotent. A broken
+return link neither cancels the local decision nor becomes a public failure
+receipt; the sender learns later stages only from actually received outcomes.
+Ordinary text retains its one-shot delivery semantics.
+
+Saved request lineage and partial ordinary AI reading are validated against the
+accepted actual actor recipe, owner, source/recipient and original clock before
+restore writes. The same inbox/pending entries participate in the digest; there
+is no separate request inbox or retry queue.
 
 ## Related
 

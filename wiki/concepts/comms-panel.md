@@ -2,7 +2,7 @@
 title: Comms Panel
 type: concept
 tags: [comms, client, inbox, hails, priority, localisation, input, feedback]
-sources: [gui/components/ph-comms-text-composer.js, editor/workshop-comms-radio.js, gui/workshop-comms-radio-panel.js, gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/world/server/mod.rs, tests/publisher_ordering.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm/operations/comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
+sources: [crates/phoenix-model/src/comms_request.rs, crates/phoenix-simulation/src/comms/requests.rs, crates/phoenix-simulation/src/comms/request_returns.rs, crates/phoenix-simulation/src/snapshot/comms_requests.rs, gui/comms-requests.js, gui/components/ph-comms-text-composer.js, editor/workshop-comms-radio.js, gui/workshop-comms-radio-panel.js, gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/world/server/mod.rs, tests/publisher_ordering.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm/operations/comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
 updated: 2026-10-15
 ---
 
@@ -43,6 +43,32 @@ clears a matching unchanged draft; invoking Send or receiving another ship's tex
 does not. Sent and received labels report only the recorded local fact.
 
 Hail, response, clear, and show-on-screen use correlated commands. Their existing server consumers return `Applied` only after consuming the command and `Refused` at their existing rejection points. Message selection is local because the server has no selection-state consumer: the shared renderer validates the requested live message, updates the list, current thread and battleship footer synchronously, and only then lets the lifecycle report `Applied`. It sends no `SelectCommsMessage`; a stale request returns unhandled instead of falsely completing. The established `CommsResponseRejected` message remains alongside shared `ActionFeedback`, so a refused response still identifies and flashes its exact button.
+
+## Structured status requests
+
+The composer sends the closed `ReportStatus` request through the same authored
+channel/audience and normal correlated Comms command as text. It preserves the
+literal text draft. Received request controls explicitly mark a copy read or
+submit Report/Decline; delegated request controls are read-only. The ordinary
+receiving Comms controller reads for the authored positive
+`request_reading_ticks`, retaining partial progress in its existing pending
+response entry and pausing under Human or Offline control. Reading and a local
+decision are separate from receipt.
+
+The request, its original clocks and receiver-local facts live on the existing
+recipient-owned inbox copy. A Report describes only its actual controlling
+Comms System's coarse availability at the recorded decision tick. Returned
+messages display recorded heard/read/decision/report ticks; they do not claim
+remote actuator acceptance. Independently paid return transmission can wait for
+a working return link without changing the reporter's local decision or exposing
+a hidden listener's viability.
+
+Clear dismisses eligible structured rows without deleting their lineage or
+pending returns. Show cleared requests restores those same permitted records
+for the Console operator; it grants no other Console's history. New returned
+outcomes have their own presentation state. Ordinary plot/text Clear retains
+its prior behaviour. `last_returned` is an internal idempotence frontier and is
+removed from Blackboard, direct CommsState and ShowOnScreen projections.
 
 ## Priority
 

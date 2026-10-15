@@ -67,7 +67,33 @@ pub(crate) fn install(
         cmds.insert(CompiledRefitFacility(facility.clone()));
     }
     if let Some(profile) = CompiledFitting::compile(config).expect("validated fitting") {
-        let catalog = phoenix_model::system_status::FittingPlannerContext {
+        let catalog = planner_context(config).expect("fitted catalog");
+        let mut equipment = FittingState::from_profile(&profile).expect("validated assemblies");
+        equipment.assemblies = equipment
+            .assemblies
+            .into_values()
+            .map(|mut item| {
+                item.id = format!("eq-{uuid}-{}", item.id);
+                (item.id.clone(), item)
+            })
+            .collect();
+        cmds.insert((
+            CompiledShipFitting(profile),
+            FittingPlannerCatalog(catalog),
+            ShipFitting {
+                equipment,
+                requested: BTreeSet::new(),
+                work: BTreeMap::new(),
+                next_request: 1,
+                last_tick: None,
+            },
+        ));
+    }
+}
+
+pub(crate) fn planner_context(config: &crate::entities::config::EntityConfig) -> Option<phoenix_model::system_status::FittingPlannerContext> {
+    let profile = CompiledFitting::compile(config).ok()??;
+    Some(phoenix_model::system_status::FittingPlannerContext {
             hull_path: String::new(),
             content_id: format!(
                 "{:016x}",
@@ -101,28 +127,7 @@ pub(crate) fn install(
                         .collect(),
                 })
                 .collect(),
-        };
-        let mut equipment = FittingState::from_profile(&profile).expect("validated assemblies");
-        equipment.assemblies = equipment
-            .assemblies
-            .into_values()
-            .map(|mut item| {
-                item.id = format!("eq-{uuid}-{}", item.id);
-                (item.id.clone(), item)
-            })
-            .collect();
-        cmds.insert((
-            CompiledShipFitting(profile),
-            FittingPlannerCatalog(catalog),
-            ShipFitting {
-                equipment,
-                requested: BTreeSet::new(),
-                work: BTreeMap::new(),
-                next_request: 1,
-                last_tick: None,
-            },
-        ));
-    }
+        })
 }
 
 pub(crate) fn register(app: &mut App) {

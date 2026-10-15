@@ -22,6 +22,9 @@ fn template(radius: f32, hp: f32) -> EntityConfig {
     EntityConfig::from_toml(&format!(
         r#"
 tags = ["asteroid", "authored-test"]
+[target]
+tags = ["cargo"]
+threat_level = "none"
 [collider]
 shape = "Ball"
 radius = {radius}
@@ -62,6 +65,7 @@ fn assert_templates(app: &mut App, radius: f32, hp: f32, cosmetic_radius: f32) {
     for rock in snapshots {
         assert_eq!(rock.radius, Some(radius));
         assert_eq!(rock.tags, ["asteroid", "authored-test"]);
+        assert_eq!(rock.target_tags, ["cargo"]);
         assert_eq!(rock.radar_icon.as_deref(), Some("asteroid"));
         assert_eq!(rock.colour, Some([0.2, 0.3, 0.4]));
         assert_eq!(rock.radar_size, Some(radius));
@@ -154,6 +158,10 @@ gameplay_y_variance = 0.0
     for rock in &app.world().resource::<WorldResource>().0.entities {
         assert_eq!(rock.radius, Some(2.0));
         assert_eq!(rock.tags, ["asteroid"]);
+        assert!(
+            rock.target_tags.is_empty(),
+            "fallback rocks grant no selection"
+        );
     }
     let mut meshes = app.world_mut().query::<&MeshSection>();
     assert_eq!(meshes.iter(app.world()).count(), 0);
@@ -180,4 +188,63 @@ gameplay_y_variance = 0.0
     let restored = project_phoenix::asteroids::lifecycle::rock_config(ROCK);
     assert_eq!(restored.collider.radius, 6.0);
     assert_eq!(restored.max_hp, 150.0);
+    assert_eq!(restored.target_tags, ["cargo"]);
+
+    // The same real restore that recreates missing rock bodies restores their
+    // complete authored display/selection metadata; it must not infer one from
+    // the other or require another streaming tick to regain selection.
+    let snapshot = project_phoenix::snapshot::capture(app.world());
+    let snapshot = serde_json::from_str(
+        &serde_json::to_string(&snapshot).expect("serialize streamed capture"),
+    )
+    .expect("deserialize streamed capture");
+    let old_rows = app.world().resource::<WorldResource>().0.entities.clone();
+    let entities: Vec<Entity> = app
+        .world_mut()
+        .query_filtered::<Entity, With<Asteroid>>()
+        .iter(app.world())
+        .collect();
+    for entity in entities {
+        app.world_mut().entity_mut(entity).despawn();
+    }
+    app.world_mut()
+        .resource_mut::<AsteroidEntityMap>()
+        .0
+        .clear();
+    app.world_mut()
+        .resource_mut::<WorldResource>()
+        .0
+        .entities
+        .clear();
+    let report = project_phoenix::snapshot::restore(app.world_mut(), &snapshot);
+    assert!(
+        report.gaps.is_empty(),
+        "actual streamed restore: {report:?}"
+    );
+    assert_eq!(report.asteroids_restored, old_rows.len());
+    assert_eq!(app.world().resource::<WorldResource>().0.entities, old_rows);
+    let mut restored_bodies = app
+        .world_mut()
+        .query_filtered::<(&MeshSection, &EntitySystemHull), With<Asteroid>>();
+    assert_eq!(restored_bodies.iter(app.world()).count(), old_rows.len());
+    for (mesh, hull) in restored_bodies.iter(app.world()) {
+        assert_eq!(mesh.0.radius, 6.0);
+        assert_eq!(hull.0.total_current(), 150.0);
+    }
+
+    // An existing template with general display tags but no Target is also
+    // unselectable; this differs from the earlier missing-template fallback.
+    let mut unselectable = template(6.0, 150.0);
+    unselectable.target = None;
+    insert_native_config(ROCK.into(), unselectable);
+    move_and_stream(&mut app, ship, 500.0);
+    move_and_stream(&mut app, ship, 0.0);
+    assert_eq!(identities(&app), original);
+    for rock in &app.world().resource::<WorldResource>().0.entities {
+        assert_eq!(rock.tags, ["asteroid", "authored-test"]);
+        assert!(rock.target_tags.is_empty());
+    }
+    assert!(project_phoenix::asteroids::lifecycle::rock_config(ROCK)
+        .target_tags
+        .is_empty());
 }

@@ -601,6 +601,8 @@ pub struct RockConfig {
     pub collider: crate::entities::config::ColliderConfig,
     pub max_hp: f32,
     pub tags: Vec<String>,
+    /// Selection permissions come only from the authored Target, not display tags.
+    pub target_tags: Vec<String>,
     pub mesh: Option<crate::entities::config::MeshConfig>,
     pub radar_icon: Option<String>,
     pub radar_colour: Option<[f32; 3]>,
@@ -649,6 +651,10 @@ pub fn rock_config(config_path: &str) -> RockConfig {
             .map(|c| c.tags.clone())
             .filter(|t| !t.is_empty())
             .unwrap_or_else(|| vec!["asteroid".into()]),
+        target_tags: entity_config
+            .and_then(|c| c.target.as_ref())
+            .map(|target| target.tags.clone())
+            .unwrap_or_default(),
         mesh: entity_config.and_then(|c| c.mesh.clone()),
         radar_icon: radar_appearance.and_then(|r| r.icon.clone()),
         radar_colour: radar_appearance.and_then(|r| {
@@ -759,6 +765,7 @@ fn try_spawn_cell(
     let collider_radius = rock.collider.radius;
     let max_hp = rock.max_hp;
     let snapshot_tags = rock.tags.clone();
+    let snapshot_target_tags = rock.target_tags.clone();
     let radar_icon = rock.radar_icon.clone();
     let radar_colour = rock.radar_colour;
     let radar_size = rock.radar_size;
@@ -833,6 +840,7 @@ fn try_spawn_cell(
         uuid: uuid.clone(),
         position: Some([world_x, spawn.y, world_z]),
         tags: snapshot_tags,
+        target_tags: snapshot_target_tags,
         radius: Some(collider_radius),
         radar_icon: radar_icon.clone(),
         colour: radar_colour,

@@ -227,6 +227,7 @@ fn actual_generated_rock_bundle_does_not_bypass_measured_visibility() {
         collider: authored.collider.clone().unwrap(),
         max_hp: authored.hull.as_ref().unwrap().hull_integrity,
         tags: authored.tags.clone(),
+        target_tags: authored.target.as_ref().unwrap().tags.clone(),
         mesh: authored.mesh.clone(),
         radar_icon: authored.radar_appearance.as_ref().unwrap().icon.clone(),
         radar_colour: None,

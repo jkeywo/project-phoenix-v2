@@ -574,6 +574,19 @@ fn two_drive_fixture() -> (App, Entity, SystemId) {
         }
     }
     ship.systems.push(system);
+    for rating in &mut ship
+        .stations
+        .iter_mut()
+        .find(|station| station.id.0 == "helm")
+        .unwrap()
+        .ratings
+    {
+        rating
+            .detailed_systems
+            .as_mut()
+            .expect("actual Helm ratings explicitly bind direct-control Systems")
+            .push(alternate.clone());
+    }
     for console in ship
         .consoles
         .iter_mut()

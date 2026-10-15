@@ -5,6 +5,25 @@ use phoenix_model::messages::DossierBlackboard;
 use phoenix_model::sensing_references::{AttachedSensorReference, KnownReferenceMetadata};
 use std::collections::BTreeMap;
 
+/// Only names unique in this already-permitted instrument picture are routine
+/// correlations. Equal labels are not evidence that two contacts are one actor.
+pub fn routine_names(
+    records: &[phoenix_model::sensing_tracks::SensorTrackSnapshot],
+) -> std::collections::BTreeSet<String> {
+    let mut counts = BTreeMap::<String, usize>::new();
+    for record in records {
+        if let Some(identity) = &record.identity {
+            if !identity.name.is_empty() {
+                *counts.entry(identity.name.clone()).or_default() += 1;
+            }
+        }
+    }
+    counts
+        .into_iter()
+        .filter_map(|(name, count)| (count == 1).then_some(name))
+        .collect()
+}
+
 /// Unique marked findings from a Console's permitted dossier publication.
 /// Ambiguous/reused IDs are withheld rather than choosing a convenient source.
 pub fn held_references(dossiers: &DossierBlackboard) -> BTreeMap<String, AttachedSensorReference> {
@@ -75,7 +94,11 @@ pub fn validate_attachments(
 
 /// Ordinary matches stay responsive. An explicitly unusual finding is shown
 /// only after deliberate attachment; it never changes observed identity.
-pub fn project(track: &BroadTrack, dossiers: &DossierBlackboard) -> Vec<AttachedSensorReference> {
+pub fn project(
+    track: &BroadTrack,
+    dossiers: &DossierBlackboard,
+    routine_name_is_unique: bool,
+) -> Vec<AttachedSensorReference> {
     held_references(dossiers)
         .into_values()
         .filter_map(|mut reference| {
@@ -83,7 +106,8 @@ pub fn project(track: &BroadTrack, dossiers: &DossierBlackboard) -> Vec<Attached
                 .attached_references
                 .get(&reference.reference.id)
                 .copied();
-            let routine = !reference.reference.unusual
+            let routine = routine_name_is_unique
+                && !reference.reference.unusual
                 && track.identity.as_ref().is_some_and(|identity| {
                     !reference.source_name.is_empty() && identity.name == reference.source_name
                 });

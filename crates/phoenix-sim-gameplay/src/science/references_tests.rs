@@ -67,7 +67,7 @@ fn dossier(unusual: bool) -> DossierBlackboard {
 fn unusual_record_requires_deliberate_attachment_and_never_changes_measurement() {
     let mut held = track();
     let dossiers = dossier(true);
-    assert!(project(&held, &dossiers).is_empty());
+    assert!(project(&held, &dossiers, true).is_empty());
     let before = held.clone();
     let reference = &dossiers.subjects[0].evidence[0].reference.as_ref().unwrap();
     attach(&mut held, reference, 12).unwrap();
@@ -77,26 +77,26 @@ fn unusual_record_requires_deliberate_attachment_and_never_changes_measurement()
         .attached_references
         .insert("known-record".into(), 12);
     assert_eq!(held, expected);
-    let view = project(&held, &dossiers);
+    let view = project(&held, &dossiers, true);
     assert_eq!(view[0].gathered_at_tick, 2);
     assert_eq!(view[0].attached_at_tick, 12);
     assert_eq!(view[0].provenance, "records");
     let resumed: BroadTrack = serde_json::from_str(&serde_json::to_string(&held).unwrap()).unwrap();
-    assert_eq!(project(&resumed, &dossiers), view);
+    assert_eq!(project(&resumed, &dossiers, true), view);
 }
 #[test]
 fn routine_matching_uses_only_observed_name_and_exact_permitted_findings() {
     let mut held = track();
-    assert_eq!(project(&held, &dossier(false)).len(), 1);
+    assert_eq!(project(&held, &dossier(false), true).len(), 1);
     held.identity = None;
-    assert!(project(&held, &dossier(false)).is_empty());
+    assert!(project(&held, &dossier(false), true).is_empty());
     held.attached_references.insert("known-record".into(), 12);
-    assert!(project(&held, &DossierBlackboard::default()).is_empty());
+    assert!(project(&held, &DossierBlackboard::default(), true).is_empty());
     let mut ambiguous = dossier(true);
     let mut conflicting = ambiguous.subjects[0].clone();
     conflicting.evidence[0].text = "different-record".into();
     ambiguous.subjects.push(conflicting);
-    assert!(project(&held, &ambiguous).is_empty());
+    assert!(project(&held, &ambiguous, true).is_empty());
 }
 
 #[test]
@@ -145,11 +145,49 @@ fn automatic_reference_join_never_predates_the_later_held_finding() {
     let held = track();
     let mut dossiers = dossier(false);
     dossiers.subjects[0].evidence[0].gathered_at_tick = 18;
-    let view = project(&held, &dossiers);
+    let view = project(&held, &dossiers, true);
     assert_eq!(view[0].gathered_at_tick, 18);
     assert_eq!(view[0].attached_at_tick, 18);
     assert!(
         held.attached_references.is_empty(),
         "routine projection adds no duplicate evidence owner"
+    );
+}
+
+#[test]
+fn equal_public_names_withhold_routine_matches_but_preserve_deliberate_hypotheses() {
+    use phoenix_model::sensing_tracks::SensorTrackSnapshot;
+    let mut held = track();
+    let first: SensorTrackSnapshot = serde_json::from_value(serde_json::json!({
+        "contact_id":"contact-a", "selectable":true, "observed_tick":10,
+        "position":[5.0,0.0], "velocity":null, "position_error":1.0,
+        "stage":"identified", "identity":held.identity.clone(), "identity_tick":10,
+        "classification":null, "classification_tick":null, "assessment":null,
+        "assessment_tick":null, "predicted":false
+    }))
+    .unwrap();
+    let mut second = first.clone();
+    second.contact_id = "contact-b".into();
+    let names = routine_names(&[first.clone(), second]);
+    assert!(!names.contains("observed-name"));
+    assert!(project(&held, &dossier(false), names.contains("observed-name")).is_empty());
+    let unique = routine_names(&[first]);
+    assert_eq!(
+        project(&held, &dossier(false), unique.contains("observed-name")).len(),
+        1
+    );
+    attach(
+        &mut held,
+        dossier(true).subjects[0].evidence[0]
+            .reference
+            .as_ref()
+            .unwrap(),
+        12,
+    )
+    .unwrap();
+    assert_eq!(
+        project(&held, &dossier(true), false).len(),
+        1,
+        "a deliberate hypothesis is not automatic identity proof"
     );
 }

@@ -119,9 +119,17 @@ pub fn attach_views(
         Some(SystemBlackboard::Dossiers(dossiers)) => Some(dossiers),
         _ => None,
     };
+    let routine_names = phoenix_sim_gameplay::science::references::routine_names(records);
     for record in records {
         record.references = match (state.tracks.get(&record.contact_id), dossiers) {
-            (Some(track), Some(dossiers)) => project(track, dossiers),
+            (Some(track), Some(dossiers)) => project(
+                track,
+                dossiers,
+                record
+                    .identity
+                    .as_ref()
+                    .is_some_and(|identity| routine_names.contains(&identity.name)),
+            ),
             _ => Vec::new(),
         };
     }

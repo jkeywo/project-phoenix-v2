@@ -1762,7 +1762,7 @@ fn root_entry_cannot_request_optional_work_or_apply_its_buffered_effects() {
     );
     assert!(app
         .world()
-        .resource::<crate::server_app::CommsInboxRes>()
+        .resource::<crate::comms::server::CommsInboxRes>()
         .0
         .iter()
         .next()

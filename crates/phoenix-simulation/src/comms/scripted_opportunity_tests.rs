@@ -88,10 +88,9 @@ fn budget_deferral_keeps_same_original_offer_and_legacy_tail_policy_then_enters_
     let original = serde_json::to_value(&open).unwrap();
     {
         let mut script = app.world_mut().resource_mut::<WorldScriptRuntime>();
-        script.prepare_invocation_tick(100);
-        script
-            .budget
-            .charge_ops(crate::world::script::MAX_OPS_PER_TICK);
+        let mut budget = crate::world::script::schedule::TickBudget::new();
+        budget.charge_ops(crate::world::script::MAX_OPS_PER_TICK);
+        script.seed_invocation_budget(100, budget);
         // A legacy refusal first must not drop a later actual offer.
         script.pending_comms_opens.push(request("offer", "legacy"));
         script.pending_comms_opens.push(open);

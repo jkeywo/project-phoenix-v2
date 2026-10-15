@@ -1328,6 +1328,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
             dossier: _,
             situations: _,
             planning: _,
+            opportunities: _,
         } = value;
     }
     fn scenario_flag_schema(value: crate::debug::payload::ScenarioFlag) {

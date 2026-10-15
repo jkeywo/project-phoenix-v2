@@ -14,6 +14,7 @@ export function mountWorkshopSensing({ root, provider, runtime, draft: getDraft,
   const rows = {}; let inspection = null, dependencies = null, disposed = false, loading = false, observed = null, generation = 0;
   node.append(el('h3', null, 'title'), el('p', null, 'hint'), label(template, 'template'), label(materialise, 'materialise'), status);
   for (const [role, spec] of Object.entries(sensingRoles)) {
+    if (role === 'broad') continue;
     const fieldset = el('fieldset', role), system = el('select', role + '-system'), fields = {};
     fieldset.append(el('legend', null, role), label(system, 'system'));
     for (const field of [...spec.fields, ...(role === 'passive' ? ['facing_deg', 'arc_deg', 'range'] : [])]) {
@@ -24,19 +25,40 @@ export function mountWorkshopSensing({ root, provider, runtime, draft: getDraft,
     }
     rows[role] = { system, fields }; node.append(fieldset);
   }
+  const broadHost = el('fieldset', 'broad'), broadRows = new Map(); let broadSequence = 0;
+  broadHost.append(el('legend', null, 'broad')); node.append(broadHost);
+  function addBroad(value = defaults.broad) {
+    const index = broadSequence++, key = index === 0 ? 'broad' : 'broad-' + index;
+    const container = el('fieldset'), system = el('select', key + '-system'), fields = {};
+    container.append(label(system, 'system'));
+    fill(system, ['', ...inspection.systems.filter(system => sensingRoles.broad.kinds.includes(system.kind)).map(system => system.id)], value.system || '');
+    for (const field of sensingRoles.broad.fields) {
+      const control = input(key + '-' + field, 'number'); control.value = value[field] ?? defaults.broad[field];
+      fields[field] = control; container.append(label(control, field));
+    }
+    const remove = el('button', key + '-remove', 'remove-broad'); remove.type = 'button';
+    remove.addEventListener('click', () => { broadRows.delete(key); container.remove(); });
+    container.append(remove); broadRows.set(key, { system, fields }); broadHost.append(container);
+  }
+  const add = el('button', 'broad-add', 'add-broad'); add.type = 'button'; add.addEventListener('click', () => { addBroad(); controls(); }); node.append(add);
   const defaults = { focused: { work_secs: 1, history_limit: 32, unfinished_retention_secs: 0 }, broad: { sample_interval_secs: .5, identity_secs: 1, classification_secs: 3, assessment_secs: 6, position_error: 2, drift_error_per_sec: .5, track_retention_secs: 60 }, passive: { sample_interval_secs: .5, min_signal_strength: .01, bearing_error_rad: .15, mount: { facing_deg: 0, arc_deg: 360, range: 100 } } };
   function controls() { for (const control of node.querySelectorAll('input,select,button')) control.disabled = disposed || loading || busy() || !inspection; fit.disabled ||= !!inspection?.sensing?.passive; }
   function paint() {
     for (const [role, spec] of Object.entries(sensingRoles)) {
+      if (role === 'broad') continue;
       const value = inspection.sensing?.[role] || defaults[role]; fill(rows[role].system, ['', ...inspection.systems.filter(system => system.kind === spec.kind).map(system => system.id)], inspection.sensing?.[role]?.system || '');
       for (const [field, control] of Object.entries(rows[role].fields)) control.value = value[field] ?? value.mount?.[field] ?? '';
     }
+    for (const child of [...broadHost.children].slice(1)) child.remove(); broadRows.clear(); broadSequence = 0;
+    for (const value of inspection.sensing?.broad || []) addBroad(value);
     fill(console, (inspection.resolved.value.console || []).map(row => row.id)); fill(group, (inspection.resolved.value.energy?.group || []).map(row => row.id)); fill(room, (inspection.resolved.value.interior?.compartment || []).map(row => row.id)); controls();
   }
-  function read() { return Object.fromEntries(Object.entries(sensingRoles).filter(([role]) => rows[role].system.value).map(([role, spec]) => [role, {
+  function read() { return { broad: [...broadRows.values()].filter(row => row.system.value).map(row => ({ system: row.system.value,
+    ...Object.fromEntries(sensingRoles.broad.fields.map(field => [field, row.fields[field].valueAsNumber])) })),
+    ...Object.fromEntries(Object.entries(sensingRoles).filter(([role]) => role !== 'broad' && rows[role].system.value).map(([role, spec]) => [role, {
     system: rows[role].system.value, ...Object.fromEntries(spec.fields.map(field => [field, rows[role].fields[field].valueAsNumber])),
     ...(role === 'passive' ? { mount: Object.fromEntries(['facing_deg', 'arc_deg', 'range'].map(field => [field, rows[role].fields[field].valueAsNumber])) } : {}),
-  }])); }
+  }])) }; }
   async function apply(extra = {}) {
     if (busy() || !inspection) return; const token = ++generation, value = read();
     if (extra.type) value.passive = { system: newId.value,

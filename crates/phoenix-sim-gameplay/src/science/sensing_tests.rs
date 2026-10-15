@@ -1,5 +1,49 @@
 use super::*;
 use std::collections::BTreeMap;
+#[test]
+fn all_fitted_instruments_derive_their_actual_independent_coverage() {
+    for hull in [
+        "alliance_battleship",
+        "alliance_courier",
+        "alliance_cruiser",
+        "alliance_destroyer",
+        "dynasty_player_cruiser",
+        "ship_harrow_cruiser",
+        "ship_harrow_destroyer",
+        "ship_harrow_patrol",
+        "ship_harrow_tug",
+        "ship_harrow_warhawk",
+        "ship_requiem_courier",
+        "station_axiom",
+        "manual_trade_port",
+    ] {
+        let config =
+            crate::test_fixtures::load_entity_config(&format!("assets/entities/{hull}.toml"))
+                .unwrap();
+        let profile = config.sensing.as_ref().unwrap();
+        validate_sensing(profile, &config).unwrap();
+        let ship = config.ship_config.as_ref().unwrap();
+        let actual = ship
+            .systems
+            .iter()
+            .filter(|s| {
+                [HELM_RADAR_KIND, TACTICAL_RADAR_KIND, SENSOR_RADAR_KIND].contains(&s.kind.as_str())
+            })
+            .count();
+        assert_eq!(actual, profile.broad.len(), "{hull}");
+        for instrument in &profile.broad {
+            assert!(broad_radar(&instrument.system, &config).unwrap().range > 0.0);
+        }
+    }
+    let mut config =
+        crate::test_fixtures::load_entity_config("assets/entities/alliance_cruiser.toml").unwrap();
+    let profile = config.sensing.clone().unwrap();
+    config.helm_console.as_mut().unwrap().radar = None;
+    assert!(validate_sensing(&profile, &config).is_err());
+    let mut wrong = profile;
+    wrong.broad[0].system = crate::core::messages::SystemId("repair".into());
+    assert!(validate_sensing(&wrong, &config).is_err());
+}
 
 fn instrument_profile() -> SensingConfig {
     SensingConfig {
@@ -9,7 +53,7 @@ fn instrument_profile() -> SensingConfig {
             history_limit: 64,
             unfinished_retention_secs: 0.0,
         }),
-        broad: Some(BroadConfig {
+        broad: vec![BroadConfig {
             system: crate::core::messages::SystemId("sensor-radar".into()),
             sample_interval_secs: 0.5,
             identity_secs: 1.0,
@@ -18,7 +62,7 @@ fn instrument_profile() -> SensingConfig {
             position_error: 1.0,
             drift_error_per_sec: 0.5,
             track_retention_secs: 60.0,
-        }),
+        }],
         passive: None,
     }
 }
@@ -87,12 +131,12 @@ fn actual_broad_and_focused_instruments_use_distinct_owned_physical_reserves() {
 #[test]
 fn optional_roles_do_not_create_free_instruments_or_merge_shared_identity() {
     let mut profile = instrument_profile();
-    profile.broad = None;
+    profile.broad.clear();
     profile.validate().unwrap();
     profile.focused = None;
     assert!(profile.validate().is_err());
     profile = instrument_profile();
-    profile.broad.as_mut().unwrap().system = profile.focused.as_ref().unwrap().system.clone();
+    profile.broad.first_mut().unwrap().system = profile.focused.as_ref().unwrap().system.clone();
     assert!(profile.validate().is_err());
 }
 #[test]
@@ -102,9 +146,9 @@ fn malformed_numeric_and_extension_profiles_refuse_before_any_runtime_state() {
         match mode {
             0 => value.focused.as_mut().unwrap().work_secs = 0.0,
             1 => value.focused.as_mut().unwrap().history_limit = 0,
-            2 => value.broad.as_mut().unwrap().classification_secs = 0.5,
-            3 => value.broad.as_mut().unwrap().position_error = f32::NAN,
-            _ => value.broad.as_mut().unwrap().track_retention_secs = -1.0,
+            2 => value.broad.first_mut().unwrap().classification_secs = 0.5,
+            3 => value.broad.first_mut().unwrap().position_error = f32::NAN,
+            _ => value.broad.first_mut().unwrap().track_retention_secs = -1.0,
         }
         assert!(value.validate().is_err());
     }
@@ -203,7 +247,7 @@ fn passive_receiver_needs_own_hardware_and_closed_program_without_target_truth()
     );
     let profile = SensingConfig {
         focused: None,
-        broad: None,
+        broad: vec![],
         passive: Some(PassiveConfig {
             system: id.clone(),
             mount: SensorMountConfig {

@@ -1,10 +1,59 @@
 use super::*;
+#[test]
+fn two_actual_radars_keep_paid_work_and_routing_separate_on_one_ship() {
+    let (mut app, observer, _, sensor) = rig();
+    let tactical = app.world().get::<BroadProfile>(observer).unwrap().0
+        [&phoenix_model::identity::SystemId("tactical-radar".into())]
+        .profile
+        .clone();
+    fund(&mut app, observer, &sensor, 1.0);
+    fund(&mut app, observer, &tactical, 0.0);
+    let before = app
+        .world()
+        .get::<ShipPowerSystem>(observer)
+        .unwrap()
+        .0
+        .capture_continuation();
+    app.update();
+    let states = &app.world().get::<BroadTracks>(observer).unwrap().0;
+    assert_eq!(states[&sensor.system].tracks.len(), 1);
+    assert!(states[&tactical.system].tracks.is_empty());
+    assert_eq!(
+        app.world()
+            .get::<ShipPowerSystem>(observer)
+            .unwrap()
+            .0
+            .capture_continuation(),
+        before
+    );
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 1;
+    fund(&mut app, observer, &sensor, 0.0);
+    fund(&mut app, observer, &tactical, 1.0);
+    app.update();
+    let states = &app.world().get::<BroadTracks>(observer).unwrap().0;
+    let sensor_id = states[&sensor.system].tracks.keys().next().unwrap();
+    let tactical_id = states[&tactical.system].tracks.keys().next().unwrap();
+    assert_ne!(sensor_id, tactical_id);
+    assert!(states[&sensor.system]
+        .resolve_current(tactical_id)
+        .is_none());
+    assert!(states[&sensor.system].current.is_empty());
+    assert_eq!(states[&tactical.system].current.len(), 1);
+}
 fn rig() -> (App, Entity, Entity, BroadConfig) {
     let config = crate::entities::include_resolve::load_entity_config(
         "assets/entities/alliance_cruiser.toml",
     )
     .unwrap();
-    let profile = config.sensing.as_ref().unwrap().broad.clone().unwrap();
+    let profile = config
+        .sensing
+        .as_ref()
+        .unwrap()
+        .broad
+        .iter()
+        .find(|p| p.system.0 == "sensor-radar")
+        .unwrap()
+        .clone();
     let mut app = App::new();
     app.insert_resource(Time::<Fixed>::from_seconds(0.5))
         .insert_resource(crate::sim_tick::SimTick(0))
@@ -17,10 +66,6 @@ fn rig() -> (App, Entity, Entity, BroadConfig) {
         None,
     );
     app.world_mut().flush();
-    app.world_mut().entity_mut(observer).insert((
-        BroadProfile(profile.clone()),
-        BroadTracks(BroadTrackState::new(&profile)),
-    ));
     let target = app
         .world_mut()
         .spawn((
@@ -65,7 +110,7 @@ fn actual_broad_work_reuses_exact_paid_reserve_grant_and_no_live_velocity() {
         paid,
         "producer cannot charge twice"
     );
-    let tracks = &app.world().get::<BroadTracks>(observer).unwrap().0;
+    let tracks = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
     let first = tracks.projection(&profile, 0, 0.5).unwrap();
     assert_eq!(first.len(), 1);
     assert!(first[0].identity.is_none() && first[0].velocity.is_none());
@@ -73,11 +118,7 @@ fn actual_broad_work_reuses_exact_paid_reserve_grant_and_no_live_velocity() {
     app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 1;
     fund(&mut app, observer, &profile, 1.0);
     app.update();
-    let measured = app
-        .world()
-        .get::<BroadTracks>(observer)
-        .unwrap()
-        .0
+    let measured = app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system]
         .projection(&profile, 1, 0.5)
         .unwrap()[0]
         .clone();
@@ -89,7 +130,7 @@ fn actual_broad_work_reuses_exact_paid_reserve_grant_and_no_live_velocity() {
     app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 2;
     fund(&mut app, observer, &profile, 0.0);
     app.update();
-    let tracks = &app.world().get::<BroadTracks>(observer).unwrap().0;
+    let tracks = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
     let lost = tracks.projection(&profile, 2, 0.5).unwrap();
     assert!(lost[0].predicted && lost[0].position_error > measured.position_error);
     assert!(tracks.resolve_current(&measured.contact_id).is_none());
@@ -112,11 +153,9 @@ fn actual_opaque_signal_path_prevents_return_despite_healthy_paid_receiver() {
     ));
     fund(&mut app, observer, &profile, 1.0);
     app.update();
-    assert!(app
-        .world()
-        .get::<BroadTracks>(observer)
-        .unwrap()
-        .0
-        .tracks
-        .is_empty());
+    assert!(
+        app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system]
+            .tracks
+            .is_empty()
+    );
 }

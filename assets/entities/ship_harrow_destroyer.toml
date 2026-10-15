@@ -124,7 +124,7 @@
 # combat, not for the whole transit, so inheriting the guard would pin the
 # drive at 2 for exactly the leg that needs it (#923; corrected #955).
 # `ship_harrow_patrol.toml` carries the fuller note on both.
-includes = ["fragments/ai/fleet_baseline.toml","fragments/ai/movement_attack_pass.toml","fragments/energy/ship_harrow_destroyer.toml","fragments/damage/common.toml"]
+includes = ["fragments/ai/fleet_baseline.toml","fragments/ai/movement_attack_pass.toml","fragments/energy/ship_harrow_destroyer.toml","fragments/damage/common.toml","fragments/sensing/tactical_broad.toml"]
 
 name = "entity.ship_harrow_destroyer.name"
 display_name = "entity.ship_harrow_destroyer.display_name"
@@ -1938,3 +1938,11 @@ label = "damage.resource.machinery_parts"
 [resource_services.machinery_parts]
 kind = "capacity"
 id = "machinery_parts"
+
+# Increment14 intentional migration: tactical acquisition was unbounded without a Radar table.
+# Existing AI profile reach is provisional finite coverage tuning for this fitted radar.
+# Combat/scenario/balance comparison remains required; no additional equipment is fitted.
+[weapons_console.radar]
+range = 400
+shows = ["player", "ship", "station", "asteroid", "missile", "torpedo"]
+selects = ["ship", "station", "asteroid"]

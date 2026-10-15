@@ -37,7 +37,7 @@
 # the #1163 headless tests put a beam on. Kept out of every shipped hull so no
 # committed world's digest moves for this slice.
 
-includes = ["fragments/ai/fleet_baseline.toml","fragments/ai/captain_alliance.toml","fragments/energy/ship_harrow_tug.toml","fragments/damage/common.toml"]
+includes = ["fragments/ai/fleet_baseline.toml","fragments/ai/captain_alliance.toml","fragments/energy/ship_harrow_tug.toml","fragments/damage/common.toml","fragments/sensing/tactical_broad.toml"]
 
 class = "courier"  # picker badge / scan subtitle — a light salvage hull
 tags = ["ship", "npc"]
@@ -1164,3 +1164,11 @@ label = "damage.resource.machinery_parts"
 [resource_services.machinery_parts]
 kind = "capacity"
 id = "machinery_parts"
+
+# Increment14 intentional migration: tactical acquisition was unbounded without a Radar table.
+# Existing AI profile reach is provisional finite coverage tuning for this fitted radar.
+# Combat/scenario/balance comparison remains required; no additional equipment is fitted.
+[weapons_console.radar]
+range = 800
+shows = ["player", "ship", "station", "asteroid", "missile", "torpedo"]
+selects = ["ship", "station", "asteroid"]

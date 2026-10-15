@@ -10,6 +10,26 @@ const path = 'assets/entities/test.toml', base = 'assets/entities/base.toml', de
 const make = text => new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: '[pack]\nformat=1\nid="test"\nname="Test"\nversion="1"\n' }, { path, text }]));
 function fixture() { const out = damageFixture(); out.schema.console_instance_publication_kinds.passive_receiver = 'Passive'; return out; }
 describe('accepted-source independent sensing instruments', () => {
+  it('authors independent radar arrays and refuses duplicate or incompatible fitted owners', () => {
+    const { value, schema } = fixture(), before = stringify(value), profile = structuredClone(value.sensing);
+    expect(profile.broad.map(row => row.system).sort()).toEqual(['helm-radar', 'sensor-radar', 'tactical-radar']);
+    profile.broad.find(row => row.system === 'helm-radar').sample_interval_secs = 2;
+    const after = prepareSensingOperation(make(before), deps, { path, value: profile }, schema).changes[0].after;
+    expect(parse(after).sensing.broad).toEqual(profile.broad);
+    expect(parse(after).energy).toEqual(value.energy);
+    const duplicate = structuredClone(profile); duplicate.broad.push(duplicate.broad[0]); expect(() => validateSensing(duplicate, value)).toThrow(/distinct/);
+    const wrong = structuredClone(profile); wrong.broad[0].system = 'repair'; expect(() => validateSensing(wrong, value)).toThrow(/kind/);
+    const missing = structuredClone(value); delete missing.helm_console.radar; expect(() => validateSensing(profile, missing)).toThrow(/coverage/);
+    expect(() => validateSensing({ ...profile, broad: profile.broad[0] }, value)).toThrow(/array/);
+  });
+  it('migrates existing NPC Tactical radars from unbounded to explicit finite authored coverage', () => {
+    for (const [hull, range] of [['ship_harrow_cruiser',350],['ship_harrow_destroyer',400],['ship_harrow_patrol',110],['ship_harrow_tug',800],['ship_harrow_warhawk',320],['ship_requiem_courier',80]]) {
+      const value = resolveTemplate(`assets/entities/${hull}.toml`, { read: file => fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null }, parse).resolved.value;
+      validateSensing(value.sensing, value); expect(value.sensing.broad.map(row => row.system)).toEqual(['tactical-radar']);
+      expect(value.weapons_console.radar.range).toBe(range);
+      expect(value.system.filter(row => row.kind === 'sensor_radar')).toHaveLength(0);
+    }
+  });
   it('edits full profile through real acceptance with exact undo/export and no-write refusal', async () => {
     const { value, schema } = fixture(), before = '# header\n' + stringify(value) + '\n# tail\n', draft = make(before), profile = structuredClone(value.sensing); profile.focused.work_secs = 4;
     const runtime = { shipSchema: async () => schema, validate: vi.fn(async () => ({ accepted: true })) };
@@ -41,7 +61,7 @@ describe('accepted-source independent sensing instruments', () => {
     expect(result.station.find(row => row.id === 'science').rating.slice(1).every(row => row.automated_systems.includes(id))).toBe(true);
     validateSensing(result.sensing, result);
   });
-  it.each([p => { p.focused.work_secs = 0; }, p => { p.focused.work_secs = '2'; }, p => { p.passive.mount.facing_deg = '90'; }, p => { p.broad.sample_interval_secs = 1e-46; }, p => { p.broad.assessment_secs = 0; }, p => { p.passive.mount.arc_deg = 361; }, p => { p.passive.bearing_error_rad = 4; }, p => { p.passive.system = 'repair'; }, p => { p.extension = true; }])('refuses invalid closed finite profiles', edit => {
+  it.each([p => { p.focused.work_secs = 0; }, p => { p.focused.work_secs = '2'; }, p => { p.passive.mount.facing_deg = '90'; }, p => { p.broad[0].sample_interval_secs = 1e-46; }, p => { p.broad[0].assessment_secs = 0; }, p => { p.passive.mount.arc_deg = 361; }, p => { p.passive.bearing_error_rad = 4; }, p => { p.passive.system = 'repair'; }, p => { p.extension = true; }])('refuses invalid closed finite profiles', edit => {
     const { value } = fixture(), profile = structuredClone(value.sensing); edit(profile); expect(() => validateSensing(profile, value)).toThrow();
   });
   it('guards physical owner references and does not permit an orphan fitted receiver', () => {
@@ -55,14 +75,14 @@ describe('accepted-source independent sensing instruments', () => {
       validateSensing(result.sensing, result); const id = result.sensing.passive.system, system = result.system.find(row => row.id === id);
       expect(result.energy.consumer.filter(row => row.system === id)).toHaveLength(1);
       expect(result.console.find(row => row.id === system.console).feed).toContainEqual({ source: id, kind: 'Passive' });
-      expect(result.sensing.focused.work_secs).toBe(2); expect(result.sensing.broad.system).not.toBe(id);
+      expect(result.sensing.focused.work_secs).toBe(2); expect(result.sensing.broad[0].system).not.toBe(id);
     }
   });
   it('migrates every remaining fitted broad radar explicitly while preserving actual hull reach', () => {
     for (const [hull, range] of [['alliance_battleship', 300], ['alliance_courier', 250], ['alliance_destroyer', 250]]) {
       const result = resolveTemplate(`assets/entities/${hull}.toml`, { read: file => fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null }, parse).resolved.value;
-      validateSensing(result.sensing, result); expect(result.sensing.broad.system).toBe('sensor-radar');
-      expect(result.sensing.broad.assessment_secs).toBeGreaterThan(result.sensing.broad.identity_secs);
+      validateSensing(result.sensing, result); expect(result.sensing.broad[0].system).toBe('sensor-radar');
+      expect(result.sensing.broad[0].assessment_secs).toBeGreaterThan(result.sensing.broad[0].identity_secs);
       expect(result.sensors_console.long_range_radar.range).toBe(range);
       const invalid = structuredClone(result); delete invalid.sensors_console;
       expect(() => validateSensing(result.sensing, invalid)).toThrow(/radar coverage/);

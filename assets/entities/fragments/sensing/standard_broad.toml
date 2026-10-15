@@ -1,7 +1,26 @@
-# [ai] Explicit first broad-scanner acquisition tuning. Actual hull radar reach
-# and tag filters remain on its existing sensors_console.long_range_radar.
-[sensing.broad]
+# [ai] Independent paid acquisition uses each actual fitted radar and its own authored coverage/filter.
+[[sensing.broad]]
 system = "sensor-radar"
+sample_interval_secs = 0.5
+identity_secs = 1
+classification_secs = 3
+assessment_secs = 6
+position_error = 2
+drift_error_per_sec = 0.5
+track_retention_secs = 60
+
+[[sensing.broad]]
+system = "tactical-radar"
+sample_interval_secs = 0.5
+identity_secs = 1
+classification_secs = 3
+assessment_secs = 6
+position_error = 2
+drift_error_per_sec = 0.5
+track_retention_secs = 60
+
+[[sensing.broad]]
+system = "helm-radar"
 sample_interval_secs = 0.5
 identity_secs = 1
 classification_secs = 3

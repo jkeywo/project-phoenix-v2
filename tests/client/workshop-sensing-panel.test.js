@@ -22,6 +22,21 @@ function fixture(withoutPassive = false) {
   return { draft, runtime, panel, source };
 }
 describe('Workshop structured sensing controls', () => {
+  it('edits and removes only the selected broad instrument while keeping the other profiles', async () => {
+    const { draft, panel } = fixture(); await settle();
+    const original = parse(draft.read(path)).sensing;
+    expect(control('broad-system').value).toBe('sensor-radar');
+    expect([...control('broad-system').options].map(option => option.value)).toEqual(expect.arrayContaining(['helm-radar', 'tactical-radar', 'sensor-radar']));
+    control('broad-sample_interval_secs').value = '2'; control('save').click(); await settle();
+    expect(parse(draft.read(path)).sensing.broad[0].sample_interval_secs).toBe(2);
+    expect(parse(draft.read(path)).sensing.broad.slice(1)).toEqual(original.broad.slice(1));
+    control('broad-remove').click(); control('save').click(); await settle();
+    expect(parse(draft.read(path)).sensing.broad).toEqual(original.broad.slice(1));
+    control('broad-add').click(); const last = control('broad').lastElementChild;
+    last.querySelector('select').value = 'sensor-radar'; last.querySelector('input').value = '3';
+    control('save').click(); await settle(); const restored = parse(draft.read(path)).sensing.broad;
+    expect(restored.slice(0,2)).toEqual(original.broad.slice(1)); expect(restored[2]).toMatchObject({ system:'sensor-radar', sample_interval_secs:3 }); panel.dispose();
+  });
   it('labels every control and edits timed work and passive mount through accepted history', async () => {
     const { draft, panel, source } = fixture(); await settle();
     for (const input of panel.node.querySelectorAll('input,select')) expect(panel.node.querySelector(`label[for="${input.id}"]`)).not.toBeNull();

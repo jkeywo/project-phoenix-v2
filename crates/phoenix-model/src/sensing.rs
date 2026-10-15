@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields)]
 pub struct SensingConfig {
     pub focused: Option<FocusedConfig>,
-    pub broad: Option<BroadConfig>,
+    #[serde(default)]
+    pub broad: Vec<BroadConfig>,
     pub passive: Option<PassiveConfig>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -106,7 +107,7 @@ impl SensingConfig {
                 return Err("focused sensing requires positive work/history and finite nonnegative unfinished retention".into());
             }
         }
-        if let Some(config) = &self.broad {
+        for config in &self.broad {
             if !positive(config.sample_interval_secs)
                 || ![
                     config.identity_secs,

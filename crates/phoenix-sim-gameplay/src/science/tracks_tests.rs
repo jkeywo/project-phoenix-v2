@@ -1,4 +1,39 @@
 use super::*;
+#[test]
+fn independent_instruments_cannot_alias_contact_ids_or_refresh_each_others_work() {
+    let mut first = profile();
+    first.system = SystemId("a:b".into());
+    let mut second = first.clone();
+    second.system = SystemId("a".into());
+    let mut a = BroadTrackState::new(&first);
+    let mut b = BroadTrackState::new(&second);
+    let evidence = [sample("same-private-source", 10.0)];
+    a.advance(&first, 0, 0.5, 1.0, &evidence).unwrap();
+    b.advance(&second, 0, 0.5, 0.0, &evidence).unwrap();
+    assert!(b.tracks.is_empty());
+    b.advance(&second, 1, 0.5, 1.0, &evidence).unwrap();
+    let a_id = a.contact_for_source("same-private-source").unwrap();
+    let b_id = b.contact_for_source("same-private-source").unwrap();
+    assert_eq!(a_id, "3:a:b:contact-1");
+    assert_eq!(b_id, "1:a:contact-1");
+    assert!(a.resolve_current(b_id).is_none() && b.resolve_current(a_id).is_none());
+    let mut wrong = a.clone();
+    let mut record = wrong.tracks.remove(a_id).unwrap();
+    record.contact_id = b_id.into();
+    wrong.tracks.insert(b_id.into(), record);
+    for value in wrong.current.values_mut() {
+        *value = b_id.into();
+    }
+    assert!(wrong.validate(&first, 1, 0.5).is_err());
+    let mut wrong = a.clone();
+    let mut record = wrong.tracks.remove(a_id).unwrap();
+    record.contact_id = "3:a:b:contact-01".into();
+    wrong.tracks.insert(record.contact_id.clone(), record);
+    for value in wrong.current.values_mut() {
+        *value = "3:a:b:contact-01".into();
+    }
+    assert!(wrong.validate(&first, 1, 0.5).is_err());
+}
 fn profile() -> BroadConfig {
     BroadConfig {
         system: SystemId("survey-array".into()),
@@ -74,8 +109,8 @@ fn partial_paid_work_is_independent_of_contact_count_and_duplicate_ticks() {
             .unwrap();
     }
     assert_eq!(
-        one.tracks["contact-1"].supported_secs,
-        many.tracks["contact-1"].supported_secs
+        one.tracks["12:survey-array:contact-1"].supported_secs,
+        many.tracks["12:survey-array:contact-1"].supported_secs
     );
     assert!(many
         .tracks
@@ -96,12 +131,12 @@ fn lost_prediction_uses_only_measured_motion_and_grows_uncertainty_without_live_
     state
         .advance(&p, 1, 0.5, 1.0, &[sample("a", 12.0)])
         .unwrap();
-    let measured = state.tracks["contact-1"].clone();
+    let measured = state.tracks["12:survey-array:contact-1"].clone();
     state
         .advance(&p, 2, 0.5, 0.0, &[sample("a", 1000.0)])
         .unwrap();
-    assert!(state.resolve_current("contact-1").is_none());
-    assert_eq!(state.tracks["contact-1"], measured);
+    assert!(state.resolve_current("12:survey-array:contact-1").is_none());
+    assert_eq!(state.tracks["12:survey-array:contact-1"], measured);
     let later = state.projection(&p, 3, 0.5).unwrap();
     let v = measured.velocity.unwrap();
     assert_eq!(
@@ -122,13 +157,19 @@ fn reacquisition_uses_unique_geometry_not_hidden_source_equality() {
     state
         .advance(&p, 2, 0.5, 1.0, &[sample("different-source", 10.0)])
         .unwrap();
-    assert_eq!(state.resolve_current("contact-1"), Some("different-source"));
+    assert_eq!(
+        state.resolve_current("12:survey-array:contact-1"),
+        Some("different-source")
+    );
     state.advance(&p, 3, 0.5, 1.0, &[]).unwrap();
     state
         .advance(&p, 4, 0.5, 1.0, &[sample("different-source", 1000.0)])
         .unwrap();
-    assert!(state.resolve_current("contact-1").is_none());
-    assert_eq!(state.resolve_current("contact-2"), Some("different-source"));
+    assert!(state.resolve_current("12:survey-array:contact-1").is_none());
+    assert_eq!(
+        state.resolve_current("12:survey-array:contact-2"),
+        Some("different-source")
+    );
 }
 #[test]
 fn confused_crossing_returns_do_not_preserve_private_ground_truth_associations() {
@@ -141,8 +182,8 @@ fn confused_crossing_returns_do_not_preserve_private_ground_truth_associations()
         .advance(&p, 1, 0.5, 1.0, &[sample("a", 5.0), sample("b", 5.0)])
         .unwrap();
     assert!(
-        state.resolve_current("contact-1").is_none()
-            && state.resolve_current("contact-2").is_none()
+        state.resolve_current("12:survey-array:contact-1").is_none()
+            && state.resolve_current("12:survey-array:contact-2").is_none()
     );
     let published = state.projection(&p, 1, 0.5).unwrap();
     assert_eq!(published.iter().filter(|track| !track.predicted).count(), 2);
@@ -244,21 +285,34 @@ fn reacquired_geometry_retains_original_fact_age_until_new_supported_refresh() {
             .advance(&p, tick, 0.5, 1.0, &[sample("a", 10.0)])
             .unwrap();
     }
-    let known = state.tracks["contact-1"].clone();
+    let known = state.tracks["12:survey-array:contact-1"].clone();
     state.advance(&p, 6, 0.5, 1.0, &[]).unwrap();
     let mut changed = sample("different-source", 10.0);
     changed.identity.as_mut().unwrap().name = "not-yet-acquired".into();
     state.advance(&p, 7, 0.5, 1.0, &[changed.clone()]).unwrap();
-    assert_eq!(state.tracks["contact-1"].identity, known.identity);
-    assert_eq!(state.tracks["contact-1"].identity_tick, known.identity_tick);
+    assert_eq!(
+        state.tracks["12:survey-array:contact-1"].identity,
+        known.identity
+    );
+    assert_eq!(
+        state.tracks["12:survey-array:contact-1"].identity_tick,
+        known.identity_tick
+    );
     state.advance(&p, 8, 0.5, 1.0, &[changed]).unwrap();
     assert_eq!(
-        state.tracks["contact-1"].identity.as_ref().unwrap().name,
+        state.tracks["12:survey-array:contact-1"]
+            .identity
+            .as_ref()
+            .unwrap()
+            .name,
         "not-yet-acquired"
     );
-    assert_eq!(state.tracks["contact-1"].identity_tick, Some(8));
     assert_eq!(
-        state.tracks["contact-1"].assessment_tick,
+        state.tracks["12:survey-array:contact-1"].identity_tick,
+        Some(8)
+    );
+    assert_eq!(
+        state.tracks["12:survey-array:contact-1"].assessment_tick,
         known.assessment_tick
     );
 }

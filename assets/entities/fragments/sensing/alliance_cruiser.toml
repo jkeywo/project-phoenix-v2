@@ -26,7 +26,7 @@ work_secs = 2
 history_limit = 64
 unfinished_retention_secs = 0
 
-[sensing.broad]
+[[sensing.broad]]
 system = "sensor-radar"
 sample_interval_secs = 0.5
 identity_secs = 1
@@ -102,3 +102,23 @@ field_replaceable = true
 [system.damage_component.susceptibility]
 physical = 1
 laser = 1
+
+[[sensing.broad]]
+system = "tactical-radar"
+sample_interval_secs = 0.5
+identity_secs = 1
+classification_secs = 3
+assessment_secs = 6
+position_error = 2
+drift_error_per_sec = 0.5
+track_retention_secs = 60
+
+[[sensing.broad]]
+system = "helm-radar"
+sample_interval_secs = 0.5
+identity_secs = 1
+classification_secs = 3
+assessment_secs = 6
+position_error = 2
+drift_error_per_sec = 0.5
+track_retention_secs = 60

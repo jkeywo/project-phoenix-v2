@@ -5722,3 +5722,5 @@ sensing.track.disabled,Broad sensing tracks,Disabled observed,Kampfunfaehigkeit 
 sensing.track.restrained,Broad sensing tracks,Weapons restrained observed,Waffenzurueckhaltung beobachtet,Weapons restrained observed,machine
 sensing.track.yes,Broad sensing tracks,Yes,Ja,Yes,machine
 sensing.track.no,Broad sensing tracks,No,Nein,No,machine
+workshop.sensing.add-broad,Independent broad instruments,Add broad instrument,Breites Instrument hinzufuegen,Add broad instrument,machine
+workshop.sensing.remove-broad,Independent broad instruments,Remove broad profile,Breites Profil entfernen,Remove broad profile,machine

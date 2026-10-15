@@ -6,7 +6,7 @@ import { prepareShipOperation } from './workshop-ship-authoring.js';
 
 export const sensingRoles = {
   focused: { kind: 'sensors', fields: ['work_secs', 'history_limit', 'unfinished_retention_secs'] },
-  broad: { kind: 'sensor_radar', fields: ['sample_interval_secs', 'identity_secs', 'classification_secs', 'assessment_secs', 'position_error', 'drift_error_per_sec', 'track_retention_secs'] },
+  broad: { kinds: ['helm_radar', 'tactical_radar', 'sensor_radar'], fields: ['sample_interval_secs', 'identity_secs', 'classification_secs', 'assessment_secs', 'position_error', 'drift_error_per_sec', 'track_retention_secs'] },
   passive: { kind: 'passive_receiver', fields: ['sample_interval_secs', 'min_signal_strength', 'bearing_error_rad'] },
 };
 export const initialPassiveTree = () => ({ root: 'passive', tree: [{ id: 'passive', initial: 'receive', state: [{ id: 'receive', task: [
@@ -20,13 +20,13 @@ export function inspectSensing(draft, dependencies, path) {
   return { ...inspection, sensing: structuredClone(inspection.resolved.value.sensing || null), systems: authoredAndGeneratedSystems(inspection.resolved.value) };
 }
 export function validateSensing(profile, value) {
-  if (profile?.broad && !value.sensors_console) throw new Error('Broad sensing requires actual SensorsConsole radar coverage.');
-  if (!closed(profile, Object.keys(sensingRoles)) || !Object.keys(sensingRoles).some(role => profile[role])) throw new Error('Sensing requires at least one closed instrument profile.');
+  if (!closed(profile, Object.keys(sensingRoles)) || (profile.broad != null && !Array.isArray(profile.broad))
+    || !(profile.focused || profile.passive || profile.broad?.length)) throw new Error('Sensing requires closed instrument profiles and a broad instrument array.');
   const systems = authoredAndGeneratedSystems(value), seen = new Set();
   for (const [role, spec] of Object.entries(sensingRoles)) {
-    const row = profile[role]; if (row == null) continue;
+    for (const row of role === 'broad' ? profile.broad || [] : profile[role] ? [profile[role]] : []) {
     const system = systems.find(system => system.id === row.system);
-    if (!closed(row, ['system', ...spec.fields, ...(role === 'passive' ? ['mount'] : [])]) || !system || system.kind !== spec.kind || seen.has(row.system)
+    if (!closed(row, ['system', ...spec.fields, ...(role === 'passive' ? ['mount'] : [])]) || !system || !(spec.kinds || [spec.kind]).includes(system.kind) || seen.has(row.system)
       || !value.console?.some(console => console.id === system.console)) throw new Error('Each instrument needs its distinct actual System kind and owning Console.');
     seen.add(row.system);
     if (!value.damage || !value.interior?.placements?.[system.id] || !value.energy?.consumer?.some(consumer => consumer.system === system.id)
@@ -35,6 +35,8 @@ export function validateSensing(profile, value) {
       if (!positive(row.work_secs) || !Number.isInteger(row.history_limit) || row.history_limit < 1 || row.history_limit > 65535 || !finite(row.unfinished_retention_secs) || !value.scan)
         throw new Error('Focused sensing requires positive work/history, finite retention and actual Scan bands.');
     } else if (role === 'broad') {
+      const radar = { helm_radar: value.helm_console?.radar, tactical_radar: value.weapons_console?.radar, sensor_radar: value.sensors_console?.long_range_radar }[system.kind];
+      if (!radar || !positive(radar.range)) throw new Error('Broad sensing requires its actual fitted radar coverage.');
       if (!positive(row.sample_interval_secs) || !spec.fields.every(key => finite(row[key]))
         || Math.fround(row.identity_secs) > Math.fround(row.classification_secs) || Math.fround(row.classification_secs) > Math.fround(row.assessment_secs))
         throw new Error('Broad sensing requires finite cadence/errors and ordered cumulative assessment times.');
@@ -42,6 +44,7 @@ export function validateSensing(profile, value) {
       if (!positive(row.sample_interval_secs) || !finite(row.min_signal_strength) || !finite(row.bearing_error_rad) || Math.fround(row.bearing_error_rad) > Math.fround(Math.PI)
         || !closed(row.mount, ['facing_deg', 'arc_deg', 'range']) || typeof row.mount.facing_deg !== 'number' || !Number.isFinite(Math.fround(row.mount.facing_deg)) || !positive(row.mount.range) || !positive(row.mount.arc_deg) || Math.fround(row.mount.arc_deg) > 360
         || !system.config?.ai?.tree?.length) throw new Error('Passive sensing requires finite mount/cadence/bearing limits and an explicit closed System AI.');
+    }
     }
   }
   if (systems.some(system => system.kind === 'passive_receiver' && system.id !== profile.passive?.system)) throw new Error('Every fitted passive receiver requires its matching sensing profile.');

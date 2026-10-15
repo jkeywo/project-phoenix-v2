@@ -93,9 +93,12 @@ impl BroadTrackState {
         }
         let mut ids = BTreeSet::new();
         for (id, track) in &self.tracks {
-            let sequence = id
-                .strip_prefix("contact-")
-                .and_then(|n| n.parse::<u64>().ok());
+            let prefix = format!("{}:{}:contact-", self.owner.0.len(), self.owner.0);
+            let sequence = id.strip_prefix(&prefix).and_then(|n| {
+                n.parse::<u64>()
+                    .ok()
+                    .filter(|sequence| sequence.to_string() == n)
+            });
             if &track.contact_id != id
                 || sequence.is_none_or(|n| n == 0 || n >= self.next_contact)
                 || !ids.insert(id)
@@ -261,7 +264,12 @@ impl BroadTrackState {
                     else {
                         continue;
                     };
-                    let id = format!("contact-{}", next.next_contact);
+                    let id = format!(
+                        "{}:{}:contact-{}",
+                        next.owner.0.len(),
+                        next.owner.0,
+                        next.next_contact
+                    );
                     next.next_contact = following;
                     next.tracks.insert(
                         id.clone(),
@@ -391,7 +399,7 @@ impl BroadTrackState {
 }
 fn profile_valid(profile: &BroadConfig, fixed_dt: f32) -> Result<(), String> {
     phoenix_model::sensing::SensingConfig {
-        broad: Some(profile.clone()),
+        broad: vec![profile.clone()],
         ..Default::default()
     }
     .validate()?;

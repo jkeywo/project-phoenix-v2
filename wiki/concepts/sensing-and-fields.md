@@ -4,6 +4,10 @@ type: concept
 tags: [science, observations, regions, simulation]
 sources:
   - crates/phoenix-model/src/sensing.rs
+  - crates/phoenix-sim-gameplay/src/science/tracks.rs
+  - crates/phoenix-sim-gameplay/src/science/sensing.rs
+  - crates/phoenix-simulation/src/science/broad.rs
+  - gui/workshop-sensing-panel.js
   - crates/phoenix-simulation/src/science/server.rs
   - crates/phoenix-simulation/src/science/focused.rs
   - crates/phoenix-simulation/src/science/passive.rs
@@ -28,6 +32,20 @@ Physical producers use actual resource expenditure, mount coverage and signal
 paths. Public signals carry bearing, error, signature, strength and dated local
 provenance rather than the emitting actor's private identity. Existing screens
 show enquiry progress/history and passive receiver controls/readings.
+
+`SensingConfig.broad` is an authored array of independent instruments. Each entry
+names a fitted Helm, Tactical or Sensor radar and derives range/filter coverage
+from that capability's existing configuration. `BroadProfile` and `BroadTracks`
+are keyed by actual System ID. Each `BroadTrackState` advances only from its own
+paid grant and physical measurements, retains acquired findings with their sample
+ticks and predicts lost positions using observed motion. Public contact IDs include
+their instrument owner; current actuator routing stays private and expires with
+measured support. Co-hosting instruments does not merge their knowledge.
+
+Workshop edits the whole sensing profile through accepted source/history, with
+separate add/edit/remove rows for broad instruments. Authored NPC Tactical radars
+now have finite explicit reach; the old absent-table unbounded acquisition is not
+an alternate equipment source.
 
 `RegionFieldState` owns bounded analytic parameters, origin and causal tick anchor.
 `RegionSignalQuery` shares deterministic segment attenuation/occlusion between

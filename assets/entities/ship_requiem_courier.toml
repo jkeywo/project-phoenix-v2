@@ -1,4 +1,4 @@
-includes = ["fragments/energy/ship_requiem_courier.toml","fragments/damage/common.toml"]
+includes = ["fragments/energy/ship_requiem_courier.toml","fragments/damage/common.toml","fragments/sensing/tactical_broad.toml"]
 
 name = "entity.ship_requiem_courier.name"
 display_name = "entity.ship_requiem_courier.display_name"
@@ -1539,3 +1539,11 @@ label = "damage.resource.machinery_parts"
 [resource_services.machinery_parts]
 kind = "capacity"
 id = "machinery_parts"
+
+# Increment14 intentional migration: tactical acquisition was unbounded without a Radar table.
+# Existing AI profile reach is provisional finite coverage tuning for this fitted radar.
+# Combat/scenario/balance comparison remains required; no additional equipment is fitted.
+[weapons_console.radar]
+range = 80
+shows = ["player", "ship", "station", "asteroid", "missile", "torpedo"]
+selects = ["ship", "station", "asteroid"]

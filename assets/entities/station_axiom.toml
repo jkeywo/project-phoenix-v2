@@ -1,4 +1,4 @@
-includes = ["fragments/energy/station_axiom.toml","fragments/damage/common.toml","fragments/ai/dock_state_tree.toml"]
+includes = ["fragments/energy/station_axiom.toml","fragments/damage/common.toml","fragments/ai/dock_state_tree.toml","fragments/sensing/tactical_broad.toml"]
 
 name = "entity.station_axiom.name"
 tags = [ "station", "comms_contact", "allied" ]

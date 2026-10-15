@@ -290,10 +290,15 @@ fn ordinary_boost_ai_releases_the_custom_owner_through_normal_admission() {
         sources.set(system.id.clone(), ControlSource::Human);
     }
     sources.set(owner.clone(), ControlSource::Ai);
+    // Match the normal LOD promotion contract: the marker alone has no
+    // actuator latches for the admitted consumer to write.
     app.world_mut().entity_mut(entity).insert((
-        crate::ai::server::AiHighFidelity,
+        crate::ai::server::ai_high_fidelity_components(),
         ShipSystemControlSources(sources),
         AdmittedCommands::default(),
+    ));
+    assert!(crate::ai::server::has_ai_high_fidelity_components(
+        &app.world_mut().entity_mut(entity)
     ));
     app.world_mut()
         .get_mut::<ShipBoost>(entity)

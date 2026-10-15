@@ -435,10 +435,15 @@ fn renamed_actual_owner_runs_the_existing_compiled_ai_and_normal_admission() {
     }
     sources.set(profile.thrust.clone(), ControlSource::Ai);
     sources.set(profile.steering.clone(), ControlSource::Ai);
+    // Match the normal LOD promotion contract: the marker alone has no
+    // actuator latches for the admitted consumer to write.
     app.world_mut().entity_mut(entity).insert((
-        crate::ai::server::AiHighFidelity,
+        crate::ai::server::ai_high_fidelity_components(),
         ShipSystemControlSources(sources),
         AdmittedCommands::default(),
+    ));
+    assert!(crate::ai::server::has_ai_high_fidelity_components(
+        &app.world_mut().entity_mut(entity)
     ));
     let actual = crate::ship::physics::ShipPhysicsState {
         x: 0.0,

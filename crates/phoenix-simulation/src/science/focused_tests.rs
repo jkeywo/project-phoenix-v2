@@ -188,10 +188,43 @@ fn private_and_absent_answers_share_refusal_and_cannot_spend_or_generate_a_readi
     );
 }
 
+// Restore's run owner replaces these resources even for empty state. The bare
+// scanner fixture supplies the same production run frontier before both boots;
+// absence must not be mistaken for the authoritative default in digest checks.
+fn prepare_capture_fixture(app: &mut App) {
+    app.init_resource::<crate::gm::actions::action::SimulationPaused>()
+        .init_resource::<crate::gm::actions::action::GmActionJournal>()
+        .init_resource::<crate::gm::operations::puppet::StationPuppets>()
+        .init_resource::<crate::gm::operations::puppet::PendingGmStationCommands>()
+        .init_resource::<crate::core::report::MissionReport>();
+    let world = app.world_mut();
+    // Production installs these optional legacy row types. Registering a type
+    // creates no actor state: the existing capture gate can now see the actual
+    // physical/repair/scanner owners already spawned by the accepted hull.
+    world.register_component::<crate::ship::state::ShipPhysics>();
+    world.register_component::<crate::entities::spawner::EntitySystemHull>();
+    world.register_component::<crate::ship::state::ShipRedAlert>();
+    world.register_component::<crate::console::command::server::ShipStationStances>();
+    world.register_component::<crate::ship_plugin::ShipSystemControlSources>();
+    world.register_component::<crate::server_app::AsteroidUuid>();
+    world.register_component::<crate::console::weapons::beam::ActiveBeam>();
+    world.register_component::<crate::console::weapons::beam::PhaserCooldown>();
+    world.register_component::<crate::console::weapons::torpedo::TorpedoSystemResource>();
+    world.register_component::<crate::entities::spawner::EntityShipArcHull>();
+    world.register_component::<crate::console::repair::server::ShipRepairTeams>();
+    world.register_component::<crate::console::repair::server::RepairRequestQueue>();
+    world.register_component::<crate::ship_plugin::RepairHumanAlerted>();
+    world.register_component::<crate::server_app::ShipSystemBlackboards>();
+    world.register_component::<crate::ai::server::ObjectiveCursors>();
+    world.register_component::<crate::console::weapons::blaster::BlasterSystemResource>();
+    world.register_component::<crate::ship::shields::ShipShields>();
+}
+
 #[test]
 fn active_intrusive_resource_question_survives_real_json_restore_and_exact_continuation() {
     use phoenix_model::focused_enquiry::{FocusedAim, ScanQuantityValue};
     let (mut app, observer) = enquiry_rig();
+    prepare_capture_fixture(&mut app);
     app.insert_resource(crate::world::server::WorldContentRuntime::default());
     let before = app
         .world()
@@ -210,8 +243,18 @@ fn active_intrusive_resource_question_survives_real_json_restore_and_exact_conti
         step(&mut app);
     }
     let snapshot = crate::snapshot::capture(app.world());
+    let captured_work = snapshot
+        .entities
+        .iter()
+        .find(|row| row.uuid == "00000000-0000-0000-0000-000000000141")
+        .and_then(|row| row.scan.as_ref())
+        .and_then(|scan| scan.instruments.get(&SystemId("sensors".into())))
+        .and_then(|scan| scan.focused.as_ref())
+        .expect("the actual observer and active work must be present in the capture");
+    assert!(captured_work.progress > 0.0 && captured_work.progress < captured_work.work_secs);
     let snapshot = serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
     let (mut resumed, resumed_observer) = enquiry_rig();
+    prepare_capture_fixture(&mut resumed);
     resumed.insert_resource(crate::world::server::WorldContentRuntime::default());
     let report = crate::snapshot::restore(resumed.world_mut(), &snapshot);
     assert!(report.gaps.is_empty(), "{report:?}");

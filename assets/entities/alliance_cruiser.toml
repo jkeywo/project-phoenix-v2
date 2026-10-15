@@ -6597,3 +6597,9 @@ system = "resource-recovery"
 range = 8
 units_per_sec = 2
 resources = [ "torpedoes", "coolant", "machinery_parts", "structural_parts", "alloy", "ore", "scrap" ]
+
+# Ordinary ships expose an explicit selectable Target capability to paid radar.
+# Faction relations, observed identity and existing command admission still decide use.
+[target]
+tags = ["ship"]
+threat_level = "none"

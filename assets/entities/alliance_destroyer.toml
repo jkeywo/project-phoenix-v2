@@ -5242,3 +5242,9 @@ unfinished_retention_secs = 0
 [sensing.control]
 combat_lock = "tactical-radar"
 science_target = "sensors"
+
+# Ordinary ships expose an explicit selectable Target capability to paid radar.
+# Faction relations, observed identity and existing command admission still decide use.
+[target]
+tags = ["ship"]
+threat_level = "none"

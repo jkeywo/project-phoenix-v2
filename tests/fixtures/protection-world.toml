@@ -1,0 +1,27 @@
+# Independent real NPC jammer and a finite protected crew receiver.
+[global]
+seed=156217
+[player_spawn]
+position=[0,0,0]
+[[entity]]
+template_path="assets/entities/protection_cruiser.toml"
+id="protected-crew"
+name="protected-crew"
+spawn_on="game_start"
+transform={position=[0,0,0]}
+[entity.overrides]
+name="protected-crew"
+[[entity]]
+template_path="assets/entities/jamming_cruiser.toml"
+id="electronic-peer"
+name="electronic-peer"
+spawn_on="game_start"
+transform={position=[0,0,20]}
+[entity.overrides]
+name="electronic-peer"
+[[entity.overrides.behaviour.doctrine]]
+id="support-interference"
+text="jamming.mission.support"
+directive_kind="Jam"
+directive_operate_target="protected-crew"
+base_priority=50

@@ -641,5 +641,5 @@ fn mixed_magazine_and_capacity_transfers_settle_in_their_actual_order() {
         .unwrap()
         .level;
     assert_eq!((hold, magazine, depot, receiver), (2, 4, 3, 2));
-    assert_eq!(hold + magazine + depot + receiver, 11);
+    assert_eq!(hold + i64::from(magazine) + depot + receiver, 11);
 }

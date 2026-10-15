@@ -591,17 +591,20 @@ fn a_flow_that_loses_its_dock_ends_the_standing_activation() {
 
 #[test]
 fn selecting_collection_moves_finite_port_parts_and_survives_continuation() {
-    use crate::resources::server::{tick_resource_transfers, ResourceTransfer};
+    use crate::resources::server::{
+        tick_resource_transfers, ResourceTransfer, ResourceTransferReceipt,
+    };
     let (mut app, operator) = docked_world();
     app.init_resource::<EffectQueue<ResourceTransfer>>()
+        .init_resource::<EffectQueue<ResourceTransferReceipt>>()
         .init_resource::<EffectQueue<crate::infrastructure::CapacityAdjustment>>()
         .init_resource::<EffectQueue<crate::infrastructure::ConditionAdjustment>>()
         .init_resource::<crate::world::server::WorldContentRuntime>()
         .add_systems(
             Update,
             (
-                tick_resource_transfers,
                 crate::infrastructure::tick_infrastructure_condition,
+                tick_resource_transfers,
             )
                 .chain()
                 .after(tick_umbilical),

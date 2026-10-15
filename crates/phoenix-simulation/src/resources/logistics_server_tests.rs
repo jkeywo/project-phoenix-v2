@@ -263,6 +263,17 @@ fn a_recalled_delivery_keeps_real_stock_until_its_return_job_finishes() {
         .next()
         .unwrap()
         .0;
+    // Lower the standing demand as well as recalling this individual batch;
+    // otherwise maintained stock correctly starts another independent delivery.
+    send(
+        &mut app,
+        "gunner",
+        "torpedo-magazine",
+        Control::SetStockTarget {
+            store: "magazine".into(),
+            amount: 2,
+        },
+    );
     send(
         &mut app,
         "engineer",

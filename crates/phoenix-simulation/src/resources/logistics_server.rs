@@ -37,10 +37,24 @@ pub(crate) fn register(app: &mut App) {
             ],
         ),
     );
+    // Stock goals are the magazine's sole admitted capability; other equipment
+    // retains its machinery consumer alongside the shared payload-only handler.
+    app.register_admitted_consumer(
+        ConsumerMatcher::kind(crate::ship::system_registry::TORPEDO_MAGAZINE_KIND).with_feedback(
+            FeedbackAddress::DeclaredKindOrCanonical("torpedo-magazine"),
+            &[Payload::SetStockTarget],
+        ),
+    );
     for kind in crate::ship::system_registry::SystemKindRegistry::with_core_systems()
         .expect("built-in registry")
         .kinds()
-        .filter(|kind| *kind != crate::ship::system_registry::LOGISTICS_KIND)
+        .filter(|kind| {
+            ![
+                crate::ship::system_registry::LOGISTICS_KIND,
+                crate::ship::system_registry::TORPEDO_MAGAZINE_KIND,
+            ]
+            .contains(kind)
+        })
     {
         app.register_admitted_consumer(
             ConsumerMatcher::kind_payload(kind, Payload::SetStockTarget).with_feedback(

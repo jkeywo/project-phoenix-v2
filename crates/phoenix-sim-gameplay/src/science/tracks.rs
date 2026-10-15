@@ -235,7 +235,8 @@ impl BroadTrackState {
                                     &received.provenance.origin.system
                                 }),
                             )
-                        || (observation.subject != (ObservationSubject::Entity { uuid: id.clone() })
+                        || (observation.subject
+                            != (ObservationSubject::Entity { uuid: id.clone() })
                             && observation.subject != ObservationSubject::Unknown)
                         || observation.subject == ObservationSubject::Unknown && track.selectable
                         || track.classification.is_some()

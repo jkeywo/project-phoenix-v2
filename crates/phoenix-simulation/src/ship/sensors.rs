@@ -949,6 +949,7 @@ pub fn publish_sensor_radar_blackboard(
             Option<&crate::science::broad::BroadProfile>,
             Option<&crate::science::broad::BroadTracks>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
+            Option<&crate::ship_plugin::ShipSystemControlSources>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
         With<crate::server_app::Ship>,
@@ -990,7 +991,7 @@ pub fn publish_sensor_radar_blackboard(
         With<crate::server_app::Ship>,
     >,
 ) {
-    for (uuid, sensors_target, own_physics, broad_profile, broad_state, config, mut bbs) in
+    for (uuid, sensors_target, own_physics, broad_profile, broad_state, config, sources, mut bbs) in
         ships_q.iter_mut()
     {
         if let Some(profiles) = broad_profile {
@@ -1010,18 +1011,42 @@ pub fn publish_sensor_radar_blackboard(
                     .zip(tick.as_ref())
                     .zip(fixed.as_ref())
                     .and_then(|((state, tick), fixed)| {
-                        state
-                            .projection(profile, tick.0, fixed.timestep().as_secs_f32())
-                            .ok()
+                        crate::science::sharing::projection(
+                            &uuid?.0,
+                            state,
+                            profile,
+                            tick.0,
+                            fixed.timestep().as_secs_f32(),
+                        )
+                        .ok()
                     })
                     .unwrap_or_default();
                 let selected = sensors_target
                     .and_then(|target| target.0.as_deref())
-                    .and_then(|source| state.and_then(|state| state.contact_for_source(source)));
+                    .and_then(|source| {
+                        tracks.iter().find(|record| {
+                            record.selectable
+                                && !record.predicted
+                                && state.and_then(|state| state.resolve_current(&record.contact_id))
+                                    == Some(source)
+                        })
+                    })
+                    .map(|record| record.contact_id.as_str());
                 let selected_track = selected
                     .and_then(|selected| tracks.iter().find(|track| track.contact_id == selected));
                 let own_velocity = own_physics.map(ship_world_velocity).unwrap_or([0.0; 2]);
                 let board = crate::core::messages::SensorRadarBlackboard {
+                    sharing: state.map(|state| {
+                        crate::science::sharing::sharing_payload(
+                            system,
+                            state,
+                            sources.is_some_and(|sources| {
+                                sources.0.source_for(system)
+                                    == crate::ship::control_source::ControlSource::Human
+                                    && !sources.0.is_offline(system)
+                            }),
+                        )
+                    }),
                     selected_target: selected.map(str::to_owned),
                     selected_target_alert: selected_track
                         .and_then(|track| track.assessment.as_ref())
@@ -1136,6 +1161,7 @@ pub fn publish_sensor_radar_blackboard(
         bbs.0.insert(
             crate::ship::system_registry::sensor_radar_system_id(),
             SystemBlackboard::SensorRadar(crate::core::messages::SensorRadarBlackboard {
+                sharing: None,
                 tracks: None,
                 selected_target,
                 selected_target_alert,

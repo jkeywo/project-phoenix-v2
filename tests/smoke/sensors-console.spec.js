@@ -150,6 +150,8 @@ test('sensors console: independent focused instruments retain their owner and wo
   const state = {
     ...NOMINAL_STATE,
     target_uuid: 'public-contact',
+    radar_sharing: [{ owner: 'broad-array', role: 'sensor_radar', share_own_faction: false,
+      receive: true, received_samples: 1, can_operate: true, controllable: true }],
     scans: [
       { system_id: 'focus-one', capable: true, controllable: true, history: [], focused: { subject: 'public-contact', progress: 250, waiting: '' } },
       { system_id: 'focus-two', capable: true, controllable: true, history: [], focused: null,
@@ -166,6 +168,14 @@ test('sensors console: independent focused instruments retain their owner and wo
     window.__updateConsole('sensors', JSON.stringify(payload));
   }, state);
   const readout = page.locator('ph-scan-readout');
+  const sharing = page.locator('ph-sensor-panel').locator('[data-radar-sharing] input[data-sharing-intent="share_own_faction"]');
+  await expect(sharing).toBeVisible();
+  await sharing.check();
+  expect(await page.evaluate(() => window.__sent)).toEqual([
+    expect.objectContaining({ action: 'set_radar_sharing', control_system_id: 'broad-array',
+      share_own_faction: true, receive: true, correlation: expect.any(String) }),
+  ]);
+  await page.evaluate(() => { window.__sent = []; });
   await expect(readout.locator('#progress')).toContainText('25%');
   await readout.locator('#instrument').selectOption('focus-two');
   await expect(readout.locator('.forecast')).toContainText('120');
@@ -178,10 +188,12 @@ test('sensors console: independent focused instruments retain their owner and wo
 
   await page.evaluate((payload) => window.__updateConsole('sensors', JSON.stringify(payload)), {
     ...state,
+    radar_sharing: state.radar_sharing.map(row => ({ ...row, controllable: false })),
     scans: state.scans.map((scan) => scan.system_id === 'focus-two' ? { ...scan, controllable: false } : scan),
   });
   await expect(readout.locator('#instrument')).toHaveValue('focus-two');
   await expect(readout.locator('#action')).toBeHidden();
+  await expect(sharing).toBeHidden();
   await readout.locator('#instrument').selectOption('focus-one');
   await expect(readout.locator('.forecast')).toHaveCount(0);
   await expect(readout.locator('#progress')).toContainText('25%');

@@ -4,9 +4,31 @@ use crate::core::messages::{AdmittedCommands, SystemControlPayload, SystemId};
 use crate::entities::spawner::{EntityUuid, FactionComponent};
 use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
 use bevy::prelude::*;
-pub use phoenix_sim_gameplay::science::sharing::{ReceivedRadarSample, projection};
-use phoenix_sim_gameplay::science::sharing::{SharedRadarSample, export_samples, receive_samples};
+use phoenix_sim_gameplay::science::sharing::{export_samples, receive_samples, SharedRadarSample};
+pub use phoenix_sim_gameplay::science::sharing::{projection, ReceivedRadarSample};
 use std::collections::BTreeMap;
+
+pub(crate) fn register(app: &mut App) {
+    use crate::command_admission::{ConsumerMatcher, FeedbackAddress, RegisterAdmittedConsumer};
+    for kind in [
+        crate::ship::system_registry::SENSOR_RADAR_KIND,
+        crate::ship::system_registry::TACTICAL_RADAR_KIND,
+    ] {
+        app.register_admitted_consumer(ConsumerMatcher::kind(kind).with_feedback(
+            FeedbackAddress::DeclaredKindOnly,
+            &[crate::core::messages::SystemControlPayloadDiscriminants::SetRadarSharing],
+        ));
+    }
+    app.add_systems(
+        FixedUpdate,
+        (
+            apply_commands.in_set(crate::sim_sets::SimSet::Physics),
+            deliver
+                .in_set(crate::sim_sets::SimSet::Modifiers)
+                .after(super::broad::tick),
+        ),
+    );
+}
 
 fn supported(kind: &str) -> bool {
     matches!(
@@ -32,7 +54,7 @@ pub(crate) fn apply_commands(
     mut outbound: Option<ResMut<Messages<crate::lobby::OutboundMessage>>>,
 ) {
     let mut ordered: Vec<_> = ships.iter_mut().collect();
-    ordered.sort_by(|a, b| a.0.0.cmp(&b.0.0));
+    ordered.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
     for (_, profiles, config, admitted, mut tracks) in ordered {
         for command in &admitted.0 {
             let SystemControlPayload::SetRadarSharing {
@@ -90,12 +112,14 @@ type Observer = (
     Entity,
     &'static EntityUuid,
     &'static Transform,
+    Option<&'static crate::ship::state::ShipPhysics>,
     &'static FactionComponent,
     &'static crate::comms::CommsRange,
     &'static ShipConfigComponent,
     &'static ShipSystemControlSources,
     &'static BroadProfile,
     &'static BroadTracks,
+    Option<&'static crate::modifiers::ShipModifiers>,
 );
 
 /// Stage all outgoing originals before mutating any recipient. Relaying cannot
@@ -111,11 +135,28 @@ pub(crate) fn deliver(
     let dt = fixed.timestep().as_secs_f32();
     let mut feeds = Vec::new();
     let mut recipients = Vec::new();
-    for (entity, uuid, pose, faction, range, config, controls, profiles, tracks) in &ships.p0() {
+    for (
+        entity,
+        uuid,
+        pose,
+        physics,
+        faction,
+        range,
+        config,
+        controls,
+        profiles,
+        tracks,
+        modifiers,
+    ) in &ships.p0()
+    {
+        if !crate::comms::server::information_endpoint_available(config, controls, modifiers) {
+            continue;
+        }
+        let position = super::broad::physical_position(physics, pose);
         recipients.push((
             uuid.0.clone(),
             entity,
-            pose.translation,
+            position,
             range.0,
             faction.0,
             profiles.clone(),
@@ -150,7 +191,7 @@ pub(crate) fn deliver(
                 feeds.push(Feed {
                     sender: uuid.0.clone(),
                     owner: owner.clone(),
-                    position: pose.translation,
+                    position,
                     range: range.0,
                     faction: faction.0,
                     kind: system.kind.clone(),

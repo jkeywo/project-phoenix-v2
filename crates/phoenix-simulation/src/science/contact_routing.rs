@@ -70,13 +70,33 @@ pub fn alias_for_source(
         return (!source.is_empty()).then(|| source.to_owned());
     };
     let permitted = config.observations_for_system(consumer, &boards.0);
-    tracks.0.iter().find_map(|(owner, state)| {
-        let contact = state.contact_for_source(source)?;
-        observations(permitted.get(&publication_source(config, owner))?)?
+    let find = |owner: &SystemId,
+                state: &phoenix_sim_gameplay::science::tracks::BroadTrackState| {
+        let mut candidates = observations(permitted.get(&publication_source(config, owner))?)?
             .iter()
-            .any(|track| track.contact_id == contact && track.selectable && !track.predicted)
-            .then(|| contact.to_owned())
-    })
+            .filter(|track| {
+                track.selectable
+                    && !track.predicted
+                    && state.resolve_current(&track.contact_id) == Some(source)
+            });
+        let first = candidates.next()?;
+        candidates
+            .next()
+            .is_none()
+            .then(|| first.contact_id.clone())
+    };
+    // Prefer the consuming radar's own permitted public picture. Fusion may
+    // retain several private samples but publishes one primary contact handle.
+    tracks
+        .0
+        .get(consumer)
+        .and_then(|state| find(consumer, state))
+        .or_else(|| {
+            tracks
+                .0
+                .iter()
+                .find_map(|(owner, state)| find(owner, state))
+        })
 }
 
 /// A machinery selection conveys no additional identifying knowledge.

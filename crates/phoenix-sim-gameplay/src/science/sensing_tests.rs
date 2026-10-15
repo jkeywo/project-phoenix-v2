@@ -145,6 +145,7 @@ fn all_fitted_instruments_derive_their_actual_independent_coverage() {
 
 fn instrument_profile() -> SensingConfig {
     SensingConfig {
+        sharing: Vec::new(),
         control: SensingControlBindings {
             combat_lock: Some(crate::core::messages::SystemId("tactical-radar".into())),
             science_target: Some(crate::core::messages::SystemId("sensors".into())),
@@ -346,6 +347,7 @@ fn passive_receiver_needs_own_hardware_and_closed_program_without_target_truth()
         1
     );
     let profile = SensingConfig {
+        sharing: Vec::new(),
         control: Default::default(),
         focused: vec![],
         broad: vec![],

@@ -184,6 +184,7 @@ pub(crate) fn publish_helm_blackboard(
                 (
                     Option<&crate::science::broad::BroadProfile>,
                     Option<&crate::science::broad::BroadTracks>,
+                    Option<&crate::entities::spawner::EntityUuid>,
                 ),
             ),
         ),
@@ -211,7 +212,7 @@ pub(crate) fn publish_helm_blackboard(
         is_local,
         faction,
         red_alert,
-        (thrust_input, lateral_input, (broad_profile, broad_state)),
+        (thrust_input, lateral_input, (broad_profile, broad_state, uuid)),
     ) in ship_q.iter_mut()
     {
         // Per-entity component path. Each fallback mirrors the pre-#824
@@ -368,9 +369,14 @@ pub(crate) fn publish_helm_blackboard(
                     .zip(tick.as_ref())
                     .zip(fixed.as_ref())
                     .and_then(|((state, tick), fixed)| {
-                        state
-                            .projection(&profile.profile, tick.0, fixed.timestep().as_secs_f32())
-                            .ok()
+                        crate::science::sharing::projection(
+                            &uuid?.0,
+                            state,
+                            &profile.profile,
+                            tick.0,
+                            fixed.timestep().as_secs_f32(),
+                        )
+                        .ok()
                     })
                     .unwrap_or_default();
                 let mut instrument = bb.clone();

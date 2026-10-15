@@ -131,29 +131,126 @@ fn two_real_paid_instruments_refine_only_their_independent_measured_constraints(
     )
     .unwrap();
     assert!(raw.iter().all(|record| record.samples.len() <= 1));
-    assert!(
-        fused
-            .iter()
-            .any(|record| record.samples.len() == 2 && record.position_error < 2.0)
-    );
+    assert!(fused
+        .iter()
+        .any(|record| record.samples.len() == 2 && record.position_error < 2.0));
     let sender_profile = &app.world().get::<BroadProfile>(sender).unwrap().0[&sid()].profile;
     let sender_state = &app.world().get::<BroadTracks>(sender).unwrap().0[&sid()];
-    assert!(
-        export_samples(
-            &app.world().get::<EntityUuid>(sender).unwrap().0,
-            sender_state,
-            sender_profile,
-            0,
-            0.5
-        )
-        .unwrap()
-        .iter()
-        .all(|sample| sample.record.samples.len() == 1)
-    );
+    assert!(export_samples(
+        &app.world().get::<EntityUuid>(sender).unwrap().0,
+        sender_state,
+        sender_profile,
+        0,
+        0.5
+    )
+    .unwrap()
+    .iter()
+    .all(|sample| sample.record.samples.len() == 1));
     assert_eq!(
         state, &before,
         "derived refinement does not mutate the canonical owner"
     );
+}
+
+#[test]
+fn gameplay_link_range_uses_canonical_physics_instead_of_a_render_pose() {
+    let (mut app, sender, receiver) = rig();
+    order(&mut app, sender, true, true);
+    app.world_mut()
+        .get_mut::<Transform>(receiver)
+        .unwrap()
+        .translation
+        .x = 1_000_000.0;
+    step(&mut app, sender);
+    assert!(
+        received(&app, receiver) > 0,
+        "render pose cannot move the physical Comms endpoint"
+    );
+    app.world_mut()
+        .get_mut::<Transform>(receiver)
+        .unwrap()
+        .translation
+        .x = 20.0;
+    app.world_mut()
+        .get_mut::<crate::ship::state::ShipPhysics>(receiver)
+        .unwrap()
+        .x = 1_000_000.0;
+    step(&mut app, sender);
+    let state = &app.world().get::<BroadTracks>(receiver).unwrap().0[&sid()];
+    assert!(state.tracks.values().any(|track| track.received.is_some()));
+    assert!(
+        state
+            .tracks
+            .keys()
+            .all(|id| state.resolve_current(id).is_none()),
+        "physical separation stops delivery and routes while keeping the finding historical"
+    );
+}
+
+#[test]
+fn fitted_radio_shutdown_and_endpoint_jamming_stop_feeds_without_erasing_history() {
+    let (mut app, sender, receiver) = rig();
+    order(&mut app, sender, true, true);
+    step(&mut app, sender);
+    assert!(received(&app, receiver) > 0);
+    let radio = app
+        .world()
+        .get::<ShipConfigComponent>(sender)
+        .unwrap()
+        .0
+        .systems
+        .iter()
+        .find(|system| system.kind == crate::ship::system_registry::COMMS_KIND)
+        .unwrap()
+        .id
+        .clone();
+    app.world_mut()
+        .get_mut::<ShipSystemControlSources>(sender)
+        .unwrap()
+        .0
+        .set_offline(radio.clone(), true);
+    step(&mut app, sender);
+    let held = &app.world().get::<BroadTracks>(receiver).unwrap().0[&sid()];
+    assert!(held.tracks.values().any(|track| track.received.is_some()));
+    assert!(held
+        .tracks
+        .keys()
+        .all(|id| held.resolve_current(id).is_none()));
+    app.world_mut()
+        .get_mut::<ShipSystemControlSources>(sender)
+        .unwrap()
+        .0
+        .set_offline(radio, false);
+    step(&mut app, sender);
+    let live = &app.world().get::<BroadTracks>(receiver).unwrap().0[&sid()];
+    assert!(live
+        .tracks
+        .keys()
+        .any(|id| live.resolve_current(id).is_some()));
+    let source = crate::core::messages::ModifierSource::RegionEffect {
+        uuid: uuid::Uuid::from_u128(77),
+    };
+    app.world_mut()
+        .get_mut::<crate::modifiers::ShipModifiers>(receiver)
+        .unwrap()
+        .add_flag(source.clone(), crate::core::messages::FlagKind::CommsJammed);
+    step(&mut app, sender);
+    let jammed = &app.world().get::<BroadTracks>(receiver).unwrap().0[&sid()];
+    assert!(jammed.tracks.values().any(|track| track.received.is_some()));
+    assert!(jammed
+        .tracks
+        .keys()
+        .all(|id| jammed.resolve_current(id).is_none()));
+    app.world_mut()
+        .get_mut::<crate::modifiers::ShipModifiers>(receiver)
+        .unwrap()
+        .remove_flag(source, crate::core::messages::FlagKind::CommsJammed);
+    step(&mut app, sender);
+    let restored = &app.world().get::<BroadTracks>(receiver).unwrap().0[&sid()];
+    assert!(restored
+        .tracks
+        .keys()
+        .any(|id| restored.resolve_current(id).is_some()));
 }
 
 #[test]
@@ -209,16 +306,12 @@ fn actual_ship_feed_requires_deliberate_intent_and_preserves_receiver_control_au
             0.5,
         )
         .unwrap();
-        assert!(
-            records
-                .iter()
-                .any(|record| record.samples[0].received_tick == Some(1))
-        );
-        assert!(
-            records
-                .iter()
-                .all(|record| !record.contact_id.contains("measured-target"))
-        );
+        assert!(records
+            .iter()
+            .any(|record| record.samples[0].received_tick == Some(1)));
+        assert!(records
+            .iter()
+            .all(|record| !record.contact_id.contains("measured-target")));
         assert!(app.world().get::<BroadTracks>(sender).unwrap().0[&sid()].share_own_faction);
     }
 }
@@ -305,17 +398,15 @@ fn an_endpoint_clear_comms_obstruction_stops_receipt_then_restores_held_sample_a
     app.world_mut().despawn(barrier);
     step(&mut app, sender);
     let caught_up = &app.world().get::<BroadTracks>(receiver).unwrap().0[&sid()];
-    assert!(
-        caught_up
-            .tracks
-            .values()
-            .any(|track| track
-                .received
-                .as_ref()
-                .is_some_and(|receipt| receipt.last_delivery_tick == 2
-                    && receipt.provenance.received_tick == Some(2)
-                    && track.observed_tick == 1))
-    );
+    assert!(caught_up
+        .tracks
+        .values()
+        .any(|track| track
+            .received
+            .as_ref()
+            .is_some_and(|receipt| receipt.last_delivery_tick == 2
+                && receipt.provenance.received_tick == Some(2)
+                && track.observed_tick == 1)));
 }
 
 #[test]
@@ -345,27 +436,31 @@ fn wrong_faction_and_real_comms_range_loss_leave_received_findings_historical() 
         .unwrap()
         .translation
         .x = 1_000_000.0;
+    app.world_mut()
+        .get_mut::<crate::ship::state::ShipPhysics>(receiver)
+        .unwrap()
+        .x = 1_000_000.0;
     step(&mut app, sender);
     let state = &app.world().get::<BroadTracks>(receiver).unwrap().0[&sid()];
-    assert!(
-        state
-            .tracks
-            .iter()
-            .all(|(id, _)| state.resolve_current(id).is_none())
-    );
+    assert!(state
+        .tracks
+        .iter()
+        .all(|(id, _)| state.resolve_current(id).is_none()));
     app.world_mut()
         .get_mut::<Transform>(receiver)
         .unwrap()
         .translation
         .x = 20.0;
+    app.world_mut()
+        .get_mut::<crate::ship::state::ShipPhysics>(receiver)
+        .unwrap()
+        .x = 20.0;
     step(&mut app, sender);
     let restored = &app.world().get::<BroadTracks>(receiver).unwrap().0[&sid()];
-    assert!(
-        restored
-            .tracks
-            .iter()
-            .any(|(id, _)| restored.resolve_current(id).is_some())
-    );
+    assert!(restored
+        .tracks
+        .iter()
+        .any(|(id, _)| restored.resolve_current(id).is_some()));
     let json = serde_json::to_string(restored).unwrap();
     let decoded: phoenix_sim_gameplay::science::tracks::BroadTrackState =
         serde_json::from_str(&json).unwrap();

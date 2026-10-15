@@ -275,3 +275,37 @@ uses those separate tags, with a source-reviewed regression for differing displa
 and target tags and absent-target denial. That correction and its real streaming
 restore regression await the next integrated native batch; the earlier 31 cases
 must not be read as post-correction execution evidence.
+
+### Integrated deliberate radar sharing
+
+The source checkpoint `93baf3c9` adds actual Sensors/Tactical faction feeds,
+original sample provenance, receipt history, geometry-only refinement and
+Workshop controls. Integration retains the synthetic-report safeguards and
+selectability rules, adds ordinary admitted sharing controls, and publishes
+the same permitted fused picture for client routing and machinery handles.
+
+The no-renderer compile check passed after correcting a source validation block
+that had been placed on mount geometry instead of `SensingConfig`. A subsequent
+check of canonical physical endpoints and radio/jam availability passed in 12.11s:
+`.phoenix/increment14-sharing-physical-endpoint-check.log`, SHA256
+`396a32a2df9b767038ab6bb971e38b383225b1458745a26f904e26e1c9c56a74`.
+The actual sharing native cases remain unexecuted at this checkpoint.
+
+Six integrated client/Workshop suites passed **459 cases**:
+
+```text
+npx vitest run tests/client/radar-sharing.test.js tests/client/radar-sharing-projection.test.js tests/client/sensor-tracks.test.js tests/client/console-state.test.js tests/client/workshop-sensing-panel.test.js editor/tests/workshop-sensing.test.js
+```
+
+The log is `.phoenix/increment14-sharing-client-integrated-tests-retry.log`,
+SHA256 `557895c12fa042dde3715e7d7375f2394cf1e93c3c7c88098eb725c11befc289`.
+The initial run exposed a wrong import in the new authority-projection test;
+the corrected retry passed. Tests cover exact ownership, typed-feed read-only
+views, co-host isolation, ordinary AI delegation, report parity and editing.
+
+The rebuilt actual Sensors `@core` journey passed **1 case in 3.5s**, exercising
+the sharing checkbox, exact System/correlation envelope, delegation, and existing
+focused/forecast controls. Log: `.phoenix/increment14-sharing-browser-smoke.log`,
+SHA256 `ded9f08c6f1a6d40b43d73e723e92e733e8c5e04d59d23ed41dc297e03587198`.
+Native sharing, whole-host continuation, multiplayer and human acceptance remain
+separate outstanding evidence, alongside the remaining selected increment scope.

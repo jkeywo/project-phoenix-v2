@@ -1157,6 +1157,7 @@ pub(crate) fn publish_tactical_radar_blackboard(
             &mut crate::server_app::ShipSystemBlackboards,
             Has<crate::server_app::LocalShip>,
             Option<&crate::entities::spawner::EntityUuid>,
+            Option<&crate::ship_plugin::ShipSystemControlSources>,
             (
                 Option<&crate::science::broad::BroadProfile>,
                 Option<&crate::science::broad::BroadTracks>,
@@ -1196,6 +1197,7 @@ pub(crate) fn publish_tactical_radar_blackboard(
         mut entity_bbs,
         is_local,
         ship_id,
+        sources,
         (broad_profile, broad_state),
     ) in ship_q.iter_mut()
     {
@@ -1215,19 +1217,42 @@ pub(crate) fn publish_tactical_radar_blackboard(
                     .zip(tick.as_ref())
                     .zip(fixed.as_ref())
                     .and_then(|((state, tick), fixed)| {
-                        state
-                            .projection(&instrument.profile, tick.0, fixed.timestep().as_secs_f32())
-                            .ok()
+                        crate::science::sharing::projection(
+                            &ship_id?.0,
+                            state,
+                            &instrument.profile,
+                            tick.0,
+                            fixed.timestep().as_secs_f32(),
+                        )
+                        .ok()
                     })
                     .unwrap_or_default();
                 let selected_target = selected_target
                     .as_deref()
-                    .and_then(|source| state?.contact_for_source(source))
-                    .map(str::to_owned);
+                    .and_then(|source| {
+                        tracks.iter().find(|record| {
+                            record.selectable
+                                && !record.predicted
+                                && state.and_then(|state| state.resolve_current(&record.contact_id))
+                                    == Some(source)
+                        })
+                    })
+                    .map(|record| record.contact_id.clone());
                 entity_bbs.0.insert(
                     owner.clone(),
                     SystemBlackboard::TacticalRadar(
                         crate::core::messages::TacticalRadarBlackboard {
+                            sharing: state.map(|state| {
+                                crate::science::sharing::sharing_payload(
+                                    owner,
+                                    state,
+                                    sources.is_some_and(|sources| {
+                                        sources.0.source_for(owner)
+                                            == crate::ship::control_source::ControlSource::Human
+                                            && !sources.0.is_offline(owner)
+                                    }),
+                                )
+                            }),
                             tracks: Some(tracks),
                             selected_target,
                             ..Default::default()
@@ -1363,6 +1388,7 @@ pub(crate) fn publish_tactical_radar_blackboard(
         entity_bbs.0.insert(
             crate::ship::system_registry::tactical_radar_system_id(),
             SystemBlackboard::TacticalRadar(crate::core::messages::TacticalRadarBlackboard {
+                sharing: None,
                 tracks: None,
                 selected_target,
                 blips,

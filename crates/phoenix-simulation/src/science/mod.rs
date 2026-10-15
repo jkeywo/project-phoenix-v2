@@ -27,6 +27,7 @@ pub mod scan;
 /// The Bevy adapter: the per-ship record, the admitted `ScanTarget` command,
 /// the fixed-tick derivation, and the blackboard publisher.
 pub mod server;
+pub mod sharing;
 
 pub use scan::{
     derive, quantise, scanned_flag, ScanBandConfig, ScanConditions, ScanConfig, ScanReading,

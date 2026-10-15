@@ -743,6 +743,35 @@ pub(crate) fn signal_comms_in_range(
         && crate::comms::in_range(start.distance(end) / transmission, own_range, other_range)
 }
 
+/// Fictional feeds obey fitted radio availability and environmental jamming.
+/// Player transport and internal command admission are separate consumers.
+pub(crate) fn information_endpoint_available(
+    config: &crate::ship_plugin::ShipConfigComponent,
+    controls: &crate::ship_plugin::ShipSystemControlSources,
+    modifiers: Option<&crate::modifiers::ShipModifiers>,
+) -> bool {
+    if modifiers
+        .is_some_and(|modifiers| modifiers.has_flag(&crate::core::messages::FlagKind::CommsJammed))
+    {
+        return false;
+    }
+    let mut radios = config
+        .0
+        .systems
+        .iter()
+        .filter(|system| system.kind == crate::ship::system_registry::COMMS_KIND)
+        .peekable();
+    // A screenless actor may declare only CommsRange. An explicitly fitted
+    // radio must have its actual machinery available, under Human or AI control.
+    radios.peek().is_none()
+        || radios.any(|system| {
+            controls.0.entries().any(|(id, _)| id == &system.id)
+                && !controls.0.is_offline(&system.id)
+                && controls.0.source_for(&system.id)
+                    != crate::ship::control_source::ControlSource::Offline
+        })
+}
+
 pub(crate) fn update_comms_range_flags(
     mut comms: ResMut<CommsRuntime>,
     ship_q: Query<

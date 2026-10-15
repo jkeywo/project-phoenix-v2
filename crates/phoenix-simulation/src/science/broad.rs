@@ -172,7 +172,7 @@ pub(crate) fn tick(
         .map(|row| (row.uuid.as_str(), row))
         .collect();
     let mut observers: Vec<_> = observers.iter_mut().collect();
-    observers.sort_by(|a, b| a.0.0.cmp(&b.0.0));
+    observers.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
     for (
         observer,
         transform,
@@ -585,7 +585,7 @@ fn routine_references<'a>(
     references.dedup();
     references
 }
-fn physical_position(physics: Option<&ShipPhysics>, transform: &Transform) -> Vec3 {
+pub(crate) fn physical_position(physics: Option<&ShipPhysics>, transform: &Transform) -> Vec3 {
     physics.map_or(transform.translation, |physics| {
         Vec3::new(physics.x, physics.y, physics.z)
     })

@@ -104,19 +104,19 @@ impl ReferenceProjection {
                     let Some(state) = tracks.0.get(owner) else {
                         continue;
                     };
-                    for (source, id) in &state.current {
+                    for (source, id) in state.current_routes() {
                         if concealed.contains(source) {
                             continue;
                         }
                         let Some(record) = public
                             .iter()
-                            .find(|record| &record.contact_id == id && !record.predicted)
+                            .find(|record| record.contact_id == id && !record.predicted)
                         else {
                             continue;
                         };
                         known.push(KnownContact {
-                            id: id.clone(),
-                            source: source.clone(),
+                            id: id.to_owned(),
+                            source: source.to_owned(),
                             kind: owner_config.kind.clone(),
                             owner: owner.clone(),
                             name: record

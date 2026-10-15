@@ -29,6 +29,7 @@ entities:
       rationale:
         - "Recipients retain target/order authority and their own permitted knowledge. Omitted/revoked feeds do not deliver new information; retained delivered findings stay honestly historical under supported retention. Old reports cannot overwrite newer samples or become live tracks. Copies circulating through allies remain one observation."
         - "[ai] Increment 14 proves this with real ships/existing sources and actual gameplay links. New probe launch/recovery/mobile-survey lifecycles remain increment 19; the common observation contract supports them without importing another deployment/relay controller here. Existing technical transport remains unchanged."
+        - "[ai] Feed link endpoints use canonical physical ship positions, ordinary fitted radio availability and existing environmental Comms-jam flags, then the shared range/path query. A screenless legacy actor may retain its declared CommsRange capability. Breaking a link stops new receipt and current actuator routes without erasing held samples. Human sharing intent remains editable while a link is unavailable."
 
   - decision: sensing-responsive-reference-correlation-and-reading
     core:

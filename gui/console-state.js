@@ -876,6 +876,7 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
 
   return {
     ...targetFacts,
+    radar_sharing: radarSharingPayload(state, systemIds, 'TacticalRadar'),
     target_uuid:   targetUuid,
     target_name:   resolvedTargetName,
     banks,
@@ -1970,6 +1971,18 @@ function scansPayload(state, systemIds = []) {
   });
 }
 
+function radarSharingPayload(state, systemIds, kind) {
+  const role = kind === 'SensorRadar' ? 'sensor_radar' : 'tactical_radar';
+  return blackboardsOfKind(state, kind, systemIds).flatMap(entry => {
+    const sharing = entry.data?.sharing;
+    // A permitted feed is information only. The published intent must name its
+    // actual producer, and controls remain with the exact Console owner.
+    if (!sharing || sharing.owner !== entry.systemId) return [];
+    return [{ ...sharing, role, controllable: systemIds.includes(entry.systemId)
+      && state.controlSources?.[entry.systemId] === 'Human' }];
+  });
+}
+
 /**
  * Sensors console. Returns an object of {@link SensorsConsolePayload}.
  * @param {{ blackboards, asteroids, shipX, shipZ, shipYaw, sensorsTarget,
@@ -1994,6 +2007,7 @@ export function buildSensorsConsoleState(state, systemIds = []) {
       on_screen: state.currentView === 'SensorsRadar' || state.currentView === 'ScienceRadar',
       regions: [], observation_tick: observationTickFor(state, trackEntry.systemId),
       scans: scansPayload(state, systemIds),
+      radar_sharing: radarSharingPayload(state, systemIds, 'SensorRadar'),
       passive: blackboardsOfKind(state, 'Passive', systemIds).map(entry => ({ ...entry.data,
         system_id: entry.systemId, controllable: systemIds.includes(entry.systemId) && state.controlSources?.[entry.systemId] === 'Human',
         observation_tick: observationTickFor(state, entry.systemId) })),

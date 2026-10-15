@@ -1977,6 +1977,10 @@ pub enum RepairTarget {
 )]
 #[serde(tag = "type", content = "data")]
 pub enum SystemControlPayload {
+    SetRadarSharing {
+        share_own_faction: bool,
+        receive: bool,
+    },
     SetPassiveEnabled {
         enabled: bool,
     },
@@ -4007,6 +4011,8 @@ pub struct RadarRegion {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct TacticalRadarBlackboard {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sharing: Option<crate::sensing_sharing::RadarSharingView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracks: Option<Vec<crate::sensing_tracks::SensorTrackSnapshot>>,
     /// The Combat Lock: the tactical radar's currently selected target UUID,
     /// or `None`. Mirrors this ship's `TacticalRadarSelection` component.
@@ -4029,6 +4035,8 @@ pub struct TacticalRadarBlackboard {
 /// lifts it into `ViewscreenBlackboard::science_target`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct SensorRadarBlackboard {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sharing: Option<crate::sensing_sharing::RadarSharingView>,
     /// Present even when empty for a fitted broad instrument. Absence identifies
     /// a capability whose legacy publication has not adopted this projection.
     #[serde(default, skip_serializing_if = "Option::is_none")]

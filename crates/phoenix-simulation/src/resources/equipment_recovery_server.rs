@@ -111,19 +111,48 @@ fn find(world: &World, uuid: &str) -> Option<Entity> {
 }
 
 fn known(world: &World, actor: Entity, retained: Option<&str>) -> BTreeSet<String> {
-    let (Some(tool), Some(config), Some(boards)) = (
-        world.get::<CompiledShipRecovery>(actor),
-        world.get::<ShipConfigComponent>(actor),
-        world.get::<crate::server_app::ShipSystemBlackboards>(actor),
-    ) else {
-        return BTreeSet::new();
-    };
-    crate::resources::recovery_server::known_contacts(
-        &config.0,
-        &tool.0.system,
-        &boards.0,
-        retained,
+    picture(world, actor).map_or_else(BTreeSet::new, |picture| picture.known_for_work(retained))
+}
+
+fn picture(
+    world: &World,
+    actor: Entity,
+) -> Option<crate::resources::recovery_server::contacts::Picture> {
+    let tool = world.get::<CompiledShipRecovery>(actor)?;
+    let config = world.get::<ShipConfigComponent>(actor)?;
+    let boards = world.get::<crate::server_app::ShipSystemBlackboards>(actor)?;
+    let observer = world.get::<EntityUuid>(actor)?;
+    Some(
+        crate::resources::recovery_server::contacts::Picture::capture(
+            &config.0,
+            &tool.0.system,
+            &boards.0,
+            world.get::<crate::science::broad::BroadTracks>(actor),
+            world.get::<crate::science::broad::SensingControls>(actor),
+            &observer.0,
+            world.get_resource::<crate::world::server::WorldContentRuntime>(),
+        ),
     )
+}
+
+fn observed_in_range(
+    world: &World,
+    actor: Entity,
+    contact: &crate::resources::recovery_server::contacts::Contact,
+) -> bool {
+    let Some(position) = contact.position else {
+        // Existing reduced fixtures without sensing use the physical check in prepare.
+        return true;
+    };
+    let (Some(origin), Some(tool)) = (
+        world.get::<Transform>(actor),
+        world.get::<CompiledShipRecovery>(actor),
+    ) else {
+        return false;
+    };
+    let distance = (f64::from(origin.translation.x) - f64::from(position[0]))
+        .hypot(f64::from(origin.translation.z) - f64::from(position[1]));
+    distance.is_finite() && distance <= f64::from(tool.0.range)
 }
 
 fn exact_component(
@@ -400,6 +429,12 @@ fn start(
     if &state.owner != owner || active(&state) || state.next_id == u64::MAX {
         return Err("recovery_tool_busy".into());
     }
+    let picture = picture(world, actor).ok_or("unknown_target")?;
+    let contact = picture.resolve(target).ok_or("unknown_target")?;
+    if !observed_in_range(world, actor, contact) {
+        return Err("out_of_range".into());
+    }
+    let target = contact.source.as_str();
     let source = find(world, target).ok_or("source_unavailable")?;
     let profile = &world
         .get::<CompiledShipFitting>(source)
@@ -679,11 +714,20 @@ pub fn validate_state(
 pub fn project(world: &World, actor: Entity) -> Option<EquipmentRecoveryView> {
     let owner = world.get::<ShipEquipmentRecovery>(actor)?;
     let profile = &world.get::<CompiledShipFitting>(actor)?.0;
-    let selected = owner.job.as_ref().map(|job| option(world, &job.activity));
+    let picture = picture(world, actor)?;
+    let selected = owner
+        .job
+        .as_ref()
+        .and_then(|job| option(world, &job.activity, &picture));
     let mut options = Vec::new();
     if !active(owner) {
-        for uuid in known(world, actor, None) {
-            let Some(source) = find(world, &uuid) else {
+        for contact in picture
+            .contacts
+            .values()
+            .filter(|contact| observed_in_range(world, actor, contact))
+        {
+            let uuid = &contact.source;
+            let Some(source) = find(world, uuid) else {
                 continue;
             };
             let (Some(source_profile), Some(source_state)) = (
@@ -713,11 +757,16 @@ pub fn project(world: &World, actor: Entity) -> Option<EquipmentRecoveryView> {
                         waiting: String::new(),
                     };
                     match prepare(world, actor, &work, JobId(owner.next_id), false) {
-                        Ok(_) => options.push(option(world, &work)),
+                        Ok(_) => {
+                            if let Some(option) = option(world, &work, &picture) {
+                                options.push(option);
+                            }
+                        }
                         Err(reason) if reason == "major_equipment_requires_facility" => {
-                            let mut unavailable = option(world, &work);
-                            unavailable.blocked_reason = Some(reason);
-                            options.push(unavailable);
+                            if let Some(mut unavailable) = option(world, &work, &picture) {
+                                unavailable.blocked_reason = Some(reason);
+                                options.push(unavailable);
+                            }
                         }
                         _ => {}
                     }
@@ -757,17 +806,30 @@ pub fn project(world: &World, actor: Entity) -> Option<EquipmentRecoveryView> {
     })
 }
 
-fn option(world: &World, work: &EquipmentRecoveryWork) -> EquipmentRecoveryOption {
-    EquipmentRecoveryOption {
-        target_uuid: work.target_uuid.clone(),
-        target_name: find(world, &work.target_uuid)
-            .and_then(|source| world.get::<crate::entities::spawner::EntityName>(source))
-            .map_or_else(|| work.target_uuid.clone(), |name| name.0.clone()),
+fn option(
+    world: &World,
+    work: &EquipmentRecoveryWork,
+    picture: &crate::resources::recovery_server::contacts::Picture,
+) -> Option<EquipmentRecoveryOption> {
+    let handle = picture.handle_for_source(&work.target_uuid)?;
+    let contact = picture.resolve(&handle)?;
+    Some(EquipmentRecoveryOption {
+        target_uuid: handle,
+        target_name: if contact.position.is_some() {
+            contact
+                .name
+                .clone()
+                .unwrap_or_else(|| "console.common.unknown".into())
+        } else {
+            find(world, &work.target_uuid)
+                .and_then(|source| world.get::<crate::entities::spawner::EntityName>(source))
+                .map_or_else(|| "console.common.unknown".into(), |name| name.0.clone())
+        },
         slot: work.source_slot.clone(),
         equipment: work.definition.clone(),
         destination_locker: work.destination_locker.clone(),
         blocked_reason: None,
-    }
+    })
 }
 
 fn waiting_reason(reason: String) -> String {

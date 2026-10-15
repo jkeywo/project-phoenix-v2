@@ -33,20 +33,7 @@ fn rig() -> (World, Entity, Entity) {
         job: None,
         last_tick: None,
     });
-    let uuid = world.get::<EntityUuid>(source).unwrap().0.clone();
-    world
-        .get_mut::<crate::server_app::ShipSystemBlackboards>(actor)
-        .unwrap()
-        .0
-        .insert(
-            sid("sensor-radar"),
-            crate::core::messages::SystemBlackboard::SensorRadar(
-                crate::core::messages::SensorRadarBlackboard {
-                    selected_target: Some(uuid),
-                    ..Default::default()
-                },
-            ),
-        );
+    observe_source(&mut world, actor, source, &config);
     let mut damage = world.get_mut::<ShipDamage>(source).unwrap();
     damage.state.catastrophic = true;
     *damage
@@ -62,8 +49,74 @@ fn rig() -> (World, Entity, Entity) {
     };
     (world, actor, source)
 }
-fn start_beam(world: &mut World, actor: Entity, source: Entity) -> Result<(), String> {
+fn observe_source(
+    world: &mut World,
+    actor: Entity,
+    source: Entity,
+    config: &crate::entities::config::EntityConfig,
+) {
+    use crate::science::broad::{BroadMeasurement, BroadProfile, BroadTracks, SensingControls};
     let uuid = world.get::<EntityUuid>(source).unwrap().0.clone();
+    let radar = sid("sensor-radar");
+    let profile = BroadProfile::from_config(config).unwrap().unwrap();
+    let mut tracks = BroadTracks::new(&profile);
+    // Pay the actual sensor's local reserve for this reduced owner's held sample.
+    let paid = world
+        .get_mut::<ShipPowerSystem>(actor)
+        .unwrap()
+        .0
+        .work_continuous(&radar, 0.5, 1.0)
+        .unwrap()
+        .fraction;
+    assert!(paid > 0.0);
+    let instrument = &profile.0[&radar].profile;
+    let state = tracks.0.get_mut(&radar).unwrap();
+    state
+        .advance(
+            instrument,
+            0,
+            0.5,
+            paid,
+            &[BroadMeasurement {
+                source: uuid,
+                selectable: true,
+                position: [4.0, 0.0],
+                support: 1.0,
+                identity: None,
+                classification: None,
+                assessment: None,
+            }],
+        )
+        .unwrap();
+    let records = state.projection(instrument, 0, 0.5).unwrap();
+    let selected = records[0].contact_id.clone();
+    world.entity_mut(actor).insert((
+        profile,
+        tracks,
+        SensingControls(config.sensing.as_ref().unwrap().control.clone()),
+    ));
+    world
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(actor)
+        .unwrap()
+        .0
+        .insert(
+            radar,
+            crate::core::messages::SystemBlackboard::SensorRadar(
+                crate::core::messages::SensorRadarBlackboard {
+                    selected_target: Some(selected),
+                    tracks: Some(records),
+                    ..Default::default()
+                },
+            ),
+        );
+}
+fn public_target(world: &World, actor: Entity, source: Entity) -> String {
+    picture(world, actor)
+        .and_then(|picture| picture.handle_for_source(&world.get::<EntityUuid>(source).unwrap().0))
+        .unwrap_or_else(|| "unobserved-source".into())
+}
+fn start_beam(world: &mut World, actor: Entity, source: Entity) -> Result<(), String> {
+    let uuid = public_target(world, actor, source);
     let owner = world
         .get::<ShipEquipmentRecovery>(actor)
         .unwrap()
@@ -87,6 +140,195 @@ fn power(world: &World, actor: Entity) -> crate::modifiers::power_system::PowerS
         .unwrap()
         .0
         .capture_continuation()
+}
+
+#[test]
+fn equipment_options_and_new_requests_use_only_the_tools_measured_handle() {
+    let (mut world, actor, source) = rig();
+    let actual = world.get::<EntityUuid>(source).unwrap().0.clone();
+    let handle = public_target(&world, actor, source);
+    let owner = world
+        .get::<ShipEquipmentRecovery>(actor)
+        .unwrap()
+        .owner
+        .clone();
+    let before = (
+        equipment(&world, actor).clone(),
+        equipment(&world, source).clone(),
+        power(&world, actor),
+    );
+    world
+        .entity_mut(source)
+        .insert(crate::entities::spawner::EntityName(
+            "SECRET live identity".into(),
+        ));
+    let view = project(&world, actor).unwrap();
+    assert!(!view.options.is_empty());
+    assert!(view.options.iter().all(
+        |option| option.target_uuid == handle && option.target_name == "console.common.unknown"
+    ));
+    assert_ne!(handle, actual);
+    let encoded = serde_json::to_string(&view).unwrap();
+    assert!(!encoded.contains(&actual) && !encoded.contains("SECRET"));
+    assert_eq!(
+        start(
+            &mut world,
+            actor,
+            &owner,
+            &actual,
+            "fore-beam",
+            "support-equipment"
+        )
+        .unwrap_err(),
+        "unknown_target"
+    );
+    assert_eq!(
+        (
+            equipment(&world, actor).clone(),
+            equipment(&world, source).clone(),
+            power(&world, actor)
+        ),
+        before
+    );
+    start(
+        &mut world,
+        actor,
+        &owner,
+        &handle,
+        "fore-beam",
+        "support-equipment",
+    )
+    .unwrap();
+    assert_eq!(
+        world
+            .get::<ShipEquipmentRecovery>(actor)
+            .unwrap()
+            .job
+            .as_ref()
+            .unwrap()
+            .activity
+            .target_uuid,
+        actual
+    );
+}
+
+#[test]
+fn equipment_acquisition_requires_current_permission_and_observed_tool_range() {
+    for mode in 0..3 {
+        let (mut world, actor, source) = rig();
+        let actual = world.get::<EntityUuid>(source).unwrap().0.clone();
+        let handle = public_target(&world, actor, source);
+        let owner = world
+            .get::<ShipEquipmentRecovery>(actor)
+            .unwrap()
+            .owner
+            .clone();
+        match mode {
+            0 => world
+                .get_mut::<crate::server_app::ShipSystemBlackboards>(actor)
+                .unwrap()
+                .0
+                .clear(),
+            1 => {
+                let mut runtime = crate::world::server::WorldContentRuntime::default();
+                crate::gm::operations::contact::set(
+                    &mut runtime.contact_overrides,
+                    &world.get::<EntityUuid>(actor).unwrap().0,
+                    &actual,
+                    crate::gm::operations::contact::ContactMode::Conceal,
+                );
+                world.insert_resource(runtime);
+            }
+            _ => {
+                let mut boards = world
+                    .get_mut::<crate::server_app::ShipSystemBlackboards>(actor)
+                    .unwrap();
+                let crate::core::messages::SystemBlackboard::SensorRadar(board) =
+                    boards.0.get_mut(&sid("sensor-radar")).unwrap()
+                else {
+                    unreachable!()
+                };
+                board.tracks.as_mut().unwrap()[0].position = [1000.0, 0.0];
+            }
+        }
+        let before = (
+            equipment(&world, actor).clone(),
+            equipment(&world, source).clone(),
+            power(&world, actor),
+        );
+        assert!(
+            project(&world, actor).unwrap().options.is_empty(),
+            "mode {mode}"
+        );
+        assert!(
+            start(
+                &mut world,
+                actor,
+                &owner,
+                &handle,
+                "fore-beam",
+                "support-equipment"
+            )
+            .is_err(),
+            "mode {mode}"
+        );
+        assert_eq!(
+            (
+                equipment(&world, actor).clone(),
+                equipment(&world, source).clone(),
+                power(&world, actor)
+            ),
+            before
+        );
+    }
+}
+
+#[test]
+fn admitted_equipment_work_keeps_progress_and_cancel_after_its_public_handle_is_lost() {
+    let (mut world, actor, source) = rig();
+    let actual = world.get::<EntityUuid>(source).unwrap().0.clone();
+    start_beam(&mut world, actor, source).unwrap();
+    advance(&mut world, actor, 1, 0.25);
+    let initial = project(&world, actor).unwrap();
+    assert!(initial.progress > 0 && initial.selected.is_some());
+    world
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(actor)
+        .unwrap()
+        .0
+        .clear();
+    let hidden = project(&world, actor).unwrap();
+    assert!(hidden.selected.is_none() && hidden.options.is_empty());
+    assert_eq!(hidden.progress, initial.progress);
+    assert!(hidden.can_cancel && !hidden.can_start);
+    assert!(!serde_json::to_string(&hidden).unwrap().contains(&actual));
+    advance(&mut world, actor, 2, 0.5);
+    let advanced = project(&world, actor).unwrap();
+    assert!(advanced.progress > hidden.progress && advanced.can_cancel);
+    let owner = world
+        .get::<ShipEquipmentRecovery>(actor)
+        .unwrap()
+        .owner
+        .clone();
+    let paid = power(&world, actor);
+    cancel(&mut world, actor, &owner).unwrap();
+    advance(&mut world, actor, 3, 1.0);
+    assert_eq!(power(&world, actor), paid);
+    assert_eq!(
+        world
+            .get::<ShipEquipmentRecovery>(actor)
+            .unwrap()
+            .job
+            .as_ref()
+            .unwrap()
+            .outcome,
+        Some(JobOutcome::Cancelled)
+    );
+    assert!(
+        equipment(&world, source)
+            .equipment
+            .installed("fore-beam")
+            .is_some()
+    );
 }
 
 #[test]
@@ -134,14 +376,18 @@ fn actual_paid_tool_moves_one_surviving_assembly_and_its_condition_without_refil
             .unwrap();
         assert_eq!(job.outcome, Some(JobOutcome::Completed));
         assert_eq!(job.activity.progress, job.activity.work_secs);
-        assert!(equipment(&world, source)
-            .equipment
-            .installed("fore-beam")
-            .is_none());
-        assert!(!equipment(&world, source)
-            .equipment
-            .assemblies
-            .contains_key(&actual));
+        assert!(
+            equipment(&world, source)
+                .equipment
+                .installed("fore-beam")
+                .is_none()
+        );
+        assert!(
+            !equipment(&world, source)
+                .equipment
+                .assemblies
+                .contains_key(&actual)
+        );
         let recovered = &equipment(&world, actor).equipment.assemblies[&actual];
         assert!(
             matches!(&recovered.location,EquipmentLocation::Stored { locker } if locker == "support-equipment")
@@ -170,13 +416,15 @@ fn actual_paid_tool_moves_one_surviving_assembly_and_its_condition_without_refil
             equipment(&world, source),
             &sid("phaser-fore")
         ));
-        assert!(!world
-            .get::<crate::console::weapons::PhaserCombatConfigResource>(source)
-            .unwrap()
-            .0
-            .banks
-            .iter()
-            .any(|bank| bank.id == "fore"));
+        assert!(
+            !world
+                .get::<crate::console::weapons::PhaserCombatConfigResource>(source)
+                .unwrap()
+                .0
+                .banks
+                .iter()
+                .any(|bank| bank.id == "fore")
+        );
         let completed = equipment(&world, actor).clone();
         advance(&mut world, actor, 121, 10.0);
         assert_eq!(equipment(&world, actor), &completed);
@@ -230,7 +478,7 @@ fn major_assemblies_are_reported_but_require_a_supported_facility_extraction_ada
         .unwrap()
         .owner
         .clone();
-    let uuid = world.get::<EntityUuid>(source).unwrap().0.clone();
+    let uuid = public_target(&world, actor, source);
     let view = project(&world, actor).unwrap();
     assert!(view.options.iter().any(|option| option.slot == "reactor"
         && option.blocked_reason.as_deref() == Some("major_equipment_requires_facility")));
@@ -315,49 +563,55 @@ fn unknown_active_full_and_repair_claimed_sources_refuse_before_any_payment_or_i
             ),
             before
         );
-        assert!(world
-            .get::<ShipEquipmentRecovery>(actor)
-            .unwrap()
-            .job
-            .is_none());
+        assert!(
+            world
+                .get::<ShipEquipmentRecovery>(actor)
+                .unwrap()
+                .job
+                .is_none()
+        );
     }
 }
 
 #[test]
 fn distinct_component_repair_can_coexist_with_extraction_but_operation_claim_pauses_it() {
     let (mut world, actor, source) = rig();
-    assert!(world
-        .get_mut::<crate::console::repair::server::ShipRepairTeams>(source)
-        .unwrap()
-        .0
-        .dispatch_physical(
-            0,
-            sid("phaser-fore"),
-            Some(phoenix_model::damage::RepairWorkTarget::Component {
-                system: sid("phaser-fore"),
-                component: "intake".into()
-            }),
-            "Fore intake".into()
-        ));
+    assert!(
+        world
+            .get_mut::<crate::console::repair::server::ShipRepairTeams>(source)
+            .unwrap()
+            .0
+            .dispatch_physical(
+                0,
+                sid("phaser-fore"),
+                Some(phoenix_model::damage::RepairWorkTarget::Component {
+                    system: sid("phaser-fore"),
+                    component: "intake".into()
+                }),
+                "Fore intake".into()
+            )
+    );
     start_beam(&mut world, actor, source).unwrap();
     advance(&mut world, actor, 1, 0.5);
     let before = world.get::<ShipEquipmentRecovery>(actor).unwrap().clone();
     assert!(before.job.as_ref().unwrap().activity.progress > 0.0);
     let paid = power(&world, actor);
     // Same actual team/job, now explicitly claiming the replaceable hardware.
-    assert!(world
-        .get_mut::<crate::console::repair::server::ShipRepairTeams>(source)
-        .unwrap()
-        .0
-        .dispatch_physical(
-            0,
-            sid("phaser-fore"),
-            Some(phoenix_model::damage::RepairWorkTarget::Component {
-                system: sid("phaser-fore"),
-                component: "operation".into()
-            }),
-            "Fore hardware".into()
-        ));
+    assert!(
+        world
+            .get_mut::<crate::console::repair::server::ShipRepairTeams>(source)
+            .unwrap()
+            .0
+            .dispatch_physical(
+                0,
+                sid("phaser-fore"),
+                Some(phoenix_model::damage::RepairWorkTarget::Component {
+                    system: sid("phaser-fore"),
+                    component: "operation".into()
+                }),
+                "Fore hardware".into()
+            )
+    );
     advance(&mut world, actor, 2, 1.0);
     let after = world
         .get::<ShipEquipmentRecovery>(actor)
@@ -409,10 +663,12 @@ fn lost_source_or_range_pauses_without_payment_and_recovery_cannot_ignore_a_chan
         .remove(&actual);
     advance(&mut world, actor, 3, 10.0);
     assert_eq!(power(&world, actor), paid);
-    assert!(!equipment(&world, actor)
-        .equipment
-        .assemblies
-        .contains_key(&actual));
+    assert!(
+        !equipment(&world, actor)
+            .equipment
+            .assemblies
+            .contains_key(&actual)
+    );
 }
 
 #[test]

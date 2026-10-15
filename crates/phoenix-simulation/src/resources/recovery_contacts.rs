@@ -5,14 +5,14 @@ use crate::science::broad::{BroadTracks, SensingControls};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[derive(Clone)]
-pub(super) struct Contact {
+pub(in crate::resources) struct Contact {
     pub source: String,
     pub handle: String,
     pub name: Option<String>,
     pub position: Option<[f32; 2]>,
 }
 
-pub(super) struct Picture {
+pub(in crate::resources) struct Picture {
     pub fitted: bool,
     pub contacts: BTreeMap<String, Contact>,
 }

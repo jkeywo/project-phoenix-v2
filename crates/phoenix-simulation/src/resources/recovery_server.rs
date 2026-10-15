@@ -15,7 +15,7 @@ use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
 use phoenix_model::recovery_ui::*;
 
 #[path = "recovery_contacts.rs"]
-mod contacts;
+pub(super) mod contacts;
 
 #[derive(Component, Clone, Debug)]
 pub struct CompiledShipRecovery(pub RecoveryToolConfig);
@@ -170,7 +170,7 @@ fn operate_ai(
         &mut AdmittedCommands,
     )>,
 ) {
-    use phoenix_sim_gameplay::ai::host::{decide_tree, TreeHostOutcome};
+    use phoenix_sim_gameplay::ai::host::{TreeHostOutcome, decide_tree};
     for (uuid, sources, state, equipment, config, boards, programs, mut runtimes, mut admitted) in
         &mut ships
     {

@@ -242,12 +242,13 @@ pub fn process(
                     .iter()
                     .find_map(|(uuid, slot)| (uuid.0 == call.peer_ship).then_some(slot.0 .0))
                 {
+                    let generation_floor = mesh.required_floor(call);
                     mesh.push(super::media_mesh::MediaHostBody {
                         from: local,
                         to,
                         call_origin_id: call.origin.clone(),
                         generation: leases.generation(operator, call),
-                        generation_floor: mesh.required_floor(call),
+                        generation_floor,
                         packet: None,
                     });
                 }

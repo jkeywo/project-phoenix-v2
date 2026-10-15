@@ -133,10 +133,13 @@ Scope diagnostics at `fb70f64c` reproduce the valid-restore failures and identif
 the empty asteroid namespace as the first difference; run, entity and resource
 stages agree. Restore's normal derived radar query registers spatial components
 that the bare fixture had omitted. `cb303175` registers that normal host roster;
-production digest semantics remain unchanged. The affected retry, expanded with
-actual seeker acquisition and same-step interception-before-payload coverage,
-is pending. The diagnostic log is `increment15-carrier-digest-diagnostics.log`;
-an intervening new-fixture constructor build failure is retained separately.
+production digest semantics remain unchanged. The expanded retry against
+`d1750c12` passes all 51 tests, including every carrier comparison, actual seeker
+acquisition and same-step interception-before-payload coverage. The receipt is
+`implementation/combat-checkpoint.json`; the passing log is
+`increment15-spatial-guidance-native-retry2.log`. The diagnostic log is
+`increment15-carrier-digest-diagnostics.log`; an intervening new-fixture
+constructor build failure is retained separately.
 
 The combined adopted lane/state-owner PASM checks pass: validate reports 1,111
 entities and `Status: OK`, scan reports 3,626 files and 7,735 dependencies, and

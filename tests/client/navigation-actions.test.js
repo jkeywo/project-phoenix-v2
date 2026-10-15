@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ActionFeedbackLifecycle } from '../../gui/action-feedback.js';
+import { FITTING_ACTIONS } from '../../gui/stations/fitting-actions.js';
 import { createClientSemanticActionRegistry } from '../../gui/client-semantic-actions.js';
 import {
   createNavigationActionRegistry,
@@ -249,6 +250,29 @@ describe('Navigation semantic actions', () => {
       'sensors.scan',
       'sensors.target-selection',
       'sensors.viewscreen',
+      'logistics.dispatch',
+      'logistics.enabled',
+      'logistics.return',
+      'port.maintenance',
+      'port.start-order',
+      'port.stop-order',
+      'port.transfer-store',
+      'power.energy-generation',
+      'power.energy-group',
+      'power.energy-mode',
+      'power.energy-priority',
+      'power.energy-reactor',
+      'power.energy-system-flow',
+      'production.enabled',
+      'production.recipe',
+      'production.target',
+      'recovery.enabled',
+      'recovery.selection',
+      'science.shield-raised',
+      'science.shield-recovery',
+      'stock.priority',
+      'stock.reserve',
+      'stock.target',
     ].sort());
     expect(idsFor(catalogue, 'comms')).toEqual([
       'comms.clear',
@@ -277,12 +301,43 @@ describe('Navigation semantic actions', () => {
       'repair.prioritise-system',
       'repair.recall-team',
       'science.shield-focus',
+      'logistics.dispatch',
+      'logistics.enabled',
+      'logistics.return',
+      'port.maintenance',
+      'port.start-order',
+      'port.stop-order',
+      'port.transfer-store',
+      'power.energy-generation',
+      'power.energy-group',
+      'power.energy-mode',
+      'power.energy-priority',
+      'power.energy-reactor',
+      'power.energy-system-flow',
+      'production.enabled',
+      'production.recipe',
+      'production.target',
+      'recovery.enabled',
+      'recovery.selection',
+      'science.shield-raised',
+      'science.shield-recovery',
+      'stock.priority',
+      'stock.reserve',
+      'stock.target',
+      'engineering.transfer-direction',
+      'engineering.transfer-resource',
     ].sort());
     expect(idsFor(catalogue, 'sensors')).toEqual([
       'sensors.cancel-impulse',
       'sensors.target-selection',
       'sensors.viewscreen',
     ].sort());
+  });
+
+  it('retains the closed shared fitting actions separately from Station navigation contexts', () => {
+    const catalogue = integratedClientCatalogue();
+    expect(idsFor(catalogue, 'fitting')).toEqual(['fitting.cancel', 'fitting.dispatch', 'fitting.recover', 'fitting.recover-cancel', 'fitting.request']);
+    for (const action of FITTING_ACTIONS) expect(action.bindings).toEqual([null, null]);
   });
 
   it('uses the keyboard place binding and the map keyboard cursor through one correlated operation', () => {

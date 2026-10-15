@@ -1,3 +1,4 @@
+import { registerFittingActions } from './stations/fitting-actions.js';
 import { mountLocalStockControls } from './components/local-stock-controls.js';
 import { registerLogisticsActions } from './stations/logistics-actions.js';
 import { mountSystemStatus } from './components/ph-system-status.js';
@@ -136,7 +137,7 @@ export function initConsole({
   var _actionContext = String(name || '').toLowerCase();
   var _actionContexts = new Set([
     _actionContext,
-    'stock',
+    'stock', 'fitting',
     ...(Array.isArray(actionFamilies) ? actionFamilies : [])
       .map((value) => String(value || '').toLowerCase())
       .filter(Boolean),
@@ -358,7 +359,7 @@ export function initConsole({
         // control. Cruiser Comms still has an always-visible inline chart, so
         // that legitimate surface is selected by the `visible` arm above.
         // Stock is a shared policy widget, not an additional chart surface.
-        return visible || ([..._actionContexts].filter(context => context !== 'stock').length === 1 ? maps[0] : null);
+        return visible || ([..._actionContexts].filter(context => !['stock', 'fitting'].includes(context)).length === 1 ? maps[0] : null);
       },
       supportsChart: navigationActions && navigationActions.supportsChart != null
         ? navigationActions.supportsChart === true
@@ -436,6 +437,7 @@ export function initConsole({
   let systemStatusWidget = null;
   let localStockWidget = null;
   registerLogisticsActions(_semanticActions, { getState: () => _latestState, sendAction });
+  registerFittingActions(_semanticActions, { getState: () => _latestState, sendAction });
 
   // ── Inbound: __updateConsole (ADR-0001 §2) ─────────────────────────────
   const workingView = createConsoleViewSession({
@@ -471,7 +473,7 @@ export function initConsole({
     } else render(s);
     if (Array.isArray(s.system_status) && typeof document !== 'undefined' && document.body?.append) {
       systemStatusWidget ||= mountSystemStatus(document);
-      systemStatusWidget.update(s.system_status);
+      systemStatusWidget.update(s.system_status, { station: s.console_host?.host || null });
     } else systemStatusWidget?.update([]);
     if (Array.isArray(s.local_stock) && typeof document !== 'undefined' && document.body?.append) {
       localStockWidget ||= mountLocalStockControls(document); localStockWidget.update(s.local_stock);

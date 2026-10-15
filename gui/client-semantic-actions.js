@@ -1,3 +1,4 @@
+import { FITTING_ACTIONS } from './stations/fitting-actions.js';
 /** Parent-realm catalogue of every semantic action retained by the private
  * operator profile. Individual surfaces filter which entries they display. */
 
@@ -24,6 +25,7 @@ export function createClientSemanticActionRegistry({ adapters = {}, actionFeedba
     ...NAVIGATION_ACTIONS,
     ...ENGINEERING_ACTIONS,
     ...MOD_ACTIONS,
+    ...FITTING_ACTIONS,
   ]) {
     registry.register(action, adapters[action.id]);
   }

@@ -1,3 +1,4 @@
+import { guardFittingReferences } from './workshop-fitting.js';
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
 import { acceptWorkshopChanges } from './workshop-acceptance.js';
@@ -103,6 +104,7 @@ export function prepareWeaponOperation(draft, dependencies, operation) {
         materialise: operation.materialise === true }).changes[0].after;
     }
   }
+  guardFittingReferences(inspection.resolved.value, inspectWeapons({ paths: () => draft.paths(), isBinary: path => draft.isBinary(path), read: path => path === operation.path ? after : draft.read(path) }, dependencies, operation.path).resolved.value);
   parse(after);
   return { changes: [{ path: operation.path, before, after }] };
 }

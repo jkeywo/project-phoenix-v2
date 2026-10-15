@@ -1,3 +1,4 @@
+import { guardFittingReferences } from './workshop-fitting.js';
 import { parse, stringify } from 'smol-toml';
 import { inspectEntityComposition } from './workshop-entity-composition.js';
 import { acceptWorkshopChanges } from './workshop-acceptance.js';
@@ -42,6 +43,7 @@ export function prepareEnergyOperation(draft, dependencies, operation) {
     for (const system of inspection.resolved.value.system || []) if (system.kind === 'power_reactor' && !system.config?.ai?.tree?.length)
       after = writeStateTrees(after, system, configuredPowerTree(energy), { materialise: operation.materialise === true });
   }
+  guardFittingReferences(inspection.resolved.value, { ...inspection.resolved.value, energy });
   parse(after);
   return { changes: [{ path: operation.path, before, after }] };
 }

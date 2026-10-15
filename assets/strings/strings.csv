@@ -5446,3 +5446,166 @@ workshop.ports.remove-offer,Docked port services,Remove offer,Angebot entfernen,
 workshop.ports.add-offer,Docked port services,Add offer,Angebot hinzufügen,Add offer,machine
 workshop.ports.apply,Docked port services,Save port policy,Hafenrichtlinie speichern,Save port policy,machine
 workshop.ports.refused,Docked port services,Port change refused: {reason},Hafenänderung abgelehnt: {reason},Port change refused: {reason},machine
+fitting.request,Equipment fitting,Request equipment,Ausrüstung anfordern,Request equipment,machine
+fitting.dispatch,Equipment fitting,Assign refit team,Umrüstteam zuweisen,Assign refit team,machine
+fitting.cancel,Equipment fitting,Cancel refit,Umrüstung abbrechen,Cancel refit,machine
+fitting.equipment,Equipment fitting,Replacement equipment,Ersatzausrüstung,Replacement equipment,machine
+fitting.team,Equipment fitting,Repair team,Reparaturteam,Repair team,machine
+fitting.team-number,Equipment fitting,Team {number},Team {number},Team {number},machine
+fitting.installed,Equipment fitting,Installed: {installed}. Requested: {desired}.,Installiert: {installed}. Angefordert: {desired}.,Installed: {installed}. Requested: {desired}.,machine
+fitting.vacant,Equipment fitting,Empty slot,Leerer Einbauplatz,Empty slot,machine
+fitting.none,Equipment fitting,None,Keine,None,machine
+fitting.choice,Equipment fitting,{equipment} · {count} stored,{equipment} · {count} gelagert,{equipment} · {count} stored,machine
+fitting.facility-required,Equipment fitting,Facility work,Arbeiten an einer Einrichtung,Facility work,machine
+fitting.progress,Equipment fitting,{phase} · {progress}%,{phase} · {progress}%,{phase} · {progress}%,machine
+fitting.forecast.beam,Equipment fitting,Range {range}; damage/s {damage}; energy/s {energy}; active {active}s; rest {rest}s.,Reichweite {range}; Schaden/s {damage}; Energie/s {energy}; Aktivität {active}s; Pause {rest}s.,Range {range}; damage/s {damage}; energy/s {energy}; active {active}s; rest {rest}s.,machine
+fitting.forecast.reactor,Equipment fitting,Sustained output {sustained}; peak {peak}; ramp/s {ramp}.,Dauerleistung {sustained}; Spitzenleistung {peak}; Änderung/s {ramp}.,Sustained output {sustained}; peak {peak}; ramp/s {ramp}.,machine
+fitting.forecast.assumptions,Equipment fitting,"Forecast assumes sustained use with the current allocation, reserves and cooling.","Die Prognose setzt Dauerbetrieb bei aktueller Zuteilung, Reserve und Kühlung voraus.","Forecast assumes sustained use with the current allocation, reserves and cooling.",machine
+fitting.phase.idle,Equipment fitting,Awaiting assignment,Wartet auf Zuweisung,Awaiting assignment,machine
+fitting.phase.preparing,Equipment fitting,Preparing,Vorbereitung,Preparing,machine
+fitting.phase.removing,Equipment fitting,Removing equipment,Ausbau,Removing equipment,machine
+fitting.phase.installing,Equipment fitting,Installing equipment,Einbau,Installing equipment,machine
+fitting.phase.team_travelling,Equipment fitting,Team travelling,Team unterwegs,Team travelling,machine
+fitting.phase.compartment_unavailable,Equipment fitting,Compartment unavailable,Abteil nicht verfügbar,Compartment unavailable,machine
+fitting.phase.facility_required,Equipment fitting,Facility required,Einrichtung erforderlich,Facility required,machine
+fitting.phase.missing_parts,Equipment fitting,Waiting for parts,Wartet auf Teile,Waiting for parts,machine
+fitting.phase.safe_shutdown,Equipment fitting,Waiting for machinery shutdown,Wartet auf Abschaltung,Waiting for machinery shutdown,machine
+fitting.phase.unsafe_hardware_transition,Equipment fitting,Waiting for a safe hardware transition,Wartet auf sicheren Hardwarewechsel,Waiting for a safe hardware transition,machine
+fitting.phase.equipment_or_space_unavailable,Equipment fitting,Waiting for equipment or receiving space,Wartet auf Ausrüstung oder Lagerplatz,Waiting for equipment or receiving space,machine
+fitting.phase.cancelled,Equipment fitting,Returning equipment after cancellation,Rückgabe der Ausrüstung nach Abbruch,Returning equipment after cancellation,machine
+system.status.reason.equipment_removed,Equipment fitting,Equipment removed or being refitted,Ausrüstung ausgebaut oder in Umrüstung,Equipment removed or being refitted,machine
+semantic_action.fitting.request.label,Equipment fitting,Request equipment,Ausrüstung anfordern,Request equipment,machine
+semantic_action.fitting.request.accessibility,Equipment fitting,Request equipment,Ausrüstung anfordern,Request equipment,machine
+semantic_action.fitting.dispatch.label,Equipment fitting,Assign refit team,Umrüstteam zuweisen,Assign refit team,machine
+semantic_action.fitting.dispatch.accessibility,Equipment fitting,Assign refit team,Umrüstteam zuweisen,Assign refit team,machine
+semantic_action.fitting.cancel.label,Equipment fitting,Cancel refit,Umrüstung abbrechen,Cancel refit,machine
+semantic_action.fitting.cancel.accessibility,Equipment fitting,Cancel refit,Umrüstung abbrechen,Cancel refit,machine
+workshop.fitting.title,Equipment fitting Workshop,Equipment fitting,Ausrüstung und Einbau,Equipment fitting,machine
+workshop.fitting.hint,Equipment fitting Workshop,"Slots keep their existing System, Console, mount and energy reserve. Initial assemblies are real authored items; saved plans grant no equipment.","Einbauplätze behalten System, Konsole, Lafette und Energiereserve. Anfangsbaugruppen sind reale definierte Gegenstände; Pläne gewähren keine Ausrüstung.","Slots keep their existing System, Console, mount and energy reserve. Initial assemblies are real authored items; saved plans grant no equipment.",machine
+workshop.fitting.none,Equipment fitting Workshop,New record,Neuer Eintrag,New record,machine
+workshop.fitting.template,Equipment fitting Workshop,Entity template,Entitätsvorlage,Entity template,machine
+workshop.fitting.materialise,Equipment fitting Workshop,Materialise inherited fitting explicitly,Geerbte Ausrüstung ausdrücklich übernehmen,Materialise inherited fitting explicitly,machine
+workshop.fitting.refused,Equipment fitting Workshop,Fitting edit refused: {reason},Ausrüstungsänderung abgelehnt: {reason},Fitting edit refused: {reason},machine
+workshop.fitting.slots,Equipment fitting Workshop,Fixed equipment slots,Feste Einbauplätze,Fixed equipment slots,machine
+workshop.fitting.select-slot,Equipment fitting Workshop,Select slot,Einbauplatz auswählen,Select slot,machine
+workshop.fitting.id,Equipment fitting Workshop,Stable ID,Stabile Kennung,Stable ID,machine
+workshop.fitting.system,Equipment fitting Workshop,Existing System,Vorhandenes System,Existing System,machine
+workshop.fitting.family,Equipment fitting Workshop,Supported adapter,Unterstützter Adapter,Supported adapter,machine
+workshop.fitting.interface,Equipment fitting Workshop,Compatibility interface,Kompatibilitätsschnittstelle,Compatibility interface,machine
+workshop.fitting.size,Equipment fitting Workshop,Interface size,Schnittstellengröße,Interface size,machine
+workshop.fitting.default,Equipment fitting Workshop,Default equipment ID,Kennung der Standardausrüstung,Default equipment ID,machine
+workshop.fitting.operation,Equipment fitting Workshop,Replaceable Operation component,Austauschbare Betriebskomponente,Replaceable Operation component,machine
+workshop.fitting.save-slot,Equipment fitting Workshop,Save slot and its default assembly,Einbauplatz und Standardbaugruppe speichern,Save slot and its default assembly,machine
+workshop.fitting.remove-slot,Equipment fitting Workshop,Remove slot and its installed initial assembly,Einbauplatz und anfänglich eingebaute Baugruppe entfernen,Remove slot and its installed initial assembly,machine
+workshop.fitting.definitions,Equipment fitting Workshop,Equipment library,Ausrüstungsbibliothek,Equipment library,machine
+workshop.fitting.select-definition,Equipment fitting Workshop,Select equipment definition,Ausrüstungsdefinition auswählen,Select equipment definition,machine
+workshop.fitting.storage-space,Equipment fitting Workshop,Storage space per assembly,Lagerplatz pro Baugruppe,Storage space per assembly,machine
+workshop.fitting.work-class,Equipment fitting Workshop,Work location requirement,Anforderung an den Arbeitsort,Work location requirement,machine
+workshop.fitting.work-secs,Equipment fitting Workshop,Work seconds per stage,Arbeitssekunden je Stufe,Work seconds per stage,machine
+workshop.fitting.manual,Equipment fitting Workshop,Manual work fraction,Manueller Arbeitsanteil,Manual work fraction,machine
+workshop.fitting.requirements,Equipment fitting Workshop,Actual fitting parts,Tatsächliche Einbauteile,Actual fitting parts,machine
+workshop.fitting.resource,Equipment fitting Workshop,Resource,Ressource,Resource,machine
+workshop.fitting.service,Equipment fitting Workshop,Existing resource service,Vorhandener Ressourcendienst,Existing resource service,machine
+workshop.fitting.amount,Equipment fitting Workshop,Units,Einheiten,Units,machine
+workshop.fitting.remove,Equipment fitting Workshop,Remove row,Zeile entfernen,Remove row,machine
+workshop.fitting.add-requirement,Equipment fitting Workshop,Add part requirement,Teilebedarf hinzufügen,Add part requirement,machine
+workshop.fitting.hardware,Equipment fitting Workshop,Supported capability parameters,Unterstützte Leistungsparameter,Supported capability parameters,machine
+workshop.fitting.save-definition,Equipment fitting Workshop,Save equipment definition,Ausrüstungsdefinition speichern,Save equipment definition,machine
+workshop.fitting.remove-definition,Equipment fitting Workshop,Remove equipment definition,Ausrüstungsdefinition entfernen,Remove equipment definition,machine
+workshop.fitting.lockers,Equipment fitting Workshop,Equipment lockers,Ausrüstungslager,Equipment lockers,machine
+workshop.fitting.select-locker,Equipment fitting Workshop,Select locker,Lager auswählen,Select locker,machine
+workshop.fitting.room,Equipment fitting Workshop,Compartment,Abteil,Compartment,machine
+workshop.fitting.space,Equipment fitting Workshop,Allocated locker space,Zugewiesener Lagerplatz,Allocated locker space,machine
+workshop.fitting.save-locker,Equipment fitting Workshop,Save locker,Lager speichern,Save locker,machine
+workshop.fitting.remove-locker,Equipment fitting Workshop,Remove locker,Lager entfernen,Remove locker,machine
+workshop.fitting.assemblies,Equipment fitting Workshop,Initial physical assemblies,Anfängliche physische Baugruppen,Initial physical assemblies,machine
+workshop.fitting.select-assembly,Equipment fitting Workshop,Select initial assembly,Anfängliche Baugruppe auswählen,Select initial assembly,machine
+workshop.fitting.installed-hint,Equipment fitting Workshop,Installed initial assemblies follow their slot default. Stored assemblies carry their own condition; initial in-progress work is unsupported.,Anfänglich eingebaute Baugruppen folgen dem Einbauplatzstandard. Gelagerte Baugruppen tragen ihren eigenen Zustand; anfängliche laufende Arbeiten werden nicht unterstützt.,Installed initial assemblies follow their slot default. Stored assemblies carry their own condition; initial in-progress work is unsupported.,machine
+workshop.fitting.definition,Equipment fitting Workshop,Equipment definition,Ausrüstungsdefinition,Equipment definition,machine
+workshop.fitting.locker,Equipment fitting Workshop,Receiving locker,Ziellager,Receiving locker,machine
+workshop.fitting.condition,Equipment fitting Workshop,Stored condition,Gelagerter Zustand,Stored condition,machine
+workshop.fitting.dose,Equipment fitting Workshop,Residual fault dose,Verbleibende Fehlerdosis,Residual fault dose,machine
+workshop.fitting.source,Equipment fitting Workshop,Last damage source (required for damage),Letzte Schadensquelle (bei Schäden erforderlich),Last damage source (required for damage),machine
+workshop.fitting.patch-factor,Equipment fitting Workshop,Patched effectiveness,Wirksamkeit der Behelfsreparatur,Patched effectiveness,machine
+workshop.fitting.save-assembly,Equipment fitting Workshop,Save stored initial assembly,Gelagerte Anfangsbaugruppe speichern,Save stored initial assembly,machine
+workshop.fitting.remove-assembly,Equipment fitting Workshop,Remove stored initial assembly,Gelagerte Anfangsbaugruppe entfernen,Remove stored initial assembly,machine
+workshop.fitting.clear,Equipment fitting Workshop,Remove all fitting declarations and initial assemblies,Alle Ausrüstungsdefinitionen und Anfangsbaugruppen entfernen,Remove all fitting declarations and initial assemblies,machine
+workshop.fitting.beam_range,Equipment fitting Workshop,Beam range,Strahlreichweite,Beam range,machine
+workshop.fitting.auto_arc_deg,Equipment fitting Workshop,Automatic aiming arc (degrees),Automatischer Zielbogen (Grad),Automatic aiming arc (degrees),machine
+workshop.fitting.beam_damage_per_sec,Equipment fitting Workshop,Damage per second,Schaden pro Sekunde,Damage per second,machine
+workshop.fitting.beam_duration_secs,Equipment fitting Workshop,Beam duration (seconds),Strahldauer (Sekunden),Beam duration (seconds),machine
+workshop.fitting.cooldown_secs,Equipment fitting Workshop,Cooldown (seconds),Abklingzeit (Sekunden),Cooldown (seconds),machine
+workshop.fitting.cycle_jitter,Equipment fitting Workshop,Cycle variation,Zyklusabweichung,Cycle variation,machine
+workshop.fitting.shield_pierce,Equipment fitting Workshop,Shield penetration fraction,Schilddurchdringungsanteil,Shield penetration fraction,machine
+workshop.fitting.continuous_cost_per_sec,Equipment fitting Workshop,Energy per second,Energie pro Sekunde,Energy per second,machine
+workshop.fitting.damage_type,Equipment fitting Workshop,Damage type,Schadensart,Damage type,machine
+workshop.fitting.penetration,Equipment fitting Workshop,Structural penetration,Strukturdurchdringung,Structural penetration,machine
+workshop.fitting.sustainable_output_per_sec,Equipment fitting Workshop,Sustained reactor output,Reaktor-Dauerleistung,Sustained reactor output,machine
+workshop.fitting.max_output_per_sec,Equipment fitting Workshop,Peak reactor output,Reaktor-Spitzenleistung,Peak reactor output,machine
+workshop.fitting.ramp_per_sec,Equipment fitting Workshop,Output change per second,Leistungsänderung pro Sekunde,Output change per second,machine
+workshop.fitting.charge_heat_per_unit,Equipment fitting Workshop,Heat per energy charged,Wärme pro geladener Energie,Heat per energy charged,machine
+workshop.fitting.discharge_heat_per_unit,Equipment fitting Workshop,Heat per energy spent,Wärme pro verbrauchter Energie,Heat per energy spent,machine
+fitting.plan.title,Equipment fitting plans and recovery,Personal fitting plans,Persönliche Ausrüstungspläne,Personal fitting plans,machine
+fitting.plan.scope,Equipment fitting plans and recovery,Plan scope,Planumfang,Plan scope,machine
+fitting.plan.name,Equipment fitting plans and recovery,Favourite name,Favoritenname,Favourite name,machine
+fitting.plan.save,Equipment fitting plans and recovery,Save favourite,Favorit speichern,Save favourite,machine
+fitting.plan.load,Equipment fitting plans and recovery,Load favourite,Favorit laden,Load favourite,machine
+fitting.plan.favourites,Equipment fitting plans and recovery,Saved favourites,Gespeicherte Favoriten,Saved favourites,machine
+fitting.plan.transfer,Equipment fitting plans and recovery,Share or import plan data,Plandaten teilen oder importieren,Share or import plan data,machine
+fitting.plan.export,Equipment fitting plans and recovery,Export plan data,Plandaten exportieren,Export plan data,machine
+fitting.plan.import,Equipment fitting plans and recovery,Import plan data,Plandaten importieren,Import plan data,machine
+fitting.plan.queue,Equipment fitting plans and recovery,Request my home Station choices,Auswahl meiner Heimatstation anfordern,Request my home Station choices,machine
+fitting.plan.equipment,Equipment fitting plans and recovery,Planned equipment,Geplante Ausrüstung,Planned equipment,machine
+fitting.plan.comparison,Equipment fitting plans and recovery,Installed: {installed}. Observed spares: {available}.,Installiert: {installed}. Bekannte Ersatzteile: {available}.,Installed: {installed}. Observed spares: {available}.,machine
+fitting.plan.unobserved,Equipment fitting plans and recovery,Not observed,Nicht bekannt,Not observed,machine
+fitting.plan.hint,Equipment fitting plans and recovery,Plans contain choices only. Whole-ship imports preserve explicit Station choices. Requests apply only to your claimed home Station and still require real equipment and ordinary Repair work after launch.,Pläne enthalten nur eine Auswahl. Schiffsweite Importe bewahren ausdrückliche Stationswahlen. Anforderungen gelten nur für Ihre besetzte Heimatstation und benötigen nach dem Start echte Ausrüstung und reguläre Reparaturarbeit.,Plans contain choices only. Whole-ship imports preserve explicit Station choices. Requests apply only to your claimed home Station and still require real equipment and ordinary Repair work after launch.,machine
+fitting.plan.whole-ship,Equipment fitting plans and recovery,Whole ship defaults,Schiffsweite Standardauswahl,Whole ship defaults,machine
+fitting.plan.saved,Equipment fitting plans and recovery,Favourite saved on this device.,Favorit auf diesem Gerät gespeichert.,Favourite saved on this device.,machine
+fitting.plan.loaded,Equipment fitting plans and recovery,Plan loaded for comparison; no equipment moved.,Plan zum Vergleich geladen; keine Ausrüstung bewegt.,Plan loaded for comparison; no equipment moved.,machine
+fitting.plan.exported,Equipment fitting plans and recovery,Copy the plan data to share it.,Kopieren Sie die Plandaten zum Teilen.,Copy the plan data to share it.,machine
+fitting.plan.queued,Equipment fitting plans and recovery,Submitted {count} physical fitting requests.,{count} physische Ausrüstungsanforderungen übermittelt.,Submitted {count} physical fitting requests.,machine
+fitting.plan.invalid-context,Equipment fitting plans and recovery,This hull has no verified persistent fitting identity.,Dieses Schiff hat keine bestätigte dauerhafte Ausrüstungsidentität.,This hull has no verified persistent fitting identity.,machine
+fitting.plan.unsupported-version,Equipment fitting plans and recovery,Unsupported fitting plan version.,Nicht unterstützte Ausrüstungsplanversion.,Unsupported fitting plan version.,machine
+fitting.plan.wrong-hull,Equipment fitting plans and recovery,This plan belongs to another hull or definition version.,Dieser Plan gehört zu einem anderen Schiff oder einer anderen Definitionsversion.,This plan belongs to another hull or definition version.,machine
+fitting.plan.invalid-choice,Equipment fitting plans and recovery,The plan contains unknown or incompatible choices.,Der Plan enthält unbekannte oder inkompatible Auswahlen.,The plan contains unknown or incompatible choices.,machine
+fitting.plan.storage-unavailable,Equipment fitting plans and recovery,Device storage is unavailable; use exported plan data.,Gerätespeicher ist nicht verfügbar; verwenden Sie exportierte Plandaten.,Device storage is unavailable; use exported plan data.,machine
+fitting.plan.name-required,Equipment fitting plans and recovery,Enter a favourite name.,Geben Sie einen Favoritennamen ein.,Enter a favourite name.,machine
+fitting.recovery.title,Equipment fitting plans and recovery,Recover intact equipment,Intakte Ausrüstung bergen,Recover intact equipment,machine
+fitting.recovery.selection,Equipment fitting plans and recovery,Observed equipment and receiving locker,Bekannte Ausrüstung und Ziellager,Observed equipment and receiving locker,machine
+fitting.recovery.start,Equipment fitting plans and recovery,Start equipment recovery,Ausrüstungsbergung starten,Start equipment recovery,machine
+fitting.recovery.cancel,Equipment fitting plans and recovery,Cancel equipment recovery,Ausrüstungsbergung abbrechen,Cancel equipment recovery,machine
+fitting.recovery.option,Equipment fitting plans and recovery,{source} · {slot} · {equipment} → {locker},{source} · {slot} · {equipment} → {locker},{source} · {slot} · {equipment} → {locker},machine
+fitting.recovery.blocked.major_equipment_requires_facility,Equipment fitting plans and recovery,Major equipment requires facility work.,Große Ausrüstung erfordert Arbeiten an einer Einrichtung.,Major equipment requires facility work.,machine
+fitting.recovery.phase.idle,Equipment fitting plans and recovery,Awaiting recovery order,Wartet auf Bergungsauftrag,Awaiting recovery order,machine
+fitting.recovery.phase.working,Equipment fitting plans and recovery,Recovering equipment,Ausrüstung wird geborgen,Recovering equipment,machine
+fitting.recovery.phase.completed,Equipment fitting plans and recovery,Equipment delivered,Ausrüstung geliefert,Equipment delivered,machine
+fitting.recovery.phase.cancelled,Equipment fitting plans and recovery,Recovery cancelled,Bergung abgebrochen,Recovery cancelled,machine
+fitting.recovery.phase.failed,Equipment fitting plans and recovery,Recovery could not complete,Bergung konnte nicht abgeschlossen werden,Recovery could not complete,machine
+fitting.recover,Equipment fitting plans and recovery,Recover equipment,Ausrüstung bergen,Recover equipment,machine
+fitting.recover-cancel,Equipment fitting plans and recovery,Cancel equipment recovery,Ausrüstungsbergung abbrechen,Cancel equipment recovery,machine
+semantic_action.fitting.recover.label,Equipment fitting plans and recovery,Recover equipment,Ausrüstung bergen,Recover equipment,machine
+semantic_action.fitting.recover.accessibility,Equipment fitting plans and recovery,Recover equipment,Ausrüstung bergen,Recover equipment,machine
+semantic_action.fitting.recover-cancel.label,Equipment fitting plans and recovery,Cancel equipment recovery,Ausrüstungsbergung abbrechen,Cancel equipment recovery,machine
+semantic_action.fitting.recover-cancel.accessibility,Equipment fitting plans and recovery,Cancel equipment recovery,Ausrüstungsbergung abbrechen,Cancel equipment recovery,machine
+fitting.recovery.phase.unknown_target,Equipment recovery phase,Target is no longer observed,Ziel wird nicht mehr beobachtet,Target is no longer observed,machine
+fitting.recovery.phase.source_unavailable,Equipment recovery phase,Source is unavailable,Quelle nicht verfügbar,Source is unavailable,machine
+fitting.recovery.phase.out_of_range,Equipment recovery phase,Outside equipment recovery range,Außerhalb der Ausrüstungsbergungsreichweite,Outside equipment recovery range,machine
+fitting.recovery.phase.no_room,Equipment recovery phase,Waiting for compatible locker space,Wartet auf kompatiblen Lagerplatz,Waiting for compatible locker space,machine
+fitting.recovery.phase.source_active,Equipment recovery phase,Source must be disabled,Quelle muss deaktiviert sein,Source must be disabled,machine
+fitting.recovery.phase.physical_task_claimed,Equipment recovery phase,Another physical task owns this equipment,Eine andere physische Aufgabe beansprucht diese Ausrüstung,Another physical task owns this equipment,machine
+fitting.recovery.phase.equipment_destroyed,Equipment recovery phase,Destroyed equipment cannot be recovered intact,Zerstörte Ausrüstung kann nicht intakt geborgen werden,Destroyed equipment cannot be recovered intact,machine
+fitting.recovery.phase.recovery_unavailable,Equipment recovery phase,Recovery tool is unavailable,Bergungsgerät nicht verfügbar,Recovery tool is unavailable,machine
+fitting.recovery.phase.no_power,Equipment recovery phase,Waiting for recovery energy,Wartet auf Bergungsenergie,Waiting for recovery energy,machine
+fitting.recovery.phase.safe_shutdown,Equipment recovery phase,Waiting for safe equipment shutdown,Wartet auf sichere Abschaltung,Waiting for safe equipment shutdown,machine
+fitting.recovery.phase.source_equipment_changed,Equipment recovery phase,Source equipment changed,Quellausrüstung geändert,Source equipment changed,machine
+fitting.recovery.phase.unsupported_equipment,Equipment recovery phase,Equipment cannot use this recovery adapter,Ausrüstung wird von diesem Bergungsadapter nicht unterstützt,Equipment cannot use this recovery adapter,machine
+workshop.fitting.option.beam,Equipment fitting Workshop option,Beam,Strahlwaffe,Beam,machine
+workshop.fitting.option.reactor,Equipment fitting Workshop option,Reactor,Reaktor,Reactor,machine
+workshop.fitting.option.field,Equipment fitting Workshop option,Field work,Arbeit im Feld,Field work,machine
+workshop.fitting.option.facility,Equipment fitting Workshop option,Facility work,Arbeit an einer Einrichtung,Facility work,machine
+workshop.fitting.option.healthy,Equipment fitting Workshop option,Healthy,Intakt,Healthy,machine
+workshop.fitting.option.damaged,Equipment fitting Workshop option,Damaged,Beschädigt,Damaged,machine
+workshop.fitting.option.destroyed,Equipment fitting Workshop option,Destroyed,Zerstört,Destroyed,machine
+workshop.fitting.option.patched,Equipment fitting Workshop option,Patched,Behelfsmäßig repariert,Patched,machine
+workshop.fitting.option.laser,Equipment fitting Workshop option,Laser,Laser,Laser,machine
+workshop.fitting.option.physical,Equipment fitting Workshop option,Physical,Physisch,Physical,machine

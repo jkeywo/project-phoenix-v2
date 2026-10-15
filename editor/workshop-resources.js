@@ -1,3 +1,4 @@
+import { guardFittingReferences } from './workshop-fitting.js';
 import { guardPortServices } from './workshop-ports.js';
 import { guardRecoveryReferences } from './workshop-resource-recovery.js';
 import { guardManagedStockBounds } from './workshop-stock-bindings.js';
@@ -138,9 +139,10 @@ export function prepareResourceOperation(draft, dependencies, operation) {
   // Pure preparation never lands an invalid draft. The authoritative runtime
   // validation below checks endpoint references, System admission and content.
   parse(after);
-  if (inspection.resolved.value.production || inspection.resolved.value.recovery || inspection.resolved.value.recoverable || inspection.resolved.value.port_service) {
+  if (inspection.resolved.value.fitting || inspection.resolved.value.production || inspection.resolved.value.recovery || inspection.resolved.value.recoverable || inspection.resolved.value.port_service) {
     const candidate = { paths: () => draft.paths(), isBinary: path => draft.isBinary(path), read: path => path === operation.path ? after : draft.read(path) };
     const proposed = inspectResources(candidate, dependencies, operation.path).resolved.value;
+    guardFittingReferences(inspection.resolved.value, proposed);
     guardProductionReferences(inspection.resolved.value, proposed);
     guardRecoveryReferences(inspection.resolved.value, proposed);
     guardPortServices(inspection.resolved.value, proposed);

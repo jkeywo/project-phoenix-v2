@@ -224,7 +224,7 @@ pub fn write_scenario_detail_floor(
 
 /// Resolve Console placement in authored order every tick, then project its
 /// controller to each owned System. Sessions supply local crew availability;
-/// lockstep ships use the shared frozen roster, preserving existing determinism.
+/// lockstep ships use admitted ratings, seeded from the shared frozen roster.
 /// Console placement is derived and never resets System intent or AI memory.
 pub fn resolve_human_seeking_hosts(
     mut ships: Query<(
@@ -257,8 +257,8 @@ pub fn resolve_human_seeking_hosts(
         // follows live `Sessions` — for both ordinary solo play and an
         // independently restored multi-ship save — while retained remote ships
         // stay on their empty frozen crew. In active lockstep, EVERY ship uses
-        // the frozen roster so peers cannot derive different control sources
-        // from their machine-local session views (issue #1116).
+        // admitted ratings so peers apply crew handoffs at the same due tick,
+        // never from their machine-local session views (issues #1116, #1119).
         let local_crew =
             crate::lockstep::uses_live_sessions(roster, fleet_session.is_some(), slot.0);
         let frozen_crew = roster.crew_of(slot.0);
@@ -272,8 +272,18 @@ pub fn resolve_human_seeking_hosts(
                 sessions.0.holder_for_station(candidate).is_some_and(|tok| {
                     !sessions.0.is_afk(tok) && sessions.0.is_console_eligible(tok, console, rating)
                 })
+            } else if fleet_session.is_some() {
+                // Backfill is the replicated absence/AFK/release state. The
+                // frozen roster seeds boot only: consulting it after a due
+                // AssignStationRating would undo a real mid-mission handoff.
+                ratings
+                    .and_then(|ratings| ratings.0.get(candidate))
+                    .map_or_else(
+                        || frozen_crew.iter().any(|(id, _)| id == candidate),
+                        |rating| rating != crate::ship::rating::BACKFILL_RATING,
+                    )
             } else {
-                // Fleet placement uses the frozen roster on every peer.
+                // Independently resumed remote ships have no current crew.
                 frozen_crew.iter().any(|(id, _)| id == candidate)
             }
         };

@@ -139,3 +139,139 @@ fn a_command_for_another_target_is_ignored() {
         "the applier reads only its own ownerless system id"
     );
 }
+
+#[test]
+fn admitted_fleet_crew_handoffs_survive_console_resolution_on_every_peer() {
+    use crate::command_admission::HostSlot;
+    use crate::lockstep::{FleetRoster, FleetShip, FleetSlotOf};
+    use crate::ship::components::{HumanSeekingHosts, ScenarioDetailFloor};
+    use crate::ship_plugin::ConsoleHosts;
+
+    let station = StationId("captain".into());
+    let system = SystemId("red-alert".into());
+    let mut peers = [HostSlot(1), HostSlot(2)].map(|local_slot| {
+        let config = parse_and_validate(CONFIG_TOML, KINDS).unwrap();
+        let (sources, ratings) = crate::ship::rating::seed_boot_ratings(&config, |_| {
+            crate::ship::rating::BACKFILL_RATING.into()
+        });
+        let mut app = App::new();
+        app.init_resource::<Time<Fixed>>();
+        app.insert_resource(crate::lobby::Sessions(
+            crate::lobby::session::SessionManager::new(),
+        ));
+        let mut world_config = crate::world::config::WorldConfig::default();
+        world_config.global.seed = Some(7);
+        app.insert_resource(world_config);
+        let roster = FleetRoster::new(
+            [HostSlot(1), HostSlot(2)]
+                .into_iter()
+                .map(FleetShip::new)
+                .collect(),
+            local_slot,
+        );
+        assert!(crate::lockstep::join_fleet(app.world_mut(), roster, 2));
+        // The local crew views deliberately disagree. Only the admitted
+        // transition below may affect this ship's Console on either peer.
+        if local_slot == HostSlot(1) {
+            let mut sessions = app.world_mut().resource_mut::<crate::lobby::Sessions>();
+            sessions
+                .0
+                .register("local-officer".into(), "Officer".into())
+                .unwrap();
+            sessions
+                .0
+                .set_station("local-officer", Some(station.clone()));
+        }
+        let ship = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                FleetSlotOf(HostSlot(1)),
+                ShipConfigComponent(config),
+                ShipSystemControlSources(sources),
+                ActiveStationRatings(ratings),
+                AdmittedCommands::default(),
+                ScenarioDetailFloor::default(),
+                HumanSeekingHosts::default(),
+                ConsoleHosts::default(),
+            ))
+            .id();
+        (app, ship)
+    });
+    for (rating, expected_source, expected_host) in [
+        (None, ControlSource::Ai, None),
+        (Some("Manual"), ControlSource::Human, Some(station.clone())),
+        (
+            Some(crate::ship::rating::BACKFILL_RATING),
+            ControlSource::Ai,
+            None,
+        ),
+        (Some("Manual"), ControlSource::Human, Some(station.clone())),
+    ] {
+        for (app, ship) in &mut peers {
+            if let Some(rating) = rating {
+                app.world_mut()
+                    .get_mut::<AdmittedCommands>(*ship)
+                    .unwrap()
+                    .0 = vec![assign("captain", rating)];
+                app.world_mut()
+                    .run_system_cached(apply_assigned_station_rating)
+                    .unwrap();
+            }
+            app.world_mut()
+                .run_system_cached(crate::ship::coordination_systems::resolve_human_seeking_hosts)
+                .unwrap();
+            assert_eq!(source_of(app, *ship, &system.0), expected_source);
+            let assignments = &app.world().get::<ConsoleHosts>(*ship).unwrap().0;
+            assert_eq!(assignments.len(), 1);
+            assert_eq!(assignments[0].host, expected_host);
+            assert_eq!(
+                app.world()
+                    .get::<HumanSeekingHosts>(*ship)
+                    .unwrap()
+                    .host_for(&system),
+                expected_host.as_ref(),
+            );
+            assert!(app
+                .world()
+                .resource::<FleetRoster>()
+                .crew_of(HostSlot(1))
+                .is_empty());
+        }
+        assert_eq!(
+            peers[0]
+                .0
+                .world()
+                .get::<ConsoleHosts>(peers[0].1)
+                .unwrap()
+                .0,
+            peers[1]
+                .0
+                .world()
+                .get::<ConsoleHosts>(peers[1].1)
+                .unwrap()
+                .0,
+        );
+    }
+    // A standalone resume intentionally releases the old remote crew; retained
+    // ratings alone must not re-seat them once the active mesh is gone.
+    let (remote_app, remote_ship) = &mut peers[1];
+    remote_app
+        .world_mut()
+        .remove_resource::<crate::lockstep::FleetLockstep>();
+    remote_app
+        .world_mut()
+        .run_system_cached(crate::ship::coordination_systems::resolve_human_seeking_hosts)
+        .unwrap();
+    assert_eq!(
+        source_of(remote_app, *remote_ship, &system.0),
+        ControlSource::Ai
+    );
+    assert!(remote_app
+        .world()
+        .get::<ConsoleHosts>(*remote_ship)
+        .unwrap()
+        .0[0]
+        .host
+        .is_none());
+}

@@ -6,7 +6,6 @@ use phoenix_model::comms_request::*;
 fn request_fixture() -> (App, Entity, Entity, String) {
     let (mut app, source, receiver) = fixture(10.0);
     crate::ai::host::register_ai_host_env(&mut app);
-    app.init_resource::<crate::lobby::Sessions>();
     app.world_mut()
         .get_mut::<AdmittedCommands>(source)
         .unwrap()

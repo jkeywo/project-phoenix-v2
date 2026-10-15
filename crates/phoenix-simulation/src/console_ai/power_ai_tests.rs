@@ -172,7 +172,10 @@ fn allocation_mode_is_optional_and_uses_the_same_admitted_power_owner() {
             if initial == expected {
                 vec![]
             } else {
-                vec![SystemControlPayload::SetEnergyMode { mode: expected }]
+                vec![SystemControlPayload::SetEnergyMode {
+                    mode: expected,
+                    cooling_usage: phoenix_model::energy::CoolingUsage::Low,
+                }]
             }
         );
         app.update();

@@ -358,7 +358,10 @@ fn ai_power_allocation(
                 emit_ai_command(
                     uuid,
                     system.clone(),
-                    Control::SetEnergyMode { mode },
+                    Control::SetEnergyMode {
+                        mode,
+                        cooling_usage: energy.cooling_usage,
+                    },
                     sources,
                     &sessions,
                     Some(config),

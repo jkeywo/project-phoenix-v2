@@ -58,6 +58,16 @@ fn one_location_keeps_custody_distinct_from_job_progress_and_refuses_self_parent
     assert!(
         serde_json::from_str::<CraftLocation>(r#"{"kind":"launching","progress":0.5}"#).is_err()
     );
+    let deployed = CraftLocation::Deployed {};
+    assert_eq!(
+        serde_json::to_string(&deployed).unwrap(),
+        r#"{"kind":"deployed"}"#
+    );
+    assert_eq!(
+        serde_json::from_str::<CraftLocation>(r#"{"kind":"deployed"}"#).unwrap(),
+        deployed
+    );
+    assert_eq!(CraftLocation::default(), deployed);
     assert!(
         serde_json::from_str::<CraftLocation>(r#"{"kind":"deployed","parent_uuid":"hidden"}"#)
             .is_err()

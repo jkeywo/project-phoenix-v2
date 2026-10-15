@@ -23,6 +23,13 @@ schedule registration, version advances and dependency-order integration. Keep
 Cargo builds and performance captures sequential. Run the required full gates on
 the integrated result before a push, not per worker commit.
 
+For PASM repository observation during parallel work, use a clean committed
+validation worktree with explicit matching spec and workspace roots, and record
+its exact revision. The current pinned tool scans nested worktrees, so observing
+the integration checkout can include unrelated worker packages or race a worker
+rename. This changes the observation root, not the model or findings. The final
+gate must still cover the integrated revision; do not substitute an older pin.
+
 Keep per-increment commits, with slice/fix commits where useful. Later validation
 can run on pinned worktrees while independent work proceeds. No initial commit
 claims a verified exit. Do not push or close PRD #1562 merely because a lane ends.

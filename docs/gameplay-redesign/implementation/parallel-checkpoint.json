@@ -224,5 +224,25 @@
     "planner_prior_native": "Two actual repair/personnel cases passed; imported HTN test exposed an insufficient6s continuation window for authored5s return travel plus2s work. Reviewed572e7934 extends comparison to1200steps, retaining real stock/payment/credit assertions. Fresh native result pending.",
     "running": "Actual5target headless batch at0c79e1a2: activity_foundation_continuation, pdc_gameplay_continuation, protection_continuation, comms_relay_continuation, physical_probe_continuation. --no-fail-fast collects all target results. .phoenix/resumed-five-host-integration.log; no result claimed while compiling.",
     "open": "Joint planned Comms execution donor, remaining16-24 runtime scope, authored Patrol/War/Sandbox and generation/Director, integrated owner/native checks, physical-device/multiplayer/workload/performance/balance evidence and final pre-push gates. No full increment exit or push."
+  },
+  "resumed_host_evidence": {
+    "source": "0c79e1a2 runtime plus typed physical assertion fix da0d4a2c; protocol25/snapshot67/rules0.47",
+    "command": "cargo test -p project-phoenix --features headless --no-fail-fast --test activity_foundation_continuation --test pdc_gameplay_continuation --test protection_continuation --test comms_relay_continuation --test physical_probe_continuation -- --nocapture",
+    "log": ".phoenix/resumed-five-host-integration-typed-retry.log",
+    "result": "6 passed,2 failed across5 targets. Not an all-green batch.",
+    "activities": "3 passed16.34s: actual Repair/Logistics credit and malformed no-write; officer paid-work/custody; imported partial-order HTN with1200 complete capture/digest comparisons and actual finite work/return/delivery outcomes.",
+    "pdc": "2 passed13.62s: ordinary finite interception with launcher-loss JSON360 continuation; concurrent two-NPC saturation with actual payload impact, flight/source counts and conservation.",
+    "probe": "1 passed12.48s: joined real paid launch/recovery, same physical actor/custody/history and JSON360 continuation.",
+    "relay": "Failed before sending because the authored ordinary Cruiser did not opt into hailable. Reviewed test-only public recipient profile59e879df plus new planning fixture8d3c243f retain normal permitted contact acquisition. Fresh retry pending.",
+    "protection": "Failed afterJSON360 because the optional protection fit received effective flow0 at low priority and exhausted its actual reserve. Reviewed204d1ea2 prioritizes that finite intake, with unchanged output/cost/capacity and stronger every-step paid witnesses on both hosts. Fresh retry pending.",
+    "compile_correction": "First five-target build failed before executing tests because two root Activity assertions still addressed retired .job. da0d4a2c uses the closed physical accessor; the same batch was rerun, not described as initially passing."
+  },
+  "resumed_planned_comms_security_join": {
+    "source": "ed685e3b; protocol26/snapshot68/rules0.48",
+    "runtime": "74b72898 actual normal planned Comms initiation;506a096c actual emission/heard receipt HTN bindings;8ee4f17e full-host tracer;5b6e6c6b real local Security routes/authoring; compatibility66917660.",
+    "client": "461 passed6files2.87s; .phoenix/resumed-comms-security-integrated-client.log.",
+    "compile": "Initial renderer-free tests exposed scoped test imports, old FlagStore calls, exhaustive local Security field coverage and a closed activity match; e9709a8c corrects them. ed685e3b pins an otherwise ambiguous generic routine-priority fixture. Final check running in .phoenix/resumed-comms-security-integrated-check-final.log.",
+    "pasm_pinned": "At513967e4: validate1142entities/615informational findings StatusOK; scan3883files/18packages ValidationOK; traceability246rows ValidationOK. .phoenix/resumed-pinned-integrated-{pasm,scan,traceability}.log. Explicit spec/workspace roots target the clean pinned validation worktree; the first live-root attempt encountered a disappearing worker file and was not a passing gate.",
+    "remaining": "New runtime/native evidence, later16-24 scope, devices/multiplayer/workload/balance/performance and final integrated gates remain open. No full increment exit or push."
   }
 }

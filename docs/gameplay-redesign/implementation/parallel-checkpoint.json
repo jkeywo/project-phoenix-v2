@@ -276,5 +276,14 @@
     "running": "Actual13target headless --no-fail-fast at32aa19c9: .phoenix/resumed-thirteen-host-roster-identity-native.log. No result claimed while compiling. Clean pinned32aa PASM validation pending.",
     "owner_checks": "New Content destination selection first failed to compile an older exhaustive ActivityRequest fixture after Communication was added.2c5f2cf4 extends the exact actor reassignment to that closed variant; fresh owner retry pending. Latest Simulation owner/digest/Security/snapshot fixture corrections and Presentation privacy still need actual fresh execution.",
     "remaining": "Actual13 outcomes/fixes; sector/formation execution; carried personnel; Comms media/decode and remaining electronic operations; optional HTN real discovery/acceptance/work; full authored continuing modes and generation/pacing; crew-size/device/multiplayer/workload/balance/performance and final integrated gates. No full increment exit, closure or push."
+  },
+  "resumed_thirteen_host_result": {
+    "source": "Runtime/test32aa19c9; corrected clearance fixture94cdc166. Later63ea0b17 provenance hardening is not included in these binary results.",
+    "command": "cargo test -p project-phoenix --features headless --no-fail-fast,13 explicit targets,--nocapture;7m15s build. .phoenix/resumed-thirteen-host-roster-identity-native.log",
+    "initial": "20 passed,1 failed across13 targets; only hazard-clearance failed because Flags.set is an internal Rust method, not a registered Rhai method. Not an initially green batch.",
+    "retry": "After94cdc166 uses the actual registered index assignment, the same freshly linked hazard executable passed1/1 in15.90s; .phoenix/resumed-hazard-registered-api-native-retry.log. Original failures preserved.",
+    "passing": "Activity3; commitmentaccept/refuse2; physicalfacilitysupply2; relay1; hazard1; identity1; local/hardenedjump2; Medical2; PDC2; probe1; plannedComms2; Protection1; Security1. All13 selected targets have positive results after the focused fixture retry; this is not a green full repository suite.",
+    "pasm": "Clean pinned32aa19c9: validate1152entities/621informationalfindings/StatusOK; scan3940files/18packages/8292dependencies/ValidationOK; traceability246rows/ValidationOK. Logs resumed-roster-pinned-{pasm,scan,traceability}.log. Temporary clean validation worktree removed after exact path/clean-state checks.",
+    "remaining": "Fresh owner terminal-personnel/identity/sector and existing corrected snapshot/digest/Security/Presentation tests; ongoing16-24 implementation and physicaldevice/multiplayer/workload/balance/performance acceptance; full integrated gates. No full increment exit/PRD closure/push."
   }
 }

@@ -33,6 +33,22 @@ fn fixture() -> (App, Entity) {
 }
 fn fixture_with_config(authored: crate::entities::config::EntityConfig) -> (App, Entity) {
     let mut app = App::new();
+    // Full capture queries also name legacy optional components. The real host
+    // registers them through its plugins; this bare owner App must do so too.
+    app.world_mut()
+        .register_component::<crate::entities::spawner::EntitySystemHull>();
+    app.world_mut()
+        .register_component::<crate::entities::spawner::EntityShipArcHull>();
+    app.world_mut()
+        .register_component::<crate::console::repair::server::RepairRequestQueue>();
+    app.world_mut()
+        .register_component::<crate::ship_plugin::RepairHumanAlerted>();
+    app.world_mut()
+        .register_component::<crate::ai::server::ObjectiveCursors>();
+    app.world_mut()
+        .register_component::<crate::console::weapons::blaster::BlasterSystemResource>();
+    app.world_mut()
+        .register_component::<crate::server_app::AsteroidUuid>();
     app.insert_resource(crate::sim_tick::SimTick(1));
     app.insert_resource(Time::<Fixed>::from_duration(
         std::time::Duration::from_secs(1),

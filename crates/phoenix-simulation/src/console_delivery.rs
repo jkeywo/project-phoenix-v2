@@ -12,6 +12,10 @@ use crate::entities::spawner::EntityUuid;
 use crate::lobby::{OutboundMessage, Sessions, Target, WorldResource};
 use crate::server_app::LocalShip;
 
+#[path = "console_delivery_references.rs"]
+mod references;
+use references::ReferenceProjection;
+
 /// Authored permission to publish a fixed chart landmark, independent of scans.
 pub const CHARTED_TAG: &str = "charted";
 
@@ -23,7 +27,11 @@ pub struct ConsoleDeliveryProjection<'w, 's> {
         's,
         (
             Option<&'static EntityUuid>,
-            Has<crate::science::broad::BroadProfile>,
+            Option<&'static crate::science::broad::BroadProfile>,
+            Option<&'static crate::ship::components::ShipConfigComponent>,
+            Option<&'static crate::server_app::ShipSystemBlackboards>,
+            Option<&'static crate::ship::components::ConsoleHosts>,
+            Option<&'static crate::science::broad::BroadTracks>,
         ),
         With<LocalShip>,
     >,
@@ -34,8 +42,8 @@ pub struct ConsoleDeliveryProjection<'w, 's> {
 impl ConsoleDeliveryProjection<'_, '_> {
     /// Capture once per flush. No resource, cache, observation or event is written.
     pub fn capture(&self) -> CapturedConsoleDelivery {
-        let local = self.local.iter().find(|(_, broad)| *broad);
-        let own = local.and_then(|(uuid, _)| uuid.map(|uuid| uuid.0.clone()));
+        let local = self.local.iter().find(|(_, broad, ..)| broad.is_some());
+        let own = local.and_then(|(uuid, ..)| uuid.map(|uuid| uuid.0.clone()));
         let concealed = own
             .as_ref()
             .and_then(|own| self.runtime.as_ref()?.contact_overrides.get(own))
@@ -43,7 +51,21 @@ impl ConsoleDeliveryProjection<'_, '_> {
             .flat_map(|rows| rows.iter())
             .filter(|(_, mode)| **mode == crate::gm::operations::contact::ContactMode::Conceal)
             .map(|(uuid, _)| uuid.clone())
-            .collect();
+            .collect::<BTreeSet<_>>();
+        let references = local.map_or_else(
+            ReferenceProjection::default,
+            |(_, broad, config, boards, hosts, tracks)| {
+                ReferenceProjection::capture(
+                    config,
+                    boards,
+                    hosts,
+                    broad,
+                    tracks,
+                    self.sessions.as_deref(),
+                    &concealed,
+                )
+            },
+        );
         CapturedConsoleDelivery {
             restricted: local.is_some(),
             own,
@@ -56,6 +78,7 @@ impl ConsoleDeliveryProjection<'_, '_> {
                 .map(|player| player.token.clone())
                 .collect(),
             concealed,
+            references,
             world: self
                 .world
                 .as_ref()
@@ -72,6 +95,7 @@ pub struct CapturedConsoleDelivery {
     recipients: BTreeSet<String>,
     concealed: BTreeSet<String>,
     world: WorldData,
+    references: ReferenceProjection,
 }
 
 impl CapturedConsoleDelivery {
@@ -98,7 +122,7 @@ impl CapturedConsoleDelivery {
             });
         }
         for token in self.recipients.iter().filter(|token| include(token)) {
-            if let Some(msg) = self.phone_message(&outgoing.msg) {
+            if let Some(msg) = self.phone_message(&outgoing.msg, token) {
                 projected.push(OutboundMessage {
                     target: Target::Token(token.clone()),
                     msg,
@@ -148,7 +172,7 @@ impl CapturedConsoleDelivery {
         self.is_own(uuid) || self.charted(uuid)
     }
 
-    fn phone_message(&self, raw: &ServerMessage) -> Option<ServerMessage> {
+    fn phone_message(&self, raw: &ServerMessage, token: &str) -> Option<ServerMessage> {
         use ServerMessage::*;
         let mut message = raw.clone();
         match &mut message {
@@ -198,19 +222,17 @@ impl CapturedConsoleDelivery {
                 target_name,
                 ..
             } => {
-                if target_uuid
-                    .as_deref()
-                    .is_none_or(|uuid| !self.public_target(uuid))
-                {
-                    *target_uuid = None;
-                    *target_name = None;
-                }
+                let target = self.references.tactical(token, target_uuid.as_deref());
+                *target_uuid = target.as_ref().map(|target| target.id.clone());
+                *target_name = target.and_then(|target| target.name);
             }
             TargetLock { uuid, .. }
             | PhaserFired {
                 target_uuid: uuid, ..
             } => {
-                if !self.public_target(uuid) {
+                if let Some(target) = self.references.tactical(token, Some(uuid)) {
+                    *uuid = target.id;
+                } else if !self.public_target(uuid) {
                     return None;
                 }
             }
@@ -224,7 +246,12 @@ impl CapturedConsoleDelivery {
                 target_uuid,
                 ..
             } => {
-                if !self.is_own(source_uuid) || !self.public_target(target_uuid) {
+                if !self.is_own(source_uuid) {
+                    return None;
+                }
+                if let Some(target) = self.references.tactical(token, Some(target_uuid)) {
+                    *target_uuid = target.id;
+                } else if !self.public_target(target_uuid) {
                     return None;
                 }
             }
@@ -247,6 +274,27 @@ impl CapturedConsoleDelivery {
             } => {
                 if !self.public_target(&uuid.to_string()) {
                     return None;
+                }
+            }
+            BlackboardUpdate {
+                console_scope,
+                updates,
+                ..
+            } => {
+                updates.retain(|(source, _)| {
+                    self.references.permits(token, source)
+                        && console_scope
+                            .as_ref()
+                            .is_none_or(|scope| scope.contains(source))
+                });
+                for (source, board) in updates.iter_mut() {
+                    self.references.board(source, board);
+                }
+                if let Some(scope) = console_scope {
+                    scope.retain(|source| self.references.permits(token, source));
+                } else {
+                    *console_scope =
+                        Some(updates.iter().map(|(source, _)| source.clone()).collect());
                 }
             }
             _ => {}
@@ -293,6 +341,7 @@ fn requires_projection(message: &ServerMessage) -> bool {
             | StationDestroyed { .. }
             | TargetLock { .. }
             | WeaponsUpdate { .. }
+            | BlackboardUpdate { .. }
             | BeamStarted { .. }
             | BeamEnded { .. }
             | PhaserFired { .. }

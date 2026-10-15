@@ -70,12 +70,42 @@ fn fixture() -> App {
             crate::gm::operations::contact::ContactMode::Conceal,
         );
     app.insert_resource(runtime);
+    let profile = crate::science::broad::BroadProfile::from_config(&config)
+        .unwrap()
+        .unwrap();
+    let tracks = crate::science::broad::BroadTracks::new(&profile);
+    let ship = config.ship_config.clone().unwrap();
+    let hosts = crate::ship::components::ConsoleHosts(
+        ship.consoles
+            .iter()
+            .map(|console| phoenix_model::console::ConsoleHostSnapshot {
+                console: console.id.clone(),
+                host: console.home_station.clone(),
+                rating: String::new(),
+            })
+            .collect(),
+    );
+    let mut boards = crate::server_app::ShipSystemBlackboards::default();
+    boards.0.insert(
+        SystemId("sensor-radar".into()),
+        SystemBlackboard::SensorRadar(Default::default()),
+    );
+    boards.0.insert(
+        SystemId("tactical-radar".into()),
+        SystemBlackboard::TacticalRadar(Default::default()),
+    );
+    boards.0.insert(
+        SystemId("helm-radar".into()),
+        SystemBlackboard::Helm(Default::default()),
+    );
     app.world_mut().spawn((
         LocalShip,
         EntityUuid("own".into()),
-        crate::science::broad::BroadProfile::from_config(&config)
-            .unwrap()
-            .unwrap(),
+        profile,
+        tracks,
+        crate::ship::components::ShipConfigComponent(ship),
+        hosts,
+        boards,
     ));
     app
 }
@@ -124,6 +154,468 @@ fn world_message(app: &App) -> ServerMessage {
     ServerMessage::WorldSetup {
         world: app.world().resource::<WorldResource>().0.clone(),
     }
+}
+
+fn local_ship(app: &mut App) -> Entity {
+    let mut query = app.world_mut().query_filtered::<Entity, With<LocalShip>>();
+    query.single(app.world()).unwrap()
+}
+
+fn observe(app: &mut App, owner: &str, tick: u64, paid: f32) -> String {
+    use crate::science::broad::{BroadMeasurement, TrackIdentity};
+    let entity = local_ship(app);
+    let owner = SystemId(owner.into());
+    let profile = app
+        .world()
+        .get::<crate::science::broad::BroadProfile>(entity)
+        .unwrap()
+        .0[&owner]
+        .profile
+        .clone();
+    let mut states = app
+        .world_mut()
+        .get_mut::<crate::science::broad::BroadTracks>(entity)
+        .unwrap();
+    let state = states.0.get_mut(&owner).unwrap();
+    let samples = [BroadMeasurement {
+        source: "hidden".into(),
+        position: [20.0, -40.0],
+        support: 1.0,
+        identity: Some(TrackIdentity {
+            name: "Recorded public identity".into(),
+            faction: None,
+        }),
+        classification: None,
+        assessment: None,
+    }];
+    state
+        .advance(
+            &profile,
+            tick,
+            0.5,
+            paid,
+            if paid > 0.0 { &samples } else { &[] },
+        )
+        .unwrap();
+    let contact = state.tracks.keys().next().unwrap().clone();
+    let public = state.projection(&profile, tick, 0.5).unwrap();
+    drop(states);
+    let mut boards = app
+        .world_mut()
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(entity)
+        .unwrap();
+    match boards.0.get_mut(&owner).unwrap() {
+        SystemBlackboard::SensorRadar(board) => board.tracks = Some(public),
+        SystemBlackboard::TacticalRadar(board) => board.tracks = Some(public),
+        SystemBlackboard::Helm(board) => board.tracks = Some(public),
+        _ => unreachable!(),
+    }
+    contact
+}
+
+fn board_packet(app: &mut App, sources: &[&str], target: Target) -> OutboundMessage {
+    let entity = local_ship(app);
+    let boards = &app
+        .world()
+        .get::<crate::server_app::ShipSystemBlackboards>(entity)
+        .unwrap()
+        .0;
+    let sources: Vec<_> = sources
+        .iter()
+        .map(|source| SystemId((*source).into()))
+        .collect();
+    OutboundMessage {
+        target,
+        delivery: DeliveryClass::Snapshot,
+        msg: ServerMessage::BlackboardUpdate {
+            console_scope: Some(sources.clone()),
+            console_scope_tick: Some(20),
+            updates: sources
+                .iter()
+                .map(|source| (source.clone(), boards[source].clone()))
+                .collect(),
+            presentation_generation: Some(2),
+        },
+    }
+}
+
+fn only_board(message: &ServerMessage) -> &SystemBlackboard {
+    let ServerMessage::BlackboardUpdate { updates, .. } = message else {
+        panic!("typed publication");
+    };
+    assert_eq!(updates.len(), 1);
+    &updates[0].1
+}
+
+#[test]
+fn helm_aliases_require_the_actual_instrument_publication_not_the_motion_aggregate() {
+    let mut app = fixture();
+    let alias = observe(&mut app, "helm-radar", 0, 1.0);
+    let entity = local_ship(&mut app);
+    let mut board = SystemBlackboard::Viewscreen(crate::core::messages::ViewscreenBlackboard {
+        last_attacker_uuid: Some("hidden".into()),
+        ..Default::default()
+    });
+    capture(&mut app)
+        .references
+        .board(&SystemId("helm-radar".into()), &mut board);
+    let SystemBlackboard::Viewscreen(projected) = &board else {
+        unreachable!()
+    };
+    assert_eq!(
+        projected.last_attacker_uuid.as_deref(),
+        Some(alias.as_str())
+    );
+
+    let mut boards = app
+        .world_mut()
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(entity)
+        .unwrap();
+    let measured = boards.0.remove(&SystemId("helm-radar".into())).unwrap();
+    boards
+        .0
+        .insert(crate::ship::system_registry::helm_station_key(), measured);
+    drop(boards);
+    let SystemBlackboard::Viewscreen(projected) = &mut board else {
+        unreachable!()
+    };
+    projected.last_attacker_uuid = Some("hidden".into());
+    capture(&mut app)
+        .references
+        .board(&SystemId("helm-radar".into()), &mut board);
+    let SystemBlackboard::Viewscreen(projected) = board else {
+        unreachable!()
+    };
+    assert!(projected.last_attacker_uuid.is_none());
+}
+
+#[test]
+fn typed_viewscreen_aliases_use_its_own_console_not_the_strongest_cohosted_receiver() {
+    use phoenix_model::console::{
+        ConsoleConfig, ConsoleFeed, ConsoleHostSnapshot, ConsoleObservationKind,
+    };
+    let mut app = fixture();
+    let sensor = observe(&mut app, "sensor-radar", 0, 1.0);
+    let tactical = observe(&mut app, "tactical-radar", 0, 1.0);
+    let entity = local_ship(&mut app);
+    let private = crate::core::messages::ConsoleId("private-view".into());
+    {
+        let mut config = app
+            .world_mut()
+            .get_mut::<crate::ship::components::ShipConfigComponent>(entity)
+            .unwrap();
+        config.0.consoles.push(ConsoleConfig {
+            id: private.clone(),
+            home_station: Some(crate::core::messages::StationId("science".into())),
+            screen: Some("fixture.html".into()),
+            ..Default::default()
+        });
+        config
+            .0
+            .systems
+            .iter_mut()
+            .find(|system| system.id == crate::ship::system_registry::viewscreen_system_id())
+            .unwrap()
+            .console = Some(private.clone());
+    }
+    app.world_mut()
+        .get_mut::<crate::ship::components::ConsoleHosts>(entity)
+        .unwrap()
+        .0
+        .push(ConsoleHostSnapshot {
+            console: private.clone(),
+            host: Some(crate::core::messages::StationId("science".into())),
+            rating: "Std".into(),
+        });
+    let original = SystemBlackboard::Viewscreen(crate::core::messages::ViewscreenBlackboard {
+        combat_lock: Some("hidden".into()),
+        science_target: Some("hidden".into()),
+        last_attacker_uuid: Some("hidden".into()),
+        ..Default::default()
+    });
+    app.world_mut()
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(entity)
+        .unwrap()
+        .0
+        .insert(
+            crate::ship::system_registry::viewscreen_system_id(),
+            original.clone(),
+        );
+    let raw = board_packet(&mut app, &["viewscreen"], Target::Token("science".into()));
+    let projected = capture(&mut app).project(&raw);
+    let SystemBlackboard::Viewscreen(board) = only_board(phone(&projected, "science").unwrap())
+    else {
+        unreachable!()
+    };
+    assert!(
+        board.science_target.is_none()
+            && board.combat_lock.is_none()
+            && board.last_attacker_uuid.is_none(),
+        "cohosted Science's own radar is not private-view's knowledge"
+    );
+    // A wrong typed feed still grants no knowledge.
+    {
+        let mut config = app
+            .world_mut()
+            .get_mut::<crate::ship::components::ShipConfigComponent>(entity)
+            .unwrap();
+        config
+            .0
+            .consoles
+            .iter_mut()
+            .find(|console| console.id == private)
+            .unwrap()
+            .feeds
+            .push(ConsoleFeed {
+                source: SystemId("sensor-radar".into()),
+                kind: ConsoleObservationKind::TacticalRadar,
+            });
+    }
+    let projected = capture(&mut app).project(&raw);
+    let SystemBlackboard::Viewscreen(board) = only_board(phone(&projected, "science").unwrap())
+    else {
+        unreachable!()
+    };
+    assert!(board.science_target.is_none());
+    {
+        let mut config = app
+            .world_mut()
+            .get_mut::<crate::ship::components::ShipConfigComponent>(entity)
+            .unwrap();
+        config
+            .0
+            .consoles
+            .iter_mut()
+            .find(|console| console.id == private)
+            .unwrap()
+            .feeds[0]
+            .kind = ConsoleObservationKind::SensorRadar;
+    }
+    let projected = capture(&mut app).project(&raw);
+    let visible = phone(&projected, "science").unwrap();
+    let SystemBlackboard::Viewscreen(board) = only_board(visible) else {
+        unreachable!()
+    };
+    assert_eq!(board.science_target.as_deref(), Some(sensor.as_str()));
+    assert!(board.combat_lock.is_none());
+    assert_eq!(board.last_attacker_uuid.as_deref(), Some(sensor.as_str()));
+    assert_no_hidden(visible);
+    {
+        let mut config = app
+            .world_mut()
+            .get_mut::<crate::ship::components::ShipConfigComponent>(entity)
+            .unwrap();
+        config
+            .0
+            .consoles
+            .iter_mut()
+            .find(|console| console.id == private)
+            .unwrap()
+            .feeds
+            .push(ConsoleFeed {
+                source: SystemId("tactical-radar".into()),
+                kind: ConsoleObservationKind::TacticalRadar,
+            });
+    }
+    let projected = capture(&mut app).project(&raw);
+    let SystemBlackboard::Viewscreen(board) = only_board(phone(&projected, "science").unwrap())
+    else {
+        unreachable!()
+    };
+    assert_eq!(board.combat_lock.as_deref(), Some(tactical.as_str()));
+    assert_eq!(board.science_target.as_deref(), Some(sensor.as_str()));
+    assert!(
+        board.last_attacker_uuid.is_none(),
+        "an unspecified ambiguous instrument reference clears"
+    );
+    assert_eq!(
+        app.world()
+            .get::<crate::server_app::ShipSystemBlackboards>(entity)
+            .unwrap()
+            .0[&crate::ship::system_registry::viewscreen_system_id()],
+        original,
+        "no internal actuator references are changed"
+    );
+}
+
+#[test]
+fn typed_weapons_use_recorded_identity_and_lost_contacts_clear_without_reading_scene_truth() {
+    let mut app = fixture();
+    let contact = observe(&mut app, "tactical-radar", 0, 1.0);
+    let entity = local_ship(&mut app);
+    app.world_mut()
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(entity)
+        .unwrap()
+        .0
+        .insert(
+            crate::ship::system_registry::tactical_station_key(),
+            SystemBlackboard::Weapons(crate::core::messages::WeaponsBlackboard {
+                target_uuid: Some("hidden".into()),
+                locked_target: Some("hidden".into()),
+                target_name: Some("SECRET LIVE NAME".into()),
+                ..Default::default()
+            }),
+        );
+    let raw = board_packet(&mut app, &["tactical"], Target::Token("science".into()));
+    let public = {
+        let mut boards = app
+            .world_mut()
+            .get_mut::<crate::server_app::ShipSystemBlackboards>(entity)
+            .unwrap();
+        let SystemBlackboard::TacticalRadar(board) = boards
+            .0
+            .get_mut(&SystemId("tactical-radar".into()))
+            .unwrap()
+        else {
+            unreachable!()
+        };
+        board.tracks.take()
+    };
+    let projected = capture(&mut app).project(&raw);
+    let SystemBlackboard::Weapons(board) = only_board(phone(&projected, "science").unwrap()) else {
+        unreachable!()
+    };
+    assert!(
+        board.target_uuid.is_none(),
+        "private current routing without a published measurement grants no alias"
+    );
+    {
+        let mut boards = app
+            .world_mut()
+            .get_mut::<crate::server_app::ShipSystemBlackboards>(entity)
+            .unwrap();
+        let SystemBlackboard::TacticalRadar(board) = boards
+            .0
+            .get_mut(&SystemId("tactical-radar".into()))
+            .unwrap()
+        else {
+            unreachable!()
+        };
+        board.tracks = public;
+    }
+    let projected = capture(&mut app).project(&raw);
+    let SystemBlackboard::Weapons(board) = only_board(phone(&projected, "science").unwrap()) else {
+        unreachable!()
+    };
+    assert_eq!(board.target_uuid.as_deref(), Some(contact.as_str()));
+    assert_eq!(board.locked_target, board.target_uuid);
+    assert!(board.target_name.is_none());
+    observe(&mut app, "tactical-radar", 1, 1.0);
+    let projected = capture(&mut app).project(&raw);
+    let visible = phone(&projected, "science").unwrap();
+    assert_no_hidden(visible);
+    assert!(!encoded(visible).contains("SECRET LIVE NAME"));
+    let SystemBlackboard::Weapons(board) = only_board(visible) else {
+        unreachable!()
+    };
+    assert_eq!(
+        board.target_name.as_deref(),
+        Some("Recorded public identity")
+    );
+    // The same sanctioned opaque reference is idempotent on an outbound copy.
+    let idempotent = capture(&mut app).project(
+        &projected
+            .iter()
+            .find(|out| out.target == Target::Token("science".into()))
+            .unwrap()
+            .clone(),
+    );
+    assert_eq!(phone(&idempotent, "science"), Some(visible));
+    observe(&mut app, "tactical-radar", 2, 0.0);
+    let projected = capture(&mut app).project(&raw);
+    let SystemBlackboard::Weapons(board) = only_board(phone(&projected, "science").unwrap()) else {
+        unreachable!()
+    };
+    assert!(
+        board.target_uuid.is_none() && board.target_name.is_none() && board.locked_target.is_none()
+    );
+}
+
+#[test]
+fn typed_receipts_are_capped_before_aliasing_and_legacy_targets_do_not_broadcast_to_ungranted_consoles(
+) {
+    let mut app = fixture();
+    let contact = observe(&mut app, "tactical-radar", 0, 1.0);
+    let raw = board_packet(&mut app, &["sensor-radar"], Target::All);
+    let output = capture(&mut app).project(&raw);
+    let ServerMessage::BlackboardUpdate {
+        console_scope,
+        updates,
+        ..
+    } = phone(&output, "unseated").unwrap()
+    else {
+        unreachable!()
+    };
+    assert!(console_scope.as_ref().unwrap().is_empty() && updates.is_empty());
+    assert_eq!(
+        only_board(phone(&output, "science").unwrap()),
+        &SystemBlackboard::SensorRadar(Default::default())
+    );
+    let legacy = packet(ServerMessage::TargetLock {
+        uuid: "hidden".into(),
+        locked: true,
+    });
+    let output = capture(&mut app).project(&legacy);
+    assert_eq!(
+        phone(&output, "science"),
+        Some(&ServerMessage::TargetLock {
+            uuid: contact,
+            locked: true
+        })
+    );
+    assert!(phone(&output, "unseated").is_none());
+}
+
+#[test]
+fn typed_sensors_maps_use_permitted_aliases_and_keep_explicit_synthetic_evidence_separate() {
+    let mut app = fixture();
+    let contact = observe(&mut app, "sensor-radar", 0, 1.0);
+    let entity = local_ship(&mut app);
+    let ghost = "__gm_ghost:own:reported";
+    let board = crate::core::messages::SensorsBlackboard {
+        science_target_uuid: Some("hidden".into()),
+        contact_ghosts: vec![EntitySnapshot {
+            uuid: ghost.into(),
+            name: Some("Reported point".into()),
+            position: Some([1.0, 0.0, 2.0]),
+            ..Default::default()
+        }],
+        contact_classifications: [
+            ("hidden".into(), "Recorded classification".into()),
+            ("unobserved-secret".into(), "UNSEEN".into()),
+            (ghost.into(), "Reported class".into()),
+        ]
+        .into_iter()
+        .collect(),
+        contact_overrides: [(
+            "concealed-chart".into(),
+            phoenix_model::wire::ContactMode::Conceal,
+        )]
+        .into_iter()
+        .collect(),
+        ..Default::default()
+    };
+    app.world_mut()
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(entity)
+        .unwrap()
+        .0
+        .insert(SystemId("sensors".into()), SystemBlackboard::Sensors(board));
+    let raw = board_packet(&mut app, &["sensors"], Target::Token("science".into()));
+    let projected = capture(&mut app).project(&raw);
+    let visible = phone(&projected, "science").unwrap();
+    assert_no_hidden(visible);
+    assert!(!encoded(visible).contains("unobserved-secret"));
+    let SystemBlackboard::Sensors(board) = only_board(visible) else {
+        unreachable!()
+    };
+    assert_eq!(board.science_target_uuid.as_deref(), Some(contact.as_str()));
+    assert_eq!(
+        board.contact_classifications[&contact],
+        "Recorded classification"
+    );
+    assert_eq!(board.contact_classifications[ghost], "Reported class");
+    assert!(board.contact_overrides.is_empty());
+    assert_eq!(board.contact_ghosts[0].position, Some([1.0, 0.0, 2.0]));
 }
 
 #[test]
@@ -318,9 +810,7 @@ fn actual_reconciliation_refreshes_only_a_removed_visible_chart_landmark_once() 
         let position = record.position.unwrap();
         let bundle = (
             Transform::from_xyz(position[0], position[1], position[2]),
-            crate::entities::spawner::EntityTagsSection(crate::entities::tags::parse_tags(
-                &record.tags,
-            )),
+            crate::entities::spawner::EntityTagsSection(record.tags.clone()),
         );
         let entity = if record.uuid == "own" {
             let mut local = app.world_mut().query_filtered::<Entity, With<LocalShip>>();

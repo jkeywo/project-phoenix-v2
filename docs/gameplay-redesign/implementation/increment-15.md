@@ -253,3 +253,13 @@ packaging passed; strict strings reported 5,931 entries with zero errors/warning
 and layer imports plus owned Rust formatting/diff checks passed. The new runtime
 owner and snapshot cases have not yet executed. This is source integration
 readiness, not the increment's native, whole-host, human or balance exit.
+
+### Runtime flight-carrier resume readiness
+
+The existing delayed rebuild path must recognise its supported closed weapon-flight
+carrier recipe, which has no authored SpawnOrigin. Keep `ready_to_restore` strict
+about the roster already present; `ready_to_rebuild` may admit missing carrier rows
+only after the same complete carrier-roster validation used by restore. Ordinary
+missing actors still require their accepted SpawnOrigin. Do not create a launcher,
+equipment or new flight vector to satisfy readiness. The actual PDC launcher-loss
+journey uses this existing rebuild route and retains complete continuation checks.

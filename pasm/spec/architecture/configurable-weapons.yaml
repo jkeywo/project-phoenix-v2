@@ -20,6 +20,8 @@ entities:
       kind: subsystem
       authority: authoritative
       owns: [finite-system-turrets, weapon-flight-carrier-state, weapon-flight-restore-guard, guided-source-order-knowledge, ship-illumination-intent, illumination-emission-readout]
+      constraints:
+        - "Resume keeps existing-roster readiness strict. Delayed rebuild recognises absent closed weapon-flight carriers only through complete candidate carrier validation, using the existing empty-carrier materialisation and actual saved flight vector; ordinary missing actors still require their accepted SpawnOrigin."
     implementation:
       status: declared
       paths: [crates/phoenix-sim-gameplay/src/weapons/mount.rs, crates/phoenix-sim-gameplay/src/weapons/phaser.rs, crates/phoenix-sim-gameplay/src/weapons/blaster.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs]

@@ -52,3 +52,38 @@ supported acquisition require their own integrated evidence. Final repository
 gates, matching browser/native/Workshop controls and authoring journeys remain
 pending. Human acceptance, crew workload, balance and performance have not been
 established by this automated batch.
+
+## Local supply and fabrication checkpoint
+
+At clean isolated revision `f454148f` (the `1899d876` local-supply/fabrication
+integration, reviewed magazine/recall fix `01a9d9a7`, and the otherwise unused
+pure recovery module), the renderer-independent Simulation owner command passed
+**38 tests, 0 failed, 0 ignored**. Build took 5m03s; execution took 3.08s. It
+includes all seven fabrication cases, local stock and delivery cases, admission
+routing, every shipped hull, and the exact five-domain schema inventory pin.
+Six owner libraries were refreshed without changing bytes; compiler paths and
+the Simulation dependency record identify the isolated source tree.
+
+```text
+cargo test -p phoenix-simulation --lib --no-default-features -- resources::logistics_server::tests resources::production_server::tests resources::server::tests command_admission::router::tests complete_active_schema_inventory_is_ratcheted_across_all_five_domains strict_mode_accepts_every_shipped_hull --test-threads=1
+```
+
+The retained log is
+`.phoenix/worktrees/increment-12-recovery-core/.phoenix/increment12-native-38-retry.log`,
+SHA256 `2f7cbfedf4bcdc1c4a7764d82189b069777c4894c0fb5194fe17ee7622ac777a`.
+The earlier `1899d876` run passed 36 and failed two cases: the magazine's sole
+stock-control consumer was not registered as its machinery owner, and a recall
+fixture retained demand for another independent batch. The production cases
+already passed. The reviewed fix registers the real magazine interface and
+lowers demand through the local operator before recalling the batch; conservation
+and travel-time assertions remain intact. Both cases pass in the 38-test retry.
+
+Separate owner evidence covers 47 pure resource/production/route cases at
+`5132c036`, and eight pure recovery cases at `5c5a326d`. These are distinct source
+pins. Integrated client checks passed 99 of 100 cases on their first run; the
+remaining Workshop history case hit its unchanged five-second timeout during
+concurrent compilation. Its unchanged isolated suite then passed all eight cases.
+This is not a claim that the first 100-case run passed.
+
+Canonical transfer-settlement changes, live recovery, port services, later
+continuation coverage and full/manual acceptance still require their own evidence.

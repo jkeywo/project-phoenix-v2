@@ -296,7 +296,8 @@
       ],
       "completion": "Direct/assisted motion, Match Speed, formation/docking and jump/transit preserve the capital/small-craft dimensional split.",
       "evidence": [
-        "docs/gameplay-redesign/implementation/increment-18.md"
+        "docs/gameplay-redesign/implementation/increment-18.md",
+        "docs/acceptance/1562-movement-transit.md"
       ]
     },
     {

@@ -456,43 +456,58 @@ fn ordinary_existing_tube_ai_forwards_newer_original_evidence_once_through_norma
         .into_iter()
         .find(|profile| profile.system.0 == "tactical-radar")
         .unwrap();
+    // Maintenance forwards a new original observation, not a new projection of
+    // the same held sample. Respect the shipped instrument's real cadence.
+    let step = 1.0_f32 / 60.0;
+    let next_sample_tick = 100 + (profile.sample_interval_secs / step).ceil() as u64;
     f.app
         .world_mut()
         .resource_mut::<crate::sim_tick::SimTick>()
-        .0 = 101;
+        .0 = next_sample_tick;
     let mut tracks = f.app.world_mut().get_mut::<BroadTracks>(f.source).unwrap();
     let state = tracks.0.get_mut(&profile.system).unwrap();
-    state
-        .advance(
-            &profile,
-            101,
-            1.0 / 60.0,
-            1.0,
-            &[crate::science::broad::BroadMeasurement {
-                source: "private-target".into(),
-                selectable: true,
-                observation: None,
-                position: [20.0, -30.0],
-                elevation: Some(phoenix_model::sensing_tracks::ObservedElevation {
-                    height: 3.0,
-                    error: profile.position_error,
-                    velocity: None,
-                }),
-                support: 1.0,
-                identity: None,
-                classification: None,
-                assessment: None,
-            }],
-        )
-        .unwrap();
+    for tick in 101..=next_sample_tick {
+        state
+            .advance(
+                &profile,
+                tick,
+                step,
+                1.0,
+                &[crate::science::broad::BroadMeasurement {
+                    source: "private-target".into(),
+                    selectable: true,
+                    observation: None,
+                    position: [20.0, -30.0],
+                    elevation: Some(phoenix_model::sensing_tracks::ObservedElevation {
+                        height: 3.0,
+                        error: profile.position_error,
+                        velocity: None,
+                    }),
+                    support: 1.0,
+                    identity: None,
+                    classification: None,
+                    assessment: None,
+                }],
+            )
+            .unwrap();
+    }
     let records = phoenix_sim_gameplay::science::sharing::projection(
         "source",
         state,
         &profile,
-        101,
-        1.0 / 60.0,
+        next_sample_tick,
+        step,
     )
     .unwrap();
+    let observed_tick = records
+        .iter()
+        .find(|record| record.contact_id == f.contact)
+        .unwrap()
+        .observed_tick;
+    assert!(
+        observed_tick > 100,
+        "the paid instrument must acquire newer evidence"
+    );
     drop(tracks);
     if let SystemBlackboard::TacticalRadar(board) = f
         .app
@@ -549,7 +564,10 @@ fn ordinary_existing_tube_ai_forwards_newer_original_evidence_once_through_norma
         .run_system_once(handle_guidance_commands)
         .unwrap();
     assert!(energy(&f) < initial);
-    assert_eq!(round(&f).last_guidance.as_ref().unwrap().sampled_tick, 101);
+    assert_eq!(
+        round(&f).last_guidance.as_ref().unwrap().sampled_tick,
+        observed_tick
+    );
     assert!(known(&f).acknowledged.is_some());
     f.app
         .world_mut()

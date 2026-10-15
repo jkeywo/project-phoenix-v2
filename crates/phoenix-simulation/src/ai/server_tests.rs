@@ -162,6 +162,10 @@ beam_damage_per_sec = 3
 beam_duration_secs = 4
 cooldown_secs = 4
 
+[weapons_console.phaser_banks.impact]
+damage_type = "laser"
+penetration = 20
+
 [[weapons_console.phaser_banks.ai.rule]]
 priority = 0
 channel = "phaser_fire"

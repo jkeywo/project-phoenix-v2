@@ -24,7 +24,7 @@ fn fixture() -> (App, Entity) {
     for system in &authored.ship_config.as_ref().unwrap().systems {
         sources.set(system.id.clone(), ControlSource::Human);
     }
-    let damage = crate::ship::physical_damage::ShipDamage::from_config(&authored)
+    let damage = crate::ship::compartment_damage::ShipDamage::from_config(&authored)
         .unwrap()
         .unwrap();
     let power = crate::ship::power::ShipPowerSystem(

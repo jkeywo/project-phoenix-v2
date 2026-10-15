@@ -131,7 +131,7 @@ pub(crate) fn apply(
                     },
                     Some(AxisIntent::Lateral(intent)) => match intent {
                         LateralIntent::Direct { force } => *force = 0.0,
-                        _ => *intent = LateralIntent::default(),
+                        _ => *intent = LateralIntent::Assisted { value: 0.0 },
                     },
                     None => {}
                 }

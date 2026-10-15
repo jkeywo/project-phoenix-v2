@@ -204,11 +204,11 @@ pub(crate) fn publish_helm_blackboard(
                     Option<&crate::science::broad::BroadTracks>,
                     Option<&crate::entities::spawner::EntityUuid>,
                 ),
-            ),
-            (
-                Option<&phoenix_sim_gameplay::ship::helm_control::CompiledHelmControl>,
-                Option<&phoenix_sim_gameplay::ship::helm_control::HelmControlState>,
-                Option<&ShipConfigComponent>,
+                (
+                    Option<&phoenix_sim_gameplay::ship::helm_control::CompiledHelmControl>,
+                    Option<&phoenix_sim_gameplay::ship::helm_control::HelmControlState>,
+                    Option<&ShipConfigComponent>,
+                ),
             ),
         ),
         With<crate::server_app::Ship>,
@@ -235,8 +235,12 @@ pub(crate) fn publish_helm_blackboard(
         is_local,
         faction,
         red_alert,
-        (thrust_input, lateral_input, (broad_profile, broad_state, uuid)),
-        (movement_profile, movement_state, ship_config),
+        (
+            thrust_input,
+            lateral_input,
+            (broad_profile, broad_state, uuid),
+            (movement_profile, movement_state, ship_config),
+        ),
     ) in ship_q.iter_mut()
     {
         // Per-entity component path. Each fallback mirrors the pre-#824

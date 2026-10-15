@@ -60,8 +60,7 @@
     "retry_log": ".phoenix/pdc-producer-helm-retry.log"
   },
   "pending": [
-    "Rebuilt full-host PDC, Helm, Comms and finite-probe continuations; new activity-support owner tests",
-    "Real headless-host PDC and joined-crew Helm continuation probes",
+    "Rebuilt integrated PDC and actual jammer/transit continuations; earlier Helm/Comms/probe/activity passes are pinned below",
     "Full-host illumination and radio journeys",
     "Remaining runtime scope in increments 16 through 24",
     "Browser/native devices, multiplayer peers, performance, balance and human workload acceptance",
@@ -136,5 +135,22 @@
     "bundle": "Workshop Authoring build passed; .phoenix/activity-authoring-integrated-build.log",
     "strings": "6105 strings, zero errors/warnings; .phoenix/activity-authoring-integrated-strings.log",
     "limitation": "New shared support native tests and full-host physical lifecycle demonstration remain pending"
+  },
+  "actual_host_continuation": {
+    "scope": "Actual ordinary host producers, complete JSON capture/digest comparison for 360 steps each; predates integrated jammer/transit runtime",
+    "comms_requests": "Passed, 5.42 seconds; .phoenix/parallel-real-host-continuation.log",
+    "helm": "Passed, 4.83 seconds, including Human-to-ordinary-AI handoff; .phoenix/parallel-real-host-continuation.log",
+    "finite_probe": "Passed, 5.98 seconds with corrected collider length and positive intake capacity; .phoenix/battery-real-host-positive-intake-retry.log",
+    "repair_delivery": "Passed, 4.66 seconds, actual repair/delivery/recall/refusal and malformed no-write candidates; .phoenix/activities-pdc-actual-host.log",
+    "pdc": "Two cases failed before the observed shield-ray uncertainty correction. Read-only diagnostics found 111/222 loaded, in-range, in-arc launch opportunities but no usable observed shield cover. Contract fecd72a8 and correction 76b9c2a2 preserve evidence-only decisions and tuning. Integrated execution pending.",
+    "limitation": "No full increment exit, physical-device acceptance, performance or balance acceptance"
+  },
+  "electronic_transit_integration": {
+    "source": "909a47b6 compiled Transit/jammer join; f0d720a4 adds reviewed Transit HUD; 3d38a890 adopts next protection contract",
+    "compile": "cargo check -p phoenix-simulation --tests --no-default-features passed; .phoenix/transit-jamming-integrated-check-retry.log",
+    "owner_tests": "Model jammer: 1 passed; Gameplay jammer/shield-ray/battery/activity: 9 passed; Content activity support: 2 passed. Logs .phoenix/jamming-model-owner.log, .phoenix/jamming-gameplay-owner.log, .phoenix/activity-content-owner.log",
+    "client": "38 tests passed across the two matched Transit/shared-console suites; .phoenix/transit-jamming-hud.log. Earlier integrated jammer controls: 52 passed; .phoenix/jamming-integrated-client.log",
+    "bundle": "Client build passed, stamp 21/phoenix-base/4; .phoenix/transit-client-build.log",
+    "runtime_status": "Actual paid Comms jammer and local Transit core integrated; native and actual-host execution pending. Sensors/protection contract adopted before runtime. No full 17/18 exit."
   }
 }

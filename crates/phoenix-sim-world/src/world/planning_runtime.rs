@@ -38,6 +38,14 @@ impl Decomposition {
             if !self.leaves.contains_key(node) || *tick < choice.chosen_tick || *tick > now {
                 return Err("invalid released HTN node/tick".into());
             }
+            if choice.temporal.as_ref().is_some_and(|saved| {
+                saved
+                    .nodes
+                    .get(node)
+                    .is_none_or(|interval| *tick < interval.start_tick)
+            }) {
+                return Err("HTN leaf released before its committed forecast start".into());
+            }
             let bound = self.bound(node, choice);
             expected.insert(bound.id.clone());
             let actual = instances
@@ -85,6 +93,7 @@ impl CompiledPlanning {
         now: u64,
     ) -> Result<Decomposition, String> {
         let graph = self.derive(choice)?;
+        self.validate_schedule(choice, &graph)?;
         graph.validate_history(choice, instances, now)?;
         Ok(graph)
     }
@@ -107,6 +116,13 @@ impl CompiledPlanning {
         let mut released = Vec::new();
         for node in graph.leaves.keys() {
             if next_choice.released.contains_key(node) || !graph.ready(node, &next_instances) {
+                continue;
+            }
+            if next_choice
+                .temporal
+                .as_ref()
+                .is_some_and(|saved| now < saved.nodes[node].start_tick)
+            {
                 continue;
             }
             let config = graph.bound(node, choice);

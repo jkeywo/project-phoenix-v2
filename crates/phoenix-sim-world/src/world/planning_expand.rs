@@ -10,6 +10,7 @@ pub struct Decomposition {
     pub leaves: BTreeMap<String, SituationConfig>,
     pub definitions: BTreeMap<String, SituationDefinition>,
     pub dependencies: Vec<Dependency>,
+    pub forecasts: BTreeMap<String, super::temporal::ActivityForecast>,
 }
 #[derive(Clone, Debug)]
 pub struct PlanSelection {
@@ -144,6 +145,7 @@ impl CompiledPlanning {
                 released: BTreeMap::new(),
                 methods,
                 refused_methods: refused_methods.clone(),
+                temporal: None,
             },
             graph,
             refused_methods,
@@ -206,6 +208,7 @@ impl CompiledPlanning {
             Task::Primitive {
                 definition,
                 request,
+                forecast,
                 ..
             } => {
                 let request = instantiate(request, args)?;
@@ -244,6 +247,10 @@ impl CompiledPlanning {
                     leaves: BTreeMap::from([(node.into(), config)]),
                     definitions: BTreeMap::from([(definition.id.clone(), definition)]),
                     dependencies: Vec::new(),
+                    forecasts: forecast
+                        .as_ref()
+                        .map(|value| BTreeMap::from([(node.into(), value.clone())]))
+                        .unwrap_or_default(),
                 })
             }
             Task::Compound { methods, .. } => {
@@ -289,6 +296,7 @@ impl CompiledPlanning {
                                 graph.leaves.extend(child.leaves);
                                 graph.definitions.extend(child.definitions);
                                 graph.dependencies.extend(child.dependencies);
+                                graph.forecasts.extend(child.forecasts);
                                 if graph.leaves.len() > MAX_LEAVES {
                                     error = Some("HTN physical leaf bound exhausted".into());
                                     break;
@@ -349,6 +357,11 @@ impl CompiledPlanning {
         }
     }
     fn validate_graph(&self, graph: &Decomposition, tick: u64) -> Result<(), String> {
+        if self.config.temporal.is_some() && graph.forecasts.len() != graph.leaves.len() {
+            return Err(
+                "temporal planning requires forecasts on every selected primitive leaf".into(),
+            );
+        }
         if graph.leaves.is_empty()
             || graph.leaves.len() > MAX_LEAVES
             || graph.dependencies.len() > MAX_EXPANDED_NODES

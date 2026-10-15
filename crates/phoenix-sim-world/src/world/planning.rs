@@ -14,6 +14,9 @@ pub use expand::*;
 #[path = "planning_runtime.rs"]
 mod runtime;
 
+#[path = "planning_temporal.rs"]
+pub mod temporal;
+
 #[cfg(test)]
 #[path = "planning_tests.rs"]
 mod tests;

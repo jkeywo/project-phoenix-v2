@@ -8,6 +8,8 @@ use phoenix_model::{
 };
 use std::collections::BTreeMap;
 const LIB: &str = "assets/worlds/domains/maintenance.toml";
+#[path = "planning_temporal_tests.rs"]
+mod temporal_tests;
 fn literal(value: Value) -> Argument {
     Argument::Literal { value }
 }
@@ -29,6 +31,7 @@ fn room() -> RepairWorkTarget {
 }
 fn library(ordered: bool) -> DomainLibrary {
     let repair = |name: &str, team| Task::Primitive {
+        forecast: None,
         id: name.into(),
         parameters: parameters(),
         definition: "repair".into(),
@@ -90,6 +93,7 @@ fn library(ordered: bool) -> DomainLibrary {
             repair("repair-second", 1),
             repair("repair-first", 0),
             Task::Primitive {
+                forecast: None,
                 id: "deliver".into(),
                 parameters: parameters(),
                 definition: "delivery".into(),
@@ -129,6 +133,7 @@ fn library(ordered: bool) -> DomainLibrary {
 }
 fn config() -> PlanningConfig {
     PlanningConfig {
+        temporal: None,
         id: "maintenance".into(),
         task: "care::maintain".into(),
         arguments: BTreeMap::from([("actor".into(), Value::Actor("crew".into()))]),

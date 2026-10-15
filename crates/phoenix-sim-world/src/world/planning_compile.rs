@@ -289,6 +289,9 @@ impl CompiledPlanning {
             .expect("validated planning task")
     }
     fn validate(&self) -> Result<(), String> {
+        if let Some(policy) = &self.config.temporal {
+            policy.validate()?;
+        }
         let count = self
             .libraries
             .values()
@@ -337,8 +340,12 @@ impl CompiledPlanning {
                     Task::Primitive {
                         definition,
                         request,
+                        forecast,
                         ..
                     } => {
+                        if let Some(forecast) = forecast {
+                            forecast.validate()?;
+                        }
                         if !library.definitions.iter().any(|row| &row.id == definition) {
                             return Err("primitive references absent Scenario definition".into());
                         }

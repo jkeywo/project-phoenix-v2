@@ -106,6 +106,8 @@ pub struct PlanningConfig {
     pub arguments: BTreeMap<String, Value>,
     #[serde(rename = "import")]
     pub imports: Vec<DomainImport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temporal: Option<super::temporal::TemporalPolicy>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -146,6 +148,8 @@ pub enum Task {
         parameters: Vec<Parameter>,
         definition: String,
         request: RequestTemplate,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        forecast: Option<super::temporal::ActivityForecast>,
     },
 }
 impl Task {
@@ -233,4 +237,6 @@ pub struct PlanChoice {
     /// Original immutable-capability decisions, never current physical facts.
     #[serde(default)]
     pub refused_methods: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temporal: Option<super::temporal::TemporalCommitment>,
 }

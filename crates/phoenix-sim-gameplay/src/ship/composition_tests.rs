@@ -328,3 +328,49 @@ fn system_priority_channel_is_bounded_typed_and_transactional() {
         .priorities("priorities")
         .is_empty());
 }
+
+#[test]
+fn actual_bay_composition_uses_one_distinct_paid_owner_and_closed_component_links() {
+    let mut system = dock();
+    system.kind = super::super::system_registry::CRAFT_BAY_KIND.into();
+    system.id = crate::core::messages::SystemId("actual-probe-bay".into());
+    system.channels.clear();
+    system.components = vec![
+        SystemComponentConfig::PowerInput {
+            id: "intake".into(),
+        },
+        SystemComponentConfig::CraftBay {
+            id: "bay".into(),
+            power_input: "intake".into(),
+            config: phoenix_model::craft::BayConfig {
+                compartment: "probe-room".into(),
+                capacity_space: 2,
+                launch_work_secs: 2.0,
+                recovery_work_secs: 3.0,
+                recovery_range: 8.0,
+                maximum_parent_speed: 0.1,
+                release_offset: [0.0, 0.0, -3.0],
+            },
+        },
+    ];
+    validate_composition(&system).unwrap();
+    let encoded = toml::to_string(&system).unwrap();
+    assert_eq!(
+        toml::from_str::<SystemInstanceConfig>(&encoded).unwrap(),
+        system
+    );
+    for fault in 0..4 {
+        let mut invalid = system.clone();
+        match fault {
+            0 => invalid.id.0 = "x".repeat(129),
+            1 => {
+                invalid.components.remove(0);
+            }
+            2 => invalid.power_group = None,
+            _ => invalid.components.push(SystemComponentConfig::PowerInput {
+                id: "unused".into(),
+            }),
+        };
+        assert!(validate_composition(&invalid).is_err(), "case {fault}");
+    }
+}

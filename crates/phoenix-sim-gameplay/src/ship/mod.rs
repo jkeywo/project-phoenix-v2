@@ -49,3 +49,7 @@ pub mod disablement;
 
 pub mod transit;
 pub mod transit_profile;
+
+pub mod craft;
+
+pub mod craft_profile;

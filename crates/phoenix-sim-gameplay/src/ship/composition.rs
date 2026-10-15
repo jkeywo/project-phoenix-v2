@@ -43,6 +43,11 @@ pub fn enabled_target_bindings(
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SystemComponentConfig {
+    CraftBay {
+        id: String,
+        power_input: String,
+        config: phoenix_model::craft::BayConfig,
+    },
     TransitDrive {
         id: String,
         power_input: String,
@@ -89,6 +94,7 @@ impl SystemComponentConfig {
         match self {
             Self::DockMating { id, .. }
             | Self::TransitDrive { id, .. }
+            | Self::CraftBay { id, .. }
             | Self::IlluminationEmitter { id, .. }
             | Self::JammingEmitter { id, .. }
             | Self::PowerInput { id }
@@ -453,6 +459,30 @@ pub fn validate_composition(system: &super::config::SystemInstanceConfig) -> Res
     for channel in &system.channels {
         channel.validate()?;
     }
+    if system.kind == super::system_registry::CRAFT_BAY_KIND {
+        let binding = craft_bay_composition(&system.components)
+            .ok_or("Craft Bay requires exactly one craft_bay and its power_input")?;
+        binding.config.validate()?;
+        let mut ids = BTreeSet::new();
+        if system.id.0.trim().is_empty()
+            || system.id.0.len() > 128
+            || system.id.0.chars().any(char::is_control)
+            || system.components.len() != 2
+            || system.power_group.is_none()
+            || !system.channels.is_empty()
+            || system
+                .components
+                .iter()
+                .any(|component| !valid_id(component.id()) || !ids.insert(component.id()))
+            || !system.components.iter().any(|component| {
+                matches!(component,
+                SystemComponentConfig::PowerInput { id } if id == binding.power_input)
+            })
+        {
+            return Err("Craft Bay requires one actual bounded owner, distinct craft_bay/power_input, a power group and no unused channels".into());
+        }
+        return Ok(());
+    }
     if system.kind == super::system_registry::JAMMING_KIND {
         return validate_jamming(system);
     }
@@ -598,6 +628,28 @@ pub fn validate_composition(system: &super::config::SystemInstanceConfig) -> Res
         return Err("Dock power_input requires the System power_group binding".into());
     }
     Ok(())
+}
+
+pub struct CraftBayComposition<'a> {
+    pub component_id: &'a str,
+    pub power_input: &'a str,
+    pub config: &'a phoenix_model::craft::BayConfig,
+}
+pub fn craft_bay_composition(
+    components: &[SystemComponentConfig],
+) -> Option<CraftBayComposition<'_>> {
+    components.iter().find_map(|component| match component {
+        SystemComponentConfig::CraftBay {
+            id,
+            power_input,
+            config,
+        } => Some(CraftBayComposition {
+            component_id: id,
+            power_input,
+            config,
+        }),
+        _ => None,
+    })
 }
 
 pub struct TransitComposition<'a> {

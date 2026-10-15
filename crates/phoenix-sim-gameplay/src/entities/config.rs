@@ -86,6 +86,9 @@ pub struct EntityConfig {
         deserialize_with = "phoenix_model::transit::deserialize_optional_gravity"
     )]
     pub arrival_gravity: Option<phoenix_model::transit::ArrivalGravityConfig>,
+    /// First supported physical probe. Custody stays on the actual World actor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe: Option<phoenix_model::craft::ProbeProfile>,
     /// Optional helm capability declaration (`[helm_capability]`).
     /// Describes vertical movement mode and impulse steering policy.
     #[serde(default)]
@@ -1028,6 +1031,7 @@ impl EntityConfig {
             .map_err(SerdeError::custom)?;
         weapon_definition::validate_round_feeds(&config).map_err(SerdeError::custom)?;
         crate::ship::transit_profile::validate_entity(&config).map_err(SerdeError::custom)?;
+        crate::ship::craft_profile::validate_entity(&config).map_err(SerdeError::custom)?;
 
         if config.interior.is_none()
             && config

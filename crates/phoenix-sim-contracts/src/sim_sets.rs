@@ -112,6 +112,7 @@ pub enum FixedStep {
     HandleStationRatingChange,
     HandleCoordinationEnqueue,
     AiPhaserAutoFire,
+    HandleWeaponAssignments,
     TickWeaponsArcRequest,
     HandleSetPhaserMode,
     AiStrikeBoost,

@@ -46,6 +46,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             ReconcileDirectedTargetControl,
             HandleStationRatingChange,
             HandleCoordinationEnqueue,
+            HandleWeaponAssignments,
             AiPhaserAutoFire,
             TickWeaponsArcRequest,
             HandleSetPhaserMode,

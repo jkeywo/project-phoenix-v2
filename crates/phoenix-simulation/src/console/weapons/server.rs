@@ -96,6 +96,10 @@ pub struct WeaponsPlugin;
 
 impl Plugin for WeaponsPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<crate::weapons::mounts::MountsPlugin>() {
+            app.add_plugins(crate::weapons::mounts::MountsPlugin);
+        }
+        super::assignments::register(app);
         use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
         // Weapons owns its delta cache and ownership-filtered reconnect
         // projection beside the live publisher in `blackboard.rs`. The generic
@@ -142,14 +146,28 @@ impl Plugin for WeaponsPlugin {
             )
             .with_feedback(
                 crate::command_admission::FeedbackAddress::MatcherSpelling,
-                &[Payload::FireTorpedo, Payload::SetTorpedoVolleyTarget],
+                &[
+                    Payload::FireTorpedo,
+                    Payload::SetTorpedoVolleyTarget,
+                    Payload::SetWeaponTarget,
+                    Payload::SetWeaponGroupTarget,
+                    Payload::FollowWeaponGroup,
+                    Payload::FollowPrimaryTarget,
+                ],
             ),
         )
         .register_admitted_consumer(
             ConsumerMatcher::prefix(crate::ship::system_registry::PHASER_BANK_KIND, "phaser-")
                 .with_feedback(
                     crate::command_admission::FeedbackAddress::MatcherSpelling,
-                    &[Payload::FirePhaser],
+                    &[
+                        Payload::FirePhaser,
+                        Payload::StopPhaser,
+                        Payload::SetWeaponTarget,
+                        Payload::SetWeaponGroupTarget,
+                        Payload::FollowWeaponGroup,
+                        Payload::FollowPrimaryTarget,
+                    ],
                 ),
         )
         // Blaster banks converge on the admission seam (issue #781): both a
@@ -163,6 +181,10 @@ impl Plugin for WeaponsPlugin {
                         Payload::FireBlaster,
                         Payload::ChargeBlasterStart,
                         Payload::ChargeBlasterCancel,
+                        Payload::SetWeaponTarget,
+                        Payload::SetWeaponGroupTarget,
+                        Payload::FollowWeaponGroup,
+                        Payload::FollowPrimaryTarget,
                     ],
                 ),
         );

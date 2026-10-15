@@ -2,11 +2,26 @@
 title: WeaponsPlugin
 type: concept
 tags: [weapons, tactical, phaser, torpedo, blaster, targeting, ai]
-sources: [crates/phoenix-model/src/weapon_operation.rs, crates/phoenix-sim-gameplay/src/weapons/operation.rs, crates/phoenix-model/src/turret.rs, crates/phoenix-sim-gameplay/src/weapons/turret.rs, crates/phoenix-simulation/src/weapons/mounts.rs, crates/phoenix-simulation/src/snapshot/mounts.rs, crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-sim-gameplay/src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/weapons/, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml, crates/phoenix-sim-gameplay/src/console/weapons/beam.rs, crates/phoenix-sim-gameplay/src/ship/damage.rs]
+sources: [crates/phoenix-simulation/src/console/weapons/assignments.rs, crates/phoenix-simulation/src/console/weapons/readiness.rs, crates/phoenix-simulation/src/console/weapons/round_work.rs, crates/phoenix-simulation/src/snapshot/weapon_targets.rs, crates/phoenix-model/src/weapon_operation.rs, crates/phoenix-sim-gameplay/src/weapons/operation.rs, crates/phoenix-model/src/turret.rs, crates/phoenix-sim-gameplay/src/weapons/turret.rs, crates/phoenix-simulation/src/weapons/mounts.rs, crates/phoenix-simulation/src/snapshot/mounts.rs, crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-sim-gameplay/src/console/weapons/shared.rs, tests/projectile_ship_traversal.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/weapons/, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, gui/sim-state.js, gui/console-state.js, gui/weapon-cooldown.js, pasm/spec/architecture/weapons.yaml, crates/phoenix-sim-gameplay/src/console/weapons/beam.rs, crates/phoenix-sim-gameplay/src/ship/damage.rs]
 updated: 2026-10-15
 ---
 
 # WeaponsPlugin
+
+`console/weapons/assignments.rs` retains per-System group and individual intent.
+Its `WeaponAimInputs` resolves a current permitted measured point for the actual
+weapon Console; lost feeds preserve orders while withholding aim. Explicit Hold
+does not borrow the primary target. `snapshot/weapon_targets.rs` validates saved
+owners, prepared group membership and reference shapes before restore writes.
+`console/weapons/readiness.rs` applies the same intent, measured geometry, target
+filters and actual turret bearing to core, fine and reconnect projections.
+
+`console/weapons/round_work.rs` resolves a managed Local store to its real Capacity
+endpoint and stages finite rounds with Power per emitted barrel. Other stock
+claims and queued physical debits remain unavailable. Missing named barrel
+markers preserve their indices and cannot substitute the ship centre.
+Beam impact uses the physical ray result, including friendly blockers; a missed
+measured ray spends its work without damaging the actor named by the contact.
 
 Gameplay `ActiveBeam::complete_bank` ends an ordinary phaser cycle and applies its recorded pending cooldown. Exceptional relight uses the existing end path. Shared damage selection retains authored system order and the original RNG draw count.
 

@@ -8,6 +8,11 @@ fn fixture() -> (World, Entity, PhoenixSnapshot) {
     .unwrap();
     let mut world = World::new();
     world.register_component::<EntitySystemHull>();
+    world.register_component::<EntityShipArcHull>();
+    world.register_component::<crate::console::repair::server::RepairRequestQueue>();
+    world.register_component::<crate::ship_plugin::RepairHumanAlerted>();
+    world.register_component::<crate::ai::server::ObjectiveCursors>();
+    world.register_component::<crate::console::weapons::blaster::BlasterSystemResource>();
     world.insert_resource(SimTick(20));
     world.insert_resource(Time::<Fixed>::default());
     let entity = crate::entities::spawner::spawn_entity(
@@ -39,6 +44,10 @@ fn fixture() -> (World, Entity, PhoenixSnapshot) {
         .unwrap();
     assert!(states.0[&owner].offset_deg > 0.0);
     let snapshot = capture(&world);
+    assert!(
+        snapshot.entities[0].weapons.is_some(),
+        "the actual machinery row must be captured"
+    );
     (world, entity, snapshot)
 }
 
@@ -48,6 +57,9 @@ fn actual_spawn_json_and_application_preserve_one_bearing_owner_and_future_motio
     let decoded: PhoenixSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
     validate_roster(&world, &decoded).unwrap();
+    super::super::preflight::validate_entity_resources(&world, entity, &decoded.entities[0])
+        .unwrap();
+    super::super::validate_entity_repair_jobs(&world, entity, &decoded.entities[0]).unwrap();
     let profile = world.get::<MountProfiles>(entity).unwrap().clone();
     let expected = decoded.entities[0].mounts.clone().unwrap();
     world.entity_mut(entity).insert(ShipMounts::new(&profile));

@@ -82,7 +82,7 @@ pub fn seed_torpedo_tube_launch_facts(
     target_valid: bool,
     in_range: bool,
     in_arc: bool,
-    target_facing_shields: i32,
+    target_facing_shields: impl Into<Option<i32>>,
     tubes_full: bool,
     posture: crate::console::weapons::WeaponsAlertPosture,
 ) -> crate::world::flags::AiFacts {
@@ -92,7 +92,9 @@ pub fn seed_torpedo_tube_launch_facts(
     facts.set_fact(fid::TARGET_VALID, if target_valid { 1.0 } else { 0.0 });
     facts.set_fact(fid::IN_RANGE, if in_range { 1.0 } else { 0.0 });
     facts.set_fact(fid::IN_ARC, if in_arc { 1.0 } else { 0.0 });
-    facts.set_fact(fid::TARGET_FACING_SHIELDS, target_facing_shields as f64);
+    if let Some(shields) = target_facing_shields.into() {
+        facts.set_fact(fid::TARGET_FACING_SHIELDS, shields as f64);
+    }
     facts.set_fact(fid::TUBES_FULL, if tubes_full { 1.0 } else { 0.0 });
     facts.set_fact(fid::RED_ALERT, posture.alert_fact_value());
     facts

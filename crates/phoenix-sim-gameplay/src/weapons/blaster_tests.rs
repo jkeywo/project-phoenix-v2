@@ -1409,7 +1409,7 @@ fn funded_charge_progress_pauses_without_pausing_live_projectiles() {
     );
     assert_eq!(events.len(), 1);
     let before = sys.in_flight[0].z;
-    sys.tick_with_work(
+    let skipped = sys.tick_with_work(
         0.1,
         0.0,
         &origins,
@@ -1422,8 +1422,16 @@ fn funded_charge_progress_pauses_without_pausing_live_projectiles() {
         &mut |_| false,
         &mut mint,
     );
+    assert!(
+        skipped.is_empty(),
+        "unfunded due barrels emit no new projectile"
+    );
+    assert_eq!(sys.in_flight.len(), 1);
     assert!(sys.in_flight[0].z < before);
-    assert_eq!(sys.volley.next_step, 1);
+    assert_eq!(
+        sys.volley.next_step, 2,
+        "the unfunded attempted step is skipped rather than queued for a catch-up volley"
+    );
 }
 
 #[test]

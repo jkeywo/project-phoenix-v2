@@ -33,6 +33,7 @@ fn aiming_uses_only_the_same_permitted_current_measurement_and_conceal_wins() {
         )
         .unwrap();
     let public = state.projection(profile, 0, 0.5).unwrap();
+    let measured = public[0].position;
     let contact = public[0].contact_id.clone();
     let mut boards = crate::server_app::ShipSystemBlackboards::default();
     boards.0.insert(
@@ -45,7 +46,7 @@ fn aiming_uses_only_the_same_permitted_current_measurement_and_conceal_wins() {
     let tracks = BroadTracks(BTreeMap::from([(instrument, state)]));
     assert_eq!(
         current_point(config, &boards, &tracks, &owner, &contact, "observer", None),
-        Some([40.0, 10.0])
+        Some(measured)
     );
     assert!(measured_point(config, &boards, &tracks, &owner, "private-actor").is_none());
     assert!(measured_point(
@@ -84,7 +85,28 @@ fn aiming_uses_only_the_same_permitted_current_measurement_and_conceal_wins() {
             "another",
             Some(&overrides)
         ),
-        Some([40.0, 10.0])
+        Some(measured)
+    );
+    let SystemBlackboard::SensorRadar(board) =
+        boards.0.get_mut(&SystemId("sensor-radar".into())).unwrap()
+    else {
+        unreachable!()
+    };
+    let records = board.tracks.as_mut().unwrap();
+    records.push(records[0].clone());
+    assert_eq!(
+        measured_point(config, &boards, &tracks, &owner, &contact),
+        Some(measured)
+    );
+    let SystemBlackboard::SensorRadar(board) =
+        boards.0.get_mut(&SystemId("sensor-radar".into())).unwrap()
+    else {
+        unreachable!()
+    };
+    board.tracks.as_mut().unwrap()[1].position[0] += 1.0;
+    assert!(
+        measured_point(config, &boards, &tracks, &owner, &contact).is_none(),
+        "conflicting current copies cannot pick an arbitrary firing point"
     );
 }
 fn profile() -> (

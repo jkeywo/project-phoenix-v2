@@ -1964,10 +1964,6 @@ source = "stock/torpedo-magazine"
 kind = "Stock"
 
 [[console.feed]]
-source = "blaster-side"
-kind = "BlasterBank"
-
-[[console.feed]]
 source = "stock/blaster-side"
 kind = "Stock"
 

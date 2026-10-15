@@ -432,7 +432,9 @@ use super::*;
 /// `50` adds actual portable equipment, physical refitting and intact recovery.
 /// `51` retains exact canonical logical combat/LOD timestamps across long runs.
 /// `52` adds per-instrument sensing histories and spatial-field continuation.
-pub const SNAPSHOT_FORMAT: u32 = 52;
+/// `53` retains weapon assignments, finite mounts, causal EMP episodes, active
+/// beam operation and frozen guided-round equipment. Older state is refused.
+pub const SNAPSHOT_FORMAT: u32 = 53;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -523,7 +525,9 @@ pub const SNAPSHOT_FORMAT: u32 = 52;
 /// "0.22" adds conserved equipment changes without resetting fixed-slot reserves.
 /// "0.23" moves historical combat recency onto the shared logical tick clock.
 /// "0.24" adds paid sensing continuation and causally anchored spatial fields.
-pub const SIMULATION_RULES: &str = "0.24";
+/// "0.25" adds measured per-bank targeting, finite mounted fire and shared
+/// weapon resources, temporary EMP and equipment-supported shield enquiry.
+pub const SIMULATION_RULES: &str = "0.25";
 
 /// The authored data, computed rather than remembered.
 ///

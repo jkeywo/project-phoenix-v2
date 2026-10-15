@@ -988,6 +988,7 @@ fn set_tactical_radar_range(app: &mut App, range: f32) {
         .entity_mut(entity)
         .insert(crate::entities::spawner::WeaponsConsoleSection(
             crate::entities::config::WeaponsConsoleConfig {
+                groups: Vec::new(),
                 torpedo_arc_color: vec![],
                 power_multipliers: None,
                 phaser_banks: vec![],

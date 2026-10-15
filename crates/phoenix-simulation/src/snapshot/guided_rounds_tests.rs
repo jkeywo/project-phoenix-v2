@@ -71,6 +71,7 @@ fn malformed_later_candidate_rounds_and_bursts_refuse_before_any_live_writes() {
         ))
         .id();
     let before = serde_json::to_value(capture(&world)).unwrap();
+    let entity_count = world.entities().len();
     for case in 0..13 {
         let mut snapshot = candidate();
         let mut second = snapshot.entities[0].clone();
@@ -103,7 +104,7 @@ fn malformed_later_candidate_rounds_and_bursts_refuse_before_any_live_writes() {
             "case{case}: {report:?}"
         );
         assert_eq!(world.resource::<crate::sim_tick::SimTick>().0, 42);
-        assert_eq!(world.entities().len(), 1);
+        assert_eq!(world.entities().len(), entity_count);
         assert_eq!(
             world.get::<Transform>(sentinel).unwrap().translation,
             Vec3::new(3.0, 4.0, 5.0)

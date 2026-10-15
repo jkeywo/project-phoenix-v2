@@ -1572,6 +1572,11 @@ pub(super) fn apply_entity_state_with(
     if let Some(saved) = &row.mounts {
         entity_mut.insert(saved.clone());
     }
+    if let Some(saved) = &row.weapon_targets {
+        entity_mut.insert(crate::console::weapons::assignments::ShipWeaponTargets(
+            saved.clone(),
+        ));
+    }
     if let Some(saved) = &row.broad {
         entity_mut.insert(crate::science::broad::BroadTracks(saved.clone()));
     }

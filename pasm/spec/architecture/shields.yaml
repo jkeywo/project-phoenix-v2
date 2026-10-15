@@ -13,7 +13,7 @@ entities:
     architecture:
       kind: defense-system
       authority: authoritative
-      owns: [shield-arc-state, shields-coordination-debounce-state]
+      owns: [shield-arc-state, shields-coordination-debounce-state, shield-probing-policy, shield-configuration-cycle]
       reads: [ship-station-system-topology-state, system-control-source-state]
       produces: [shield-status-blackboard-state]
       runs_in: [host-browser-runtime]

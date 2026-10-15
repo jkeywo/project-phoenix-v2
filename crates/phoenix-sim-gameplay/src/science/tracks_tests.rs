@@ -138,6 +138,7 @@ fn report_future_metadata_and_hidden_facts_refuse_transactionally() {
             2 => sample.identity.as_mut().unwrap().faction = Some("private-faction".into()),
             _ => {
                 sample.assessment = Some(TrackAssessment {
+                    protection: None,
                     alert: Some(true),
                     weapons_restrained: None,
                     disabled: None,
@@ -213,14 +214,12 @@ fn later_duplicate_observed_identity_retracts_automatic_reference_correlation() 
     );
     let duplicate = sample("second-private-source", 100.0);
     state.advance(&p, 2, 0.5, 1.0, &[first, duplicate]).unwrap();
-    assert!(
-        state.tracks[&first_id]
-            .identity
-            .as_ref()
-            .unwrap()
-            .references
-            .is_empty()
-    );
+    assert!(state.tracks[&first_id]
+        .identity
+        .as_ref()
+        .unwrap()
+        .references
+        .is_empty());
 }
 #[test]
 fn independent_instruments_cannot_alias_contact_ids_or_refresh_each_others_work() {
@@ -284,6 +283,7 @@ fn sample(source: &str, x: f32) -> BroadMeasurement {
         }),
         classification: Some("ship".into()),
         assessment: Some(TrackAssessment {
+            protection: None,
             alert: Some(true),
             weapons_restrained: Some(false),
             disabled: Some(false),
@@ -339,11 +339,10 @@ fn partial_paid_work_is_independent_of_contact_count_and_duplicate_ticks() {
         one.tracks["12:survey-array:contact-1"].supported_secs,
         many.tracks["12:survey-array:contact-1"].supported_secs
     );
-    assert!(
-        many.tracks
-            .values()
-            .all(|track| track.supported_secs == 1.0)
-    );
+    assert!(many
+        .tracks
+        .values()
+        .all(|track| track.supported_secs == 1.0));
     let before = many.clone();
     many.advance(&p, 3, 0.5, 1.0, &[sample("a", 900.0)])
         .unwrap();
@@ -415,12 +414,10 @@ fn confused_crossing_returns_do_not_preserve_private_ground_truth_associations()
     );
     let published = state.projection(&p, 1, 0.5).unwrap();
     assert_eq!(published.iter().filter(|track| !track.predicted).count(), 2);
-    assert!(
-        published
-            .iter()
-            .filter(|track| !track.predicted)
-            .all(|track| track.identity.is_none())
-    );
+    assert!(published
+        .iter()
+        .filter(|track| !track.predicted)
+        .all(|track| track.identity.is_none()));
 }
 #[test]
 fn zero_supply_retains_findings_then_bounded_retention_removes_only_stale_tracks() {
@@ -481,10 +478,9 @@ fn continuation_matches_quality_motion_and_identity_after_json_and_refuses_tampe
     bad.current.insert("a".into(), "missing-contact".into());
     assert!(bad.validate(&p, 10, 0.5).is_err());
     let before = live.clone();
-    assert!(
-        live.advance(&p, 10, 0.5, 1.0, &[sample("a", 0.0), sample("a", 1.0)])
-            .is_err()
-    );
+    assert!(live
+        .advance(&p, 10, 0.5, 1.0, &[sample("a", 0.0), sample("a", 1.0)])
+        .is_err());
     assert_eq!(live, before);
     assert!(live.advance(&p, 10, 0.5, f32::NAN, &[]).is_err());
     assert_eq!(live, before);

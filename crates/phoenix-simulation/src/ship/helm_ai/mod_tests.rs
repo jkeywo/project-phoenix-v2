@@ -9831,7 +9831,6 @@ fn set_torpedoes_in_flight(app: &mut App, n: usize) {
                 target_uuid: None,
                 source_uuid: None,
                 tube_id: "bow_port".into(),
-                shield_pierce: 0.0,
             });
     }
 }

@@ -13,6 +13,8 @@ use crate::simmath;
 
 #[path = "energy_tests.rs"]
 mod energy_tests;
+#[path = "measured_beam_tests.rs"]
+mod measured_beam_tests;
 #[path = "strike_tests.rs"]
 mod strike_tests;
 
@@ -5976,6 +5978,7 @@ rank = "Ltn."
             PhaserCooldown::default(),
             ShipPhysics::default(),
             WeaponsConsoleSection(crate::entities::config::WeaponsConsoleConfig {
+                groups: Vec::new(),
                 torpedo_arc_color: vec![],
                 power_multipliers: None,
                 phaser_banks: vec![crate::entities::config::PhaserBankConfig {
@@ -7508,6 +7511,7 @@ fn set_tactical_radar_range(app: &mut App, range: f32) {
         .entity_mut(entity)
         .insert(crate::entities::spawner::WeaponsConsoleSection(
             crate::entities::config::WeaponsConsoleConfig {
+                groups: Vec::new(),
                 torpedo_arc_color: vec![],
                 power_multipliers: None,
                 phaser_banks: vec![],
@@ -7686,6 +7690,7 @@ fn tactical_ai_respects_radar_range() {
             app.world_mut().entity_mut(entity).insert(
                 crate::entities::spawner::WeaponsConsoleSection(
                     crate::entities::config::WeaponsConsoleConfig {
+                        groups: Vec::new(),
                         torpedo_arc_color: vec![],
                         power_multipliers: None,
                         phaser_banks: vec![],
@@ -11141,7 +11146,6 @@ fn torpedo_in_flight_count_is_published_as_a_public_fact() {
         target_uuid: None,
         source_uuid: Some("shooter".into()),
         tube_id: "fore_port".into(),
-        shield_pierce: 0.0,
     });
     let ship = app
         .world_mut()
@@ -11856,7 +11860,6 @@ fn torpedo_kill_on_the_local_ship_latches_game_over() {
             target_uuid: Some("test-local-ship".into()),
             source_uuid: Some("enemy-uuid".into()),
             tube_id: "fore_port".into(),
-            shield_pierce: 1.0,
         });
     app.world_mut().spawn((
         crate::server_app::Ship,
@@ -14669,9 +14672,9 @@ fn los_enemy_blocker_redirects_damage_away_from_target() {
 }
 
 #[test]
-fn los_friendly_blocker_absorbs_beam_with_no_damage() {
+fn los_friendly_blocker_takes_physical_collateral_and_stops_the_ray() {
     // Shooter and blocker are same faction. Blocker at (0,0,-10),
-    // target at (0,0,-30). Neither blocker nor target should take damage.
+    // target at (0,0,-30). The actual blocker takes collateral; the target is covered.
     use crate::ai::faction::FactionRegistry;
     use crate::entities::config_cache::FactionRegistryResource;
 
@@ -14724,9 +14727,9 @@ fn los_friendly_blocker_absorbs_beam_with_no_damage() {
     let blocker_after = hull_hp(&app, blocker);
     let target_after = hull_hp(&app, target);
 
-    assert_eq!(
-        blocker_after, blocker_before,
-        "Friendly blocker must NOT take damage (before={blocker_before}, after={blocker_after})"
+    assert!(
+        blocker_after < blocker_before,
+        "The physical friendly blocker must take collateral (before={blocker_before}, after={blocker_after})"
     );
     assert_eq!(
         target_after, target_before,

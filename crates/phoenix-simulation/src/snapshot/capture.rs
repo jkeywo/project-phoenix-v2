@@ -1428,6 +1428,9 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                         .flatten(),
                     power: capture_power(entity),
                     mounts: entity.get::<crate::weapons::mounts::ShipMounts>().cloned(),
+                    weapon_targets: entity
+                        .get::<crate::console::weapons::assignments::ShipWeaponTargets>()
+                        .map(|state| state.0.clone()),
                     port_provider: entity
                         .get::<crate::resources::ports_server::PortProviderState>()
                         .map(|owner| owner.0.clone()),

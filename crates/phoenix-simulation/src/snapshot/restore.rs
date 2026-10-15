@@ -44,6 +44,12 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
             .push(RestoreGap::ResourceStateInvalid { uuid, reason });
         return report;
     }
+    if let Err((uuid, reason)) = super::weapon_targets::validate_roster(world, snapshot) {
+        report
+            .gaps
+            .push(RestoreGap::ResourceStateInvalid { uuid, reason });
+        return report;
+    }
     if let Err((uuid, reason)) = super::emp::validate_roster(world, snapshot) {
         report
             .gaps

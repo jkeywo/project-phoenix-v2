@@ -374,9 +374,10 @@ mod mission_clock_tests;
 mod mounts;
 #[cfg(test)]
 mod navigation_sharing_tests;
-mod shield_enquiry;
 mod sensing_publications;
+mod shield_enquiry;
 mod spatial_fields;
 
 #[cfg(test)]
 mod sustained_beam_tests;
+mod weapon_targets;

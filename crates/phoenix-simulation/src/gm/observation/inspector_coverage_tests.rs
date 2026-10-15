@@ -514,6 +514,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         damage_schema,
         phoenix_model::damage::DamageConfig,
+        emp,
         materials,
         remedies
     );
@@ -554,6 +555,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         impact_schema,
         phoenix_model::damage::DamageProfile,
+        emp,
         damage_type,
         penetration
     );
@@ -618,6 +620,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         private_component_state_schema,
         phoenix_model::damage::ComponentState,
+        emp,
         condition,
         dose,
         last_source
@@ -859,6 +862,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         weapons_console_schema,
         crate::entities::config::WeaponsConsoleConfig,
+        groups,
         torpedo_arc_color,
         power_multipliers,
         phaser_banks,
@@ -871,6 +875,8 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         phaser_bank_schema,
         crate::entities::config::PhaserBankConfig,
+        targets,
+        operation,
         impact,
         id,
         facing_deg,
@@ -889,6 +895,8 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         blaster_bank_schema,
         crate::entities::config::BlasterBankConfig,
+        targets,
+        rounds,
         impact,
         id,
         facing_deg,
@@ -913,6 +921,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         torpedoes_schema,
         crate::entities::config::TorpedoesConfig,
+        durability,
         count,
         initial_count,
         damage_hull,
@@ -931,6 +940,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         torpedo_tube_schema,
         crate::entities::config::TorpedoTubeConfig,
+        targets,
         impact,
         id,
         facing_deg,

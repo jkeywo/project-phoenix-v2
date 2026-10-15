@@ -13,6 +13,37 @@ fn assert_client_roundtrip(msg: ClientMessage) {
 }
 
 #[test]
+fn weapon_assignment_and_stop_controls_round_trip_through_the_existing_command_envelope() {
+    for payload in [
+        SystemControlPayload::SetWeaponTarget {
+            uuid: Some("radar:contact:7".into()),
+        },
+        SystemControlPayload::SetWeaponTarget { uuid: None },
+        SystemControlPayload::SetWeaponGroupTarget {
+            group: "main-beams".into(),
+            uuid: Some("radar:contact:8".into()),
+        },
+        SystemControlPayload::SetWeaponGroupTarget {
+            group: "main-beams".into(),
+            uuid: None,
+        },
+        SystemControlPayload::FollowWeaponGroup,
+        SystemControlPayload::FollowPrimaryTarget,
+        SystemControlPayload::StopPhaser,
+    ] {
+        assert_client_roundtrip(ClientMessage::ControlSystem {
+            target: SystemId("phaser-fore".into()),
+            payload: payload.clone(),
+        });
+        assert_client_roundtrip(ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("weapon-order").unwrap(),
+            target: SystemId("phaser-fore".into()),
+            payload,
+        });
+    }
+}
+
+#[test]
 fn port_controls_round_trip_with_actual_owner_visit_and_typed_lines() {
     for payload in [
         SystemControlPayload::SetTransferStore {

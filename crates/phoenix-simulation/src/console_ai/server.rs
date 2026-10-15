@@ -30,7 +30,6 @@
 //! entirely, and target selection now lives wholly in
 //! `console::weapons::ai_target_selection`.
 
-use crate::simmath;
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
@@ -450,6 +449,7 @@ fn ai_power_allocation(
 ///   test asserts on.
 pub(crate) fn ai_torpedo_auto_fire(
     sessions: Res<crate::lobby::Sessions>,
+    aims: crate::console::weapons::assignments::WeaponAimInputs,
     // The read-only AI-host world context — flag chain, sessions, and origin
     // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
     // runs this host must register it (`register_ai_host_env`) or fail loudly at
@@ -583,61 +583,6 @@ pub(crate) fn ai_torpedo_auto_fire(
             continue;
         }
 
-        // Combat Lock from this ship's frozen viewscreen blackboard (issue
-        // #829, spec §1/§3). One-tick lag accepted, including for firing.
-        let Some(target_uuid) = ship_config
-            .0
-            .systems
-            .iter()
-            .filter(|system| system.kind == "torpedo_tube")
-            .find_map(|system| console_combat_lock(&ship_config.0, &system.id, blackboards))
-        else {
-            continue;
-        };
-
-        // Look up live world position + shields — the WorldResource snapshot is
-        // stale for moving targets. A target that resolves here is a real lock
-        // (`target_locked`); one that does not is a UUID naming something that
-        // no longer exists, so there is nothing to shoot at.
-        let target_state = asteroid_q
-            .iter()
-            .find_map(|(u, t)| {
-                (u.0 == target_uuid).then_some(((t.translation.x, t.translation.z), None, 0.0))
-            })
-            .or_else(|| {
-                other_ships_q.iter().find_map(|(u, t, shields, tphys)| {
-                    (u.0 == target_uuid).then_some((
-                        (t.translation.x, t.translation.z),
-                        shields,
-                        tphys.map(|p| p.yaw).unwrap_or(0.0),
-                    ))
-                })
-            });
-        let Some(((tx, tz), target_shields_comp, target_yaw)) = target_state else {
-            continue;
-        };
-
-        // HP of the ONE arc a torpedo from this ship would strike. Arcs are
-        // authored relative to the target's own facing, so the bearing is taken
-        // from the target's frame (hence `target_yaw`) and resolved by the
-        // target's own `facing_index_for_bearing` — the same resolver
-        // `apply_damage` uses (`tick_torpedo_lifecycle` feeds it the torpedo's
-        // impact bearing), so the gate and the eventual hit agree about
-        // which arc is in the way. A healthy rear arc must not veto a shot into
-        // a collapsed front arc. An offline arc reads 0 (it passes damage
-        // through to the hull, so it is not blocking), and a target with no
-        // `ShipShields` (asteroids, debris) reads 0 — torpedo-eligible.
-        let target_facing_shields: i32 = target_shields_comp
-            .map(|s| {
-                s.0.hp_facing_attacker(physics.x, physics.z, tx, tz, target_yaw)
-            })
-            .unwrap_or(0);
-
-        let dx = tx - physics.x;
-        let dz = tz - physics.z;
-        let world_bearing = simmath::atan2(dx, -dz);
-        let bearing = world_bearing - physics.yaw;
-
         // Per-entity component only (issue #738). This used to fall back to
         // the global `TorpedoSystemResource` Resource, which mirrors the
         // LOCAL ship's magazine and tube state — so an NPC with no `[torpedoes]`
@@ -647,19 +592,6 @@ pub(crate) fn ai_torpedo_auto_fire(
             continue;
         };
         let torpedo_sys: &crate::weapons::torpedo::TorpedoSystem = &torpedo_sys_comp.0;
-        let tubes: Vec<crate::console_ai::TubeSummary> = torpedo_sys
-            .tubes
-            .iter()
-            .map(|tube| crate::console_ai::TubeSummary {
-                id: tube.id.clone(),
-                loaded: tube.is_loaded(),
-                in_arc: tube.is_in_arc(bearing),
-            })
-            .collect();
-        // Reported, not a gate: `torpedoes_remaining` is the rounds left to
-        // RELOAD with — the ones in the tubes were drawn from it when their load
-        // started — so it must never veto a launch. See `auto_fire_torpedo`.
-        let magazine = torpedo_sys.torpedoes_remaining();
         // Ship-wide "every tube is at its volley capacity" (issue #791). A
         // doctrine that spends a shield gap on one full salvo needs this rather
         // than the per-tube `loaded` (which is `loaded_count > 0`), and it is a
@@ -673,28 +605,71 @@ pub(crate) fn ai_torpedo_auto_fire(
             .iter()
             .all(|tube| tube.loaded_count >= tube.volley_max);
 
-        let input = crate::console_ai::TorpedoAiInput {
-            // Reaching here means `TacticalRadarSelection` named an entity that
-            // resolved to a live world position above — a real lock.
-            target_locked: true,
-            target_facing_shields,
-            tubes,
-            magazine,
-        };
-
-        let tubes_to_fire = crate::console_ai::auto_fire_torpedo(&input);
-        for tube_id in tubes_to_fire {
-            let Some(target) = crate::ship::system_registry::torpedo_tube_system_id(&tube_id)
-            else {
+        for tube in &torpedo_sys.tubes {
+            let tube_id = &tube.id;
+            let Some(target) = crate::ship::system_registry::torpedo_tube_system_id(tube_id) else {
                 continue;
             };
-            // A neighbouring tube can be controlled by another Console. A
-            // shared Station or magazine never lends it that Console's lock.
-            if console_combat_lock(&ship_config.0, &target, blackboards).as_deref()
-                != Some(target_uuid.as_str())
-            {
+            let Some(aim) = aims.resolve(ship_entity, &target, |route| {
+                asteroid_q
+                    .iter()
+                    .find_map(|(uuid, transform)| {
+                        (uuid.0 == route)
+                            .then_some([transform.translation.x, transform.translation.z])
+                    })
+                    .or_else(|| {
+                        other_ships_q.iter().find_map(|(uuid, transform, _, _)| {
+                            (uuid.0 == route)
+                                .then_some([transform.translation.x, transform.translation.z])
+                        })
+                    })
+            }) else {
+                continue;
+            };
+            if !aim.allows(tube.targets.as_deref()) {
                 continue;
             }
+            let geometry = aims.geometry(
+                ship_entity,
+                &target,
+                &crate::weapons::mount::MountConfig {
+                    facing_deg: tube.facing_deg,
+                    fire_arc_deg: tube.fire_arc_deg,
+                    range: torpedo_sys.config.speed * torpedo_sys.config.lifespan,
+                },
+                &aim,
+                physics,
+            );
+            if !tube.is_loaded() || !geometry.in_arc || !geometry.in_range {
+                continue;
+            }
+            // A permitted position is not a shield measurement. Legacy fixtures
+            // retain their old inputs; fitted instruments never read live enemy
+            // shields to decide whether to launch.
+            let target_facing_shields = if aim.measured {
+                aims.observed_shield_cover(ship_entity, &target, &aim, [physics.x, physics.z])
+            } else {
+                Some(
+                    other_ships_q
+                        .iter()
+                        .find_map(|(uuid, _, shields, target_physics)| {
+                            (uuid.0 == aim.route).then(|| {
+                                shields
+                                    .map(|shields| {
+                                        shields.0.hp_facing_attacker(
+                                            physics.x,
+                                            physics.z,
+                                            aim.position[0],
+                                            aim.position[1],
+                                            target_physics.map_or(0.0, |physics| physics.yaw),
+                                        )
+                                    })
+                                    .unwrap_or(0)
+                            })
+                        })
+                        .unwrap_or(0),
+                )
+            };
             // Per-tube LAUNCH policy gate (issue #782): `auto_fire_torpedo`
             // already resolved this tube's host readiness (loaded, in arc, target
             // locked — NOT the magazine, whose rounds are the ones left to reload
@@ -711,7 +686,7 @@ pub(crate) fn ai_torpedo_auto_fire(
             // A tube with NO entry does not launch: since #885b stage 5d there
             // is no synthesised stand-in, and strict AI-declaration mode rejects
             // a tube that authors no inline `ai` block at load.
-            let Some(launch_policy) = tube_policies.and_then(|p| p.0.get(&tube_id)) else {
+            let Some(launch_policy) = tube_policies.and_then(|p| p.0.get(tube_id)) else {
                 continue;
             };
             let facts = crate::console::weapons::seed_torpedo_tube_launch_facts(
@@ -721,7 +696,7 @@ pub(crate) fn ai_torpedo_auto_fire(
                 true,
                 target_facing_shields,
                 tubes_full,
-                posture_for(&tube_id),
+                posture_for(tube_id),
             );
             if !crate::console::weapons::torpedo_tube_launch_policy_fires(
                 launch_policy,
@@ -735,9 +710,7 @@ pub(crate) fn ai_torpedo_auto_fire(
             crate::command_admission::ai_emit::emit_ai_command(
                 entity_uuid,
                 target,
-                crate::core::messages::SystemControlPayload::FireTorpedo {
-                    target_uuid: Some(target_uuid.clone()),
-                },
+                crate::core::messages::SystemControlPayload::FireTorpedo { target_uuid: None },
                 control_sources,
                 &sessions,
                 Some(ship_config),

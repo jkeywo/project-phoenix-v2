@@ -646,7 +646,6 @@ fn find_detonation_hits_handles_multiple_torpedoes_independently() {
         target_uuid: None,
         source_uuid: None,
         tube_id: "fore_port".into(),
-        shield_pierce: 0.0,
     });
     let targets = vec![
         ("a".to_string(), 1.0, 0.0, 0.0, 0.0),     // close to t1

@@ -327,6 +327,12 @@ pub(crate) fn handle_fire_torpedo(
         With<crate::server_app::Ship>,
     >,
     physical: Query<&crate::ship::compartment_damage::ShipDamage>,
+    aims: super::assignments::WeaponAimInputs,
+    legacy_positions: Query<(
+        Option<&crate::entities::spawner::EntityUuid>,
+        Option<&AsteroidUuid>,
+        &Transform,
+    )>,
     mut outbox: ResMut<SimOutbox>,
     mut balance_events: Option<
         ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
@@ -368,7 +374,7 @@ pub(crate) fn handle_fire_torpedo(
             transform,
             markers_opt,
             admitted,
-            blackboards_opt,
+            _blackboards_opt,
             source_uuid_opt,
             torpedo_sys_comp,
             weapon_fired_comp,
@@ -564,6 +570,81 @@ pub(crate) fn handle_fire_torpedo(
                 );
                 continue;
             }
+            let Some(tube_bearing) = aims.bearing(
+                shooter,
+                &cmd.target,
+                torpedo_sys
+                    .tube(&tube_id)
+                    .expect("resolved tube")
+                    .facing_deg,
+            ) else {
+                continue;
+            };
+            // Resolve only this tube's permitted target. Explicit Hold and a
+            // lost assigned contact never fall through to a different target.
+            let legacy = |route: &str| {
+                legacy_positions
+                    .iter()
+                    .find_map(|(uuid, asteroid, transform)| {
+                        (uuid.is_some_and(|id| id.0 == route)
+                            || asteroid.is_some_and(|id| id.0 == route))
+                        .then_some([transform.translation.x, transform.translation.z])
+                    })
+            };
+            let has_intent = aims.has_target_intent(shooter, &cmd.target);
+            let aim = aims.resolve(shooter, &cmd.target, legacy).or_else(|| {
+                (!has_intent)
+                    .then(|| {
+                        target_uuid.as_deref().and_then(|contact| {
+                            aims.resolve_reference(shooter, &cmd.target, contact, legacy)
+                        })
+                    })
+                    .flatten()
+            });
+            if aim.is_none()
+                && (has_intent
+                    || target_uuid.is_some()
+                    || torpedo_sys
+                        .tube(&tube_id)
+                        .is_some_and(|tube| tube.targets.is_some()))
+            {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::MissingTarget),
+                );
+                continue;
+            }
+            if let Some(aim) = &aim {
+                let tube = torpedo_sys.tube(&tube_id).expect("resolved tube");
+                if !aim.allows(tube.targets.as_deref()) {
+                    super::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        WeaponActionResult::Refused(WeaponActionRefusal::MissingTarget),
+                    );
+                    continue;
+                }
+                let geometry = aims.geometry(
+                    shooter,
+                    &cmd.target,
+                    &crate::weapons::mount::MountConfig {
+                        facing_deg: tube.facing_deg,
+                        fire_arc_deg: tube.fire_arc_deg,
+                        range: torpedo_sys.config.speed * torpedo_sys.config.lifespan,
+                    },
+                    aim,
+                    physics,
+                );
+                if !geometry.in_arc || !geometry.in_range {
+                    super::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        WeaponActionResult::Refused(WeaponActionRefusal::MissingTarget),
+                    );
+                    continue;
+                }
+            }
             if physical.get(shooter).is_ok_and(|damage| {
                 damage.factor(&cmd.target, phoenix_model::damage::DamageBinding::Operation) <= 0.0
             }) || !power_opt
@@ -582,24 +663,9 @@ pub(crate) fn handle_fire_torpedo(
                 id_mint.as_deref(),
                 crate::world_id::IdNamespace::Projectile,
             );
-            let tube_facing_rad = torpedo_sys
-                .tube(tube_id.as_str())
-                .map(|t| t.facing_deg.to_radians())
-                .unwrap_or(0.0);
-            let launch_heading = physics.yaw + tube_facing_rad;
+            let launch_heading = physics.yaw + tube_bearing.to_radians();
             let source_uuid = source_uuid_opt.map(|u| u.0.clone());
-            // Homing target: the ship's frozen Combat Lock (issue #829),
-            // else the explicit target on the FireTorpedo payload.
-            let combat_lock = match blackboards_opt.as_ref().and_then(|bbs| {
-                bbs.0
-                    .get(&crate::ship::system_registry::viewscreen_system_id())
-            }) {
-                Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => {
-                    bb.combat_lock.clone()
-                }
-                _ => None,
-            };
-            let homing_uuid: Option<String> = combat_lock.or_else(|| target_uuid.clone());
+            let homing_uuid = aim.map(|aim| aim.route);
             // Resolve one world-XZ origin per authored barrel marker (issue
             // #766), mirroring `tick_blaster_system`. A tube with no barrels
             // authored yields an empty slice, so `launch_with_barrels` falls

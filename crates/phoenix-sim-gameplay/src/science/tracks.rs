@@ -6,6 +6,12 @@ pub use phoenix_model::sensing_tracks::{
 };
 use phoenix_model::{identity::SystemId, sensing::BroadConfig};
 use serde::{Deserialize, Serialize};
+
+pub fn shield_observation_sector(observer: [f32; 2], subject: [f32; 2]) -> u16 {
+    let degrees =
+        crate::simmath::atan2(observer[0] - subject[0], subject[1] - observer[1]).to_degrees();
+    (degrees.rem_euclid(360.0).round() as u16) % 360
+}
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Physical producer input, already limited by actual coverage/visibility.
@@ -202,6 +208,11 @@ impl BroadTrackState {
                     && track.identity.is_some()
                     && track.observation.is_none()
                     && track.received.is_none()
+                || track
+                    .assessment
+                    .as_ref()
+                    .and_then(|assessment| assessment.protection.as_ref())
+                    .is_some_and(|protection| protection.validate().is_err())
                 || track.identity.as_ref().is_some_and(|identity| {
                     identity.name.is_empty()
                         || identity.references.iter().any(|reference| {

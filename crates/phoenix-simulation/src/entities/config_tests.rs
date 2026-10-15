@@ -4788,7 +4788,7 @@ fn torpedo_in_flight_snapshots_shield_pierce_at_launch() {
     let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
     sys.tick(sys.config.load_time, &targets, &mut || "test".into());
     sys.launch("fore", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
-    assert!((sys.in_flight[0].shield_pierce - 0.75).abs() < 1e-6);
+    assert!((sys.in_flight[0].profile.shield_pierce - 0.75).abs() < 1e-6);
 
     let det = sys.handle_collision_full("t1").unwrap();
     assert!((det.shield_pierce - 0.75).abs() < 1e-6);

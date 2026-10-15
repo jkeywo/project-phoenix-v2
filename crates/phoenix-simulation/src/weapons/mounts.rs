@@ -119,13 +119,35 @@ fn measured_contact(
     contact: &str,
 ) -> Option<(String, [f32; 2])> {
     let view = config.observations_for_system(owner, &boards.0);
-    tracks.0.iter().find_map(|(instrument, state)| {
-        let public = crate::science::contact_routing::observations(view.get(instrument)?)?;
-        let record = public.iter().find(|record| {
-            record.contact_id == contact && !record.predicted && record.selectable
-        })?;
-        Some((state.resolve_current(contact)?.to_owned(), record.position))
-    })
+    let mut found = None;
+    for (instrument, state) in &tracks.0 {
+        let Some(public) = view
+            .get(instrument)
+            .and_then(crate::science::contact_routing::observations)
+        else {
+            continue;
+        };
+        for record in public
+            .iter()
+            .filter(|record| record.contact_id == contact && !record.predicted && record.selectable)
+        {
+            let Some(route) = state.resolve_current(contact) else {
+                continue;
+            };
+            if record.position.iter().any(|value| !value.is_finite()) {
+                return None;
+            }
+            let candidate = (route.to_owned(), record.position, record.velocity);
+            if found
+                .as_ref()
+                .is_some_and(|previous| previous != &candidate)
+            {
+                return None;
+            }
+            found = Some(candidate);
+        }
+    }
+    found.map(|(route, point, _)| (route, point))
 }
 
 fn current_point(

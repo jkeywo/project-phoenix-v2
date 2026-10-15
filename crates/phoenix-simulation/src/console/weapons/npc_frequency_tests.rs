@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::messages::ViewscreenBlackboard;
+use crate::core::messages::{SystemId, ViewscreenBlackboard};
 use crate::server_app::ShipSystemBlackboards;
 use crate::ship_plugin::ShipConfigComponent;
 use bevy::ecs::system::RunSystemOnce;

@@ -6,9 +6,11 @@
 //! everything the `server` adapter exposes is re-exported so
 //! `crate::console::weapons::X` paths keep resolving.
 
+pub mod assignments;
 pub mod beam;
 pub mod blackboard;
 pub mod blaster;
+mod round_work;
 pub mod server;
 pub mod shared;
 pub mod strike;

@@ -124,6 +124,34 @@ fn published(
     let (core, fine) = (core.clone(), fine.clone());
     (core, fine, compute_current_weapons_update(world))
 }
+
+fn aim_at_held_measurement(world: &mut World, entity: Entity, owner: &SystemId) {
+    let boards = world.get::<ShipSystemBlackboards>(entity).unwrap();
+    let SystemBlackboard::TacticalRadar(board) = &boards.0[&SystemId("tactical-radar".into())]
+    else {
+        unreachable!()
+    };
+    let point = board.tracks.as_ref().unwrap()[0].position;
+    let physics = world
+        .get::<ShipPhysics>(entity)
+        .copied()
+        .unwrap_or_default();
+    let (x, forward) =
+        crate::weapons::mount::ship_local(point[0], point[1], physics.x, physics.z, physics.yaw);
+    let bearing = crate::simmath::atan2(x, forward).to_degrees();
+    let facing = world
+        .get::<crate::weapons::mounts::MountProfiles>(entity)
+        .unwrap()
+        .0[owner]
+        .facing_deg;
+    world
+        .get_mut::<crate::weapons::mounts::ShipMounts>(entity)
+        .unwrap()
+        .0
+        .get_mut(owner)
+        .unwrap()
+        .offset_deg = f64::from(bearing - facing);
+}
 #[test]
 fn ordinary_core_fine_and_reconnect_readiness_agree_with_measured_point_and_real_bearing() {
     let (mut world, entity, _) = fixture();
@@ -154,13 +182,7 @@ fn ordinary_core_fine_and_reconnect_readiness_agree_with_measured_point_and_real
             .unwrap()
             .readiness
     );
-    world
-        .get_mut::<crate::weapons::mounts::ShipMounts>(entity)
-        .unwrap()
-        .0
-        .get_mut(&owner)
-        .unwrap()
-        .offset_deg = 90.0;
+    aim_at_held_measurement(&mut world, entity, &owner);
     let (core, fine, reconnect) = published(&mut world, entity);
     let bank = core.banks.iter().find(|bank| bank.id == "fore").unwrap();
     assert!(bank.fire_ready && fine.fire_ready);
@@ -180,13 +202,7 @@ fn explicit_hold_lost_feed_and_conceal_never_borrow_primary_or_live_world_geomet
     for mode in 0..3 {
         let (mut world, entity, _) = fixture();
         let owner = SystemId("phaser-fore".into());
-        world
-            .get_mut::<crate::weapons::mounts::ShipMounts>(entity)
-            .unwrap()
-            .0
-            .get_mut(&owner)
-            .unwrap()
-            .offset_deg = 90.0;
+        aim_at_held_measurement(&mut world, entity, &owner);
         assert!(published(&mut world, entity).1.fire_ready);
         match mode {
             0 => world
@@ -274,13 +290,7 @@ fn actual_core_fine_and_reconnect_target_filters_use_only_held_classification() 
     use phoenix_model::tags::EntityTag;
     let (mut world, entity, _) = fixture();
     let owner = SystemId("phaser-fore".into());
-    world
-        .get_mut::<crate::weapons::mounts::ShipMounts>(entity)
-        .unwrap()
-        .0
-        .get_mut(&owner)
-        .unwrap()
-        .offset_deg = 90.0;
+    aim_at_held_measurement(&mut world, entity, &owner);
     assert!(published(&mut world, entity).1.fire_ready);
     // Unknown held classification cannot satisfy an explicit tag, regardless
     // of the real actor's private definition/position elsewhere in the scene.
@@ -336,13 +346,7 @@ fn actual_core_fine_and_reconnect_target_filters_use_only_held_classification() 
 fn omitted_policy_does_not_turn_a_nonordinary_route_into_ready_geometry() {
     let (mut world, entity, _) = fixture();
     let owner = SystemId("phaser-fore".into());
-    world
-        .get_mut::<crate::weapons::mounts::ShipMounts>(entity)
-        .unwrap()
-        .0
-        .get_mut(&owner)
-        .unwrap()
-        .offset_deg = 90.0;
+    aim_at_held_measurement(&mut world, entity, &owner);
     assert!(published(&mut world, entity).1.fire_ready);
     let physical = world
         .query::<(Entity, &crate::entities::spawner::EntityUuid)>()

@@ -471,6 +471,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("recorded-scans", fold_recorded_scans_namespace),
     ("passive-samples", fold_passive_samples_namespace),
     ("system-mounts", fold_mounts_namespace),
+    ("weapon-target-assignments", fold_weapon_targets_namespace),
     ("broad-tracks", fold_broad_tracks_namespace),
     ("navigation-sharing", fold_navigation_sharing_namespace),
     ("navigation-request", fold_navigation_request_namespace),
@@ -2661,6 +2662,15 @@ fn fold_mounts_namespace(world: &World, acc: u64) -> u64 {
             }
             Some(state)
         },
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+fn fold_weapon_targets_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "weapon-target-assignments",
+        |owner: &crate::console::weapons::assignments::ShipWeaponTargets| Some(owner.0.clone()),
         |acc, state| fold_serde(acc, &state),
     )
 }

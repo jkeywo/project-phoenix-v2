@@ -38,9 +38,29 @@ pub struct TrackIdentity {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrackAssessment {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protection: Option<ObservedShieldCover>,
     pub alert: Option<bool>,
     pub weapons_restrained: Option<bool>,
     pub disabled: Option<bool>,
+}
+
+/// The shielding actually observed along one ray, not a complete shield map.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservedShieldCover {
+    /// World azimuth from the subject towards the observing instrument.
+    pub incoming_sector: u16,
+    pub blocked: bool,
+}
+impl ObservedShieldCover {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.incoming_sector >= 360 {
+            Err("invalid observed shield bearing".into())
+        } else {
+            Ok(())
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

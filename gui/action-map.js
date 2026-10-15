@@ -115,12 +115,12 @@ export const ACTION_MAP = Object.freeze({
       payload: { type: 'FirePhaser' },
     });
   },
-
   stop_phaser: (a, send) => {
     if (!a.bank) return;
     const correlated = typeof a.correlation === 'string' && a.correlation;
     send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
-      ...(correlated ? { correlation: a.correlation } : {}), target: `phaser-${a.bank}`,
+      ...(correlated ? { correlation: a.correlation } : {}),
+      target: `phaser-${a.bank}`,
       payload: { type: 'StopPhaser' },
     });
   },

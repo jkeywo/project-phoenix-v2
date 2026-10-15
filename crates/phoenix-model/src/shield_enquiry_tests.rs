@@ -10,18 +10,8 @@ fn ordinary_and_special_equipment_have_explicit_bounded_optional_benefits() {
 }
 #[test]
 fn acquired_configuration_does_not_contain_unmeasured_frequency_or_future_schedule() {
-    let a = ShieldFinding::acquire(
-        0.701,
-        Default::default(),
-        std::time::Duration::from_millis(100),
-    )
-    .unwrap();
-    let b = ShieldFinding::acquire(
-        0.702,
-        Default::default(),
-        std::time::Duration::from_millis(100),
-    )
-    .unwrap();
+    let a = ShieldFinding::acquire(0.701, Default::default(), 0.1).unwrap();
+    let b = ShieldFinding::acquire(0.702, Default::default(), 0.1).unwrap();
     assert_eq!(a, b);
     a.validate().unwrap();
     let mut bad = a.clone();

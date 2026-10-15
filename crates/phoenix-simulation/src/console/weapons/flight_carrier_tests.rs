@@ -44,6 +44,11 @@ fn host_with_registration(reverse: bool) -> App {
     crate::world_id::install(world, crate::world_id::WorldIdMint::default());
     // Actual capture joins use optional registered owners even for bare hosts.
     world.register_component::<EntityUuid>();
+    // The normal host registers the empty spatial namespaces before capture.
+    // Restore's derived radar rebuild also registers these query components;
+    // both sides must start from that same host roster, even with no asteroids.
+    world.register_component::<crate::server_app::AsteroidUuid>();
+    world.register_component::<Transform>();
     world.register_component::<crate::ship::state::ShipPhysics>();
     world.register_component::<crate::entities::spawner::EntitySystemHull>();
     world.register_component::<crate::ship::state::ShipRedAlert>();

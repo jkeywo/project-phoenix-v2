@@ -582,3 +582,51 @@ fn legacy_direct_wire_and_explicit_shared_display_redact_internal_returns_and_ke
         "projection never edits canonical receipt bookkeeping"
     );
 }
+
+#[test]
+fn clearing_an_inbox_id_cannot_cancel_a_distinct_planned_reading_with_the_same_text() {
+    let (mut app, source, _) = fixture(10.0);
+    let id = "htn/plan/request";
+    let mut message = crate::core::messages::CommsMessage::injected(
+        id.into(),
+        "narrator".into(),
+        "Narrator".into(),
+        "Plot message".into(),
+        Default::default(),
+        vec![],
+        "plot".into(),
+        true,
+        Default::default(),
+    );
+    message.recipient_ship = Some(phoenix_model::wire::ShipKey("source".into()));
+    app.world_mut()
+        .resource_mut::<CommsInboxRes>()
+        .0
+        .inject(message);
+    let key = super::server::PendingAiResponseKey::planned("source", id);
+    let reading = CommsRequestReading::start(30, 10).unwrap();
+    let record = super::server::PendingAiResponse {
+        due_tick: reading.due_tick().unwrap(),
+        response_fingerprint: 0,
+        request_reading: Some(reading),
+    };
+    app.world_mut()
+        .resource_mut::<CommsRuntime>()
+        .pending_ai_responses
+        .insert(key.clone(), record);
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(source)
+        .unwrap()
+        .0[0]
+        .payload = SystemControlPayload::ClearComms;
+    app.world_mut()
+        .run_system_once(crate::console::comms::server::handle_clear_comms)
+        .unwrap();
+    assert_eq!(
+        app.world()
+            .resource::<CommsRuntime>()
+            .pending_ai_responses
+            .get(&key),
+        Some(&record)
+    );
+}

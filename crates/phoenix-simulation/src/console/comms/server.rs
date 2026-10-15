@@ -1070,7 +1070,7 @@ pub(crate) fn handle_clear_comms(
             });
             comms
                 .pending_ai_responses
-                .retain(|key, _| !dialogue_ids.contains(&key.message_id));
+                .retain(|key, _| key.planned_request || !dialogue_ids.contains(&key.message_id));
             inbox.0.clear_for_ship(ship);
             if let Some(source) = ship {
                 comms.open_hails.clear_source(source);

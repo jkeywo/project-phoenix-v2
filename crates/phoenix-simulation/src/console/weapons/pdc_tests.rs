@@ -493,3 +493,186 @@ fn an_asymmetric_body_uses_current_canonical_yaw_instead_of_mirrored_or_stale_po
     assert_eq!(position, stale.translation);
     assert_eq!(rotation, stale.rotation);
 }
+
+#[test]
+fn actual_paid_crossing_prevents_same_step_endpoint_payload_but_unopposed_round_damages_hull() {
+    use super::super::{BlasterSystemResource, TorpedoSystemResource};
+    use crate::ship::compartment_damage::ShipDamage;
+    use crate::weapons::blaster::BlasterSystem;
+    use bevy::ecs::system::RunSystemOnce;
+    use phoenix_model::identity::SystemId;
+    for intercept in [false, true] {
+        let config = crate::entities::include_resolve::load_entity_config(
+            "assets/entities/pdc_cruiser.toml",
+        )
+        .unwrap();
+        let mut app = app();
+        let mut time = Time::<()>::default();
+        time.advance_by(std::time::Duration::from_secs(1));
+        app.insert_resource(time)
+            .init_resource::<TorpedoSystemResource>()
+            .init_resource::<super::super::shared::TorpedoTargetSnapshot>();
+        let target = app
+            .world_mut()
+            .spawn((
+                crate::entities::spawner::EntityUuid("endpoint-hull".into()),
+                Transform::from_xyz(10.0, 10.0, -25.0),
+                ShipDamage::from_config(&config).unwrap().unwrap(),
+            ))
+            .id();
+        let before = app
+            .world()
+            .get::<ShipDamage>(target)
+            .unwrap()
+            .structural_totals()
+            .0;
+        let mut incoming = incoming();
+        incoming.0.in_flight.truncate(1);
+        let missile = &mut incoming.0.in_flight[0];
+        missile.x = -10.0;
+        missile.z = -25.0;
+        missile.heading = std::f32::consts::FRAC_PI_2;
+        missile.profile.speed = 20.0;
+        let provider = app
+            .world_mut()
+            .spawn((crate::server_app::Ship, incoming))
+            .id();
+        let owner = SystemId("blaster-side".into());
+        let mut power = crate::ship::power::ShipPowerSystem(
+            crate::modifiers::power_system::PowerSystem::from_energy(
+                config.energy.clone().unwrap(),
+                config.ship_config.clone().unwrap(),
+            )
+            .unwrap(),
+        );
+        let mut inventory = crate::infrastructure::InfrastructureCondition(
+            crate::infrastructure::condition::InfrastructureState::from_config(
+                config.infrastructure.as_ref().unwrap(),
+            ),
+        );
+        let logistics = crate::resources::logistics_server::CompiledShipLogistics(
+            crate::resources::logistics_profile::compile_entity_logistics(&config)
+                .unwrap()
+                .unwrap(),
+        );
+        let bank_config = config
+            .weapons_console
+            .as_ref()
+            .unwrap()
+            .blaster_banks
+            .iter()
+            .find(|bank| bank.id == "side")
+            .unwrap()
+            .to_runtime();
+        let cost = power
+            .0
+            .config()
+            .consumers
+            .iter()
+            .find(|consumer| consumer.system == owner)
+            .unwrap()
+            .discrete_cost;
+        let energy = power.0.network().consumers[&owner].energy;
+        let rounds = inventory
+            .0
+            .capacity_stock("side-kinetic-rounds")
+            .unwrap()
+            .level;
+        if intercept {
+            let feed = bank_config.rounds.clone().unwrap();
+            let mut bank = BlasterSystem::new(bank_config);
+            assert!(bank.request_fire());
+            let mut minted = 0;
+            let launched = bank.tick_with_origins_3d(
+                0.1,
+                0.0,
+                &[Some([0.0, 10.0, 0.0]); 2],
+                0.0,
+                [0.0, 10.0, -25.0],
+                [0.0; 3],
+                "pdc",
+                &mut |barrel| {
+                    super::super::round_work::pay_barrel(
+                        &owner,
+                        Some(&feed),
+                        barrel,
+                        Some(&mut power),
+                        Some(&mut inventory),
+                        Some(&logistics),
+                        &Default::default(),
+                    )
+                    .is_some()
+                },
+                &mut || {
+                    minted += 1;
+                    format!("actual-crossing-{minted}")
+                },
+            );
+            assert_eq!(launched.len(), 2);
+            bank.advance_flight_only(1.0);
+            app.world_mut().spawn(BlasterSystemResource(vec![bank]));
+        }
+        // Real production phases: actual guided advance, PDC Damage, then
+        // terminal payload settlement. The endpoint alone is a genuine hit.
+        app.world_mut()
+            .run_system_once(super::super::torpedo::build_torpedo_target_snapshot)
+            .unwrap();
+        app.world_mut()
+            .run_system_once(super::super::advance_torpedo_flights)
+            .unwrap();
+        let roster = &app
+            .world()
+            .resource::<super::super::shared::TorpedoTargetSnapshot>()
+            .targets;
+        assert!(app
+            .world()
+            .get::<TorpedoSystemResource>(provider)
+            .unwrap()
+            .0
+            .find_detonation_hits(roster)
+            .iter()
+            .any(|(_, target)| target == "endpoint-hull"));
+        app.world_mut()
+            .run_system_once(super::super::blaster::handle_blaster_hits)
+            .unwrap();
+        app.world_mut()
+            .run_system_once(super::super::torpedo::tick_torpedo_lifecycle)
+            .unwrap();
+        let after = app
+            .world()
+            .get::<ShipDamage>(target)
+            .unwrap()
+            .structural_totals()
+            .0;
+        if intercept {
+            assert_eq!(
+                after, before,
+                "earlier actual crossing removes payload before endpoint settlement"
+            );
+        } else {
+            assert!(
+                after < before,
+                "same actual unopposed endpoint causes physical hull damage"
+            );
+        }
+        assert!(app
+            .world()
+            .get::<TorpedoSystemResource>(provider)
+            .unwrap()
+            .0
+            .in_flight
+            .is_empty());
+        assert_eq!(
+            inventory
+                .0
+                .capacity_stock("side-kinetic-rounds")
+                .unwrap()
+                .level,
+            rounds - if intercept { 2 } else { 0 }
+        );
+        assert_eq!(
+            power.0.network().consumers[&owner].energy,
+            energy - if intercept { 2.0 * cost } else { 0.0 }
+        );
+    }
+}

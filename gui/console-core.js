@@ -1,4 +1,5 @@
 import { registerProtectionActions } from './stations/protection-actions.js';
+import { registerBayActions } from './stations/bay-actions.js';
 import { registerJammingActions } from './stations/jamming-actions.js';
 import { registerIlluminationActions } from './stations/illumination-actions.js';
 import { registerGuidanceActions } from './stations/guidance-actions.js';
@@ -126,7 +127,7 @@ import { preserveLocaleEditContext } from './locale-edit-context.js';
 export { preserveLocaleEditContext as preserveConsoleEditContext } from './locale-edit-context.js';
 
 const preserveConsoleEditContext = preserveLocaleEditContext;
-const equipmentActionContexts = ['stock', 'fitting', 'guidance', 'illumination', 'jamming', 'protection'];
+const equipmentActionContexts = ['stock', 'fitting', 'guidance', 'illumination', 'jamming', 'protection', 'bay'];
 
 export function initConsole({
   name,
@@ -451,6 +452,7 @@ export function initConsole({
   registerGuidanceActions(_semanticActions, { getState: () => _latestState, sendAction });
   registerProtectionActions(_semanticActions, { getState: () => _latestState, sendAction });
   registerJammingActions(_semanticActions, { getState: () => _latestState, sendAction });
+  registerBayActions(_semanticActions, { getState: () => _latestState, sendAction });
   registerIlluminationActions(_semanticActions, { getState: () => _latestState, sendAction });
 
   // ── Inbound: __updateConsole (ADR-0001 §2) ─────────────────────────────

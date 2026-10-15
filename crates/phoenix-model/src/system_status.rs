@@ -53,6 +53,8 @@ pub struct SystemStatus {
     pub jamming: Option<crate::jamming_ui::JammingControlsView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signal_protection: Option<crate::protection_ui::ProtectionControlsView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bay: Option<crate::craft::BayControlsView>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,6 +134,7 @@ impl SystemStatus {
             illumination: None,
             jamming: None,
             signal_protection: None,
+            bay: None,
         };
         if offline && !matches!(damage, Some(DamageTier::Disabled | DamageTier::Destroyed)) {
             status.unavailable(StatusReasonCode::Offline, None);

@@ -31,6 +31,11 @@ pub(crate) fn publish(world: &mut World) {
                 {
                     view.stored.push(StoredCraftView {
                         id: id.0.clone(),
+                        name: runtime::entity_for(world, &id.0)
+                            .and_then(|entity| {
+                                world.get::<super::super::spawner::EntityName>(entity)
+                            })
+                            .map(|name| name.0.clone()),
                         space: probe.0.space,
                     });
                 }
@@ -103,4 +108,42 @@ pub(crate) fn publish(world: &mut World) {
                 .insert(owner, crate::core::messages::SystemBlackboard::Bay(view));
         }
     }
+}
+
+/// Read only the actual owning Console's typed publication. A co-hosted display
+/// cannot turn a feed or a guessed System name into machinery authority.
+pub(crate) fn project(world: &World, entity: Entity, owner: &SystemId) -> Option<BayControlsView> {
+    let config = world.get::<crate::ship_plugin::ShipConfigComponent>(entity)?;
+    if config.0.system(owner)?.kind != crate::ship::system_registry::CRAFT_BAY_KIND {
+        return None;
+    }
+    let sources = world.get::<crate::ship_plugin::ShipSystemControlSources>(entity)?;
+    if !sources.0.entries().any(|(id, _)| id == owner) {
+        return None;
+    }
+    let boards = world.get::<crate::server_app::ShipSystemBlackboards>(entity)?;
+    let view = config.0.observations_for_system(owner, &boards.0);
+    let Some(crate::core::messages::SystemBlackboard::Bay(board)) = view.get(owner) else {
+        return None;
+    };
+    let controllable =
+        sources.0.policy_for(owner).accept_human_input && !sources.0.is_offline(owner);
+    let active = board.job.as_ref().is_some_and(|job| job.outcome.is_none());
+    Some(BayControlsView {
+        controllable,
+        can_launch: controllable && board.can_launch,
+        can_recover: controllable && board.can_recover,
+        can_cancel: controllable && active,
+        capacity_space: board.capacity_space,
+        occupied_space: board.occupied_space,
+        stored: board.stored.clone(),
+        contacts: board.contacts.clone(),
+        progress: board
+            .job
+            .as_ref()
+            .map(|job| (job.fraction.clamp(0.0, 1.0) * 1000.0).round() as u16),
+        paused: board.job.as_ref().is_some_and(|job| job.paused),
+        ready: board.job.as_ref().is_some_and(|job| job.ready),
+        outcome: board.job.as_ref().and_then(|job| job.outcome),
+    })
 }

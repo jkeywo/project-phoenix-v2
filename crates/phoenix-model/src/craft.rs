@@ -27,6 +27,8 @@ pub struct BayView {
 #[serde(deny_unknown_fields)]
 pub struct StoredCraftView {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub space: u64,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -147,3 +149,21 @@ fn identity(value: &str, bound: usize) -> bool {
 #[cfg(test)]
 #[path = "craft_tests.rs"]
 mod tests;
+
+/// Own permitted machinery presentation, separate from actual private Job state.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BayControlsView {
+    pub controllable: bool,
+    pub can_launch: bool,
+    pub can_recover: bool,
+    pub can_cancel: bool,
+    pub capacity_space: u64,
+    pub occupied_space: u64,
+    pub stored: Vec<StoredCraftView>,
+    pub contacts: Vec<RecoveryContactView>,
+    pub progress: Option<u16>,
+    pub paused: bool,
+    pub ready: bool,
+    pub outcome: Option<crate::job::JobOutcome>,
+}

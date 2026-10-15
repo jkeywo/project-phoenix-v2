@@ -205,6 +205,7 @@ mod runtime;
 #[path = "craft_view.rs"]
 mod view;
 pub(crate) use bootstrap::{initial_game_start_location, initial_location, stage_initial};
+pub(crate) use view::project;
 
 #[cfg(test)]
 #[path = "craft_tests.rs"]

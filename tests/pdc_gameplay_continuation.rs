@@ -59,6 +59,8 @@ struct Trace {
     payload_damaged_own_hull: bool,
     producer_initial: Option<serde_json::Value>,
     launcher_readiness: [u64; 3],
+    first_aiming_opportunity: Option<(u64, [f32; 3])>,
+    first_protection_reading: Option<(u64, [f32; 3])>,
 }
 
 impl std::fmt::Debug for Trace {
@@ -83,10 +85,13 @@ impl std::fmt::Debug for Trace {
             .field("before_payload_hp", &self.before_payload_hp)
             .field("payload_damaged_own_hull", &self.payload_damaged_own_hull)
             .field("launcher_readiness", &self.launcher_readiness)
+            .field("first_aiming_opportunity", &self.first_aiming_opportunity)
+            .field("first_protection_reading", &self.first_protection_reading)
             .finish()
     }
 }
 fn observe_launcher_readiness(
+    tick: Res<SimTick>,
     aims: project_phoenix::console::weapons::assignments::WeaponAimInputs,
     ships: Query<(
         Entity,
@@ -123,11 +128,18 @@ fn observe_launcher_readiness(
                 &aim,
                 physics,
             );
+            let cover = aims.observed_shield_cover(entity, &owner, &aim, [physics.x, physics.z]);
+            if cover.is_some() {
+                trace
+                    .first_protection_reading
+                    .get_or_insert((tick.0, [physics.x, physics.z, physics.yaw]));
+            }
             if geometry.in_arc && geometry.in_range {
+                trace
+                    .first_aiming_opportunity
+                    .get_or_insert((tick.0, [physics.x, physics.z, physics.yaw]));
                 trace.launcher_readiness[0] += 1;
-                if let Some(cover) =
-                    aims.observed_shield_cover(entity, &owner, &aim, [physics.x, physics.z])
-                {
+                if let Some(cover) = cover {
                     trace.launcher_readiness[1] += 1;
                     if cover == 0 {
                         trace.launcher_readiness[2] += 1;

@@ -252,6 +252,42 @@ with exact complete captures/digests; malformed cross-request/stage/clock claims
 must leave the live host unchanged. Different-LocalShip peers must agree. Source
 review and owner tests alone do not establish this playable exit.
 
+## Adopted first equipment-backed relay
+
+The first relay is an optional Boolean `relay` on an actual authored radio
+channel, defaulting false. It uses that same installed Comms System and its
+ordinary continuously paid operation, condition and exact receiver protection.
+A channel-compatible endpoint with positive current paid operation may forward;
+intermediate endpoints must explicitly enable relay. Protected forwarding in this
+first slice requires the relay's actually held matching channel key. Opaque
+forwarding without a key and captured-message decoding remain later consumers.
+
+At each delivery boundary derive a direct-first, shortest-hop viable route,
+using stable endpoint UUID order to break equal-length ties. Every hop uses both
+actual endpoint ranges and the existing physical terrain/field/interference path.
+Cycles are excluded by visited endpoint identity. There is no route cache,
+reservation, transit queue, extra controller, per-message forwarding payment or
+message-capacity accounting. Continuous operation funds this supported service;
+no relay means no additional work beyond the existing radio owner.
+
+The recipient receives the original immutable emission and original sender; a
+relay does not become the sender, invent observations, obtain an inbox copy just
+by forwarding or disclose route membership to source/recipient controls. Address
+eligibility stays between the original source and final recipient. One-shot text
+and initial requests use the route available on emission. Retained returned
+outcomes use their existing sustained service and can arrive after a real relay
+returns, without paying another discrete transmission or repeating a decision.
+Current endpoint sampling and complete deterministic state retain their existing
+owner. Removing power, disabling equipment, incompatible keys or a blocked hop
+removes the derived route at the next ordinary radio boundary.
+
+Workshop edits the same optional channel field through the accepted source/history
+transaction. The first reference is an optional relay Cruiser with unchanged
+base energy and a complete materialised radio profile. Real three-endpoint tests
+must prove blocked direct reach restored by an actual relay, relay power/condition
+loss, incompatible protection, cycles and deterministic equal-hop selection.
+Actual host continuation/media and different-LocalShip evidence remain separate.
+
 ## Ordered implementation and parallel seams
 
 1. **Shared threads and equipment links.** Preserve actual current hails/dialogue;

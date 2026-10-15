@@ -41,11 +41,12 @@ fn required_radio_owner_and_malformed_single_row_are_rejected_without_writes() {
         assert_eq!(capture(&world), before);
         assert_eq!(crate::sim_digest::world_digest(&world), digest);
         let mut candidate = saved.clone();
-        *candidate
+        let candidate_row = candidate
             .entities
             .iter_mut()
             .find(|row| row.uuid == bad.uuid)
-            .unwrap() = bad;
+            .unwrap();
+        *candidate_row = bad;
         assert!(validate_roster(&world, &candidate).is_err());
         assert!(!restore(&mut world, &candidate).is_complete());
         assert_eq!(capture(&world), before);

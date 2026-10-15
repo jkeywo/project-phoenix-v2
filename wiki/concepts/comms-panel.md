@@ -8,6 +8,22 @@ updated: 2026-10-15
 
 # Comms Panel
 
+## Radio authoring
+
+`editor/workshop-comms-radio.js` and `gui/workshop-comms-radio-panel.js`
+provide structured channel and held-key rows on the existing Workshop surface.
+They bind the actual canonical Comms System, owning Console, finite endpoint
+reach and positive continuous/discrete energy costs. Each channel has a unique
+id, endpoint-bounded range, positive whole work units and optional held-key
+binding. Removing a key leaves a protected channel invalid until its author
+explicitly changes that channel.
+
+Edits use the normal accepted draft/history transaction, explicit inherited
+materialisation and existing Preview/Test entry points. The bounded writer
+preserves other Comms settings and comments and checks parsed equivalence
+before accepting a candidate. These authoring checks remain separate from
+native radio runtime and human acceptance evidence.
+
 Runtime messages keep canonical `priority`. Legacy `is_urgent` is derived at the wire boundary and at its historical digest fold position; deserialization promotes legacy urgency only when no priority was supplied.
 
 The Comms client is a mounted station controller plus three reusable components: contacts, hail threads, and the current message/reply surface. It renders authoritative `CommsState`; it does not advance dialogue locally.

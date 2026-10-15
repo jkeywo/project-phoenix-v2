@@ -1,6 +1,7 @@
 import { guardPersonnelReferences } from './workshop-personnel.js';
 import { guardWeaponGroupReferences } from './workshop-weapon-groups.js';
 import { guardHelmMovementReferences } from './workshop-helm-movement.js';
+import { guardCommsRadioReferences } from './workshop-comms-radio.js';
 import { guardSensingReferences } from './workshop-sensing.js';
 import { guardFittingReferences } from './workshop-fitting.js';
 import { guardRecoveryReferences } from './workshop-resource-recovery.js';
@@ -453,6 +454,7 @@ export function prepareShipOperation(draft, dependencies, schema, operation) {
   guardPersonnelReferences(inspection.composition.resolved.value, effectiveValue);
   guardWeaponGroupReferences(inspection.composition.resolved.value, effectiveValue);
   guardHelmMovementReferences(inspection.composition.resolved.value, effectiveValue);
+  guardCommsRadioReferences(inspection.composition.resolved.value, effectiveValue);
   guardFittingReferences(inspection.composition.resolved.value, effectiveValue);
   guardSensingReferences(inspection.composition.resolved.value, effectiveValue);
   guardProductionReferences(inspection.composition.resolved.value, effectiveValue);

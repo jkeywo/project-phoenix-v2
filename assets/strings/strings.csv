@@ -5979,3 +5979,21 @@ workshop.personnel.add_team,Add existing team binding,[Bind existing team],[Vorh
 workshop.personnel.add_officer,Add finite officer definition,[Add officer],[Offizier hinzufuegen],[Add officer],machine
 workshop.personnel.save,Accept roster edit,[Apply roster],[Liste anwenden],[Apply roster],machine
 workshop.personnel.refused,Personnel validation refusal,[Roster refused: {reason}],[Liste abgelehnt: {reason}],[Roster refused: {reason}],machine
+workshop.comms_radio.title,Workshop radio channel authoring,Radio channels,Funkkanaele,Radio channels,machine
+workshop.comms_radio.hint,Workshop radio channel authoring,Configure channels on the actual Comms equipment. Protected channels require a held key; removing a key never opens a channel automatically.,Kanaele der vorhandenen Kommunikationsanlage konfigurieren. Geschuetzte Kanaele brauchen einen vorhandenen Schluessel; Entfernen eines Schluessels oeffnet keinen Kanal automatisch.,Configure channels on the actual Comms equipment. Protected channels require a held key; removing a key never opens a channel automatically.,machine
+workshop.comms_radio.template,Workshop radio channel authoring,Hull or endpoint,Rumpf oder Endpunkt,Hull or endpoint,machine
+workshop.comms_radio.materialise,Workshop radio channel authoring,Materialise inherited radio channels,Geerbte Funkkanaele lokal uebernehmen,Materialise inherited radio channels,machine
+workshop.comms_radio.owner,Workshop radio channel authoring,Comms owner: {system}; endpoint reach: {range},Kommunikationssystem: {system}; Endpunktreichweite: {range},Comms owner: {system}; endpoint reach: {range},machine
+workshop.comms_radio.unavailable,Workshop radio channel authoring,"Requires actual Comms equipment, finite reach and positive local radio energy costs.","Erfordert eine vorhandene Kommunikationsanlage, endliche Reichweite und positive lokale Funkenergiekosten.","Requires actual Comms equipment, finite reach and positive local radio energy costs.",machine
+workshop.comms_radio.channels,Workshop radio channel authoring,Channels,Kanaele,Channels,machine
+workshop.comms_radio.keys,Workshop radio channel authoring,Held protection keys,Vorhandene Schutzschluessel,Held protection keys,machine
+workshop.comms_radio.add_channel,Workshop radio channel authoring,Add channel,Kanal hinzufuegen,Add channel,machine
+workshop.comms_radio.add_key,Workshop radio channel authoring,Add held key,Vorhandenen Schluessel hinzufuegen,Add held key,machine
+workshop.comms_radio.id,Workshop radio channel authoring,Channel id,Kanalkennung,Channel id,machine
+workshop.comms_radio.range,Workshop radio channel authoring,Channel reach,Kanalreichweite,Channel reach,machine
+workshop.comms_radio.work_units,Workshop radio channel authoring,Work units per transmission,Arbeitseinheiten je Sendung,Work units per transmission,machine
+workshop.comms_radio.key,Workshop radio channel authoring,Protection key (optional),Schutzschluessel (optional),Protection key (optional),machine
+workshop.comms_radio.identity,Workshop radio channel authoring,Held key id,Kennung des vorhandenen Schluessels,Held key id,machine
+workshop.comms_radio.remove,Workshop radio channel authoring,Remove row,Zeile entfernen,Remove row,machine
+workshop.comms_radio.save,Workshop radio channel authoring,Save radio channels,Funkkanaele speichern,Save radio channels,machine
+workshop.comms_radio.refused,Workshop radio channel authoring,Radio edit refused: {reason},Funkbearbeitung abgelehnt: {reason},Radio edit refused: {reason},machine

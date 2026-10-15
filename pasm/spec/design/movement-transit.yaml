@@ -90,3 +90,13 @@ entities:
         - "[ai] Construct the clear point from canonical physical pose and the actual mating marker's outward direction. Continuing separation needs no new observation of its former mate. Actual Umbilical/services lose their ordinary docked-partner relation on release; they retain their existing interruption/conservation owners."
         - "[ai] Charge only the granted motion, with finite authored approach speed/clear distance and actual condition fraction. Derived feedback may report separation/progress; saved identity, clear geometry and physical pose remain existing owners. Emergency release is a future explicitly authored supported mechanism with consequences, never an implicit free normal-undock exception."
         - "[ai] Source cases must cover disabled/source/payment hold, paid resume and JSON continuation with exact physical/reserve state. No new runtime capability is claimed by this contract checkpoint."
+
+  - decision: movement-dock-body-placement
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Moving Dock Equipment Shares the Existing Physical Pose
+      summary: "DockMating moves_body is explicit and defaults false. Mobile Dock profiles opt in; stationary berth/service equipment does not gain propulsion. A supported moving Dock on a nonship seeds the existing ShipPhysics pose owner without adding Ship, AI or another integrator."
+      rationale:
+        - "[ai] DockProbe and other accepted controlled moving equipment must preserve physical placement through the ordinary snapshot/digest path. Do not save a second Dock pose or rely on an unsaved Transform. Existing mobile Dock profiles migrate explicitly; passive berth markers/services remain intact."
+        - "[ai] Releasing a stationary provider's existing coupling is distinct from powered clearance and may clear that relationship without applying a movement pose. Controlled body separation still requires accepted equipment, actual physical marker direction and paid operability; missing-config fixtures have no runtime bypass."

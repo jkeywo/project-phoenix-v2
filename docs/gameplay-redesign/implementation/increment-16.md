@@ -201,6 +201,9 @@ cancelling work or discarding pending returns. Actual lineage remains until sess
 end in this persistent slice. A new returned stage is a new visible outcome row
 and does not silently un-dismiss the old request. Ordinary text/plot Clear is
 unchanged; there is no separate archive or expiry/garbage-collection success.
+The same Console continues receiving its own retained records; a Show cleared
+requests filter reveals them. Default hiding does not revoke human knowledge while
+AI uses retained history, and it never pools another Console's records.
 Technical record bounds are validation limits, not message-capacity accounting.
 
 Extend the existing response AI and pending-response reading map to actual ship

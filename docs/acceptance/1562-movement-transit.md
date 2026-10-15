@@ -37,8 +37,17 @@ full host. Compare fresh JSON restore using complete captures/digests for 360
 fixed steps and exercise malformed candidate no-write cases. Execute actual
 renamed-owner and Boost tests, then record the exact tested revisions and logs.
 
-Paid Dock separation is being implemented in its isolated lane. Local/inter-system
-transit, formation requests, the small-craft join and their actual fuel/arrival
+The first full-host attempt stopped at a neutral-coast grant-ratio assertion.
+`e606b4c1` now checks actual work on every tick, retaining the same momentum and
+displacement proof. Corrected execution and its later continuation remain pending.
+
+Paid Dock separation is integrated as `370baf93`, with whole-candidate preflight
+and compatibility joins in `fcf386de`. Explicit moving equipment uses the existing
+physical pose and paid work; stationary providers release without moving their
+body. The merged Dock/illumination client suites pass 30 tests, and protocol 18
+client/Workshop builds pass. Native Dock execution remains pending.
+
+Local and inter-system transit, formation requests, the small-craft join and their actual fuel/arrival
 continuation remain open. Browser/native device controls, performance, balance and
 human workload across supported seat counts are unverified. No full integration
 gate, push or increment exit is claimed.

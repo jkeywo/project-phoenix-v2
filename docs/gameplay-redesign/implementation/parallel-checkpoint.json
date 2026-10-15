@@ -42,6 +42,22 @@
     "strings": "6037 strings, zero errors or warnings",
     "layers": "dependency-tree check passed"
   },
+  "later_integrated_checkpoints": {
+    "dock": "370baf93 integrates paid mobile separation and stationary release; fcf386de joins shared no-write preflight, protocol 18 and rules 0.32",
+    "torpedo_ai": "d859208e corrects a real cross-ship authority leak: the firing ship's rating now governs auto-fire rather than this host's unrelated Tactical holder; rules 0.33",
+    "compile": "cargo check -p phoenix-simulation --tests --no-default-features passes after adding moves_body to exhaustive schema coverage; .phoenix/parallel-dock-rating-check-retry.log",
+    "client": "30 tests pass across six merged Dock/illumination suites; .phoenix/parallel-dock-illumination-client.log",
+    "bundles": "Client and Workshop authoring build; client stamp 18/phoenix-base/4",
+    "native": "Broader rebuilt owner/continuation suite is pending"
+  },
+  "full_host_attempt": {
+    "command": "cargo test -p project-phoenix --features headless --test pdc_gameplay_continuation --test helm_movement_continuation",
+    "helm": "Compiled and failed a retained last_work_fraction assertion during neutral coast. Earlier actual acceleration and world-momentum assertions passed. e606b4c1 now checks actual zero emitted work every coast tick and reserve nondecrease; corrected execution pending.",
+    "helm_log": ".phoenix/parallel-integrated-full-host.log",
+    "pdc": "Both already-built probes executed and failed: the ordinary foe launched no ordnance. Source investigation found the unrelated host-local Tactical claim suppressing NPC Backfill torpedo AI. d859208e corrects that gate; corrected execution pending.",
+    "pdc_log": ".phoenix/parallel-integrated-pdc-full-host.log",
+    "continuation": "Neither full-host probe reached its required continuation exit on this attempt"
+  },
   "pending": [
     "Rebuilt execution of all eight corrected owner cases",
     "Real headless-host PDC and joined-crew Helm continuation probes",

@@ -111,6 +111,16 @@ when the delivery link is lost.
 Current paid emissions/exposure are derived, not saved work credit. Clear them
 on restore and recompute from actual ordinary paid processing before any link
 consumer may use them; restored bootstrap emission must not buy free influence.
+The actual paid boundary runs in Input after its unique AI/admitted channel
+handling and before Hail. It uses the current actual mount bearing; later
+Physics traversal changes the next emission boundary. It spends the ordinary
+existing reserve before that step's later distribution. With actual jammer
+hardware present, the same range-flags owner refreshes additionally in a named
+Input step after that paid boundary and before Hail; its normal Broadcast
+refresh remains. Actual Physics radio/returns and Broadcast notices consume the
+same current-tick result. Missing current-tick processing fails links closed,
+never reuses a previous/bootstrap emission, and creates no alternate range map.
+
 Canonical generic channels, shared mount state, actual power/conditions and
 original held observations remain at their existing owners in capture/restore
 and the digest. Missing, Offline, destroyed, unfunded or out-of-coverage hardware

@@ -223,6 +223,15 @@ fn invalid_unavailable_and_unfunded_hardware_has_no_field_or_free_work() {
                     .insert("enabled".into(), CommandChannelValue::EntityTarget(None));
             }
             _ => {
+                // Ordinary spawning installs the valid fitting pair. This
+                // fault specifically tests a half-present pair, not a valid
+                // idle fitted ship which may operate normally.
+                assert!(world
+                    .get::<crate::resources::fitting_server::CompiledShipFitting>(entity)
+                    .is_some());
+                world
+                    .entity_mut(entity)
+                    .remove::<crate::resources::fitting_server::CompiledShipFitting>();
                 world
                     .entity_mut(entity)
                     .insert(crate::resources::fitting_server::ShipFitting {
@@ -236,8 +245,16 @@ fn invalid_unavailable_and_unfunded_hardware_has_no_field_or_free_work() {
         }
         let before = reserve(&world, entity);
         world.run_system_once(tick).unwrap();
-        assert_eq!(reserve(&world, entity), before);
-        assert_eq!(factor(&world, entity), 1.0);
+        assert_eq!(
+            reserve(&world, entity),
+            before,
+            "fault {fault} must not spend field work"
+        );
+        assert_eq!(
+            factor(&world, entity),
+            1.0,
+            "fault {fault} must grant no field"
+        );
     }
 }
 #[test]

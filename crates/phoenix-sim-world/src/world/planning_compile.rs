@@ -9,7 +9,18 @@ pub struct DomainSource {
 #[derive(Clone, Debug)]
 pub struct CompiledPlanning {
     pub(super) config: PlanningConfig,
+    pub(super) catalog: DomainCatalog,
+}
+#[derive(Clone, Debug)]
+pub struct DomainCatalog {
+    pub(super) imports: Vec<DomainImport>,
     pub(super) libraries: BTreeMap<String, DomainLibrary>,
+}
+impl std::ops::Deref for CompiledPlanning {
+    type Target = DomainCatalog;
+    fn deref(&self) -> &Self::Target {
+        &self.catalog
+    }
 }
 pub(super) fn identifier(value: &str) -> bool {
     !value.is_empty()
@@ -174,7 +185,7 @@ impl CompiledPlanning {
     /// to its existing content ledger; this pure owner never mutates that ledger.
     pub fn load(
         config: PlanningConfig,
-        mut read: impl FnMut(&str) -> Option<String>,
+        read: impl FnMut(&str) -> Option<String>,
     ) -> Result<(Self, Vec<DomainSource>), String> {
         if !identifier(&config.id)
             || config.arguments.len() > 32
@@ -189,6 +200,44 @@ impl CompiledPlanning {
         for value in config.arguments.values() {
             validate_value(value)?;
         }
+        let (catalog, sources) = DomainCatalog::load(config.imports.clone(), read)?;
+        let compiled = Self { config, catalog };
+        compiled.validate()?;
+        Ok((compiled, sources))
+    }
+    fn validate(&self) -> Result<(), String> {
+        if let Some(policy) = &self.config.temporal {
+            policy.validate()?;
+        }
+        let root = self.resolve(None, &self.config.task)?;
+        let task = self.task(&root);
+        if self.config.arguments.len() != task.parameters().len() {
+            return Err("root argument set mismatch".into());
+        }
+        for parameter in task.parameters() {
+            if self
+                .config
+                .arguments
+                .get(&parameter.name)
+                .is_none_or(|value| value.kind() != parameter.kind)
+            {
+                return Err("root argument type mismatch".into());
+            }
+        }
+        Ok(())
+    }
+}
+impl DomainCatalog {
+    pub fn libraries(&self) -> impl Iterator<Item = (&str, &DomainLibrary)> {
+        self.libraries
+            .iter()
+            .map(|(path, library)| (path.as_str(), library))
+    }
+    pub fn load(
+        imports: Vec<DomainImport>,
+        mut read: impl FnMut(&str) -> Option<String>,
+    ) -> Result<(Self, Vec<DomainSource>), String> {
+        validate_imports(&imports)?;
         let mut libraries = BTreeMap::new();
         let mut sources = Vec::new();
         let mut stack = Vec::new();
@@ -241,7 +290,7 @@ impl CompiledPlanning {
             libraries.insert(path.into(), library);
             Ok(())
         }
-        for import in &config.imports {
+        for import in &imports {
             visit(
                 &import.path,
                 &mut read,
@@ -250,7 +299,7 @@ impl CompiledPlanning {
                 &mut stack,
             )?;
         }
-        let compiled = Self { config, libraries };
+        let compiled = Self { imports, libraries };
         compiled.validate()?;
         Ok((compiled, sources))
     }
@@ -263,7 +312,7 @@ impl CompiledPlanning {
             if !identifier(namespace) || !identifier(task) {
                 return Err(format!("invalid task reference {reference:?}"));
             }
-            let imports = caller.map_or(&self.config.imports, |path| &self.libraries[path].imports);
+            let imports = caller.map_or(&self.imports, |path| &self.libraries[path].imports);
             let import = imports
                 .iter()
                 .find(|row| row.namespace == namespace && row.names.iter().any(|name| name == task))
@@ -305,9 +354,6 @@ impl CompiledPlanning {
             .expect("validated planning task")
     }
     fn validate(&self) -> Result<(), String> {
-        if let Some(policy) = &self.config.temporal {
-            policy.validate()?;
-        }
         let count = self
             .libraries
             .values()
@@ -436,30 +482,15 @@ impl CompiledPlanning {
                 }
             }
         }
-        for import in &self.config.imports {
+        for import in &self.imports {
             for name in &import.names {
                 self.resolve(None, &format!("{}::{name}", import.namespace))?;
-            }
-        }
-        let root = self.resolve(None, &self.config.task)?;
-        let task = self.task(&root);
-        if self.config.arguments.len() != task.parameters().len() {
-            return Err("root argument set mismatch".into());
-        }
-        for parameter in task.parameters() {
-            let value = self
-                .config
-                .arguments
-                .get(&parameter.name)
-                .ok_or("missing root argument")?;
-            if value.kind() != parameter.kind {
-                return Err("root argument type mismatch".into());
             }
         }
         // Reject recursion in every imported definition, including an unused
         // alternative; runtime bounds never make a cyclic source acceptable.
         fn acyclic(
-            owner: &CompiledPlanning,
+            owner: &DomainCatalog,
             id: TaskIdentity,
             active: &mut BTreeSet<TaskIdentity>,
             done: &mut BTreeSet<TaskIdentity>,

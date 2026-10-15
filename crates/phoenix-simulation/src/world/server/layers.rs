@@ -209,7 +209,7 @@ pub(super) fn apply_loaded_layer(
         scripts,
     } = layer;
 
-    if scenario_config.planning.is_some() {
+    if scenario_config.planning.is_some() || scenario_config.opportunity_search.is_some() {
         bevy::log::error!(
             "layer {path}: maintenance planning is supported only on the accepted base world"
         );

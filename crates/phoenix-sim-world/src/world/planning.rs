@@ -23,3 +23,6 @@ mod commitment;
 #[cfg(test)]
 #[path = "planning_tests.rs"]
 mod tests;
+
+#[path = "planning_opportunities.rs"]
+pub mod opportunities;

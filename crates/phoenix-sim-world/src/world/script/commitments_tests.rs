@@ -301,3 +301,36 @@ fn taking_the_changes_twice_yields_them_once() {
         "a drained buffer cannot replay its mutations"
     );
 }
+
+#[test]
+fn generated_promise_recording_is_refused_before_any_call_effects_escape() {
+    use crate::world::script::{engine::RuntimeHost, schedule::SchedClock};
+    let host = RuntimeHost::new();
+    let ast=host.engine().compile(r#"fn on_x(ctx) {ctx.flags.before=1;let id="opportunity."+"maintenance.1";ctx.commitments.record(#{id:id,made_to:"crew",terms:"terms"});ctx.flags.after=1;}"#).unwrap();
+    let ledger = ledger();
+    let original = ledger.clone();
+    let result = host.try_call_scoped(
+        &SchedClock::ZERO,
+        &ast,
+        "reserved.rhai",
+        "on_x",
+        &[crate::world::flags::FlagStore::default()],
+        &Default::default(),
+        &ledger,
+        &Default::default(),
+        None,
+        Map::new(),
+    );
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("reserved for atomic World"));
+    assert_eq!(ledger, original);
+    let sources=[vellum_script::ScriptSource {path:"reserved.rhai".into(),source:r#"fn on_x(ctx){ctx.commitments.record(#{id:"opportunity.maintenance.1",made_to:"crew",terms:"terms"});}"#.into()}];
+    let findings = crate::world::script::validate::validate_generated_commitments(&sources);
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].category, "reserved-generated-promise");
+    let ordinary=[vellum_script::ScriptSource {path:"ordinary.rhai".into(),source:r#"// commitments.record(#{id:"opportunity.fake.1"})
+    fn f(ctx){let text="opportunity.maintenance.1";ctx.commitments.record(#{id:"ordinary",made_to:"crew",terms:text});ctx.commitments.keep("opportunity.maintenance.1");}"#.into()}];
+    assert!(crate::world::script::validate::validate_generated_commitments(&ordinary).is_empty());
+}

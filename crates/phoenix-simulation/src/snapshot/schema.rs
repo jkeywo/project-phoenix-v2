@@ -1298,6 +1298,8 @@ pub struct LayerFlags {
 /// them by re-running the same layer loads.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ScenarioState {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub opportunities: Vec<crate::world::opportunities::OpportunityRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_choice: Option<phoenix_sim_world::world::planning::PlanChoice>,
     #[serde(

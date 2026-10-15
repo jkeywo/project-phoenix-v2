@@ -69,6 +69,7 @@ fn setup(callback: &str) -> (App, String, OpportunityRef) {
                 local_headroom: 8,
                 source_available_above_floor: 4,
                 known: true,
+                report: None,
                 repair_idle: true,
                 handling_idle: true,
                 route_available: true,

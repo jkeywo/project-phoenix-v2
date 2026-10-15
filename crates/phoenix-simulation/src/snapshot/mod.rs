@@ -370,8 +370,9 @@ use materialization::restore_entities;
 pub(crate) use materialization::spawn_from_origin;
 pub use materialization::LayerReconcileStatus;
 
-mod activities;
+pub(crate) mod activities;
 mod activity_communication;
+mod opportunity_comms;
 pub(crate) use activities::validate_single_row as validate_activity_single_row;
 mod craft;
 mod emp;

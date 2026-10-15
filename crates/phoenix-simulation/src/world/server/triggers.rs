@@ -135,13 +135,28 @@ pub(crate) fn collect_world_events(
         Option<&crate::ship_plugin::HumanSeekingHosts>,
         Option<&crate::comms::radio::RadioProfile>,
     )>,
+    opportunity_actors: Query<(
+        &crate::entities::spawner::EntityUuid,
+        &crate::ship_plugin::ShipConfigComponent,
+        &crate::ship::compartment_damage::ShipDamage,
+        &crate::console::repair::server::ShipRepairTeams,
+        &crate::console::repair::server::RepairRequestQueue,
+        &crate::resources::logistics_server::CompiledShipLogistics,
+        &crate::resources::logistics_server::ShipLogistics,
+        &crate::infrastructure::InfrastructureCondition,
+        Option<&crate::console::weapons::torpedo::TorpedoSystemResource>,
+        &crate::resources::server::ResourceServices,
+        Option<&crate::ship::access::InteriorAccess>,
+        &crate::server_app::ShipSystemBlackboards,
+    )>,
+    mut opportunity_scripts: Option<ResMut<WorldScriptRuntime>>,
     hulls: Query<(
         &crate::entities::spawner::EntityUuid,
         Option<&crate::entities::spawner::EntitySystemHull>,
         Option<&crate::ship::compartment_damage::ShipDamage>,
     )>,
 ) {
-    if let Some(tick) = tick {
+    if let Some(tick) = tick.as_deref() {
         if let Some(inbox) = comms_inbox.as_deref() {
             crate::world::activities::observe_communication_receipts(
                 &mut runtime,
@@ -228,6 +243,72 @@ pub(crate) fn collect_world_events(
                 );
                 if let Err(error) = result {
                     bevy::log::warn!(actor=%uuid.0,%error,"Maintenance plan release withheld");
+                }
+            }
+        }
+    }
+    if let (Some(tick), Some(base), Some(scripts)) = (
+        tick.as_deref(),
+        base_world.as_deref(),
+        opportunity_scripts.as_deref_mut(),
+    ) {
+        if let Some(source) = &base.compiled_opportunity_search {
+            let mut actors = opportunity_actors.iter().collect::<Vec<_>>();
+            actors.sort_by(|left, right| left.0 .0.cmp(&right.0 .0));
+            for (
+                uuid,
+                config,
+                damage,
+                teams,
+                reports,
+                profile,
+                logistics,
+                inventory,
+                torpedoes,
+                services,
+                access,
+                boards,
+            ) in actors
+            {
+                if base.name_to_uuid.get(&source.config.actor) != Some(&uuid.0) {
+                    continue;
+                }
+                let result = (|| -> Result<(), String> {
+                    crate::world::opportunities::advance(&mut runtime, base, &uuid.0, tick.0)?;
+                    let inputs = crate::world::opportunity_inputs::project(
+                        source, tick.0, config, damage, teams, reports, profile, logistics,
+                        inventory, torpedoes, services, access, boards,
+                    )?;
+                    if let Some(reference) = crate::world::opportunities::consider(
+                        &mut runtime,
+                        base,
+                        &uuid.0,
+                        tick.0,
+                        &inputs,
+                    )? {
+                        scripts
+                            .pending_comms_opens
+                            .push(crate::comms::content::OpenCommsRequest {
+                                opportunity: Some(reference.clone()),
+                                recipients: None,
+                                sender_uuid: None,
+                                recipient_ship: Some(crate::command_admission::log::ShipKey(
+                                    uuid.0.clone(),
+                                )),
+                                from: "_self".into(),
+                                root_fn: source.config.offer_function.clone(),
+                                display_name: None,
+                                thread_id: Some(reference.instance_id()),
+                                priority: Default::default(),
+                                urgent: false,
+                                script_path: source.config.offer_script.clone(),
+                                origin_layer: None,
+                            });
+                    }
+                    Ok(())
+                })();
+                if let Err(error) = result {
+                    bevy::log::warn!(actor=%uuid.0,%error,"Optional maintenance admission withheld");
                 }
             }
         }

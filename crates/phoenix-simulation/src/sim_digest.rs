@@ -1279,6 +1279,12 @@ fn fold_scenario_schedule(world: &World, mut acc: u64) -> u64 {
         if let Some(choice) = &runtime.plan_choice {
             acc = activities::plan(acc, choice);
         }
+        if !runtime.opportunities.is_empty() {
+            acc = fold_serde(
+                fold_str(acc, "world-optional-maintenance-history"),
+                &runtime.opportunities,
+            );
+        }
     }
     if callbacks.is_empty() && events.is_empty() {
         return acc;
@@ -1683,6 +1689,9 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
                 acc = fold_optional_u64(acc, response.ai.weight.map(u64::from));
                 acc = fold_optional_u64(acc, response.ai.delay_seconds.map(u64::from));
             }
+            if let Some(reference) = &dialogue.script.opportunity {
+                acc = fold_serde(fold_str(acc, "own-opportunity"), reference);
+            }
             acc = fold_str(acc, &dialogue.script.script_path);
             acc = fold_optional_str(acc, dialogue.script.origin_layer.as_deref());
             if let Some(recipient) = &dialogue.script.recipient_ship {
@@ -1730,6 +1739,9 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
 
     acc = fold_u64(acc, opens.len() as u64);
     for open in opens {
+        if let Some(reference) = &open.opportunity {
+            acc = fold_serde(fold_str(acc, "own-opportunity"), reference);
+        }
         acc = fold_str(acc, &open.from);
         if let Some(sender) = &open.sender_uuid {
             acc = fold_str(fold_str(acc, "bound-sender"), sender);

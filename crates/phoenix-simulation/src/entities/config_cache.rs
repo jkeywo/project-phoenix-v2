@@ -374,6 +374,7 @@ fn advance_world_preload() {
             WORLD_CONFIG.with(|slot| {
                 if let Some(config) = slot.borrow_mut().as_mut() {
                     config.compiled_planning = dependencies.planning.clone();
+                    config.compiled_opportunity_search = dependencies.opportunities.clone();
                 }
             });
             WORLD_PRELOAD_PENDING

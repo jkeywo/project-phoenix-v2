@@ -132,8 +132,18 @@ impl CompiledPlanning {
         &self,
         actor_uuid: &str,
         tick: u64,
+        supports: impl FnMut(&ActivityRequest) -> Result<(), String>,
+    ) -> Result<PlanSelection, String> {
+        self.choose_as(actor_uuid, tick, PlanExecution::Primary, supports)
+    }
+    fn choose_as(
+        &self,
+        actor_uuid: &str,
+        tick: u64,
+        execution: PlanExecution,
         mut supports: impl FnMut(&ActivityRequest) -> Result<(), String>,
     ) -> Result<PlanSelection, String> {
+        let required_commitment = self.commitment_for_execution(&execution)?;
         if actor_uuid.trim().is_empty()
             || actor_uuid.len() > 256
             || actor_uuid.chars().any(char::is_control)
@@ -148,6 +158,7 @@ impl CompiledPlanning {
             &root,
             &self.config.arguments,
             "root",
+            &execution,
             &mut methods,
             None,
             &mut supports,
@@ -158,7 +169,8 @@ impl CompiledPlanning {
         Ok(PlanSelection {
             choice: PlanChoice {
                 id: self.config.id.clone(),
-                required_commitment: self.config.required_commitment.clone(),
+                required_commitment,
+                execution,
                 root_arguments: self.config.arguments.clone(),
                 chosen_tick: tick,
                 actor_uuid: actor_uuid.into(),
@@ -175,8 +187,9 @@ impl CompiledPlanning {
     /// Reconstruct the exact saved alternative, never choose again from current
     /// damage, resources, equipment or command availability.
     pub fn derive(&self, choice: &PlanChoice) -> Result<Decomposition, String> {
-        if choice.id != self.config.id
-            || choice.required_commitment != self.config.required_commitment
+        if !choice.execution.is_primary()
+            || choice.id != self.config.id
+            || choice.required_commitment != self.commitment_for_execution(&choice.execution)?
             || choice.root_arguments != self.config.arguments
             || choice.actor_uuid.trim().is_empty()
             || choice.actor_uuid.len() > 256
@@ -197,6 +210,7 @@ impl CompiledPlanning {
             &root,
             &choice.root_arguments,
             "root",
+            &choice.execution,
             &mut methods,
             Some(&choice.methods),
             &mut |_| Ok(()),
@@ -215,6 +229,7 @@ impl CompiledPlanning {
         task_id: &TaskIdentity,
         args: &BTreeMap<String, Value>,
         node: &str,
+        execution: &PlanExecution,
         choices: &mut BTreeMap<String, MethodChoice>,
         saved: Option<&BTreeMap<String, MethodChoice>>,
         supports: &mut impl FnMut(&ActivityRequest) -> Result<(), String>,
@@ -227,54 +242,20 @@ impl CompiledPlanning {
         *budget -= 1;
         let task = self.task(task_id);
         match task {
-            Task::Primitive {
-                definition,
-                request,
-                forecast,
-                ..
-            } => {
-                let request = instantiate(request, args)?;
-                if request.actor() != root_actor(&self.config.arguments)? {
-                    return Err("first maintenance leaves must bind the root actor exactly".into());
+            Task::Primitive { .. } => {
+                let graph = self.catalog.expand_resolved_primitive(
+                    task_id,
+                    args,
+                    &execution.namespace(&self.config.id),
+                    node,
+                    root_actor(&self.config.arguments)?,
+                )?;
+                for config in graph.leaves.values() {
+                    supports(&config.request)?;
                 }
-                supports(&request)?;
-                let mut definition = self.libraries[&task_id.library_path]
-                    .definitions
-                    .iter()
-                    .find(|row| &row.id == definition)
-                    .expect("compiled Scenario definition")
-                    .clone();
-                if definition
-                    .state
-                    .iter()
-                    .any(|state| !compatible(&state.when, &request))
-                {
-                    return Err(
-                        "primitive Scenario condition does not match its physical outcome family"
-                            .into(),
-                    );
-                }
-                definition.id = format!(
-                    "htn/{}/{}/{definition_id}",
-                    self.config.id,
-                    task_id.library_path,
-                    definition_id = definition.id
-                );
-                let config = SituationConfig {
-                    id: format!("htn/{}/{node}", self.config.id),
-                    definition: definition.id.clone(),
-                    request,
-                };
-                Ok(Decomposition {
-                    leaves: BTreeMap::from([(node.into(), config)]),
-                    definitions: BTreeMap::from([(definition.id.clone(), definition)]),
-                    dependencies: Vec::new(),
-                    forecasts: forecast
-                        .as_ref()
-                        .map(|value| BTreeMap::from([(node.into(), value.clone())]))
-                        .unwrap_or_default(),
-                })
+                Ok(graph)
             }
+
             Task::Compound { methods, .. } => {
                 let selected = saved
                     .map(|saved| saved.get(node).ok_or("missing saved compound method"))
@@ -308,6 +289,7 @@ impl CompiledPlanning {
                             &id,
                             &arguments,
                             &format!("{node}/{}", step.id),
+                            execution,
                             &mut candidate_choices,
                             saved,
                             supports,
@@ -429,5 +411,90 @@ impl CompiledPlanning {
             }
         }
         Ok(())
+    }
+}
+
+impl DomainCatalog {
+    /// Expand a real explicitly imported primitive through the same typed
+    /// template and Scenario validation used by authored HTN leaves.
+    pub fn expand_operator(
+        &self,
+        reference: &str,
+        arguments: &BTreeMap<String, Value>,
+        namespace: &str,
+        node: &str,
+        actor_reference: &str,
+    ) -> Result<Decomposition, String> {
+        let task = self.resolve(None, reference)?;
+        self.expand_resolved_primitive(&task, arguments, namespace, node, actor_reference)
+    }
+    fn expand_resolved_primitive(
+        &self,
+        task_id: &TaskIdentity,
+        args: &BTreeMap<String, Value>,
+        namespace: &str,
+        node: &str,
+        actor_reference: &str,
+    ) -> Result<Decomposition, String> {
+        if !path(namespace) || !path(node) {
+            return Err("invalid generated operator namespace".into());
+        }
+        let task = self.task(task_id);
+        if args.len() != task.parameters().len()
+            || task.parameters().iter().any(|parameter| {
+                args.get(&parameter.name).is_none_or(|value| {
+                    value.kind() != parameter.kind || super::compile::validate_value(value).is_err()
+                })
+            })
+        {
+            return Err("generated operator parameter set/type mismatch".into());
+        }
+        let Task::Primitive {
+            definition,
+            request,
+            forecast,
+            ..
+        } = task
+        else {
+            return Err("generated operator must name an exported primitive".into());
+        };
+        let request = instantiate(request, args)?;
+        if request.actor() != actor_reference {
+            return Err("first maintenance leaves must bind the root actor exactly".into());
+        }
+        let mut definition = self.libraries[&task_id.library_path]
+            .definitions
+            .iter()
+            .find(|row| &row.id == definition)
+            .expect("compiled Scenario definition")
+            .clone();
+        if definition
+            .state
+            .iter()
+            .any(|state| !compatible(&state.when, &request))
+        {
+            return Err(
+                "primitive Scenario condition does not match its physical outcome family".into(),
+            );
+        }
+        definition.id = format!(
+            "{namespace}/{}/{definition_id}",
+            task_id.library_path,
+            definition_id = definition.id
+        );
+        let config = SituationConfig {
+            id: format!("{namespace}/{node}"),
+            definition: definition.id.clone(),
+            request,
+        };
+        Ok(Decomposition {
+            leaves: BTreeMap::from([(node.into(), config)]),
+            definitions: BTreeMap::from([(definition.id.clone(), definition)]),
+            dependencies: Vec::new(),
+            forecasts: forecast
+                .as_ref()
+                .map(|value| BTreeMap::from([(node.into(), value.clone())]))
+                .unwrap_or_default(),
+        })
     }
 }

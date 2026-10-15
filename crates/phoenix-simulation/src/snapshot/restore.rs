@@ -78,6 +78,13 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
             }
         }
     }
+    if let Err(reason) = super::opportunity_comms::validate(snapshot) {
+        report.gaps.push(RestoreGap::ResourceStateInvalid {
+            uuid: "scenario/opportunity-comms".into(),
+            reason,
+        });
+        return report;
+    }
     if let Err(reason) = super::activities::validate(world, snapshot) {
         report.gaps.push(RestoreGap::ResourceStateInvalid {
             uuid: "scenario/activities".into(),

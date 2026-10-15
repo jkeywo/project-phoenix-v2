@@ -1,0 +1,50 @@
+# An ordinary Cruiser and optional work discovered from an actual later cause.
+# The host probe supplies the real physical incident and consumes existing parts;
+# no authored flag creates damage, stock, communication receipts or completion.
+[global]
+seed=1562241
+[player_spawn]
+position=[0,0,0]
+[[entity]]
+template_path="assets/entities/alliance_cruiser.toml"
+id="maintenance-ship"
+name="maintenance-ship"
+spawn_on="game_start"
+transform={position=[0,0,0]}
+[opportunity_search]
+id="maintenance"
+actor="maintenance-ship"
+repair_owner="repair"
+handling_owner="logistics"
+team=0
+compartments=["engineering"]
+source_store="hold-structural-parts"
+destination_store="repair-structural"
+commodity="structural_parts"
+offer_script="tests/fixtures/optional-maintenance-world.toml#script.setup"
+offer_function="maintenance_offer"
+terms="world.optional_maintenance.terms"
+resolves_when="world.optional_maintenance.resolves"
+import=[{path="tests/fixtures/maintenance-opportunity-domain.toml",as="maintenance",names=["restore-room","deliver-parts"]}]
+repair={task="maintenance::restore-room",arguments={actor="actor",owner="repair_owner",team="team",visit="repair_request",target="repair_target",goal="repair_goal"}}
+delivery={task="maintenance::deliver-parts",arguments={actor="actor",owner="handling_owner",from="source_store",to="destination_store",resource="commodity",amount="quantity"}}
+[script]
+setup='''
+fn maintenance_offer(ctx) {
+    #{message:"world.optional_maintenance.offer",responses:[
+        #{text:"world.optional_maintenance.accept",on_pick:"request_maintenance",ai_weight:0},
+        #{text:"world.optional_maintenance.decline",on_pick:"decline_maintenance",ai_weight:0},
+    ]}
+}
+fn request_maintenance(ctx) {
+    #{message:"world.optional_maintenance.requested",responses:[],opportunity_decision:"accept"}
+}
+fn decline_maintenance(ctx) {
+    #{message:"world.optional_maintenance.declined",responses:[],opportunity_decision:"decline"}
+}
+fn complete_optional(ctx) {
+    let scope=ctx.situation.split("/");
+    ctx.commitments.keep("opportunity."+scope[1]+"."+scope[2]);
+    ctx.flags.increment("actual_optional_structure",1);
+}
+'''

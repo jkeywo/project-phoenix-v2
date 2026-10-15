@@ -211,6 +211,10 @@ pub(super) fn instances(mut acc: u64, values: &SituationInstances) -> u64 {
 pub(super) fn plan(mut acc: u64, value: &phoenix_sim_world::world::planning::PlanChoice) -> u64 {
     use phoenix_sim_world::world::planning::Value;
     acc = fold_str(acc, "world-plan-choice");
+    if !value.execution.is_primary() {
+        acc = fold_serde(fold_str(acc, "optional-execution"), &value.execution);
+    }
+
     acc = fold_str(acc, &value.id);
     acc = fold_u64(acc, value.chosen_tick);
     acc = fold_optional_str(acc, value.required_commitment.as_deref());

@@ -89,6 +89,9 @@ pub(crate) fn advance_with_forecast(
         return Ok(());
     }
     let (mut choice, graph) = if let Some(choice) = &runtime.plan_choice {
+        if !choice.execution.is_primary() {
+            return Err("primary plan contains an optional execution".into());
+        }
         compiled.validate_required_commitment(choice, &runtime.commitments, tick)?;
         (
             choice.clone(),
@@ -168,21 +171,32 @@ pub(crate) fn requests(
     let (Some(runtime), Some(base)) = (runtime, base) else {
         return Vec::new();
     };
-    let (Some(compiled), Some(choice)) = (&base.compiled_planning, &runtime.plan_choice) else {
-        return Vec::new();
-    };
-    compiled
-        .ready_requests(choice, &runtime.situations, tick)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|row| {
-            row.request.actor() == actor
-                && match &row.request {
-                    ActivityRequest::Repair { owner: target, .. }
-                    | ActivityRequest::Delivery { owner: target, .. }
-                    | ActivityRequest::Communication { owner: target, .. } => target == owner,
+    let mut rows = Vec::new();
+    if let (Some(compiled), Some(choice)) = (&base.compiled_planning, &runtime.plan_choice) {
+        rows.extend(
+            compiled
+                .ready_requests(choice, &runtime.situations, tick)
+                .unwrap_or_default(),
+        );
+    }
+    if let Some(source) = &base.compiled_opportunity_search {
+        for record in &runtime.opportunities {
+            if let crate::world::opportunities::OpportunityState::Accepted {
+                input, choice, ..
+            } = &record.state
+            {
+                if let Ok(graph) = source.derive(&record.reference, input, &record.proposal) {
+                    rows.extend(
+                        graph
+                            .ready_requests(choice, &runtime.situations, tick)
+                            .unwrap_or_default(),
+                    );
                 }
-        })
+            }
+        }
+    }
+    rows.into_iter()
+        .filter(|row| row.request.actor() == actor && row.request.owner() == owner)
         .collect()
 }
 

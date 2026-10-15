@@ -53,6 +53,7 @@ function isEmptyPayload(payload) {
     payload.commitments,
     payload.dossier,
     payload.situations,
+    payload.opportunities,
   ].every((list) => !Array.isArray(list) || list.length === 0);
 }
 
@@ -325,6 +326,28 @@ export function buildScenarioStatePanel(payload, opts = {}) {
       field('dependency', `${edge.from} → ${edge.to}: ${edge.when?.kind}${edge.when?.outcome ? ' / '+edge.when.outcome : ''}`);
     }
     if (plan.derivation_error) field('error', plan.derivation_error);
+    root.appendChild(sec);
+  }
+
+  if (Array.isArray(payload.opportunities) && payload.opportunities.length) {
+    const sec=section(doc,'opportunities','settings.debug.scenario.opportunities.title');
+    for (const offer of payload.opportunities) {
+      const row=el(doc,'div','ss-opportunity');
+      row.appendChild(el(doc,'strong','ss-opportunity-id',`${offer.reference?.source}/${offer.reference?.ordinal}`));
+      const state=offer.state || {};
+      for (const [key,value] of [
+        ['state',state.state],['actor',offer.reference?.actor],['discovery',offer.discovered_tick],
+        ['evidence',JSON.stringify(offer.input)],['steps',JSON.stringify(offer.proposal?.steps)],
+        ['expansions',offer.proposal?.expansions],['decision',state.tick ?? state.decision_tick],
+        ['admitted',state.choice?.chosen_tick],['released',JSON.stringify(state.choice?.released)],['reason',state.reason ?? state.cause],
+      ]) {
+        const field=el(doc,'div',`ss-opportunity-${key}`);
+        field.appendChild(el(doc,'span','',t(`settings.debug.scenario.opportunities.${key}`)+': '));
+        field.appendChild(el(doc,'span','',value==null?t('settings.debug.scenario.none'):String(value)));
+        row.appendChild(field);
+      }
+      sec.appendChild(row);
+    }
     root.appendChild(sec);
   }
 

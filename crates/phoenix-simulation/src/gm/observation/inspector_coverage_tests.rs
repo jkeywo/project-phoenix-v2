@@ -1252,6 +1252,8 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         situations: _,
         planning: _,
         compiled_planning: _,
+        opportunity_search: _,
+        compiled_opportunity_search: _,
         global: _,
         scenario_detail_floor: _,
         anchors: _,

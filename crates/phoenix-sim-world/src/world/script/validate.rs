@@ -825,3 +825,55 @@ pub fn validate_on_pick_fns(
 #[cfg(test)]
 #[path = "validate_tests.rs"]
 mod tests;
+
+/// Literal authored collisions are refused before activation. Computed IDs are
+/// checked by the same reserved namespace at the actual script record boundary.
+pub fn validate_generated_commitments(sources: &[ScriptSource]) -> Vec<WorldFinding> {
+    let mut findings = Vec::new();
+    for source in sources {
+        let tokens = lex_significant(&source.source);
+        for index in 0..tokens.len().saturating_sub(4) {
+            if !matches!(&tokens[index].kind,Tok::Ident(name) if name=="commitments")
+                || tokens[index + 1].kind != Tok::Dot
+                || !matches!(&tokens[index+2].kind,Tok::Ident(name) if name=="record")
+                || tokens[index + 3].kind != Tok::Other('(')
+            {
+                continue;
+            }
+            let mut parens = 1usize;
+            let mut braces = 0usize;
+            for position in index + 4..tokens.len() {
+                match tokens[position].kind {
+                    Tok::Other('(') => parens += 1,
+                    Tok::Other(')') => {
+                        parens -= 1;
+                        if parens == 0 {
+                            break;
+                        }
+                    }
+                    Tok::Other('{') => braces += 1,
+                    Tok::Other('}') => braces = braces.saturating_sub(1),
+                    _ => {}
+                }
+                if parens == 1
+                    && braces == 1
+                    && matches!(&tokens[position].kind,Tok::Ident(name) if name=="id")
+                    && tokens
+                        .get(position + 1)
+                        .is_some_and(|token| token.kind == Tok::Colon)
+                {
+                    if let Some(Token {
+                        kind: Tok::Str(id),
+                        line,
+                    }) = tokens.get(position + 2)
+                    {
+                        if id.starts_with("opportunity.") {
+                            findings.push(WorldFinding {severity:Severity::Error,category:"reserved-generated-promise",message:"opportunity.<source>.<ordinal> is reserved for atomic World acceptance; use the bound opportunity decision instead of commitments.record".into(),source:SourceLocation {file:source.path.clone(),line:Some(*line),reference:id.clone()}});
+                        }
+                    }
+                }
+            }
+        }
+    }
+    findings
+}

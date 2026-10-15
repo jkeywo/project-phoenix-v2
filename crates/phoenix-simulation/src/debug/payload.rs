@@ -481,6 +481,8 @@ pub struct ScenarioStatePayload {
     /// Privileged derived source/choice graph, never a gameplay instruction feed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub planning: Option<ScenarioPlanning>,
+    #[serde(default)]
+    pub opportunities: Vec<crate::world::opportunities::OpportunityRecord>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -535,6 +537,7 @@ impl Default for ScenarioStatePayload {
             dossier: Vec::new(),
             situations: Vec::new(),
             planning: None,
+            opportunities: Vec::new(),
         }
     }
 }

@@ -353,6 +353,7 @@ pub fn collect_scenario_state_with_fires(
     recorder: &TriggerFireRecorder,
 ) -> ScenarioStatePayload {
     let mut payload = ScenarioStatePayload::empty();
+    payload.opportunities = runtime.opportunities.clone();
     // BTreeMap identity order and original retained fact order. This does not
     // acknowledge evidence, step a job, or run a Scenario transition.
     payload.situations = runtime

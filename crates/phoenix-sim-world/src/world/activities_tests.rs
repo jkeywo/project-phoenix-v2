@@ -476,3 +476,61 @@ fn actual_callback_receipt_has_its_own_clock_and_refusal_never_grants_permission
         "permission references an explicit authored callback"
     );
 }
+
+#[test]
+fn retained_assignment_can_repeat_only_strictly_after_actual_terminal_settlement() {
+    let (mut instances, definitions) = prepare();
+    let original = instances.instances["repair-one"].clone();
+    let config = SituationConfig {
+        id: "repair-two".into(),
+        definition: original.definition.clone(),
+        request: original.request.clone(),
+    };
+    let definition = definitions
+        .iter()
+        .find(|row| row.id == config.definition)
+        .unwrap();
+    let work = achieved(&instances);
+    instances.acknowledge(&work, work.tick).unwrap();
+    assert!(
+        instances.arm(&config, definition, 10).is_err(),
+        "achievement does not release the returning team"
+    );
+    let terminal = instances
+        .fact(
+            original.accepted.as_ref().unwrap(),
+            10,
+            ActivityOutcome::RepairSettled {
+                outcome: JobOutcome::Cancelled,
+            },
+        )
+        .unwrap();
+    instances.acknowledge(&terminal, 10).unwrap();
+    assert!(
+        instances.arm(&config, definition, 10).is_err(),
+        "same-tick repeat overlaps terminal settlement"
+    );
+    instances.arm(&config, definition, 11).unwrap();
+    instances.validate(&definitions, 11).unwrap();
+    let mut bad = instances.clone();
+    bad.instances.get_mut("repair-two").unwrap().armed_tick = 10;
+    assert!(
+        bad.validate(&definitions, 11).is_err(),
+        "whole-history validation enforces the same strict frontier"
+    );
+    assert!(
+        instances
+            .accept_repair(
+                "ship",
+                &SystemId("repair".into()),
+                0,
+                &phoenix_model::messages::RepairTarget::Work(RepairWorkTarget::Compartment {
+                    compartment: "engine-room".into()
+                }),
+                original.accepted.as_ref().unwrap().physical_job().unwrap(),
+                11
+            )
+            .is_err(),
+        "retained JobId never becomes a new execution identity"
+    );
+}

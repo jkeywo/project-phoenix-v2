@@ -23,6 +23,8 @@ pub mod manifest;
 pub mod materialization;
 pub mod mod_pack;
 pub mod native_render_config;
+pub mod opportunities;
+pub(crate) mod opportunity_inputs;
 pub mod pack_asset_validation;
 pub(crate) mod planning;
 pub mod script;

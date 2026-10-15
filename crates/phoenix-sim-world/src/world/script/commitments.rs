@@ -137,6 +137,9 @@ impl Commitments {
     fn record(&self, spec: &Map) -> Result<(), Box<EvalAltResult>> {
         let id = map_str(spec, "id")
             .ok_or_else(|| raise("commitments.record requires a string `id`".to_string()))?;
+        if id.starts_with("opportunity.") {
+            return Err(raise("commitments.record: opportunity.<source>.<ordinal> is reserved for atomic World offer acceptance; request the bound opportunity decision instead".into()));
+        }
         let made_to = map_str(spec, "made_to").ok_or_else(|| {
             raise(
                 "commitments.record requires a string `made_to` (the party the promise \

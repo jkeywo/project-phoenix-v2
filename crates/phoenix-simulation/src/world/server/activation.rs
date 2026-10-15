@@ -397,6 +397,7 @@ pub(crate) fn init_world_runtime(
     };
     runtime.situations = Default::default();
     runtime.plan_choice = None;
+    runtime.opportunities.clear();
     runtime.situation_definitions = world_config.situation_definitions.clone();
     runtime.situation_configs = world_config.situations.clone();
 

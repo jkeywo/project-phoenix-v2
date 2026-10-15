@@ -646,6 +646,19 @@ pub(super) fn restore_scenario(
                     .expect("whole-candidate plan preflight checked source graph");
                 definitions.extend(graph.definitions.into_values());
             }
+            if let Some(source) = &base.compiled_opportunity_search {
+                for record in &stored.opportunities {
+                    if let crate::world::opportunities::OpportunityState::Accepted {
+                        input, ..
+                    } = &record.state
+                    {
+                        let graph = source
+                            .derive(&record.reference, input, &record.proposal)
+                            .expect("whole-candidate optional source preflight");
+                        definitions.extend(graph.definitions.into_values());
+                    }
+                }
+            }
             definitions
         });
 
@@ -726,6 +739,7 @@ pub(super) fn restore_scenario(
             .collect();
         runtime.situations = stored.situations.clone();
         runtime.plan_choice = stored.plan_choice.clone();
+        runtime.opportunities = stored.opportunities.clone();
         // Source graph is derived once after candidate-only validation.
         if let Some(definitions) = plan_definitions {
             runtime.situation_definitions = definitions;

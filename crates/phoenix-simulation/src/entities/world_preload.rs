@@ -13,6 +13,8 @@ pub(crate) struct Dependencies {
     pub pending: BTreeSet<String>,
     pub templates: BTreeSet<String>,
     pub planning: Option<phoenix_sim_world::world::planning::CompiledPlanning>,
+    pub opportunities:
+        Option<phoenix_sim_world::world::planning::opportunities::CompiledMaintenanceSearch>,
 }
 
 /// `Ok(None)` is an outstanding read; `Err` is terminal. The caller issues the
@@ -83,6 +85,43 @@ pub(crate) fn discover(
                     crate::content_ledger::record(&source.path, &source.text);
                 }
                 result.planning = Some(compiled);
+            }
+        }
+        if let Some(authored) = config.opportunity_search.clone() {
+            if !is_root {
+                return Err(format!(
+                    "{path}: opportunity discovery is supported only on the base world"
+                ));
+            }
+            let mut missing = BTreeSet::new();
+            let mut failure = None;
+            let compiled =
+                phoenix_sim_world::world::planning::opportunities::CompiledMaintenanceSearch::load(
+                    authored,
+                    |source| match read(source) {
+                        Ok(Some(text)) => Some(text),
+                        Ok(None) => {
+                            missing.insert(source.to_string());
+                            None
+                        }
+                        Err(error) => {
+                            failure = Some(format!("{source}: {error}"));
+                            None
+                        }
+                    },
+                );
+            if let Some(error) = failure {
+                return Err(error);
+            }
+            if !missing.is_empty() {
+                result.pending.extend(missing);
+            } else {
+                let (compiled, sources) =
+                    compiled.map_err(|error| format!("{path}: opportunity discovery: {error}"))?;
+                for source in sources {
+                    crate::content_ledger::record(&source.path, &source.text);
+                }
+                result.opportunities = Some(compiled);
             }
         }
         crate::content_ledger::record(&path, &text);

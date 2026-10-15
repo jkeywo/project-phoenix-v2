@@ -2,7 +2,7 @@
 title: Activity Contracts
 type: concept
 tags: [world, activities, repair, logistics, continuation]
-sources: [crates/phoenix-model/src/activity.rs, crates/phoenix-sim-world/src/world/activities.rs, crates/phoenix-sim-world/src/world/planning.rs, crates/phoenix-sim-world/src/world/planning_compile.rs, crates/phoenix-sim-world/src/world/planning_runtime.rs, crates/phoenix-sim-world/src/world/planning_temporal.rs, crates/phoenix-simulation/src/world/planning_inputs.rs, crates/phoenix-simulation/src/lobby/crew_replication.rs, crates/phoenix-simulation/src/snapshot/crew_presence.rs, crates/phoenix-content-preparation/src/world/planning.rs, crates/phoenix-simulation/src/world/planning.rs, gui/planned-requests.js, editor/workshop-planning.js, gui/workshop-planning-panel.js, crates/phoenix-simulation/src/debug/scenario.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/activities.rs, crates/phoenix-simulation/src/world/server/triggers.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/resources/logistics_server.rs, crates/phoenix-simulation/src/snapshot/activities.rs, crates/phoenix-simulation/src/sim_digest_activities.rs, crates/phoenix-sim-gameplay/src/jobs/activity_bindings.rs, crates/phoenix-content-preparation/src/world/activity_bindings.rs, editor/workshop-activities.js, gui/workshop-activities-panel.js, crates/phoenix-simulation/src/debug/scenario.rs]
+sources: [crates/phoenix-sim-world/src/world/planning_opportunities.rs, crates/phoenix-content-preparation/src/world/opportunities.rs, crates/phoenix-simulation/src/world/opportunities.rs, crates/phoenix-simulation/src/world/opportunity_inputs.rs, crates/phoenix-model/src/activity.rs, crates/phoenix-sim-world/src/world/activities.rs, crates/phoenix-sim-world/src/world/planning.rs, crates/phoenix-sim-world/src/world/planning_compile.rs, crates/phoenix-sim-world/src/world/planning_runtime.rs, crates/phoenix-sim-world/src/world/planning_temporal.rs, crates/phoenix-simulation/src/world/planning_inputs.rs, crates/phoenix-simulation/src/lobby/crew_replication.rs, crates/phoenix-simulation/src/snapshot/crew_presence.rs, crates/phoenix-content-preparation/src/world/planning.rs, crates/phoenix-simulation/src/world/planning.rs, gui/planned-requests.js, editor/workshop-planning.js, gui/workshop-planning-panel.js, crates/phoenix-simulation/src/debug/scenario.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/activities.rs, crates/phoenix-simulation/src/world/server/triggers.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/resources/logistics_server.rs, crates/phoenix-simulation/src/snapshot/activities.rs, crates/phoenix-simulation/src/sim_digest_activities.rs, crates/phoenix-sim-gameplay/src/jobs/activity_bindings.rs, crates/phoenix-content-preparation/src/world/activity_bindings.rs, editor/workshop-activities.js, gui/workshop-activities-panel.js, crates/phoenix-simulation/src/debug/scenario.rs]
 updated: 2026-10-15
 ---
 
@@ -89,7 +89,7 @@ and primitive phases without a second authoring acceptance owner. Estimates in
 the opt-in maintenance fixture remain provisional, not measured human workload.
 
 This first imported maintenance consumer supports one base actor or authored
-launch slot and disjoint finite leaves. Dynamic opportunities, multi-actor
+launch slot and disjoint finite leaves. Multi-actor
 planning and automatic plan repair remain separate work; source checks do not
 establish whole-host or full increment completion.
 
@@ -141,5 +141,38 @@ A same-tick script acceptance can await the next collection pass; an older open
 interval cannot explain a missing accepted root. The existing Workshop source
 transaction edits this binding and privileged Scenario inspection displays it.
 The committed-assistance probe exercises ordinary Comms acceptance and actual
-machinery evidence; native execution, physical custody and full Patrol acceptance
-remain separate from this source checkpoint.
+machinery evidence; the integration owner's native accept/refuse host checks
+pass. Physical custody and full Patrol acceptance remain separate.
+
+
+An opt-in base World `opportunity_search` imports real typed maintenance operators
+through the same accepted content closure. Its bounded scratch search reads actual
+own reported damage, finite local/main stores, routes and outstanding work. It
+forecasts a useful structural repair, with delivery first only when parts are
+missing. Search does not dispatch jobs or move resources.
+
+The existing collector retains bounded immutable proposals, original observations
+and search inputs. An exact internal own-Comms dialogue records Accept or Decline
+through ordinary Human/AI response admission. Acceptance revalidates actual need
+and resources, then stages one generated promise and a distinct optional
+Decomposition in the existing Situation owner. Primary choice and history remain
+unchanged. Released requests use the same Console publications and physical
+Repair/Logistics bindings; later leaves wait for actual prerequisite evidence.
+
+Snapshot preflight reconstructs original proposals and optional namespaces from
+accepted operator sources before writes. Actual settled jobs and finished
+callbacks gate reuse; achievement alone does not free a team. Privileged Scenario
+inspection shows the retained input, steps, decisions and release clocks. Workshop
+uses its existing accepted source/document history and Preview/Test path.
+
+The first host probe uses a Human to issue the released delivery and repair,
+then delegates actual partial work before complete JSON continuation. Autonomous
+coordination of future repair intent, Human overrides of frozen pending work,
+pacing and full continuing-mode acceptance remain open. This is a bounded
+maintenance consumer, not full generation or whole increment completion.
+
+Offered records require a unique retained pending/active internal Comms envelope.
+Final script-root failures record a dated closed source-unavailable cause without a
+player decision or Promise; budget deferral retains the pending envelope. A bound
+reply missing its decision refuses before buffered effects or response selection.
+Retained originating response metadata cannot contradict a recorded decision.

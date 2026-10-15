@@ -6,6 +6,11 @@ use super::{
 use crate::entities::loader::TemplateLoader;
 
 pub(super) fn findings(source: &WorldSource, loader: &dyn TemplateLoader) -> Vec<WorldFinding> {
+    let mut findings = super::opportunities::findings(source, loader);
+    findings.extend(planning_findings(source, loader));
+    findings
+}
+fn planning_findings(source: &WorldSource, loader: &dyn TemplateLoader) -> Vec<WorldFinding> {
     let Some(authored) = &source.config.planning else {
         return Vec::new();
     };

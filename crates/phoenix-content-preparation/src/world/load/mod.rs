@@ -547,6 +547,31 @@ pub fn load(
             .collect();
     }
 
+    if let Some(authored) = config
+        .opportunity_search
+        .clone()
+        .filter(|_| !matches!(policy, LoadPolicy::Inspect))
+    {
+        let (compiled, sources) =
+            phoenix_sim_world::world::planning::opportunities::CompiledMaintenanceSearch::load(
+                authored,
+                |source| reader.read(source),
+            )
+            .map_err(|message| LoadError::ParseFailed {
+                path: path.clone(),
+                message: format!("opportunity_search: {message}"),
+            })?;
+        config.compiled_opportunity_search = Some(compiled);
+        for source in sources {
+            if !domain_records.iter().any(|row| row.path == source.path) {
+                domain_records.push(LedgerRecord {
+                    path: source.path,
+                    text: source.text,
+                });
+            }
+        }
+    }
+
     match policy {
         LoadPolicy::Inspect => Ok(LoadedWorld {
             config,
@@ -557,6 +582,7 @@ pub fn load(
         }),
         LoadPolicy::Merge => {
             let scripts = compile_scripts(&path, &text, script_resolver, raw_transform)?;
+            validate_opportunity_scripts(&config, &scripts, &path)?;
             let digests = script_digests(&scripts);
             Ok(LoadedWorld {
                 config,
@@ -614,7 +640,7 @@ pub fn load(
                         path: child_path.clone(),
                         message: e,
                     })?;
-                if child_config.planning.is_some() {
+                if child_config.planning.is_some() || child_config.opportunity_search.is_some() {
                     return Err(LoadError::ChildParseFailed {
                         path: child_path.clone(),
                         message: "maintenance planning is supported only on the base world".into(),
@@ -648,6 +674,7 @@ pub fn load(
             // ledger order; the same owned value is returned below and supplies
             // the unchanged digest/runtime handoff.
             let scripts = compile_scripts(&path, &text, script_resolver, raw_transform)?;
+            validate_opportunity_scripts(&config, &scripts, &path)?;
 
             // Atomic composition validation over root + children. Findings (not
             // errors) — the caller gates activation on them.
@@ -742,4 +769,38 @@ fn compile_scripts(
     }
 
     Ok(Some(load_world_scripts(path, &raw, resolver)))
+}
+
+fn validate_opportunity_scripts(
+    config: &WorldConfig,
+    scripts: &Option<CompiledScripts>,
+    path: &str,
+) -> Result<(), LoadError> {
+    let Some(source) = &config.compiled_opportunity_search else {
+        return Ok(());
+    };
+    let has = |script: &str, function: &str| {
+        scripts
+            .as_ref()
+            .and_then(|compiled| compiled.asts.get(script))
+            .is_some_and(|ast| {
+                ast.iter_functions()
+                    .any(|metadata| metadata.name == function && metadata.params.len() == 1)
+            })
+    };
+    if !has(&source.config.offer_script, &source.config.offer_function) {
+        return Err(LoadError::ParseFailed {path:path.into(),message:"opportunity_search offer_script/offer_function must name a real one-context function in the accepted World script set".into()});
+    }
+    for (_, library) in source.catalog.libraries() {
+        for definition in &library.definitions {
+            for state in &definition.state {
+                if let Some(call) = &state.call {
+                    if !has(&call.script, &call.function) {
+                        return Err(LoadError::ParseFailed {path:path.into(),message:format!("generated maintenance callback {}::{} is absent from the accepted World scripts",call.script,call.function)});
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }

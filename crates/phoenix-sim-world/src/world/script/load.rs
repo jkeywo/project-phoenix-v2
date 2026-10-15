@@ -417,6 +417,9 @@ pub fn load_world_scripts(
     // increment. Each is a blocking finding, so the atomic activation gate keeps a
     // world that reaches for the old `+=` idiom from spawning (issue #994).
     compiled.findings.extend(validate_flag_opassign(&sources));
+    compiled
+        .findings
+        .extend(super::validate::validate_generated_commitments(&sources));
     // And the dialogue tree's OWN cross-reference (issue #984): every
     // `on_pick: "fn"` literal inside a node fn's returned map, checked against the
     // same defined-function set. Every node past a thread's root is named by a

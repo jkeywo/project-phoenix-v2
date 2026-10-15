@@ -231,12 +231,36 @@ pub struct MethodChoice {
     pub task: TaskIdentity,
     pub method: String,
 }
+/// A closed execution scope, independent of the immutable task source.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PlanExecution {
+    #[default]
+    Primary,
+    Optional {
+        source: String,
+        ordinal: u16,
+    },
+}
+impl PlanExecution {
+    pub fn is_primary(&self) -> bool {
+        matches!(self, Self::Primary)
+    }
+    pub fn namespace(&self, source: &str) -> String {
+        match self {
+            Self::Primary => format!("htn/{source}"),
+            Self::Optional { source, ordinal } => format!("htn-optional/{source}/{ordinal}"),
+        }
+    }
+}
 /// The one saved choice frontier. Definitions and expanded leaves are derived
 /// from frozen content; SituationInstances own physical acceptance and evidence.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlanChoice {
     pub id: String,
+    #[serde(default, skip_serializing_if = "PlanExecution::is_primary")]
+    pub execution: PlanExecution,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub required_commitment: Option<String>,
     pub root_arguments: BTreeMap<String, Value>,

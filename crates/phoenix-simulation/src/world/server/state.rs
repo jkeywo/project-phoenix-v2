@@ -39,6 +39,7 @@ impl MissionClock {
 /// `crate::comms::server::CommsRuntime` (issue #816).
 #[derive(Resource, Default)]
 pub struct WorldContentRuntime {
+    pub opportunities: Vec<crate::world::opportunities::OpportunityRecord>,
     /// Scenario-private bindings/evidence; no physical machinery copies.
     pub situations: phoenix_sim_world::world::activities::SituationInstances,
     /// Immutable authored definitions, rebuilt from accepted content.

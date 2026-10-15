@@ -422,10 +422,13 @@ impl SituationInstances {
             || config.definition != definition.id
             || self.instances.contains_key(&config.id)
             || self.instances.len() >= MAX_SITUATIONS
-            || self
-                .instances
-                .values()
-                .any(|instance| instance.request.conflicts(&config.request))
+            || self.instances.values().any(|instance| {
+                instance.request.conflicts(&config.request)
+                    && instance
+                        .settled
+                        .as_ref()
+                        .is_none_or(|fact| fact.tick >= tick)
+            })
         {
             return Err("activity binding identity/capacity/conflict".into());
         }
@@ -802,11 +805,17 @@ impl SituationInstances {
         }
         let values: Vec<_> = self.instances.values().collect();
         for (index, left) in values.iter().enumerate() {
-            if values
-                .iter()
-                .skip(index + 1)
-                .any(|right| left.request.conflicts(&right.request))
-            {
+            if values.iter().skip(index + 1).any(|right| {
+                left.request.conflicts(&right.request)
+                    && !left
+                        .settled
+                        .as_ref()
+                        .is_some_and(|fact| fact.tick < right.armed_tick)
+                    && !right
+                        .settled
+                        .as_ref()
+                        .is_some_and(|fact| fact.tick < left.armed_tick)
+            }) {
                 return Err("overlapping situation requests".into());
             }
         }

@@ -1269,6 +1269,8 @@ impl GmPaletteEntry {
 #[derive(Debug, Default, Deserialize)]
 pub struct RawWorld {
     #[serde(default)]
+    pub opportunity_search: Option<crate::world::planning::opportunities::MaintenanceSearchConfig>,
+    #[serde(default)]
     pub planning: Option<crate::world::planning::PlanningConfig>,
     #[serde(default)]
     pub transit_destination: Vec<super::transit_destinations::WorldTransitDestination>,
@@ -2496,6 +2498,9 @@ pub fn scripted_trigger(condition: TriggerCondition) -> Trigger {
 /// re-validate length on every read.
 #[derive(Clone, Debug, Default, bevy::prelude::Resource)]
 pub struct WorldConfig {
+    pub opportunity_search: Option<crate::world::planning::opportunities::MaintenanceSearchConfig>,
+    pub compiled_opportunity_search:
+        Option<crate::world::planning::opportunities::CompiledMaintenanceSearch>,
     /// Authored root; compiled only through the overlay-aware content reader.
     pub planning: Option<crate::world::planning::PlanningConfig>,
     /// Derived immutable imported source closure, never snapshot state.
@@ -3193,6 +3198,8 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         planning: raw.planning,
         compiled_planning: None,
         transit_destinations: raw.transit_destination,
+        opportunity_search: raw.opportunity_search,
+        compiled_opportunity_search: None,
         situation_definitions: raw.situation_definition,
         situations: raw.situation,
         global: raw.global,

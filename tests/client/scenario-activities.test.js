@@ -89,3 +89,25 @@ it('shows the dated reconsideration while retaining the original refused decisio
   expect(container.querySelector('.ss-plan-interval').textContent).toContain('30 → 90');
   expect(container.querySelector('button,input,select')).toBeNull();
 });
+
+it('shows original optional discovery separately from a refused acceptance without control or markup',()=>{
+  const container=document.createElement('div');
+  const offer={reference:{source:'<source>',ordinal:2,actor:'own-ship'},discovered_tick:14,input:{compartment:'engineering',local_available:0},proposal:{steps:[{task:'maintenance::deliver-parts'}],expansions:3},state:{state:'refused',decision_tick:18,tick:19,reason:'<changed>'}};
+  renderScenarioStatePanel(container,JSON.stringify({flags:[],triggers:[],opportunities:[offer]}));
+  expect(container.querySelector('.ss-empty')).toBeNull();
+  expect(container.querySelector('.ss-opportunity-id').textContent).toContain('<source>/2');
+  expect(container.querySelector('.ss-opportunity-state').textContent).toContain('refused');
+  expect(container.querySelector('.ss-opportunity-discovery').textContent).toContain('14');
+  expect(container.querySelector('.ss-opportunity-reason').textContent).toContain('<changed>');
+  expect(container.querySelector('source,changed,button,input,select')).toBeNull();
+});
+
+it('shows an actual unavailable offer source separately from a player decision',()=>{
+  const container=document.createElement('div');
+  const offer={reference:{source:'maintenance',ordinal:1,actor:'own-ship'},discovered_tick:14,proposal:{steps:[],expansions:0},state:{state:'source_unavailable',tick:15,cause:'no_node'}};
+  renderScenarioStatePanel(container,JSON.stringify({flags:[],triggers:[],opportunities:[offer]}));
+  expect(container.querySelector('.ss-opportunity-state').textContent).toContain('source_unavailable');
+  expect(container.querySelector('.ss-opportunity-reason').textContent).toContain('no_node');
+  expect(container.querySelector('.ss-opportunity-admitted').textContent).toContain('(none)');
+  expect(container.querySelector('button,input,select')).toBeNull();
+});

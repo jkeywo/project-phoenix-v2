@@ -236,7 +236,7 @@ namespace and missing-leaf mutations must refuse without writes. These native te
 are authored and pending the integration owner's run; source review is separate.
 The incident is not a weapon/GM or authored-encounter acceptance result.
 
-Targeted executed JavaScript evidence: Scenario activity inspection 5 tests pass;
+Targeted executed JavaScript evidence: Scenario activity inspection 6 tests pass;
 strict string validation reports 6271 IDs, zero errors/warnings. Native compilation,
 actual host execution, compatibility epochs and integrated gates remain with the
 integration owner. Future-AI prerequisite intent and Human-override outcomes remain

@@ -66,7 +66,7 @@ fn slot_binding(
 }
 
 /// The accepted complete base/slot recipe is the historical capability source.
-pub(super) fn accepted_recipe(
+pub(crate) fn accepted_recipe(
     world: &World,
     snapshot: &PhoenixSnapshot,
     actor: &str,
@@ -118,8 +118,12 @@ fn planning_frontier(
     let mut configs = runtime.situation_configs.clone();
     let base = world.get_resource::<crate::world::config::WorldConfig>();
     let compiled = base.and_then(|base| base.compiled_planning.as_ref());
+    let mut plan_bindings = Vec::new();
     match (&stored.plan_choice, compiled) {
         (Some(choice), Some(compiled)) => {
+            if !choice.execution.is_primary() {
+                return Err("primary plan contains an optional execution".into());
+            }
             compiled.validate_required_commitment(choice, &stored.commitments, snapshot.tick)?;
             let base = base.ok_or("missing plan base-world definition")?;
             let actor = compiled.actor_reference()?;
@@ -169,8 +173,8 @@ fn planning_frontier(
             }
             // Keep authored actor references for the existing immutable actor /
             // historical equipment checks below; its request is bound once.
-            validate_plan_publications(snapshot, choice, &graph)?;
             configs.extend(graph.leaves.values().cloned());
+            plan_bindings.push((choice.clone(), graph));
         }
         (Some(_), None) => return Err("saved plan has no accepted imported source closure".into()),
         (None, Some(compiled)) if stored.mission_elapsed.is_some() => {
@@ -204,23 +208,20 @@ fn planning_frontier(
         }
         _ => {}
     }
-    if stored.plan_choice.is_none()
-        && snapshot
-            .entities
-            .iter()
-            .flat_map(|row| &row.blackboards)
-            .any(|(_, board)| match board {
-                crate::core::messages::SystemBlackboard::Repair(board) => {
-                    !board.planned_requests.is_empty()
-                }
-                crate::core::messages::SystemBlackboard::Logistics(board) => {
-                    !board.planned_requests.is_empty()
-                }
-                _ => false,
-            })
-    {
-        return Err("planned publication lacks its saved World choice".into());
+    for (choice, graph) in crate::world::opportunities::validate_history(world, snapshot)? {
+        for definition in graph.definitions.values() {
+            if definitions
+                .iter()
+                .any(|existing| existing.id == definition.id)
+            {
+                return Err("duplicate generated Scenario identity".into());
+            }
+            definitions.push(definition.clone());
+        }
+        configs.extend(graph.leaves.values().cloned());
+        plan_bindings.push((choice, graph));
     }
+    validate_plan_publications(snapshot, &plan_bindings)?;
     Ok((definitions, configs))
 }
 
@@ -230,11 +231,13 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
         if world
             .get_resource::<WorldContentRuntime>()
             .is_some_and(|runtime| {
-                !runtime.situation_configs.is_empty() || runtime.plan_choice.is_some()
+                !runtime.situation_configs.is_empty()
+                    || runtime.plan_choice.is_some()
+                    || !runtime.opportunities.is_empty()
             })
             || world
                 .get_resource::<crate::world::config::WorldConfig>()
-                .is_some_and(|base| base.planning.is_some())
+                .is_some_and(|base| base.planning.is_some() || base.opportunity_search.is_some())
         {
             return Err("configured situations require their saved World owner".into());
         }
@@ -243,6 +246,7 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
     let Some(runtime) = world.get_resource::<WorldContentRuntime>() else {
         return if stored.situations.instances.is_empty()
             && stored.plan_choice.is_none()
+            && stored.opportunities.is_empty()
             && !stored.pending_events.iter().any(|event| event.kind == 13)
         {
             Ok(())
@@ -646,18 +650,25 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
 /// but can never invent another actor, command, method, or original release tick.
 fn validate_plan_publications(
     snapshot: &PhoenixSnapshot,
-    choice: &phoenix_sim_world::world::planning::PlanChoice,
-    graph: &phoenix_sim_world::world::planning::Decomposition,
+    bindings: &[(
+        phoenix_sim_world::world::planning::PlanChoice,
+        phoenix_sim_world::world::planning::Decomposition,
+    )],
 ) -> Result<(), String> {
     use crate::core::messages::SystemBlackboard;
-    let released = choice
-        .released
+    let released = bindings
         .iter()
-        .map(|(node, tick)| {
-            (
-                graph.leaves[node].id.clone(),
-                (&graph.leaves[node].request, *tick),
-            )
+        .flat_map(|(choice, graph)| {
+            choice.released.iter().map(|(node, tick)| {
+                (
+                    graph.leaves[node].id.clone(),
+                    (
+                        &graph.leaves[node].request,
+                        *tick,
+                        choice.actor_uuid.as_str(),
+                    ),
+                )
+            })
         })
         .collect::<std::collections::BTreeMap<_, _>>();
     for row in &snapshot.entities {
@@ -680,11 +691,12 @@ fn validate_plan_publications(
                                 ..
                             },
                             tick,
+                            actor,
                         )) = released.get(&request.id).copied()
                         else {
                             return Err("Repair publication has no released primitive".into());
                         };
-                        if row.uuid != choice.actor_uuid
+                        if row.uuid.as_str() != actor
                             || expected.0.as_str() != owner.as_str()
                             || !ids.insert(&request.id)
                             || request.released_tick != tick
@@ -716,11 +728,12 @@ fn validate_plan_publications(
                                 ..
                             },
                             tick,
+                            actor,
                         )) = released.get(&request.id).copied()
                         else {
                             return Err("delivery publication has no released primitive".into());
                         };
-                        if row.uuid != choice.actor_uuid
+                        if row.uuid.as_str() != actor
                             || expected.0.as_str() != owner.as_str()
                             || !ids.insert(&request.id)
                             || request.released_tick != tick

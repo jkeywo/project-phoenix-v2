@@ -1,5 +1,40 @@
 use super::*;
 
+#[test]
+fn candidate_field_validates_actual_origin_and_maximum_evolution_effects() {
+    use crate::regions::effects::RegionEffectKind;
+    let mut config = profile();
+    config.evolution = Some(FieldEvolution {
+        duration_secs: 1.0,
+        translation: [f32::MAX, 0.0, 0.0],
+        final_scale: 1.0,
+        final_strength: 2.0,
+    });
+    assert!(RegionFieldState::new(config.clone(), 0, [f32::MAX, 0.0, 0.0]).is_err());
+    let state = RegionFieldState::new(config, 0, [0.0; 3]).unwrap();
+    let shape = RegionShape::Sphere { radius: 1.0 };
+    assert!(state
+        .validate_environment(
+            &shape,
+            &[RegionEffectKind::SlowZone {
+                thrust_modifier: Some(-f32::MAX),
+                yaw_rate_modifier: None
+            }]
+        )
+        .is_err());
+    assert!(state
+        .validate_environment(
+            &shape,
+            &[RegionEffectKind::RadarDampening { multiplier: -1.0 }]
+        )
+        .is_ok());
+    let mut state = state;
+    state.profile.evolution.as_mut().unwrap().final_scale = f32::MAX;
+    assert!(state
+        .validate_environment(&RegionShape::Sphere { radius: 2.0 }, &[])
+        .is_err());
+}
+
 fn profile() -> FieldConfig {
     FieldConfig {
         falloff: FieldFalloff::Step,

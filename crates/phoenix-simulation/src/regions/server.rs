@@ -103,6 +103,72 @@ pub fn rebuild_region_read_cache(world: &mut World) {
     world.insert_resource(membership);
 }
 
+/// Reconcile scene-derived consumers after the full snapshot is adopted.
+/// This invokes no boundary events, paid work or machinery commands.
+pub fn rebuild_region_projections(world: &mut World) {
+    use crate::regions::field::RegionFieldState;
+    rebuild_region_read_cache(world);
+    let mut regions: Vec<_> = world
+        .query::<(
+            Entity,
+            &EntityUuid,
+            &RegionEffectsSection,
+            Option<&RegionFieldState>,
+        )>()
+        .iter(world)
+        .filter_map(|(entity, uuid, effects, field)| {
+            uuid::Uuid::parse_str(&uuid.0)
+                .ok()
+                .map(|uuid| (entity, uuid, effects.0.clone(), field.is_some()))
+        })
+        .collect();
+    regions.sort_by_key(|(_, uuid, ..)| *uuid);
+    let membership = world.resource::<RegionMembership>();
+    let inside = membership.inside.clone();
+    let exposures = membership.exposure.clone();
+    for (entity, mut modifiers) in world
+        .query_filtered::<(Entity, &mut ShipModifiers), With<Ship>>()
+        .iter_mut(world)
+    {
+        let pending = std::mem::take(&mut modifiers.pending_events);
+        modifiers.clear_region_sources();
+        for (region, uuid, effects, field) in &regions {
+            if inside
+                .get(&entity)
+                .is_some_and(|inside| inside.contains(region))
+            {
+                let exposure = if *field {
+                    exposures.get(&(entity, *region)).copied().unwrap_or(0.0)
+                } else {
+                    1.0
+                };
+                crate::modifiers::coordination::apply_weighted_region_effects(
+                    &mut modifiers,
+                    *uuid,
+                    effects,
+                    exposure,
+                );
+            }
+        }
+        modifiers.pending_events = pending;
+    }
+    // Reachability gates Hail/Respond in Input, before the usual Broadcast
+    // refresh. It is a read projection, not part of captured Comms intent.
+    if world.contains_resource::<crate::comms::server::CommsRuntime>() {
+        use bevy::ecs::system::RunSystemOnce;
+        // The normal Broadcast updater also retires open hails. Preserve that
+        // captured intent: restore is only rebuilding its derived reach views.
+        let open_hails = world
+            .resource::<crate::comms::server::CommsRuntime>()
+            .open_hails
+            .clone();
+        let _ = world.run_system_once(crate::comms::server::update_comms_range_flags);
+        world
+            .resource_mut::<crate::comms::server::CommsRuntime>()
+            .open_hails = open_hails;
+    }
+}
+
 impl Plugin for RegionPlugin {
     fn build(&self, app: &mut App) {
         use crate::authoritative::{DeclareState, StateClass};

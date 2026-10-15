@@ -10,6 +10,141 @@ use crate::ship::damage::SystemHull;
 use crate::ship::impulse::{ImpulsePhase, IMPULSE_CHARGE_DURATION};
 use crate::ship::physics::ShipPhysicsConfig;
 
+#[test]
+fn restored_field_projections_settle_first_input_hail_without_a_physics_step() {
+    use crate::comms::server::CommsRuntime;
+    use crate::core::messages::{
+        AdmittedCommand, AdmittedCommands, FlagKind, ModifierSource, SystemControlPayload, SystemId,
+    };
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    let power = crate::modifiers::power_system::PowerSystem::from_energy(
+        config.energy.unwrap(),
+        config.ship_config.unwrap(),
+    )
+    .unwrap();
+    let mut app = App::new();
+    app.insert_resource(crate::sim_tick::SimTick(40))
+        .insert_resource(Time::<Fixed>::from_seconds(1.0))
+        .insert_resource(CommsRuntime::default())
+        .insert_resource(crate::world::server::WorldContentRuntime::default())
+        .add_systems(Update, crate::console::comms::server::handle_hail);
+    let ship = app
+        .world_mut()
+        .spawn((
+            Ship,
+            LocalShip,
+            ShipPhysics::default(),
+            Transform::default(),
+            crate::ship::power::ShipPowerSystem(power),
+            crate::comms::CommsRange(100.0),
+            ShipModifiers::new(),
+            AdmittedCommands(vec![AdmittedCommand {
+                target: SystemId("comms".into()),
+                payload: SystemControlPayload::Hail {
+                    target_uuid: "contact".into(),
+                },
+                response_token: None,
+                feedback_correlation: None,
+            }]),
+        ))
+        .id();
+    app.world_mut().spawn((
+        EntityUuid("contact".into()),
+        Transform::from_xyz(4.0, 0.0, 0.0),
+        crate::comms::CommsRange(100.0),
+    ));
+    let mut profile = field_profile();
+    profile.comms_absorption_per_unit = 100.0;
+    let region = app
+        .world_mut()
+        .spawn((
+            EntityUuid("00000000-0000-0000-0000-000000000144".into()),
+            Transform::default(),
+            RegionShapeSection(RegionShape::Sphere { radius: 10.0 }),
+            RegionEffectsSection(vec![
+                RegionEffectKind::CommsJam,
+                RegionEffectKind::SlowZone {
+                    thrust_modifier: Some(-1.0),
+                    yaw_rate_modifier: None,
+                },
+            ]),
+            crate::regions::field::RegionFieldState::new(profile.clone(), 0, [0.0; 3]).unwrap(),
+        ))
+        .id();
+    rebuild_region_projections(app.world_mut());
+    assert!(!app.world().resource::<CommsRuntime>().range_flags["contact"]);
+    assert!(app
+        .world()
+        .get::<ShipModifiers>(ship)
+        .unwrap()
+        .has_flag(&FlagKind::CommsJammed));
+    app.update();
+    assert!(app.world().resource::<CommsRuntime>().open_hails.is_empty());
+    let source = ModifierSource::RegionEffect {
+        uuid: uuid::Uuid::from_u128(145),
+    };
+    let mut modifiers = app.world_mut().get_mut::<ShipModifiers>(ship).unwrap();
+    modifiers.add_flag(source, FlagKind::CommsJammed);
+    modifiers.add_flag(ModifierSource::ImpulseDrive, FlagKind::SensorBlind);
+    let pending_count = modifiers.pending_events.len();
+    profile.strength = 0.0;
+    let saved = crate::regions::field::RegionFieldState::new(profile, 0, [0.0; 3]).unwrap();
+    let restored = serde_json::from_slice::<crate::regions::field::RegionFieldState>(
+        &serde_json::to_vec(&saved).unwrap(),
+    )
+    .unwrap();
+    app.world_mut().entity_mut(region).insert(restored);
+    let before = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(ship)
+        .unwrap()
+        .0
+        .network()
+        .consumers[&SystemId("comms".into())]
+        .energy;
+    app.world_mut()
+        .resource_mut::<CommsRuntime>()
+        .open_hails
+        .insert("departed-captured-hail".into());
+    rebuild_region_projections(app.world_mut());
+    let modifiers = app.world().get::<ShipModifiers>(ship).unwrap();
+    assert!(!modifiers.has_flag(&FlagKind::CommsJammed));
+    assert!(modifiers.has_flag(&FlagKind::SensorBlind));
+    assert_eq!(modifiers.get(&ModifierSlot::MaxSpeed), 1.0);
+    assert_eq!(modifiers.pending_events.len(), pending_count);
+    assert!(app.world().resource::<CommsRuntime>().range_flags["contact"]);
+    assert!(app
+        .world()
+        .resource::<CommsRuntime>()
+        .open_hails
+        .contains("departed-captured-hail"));
+    app.update();
+    assert!(app
+        .world()
+        .resource::<CommsRuntime>()
+        .open_hails
+        .contains("contact"));
+    assert!(
+        app.world()
+            .get::<crate::ship::power::ShipPowerSystem>(ship)
+            .unwrap()
+            .0
+            .network()
+            .consumers[&SystemId("comms".into())]
+            .energy
+            < before
+    );
+    assert_eq!(
+        app.world()
+            .get::<crate::regions::field::RegionFieldState>(region)
+            .unwrap(),
+        &saved
+    );
+}
+
 /// Build a minimal Bevy app with the real `RegionPlugin`, one fixed
 /// simulation step per `update()` (issue #895).
 fn test_app() -> App {

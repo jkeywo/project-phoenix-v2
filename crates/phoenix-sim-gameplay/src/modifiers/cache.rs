@@ -203,9 +203,24 @@ impl ShipModifiers {
         self.flags.keys().cloned().collect()
     }
 
-    /// Removes ALL modifiers and flags originating from `source`.
+    /// Region contributions are derived from the current scene. Rebuilding
+    /// after restore must also remove sources whose bootstrap entity vanished.
+    pub fn clear_region_sources(&mut self) {
+        let sources: BTreeSet<_> = self
+            .table
+            .keys()
+            .map(|(source, _)| source)
+            .chain(self.flags.values().flat_map(|sources| sources.iter()))
+            .filter(|source| matches!(source, ModifierSource::RegionEffect { .. }))
+            .cloned()
+            .collect();
+        for source in sources {
+            self.clear_source(&source);
+        }
+    }
+
+    /// Removes all float modifiers and flags originating from `source`.
     /// Pushes a `ModifierEvent::Removed` for each modifier removed.
-    /// Rebuilds the cache after removal.
     pub fn clear_source(&mut self, source: &ModifierSource) {
         let keys: Vec<(ModifierSource, ModifierSlot)> = self
             .table

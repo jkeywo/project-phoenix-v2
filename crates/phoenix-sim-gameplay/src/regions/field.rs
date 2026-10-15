@@ -36,6 +36,76 @@ impl FieldPose {
 }
 
 impl RegionFieldState {
+    /// Validate a candidate against its actual geometry and effects before
+    /// spawn, causal replacement or snapshot adoption. Maximum exposure can
+    /// occur at either endpoint of the bounded analytic evolution.
+    pub fn validate_environment(
+        &self,
+        shape: &RegionShape,
+        effects: &[super::effects::RegionEffectKind],
+    ) -> Result<(), String> {
+        self.validate()?;
+        shape.validate()?;
+        let strength = self
+            .profile
+            .evolution
+            .as_ref()
+            .map_or(self.profile.strength, |end| {
+                self.profile.strength.max(end.final_strength)
+            });
+        let scale = self
+            .profile
+            .evolution
+            .as_ref()
+            .map_or(1.0, |end| end.final_scale.max(1.0));
+        let finite_scaled =
+            |value: f32, multiplier: f32| value.is_finite() && (value * multiplier).is_finite();
+        let dimensions: &[f32] = match shape {
+            RegionShape::Sphere { radius } => std::slice::from_ref(radius),
+            RegionShape::Box { half_extents, .. } => half_extents,
+            RegionShape::Torus {
+                inner_radius,
+                outer_radius,
+            } => {
+                if !finite_scaled(*inner_radius, scale) {
+                    return Err("field-scaled geometry must remain finite and valid".into());
+                }
+                std::slice::from_ref(outer_radius)
+            }
+        };
+        if dimensions.iter().any(|value| !finite_scaled(*value, scale)) {
+            return Err("field-scaled geometry must remain finite".into());
+        }
+        use super::effects::RegionEffectKind;
+        for effect in effects {
+            let valid = match effect {
+                RegionEffectKind::SlowZone {
+                    thrust_modifier,
+                    yaw_rate_modifier,
+                } => [thrust_modifier, yaw_rate_modifier]
+                    .into_iter()
+                    .flatten()
+                    .all(|value| finite_scaled(*value, strength)),
+                RegionEffectKind::RadarDampening { multiplier } => {
+                    finite_scaled(*multiplier, strength)
+                }
+                RegionEffectKind::NebulaFog { density, color } => {
+                    finite_scaled(*density, strength) && color.iter().all(|value| value.is_finite())
+                }
+                RegionEffectKind::DamageZone { dps, shield_pierce } => {
+                    finite_scaled(*dps, strength) && shield_pierce.is_finite()
+                }
+                RegionEffectKind::BlocksImpulse
+                | RegionEffectKind::CommsJam
+                | RegionEffectKind::SensorBlind => true,
+            };
+            if !valid {
+                return Err("field strength and effect must produce finite local values throughout evolution".into());
+            }
+        }
+        Ok(())
+    }
+
     pub fn new(profile: FieldConfig, anchor_tick: u64, origin: [f32; 3]) -> Result<Self, String> {
         let state = Self {
             profile,

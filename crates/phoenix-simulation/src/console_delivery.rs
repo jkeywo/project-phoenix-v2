@@ -32,17 +32,39 @@ pub struct ConsoleDeliveryProjection<'w, 's> {
             Option<&'static crate::server_app::ShipSystemBlackboards>,
             Option<&'static crate::ship::components::ConsoleHosts>,
             Option<&'static crate::science::broad::BroadTracks>,
+            Option<&'static crate::science::broad::SensingControls>,
+            Option<&'static crate::science::ShipScanRecord>,
+            Option<&'static crate::science::passive::PassiveProfile>,
         ),
         With<LocalShip>,
     >,
     world: Option<Res<'w, WorldResource>>,
     runtime: Option<Res<'w, crate::world::server::WorldContentRuntime>>,
+    accepted: Option<Res<'w, crate::lobby::ShipClientConfigResource>>,
 }
 
 impl ConsoleDeliveryProjection<'_, '_> {
     /// Capture once per flush. No resource, cache, observation or event is written.
     pub fn capture(&self) -> CapturedConsoleDelivery {
-        let local = self.local.iter().find(|(_, broad, ..)| broad.is_some());
+        let local = self.local.single().ok();
+        let fitted = local.is_some_and(|(_, broad, _, _, _, _, controls, focused, passive)| {
+            broad.is_some() || controls.is_some() || focused.is_some() || passive.is_some()
+        });
+        // Accepted client topology survives loss of the actor itself. Never
+        // turn a missing live observation scope into legacy unrestricted data.
+        let accepted = self.accepted.as_ref().is_some_and(|accepted| {
+            accepted.0.system_kinds.values().any(|kind| {
+                use crate::ship::system_registry::*;
+                matches!(
+                    kind.as_str(),
+                    HELM_RADAR_KIND
+                        | TACTICAL_RADAR_KIND
+                        | SENSOR_RADAR_KIND
+                        | SENSORS_KIND
+                        | PASSIVE_RECEIVER_KIND
+                )
+            })
+        });
         let own = local.and_then(|(uuid, ..)| uuid.map(|uuid| uuid.0.clone()));
         let concealed = own
             .as_ref()
@@ -54,20 +76,21 @@ impl ConsoleDeliveryProjection<'_, '_> {
             .collect::<BTreeSet<_>>();
         let references = local.map_or_else(
             ReferenceProjection::default,
-            |(_, broad, config, boards, hosts, tracks)| {
+            |(_, broad, config, boards, hosts, tracks, controls, ..)| {
                 ReferenceProjection::capture(
                     config,
                     boards,
                     hosts,
                     broad,
                     tracks,
+                    controls,
                     self.sessions.as_deref(),
                     &concealed,
                 )
             },
         );
         CapturedConsoleDelivery {
-            restricted: local.is_some(),
+            restricted: fitted || accepted,
             own,
             recipients: self
                 .sessions
@@ -138,7 +161,8 @@ impl CapturedConsoleDelivery {
     }
 
     fn charted(&self, uuid: &str) -> bool {
-        !self.concealed.contains(uuid)
+        self.own.is_some()
+            && !self.concealed.contains(uuid)
             && self
                 .world
                 .entities
@@ -149,7 +173,10 @@ impl CapturedConsoleDelivery {
     fn entity(&self, entity: &EntitySnapshot) -> Option<EntitySnapshot> {
         if self.is_own(&entity.uuid) {
             Some(entity.clone())
-        } else if !self.concealed.contains(&entity.uuid) && has_chart_permission(entity) {
+        } else if self.own.is_some()
+            && !self.concealed.contains(&entity.uuid)
+            && has_chart_permission(entity)
+        {
             Some(chart_snapshot(entity))
         } else {
             None

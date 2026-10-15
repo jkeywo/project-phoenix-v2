@@ -11,6 +11,7 @@ pub(super) struct KnownContact {
     pub name: Option<String>,
     source: String,
     kind: String,
+    owner: SystemId,
 }
 
 #[derive(Default)]
@@ -19,6 +20,7 @@ pub(super) struct ReferenceProjection {
     publishers: BTreeMap<SystemId, ConsoleId>,
     receipt: BTreeMap<String, BTreeSet<SystemId>>,
     tactical: Option<SystemId>,
+    bound_combat: Option<SystemId>,
     concealed: BTreeSet<String>,
 }
 
@@ -29,6 +31,7 @@ impl ReferenceProjection {
         hosts: Option<&ConsoleHosts>,
         profiles: Option<&BroadProfile>,
         tracks: Option<&BroadTracks>,
+        controls: Option<&crate::science::broad::SensingControls>,
         sessions: Option<&crate::lobby::Sessions>,
         concealed: &BTreeSet<String>,
     ) -> Self {
@@ -113,6 +116,7 @@ impl ReferenceProjection {
                             id: id.clone(),
                             source: source.clone(),
                             kind: owner_config.kind.clone(),
+                            owner: owner.clone(),
                             name: record
                                 .identity
                                 .as_ref()
@@ -124,13 +128,28 @@ impl ReferenceProjection {
             result.contexts.insert(console.id.clone(), known);
         }
         // These are existing aggregate publication aliases, never new Systems.
+        result.bound_combat = controls
+            .and_then(|controls| crate::science::broad::combat_owner(Some(controls), true))
+            .filter(|owner| {
+                config
+                    .system(owner)
+                    .is_some_and(|system| system.kind == TACTICAL_RADAR_KIND)
+            });
         for (publication, kind) in [
             (helm_station_key(), HELM_RADAR_KIND),
             (tactical_station_key(), TACTICAL_RADAR_KIND),
         ] {
             let mut owners = config.systems.iter().filter(|system| system.kind == kind);
             let unique = owners.next().filter(|_| owners.next().is_none());
-            if let Some(system) = unique {
+            let owner = if kind == TACTICAL_RADAR_KIND && controls.is_some() {
+                result
+                    .bound_combat
+                    .as_ref()
+                    .and_then(|owner| config.system(owner))
+            } else {
+                unique
+            };
+            if let Some(system) = owner {
                 if kind == TACTICAL_RADAR_KIND {
                     result.tactical = Some(system.id.clone());
                 }
@@ -158,14 +177,43 @@ impl ReferenceProjection {
     ) -> Option<KnownContact> {
         let reference = reference?;
         let console = self.publishers.get(publication)?;
-        let mut matches = self.contexts.get(console)?.iter().filter(|contact| {
-            (contact.source == reference || contact.id == reference)
-                && kind.is_none_or(|kind| contact.kind == kind)
-        });
-        let found = matches.next()?;
+        let matches: Vec<_> = self
+            .contexts
+            .get(console)?
+            .iter()
+            .filter(|contact| {
+                (contact.source == reference || contact.id == reference)
+                    && kind.is_none_or(|kind| contact.kind == kind)
+            })
+            .collect();
+        // A retained explicit contact handle keeps its own measured provenance.
+        // For private machinery references, prefer that actuator's own record;
+        // never choose an unrelated feed merely because its key sorts first.
+        let preferred = if self
+            .contexts
+            .get(console)?
+            .iter()
+            .any(|contact| &contact.owner == publication)
+        {
+            Some(publication)
+        } else if kind == Some(TACTICAL_RADAR_KIND) || publication == &tactical_station_key() {
+            self.tactical.as_ref()
+        } else if kind.is_none() {
+            self.bound_combat.as_ref()
+        } else {
+            None
+        };
+        if let Some(found) = matches.iter().find(|contact| contact.id == reference) {
+            return Some((**found).clone());
+        }
+        if let Some(found) =
+            preferred.and_then(|owner| matches.iter().find(|contact| &contact.owner == owner))
+        {
+            return Some((**found).clone());
+        }
         // Several independent observations are not interchangeable command
         // identities. Without one unambiguous producing owner, disclose none.
-        matches.next().is_none().then(|| found.clone())
+        (matches.len() == 1).then(|| (*matches[0]).clone())
     }
 
     pub fn tactical(&self, token: &str, reference: Option<&str>) -> Option<KnownContact> {

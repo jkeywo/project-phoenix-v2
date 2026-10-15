@@ -75,6 +75,15 @@ fn fixture() -> App {
         .unwrap();
     let tracks = crate::science::broad::BroadTracks::new(&profile);
     let ship = config.ship_config.clone().unwrap();
+    let controls =
+        crate::science::broad::SensingControls(config.sensing.as_ref().unwrap().control.clone());
+    let mut client = crate::core::messages::ShipClientConfig::default();
+    client.system_kinds = ship
+        .systems
+        .iter()
+        .map(|system| (system.id.0.clone(), system.kind.clone()))
+        .collect();
+    app.insert_resource(crate::lobby::ShipClientConfigResource(client));
     let hosts = crate::ship::components::ConsoleHosts(
         ship.consoles
             .iter()
@@ -103,6 +112,7 @@ fn fixture() -> App {
         EntityUuid("own".into()),
         profile,
         tracks,
+        controls,
         crate::ship::components::ShipConfigComponent(ship),
         hosts,
         boards,
@@ -179,11 +189,13 @@ fn observe(app: &mut App, owner: &str, tick: u64, paid: f32) -> String {
     let state = states.0.get_mut(&owner).unwrap();
     let samples = [BroadMeasurement {
         source: "hidden".into(),
+        selectable: true,
         position: [20.0, -40.0],
         support: 1.0,
         identity: Some(TrackIdentity {
             name: "Recorded public identity".into(),
             faction: None,
+            references: Vec::new(),
         }),
         classification: None,
         assessment: None,
@@ -424,9 +436,10 @@ fn typed_viewscreen_aliases_use_its_own_console_not_the_strongest_cohosted_recei
     };
     assert_eq!(board.combat_lock.as_deref(), Some(tactical.as_str()));
     assert_eq!(board.science_target.as_deref(), Some(sensor.as_str()));
-    assert!(
-        board.last_attacker_uuid.is_none(),
-        "an unspecified ambiguous instrument reference clears"
+    assert_eq!(
+        board.last_attacker_uuid.as_deref(),
+        Some(tactical.as_str()),
+        "the explicitly bound combat instrument is preferred only when this Console permits it"
     );
     assert_eq!(
         app.world()
@@ -1120,8 +1133,173 @@ fn unfitted_legacy_hosts_preserve_existing_delivery_and_projection_does_not_writ
     app.world_mut()
         .entity_mut(local)
         .remove::<crate::science::broad::BroadProfile>();
+    app.world_mut()
+        .entity_mut(local)
+        .remove::<crate::science::broad::SensingControls>();
+    app.world_mut()
+        .resource_mut::<crate::lobby::ShipClientConfigResource>()
+        .0
+        .system_kinds
+        .clear();
     let output = capture(&mut app).project(&raw);
     assert_eq!(output.len(), 1);
     assert_eq!(output[0].target, Target::All);
     assert_eq!(output[0].msg, raw.msg);
+}
+
+#[test]
+fn focused_only_instruments_and_accepted_sensor_topology_never_enable_raw_delivery() {
+    let mut app = fixture();
+    let local = local_ship(&mut app);
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    app.world_mut()
+        .entity_mut(local)
+        .remove::<crate::science::broad::BroadProfile>()
+        .remove::<crate::science::broad::SensingControls>()
+        .insert(crate::science::ShipScanRecord::from_config(&config).unwrap());
+    // The real focused owner alone activates privacy even in a reduced host
+    // that does not install the accepted client configuration resource.
+    app.world_mut()
+        .remove_resource::<crate::lobby::ShipClientConfigResource>();
+    let raw = packet(world_message(&app));
+    let projected = capture(&mut app).project(&raw);
+    assert_no_hidden(phone(&projected, "science").unwrap());
+    assert_eq!(raw.msg, world_message(&app));
+    app.world_mut()
+        .entity_mut(local)
+        .remove::<crate::science::ShipScanRecord>()
+        .insert(crate::science::passive::PassiveProfile::from_config(&config).unwrap());
+    assert_no_hidden(phone(&capture(&mut app).project(&raw), "science").unwrap());
+    // Accepted topology also covers the gap before/after a live owner exists.
+    app.world_mut()
+        .entity_mut(local)
+        .remove::<crate::science::passive::PassiveProfile>();
+    let mut accepted = crate::core::messages::ShipClientConfig::default();
+    accepted
+        .system_kinds
+        .insert("actual-focused".into(), "sensors".into());
+    app.insert_resource(crate::lobby::ShipClientConfigResource(accepted));
+    assert_no_hidden(phone(&capture(&mut app).project(&raw), "science").unwrap());
+}
+
+#[test]
+fn actual_local_hull_removal_keeps_accepted_privacy_without_guessing_an_observer() {
+    let mut app = fixture();
+    let local = local_ship(&mut app);
+    app.init_resource::<crate::server_app::SimOutbox>();
+    let _ = crate::gm::operations::despawn::remove_entity(app.world_mut(), local);
+    let raw = packet(world_message(&app));
+    let projection = capture(&mut app);
+    let projected = projection.project(&raw);
+    let ServerMessage::WorldSetup { world } = phone(&projected, "science").unwrap() else {
+        unreachable!()
+    };
+    assert!(
+        world.entities.is_empty(),
+        "lost observer scope cannot disclose chart Conceal or foreign truth"
+    );
+    assert!(
+        phone(
+            &projection.project(&packet(ServerMessage::EntityDespawned {
+                uuid: "own".into()
+            })),
+            "science"
+        )
+        .is_none(),
+        "missing scope does not guess a terminal UUID"
+    );
+    let own_end = packet(ServerMessage::ShipDestroyed);
+    let end = projection.project(&own_end);
+    assert_eq!(end.len(), 1);
+    assert_eq!(end[0].target, own_end.target);
+    assert_eq!(end[0].msg, own_end.msg);
+    assert_eq!(
+        phone(&projected, crate::console_bridge::LOCAL_CONSOLE_TOKEN),
+        Some(&raw.msg)
+    );
+}
+
+#[test]
+fn explicit_combat_binding_selects_its_measured_record_among_independent_tactical_instruments() {
+    use crate::science::broad::{BroadProfile, BroadTrackState, BroadTracks, SensingControls};
+    let mut app = fixture();
+    let local = local_ship(&mut app);
+    let second = SystemId("tactical-second".into());
+    {
+        let mut config = app
+            .world_mut()
+            .get_mut::<crate::ship::components::ShipConfigComponent>(local)
+            .unwrap();
+        let mut system = config
+            .0
+            .system(&SystemId("tactical-radar".into()))
+            .unwrap()
+            .clone();
+        system.id = second.clone();
+        config.0.systems.push(system);
+    }
+    let mut instrument = app.world().get::<BroadProfile>(local).unwrap().0
+        [&SystemId("tactical-radar".into())]
+        .clone();
+    instrument.profile.system = second.clone();
+    let state = BroadTrackState::new(&instrument.profile);
+    app.world_mut()
+        .get_mut::<BroadProfile>(local)
+        .unwrap()
+        .0
+        .insert(second.clone(), instrument);
+    app.world_mut()
+        .get_mut::<BroadTracks>(local)
+        .unwrap()
+        .0
+        .insert(second.clone(), state);
+    app.world_mut()
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(local)
+        .unwrap()
+        .0
+        .insert(
+            second.clone(),
+            SystemBlackboard::TacticalRadar(Default::default()),
+        );
+    let first = observe(&mut app, "tactical-radar", 0, 1.0);
+    let other = observe(&mut app, &second.0, 0, 1.0);
+    assert_ne!(first, other);
+    let raw = packet(ServerMessage::TargetLock {
+        uuid: "hidden".into(),
+        locked: true,
+    });
+    let selected = |app: &mut App| {
+        let out = capture(app).project(&raw);
+        match phone(&out, "science") {
+            Some(ServerMessage::TargetLock { uuid, .. }) => Some(uuid.clone()),
+            None => None,
+            _ => unreachable!(),
+        }
+    };
+    assert_eq!(selected(&mut app), Some(first));
+    app.world_mut()
+        .get_mut::<SensingControls>(local)
+        .unwrap()
+        .0
+        .combat_lock = Some(second);
+    assert_eq!(selected(&mut app), Some(other));
+    app.world_mut()
+        .get_mut::<SensingControls>(local)
+        .unwrap()
+        .0
+        .combat_lock = None;
+    assert!(
+        selected(&mut app).is_none(),
+        "explicitly unbound is not a unique-kind guess"
+    );
+    app.world_mut()
+        .entity_mut(local)
+        .remove::<SensingControls>();
+    assert!(
+        selected(&mut app).is_none(),
+        "two unbound publishers are ambiguous"
+    );
 }

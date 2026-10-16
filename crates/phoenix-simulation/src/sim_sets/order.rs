@@ -232,7 +232,6 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             DrainScriptedPowerOrders,
             MirrorWeaponsColdFlags,
             RefreshAnchoredWaypoint,
-            ShareNavigationObservations,
             TranslatePowerModifiers,
             TranslateImpulseModifiers,
             ApplyRadarDamageModifiers,
@@ -250,6 +249,9 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             TickTransport,
             TickDebrisDrift,
             TickScans,
+            // Its existing after(deliver) gate consumes completed Broad feed
+            // receipts, downstream of scans and physical modifier application.
+            ShareNavigationObservations,
             AdvanceObjectiveCursors,
         ],
     );

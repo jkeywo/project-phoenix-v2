@@ -34,6 +34,19 @@ Ship LOD promotion and demotion also write through deferred Commands. Their
 buffer remains after region membership's buffer at the existing shared flush,
 even though those writes do not produce an ordinary ECS ambiguity.
 
+Navigation sharing is a late Modifiers consumer: its existing registration
+requires the completed Broad radar-feed delivery frontier. The declared sequence
+therefore places it after focused scans and before objective cursor advancement,
+with the existing `after(deliver)` edge retaining the actual Broad dependency.
+Power/impulse/radar translation still precedes Tractor, infrastructure condition
+and sensing. Placing sharing ahead of those physical owners contradicted its
+delivery dependency and prevented the whole-host schedule from initializing.
+This correction moves one declared owner; it changes no phase, deferred barrier,
+permitted observation, machinery command or physical modifier order. The actual
+host census target exercises this failure at schedule initialization; the
+existing pass tests retain the deferred-publication and contradictory-order
+checks. Native re-execution remains integrator-owned.
+
 ## Callbacks inside an owner
 
 `SimDispatch` calls multiple broadcast producers through one exclusive system.

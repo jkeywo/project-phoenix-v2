@@ -644,7 +644,8 @@ pub const SNAPSHOT_FORMAT: u32 = 85;
 /// generates shield knowledge Consoles only for actual shield equipment.
 /// "0.68" derives paid NPC radio contacts, fulfills exact released delivery demand,
 /// shares guided-loader work and commits paid uncrewed vessel acquisition.
-pub const SIMULATION_RULES: &str = "0.68";
+/// "0.69" preserves authored height when ordinary Full3D hulls are spawned.
+pub const SIMULATION_RULES: &str = "0.69";
 
 /// The authored data, computed rather than remembered.
 ///

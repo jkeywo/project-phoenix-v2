@@ -37,8 +37,9 @@ continuations exposed incomplete sensing fixtures. Their fixture correction is
 integrated at `3a1e7e6e`, with the native retry pending.
 
 The latest loader, disruption, maintenance and authoritative-state host batch
-fails before gameplay because `TickSecurityTeams` is registered twice. A minimal
-single-owner schedule correction is in progress. These results establish neither
+fails before gameplay because the singleton `TickSecurityTeams` stage contains
+both the team tick and the acquisition commit. A minimal stage/order correction
+is in progress; this does not mean the physical team tick executes twice. These results establish neither
 a green host batch nor the full integrated gate. Earlier
 owner, codec, transport and host evidence, with its source pins and limitations,
 remains in the integration checkpoint. Human/device, balance and workload
@@ -63,7 +64,7 @@ acceptance remain separate.
 | 14 — Sensing/environment | Substantial implementation | Knowledge, presentation, balance and full acceptance. |
 | 15 — Layered combat | Combat core implemented; shared loaders/priorities integrated and accepted-recipe/pure handling checks pass | Physical marking payloads remain unimplemented; loader host continuation, broader illumination/link-loss/payload journeys, combat styles, balance/workload and full acceptance. |
 | 16 — Comms/orders | Channels, requests and relay operational; both actual capture/decoding host journeys pass | Listening priorities/chatter, contextual operations, native media edge/device acceptance and broader playable acceptance remain. |
-| 17 — Electronic operations | Jamming/protection/identity operational; both emission host cases pass; bounded disruption integrated and its corrected hull passes actual accepted-recipe validation | Disruption host continuation is blocked by the duplicate Security schedule registration. Broader information/access and acceptance remain. |
+| 17 — Electronic operations | Jamming/protection/identity operational; both emission host cases pass; bounded disruption integrated and its corrected hull passes actual accepted-recipe validation | Disruption host continuation is blocked by the Security singleton-stage membership error. Broader information/access and acceptance remain. |
 | 18 — Movement/transit | Local jumps verified; sector code integrated; actual formation movement/JSON360 host case passes | Remaining assistance and broader acceptance. |
 | 19 — Craft/deployables | Physical probe, both fixed beam-turret and both decoy host journeys verified; ordinary Full3D utility hull passes actual accepted-recipe validation | Moving custody, XYZ navigation consumers, sorties, remote operation and acceptance remain. |
 | 20 — Personnel | Officers/care/roster, four physical personnel and both reception host journeys verified; bounded acquisition source integrated | Model/Session and Content acquisition checks pass; Simulation/continuation verification, broader boarding/away/rescue/capture and acceptance remain. |

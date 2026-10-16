@@ -8,8 +8,16 @@ faction = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb"
 # existing nearest-hostile doctrine. Empty behaviour gives it no travel order.
 [behaviour]
 
-# Arrays replace rather than append. Restate the complete one-room layout;
+# Interior replaces atomically. Restate the complete one-room layout;
 # only finite structural endurance differs from the original probe room.
+[interior]
+team_homes = []
+
+[[interior.deck]]
+id = "probe"
+label = "entity.battery_probe.room"
+damage_weight = 1
+
 [[interior.compartment]]
 id = "probe-core"
 deck = "probe"
@@ -22,3 +30,6 @@ material = "bulkhead"
 max_hp = 10000
 recovery_fraction = 0.2
 structural_remedy = "structural"
+
+[interior.placements]
+sensor-radar = "probe-core"

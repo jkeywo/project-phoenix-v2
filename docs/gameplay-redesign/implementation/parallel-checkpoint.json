@@ -23,8 +23,8 @@
       "accepted_loader": "At49289494,3actual resolvedsource→EntityConfig::from_toml Gameplay regressions PASS,1m19build. .phoenix/resumed-decoy-actual-loader-owner.log",
       "affected_retry": "At35f62881,8selected cases across5targets completed5passed/3failed: emission2/0,reception2/0,decoy1/1,formation0/1,optionalmaintenance0/1. Decoy ordinaryAI launch passes; the Human case expects fixture ID instead of actual accepted public name. Formation begins outside its actual50-unit radar range. Maintenance diagnostic proves real local stock8→0 in one actual tick, then ordinary restocking restores8 before discovery. Log .phoenix/resumed-five-affected-host-native.log; build1m35.",
       "reviewed_followups": "77b83e11 fixes only decoy public-name proof expectations against actual accepted content. ba9e0513 implements adopted16f347cc NPC own-radio contacts via actual paid public endpoints, preserving crew knowledge bounds. 300add84 corrects Formation fixture geometry and explicitly requires earned identity/motion. All source reviewed; native verification pending. Scoped planned-delivery demand extension is being prepared in an isolated planner lane.",
-      "running": "At300add84, renderer-free Simulation owner tests filtered non_roster_ are running; .phoenix/resumed-npc-own-radio-native.log. Root is the sole Cargo owner.",
-      "remaining": "Actual capture/decoy/Formation retries and autonomous planned-maintenance execution; broader runtime16–24 and all acceptance/finalgates. No increment closure or push."
+      "radio_owner_retry": "At300add84 non_roster_2PASS; broader radio16PASS/1FAIL. Sparse publication correction e01556d2 is integrated; current_followup records the pending retry and current source.",
+      "remaining": "The actual decoy/capture/Formation cases now pass atbc5ada43. Autonomous maintenance and newly integrated packet verification remain; see current_followup. No increment closure or push."
     },
     "eight_host_native": {
       "source": "f1643e85",

@@ -358,8 +358,31 @@ impl PowerSystem {
         dt: f32,
         activity: f32,
     ) -> Result<crate::resources::energy::EnergyGrant, String> {
-        self.work_continuous_if(system, dt, activity, |grant| Ok(Some(grant)))
-            .map(|result| result.expect("unconditional work accepts its grant"))
+        if !dt.is_finite() || dt < 0.0 || !activity.is_finite() || activity < 0.0 {
+            return Err("energy work requires finite nonnegative time and activity".into());
+        }
+        let consumer = self
+            .definition
+            .config()
+            .consumers
+            .iter()
+            .find(|consumer| &consumer.system == system)
+            .ok_or("unknown energy consumer")?;
+        let requested = consumer.continuous_cost_per_sec * dt * activity;
+        // Ordinary work has no later recipient refusal. The reserve already
+        // commits its checked spend atomically, so no outer staging is needed.
+        let grant = self
+            .network
+            .consumers
+            .get_mut(system)
+            .ok_or("unknown consumer state")?
+            .spend_continuous(&consumer.reserve, requested)?;
+        *self.work_emissions.entry(system.clone()).or_default() += f64::from(grant.granted);
+        self.last_work_fraction.insert(
+            system.clone(),
+            if activity > 0.0 { grant.fraction } else { 0.0 },
+        );
+        Ok(grant)
     }
 
     /// Stage one consumer's payment and accounting, committing only when the

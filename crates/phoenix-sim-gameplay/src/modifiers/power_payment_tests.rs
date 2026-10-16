@@ -120,6 +120,7 @@ fn repeated_owner_payments_accumulate_and_duplicate_authored_owner_still_refuses
     let mut actual = PowerSystem::default();
     let owner = actual.config().consumers[0].system.clone();
     let mut expected = actual.clone();
+    let mut direct = actual.clone();
     for _ in 0..4 {
         let grant = expected
             .work_continuous_reference(&owner, 0.25, 1.0)
@@ -130,6 +131,9 @@ fn repeated_owner_payments_accumulate_and_duplicate_authored_owner_still_refuses
                 .unwrap(),
             Some(grant)
         );
+        assert_eq!(direct.work_continuous(&owner, 0.25, 1.0).unwrap(), grant);
+        assert_eq!(direct, expected);
+        assert_eq!(bytes(&direct), bytes(&expected));
         assert_eq!(actual, expected);
         assert_eq!(bytes(&actual), bytes(&expected));
     }

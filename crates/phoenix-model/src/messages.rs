@@ -50,7 +50,7 @@ use uuid::Uuid;
 /// Revision 34 binds officer dispatch to the destination request actually shown.
 /// Revision 35 carries permitted formation coordination and measured Navigation intent.
 /// Revision 36 carries explicitly selected human calls and bounded transient media.
-pub const PROTOCOL_VERSION: u32 = 36;
+pub const PROTOCOL_VERSION: u32 = 37;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).

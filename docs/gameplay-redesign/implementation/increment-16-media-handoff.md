@@ -42,3 +42,23 @@ panes and insecure browser origins explicitly lack device capture support.
 
 This handoff establishes bounded implementation and targeted evidence. It does
 not close increment 16, the redesign PRD or the wider increment 24 scope.
+
+
+## Local integration checkpoint — 16 October 2026
+
+Media is integrated on local main through 5d5a59a9; paid capture/decoding joins
+in 7ce553d6. The current composed contracts are protocol37, snapshot80 and rules
+0.62. The root renderer-free Simulation test compilation passes after correcting
+two new test-only constructor/import omissions. Native owner, native edge and
+actual two-host/device execution remain pending. No push or deployment is claimed.
+
+The actual Comms Console builder now forwards published media capability and its
+real authored System identity. Shared knowledge views remain readable but do not
+gain controls. A regression follows a renamed radio from actual projection through
+semantic action and correlated wire admission; another mounts the ordinary composer
+and proves call buttons become available from the real payload, then disable for
+a shared read-only view. Five affected client files passed581 tests. Independent
+source review passed the complete seven-file correction. The later integrated
+capture/client batch passed609 tests and failed one stale exact action inventory;
+the corrected inventory retry passed all123 tests in that file. These are passing
+results after correction, not a passing original batch or playable acceptance.

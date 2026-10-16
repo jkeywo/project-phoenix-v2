@@ -1,8 +1,8 @@
 {
-  "date": "2026-10-15",
+  "date": "2026-10-16",
   "status": "partial",
   "current_summary": {
-    "source": "e225d662",
+    "source": "c10a6a14",
     "per_increment_report": "README.md#per-increment-progress--16-october-2026",
     "closed_increments": [
       0
@@ -37,9 +37,9 @@
     },
     "push": "Not performed. Full integration gate and outstanding acceptance have not passed.",
     "compatibility": {
-      "protocol": 35,
-      "snapshot": 78,
-      "rules": "0.60"
+      "protocol": 37,
+      "snapshot": 80,
+      "rules": "0.62"
     },
     "current_four_owner_native": {
       "source": "3f783eec",
@@ -107,13 +107,15 @@
     },
     "funded_fixture_retry": {
       "source": "e225d662",
-      "status": "running; no result claimed",
-      "log": ".phoenix/resumed-funded-fixtures-native-retry.log"
+      "status": "completed with one authored Power policy expectation failure; reviewed correction integrated, final native retry pending",
+      "log": ".phoenix/resumed-funded-fixtures-native-retry.log",
+      "result": "151 passed,1 failed; all selected Repair, sparse hardware, craft capture and Comms corrections pass. The Power-only retry at26d003e2 still failed on a static passive receiver authored at0.15 rather than its0.25 hardware ceiling. 44977d8e corrects expectations to actual authored guarded targets and stable defaults.",
+      "retry_log": ".phoenix/resumed-authored-power-policy-native-retry.log"
     },
     "prepared_media": {
       "branch": "codex/comms-media-integration",
       "source": "30a49c77",
-      "status": "prepared isolated integration, not on main; native and device acceptance unrun",
+      "status": "Superseded by integrated_comms; retained below as historical isolated evidence, not a current worktree-only status.",
       "source_review": "Worker canonical/transport, root physical joins, independent native bridge reviews passed. Conflict resolutions retain both concealment and media guards.",
       "client": "15 affected files initially261 passed/2 stale Navigation projection expectations failed; final focused23-test Comms Console retry passes after exact fields were updated. All263 selected tests have passing evidence after retries; initial batch was not green.",
       "logs": [
@@ -127,6 +129,25 @@
         "snapshot": 79,
         "rules": "0.61"
       }
+    },
+    "integrated_comms": {
+      "source": "c10a6a14",
+      "status": "media and paid interception/decoding source integrated; native owner and full-host evidence pending",
+      "media_merge": "5d5a59a9",
+      "capture_merge": "7ce553d6",
+      "actual_console_fix": "14b4b6f7",
+      "compatibility": "37/80/0.62",
+      "source_review": "Canonical owner, knowledge, snapshot, census/fold, transport/native bridge and actual Console controls reviewed independently. Both capture and media use the existing radio pass; capture settles before final paid media-carrier derivation.",
+      "client": "Integrated9-file batch609 passed/1 failed: exact action inventory omitted the new capture action. Corrected focused action-map retry123 passed; all610 selected tests have positive evidence after retry, not a passing initial batch. Prior actual media Console-to-wire/mounted-composer5-file batch581 passed.",
+      "logs": [
+        ".phoenix/resumed-integrated-comms-capture-client.log",
+        ".phoenix/resumed-capture-action-inventory-retry.log",
+        ".phoenix/resumed-media-actual-console-client.log",
+        ".phoenix/resumed-integrated-media-capture-check.log",
+        ".phoenix/resumed-integrated-media-capture-check-retry.log"
+      ],
+      "remaining": "Native owner/continuation and root native-edge execution, dynamic keys/forwarded capture and richer typed decoded evidence, live two-human/two-host/device and Workshop acceptance. Relay optional capability deployment remains separate; unknown/old policy refuses media.",
+      "compile": "Renderer-free Simulation including tests passes after two test-only constructor/import corrections;46.55s. Initial compile failed on those two fixture compilation errors. Native execution remains pending."
     }
   },
   "scope": "Integrated communication, movement, illumination, local personnel and equipment-bound facility checkpoints; no increment exit",

@@ -15,8 +15,10 @@ commits are implementation checkpoints, not verified increment exits. The latest
 focused host results cover 21 tests across 13 targets after a clearance fixture
 correction; they do not replace the full integrated gate. The latest broader native run passed 771 tests and failed 23; the previously
 failing Formation, concealment, terminal personnel and exact digest checks now
-pass. Remaining Repair, Power and sparse-fixture corrections are committed and
-under native retry. Separately, all 17 selected content/Workshop composition
+pass. The focused correction batch passed 151 tests and failed one authored Power AI
+expectation. A subsequent Power-only retry also failed; the final reviewed
+correction distinguishes actual authored policy targets from hardware ceilings
+and awaits execution. The selected Repair and sparse-fixture corrections pass. Separately, all 17 selected content/Workshop composition
 checks pass. These results do not establish a passing integrated exit.
 
 | Increment | Implementation state | Material remaining work |
@@ -29,15 +31,15 @@ checks pass. These results do not establish a passing integrated exit.
 | 5 — Jobs/teams | Implemented; automated exit passed | Physical-device and human acceptance. |
 | 6 — Stores/services | Implemented; automated exit passed | Physical-device and human acceptance. |
 | 7 — Configurable weapons | Implemented; automated exit passed | Physical-device and human acceptance. |
-| 8 — Energy/thermal | Core implemented | Power integration/fixture failures under correction; full integrated, balance, performance and playable acceptance. |
+| 8 — Energy/thermal | Core implemented | Selected energy/continuation corrections pass; final authored Power policy retry pending; full integrated, balance, performance and playable acceptance. |
 | 9 — Shield energy | Core implemented | Full integrated and playable acceptance. |
 | 10 — Interiors/routes | Core implemented | Full integrated and playable acceptance. |
-| 11 — Damage/restoration | Core implemented | Retained Repair adapter tests under correction; full integrated and playable acceptance. |
+| 11 — Damage/restoration | Core implemented | Retained Repair adapter corrections pass targeted native checks; full integrated and playable acceptance. |
 | 12 — Logistics/production | Implemented in slices | Cross-system coverage and full acceptance. |
 | 13 — Equipment fitting | Supported beam/reactor implementation | Cross-system coverage and full acceptance. |
 | 14 — Sensing/environment | Substantial implementation | Knowledge, presentation, balance and full acceptance. |
 | 15 — Layered combat | Substantial implementation | Broader combat/balance/workload coverage and full acceptance. |
-| 16 — Comms/orders | Channels, requests and relay operational | Human media, decoding, remaining operations and acceptance. |
+| 16 — Comms/orders | Channels, requests and relay operational | Human media and paid decoding source integrated; native/full-host execution, remaining operations and acceptance. |
 | 17 — Electronic operations | Jamming/protection/identity operational | Concealment owner/snapshot checks pass; full-host proof, low-emission advice and disruption remain. |
 | 18 — Movement/transit | Local jumps verified; sector code integrated | Formation owner/restore checks pass; full-host proofs, Helm follow controls, remaining assistance and acceptance. |
 | 19 — Craft/deployables | Physical probe handling verified | Other craft/deployables, sorties, remote operation and acceptance. |

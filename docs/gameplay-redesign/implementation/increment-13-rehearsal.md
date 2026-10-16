@@ -177,8 +177,12 @@ The private TestStatus result binds capture revision, accepted hull content_id,
 normalized plan choices, workload revision, seed, selected slot and run generation.
 Retire previous results immediately on plan/profile/source/slot/seed replacement
 or disposal. An old child reply cannot paint into a replacement comparison.
-Bound report data to 128 chart samples plus finite aggregate counters/minima/maxima;
-this is disposable TestInfra and read-only presentation, not a canonical ship
+Bound report data to 128 chart samples plus finite aggregate counters/minima/maxima
+and 32 KiB encoded rehearsal result. The complete private status record must also
+fit the existing 64 KiB framing limit. Choose deterministic aggregation/downsampling
+before encoding; if either byte bound still fails, emit a small explicit
+result-too-large refusal, never silently truncate a successful result or oversize
+the pipe. This is disposable TestInfra and read-only presentation, not a canonical ship
 history, save payload or second resource account.
 
 Report actual interval paid energy using PowerSystem::emitted_work, actual reactor

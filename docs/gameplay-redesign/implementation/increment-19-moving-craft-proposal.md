@@ -1,9 +1,6 @@
 # Draft: first moving carried craft
 
-**For root review; unadopted.** This document changes no PASM, runtime, accepted
-recipe or completion status. The current fixed-craft native checks must clear
-before implementation. It proposes the next bounded consumer of the existing
-mechanisms, rather than enabling moving profiles through a whitelist change.
+**Reviewed proposal, superseded by the adopted [implementation contract](increment-19-moving-craft.md).** Root selected the first unarmed utility shuttle, physical launch home provenance, transmitted known XYZ waypoint and data-authored matched capture. This proposal retains the owner audit and alternatives for context; the adopted contract and PASM govern implementation. No moving runtime or completion is claimed, and fixed-craft native checks must clear before implementation.
 
 ## Proposed playable increment
 

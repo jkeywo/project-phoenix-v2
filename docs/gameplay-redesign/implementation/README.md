@@ -24,15 +24,22 @@ retain their earlier pinned evidence; this is not one green integrated batch.
 
 Shared loaders, Comms-owned disruption, bounded uncrewed acquisition and scoped
 planned-delivery demand are now source-integrated. At `0ca0d986`, selected owner
-checks passed 16 tests and failed one: the optional disruption hull inherits an
-unsupported Console rating and is not accepted. Its data correction and native
-retry are required before further host tests. The shared-loader actual accepted
+checks passed 16 tests and failed one: the optional disruption hull inherited an
+unsupported Console rating. The auxiliary-Console data correction now passes its
+actual accepted-recipe native test at `27e579fa`. The ordinary Full3D utility hull
+also passes its accepted-recipe native test at `c3c3500b`; this is not flight
+or sortie evidence. The shared-loader actual accepted
 recipe and pure handling tests pass, as do Model/Session acquisition guards and
 Content acquisition closure. Seven combined client files pass 150 tests.
-Simulation owner checks and autonomous maintenance verification remain pending.
+The Simulation owner retry passed 83 tests and failed four: two retained-beam
+cases were blocked by that now-corrected disruption recipe, and two acquisition
+continuations exposed incomplete sensing fixtures. Their fixture correction is
+integrated at `3a1e7e6e`, with the native retry pending.
 
-The catalogue-completeness and fixed-step ordering blockers are corrected. Those
-checks establish neither a green host batch nor the full integrated gate. Earlier
+The latest loader, disruption, maintenance and authoritative-state host batch
+fails before gameplay because `TickSecurityTeams` is registered twice. A minimal
+single-owner schedule correction is in progress. These results establish neither
+a green host batch nor the full integrated gate. Earlier
 owner, codec, transport and host evidence, with its source pins and limitations,
 remains in the integration checkpoint. Human/device, balance and workload
 acceptance remain separate.
@@ -56,9 +63,9 @@ acceptance remain separate.
 | 14 — Sensing/environment | Substantial implementation | Knowledge, presentation, balance and full acceptance. |
 | 15 — Layered combat | Combat core implemented; shared loaders/priorities integrated and accepted-recipe/pure handling checks pass | Physical marking payloads remain unimplemented; loader host continuation, broader illumination/link-loss/payload journeys, combat styles, balance/workload and full acceptance. |
 | 16 — Comms/orders | Channels, requests and relay operational; both actual capture/decoding host journeys pass | Listening priorities/chatter, contextual operations, native media edge/device acceptance and broader playable acceptance remain. |
-| 17 — Electronic operations | Jamming/protection/identity operational; both emission host cases pass; bounded disruption source integrated | Optional disruption hull fails actual rating validation; data correction and native retry required. Broader information/access and acceptance remain. |
+| 17 — Electronic operations | Jamming/protection/identity operational; both emission host cases pass; bounded disruption integrated and its corrected hull passes actual accepted-recipe validation | Disruption host continuation is blocked by the duplicate Security schedule registration. Broader information/access and acceptance remain. |
 | 18 — Movement/transit | Local jumps verified; sector code integrated; actual formation movement/JSON360 host case passes | Remaining assistance and broader acceptance. |
-| 19 — Craft/deployables | Physical probe, both fixed beam-turret and both decoy host journeys verified | Moving-craft implementation cleared by fixed-equipment prerequisites; sorties, remote operation and acceptance remain. |
+| 19 — Craft/deployables | Physical probe, both fixed beam-turret and both decoy host journeys verified; ordinary Full3D utility hull passes actual accepted-recipe validation | Moving custody, XYZ navigation consumers, sorties, remote operation and acceptance remain. |
 | 20 — Personnel | Officers/care/roster, four physical personnel and both reception host journeys verified; bounded acquisition source integrated | Model/Session and Content acquisition checks pass; Simulation/continuation verification, broader boarding/away/rescue/capture and acceptance remain. |
 | 21 — Facilities/actors | Finite ports and physical supply verified | Workforce, broader objectives/dependencies and acceptance. |
 | 22 — Authored HTN execution | Working scheduling/activity core; scoped planned-delivery consumer integrated | Delivery native verification, broader operator/scenario coverage and full integration. |

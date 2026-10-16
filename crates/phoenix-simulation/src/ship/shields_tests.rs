@@ -797,6 +797,21 @@ fn test_app_with_helm() -> App {
         offline_duration: 10.0,
     };
     let mut app = App::new();
+    // The notifier observes settled work from the preceding interval in Input;
+    // shield upkeep runs later in Physics, as in the ordinary host schedule.
+    app.configure_sets(
+        FixedUpdate,
+        (
+            crate::sim_sets::SimSet::Input,
+            crate::sim_sets::SimSet::Physics,
+            crate::sim_sets::SimSet::Damage,
+            crate::sim_sets::SimSet::Modifiers,
+            crate::sim_sets::SimSet::Publish,
+            crate::sim_sets::SimSet::PublishAggregate,
+            crate::sim_sets::SimSet::Broadcast,
+        )
+            .chain(),
+    );
     let ship = app
         .world_mut()
         .spawn((
@@ -985,7 +1000,16 @@ fn shield_facing_restored_fires_on_red_alert_when_hp_recovers() {
         .0
         .apply_damage(9999, 0.0);
     tick(&mut app);
-    drain_coord(&mut app); // discard down notification
+    assert!(drain_coord(&mut app).iter().any(|message| matches!(
+        message.payload,
+        CoordinationPayload::ShieldFacingDown { .. }
+    )));
+    assert!(
+        app.world()
+            .get::<ShieldsCoordinationState>(se)
+            .unwrap()
+            .down_notified[0]
+    );
 
     // Manually restore the facing and set HP to above threshold.
     {
@@ -1004,20 +1028,44 @@ fn shield_facing_restored_fires_on_red_alert_when_hp_recovers() {
         }
     }
 
-    // Mark down_notified on the per-ship ShieldsCoordinationState so
-    // the restore branch can fire.
-    {
-        let se = ship_e(&mut app);
-        let mut e = app.world_mut().entity_mut(se);
-        let mut coord = e.get_mut::<ShieldsCoordinationState>().unwrap();
-        if coord.down_notified.is_empty() {
-            coord.down_notified.push(true);
-            coord.restore_notified.push(false);
-        } else {
-            coord.down_notified[0] = true;
-        }
-    }
-
+    let arc = crate::ship::system_registry::shield_arc_system_id("fore").unwrap();
+    let reserve = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(se)
+        .unwrap()
+        .0
+        .network()
+        .consumers[&arc]
+        .energy;
+    // HP/timer recovery alone cannot grant protection. This interval's Input
+    // still sees the offline interval's zero protection; actual Physics upkeep
+    // then buys the restored facing before the following Input can report it.
+    assert!(
+        !app.world().get::<ShipShields>(se).unwrap().0.facings[0]
+            .snapshot()
+            .online
+    );
+    tick(&mut app);
+    assert!(drain_coord(&mut app).iter().all(|message| !matches!(
+        message.payload,
+        CoordinationPayload::ShieldFacingRestored { .. }
+    )));
+    assert!(
+        app.world()
+            .get::<crate::ship::power::ShipPowerSystem>(se)
+            .unwrap()
+            .0
+            .network()
+            .consumers[&arc]
+            .energy
+            < reserve,
+        "restored protection requires actual finite upkeep"
+    );
+    assert!(
+        app.world().get::<ShipShields>(se).unwrap().0.facings[0]
+            .snapshot()
+            .online
+    );
     tick(&mut app);
     let coord_msgs = drain_coord(&mut app);
 
@@ -1027,8 +1075,16 @@ fn shield_facing_restored_fires_on_red_alert_when_hp_recovers() {
         .collect();
 
     assert!(
-        !restored_msgs.is_empty(),
+        restored_msgs.len() == 1,
         "expected a ShieldFacingRestored CoordinationEnqueue on red alert after recovery"
+    );
+    tick(&mut app);
+    assert!(
+        drain_coord(&mut app).iter().all(|message| !matches!(
+            message.payload,
+            CoordinationPayload::ShieldFacingRestored { .. }
+        )),
+        "paid recovery is announced only once in this offline cycle"
     );
 }
 

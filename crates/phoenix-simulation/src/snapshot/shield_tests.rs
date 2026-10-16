@@ -76,6 +76,10 @@ fn fixture() -> (App, Entity, SystemId, SystemId, SystemId) {
             EntityUuid("snapshot-shields".into()),
             ShipRedAlert(false),
             ShipConfigComponent(ship),
+            // The accepted Cruiser declares weapon machinery. Production's
+            // assignments::install always seeds its retained intent owner,
+            // even when no targets are selected in this shield-only rig.
+            crate::console::weapons::assignments::ShipWeaponTargets::default(),
             sources,
             // Capture the real crew projection required by this configured
             // ship. This sparse owner rig has no occupied human Stations.
@@ -256,6 +260,12 @@ fn shield_snapshot_resumes_mid_recovery_partial_interception_and_private_tree_ex
     let saved: PhoenixSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
     assert_eq!(saved.entities.len(), 1);
+    assert!(saved.entities[0]
+        .weapon_targets
+        .as_ref()
+        .unwrap()
+        .0
+        .is_empty());
     assert!(saved.entities[0]
         .weapons
         .as_ref()

@@ -76,6 +76,9 @@ fn actor() -> (App, Entity) {
             damage,
             ShipRedAlert(false),
             crate::ship_plugin::ShipConfigComponent(ship_config),
+            // Match assignments::install for this accepted armed hull. Empty
+            // retained intent still has a required canonical owner.
+            crate::console::weapons::assignments::ShipWeaponTargets::default(),
             crate::ship_plugin::ShipSystemControlSources(sources),
             crate::ship_plugin::ActiveStationRatings(ratings),
             crate::lobby::crew_replication::ShipCrewPresence::default(),
@@ -112,6 +115,12 @@ fn full_snapshot_preserves_the_actor_frontier_and_next_recovery_occurs_once() {
     let saved: PhoenixSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
     assert_eq!(saved.entities.len(), 1);
+    assert!(saved.entities[0]
+        .weapon_targets
+        .as_ref()
+        .unwrap()
+        .0
+        .is_empty());
     assert!(saved.entities[0].disablement.as_ref().unwrap().disabled);
     let crew = saved.entities[0]
         .mesh_crew

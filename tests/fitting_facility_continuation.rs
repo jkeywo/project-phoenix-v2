@@ -126,6 +126,91 @@ fn control(app: &mut App, station: &str, target: &str, payload: Control) {
     );
     steps(app, 4);
 }
+// Recovery is a close-range Human operation. Claim flight before the other
+// seats so ordinary vacant Helm avoidance cannot carry the tool out of reach.
+// Zero existing latches through their normal admitted consumers, never poses.
+fn hold_recovery_helm(app: &mut App) {
+    claim(app, "helm");
+    for (owner, payload) in [
+        ("helm-thrust", Control::SetThrust { value: 0.0 }),
+        ("helm-steering", Control::SetSteering { value: 0.0 }),
+        (
+            "helm-lateral-thrust",
+            Control::LateralThrustInput { lateral: 0.0 },
+        ),
+    ] {
+        control(app, "helm", owner, payload);
+    }
+    let entity = local(app);
+    let sources = app.world().get::<ShipSystemControlSources>(entity).unwrap();
+    for owner in ["helm-thrust", "helm-steering", "helm-lateral-thrust"] {
+        assert_eq!(
+            sources.0.source_for(&sid(owner)),
+            project_phoenix::ship::control_source::ControlSource::Human
+        );
+        assert!(!sources.0.policy_for(&sid(owner)).operate_ai);
+    }
+    assert_eq!(
+        app.world()
+            .get::<project_phoenix::ship::helm::ThrustInput>(entity)
+            .unwrap()
+            .0,
+        0.0
+    );
+    assert_eq!(
+        app.world()
+            .get::<project_phoenix::ship::helm::SteeringInput>(entity)
+            .unwrap()
+            .0,
+        0.0
+    );
+    assert_eq!(
+        app.world()
+            .get::<project_phoenix::ship::helm::LateralThrustInput>(entity)
+            .unwrap()
+            .0,
+        0.0
+    );
+}
+
+fn assert_recovery_range(app: &App, actor: Entity, source: Entity) {
+    let world = app.world();
+    let tool = &world
+        .get::<project_phoenix::resources::recovery_server::CompiledShipRecovery>(actor)
+        .unwrap()
+        .0;
+    let own = world.get::<Transform>(actor).unwrap().translation;
+    let target = world.get::<Transform>(source).unwrap().translation;
+    assert!(own.distance(target) <= tool.range,
+        "Human-held Recovery must remain physically in the unchanged tool range: own={own:?}, source={target:?}, range={}", tool.range);
+    let boards = world.get::<ShipSystemBlackboards>(actor).unwrap();
+    let permitted = world
+        .get::<ShipConfigComponent>(actor)
+        .unwrap()
+        .0
+        .observations_for_system(&tool.system, &boards.0);
+    let Some(SystemBlackboard::SensorRadar(board)) = permitted.get(&sid("sensor-radar")) else {
+        panic!("actual Recovery feed is required")
+    };
+    let measured = board
+        .tracks
+        .as_ref()
+        .unwrap()
+        .iter()
+        .find(|row| {
+            Some(row.contact_id.as_str()) == board.selected_target.as_deref()
+                && row.selectable
+                && !row.predicted
+        })
+        .expect("the selected earned contact remains current");
+    assert!(
+        (own.x - measured.position[0]).hypot(own.z - measured.position[1]) <= tool.range,
+        "Recovery must also be in measured range: own={own:?}, observed={:?}, range={}",
+        measured.position,
+        tool.range
+    );
+}
+
 fn fit(app: &App, entity: Entity) -> &ShipFitting {
     app.world().get::<ShipFitting>(entity).unwrap()
 }
@@ -374,9 +459,6 @@ fn disable_source(app: &mut App, source: &str) {
 #[test]
 fn intact_recovery_preserves_actual_condition_then_vacant_repair_fetches_and_installs_it() {
     let mut live = build(true);
-    claim(&mut live, "engineering");
-    claim(&mut live, "science");
-    claim(&mut live, "tactical");
     let entity = local(&mut live);
     let source = live
         .world_mut()
@@ -391,7 +473,13 @@ fn intact_recovery_preserves_actual_condition_then_vacant_repair_fetches_and_ins
         .unwrap()
         .id
         .clone();
+    // The same one trusted incident precedes crew setup: the still-vacant
+    // source must not spend that setup time escaping the close-range operation.
     disable_source(&mut live, &source.1);
+    hold_recovery_helm(&mut live);
+    claim(&mut live, "engineering");
+    claim(&mut live, "science");
+    claim(&mut live, "tactical");
     let damage = live.world().get::<ShipDamage>(source.0).unwrap();
     assert!(damage.neutralized(
         &live.world().get::<ShipConfigComponent>(source.0).unwrap().0,
@@ -454,6 +542,7 @@ fn intact_recovery_preserves_actual_condition_then_vacant_repair_fetches_and_ins
             })
     };
     for _ in 0..1800 {
+        assert_recovery_range(&live, entity, source.0);
         if offered(&live).is_some() {
             break;
         }
@@ -487,6 +576,7 @@ fn intact_recovery_preserves_actual_condition_then_vacant_repair_fetches_and_ins
             destination_locker: option.destination_locker,
         },
     );
+    assert_recovery_range(&live, entity, source.0);
     assert!(live
         .world()
         .get::<ShipEquipmentRecovery>(entity)
@@ -496,6 +586,7 @@ fn intact_recovery_preserves_actual_condition_then_vacant_repair_fetches_and_ins
     let recovery_checkpoint: PhoenixSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
     let mut recovery_resumed = build(true);
+    hold_recovery_helm(&mut recovery_resumed);
     for station in ["engineering", "science", "tactical"] {
         claim(&mut recovery_resumed, station);
     }
@@ -559,6 +650,7 @@ fn intact_recovery_preserves_actual_condition_then_vacant_repair_fetches_and_ins
         serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
     let initial_parts = parts(&live, entity);
     let mut resumed = build(true);
+    hold_recovery_helm(&mut resumed);
     for station in ["engineering", "science", "tactical"] {
         claim(&mut resumed, station);
     }

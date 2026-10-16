@@ -28,8 +28,12 @@ At `f1643e85`, all eight selected host-test targets compile successfully with
 personnel reception, optional maintenance and authoritative-state enumeration.
 The native build completed in 7m25s, but all 23 selected tests refused boot on a
 shared catalogue error: `battery_turret.toml` replaces the energy table without
-the required reactor definition. A data-only correction is being prepared; no
-gameplay result or playable exit is claimed from this run.
+the required reactor definition. Complete energy/interior data and a missing
+receiver compartment connection are now corrected. The catalogue loads; the next
+check exposes a conflicting FixedUpdate ordering constraint. A targeted native
+diagnostic is rebuilding to identify the exact constraint. The census also omitted
+the existing PowerFlowRng alias; its exact owner/count assertion is corrected.
+No gameplay result or playable exit is claimed from this run.
 
 | Increment | Implementation state | Material remaining work |
 |---|---|---|

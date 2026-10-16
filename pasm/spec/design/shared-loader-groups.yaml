@@ -1,0 +1,14 @@
+entities:
+  - decision: layered-combat-optional-shared-loader-service
+    core:
+      status: proposed
+      confidence: tentative
+      title: Optional Guided Groups Share Finite Existing Handling
+      summary: "S004 shared loaders remain optional. Actual guided tubes keep their sole magazine, loading timer, ammunition claims, paid work and ordinary individual AI. Immutable authored groups limit aggregate handling; independent loaders retain existing behavior."
+      rationale:
+        - "The proposed bounded contract is docs/gameplay-redesign/implementation/increment-15-loaders.md. Exact allocation, damage, priority and visibility choices await integrator review before runtime changes."
+        - "A group has stable identity, actual unique guided members and finite positive work_rate in load-work seconds per simulation second. It belongs to the existing actual torpedo-magazine mechanism; current magazine Operation availability scales aggregate capacity, while actual tube progression and magazine transfer retain their existing once-paid work. No second stock, battery, System controller or handling reserve."
+        - "Each tube retains a bounded priority changed through normal System-addressed admission. Lower priority numbers win; equal priority prefers a committed operation then lexical actual SystemId. Apply the same order to grouped competing claims and progress, retaining partial work and existing claims rather than cancelling them on priority changes."
+        - "Fresh group work is bounded by dt, rate and actual machinery availability; each tube remains bounded by its own remaining stage and dt. Only actual paid progression spends capacity. Unfunded members leave work for feasible members; no same-step unbounded chaining or idle credit. Loading and unloading compete for the same physical service."
+        - "Per-tube publications reveal own priority/progress and closed waiting reasons. Shared hardware grants neither cross-Console member information nor authority. Ordinary existing load AI requests readiness and respects physical arbitration, with no new controller or special backfill behavior."
+        - "Author immutable groups and initial priorities through accepted native Workshop transactions; preserve inherited source and reference validation. Persist/fold retained tube priority, reconstruct groups from exact accepted recipes and validate complete roster/claims before either restore door writes. Root owns compatibility changes and execution evidence."

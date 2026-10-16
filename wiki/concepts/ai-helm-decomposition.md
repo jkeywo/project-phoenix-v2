@@ -28,6 +28,8 @@ The forward-thrust host remains part of the shared module surface. Together the 
 
 `build_helm_ai_surfaces_frame` runs once before the hosts on each eligible AI tick. It folds authoritative, console-owned state into a per-ship frame: the viewscreen combat lock and scored objectives, Navigation waypoint and coordination clearance, current physics, world snapshot, shields, weapons reach, authored behaviour, and per-host policy memory.
 
+Frame assembly borrows the intersection of the participating AI axes' current Console publications and the current `WorldSnapshot` entity slice. The ECS fallback still builds an owned entity list. These borrows last only for assembly; the completed per-tick frame owns its decision inputs, and each System keeps its existing controller and private memory.
+
 Missing information remains missing; the Helm AI does not invent a goal. Named scenario targets resolve through the same world/runtime names available to the crew-facing surfaces. Private policy memory is snapshot-safe and scoped per fine system.
 
 Helm's `receive_helm_coordination` owns post-lag `ArcBearingRequest`,

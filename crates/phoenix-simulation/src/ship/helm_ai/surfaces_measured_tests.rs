@@ -480,3 +480,6 @@ fn current_held_board_cannot_bypass_new_conceal_or_missing_observer_scope() {
     assert!(missing.merged_view.entities.is_empty());
     assert_eq!(missing.current_contact_routes, Some(BTreeMap::new()));
 }
+
+#[path = "surfaces_borrowed_tests.rs"]
+mod borrowed_input_tests;

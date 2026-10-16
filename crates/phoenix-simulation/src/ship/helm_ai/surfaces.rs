@@ -14,8 +14,51 @@
 //! happens exactly once per tick rather than once per host.
 
 use super::*;
+use std::borrow::Cow;
 #[path = "surfaces_measured.rs"]
 mod measured;
+
+/// Call-local access to either the existing publications or their permitted
+/// intersection. This does not own observations or survive frame assembly.
+pub(crate) trait HelmObservations {
+    fn get(
+        &self,
+        source: &crate::core::messages::SystemId,
+    ) -> Option<&crate::core::messages::SystemBlackboard>;
+
+    fn iter(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            &crate::core::messages::SystemId,
+            &crate::core::messages::SystemBlackboard,
+        ),
+    >;
+
+    fn values(&self) -> impl Iterator<Item = &crate::core::messages::SystemBlackboard> {
+        self.iter().map(|(_, board)| board)
+    }
+}
+
+impl HelmObservations for crate::server_app::ShipSystemBlackboards {
+    fn get(
+        &self,
+        source: &crate::core::messages::SystemId,
+    ) -> Option<&crate::core::messages::SystemBlackboard> {
+        self.0.get(source)
+    }
+
+    fn iter(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            &crate::core::messages::SystemId,
+            &crate::core::messages::SystemBlackboard,
+        ),
+    > {
+        self.0.iter()
+    }
+}
 
 /// The console-owned surfaces the AI Helm derives its goals from (issue #702).
 ///
@@ -70,57 +113,57 @@ pub(crate) type HelmAiFallbackQuery<'w, 's> = Query<
 ///
 /// Uses `WorldSnapshot` when available (production); falls back to a direct
 /// ECS query for tests that don't register `AiPlugin`.
-pub(crate) fn helm_ai_snapshot_entities(
-    world_snapshot: Option<&crate::ai::server::WorldSnapshot>,
+pub(crate) fn helm_ai_snapshot_entities<'a>(
+    world_snapshot: Option<&'a crate::ai::server::WorldSnapshot>,
     runtime_ref: Option<&crate::world::server::WorldContentRuntime>,
     entity_fallback_q: &HelmAiFallbackQuery,
-) -> Vec<crate::ai::AiWorldEntity> {
+) -> Cow<'a, [crate::ai::AiWorldEntity]> {
     if let Some(ws) = world_snapshot {
-        return ws.entities.clone();
+        return Cow::Borrowed(&ws.entities);
     }
-    entity_fallback_q
-        .iter()
-        .map(|(uuid, transform, name, faction, hull, damage, collider)| {
-            let runtime_name = runtime_ref.and_then(|rt| {
-                rt.name_to_uuid
-                    .iter()
-                    .find_map(|(n, mapped)| (mapped == &uuid.0).then(|| n.clone()))
-            });
-            let hull_fraction = crate::ship::compartment_damage::structural_fraction(damage, hull);
-            crate::ai::AiWorldEntity {
-                uuid: uuid::Uuid::parse_str(&uuid.0).unwrap_or_default(),
-                name: runtime_name.or_else(|| name.map(|n| n.0.clone())),
-                position: [
-                    transform.translation.x,
-                    transform.translation.y,
-                    transform.translation.z,
-                ],
-                faction: faction.map(|f| f.0),
-                hull_fraction,
-                yaw: Some(-transform.rotation.to_euler(EulerRot::YXZ).0),
-                radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
-                // Mobility is the authored `[collider] movable` fact, matching
-                // `ai::server::build_world_snapshot` (issue #958) so the
-                // fallback picture and the production one classify terrain the
-                // same way. Dangerous, with size rating tracking the collision
-                // radius (issue #743).
-                movable: collider.map(|c| c.0.movable).unwrap_or(false),
-                dangerous: true,
-                size_rating: collider.map(|c| c.0.radius).unwrap_or(0.0),
-                ..Default::default()
-            }
-        })
-        .collect()
+    Cow::Owned(
+        entity_fallback_q
+            .iter()
+            .map(|(uuid, transform, name, faction, hull, damage, collider)| {
+                let runtime_name = runtime_ref.and_then(|rt| {
+                    rt.name_to_uuid
+                        .iter()
+                        .find_map(|(n, mapped)| (mapped == &uuid.0).then(|| n.clone()))
+                });
+                let hull_fraction =
+                    crate::ship::compartment_damage::structural_fraction(damage, hull);
+                crate::ai::AiWorldEntity {
+                    uuid: uuid::Uuid::parse_str(&uuid.0).unwrap_or_default(),
+                    name: runtime_name.or_else(|| name.map(|n| n.0.clone())),
+                    position: [
+                        transform.translation.x,
+                        transform.translation.y,
+                        transform.translation.z,
+                    ],
+                    faction: faction.map(|f| f.0),
+                    hull_fraction,
+                    yaw: Some(-transform.rotation.to_euler(EulerRot::YXZ).0),
+                    radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
+                    // Mobility is the authored `[collider] movable` fact, matching
+                    // `ai::server::build_world_snapshot` (issue #958) so the
+                    // fallback picture and the production one classify terrain the
+                    // same way. Dangerous, with size rating tracking the collision
+                    // radius (issue #743).
+                    movable: collider.map(|c| c.0.movable).unwrap_or(false),
+                    dangerous: true,
+                    size_rating: collider.map(|c| c.0.radius).unwrap_or(0.0),
+                    ..Default::default()
+                }
+            })
+            .collect(),
+    )
 }
 
 /// Read this entity's scored objectives out of its viewscreen blackboard.
 pub(crate) fn helm_ai_scored_objectives(
-    blackboards: &crate::server_app::ShipSystemBlackboards,
+    blackboards: &impl HelmObservations,
 ) -> Vec<crate::core::messages::ScoredObjective> {
-    match blackboards
-        .0
-        .get(&crate::ship::system_registry::viewscreen_system_id())
-    {
+    match blackboards.get(&crate::ship::system_registry::viewscreen_system_id()) {
         Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => {
             bb.scored_objectives.clone()
         }
@@ -147,15 +190,12 @@ pub(crate) fn has_helm_objective(scored: &[crate::core::messages::ScoredObjectiv
 /// its first publish); `helm_ai_radar_range_prefers_the_npc_blackboard_entry`
 /// pins both sides.
 pub(crate) fn helm_ai_radar_range(
-    blackboards: &crate::server_app::ShipSystemBlackboards,
+    blackboards: &impl HelmObservations,
     helm_section: Option<&crate::entities::spawner::HelmConsoleSection>,
     ship_client_config: Option<&crate::lobby::server::ShipClientConfigResource>,
     is_local: bool,
 ) -> f32 {
-    let from_blackboard = match blackboards
-        .0
-        .get(&crate::ship::system_registry::helm_station_key())
-    {
+    let from_blackboard = match blackboards.get(&crate::ship::system_registry::helm_station_key()) {
         Some(crate::core::messages::SystemBlackboard::Helm(bb)) if bb.radar_range > 0.0 => {
             Some(bb.radar_range)
         }
@@ -183,7 +223,7 @@ pub(crate) fn helm_ai_world_view(
     faction: Option<&crate::entities::spawner::FactionComponent>,
     collider: Option<&crate::entities::spawner::ColliderSection>,
     helm_section: Option<&crate::entities::spawner::HelmConsoleSection>,
-    blackboards: &crate::server_app::ShipSystemBlackboards,
+    blackboards: &impl HelmObservations,
     ship_client_config: Option<&crate::lobby::server::ShipClientConfigResource>,
     is_local: bool,
     anchors: &std::collections::HashMap<String, [f32; 3]>,
@@ -222,7 +262,7 @@ pub(crate) fn helm_ai_world_view(
 pub(crate) fn helm_shared_target_view(
     mut world_view: crate::ai::WorldView,
     snapshot_entities: &[crate::ai::AiWorldEntity],
-    blackboards: &crate::server_app::ShipSystemBlackboards,
+    blackboards: &impl HelmObservations,
     waypoint: Option<&crate::console::navigation::NavigationWaypoint>,
 ) -> (crate::ai::WorldView, Vec<uuid::Uuid>) {
     let mut ids = Vec::new();
@@ -236,9 +276,8 @@ pub(crate) fn helm_shared_target_view(
     // Combat Lock + Science Target come from the frozen viewscreen blackboard
     // (issue #829, spec §3): cross-system target reads must not reach the
     // tactical / sensor radar's live selection synchronously.
-    if let Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) = blackboards
-        .0
-        .get(&crate::ship::system_registry::viewscreen_system_id())
+    if let Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) =
+        blackboards.get(&crate::ship::system_registry::viewscreen_system_id())
     {
         push(bb.combat_lock.clone());
         push(bb.science_target.clone());
@@ -250,7 +289,7 @@ pub(crate) fn helm_shared_target_view(
     }
     // A designation shares identity, not the world's full contact record.
     // Match the client read view: Viewscreen alone does not supply contacts.
-    let has_contacts = blackboards.0.values().any(|board| {
+    let has_contacts = blackboards.values().any(|board| {
         matches!(
             board,
             crate::core::messages::SystemBlackboard::Helm(_)
@@ -502,7 +541,7 @@ pub(crate) fn build_helm_ai_surfaces_frame(
         // no policy memory or authoritative observation store is replaced.
         let scoped = shared_helm_observations(ship_config.map(|c| &c.0), sources, blackboards);
         let blackboards = &scoped;
-        let has_navigation = blackboards.0.values().any(|board| {
+        let has_navigation = blackboards.values().any(|board| {
             matches!(
                 board,
                 crate::core::messages::SystemBlackboard::Navigation(_)
@@ -530,7 +569,7 @@ pub(crate) fn build_helm_ai_surfaces_frame(
                 return None;
             };
             let Some(crate::core::messages::SystemBlackboard::Navigation(board)) =
-                blackboards.0.get(&course.owner)
+                blackboards.get(&course.owner)
             else {
                 return None;
             };
@@ -567,15 +606,13 @@ pub(crate) fn build_helm_ai_surfaces_frame(
             continue;
         }
 
-        let combat_lock = match blackboards
-            .0
-            .get(&crate::ship::system_registry::viewscreen_system_id())
-        {
-            Some(crate::core::messages::SystemBlackboard::Viewscreen(board)) => {
-                board.combat_lock.as_deref()
-            }
-            _ => None,
-        };
+        let combat_lock =
+            match blackboards.get(&crate::ship::system_registry::viewscreen_system_id()) {
+                Some(crate::core::messages::SystemBlackboard::Viewscreen(board)) => {
+                    board.combat_lock.as_deref()
+                }
+                _ => None,
+            };
         let (
             visible_view,
             merged_view,
@@ -598,9 +635,8 @@ pub(crate) fn build_helm_ai_surfaces_frame(
                 runtime.as_deref(),
             );
             let mut shared = Vec::new();
-            if let Some(crate::core::messages::SystemBlackboard::Viewscreen(board)) = blackboards
-                .0
-                .get(&crate::ship::system_registry::viewscreen_system_id())
+            if let Some(crate::core::messages::SystemBlackboard::Viewscreen(board)) =
+                blackboards.get(&crate::ship::system_registry::viewscreen_system_id())
             {
                 for selected in [&board.combat_lock, &board.science_target] {
                     if let Some(key) = measured.selection(selected.as_deref()) {
@@ -646,7 +682,6 @@ pub(crate) fn build_helm_ai_surfaces_frame(
                 &snapshot_entities,
             );
             if !blackboards
-                .0
                 .values()
                 .any(|board| matches!(board, crate::core::messages::SystemBlackboard::Helm(_)))
             {
@@ -703,43 +738,66 @@ pub use phoenix_sim_gameplay::ship::helm_ai::surfaces::*;
 mod shared_target_scope_tests;
 
 /// Shared coordination work is restricted to the intersection of its readers.
-fn shared_helm_observations(
-    config: Option<&crate::ship::config::ShipConfig>,
-    sources: &ShipSystemControlSources,
-    boards: &crate::server_app::ShipSystemBlackboards,
-) -> crate::server_app::ShipSystemBlackboards {
-    let Some(config) = config else {
-        return Default::default();
-    };
-    let readers: Vec<_> = config
-        .systems
-        .iter()
-        .filter(|system| {
-            matches!(
-                system.kind.as_str(),
-                "helm_thrust"
-                    | "helm_steering"
-                    | "lateral_thrust"
-                    | "vertical_thrust"
-                    | "helm_impulse"
-                    | "helm_boost"
-            ) && sources.0.policy_for(&system.id).operate_ai
-        })
-        .collect();
-    crate::server_app::ShipSystemBlackboards(
-        boards
+struct SharedHelmObservations<'a> {
+    boards: &'a crate::server_app::ShipSystemBlackboards,
+    readers: Vec<phoenix_sim_gameplay::ship::console_ownership::ConsoleKnowledgeView<'a>>,
+}
+
+impl HelmObservations for SharedHelmObservations<'_> {
+    fn get(
+        &self,
+        source: &crate::core::messages::SystemId,
+    ) -> Option<&crate::core::messages::SystemBlackboard> {
+        if self.readers.is_empty()
+            || self
+                .readers
+                .iter()
+                .any(|reader| reader.get(source).is_none())
+        {
+            return None;
+        }
+        self.boards.0.get(source)
+    }
+
+    fn iter(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            &crate::core::messages::SystemId,
+            &crate::core::messages::SystemBlackboard,
+        ),
+    > {
+        self.boards
             .0
             .iter()
-            .filter(|(source, _)| {
-                !readers.is_empty()
-                    && readers.iter().all(|system| {
-                        config
-                            .observations_for_system(&system.id, &boards.0)
-                            .get(source)
-                            .is_some()
-                    })
-            })
-            .map(|(source, board)| (source.clone(), board.clone()))
-            .collect(),
-    )
+            .filter(move |(source, _)| self.get(source).is_some())
+    }
+}
+
+fn shared_helm_observations<'a>(
+    config: Option<&'a crate::ship::config::ShipConfig>,
+    sources: &ShipSystemControlSources,
+    boards: &'a crate::server_app::ShipSystemBlackboards,
+) -> SharedHelmObservations<'a> {
+    let readers = config
+        .into_iter()
+        .flat_map(|config| {
+            config
+                .systems
+                .iter()
+                .filter(|system| {
+                    matches!(
+                        system.kind.as_str(),
+                        "helm_thrust"
+                            | "helm_steering"
+                            | "lateral_thrust"
+                            | "vertical_thrust"
+                            | "helm_impulse"
+                            | "helm_boost"
+                    ) && sources.0.policy_for(&system.id).operate_ai
+                })
+                .map(move |system| config.observations_for_system(&system.id, &boards.0))
+        })
+        .collect();
+    SharedHelmObservations { boards, readers }
 }

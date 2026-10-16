@@ -71,7 +71,7 @@ impl MeasuredHelm {
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build(
-    boards: &crate::server_app::ShipSystemBlackboards,
+    boards: &impl HelmObservations,
     tracks: Option<&crate::science::broad::BroadTracks>,
     controls: Option<&crate::science::broad::SensingControls>,
     physics: &ShipPhysics,
@@ -102,7 +102,7 @@ pub(super) fn build(
     if runtime.is_some() && observer.is_none() {
         return result;
     }
-    let mut publications: Vec<_> = boards.0.iter().collect();
+    let mut publications: Vec<_> = boards.iter().collect();
     publications.sort_by_key(|(owner, _)| *owner);
     let preferred = controls.and_then(|controls| controls.0.combat_lock.as_ref());
     let mut routes =

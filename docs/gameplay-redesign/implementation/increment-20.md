@@ -483,7 +483,7 @@ Later dated Comms telemetry can extend this view through its real delivery owner
 global physical custody alone is never a knowledge grant.
 
 
-## Owned carrier source slice — awaiting native integration evidence
+## Owned carrier source slice - awaiting native integration evidence
 
 The first implementation uses `PersonnelTransfer` on the existing Repair
 TeamJobs owner. `SetDutyOfficerDestination` persists a closed request on
@@ -688,3 +688,27 @@ fixtures are authored but unexecuted here. Native compile, actual Human/AI radio
 and physical host proof, full JSON continuation/loss/forgery evidence and full
 reception/Patrol acceptance remain pending root integration. This source slice
 is not the full increment20/21/23 exit. Root owns versions, Cargo and final gates.
+
+## Reception integration checkpoint
+
+The reception donors were replayed onto the current media/capture integration
+at `9d9e8746`, preserving both optional Comms capabilities, ordinary radio
+settlement order and candidate-only captured-evidence validation. The request
+enum's owned craft identity removes `Copy`; existing Media/FormUp and planned
+communication consumers borrow or clone the same values. Planner validation
+remains explicitly ReportStatus-only.
+
+The actual Console builder now forwards the selected Comms publication's
+`reception_craft` list. A regression exercises that builder with a nonstandard
+Comms System ID through the normal request action, and verifies that a separate
+unbound Bay publication does not supply craft choices.
+
+Targeted browser tests passed **455 tests across six files** (1.46 s), including
+the Console builder, Comms actions/requests/capture, reception and Workshop craft
+authoring. Layer rules, strict strings (**6430 rows, zero errors**) and diff
+checks passed. Independent source review passed the merged runtime/candidate
+joins and the narrow planner ownership changes. Native compilation, protocol/
+save/rules version joins, actual Human/AI host reception and JSON/loss proofs,
+device/network acceptance and final integration gates remain root-owned and
+pending. These checks establish a source integration checkpoint, not an
+increment20/21/23 exit.

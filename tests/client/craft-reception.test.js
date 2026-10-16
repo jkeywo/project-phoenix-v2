@@ -6,6 +6,7 @@ import {ActionFeedbackLifecycle} from '../../gui/action-feedback.js';
 import {createSemanticActionRegistry} from '../../gui/semantic-action-registry.js';
 import {BAY_ACTION_IDS,registerBayActions} from '../../gui/stations/bay-actions.js';
 import {createCommsActionRegistry,COMMS_SEND_REQUEST_ACTION_ID} from '../../gui/stations/comms-actions.js';
+import {buildCommsConsoleState} from '../../gui/console-state.js';
 import '../../gui/components/ph-comms-text-composer.js';
 const order=()=>({request:{origin_id:'internal-order',source_ship:'origin',recipient_ship:'receiver',emitted_tick:2,heard_tick:3,request:{receive_craft:{craft:'private-craft'}}},decision_tick:4});
 const view=()=>({controllable:true,can_recover:true,stored:[],contacts:[{contact:'earned-alias',observed_tick:9}],capacity_space:2,occupied_space:0,
@@ -45,6 +46,22 @@ it('Comms proposes only its current explicitly published own stored craft with n
  state={...state,reception_craft:[]};expect(registry.activate(COMMS_SEND_REQUEST_ACTION_ID,{context:'comms',detail}).handled).toBe(false);expect(send).toHaveBeenCalledTimes(1);
  const el=document.createElement('ph-comms-text-composer');document.body.append(el);el.state={...state,reception_craft:[{id:'private-craft',name:'Rescue pod'}]};
  expect(el.shadowRoot.textContent).toContain('Rescue pod');expect(el.shadowRoot.textContent).not.toContain('private-craft');
+});
+
+it('carries only the selected typed Comms publication through the real Console builder and request action',()=>{
+ const craft={id:'private-craft',name:'Rescue pod',space:1};
+ const sim={blackboardKinds:{'radio-2':'Comms',bay:'Bay'},
+  blackboards:{'radio-2':{channels:[{id:'public'}],contacts:[{uuid:'receiver',name:'Outpost'}],reception_craft:[craft]},
+   bay:{stored:[{id:'unshared-craft',name:'Private hold'}]}},controlSources:{'radio-2':'Human'}};
+ const state=buildCommsConsoleState(sim,['radio-2']);
+ expect(state.reception_craft).toEqual([craft]);expect(state.comms_system_id).toBe('radio-2');
+ const send=vi.fn(),registry=createCommsActionRegistry({getState:()=>state,sendAction:send,actionFeedback:new ActionFeedbackLifecycle()});
+ const detail={channel:'public',audience:{kind:'contact',target_uuid:'receiver'},request:{receive_craft:{craft:craft.id}}};
+ expect(registry.activate(COMMS_SEND_REQUEST_ACTION_ID,{context:'comms',detail}).handled).toBe(true);
+ expect(send.mock.calls[0][1]).toMatchObject({control_system_id:'radio-2',request:detail.request});
+ delete sim.blackboards['radio-2'].reception_craft;
+ expect(buildCommsConsoleState(sim,['radio-2']).reception_craft).toEqual([]);
+ expect(buildCommsConsoleState({}).reception_craft ?? []).toEqual([]);
 });
 
 it('invalidates retired reception buttons and prevents a disposed widget being revived',()=>{

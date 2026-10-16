@@ -46,7 +46,8 @@ separate from source review and mocked-device tests.
 ## Craft receiving requests
 
 The composer offers only current own stored craft from explicitly bound Bay
-publications. ReceiveCraft carries a sender claim, never an observed-contact or
+publications. `buildCommsConsoleState` forwards that selected Comms publication's
+list without collecting unrelated Bay blackboards. ReceiveCraft carries a sender claim, never an observed-contact or
 ownership grant. A receiving operator accepts through ordinary Comms; machinery
 operation remains with its Bay. Bay controls display the attributed agreement
 and wait for an independently earned contact, keeping technical identities out

@@ -1581,3 +1581,63 @@ fn fixed_beam_turret_uses_existing_exact_source_workshop_composition_and_validat
     assert_eq!(redo.energy, undo.energy);
     assert_eq!(redo.interior, undo.interior);
 }
+
+#[test]
+fn physical_identity_decoy_uses_existing_identity_editor_and_refuses_source_energy_before_preview()
+{
+    const DECOY: &str = "assets/entities/battery_decoy.toml";
+    let mut files = BTreeMap::new();
+    text_members_under("assets", &mut files);
+    let dependencies = WorkshopDependencies::default();
+    let original = files[DECOY].clone();
+    let view = catalog(&files, &dependencies, DECOY);
+    assert!(view.resolvable, "{:?}", view.error);
+    let edit = request(
+        &files,
+        DECOY,
+        vec![Edit::Set {
+            path: vec![
+                Segment::Key("system".into()),
+                Segment::Index(0),
+                Segment::Key("component".into()),
+                Segment::Index(1),
+                Segment::Key("config".into()),
+                Segment::Key("callsign".into()),
+            ],
+            value_source: "\"Survey contact\"".into(),
+        }],
+    );
+    let changed = compose(&files, &dependencies, &edit).unwrap();
+    assert!(changed.contains("# The exhausted body remains recoverable"));
+    files.insert(DECOY.into(), changed.clone());
+    assert!(compose(&files, &dependencies, &edit).is_err());
+    let accepted: EntityConfig = resolve_template(DECOY, &files).unwrap().parse().unwrap();
+    assert!(accepted.sensing.is_none() && accepted.weapons_console.is_none());
+    let ship = accepted.ship_config.as_ref().unwrap();
+    let claim =
+        phoenix_sim_gameplay::ship::composition::identity_composition(&ship.systems[0].components)
+            .unwrap();
+    assert_eq!(claim.config.callsign, "Survey contact");
+    let invalid = request(
+        &files,
+        DECOY,
+        vec![Edit::Set {
+            path: vec![
+                Segment::Key("energy".into()),
+                Segment::Key("reactor".into()),
+                Segment::Key("initial_energy".into()),
+            ],
+            value_source: "1".into(),
+        }],
+    );
+    assert!(
+        compose(&files, &dependencies, &invalid).is_err(),
+        "sensorless finite decoy cannot silently gain another supply before Preview/Test"
+    );
+    assert_eq!(files[DECOY], changed);
+    files.insert(DECOY.into(), original);
+    let restored: EntityConfig = resolve_template(DECOY, &files).unwrap().parse().unwrap();
+    assert_eq!(restored.energy, accepted.energy);
+    assert_eq!(restored.probe, accepted.probe);
+    assert_eq!(restored.interior, accepted.interior);
+}

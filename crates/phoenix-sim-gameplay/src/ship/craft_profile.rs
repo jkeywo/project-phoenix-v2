@@ -23,6 +23,13 @@ pub fn validate_entity(config: &EntityConfig) -> Result<(), String> {
         } else {
             false
         };
+        let identity_only = ship
+            .systems
+            .iter()
+            .any(|system| system.kind == IDENTITY_EMITTER_KIND);
+        if identity_only {
+            validate_fixed_identity_decoy(config)?;
+        }
         if config.helm_console.is_some()
             || config.helm_control.is_some()
             || config.behaviour.is_some()
@@ -52,10 +59,11 @@ pub fn validate_entity(config: &EntityConfig) -> Result<(), String> {
             || config.collider.as_ref().is_none_or(|body| body.movable)
             || config.damage.is_none()
             || config.interior.is_none()
-            || config
-                .sensing
-                .as_ref()
-                .is_none_or(|sensing| sensing.broad.is_empty())
+            || (!identity_only
+                && config
+                    .sensing
+                    .as_ref()
+                    .is_none_or(|sensing| sensing.broad.is_empty()))
             || energy.reactor.max_output_per_sec != 0.0
             || energy.reactor.sustainable_output_per_sec != 0.0
             || energy.reactor.initial_output_per_sec != 0.0
@@ -69,9 +77,10 @@ pub fn validate_entity(config: &EntityConfig) -> Result<(), String> {
                         | SENSORS_KIND
                         | COMMS_KIND
                 ) && !(fixed_beam && system.kind == PHASER_BANK_KIND)
+                    && !(identity_only && system.kind == IDENTITY_EMITTER_KIND)
             })
         {
-            return Err("fixed carried equipment must be battery-only engineless childless fixed physical sensor or supported beam-turret equipment with ordinary damage; moving, mesh-child, projectile, own-crew, fitting, bay and other actuator profiles are not supported yet".into());
+            return Err("fixed carried equipment must be battery-only engineless childless fixed physical sensor, supported beam-turret or identity-only decoy equipment with ordinary damage; moving, mesh-child, projectile, own-crew, fitting, bay and other actuator profiles are not supported yet".into());
         }
     }
     let Some(ship) = &config.ship_config else {
@@ -233,6 +242,56 @@ fn validate_fixed_beam_turret(config: &EntityConfig) -> Result<(), String> {
     {
         return Err(refuse());
     }
+    Ok(())
+}
+
+/// Identity-only equipment needs no observer or targeting capability of its own.
+/// Its finite ordinary emitter battery limits useful claim life; the physical
+/// body remains recoverable without a new timer or destruction owner.
+fn validate_fixed_identity_decoy(config: &EntityConfig) -> Result<(), String> {
+    let refuse = || {
+        "identity-only decoy requires one AI-only Console-owned IdentityEmitter, supported enabled composition/tree, finite paid local reserve, no source energy, passengers, sensing or weapons".to_string()
+    };
+    let ship = config.ship_config.as_ref().ok_or_else(refuse)?;
+    let energy = config.energy.as_ref().ok_or_else(refuse)?;
+    let profile = config.probe.as_ref().ok_or_else(refuse)?;
+    if ship.systems.len() != 1
+        || ship.consoles.len() != 1
+        || !ship.stations.is_empty()
+        || !profile.passenger_berths.is_empty()
+        || config.weapons_console.is_some()
+        || config.sensing.is_some()
+        || config.sensors_console.is_some()
+        || config.navigation_console.is_some()
+        || config.comms.is_some()
+        || config.comms_console.is_some()
+        || energy.reactor.initial_energy != 0.0
+        || energy.consumers.len() != 1
+    {
+        return Err(refuse());
+    }
+    let system = &ship.systems[0];
+    let console = ship.console_for_system(&system.id).ok_or_else(refuse)?;
+    if system.kind != IDENTITY_EMITTER_KIND
+        || !system.ai_only
+        || console.screen.is_some()
+        || console.home_station.is_some()
+        || !console.feeds.is_empty()
+        || system
+            .config
+            .as_ref()
+            .and_then(|value| value.get("ai"))
+            .is_none()
+        || system.components.len() != 2
+        || energy.consumers[0].system != system.id
+        || !energy.consumers[0].continuous_cost_per_sec.is_finite()
+        || energy.consumers[0].continuous_cost_per_sec <= 0.0
+        || !energy.consumers[0].initial_energy.is_finite()
+        || energy.consumers[0].initial_energy <= 0.0
+    {
+        return Err(refuse());
+    }
+    crate::electronic::identity::validate_equipment(config, system)?;
     Ok(())
 }
 

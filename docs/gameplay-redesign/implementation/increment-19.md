@@ -442,3 +442,18 @@ and malformed no-write, plus existing Workshop exact-source composition evidence
 Native and mounted authoring/browser/device acceptance remain distinct from
 source checkpoints. Moving craft and richer decoy signatures remain later
 supported compositions, rather than being admitted by this narrow subtype.
+
+
+Identity-only decoy source checkpoint: `battery_decoy.toml` is one ordinary fixed
+body with one AI-only Console-owned composed IdentityEmitter, a configured enabled
+state tree, zero source generation/reserve and 24 local energy at 2 energy/sec.
+The narrow subtype alone permits absence of sensing; weapons, passengers, other
+Systems and both radio/legacy Comms endpoints refuse. Its false literal callsign
+and faction leave the actual body and faction unchanged. Useful emission life
+comes from ordinary finite paid work/passive loss, not a timer or despawn.
+
+Independent review passed the accepted data/guard and thirteen invalid recipe
+cases, plus real Workshop exact-source callsign edit/stale rejection/source-energy
+refusal and preserved physical/resource source undo. Strict strings passed with
+6389 identifiers; owned formatting/diff and literal TOML syntax passed. Cargo,
+actual host execution and mounted authoring/device journeys remain pending.

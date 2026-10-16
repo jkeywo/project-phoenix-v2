@@ -6493,3 +6493,5 @@ workshop.emission.preview,Workshop action,Preview,,,
 workshop.emission.test,Workshop action,Test,,,
 workshop.emission.unavailable,Workshop state,This template has no supported Command System.,,,
 workshop.emission.refused,Workshop refusal,Profile refused: {reason},,,
+entity.battery_decoy.name,Optional finite physical identity decoy,Battery Identity Decoy,Battery Identity Decoy,Battery Identity Decoy,source
+entity.battery_decoy.description,Physical decoy target description,A fixed battery-powered identity emitter,A fixed battery-powered identity emitter,A fixed battery-powered identity emitter,source

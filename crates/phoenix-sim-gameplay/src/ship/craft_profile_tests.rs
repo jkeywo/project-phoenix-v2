@@ -289,3 +289,79 @@ fn fixed_turret_refuses_unsupported_hardware_and_missing_real_ai_scope_or_paid_w
         assert!(validate_entity(&invalid).is_err(), "case {fault}");
     }
 }
+
+#[test]
+fn actual_identity_only_decoy_uses_paid_fixed_equipment_without_fitting_a_sensor_or_weapon() {
+    let decoy =
+        crate::test_fixtures::load_entity_config("assets/entities/battery_decoy.toml").unwrap();
+    validate_entity(&decoy).unwrap();
+    assert!(!decoy.is_static_point_defence());
+    assert!(
+        decoy.weapons_console.is_none()
+            && decoy.sensing.is_none()
+            && decoy.sensors_console.is_none()
+    );
+    assert!(decoy.behaviour.is_none() && decoy.helm_console.is_none());
+    let ship = decoy.ship_config.as_ref().unwrap();
+    assert_eq!(ship.systems.len(), 1);
+    assert!(ship.stations.is_empty());
+    let emitter = &ship.systems[0];
+    assert_eq!(emitter.kind, IDENTITY_EMITTER_KIND);
+    let composition = crate::ship::composition::identity_composition(&emitter.components).unwrap();
+    assert_eq!(composition.config.callsign, "Harrow frigate");
+    assert_ne!(
+        composition.config.faction(),
+        decoy.faction.map(|faction| faction.to_string())
+    );
+    let battery = &decoy.energy.as_ref().unwrap().consumers[0];
+    assert_eq!(battery.system, emitter.id);
+    assert_eq!(battery.initial_energy, 24.0);
+    assert_eq!(battery.continuous_cost_per_sec, 2.0);
+    assert_eq!(decoy.energy.as_ref().unwrap().reactor.initial_energy, 0.0);
+    let mut sensor =
+        crate::test_fixtures::load_entity_config("assets/entities/physical_probe.toml").unwrap();
+    sensor.sensing = None;
+    assert!(
+        validate_entity(&sensor).is_err(),
+        "sensorless acceptance belongs solely to actual identity-only composition"
+    );
+}
+
+#[test]
+fn identity_decoy_refuses_other_capabilities_unpaid_work_and_missing_actual_owners() {
+    let valid =
+        crate::test_fixtures::load_entity_config("assets/entities/battery_decoy.toml").unwrap();
+    let sensor =
+        crate::test_fixtures::load_entity_config("assets/entities/physical_probe.toml").unwrap();
+    for fault in 0..13 {
+        let mut invalid = valid.clone();
+        match fault {
+            0 => invalid.energy.as_mut().unwrap().reactor.initial_energy = 1.0,
+            1 => invalid.energy.as_mut().unwrap().reactor.max_output_per_sec = 1.0,
+            2 => invalid.energy.as_mut().unwrap().consumers[0].initial_energy = 0.0,
+            3 => invalid.energy.as_mut().unwrap().consumers[0].continuous_cost_per_sec = f32::NAN,
+            4 => invalid.ship_config.as_mut().unwrap().systems[0].ai_only = false,
+            5 => invalid.ship_config.as_mut().unwrap().consoles.clear(),
+            6 => invalid
+                .probe
+                .as_mut()
+                .unwrap()
+                .passenger_berths
+                .push("passenger".into()),
+            7 => invalid.sensing = sensor.sensing.clone(),
+            8 => invalid
+                .ship_config
+                .as_mut()
+                .unwrap()
+                .systems
+                .push(sensor.ship_config.as_ref().unwrap().systems[0].clone()),
+            9 => invalid.ship_config.as_mut().unwrap().systems[0]
+                .channels
+                .clear(),
+            10 => invalid.ship_config.as_mut().unwrap().systems[0].config = None,
+            11 => invalid.collider.as_mut().unwrap().movable = true,
+            _ => invalid.comms = Some(toml::from_str("range=40\nhailable=true").unwrap()),
+        }
+        assert!(validate_entity(&invalid).is_err(), "case {fault}");
+    }
+}

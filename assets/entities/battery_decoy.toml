@@ -1,0 +1,277 @@
+# Optional increment19 physical identity-only decoy: actual paid finite emitter.
+# The exhausted body remains recoverable; no fake actor or lifetime timer.
+name = "entity.battery_decoy.name"
+faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+tags = [ "ship" ]
+mass = 20
+
+[target]
+tags = [ "ship" ]
+threat_level = "none"
+description = "entity.battery_decoy.description"
+
+[collider]
+shape = "Ball"
+radius = 0.5
+length = 0
+movable = false
+
+[radar_appearance]
+icon = "ship"
+colour = [ 0.4, 0.8, 1 ]
+size = 0.5
+
+[[system]]
+id = "identity-emitter"
+kind = "identity-emitter"
+console = "decoy"
+ai_only = true
+power_group = "probe"
+[[system.channel]]
+name = "enabled"
+kind = "boolean"
+initial = {kind="boolean",value=false}
+[[system.component]]
+id = "input"
+kind = "power_input"
+[[system.component]]
+id = "transponder"
+kind = "identity_emitter"
+enabled_channel = "enabled"
+power_input = "input"
+[system.component.config]
+callsign = "Harrow frigate"
+faction = "cccccccc-3333-4333-8333-cccccccccccc"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+[system.config.ai]
+root = "transponder"
+[[system.config.ai.tree]]
+id = "transponder"
+initial = "emit"
+[[system.config.ai.tree.state]]
+id = "emit"
+[[system.config.ai.tree.state.task]]
+id = "maintain-declared-claim"
+action = {kind="write",channel="enabled",value={source="literal",value=true}}
+[[console]]
+id = "decoy"
+name = "entity.battery_decoy.name"
+
+[power_groups.probe]
+label = "entity.battery_probe.name"
+default_level = 2
+min_level = 0
+max_level = 4
+
+[energy.reactor]
+sustainable_output_per_sec = 0
+max_output_per_sec = 0
+ramp_per_sec = 7.925
+initial_output_per_sec = 0
+initial_energy = 0
+initial_heat = 0
+max_cooling_per_sec = 0
+default_cooling_per_sec = 0
+
+[energy.reactor.reserve]
+capacity = 1
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.951
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.reactor.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "identity-emitter"
+initial_energy = 24
+initial_heat = 0
+continuous_cost_per_sec = 2
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 24
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.group]]
+id = "probe"
+max_flow_per_sec = 0
+default_flow_per_sec = 0
+max_cooling_per_sec = 0
+default_cooling_per_sec = 0
+priority = 15
+restore_delay_secs = 0.5
+
+[resource_services.coolant]
+kind = "capacity"
+id = "coolant"
+
+[resource_services.structural_parts]
+kind = "capacity"
+id = "structural_parts"
+
+[resource_services.machinery_parts]
+kind = "capacity"
+id = "machinery_parts"
+
+[[infrastructure.capacity]]
+id = "coolant"
+amount = 0
+ceiling = 4
+label = "energy.coolant"
+
+[[infrastructure.capacity]]
+id = "structural_parts"
+amount = 0
+ceiling = 4
+label = "damage.resource.structural_parts"
+
+[[infrastructure.capacity]]
+id = "machinery_parts"
+amount = 0
+ceiling = 4
+label = "damage.resource.machinery_parts"
+
+[damage.emp]
+resistance_per_stack = 0.5
+max_stacks = 8
+decay_secs = 20
+bindings = [ "operation" ]
+
+[damage.materials.light]
+residual_fraction = 0.1
+
+[damage.materials.light.resistance]
+physical = 0.2
+laser = 0.15
+
+[damage.materials.bulkhead]
+residual_fraction = 0.1
+
+[damage.materials.bulkhead.resistance]
+physical = 1
+laser = 0.7
+
+[damage.materials.armour]
+residual_fraction = 0.1
+
+[damage.materials.armour.resistance]
+physical = 2
+laser = 1.4
+
+[damage.remedies.structural]
+work_secs = 2
+manual_work_fraction = 0.25
+structural_hp = 10
+
+[damage.remedies.structural.outcome]
+kind = "structural"
+
+[[damage.remedies.structural.requirements]]
+resource = "structural_parts"
+service = "structural_parts"
+amount = 1
+
+[damage.remedies.machinery-full]
+work_secs = 4
+manual_work_fraction = 0.25
+
+[damage.remedies.machinery-full.outcome]
+kind = "full"
+
+[[damage.remedies.machinery-full.requirements]]
+resource = "machinery_parts"
+service = "machinery_parts"
+amount = 1
+
+[damage.remedies.machinery-patch]
+work_secs = 3
+manual_work_fraction = 0.5
+
+[damage.remedies.machinery-patch.outcome]
+kind = "patch"
+factor = 0.5
+
+[[damage.remedies.machinery-patch.requirements]]
+resource = "structural_parts"
+service = "structural_parts"
+amount = 1
+
+[interior]
+team_homes = []
+
+[[interior.deck]]
+id = "probe"
+label = "entity.battery_probe.room"
+damage_weight = 1
+
+[[interior.compartment]]
+id = "probe-core"
+deck = "probe"
+label = "entity.battery_probe.room"
+x = -0.5
+z = -0.5
+width = 1
+depth = 1
+material = "bulkhead"
+max_hp = 12
+recovery_fraction = 0.2
+structural_remedy = "structural"
+
+[interior.placements]
+identity-emitter = "probe-core"
+
+
+[probe]
+space = 1
+[mesh]
+shape = "sphere"
+colour = [0.9, 0.65, 0.2]
+radius = 0.5

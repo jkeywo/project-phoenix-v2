@@ -30,6 +30,10 @@ impl Plugin for HelmPlugin {
             StateClass::Derived,
             "helm-movement-profile",
         );
+        app.declare_state::<phoenix_sim_gameplay::ship::helm_control::HelmNavigationInputs>(
+            StateClass::Derived,
+            "helm-current-navigation-inputs",
+        );
         app.add_message::<DeliveredCoordination>()
             .add_systems(
                 FixedUpdate,
@@ -37,6 +41,7 @@ impl Plugin for HelmPlugin {
                     .in_set(crate::sim_sets::FixedStep::ApplyHelmMovementControls)
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(crate::ship_plugin::process_helm_inputs)
+                    .after(crate::sim_sets::FixedStep::HandleNavigationWaypoint)
                     .before(crate::ship_plugin::integrate_ship_physics),
             )
             .add_systems(
@@ -174,6 +179,7 @@ pub(crate) fn publish_helm_blackboard(
     tick: Option<Res<crate::sim_tick::SimTick>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     fixed: Option<Res<Time<Fixed>>>,
+    navigation_knowledge: crate::console::navigation::knowledge::Environment,
     world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     mut ship_q: Query<
@@ -210,6 +216,10 @@ pub(crate) fn publish_helm_blackboard(
                     Option<&phoenix_sim_gameplay::ship::helm_control::CompiledHelmControl>,
                     Option<&phoenix_sim_gameplay::ship::helm_control::HelmControlState>,
                     Option<&ShipConfigComponent>,
+                    (
+                        Entity,
+                        Option<&crate::console::navigation::NavigationWaypoint>,
+                    ),
                 ),
             ),
         ),
@@ -241,7 +251,7 @@ pub(crate) fn publish_helm_blackboard(
             thrust_input,
             lateral_input,
             (broad_profile, broad_state, uuid),
-            (movement_profile, movement_state, ship_config),
+            (movement_profile, movement_state, ship_config, (entity, waypoint)),
         ),
     ) in ship_q.iter_mut()
     {
@@ -399,7 +409,27 @@ pub(crate) fn publish_helm_blackboard(
                 },
                 _ => false,
             };
+            // HUD availability is a permitted read-model projection, not the
+            // integrator's ephemeral current-tick input grant. Restore can
+            // rebuild this view without executing machinery or reviving an old
+            // actuator context; the normal applier still creates that context.
+            let (navigation_generation, navigation_axes) = ship_config
+                .zip(tick.as_ref())
+                .map(|(config, tick)| {
+                    super::navigation::availability_at(
+                        &navigation_knowledge,
+                        entity,
+                        config,
+                        &bbs,
+                        profile,
+                        waypoint,
+                        tick.0,
+                    )
+                })
+                .unwrap_or_default();
             Some(HelmMovementView {
+                navigation_generation,
+                navigation_axes,
                 thrust: HelmAxisView {
                     system: profile.thrust.clone(),
                     intent: thrust.clone(),

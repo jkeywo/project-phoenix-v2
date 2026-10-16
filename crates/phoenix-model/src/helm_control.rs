@@ -56,6 +56,11 @@ pub struct HelmAxisView<I> {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HelmMovementView {
+    /// Current permitted formation course available to at least one actual axis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub navigation_generation: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub navigation_axes: Vec<SystemId>,
     pub thrust: HelmAxisView<ThrustIntent>,
     pub steering: HelmAxisView<SteeringIntent>,
     pub lateral: Option<HelmAxisView<LateralIntent>>,
@@ -67,6 +72,8 @@ pub struct HelmMovementView {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SpeedDemand {
+    /// Follow only this accepted semantic Navigation course revision.
+    Navigation { generation: u64 },
     /// Equivalent interpretation of the existing normalized throttle command.
     Fraction { value: f32 },
     /// Signed speed in the existing local forward frame, not thrust or energy.
@@ -89,10 +96,17 @@ pub enum ThrustIntent {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SteeringDemand {
+    Navigation {
+        generation: u64,
+    },
     /// Equivalent interpretation of the existing normalized yaw-rate command.
-    Rate { value: f32 },
+    Rate {
+        value: f32,
+    },
     /// Canonical absolute heading in radians, in [0, TAU).
-    Heading { heading_rad: f32 },
+    Heading {
+        heading_rad: f32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -105,6 +119,7 @@ pub enum SteeringIntent {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum LateralIntent {
+    Navigation { generation: u64 },
     Assisted { value: f32 },
     Direct { force: f32 },
 }
@@ -112,12 +127,13 @@ pub enum LateralIntent {
 impl LateralIntent {
     pub fn mode(&self) -> HelmControlMode {
         match self {
-            Self::Assisted { .. } => HelmControlMode::Assisted,
+            Self::Assisted { .. } | Self::Navigation { .. } => HelmControlMode::Assisted,
             Self::Direct { .. } => HelmControlMode::Direct,
         }
     }
     pub fn is_valid(&self) -> bool {
         match self {
+            Self::Navigation { generation } => *generation > 0,
             Self::Assisted { value } => axis(*value),
             Self::Direct { force } => axis(*force),
         }
@@ -141,6 +157,7 @@ impl ThrustIntent {
         match self {
             Self::Direct { force } => axis(*force),
             Self::Assisted { demand } => match demand {
+                SpeedDemand::Navigation { generation } => *generation > 0,
                 SpeedDemand::Fraction { value } => axis(*value),
                 SpeedDemand::Absolute { speed } => speed.is_finite(),
                 SpeedDemand::Match {
@@ -179,6 +196,7 @@ impl SteeringIntent {
         match self {
             Self::Direct { rate } => axis(*rate),
             Self::Assisted { demand } => match demand {
+                SteeringDemand::Navigation { generation } => *generation > 0,
                 SteeringDemand::Rate { value } => axis(*value),
                 SteeringDemand::Heading { heading_rad } => {
                     heading_rad.is_finite() && (0.0..std::f32::consts::TAU).contains(heading_rad)

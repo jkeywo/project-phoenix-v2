@@ -63,12 +63,16 @@ pub(super) fn observed_speed(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn apply(
     tick: Option<Res<crate::sim_tick::SimTick>>,
+    knowledge: crate::console::navigation::knowledge::Environment,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     membership: Option<Res<crate::regions::server::RegionMembership>>,
     regions: Query<&crate::entities::spawner::RegionEffectsSection>,
     mut ships: Query<(
         &CompiledHelmControl,
-        &mut HelmControlState,
+        (
+            &mut HelmControlState,
+            &mut phoenix_sim_gameplay::ship::helm_control::HelmNavigationInputs,
+        ),
         &AdmittedCommands,
         &ShipPhysics,
         &ShipPhysicsConfigResource,
@@ -85,7 +89,10 @@ pub(crate) fn apply(
         &mut ThrustInput,
         &mut SteeringInput,
         Option<&mut LateralThrustInput>,
-        Option<&crate::ship::helm::ImpulseCommand>,
+        (
+            Option<&crate::ship::helm::ImpulseCommand>,
+            Option<&crate::console::navigation::NavigationWaypoint>,
+        ),
     )>,
     mut outbound: Option<
         ResMut<bevy::ecs::message::Messages<crate::lobby::server::OutboundMessage>>,
@@ -93,7 +100,7 @@ pub(crate) fn apply(
 ) {
     for (
         profile,
-        mut state,
+        (mut state, mut navigation_inputs),
         admitted,
         physics,
         tuning,
@@ -105,10 +112,24 @@ pub(crate) fn apply(
         mut thrust,
         mut steering,
         mut lateral,
-        impulse,
+        (impulse, waypoint),
     ) in &mut ships
     {
         let profile = &profile.0;
+        navigation_inputs.tick = tick.as_ref().map(|tick| tick.0);
+        navigation_inputs.axes.clear();
+        if let Some(boards) = boards {
+            for axis in [&profile.thrust, &profile.steering]
+                .into_iter()
+                .chain(profile.lateral.iter())
+            {
+                if let Some(input) =
+                    super::navigation::motion(&knowledge, entity, config, boards, axis, waypoint)
+                {
+                    navigation_inputs.axes.insert(axis.clone(), input);
+                }
+            }
+        }
         // Offline work loses its old stick latch, while mode and actual momentum
         // survive. Repaired Direct axes cannot revive a stale force request.
         for owner in [&profile.thrust, &profile.steering]
@@ -193,6 +214,18 @@ pub(crate) fn apply(
                 continue;
             }
             let outcome = match &command.payload {
+                SystemControlPayload::SetFollowNavigation { generation } => Some(
+                    if generation.is_some_and(|generation| {
+                        !navigation_inputs
+                            .axes
+                            .get(owner)
+                            .is_some_and(|input| input.generation == generation)
+                    }) {
+                        Err("Following requires this axis's current permitted Navigation course and leader measurement".into())
+                    } else {
+                        state.follow_navigation(owner, *generation, actual)
+                    },
+                ),
                 SystemControlPayload::SetHelmMode { mode } => {
                     Some(state.set_mode(owner, *mode, actual, &tuning.0))
                 }

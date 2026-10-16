@@ -30,8 +30,9 @@ fn tracks_mut(board: &mut SystemBlackboard) -> Option<&mut Vec<SensorTrackSnapsh
 }
 
 /// Rebuild missing views first, then retain only saved measurements that agree
-/// with the actual source at this frontier. No selection, control affordance,
-/// clock, physical association or other board field is copied back.
+/// with the actual source at this frontier. No selection, machinery intent,
+/// control authority, clock or physical association is copied back. Navigation
+/// availability is separately recomputed against its held frontier below.
 pub(super) fn restore_held(world: &mut World, snapshot: &PhoenixSnapshot) {
     let Some(fixed) = world.get_resource::<Time<Fixed>>() else {
         return;
@@ -90,6 +91,59 @@ pub(super) fn restore_held(world: &mut World, snapshot: &PhoenixSnapshot) {
             {
                 if let Some(current) = tracks_mut(board) {
                     *current = records;
+                }
+            }
+        }
+    }
+    restore_navigation_availability(world, snapshot);
+}
+
+/// Control affordances are recomputed, never trusted from the saved board. A
+/// real fixed publication may precede the saved next-tick counter by one. Keep
+/// only an exact permitted projection at either accepted frontier; the servo's
+/// current-tick context remains empty until ordinary mechanical admission.
+fn restore_navigation_availability(world: &mut World, snapshot: &PhoenixSnapshot) {
+    use bevy::ecs::system::SystemState;
+    use phoenix_sim_gameplay::ship::helm_control::CompiledHelmControl;
+    if !snapshot.entities.iter().any(|row| {
+        row.blackboards.iter().any(
+            |(_, board)| matches!(board, SystemBlackboard::Helm(board) if board.movement.is_some()),
+        )
+    }) {
+        return;
+    }
+    let mut environment =
+        SystemState::<crate::console::navigation::knowledge::Environment>::new(world);
+    let updates = {
+        let knowledge = environment.get(world);
+        snapshot.entities.iter().flat_map(|row| {
+            let entity = world.try_query_filtered::<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>()
+                .and_then(|mut query| query.iter(world).find_map(|(entity, uuid)| (uuid.0 == row.uuid).then_some(entity)));
+            let Some(entity) = entity else { return Vec::new(); };
+            let (Some(config), Some(profile), Some(boards)) = (
+                world.get::<ShipConfigComponent>(entity), world.get::<CompiledHelmControl>(entity), world.get::<ShipSystemBlackboards>(entity)
+            ) else { return Vec::new(); };
+            let waypoint = world.get::<crate::console::navigation::NavigationWaypoint>(entity);
+            row.blackboards.iter().filter_map(|(source, held)| {
+                let SystemBlackboard::Helm(held) = held else { return None; };
+                let held = held.movement.as_ref()?;
+                let expected = (held.navigation_generation, held.navigation_axes.clone());
+                // An empty held affordance can reflect the source publication
+                // not yet having run. Retaining withholding adds no knowledge
+                // or control; positive availability needs exact source proof.
+                let withheld = expected.0.is_none() && expected.1.is_empty();
+                (withheld || [Some(snapshot.tick), snapshot.tick.checked_sub(1)].into_iter().flatten().any(|at| {
+                    crate::console::helm::navigation::availability_at(&knowledge, entity, config, boards, &profile.0, waypoint, at) == expected
+                })).then(|| (entity, SystemId(source.clone()), expected))
+            }).collect::<Vec<_>>()
+        }).collect::<Vec<_>>()
+    };
+    for (entity, source, (generation, axes)) in updates {
+        if let Some(mut boards) = world.get_mut::<ShipSystemBlackboards>(entity) {
+            if let Some(SystemBlackboard::Helm(board)) = boards.0.get_mut(&source) {
+                if let Some(movement) = board.movement.as_mut() {
+                    movement.navigation_generation = generation;
+                    movement.navigation_axes = axes;
                 }
             }
         }

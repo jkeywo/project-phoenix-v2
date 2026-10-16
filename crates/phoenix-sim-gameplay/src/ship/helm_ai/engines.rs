@@ -81,6 +81,13 @@ impl HelmAxisHost for EnginesAxis {
                 // Decode our own axis (forward throttle) from the ship's 3D
                 // desired velocity rather than re-deriving the decision here.
                 let sp = cx.plan?;
+                if cx.movement.is_some() {
+                    if let Some(generation) = sp.navigation_generation {
+                        return Some(SystemControlPayload::SetFollowNavigation {
+                            generation: Some(generation),
+                        });
+                    }
+                }
                 let thrust = crate::ai::decode_thrust_from_velocity(
                     sp.motion.desired_velocity_local.to_array(),
                 );
@@ -150,6 +157,7 @@ pub fn ai_helm_thrust(
             continue;
         };
         let cx = HelmAxisCtx {
+            movement: movement,
             physics: Some(physics),
             max_speed: physics_cfg.map(|c| c.0.max_speed).unwrap_or(0.0),
             plan: Some(sp),

@@ -694,6 +694,7 @@ pub(super) fn capture_motion_plans(
         primary_hazard: ship.hazard.primary_hazard.map(|u| u.to_string()),
         moving_hazard_threat: ship.hazard.moving_hazard_threat,
         docking_active: ship.docking_active,
+        navigation_generation: ship.navigation_generation,
     })
 }
 

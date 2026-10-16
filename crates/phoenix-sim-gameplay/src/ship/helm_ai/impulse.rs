@@ -177,6 +177,7 @@ pub fn ai_helm_impulse(
             continue;
         };
         let cx = HelmAxisCtx {
+            movement: None,
             physics: Some(physics),
             max_speed: 0.0,
             plan: plan.ships.get(&entity),

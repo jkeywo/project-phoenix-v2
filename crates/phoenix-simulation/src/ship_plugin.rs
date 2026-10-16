@@ -103,6 +103,13 @@ impl Plugin for ShipPlugin {
                 StateClass::DeferredFold,
                 "coordination-enqueue-staging-state",
             )
+            // The existing held plan is captured between AI cadence updates.
+            // Only navigation_generation is newly folded; the legacy desired
+            // motion/hazard/docking fields remain the pre-existing fold gap.
+            .declare_state::<HelmMotionPlan>(
+                StateClass::DeferredFold,
+                "helm-motion-blackboard-state",
+            )
             .declare_state::<crate::gm::operations::puppet::PendingGmStationFeedbackRoutes>(
                 StateClass::ClearedAtFold,
                 "gm-action-state",

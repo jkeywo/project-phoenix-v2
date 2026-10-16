@@ -1222,6 +1222,207 @@ fn formation_selection_uses_actual_heard_acceptance_and_earned_measurement_with_
         crate::snapshot::capture(again.world()).entities,
         dismissed.entities
     );
+    exercise_formation_follow(&mut again);
+}
+
+/// Same genuine heard/accepted/earned course, now consumed by the ordinary
+/// admitted Helm boundary and sole paid physics integrator.
+fn exercise_formation_follow(app: &mut App) {
+    use phoenix_model::helm_control::{SpeedDemand, SteeringDemand, SteeringIntent, ThrustIntent};
+    use phoenix_sim_gameplay::ship::helm_control::{
+        AxisIntent, CompiledHelmControl, HelmControlState, HelmNavigationInputs,
+    };
+    let observer = app
+        .world_mut()
+        .query::<(Entity, &EntityUuid)>()
+        .iter(app.world())
+        .find_map(|(entity, uuid)| (uuid.0 == "observer").then_some(entity))
+        .unwrap();
+    let profile = app
+        .world()
+        .get::<CompiledHelmControl>(observer)
+        .unwrap()
+        .0
+        .clone();
+    let generation = app
+        .world()
+        .get::<NavigationWaypoint>(observer)
+        .unwrap()
+        .generation();
+    app.world_mut()
+        .entity_mut(observer)
+        .insert(crate::ai::server::ai_high_fidelity_components());
+    let mut clock: Time = Time::default();
+    clock.advance_by(std::time::Duration::from_secs_f32(1.0 / 60.0));
+    app.insert_resource(clock);
+    #[cfg(debug_assertions)]
+    app.insert_resource(crate::ship::helm::HelmPhysicsFrame(1));
+    for axis in [&profile.thrust, &profile.steering]
+        .into_iter()
+        .chain(profile.lateral.iter())
+    {
+        app.world_mut()
+            .get_mut::<crate::ship_plugin::ShipSystemControlSources>(observer)
+            .unwrap()
+            .0
+            .set(
+                axis.clone(),
+                crate::ship::control_source::ControlSource::Human,
+            );
+    }
+    let follow = |axis: SystemId, generation| crate::core::messages::AdmittedCommand {
+        target: axis,
+        payload: SystemControlPayload::SetFollowNavigation {
+            generation: Some(generation),
+        },
+        response_token: None,
+        feedback_correlation: None,
+    };
+    let original = app
+        .world()
+        .get::<HelmControlState>(observer)
+        .unwrap()
+        .clone();
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(observer)
+        .unwrap()
+        .0 = vec![follow(profile.thrust.clone(), generation + 1)];
+    app.world_mut()
+        .run_system_once(crate::console::helm::control::apply)
+        .unwrap();
+    assert_eq!(
+        app.world().get::<HelmControlState>(observer),
+        Some(&original),
+        "a stale/future HUD selection cannot choose a different course"
+    );
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(observer)
+        .unwrap()
+        .0 = [&profile.thrust, &profile.steering]
+        .into_iter()
+        .chain(profile.lateral.iter())
+        .map(|axis| follow(axis.clone(), generation))
+        .collect();
+    app.world_mut()
+        .run_system_once(crate::console::helm::control::apply)
+        .unwrap();
+    let held = app
+        .world()
+        .get::<HelmControlState>(observer)
+        .unwrap()
+        .clone();
+    assert!(
+        matches!(held.axes[&profile.thrust], AxisIntent::Thrust(ThrustIntent::Assisted { demand: SpeedDemand::Navigation { generation: held } }) if held == generation)
+    );
+    assert!(
+        matches!(held.axes[&profile.steering], AxisIntent::Steering(SteeringIntent::Assisted { demand: SteeringDemand::Navigation { generation: held } }) if held == generation)
+    );
+    let reserve = |app: &App| {
+        app.world()
+            .get::<crate::ship::power::ShipPowerSystem>(observer)
+            .unwrap()
+            .0
+            .network()
+            .consumers[&profile.thrust]
+            .energy
+    };
+    let before = reserve(app);
+    let pose = *app
+        .world()
+        .get::<crate::ship::state::ShipPhysics>(observer)
+        .unwrap();
+    app.world_mut()
+        .run_system_once(crate::ship_plugin::integrate_ship_physics)
+        .unwrap();
+    assert!(
+        reserve(app) < before,
+        "following uses the same actual paid actuator reserve"
+    );
+    let after = app
+        .world()
+        .get::<crate::ship::state::ShipPhysics>(observer)
+        .unwrap();
+    assert_ne!(
+        (after.x, after.z, after.forward_speed),
+        (pose.x, pose.z, pose.forward_speed),
+        "the existing integrator performs the requested measured movement"
+    );
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(observer)
+        .unwrap()
+        .0
+        .clear();
+    formation_publications(app.world_mut());
+    let saved: crate::snapshot::PhoenixSnapshot = serde_json::from_slice(
+        &serde_json::to_vec(&crate::snapshot::capture(app.world())).unwrap(),
+    )
+    .unwrap();
+    let (mut resumed, resumed_observer, _) = formation_boot();
+    let result = crate::snapshot::restore(resumed.world_mut(), &saved);
+    assert!(
+        result.is_complete(),
+        "ordinary paid FollowNavigation restores: {:?}",
+        result.gaps
+    );
+    assert_eq!(
+        resumed.world().get::<HelmControlState>(resumed_observer),
+        Some(&held)
+    );
+    assert!(
+        resumed
+            .world()
+            .get::<HelmNavigationInputs>(resumed_observer)
+            .unwrap()
+            .axes
+            .is_empty(),
+        "a pre-restore permitted-input cache is never authoritative continuation"
+    );
+    assert_eq!(
+        crate::snapshot::capture(resumed.world()).entities,
+        saved.entities,
+        "the same permitted HUD availability rebuilds without restoring a servo input grant"
+    );
+    exercise_formation_publication_frontier(&mut resumed, resumed_observer);
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(observer)
+        .unwrap()
+        .0 = vec![crate::core::messages::AdmittedCommand {
+        target: profile.thrust.clone(),
+        payload: SystemControlPayload::SetThrust { value: 0.25 },
+        response_token: None,
+        feedback_correlation: None,
+    }];
+    app.world_mut()
+        .run_system_once(crate::console::helm::control::apply)
+        .unwrap();
+    let manual = app.world().get::<HelmControlState>(observer).unwrap();
+    assert!(matches!(
+        manual.axes[&profile.thrust],
+        AxisIntent::Thrust(ThrustIntent::Assisted {
+            demand: SpeedDemand::Fraction { value: 0.25 }
+        })
+    ));
+    assert_eq!(
+        manual.axes[&profile.steering], held.axes[&profile.steering],
+        "manual input breaks away only on its actual axis"
+    );
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(observer)
+        .unwrap()
+        .0
+        .clear();
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 += 10_000;
+    app.world_mut()
+        .run_system_once(crate::console::helm::control::apply)
+        .unwrap();
+    assert!(
+        app.world()
+            .get::<HelmNavigationInputs>(observer)
+            .unwrap()
+            .axes
+            .is_empty(),
+        "dated shared samples cannot renew themselves without fresh observed evidence"
+    );
 }
 
 #[test]
@@ -1266,4 +1467,109 @@ fn optional_formation_hull_preserves_actual_hardware_and_existing_console_feeds(
         .iter()
         .any(|feed| feed.source.0 == "tactical-radar"
             && feed.kind == phoenix_model::console::ConsoleObservationKind::TacticalRadar));
+}
+
+/// The actual sample/profile use the rig's existing 0.5s fixed clock. Exercise
+/// the precise freshness limit, then FixedLast's next counter, without another
+/// observation, paid work, input grant or independent authoritative clock.
+fn exercise_formation_publication_frontier(app: &mut App, observer: Entity) {
+    use phoenix_sim_gameplay::ship::helm_control::HelmNavigationInputs;
+    let sample = match app
+        .world()
+        .get::<NavigationWaypoint>(observer)
+        .unwrap()
+        .mode()
+        .unwrap()
+    {
+        WaypointMode::Formation { course } => course.measurement.observed_tick,
+        _ => panic!("genuine selected Formation"),
+    };
+    let cadence = app.world().get::<BroadProfile>(observer).unwrap().0
+        [&SystemId("tactical-radar".into())]
+        .profile
+        .sample_interval_secs;
+    let dt = app
+        .world()
+        .resource::<Time<Fixed>>()
+        .timestep()
+        .as_secs_f32();
+    assert_eq!(dt, 0.5);
+    assert_eq!(cadence, dt);
+    let limit = sample + 3;
+    assert!(limit >= app.world().resource::<crate::sim_tick::SimTick>().0);
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = limit;
+    formation_publications(app.world_mut());
+    let available = |app: &App, entity| {
+        app.world()
+            .get::<crate::server_app::ShipSystemBlackboards>(entity)
+            .unwrap()
+            .0
+            .values()
+            .find_map(|board| {
+                let SystemBlackboard::Helm(board) = board else {
+                    return None;
+                };
+                board
+                    .movement
+                    .as_ref()
+                    .map(|view| (view.navigation_generation, view.navigation_axes.clone()))
+            })
+            .unwrap()
+    };
+    let held = available(app, observer);
+    assert!(
+        held.0.is_some() && !held.1.is_empty(),
+        "the original sample remains available at its exact configured limit"
+    );
+    // The complete fixed publication ran at limit. The saved clock is the
+    // next counter; no observation/processing has happened at limit+1 yet.
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = limit + 1;
+    let saved: crate::snapshot::PhoenixSnapshot = serde_json::from_slice(
+        &serde_json::to_vec(&crate::snapshot::capture(app.world())).unwrap(),
+    )
+    .unwrap();
+    let (mut resumed, restored, _) = formation_boot();
+    let result = crate::snapshot::restore(resumed.world_mut(), &saved);
+    assert!(
+        result.is_complete(),
+        "exact held-frontier restore: {:?}",
+        result.gaps
+    );
+    assert_eq!(available(&resumed, restored), held);
+    assert!(resumed
+        .world()
+        .get::<HelmNavigationInputs>(restored)
+        .unwrap()
+        .axes
+        .is_empty());
+    let restored_row = crate::snapshot::capture(resumed.world())
+        .entities
+        .into_iter()
+        .find(|row| row.uuid == "observer")
+        .unwrap();
+    let saved_row = saved
+        .entities
+        .iter()
+        .find(|row| row.uuid == "observer")
+        .unwrap();
+    assert_eq!(
+        restored_row.navigation_waypoint,
+        saved_row.navigation_waypoint
+    );
+    assert_eq!(restored_row.helm_movement, saved_row.helm_movement);
+    assert_eq!(
+        restored_row.broad, saved_row.broad,
+        "holding the HUD publication cannot age or refresh observations"
+    );
+    resumed
+        .world_mut()
+        .run_system_once(crate::console::helm::server::publish_helm_blackboard)
+        .unwrap();
+    assert_eq!(available(&resumed, restored), (None, vec![]), "the next ordinary publication must withhold the now-stale sample; restore cannot rejuvenate it");
+    assert!(resumed
+        .world()
+        .get::<HelmNavigationInputs>(restored)
+        .unwrap()
+        .axes
+        .is_empty());
 }

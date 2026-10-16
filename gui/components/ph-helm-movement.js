@@ -51,13 +51,28 @@ export class PhHelmMovement extends PhElement {
           if (current?.controllable) window.activateSemanticAction?.('helm.mode', { context: 'helm', source: 'control',
             detail: { systemId: current.system_id, mode: current.mode === 'direct' ? 'assisted' : 'direct' } });
         });
-        node.append(label, value, button); this.$('axes').append(node); row = { node, label, value, button }; this.rows.set(axis.system_id, row);
+        const follow=this.ownerDocument.createElement('button');follow.type='button';follow.dataset.followNavigation=axis.system_id;
+        let armed=null;
+        const arm=()=>{const current=this.state?.axes?.find(candidate=>candidate.system_id===axis.system_id);armed={generation:this.state?.navigation_generation,following:current?.following_generation};};
+        follow.addEventListener('pointerdown',arm);follow.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' ')arm();});
+        follow.addEventListener('click',()=>{
+          const current=this.state?.axes?.find(candidate=>candidate.system_id===axis.system_id);
+          if(!current?.controllable||follow.disabled)return;
+          if(armed&&(armed.generation!==this.state?.navigation_generation||armed.following!==current.following_generation)){armed=null;return;}
+          armed=null;window.activateSemanticAction?.('helm.follow-navigation',{context:'helm',source:'control',detail:{systemId:current.system_id,generation:current.following_generation!==null?null:this.state.navigation_generation}});
+        });
+        node.append(label, value, button,follow); this.$('axes').append(node); row = { node, label, value, button,follow }; this.rows.set(axis.system_id, row);
       }
       row.label.textContent = t('helm.movement.axis.' + axis.role)
         + (!axis.available ? ` · ${t('helm.movement.unavailable')}` : !axis.controllable ? ` · ${t('helm.movement.delegated')}` : '');
       row.button.textContent = t('helm.movement.mode.' + axis.mode); row.button.disabled = !axis.controllable;
+      row.follow.textContent=t(axis.following_generation!==null?'helm.movement.stop_navigation':'helm.movement.follow_navigation');
+      row.follow.disabled=!axis.controllable||(axis.following_generation===null&&(!axis.navigation_available||!axis.available));
+      row.follow.setAttribute('aria-pressed',String(axis.following_generation!==null));
+
       const intent = axis.intent, demand = intent?.demand;
-      row.value.textContent = demand?.kind === 'heading' ? t('helm.movement.heading_goal', { value: (demand.heading_rad * 180 / Math.PI).toFixed(1) })
+      row.value.textContent = axis.following_generation!==null ? t(axis.navigation_available && axis.following_generation === this.state.navigation_generation ? 'helm.movement.navigation_selected' : 'helm.movement.navigation_paused')
+        : demand?.kind === 'heading' ? t('helm.movement.heading_goal', { value: (demand.heading_rad * 180 / Math.PI).toFixed(1) })
         : ['absolute', 'match'].includes(demand?.kind) ? t('helm.movement.speed_goal', { value: demand.speed.toFixed(1) })
         : intent ? t('helm.movement.stick_goal', { value: ((intent.force ?? intent.rate ?? intent.value ?? demand?.value ?? 0) * 100).toFixed(0) }) : '';
     }

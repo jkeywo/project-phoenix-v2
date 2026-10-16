@@ -92,6 +92,22 @@ impl HelmAxisHost for SteeringAxis {
         let sp = cx.plan?;
         let sf = cx.frame?;
         let physics = cx.physics?;
+        // Only the ordinary travel-facing verb follows Navigation. Authored
+        // combat/pass legs and an existing Weapons bearing request keep their
+        // own decision, even when an old Formation plan remains available.
+        if matches!(verb, AiPolicyVerb::ActuateDesiredFacing)
+            && cx.movement.is_some()
+            && io
+                .pending
+                .as_ref()
+                .is_none_or(|pending| pending.target.is_none())
+        {
+            if let Some(generation) = sp.navigation_generation {
+                return Some(SystemControlPayload::SetFollowNavigation {
+                    generation: Some(generation),
+                });
+            }
+        }
         let mut steering =
             crate::ai::decode_steering_from_facing(sp.motion.desired_facing_local.to_array());
 
@@ -187,6 +203,7 @@ pub fn ai_helm_steering(
             continue;
         };
         let cx = HelmAxisCtx {
+            movement: movement,
             physics: Some(physics),
             max_speed: physics_cfg.map(|c| c.0.max_speed).unwrap_or(0.0),
             plan: Some(sp),

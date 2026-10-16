@@ -108,3 +108,47 @@ fn malformed_movement_candidates_fail_before_clock_or_actor_writes() {
         assert_eq!(crate::sim_digest::world_digest(&world), digest);
     }
 }
+
+#[test]
+fn forged_future_navigation_axis_or_held_plan_refuses_whole_candidate_without_writes() {
+    let (mut world, entity, saved) = fixture();
+    let profile = world.get::<CompiledHelmControl>(entity).unwrap().0.clone();
+    let before = capture(&world);
+    let digest = crate::sim_digest::world_digest(&world);
+    for held_plan in [false, true] {
+        let mut candidate = saved.clone();
+        let row = candidate
+            .entities
+            .iter_mut()
+            .find(|row| row.uuid == "movement-ship")
+            .unwrap();
+        if held_plan {
+            row.motion_plan = Some(MotionPlanState {
+                navigation_generation: Some(1),
+                ..Default::default()
+            });
+        } else {
+            row.helm_movement
+                .as_mut()
+                .unwrap()
+                .follow_navigation(
+                    &profile.thrust,
+                    Some(1),
+                    crate::ship::physics::ShipPhysicsState {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                        yaw: 0.0,
+                        forward_speed: 0.0,
+                        lateral_speed: 0.0,
+                        vertical_speed: 0.0,
+                    },
+                )
+                .unwrap();
+        }
+        assert!(validate_roster(&world, &candidate).is_err());
+        assert!(!restore(&mut world, &candidate).is_complete());
+        assert_eq!(capture(&world), before);
+        assert_eq!(crate::sim_digest::world_digest(&world), digest);
+    }
+}

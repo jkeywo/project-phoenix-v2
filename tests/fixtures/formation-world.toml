@@ -1,0 +1,19 @@
+# Actual same-radio contact, ordinary paid observation and per-System backfill.
+[global]
+seed = 181819
+[player_spawn]
+position = [0, 0, 0]
+[[entity]]
+template_path = "assets/entities/formation_cruiser.toml"
+id = "formation-leader"
+name = "formation-leader"
+spawn_on = "game_start"
+transform = { position = [0, 0, 0] }
+[[entity]]
+template_path = "assets/entities/formation_cruiser.toml"
+id = "formation-wing"
+name = "formation-wing"
+spawn_on = "game_start"
+transform = { position = [0, 0, 120] }
+[entity.overrides.comms]
+hailable = true

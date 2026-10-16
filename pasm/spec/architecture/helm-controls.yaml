@@ -474,13 +474,14 @@ entities:
       status: implemented
       confidence: confirmed
       title: Helm Motion Blackboard State
-      summary: Replicated or ship-local 3D motion-planning surface exposing objective velocity, desired facing, avoidance velocity, combined desired velocity, avoidance urgency, and primary hazard identity.
+      summary: Retained shared 3D motion-planning surface exposing objective velocity, desired facing, avoidance velocity, combined desired velocity, avoidance urgency, primary hazard identity and the selected Navigation generation.
       rationale:
         - "[ai] The smallest useful shared interface is a local-space velocity-based contract rather than direct thrust or steering commands."
         - Keeping this blackboard 3D allows bounded and full-3D ships to share the same contract even while current consumer logic remains mostly planar.
         - Desired facing belongs beside desired velocity because some helm requests care more about orientation than translation.
+        - "The actual HelmMotionPlan resource retains its last plan between AI cadence updates and joins existing snapshots. Its census classification is DeferredFold: only navigation_generation is newly folded in a stable actual-actor namespace. Legacy held desired-motion, hazard and docking fields remain the existing unfolded gap; no whole-resource fold is claimed. An unbound plan preserves its previous digest contribution."
     architecture:
-      classification: replicated
+      classification: authoritative
       owner: helm-motion-planner
       derived_from:
         - desired-motion-state

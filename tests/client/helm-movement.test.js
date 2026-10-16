@@ -114,3 +114,45 @@ it('keeps native pickers and input drafts focused, isolates keys, and never togg
   element.state = buildHelmMovement(held, options({ tracks: [] }));
   expect(root.querySelector('output').textContent).toContain('7.0'); expect(root.getElementById('held').textContent).toContain('age 8');
 });
+
+it('explicit per-axis Navigation follow uses only current own permitted generation and manual authority',()=>{
+ const raw=dto();raw.navigation_generation=7;raw.navigation_axes=['main-drive'];
+ let projected=buildHelmMovement(raw,options());const send=vi.fn();
+ let serial=0;const actions=createHelmActionRegistry({getState:()=>({helm_movement:projected}),sendAction:send,actionFeedback:{press:()=>({correlation:'follow-'+(++serial),inputMs:serial}),pending(){},cancel(){},settle(){}}});
+ const choose=(generation=7,systemId='main-drive')=>actions.activate('helm.follow-navigation',{context:'helm',detail:{systemId,generation,leader:'private',position:[999,999]}});
+ expect(choose()).toMatchObject({handled:true});expect(send).toHaveBeenCalledWith('set_helm_follow_navigation',expect.objectContaining({control_system_id:'main-drive',generation:7}));
+ const packet=send.mock.calls[0][1];const wire=vi.fn();dispatchConsoleAction({action:'set_helm_follow_navigation',...packet},wire);
+ expect(wire).toHaveBeenCalledWith('ControlSystemCorrelated',expect.objectContaining({target:'main-drive',payload:{type:'SetFollowNavigation',data:{generation:7}}}));
+ send.mockClear();choose(6);choose(7,'rudder');choose(null);
+ projected={...projected,navigation_generation:8};choose();expect(send).not.toHaveBeenCalled();
+ raw.thrust.intent={mode:'assisted',demand:{kind:'navigation',generation:7}};projected=buildHelmMovement(raw,options());
+ expect(choose(null)).toMatchObject({handled:true});expect(send).toHaveBeenCalledWith('set_helm_follow_navigation',expect.objectContaining({generation:null}));
+});
+it('HUD captures the selected generation and rejects a newly changed course during a held click',()=>{
+ const raw=dto();raw.navigation_generation=7;raw.navigation_axes=['main-drive'];const widget=document.createElement('ph-helm-movement');document.body.append(widget);
+ window.activateSemanticAction=vi.fn();widget.state=buildHelmMovement(raw,options());const follow=widget.shadowRoot.querySelector('[data-follow-navigation="main-drive"]');
+ expect(follow.disabled).toBe(false);follow.dispatchEvent(new Event('pointerdown'));
+ raw.navigation_generation=8;widget.state=buildHelmMovement(raw,options());follow.click();expect(window.activateSemanticAction).not.toHaveBeenCalled();
+ follow.click();expect(window.activateSemanticAction).toHaveBeenCalledWith('helm.follow-navigation',expect.objectContaining({detail:{systemId:'main-drive',generation:8}}));
+ window.activateSemanticAction.mockClear();widget.state=buildHelmMovement(raw,options({systemIds:[]}));follow.click();expect(window.activateSemanticAction).not.toHaveBeenCalled();
+});
+
+it('keeps an older retained follow demand visibly paused when a new available course is published', () => {
+  const raw = dto();
+  raw.navigation_generation = 8;
+  raw.navigation_axes = ['main-drive'];
+  raw.thrust.intent = { mode: 'assisted', demand: { kind: 'navigation', generation: 7 } };
+  const widget = document.createElement('ph-helm-movement');
+  document.body.append(widget);
+  widget.state = buildHelmMovement(raw, options());
+  const root = widget.shadowRoot;
+  const heldStatus = root.querySelector('output').textContent;
+  const stop = root.querySelector('[data-follow-navigation="main-drive"]');
+  expect(heldStatus).toContain('paused');
+  expect(stop.disabled).toBe(false);
+  expect(stop.getAttribute('aria-pressed')).toBe('true');
+  raw.thrust.intent.demand.generation = 8;
+  widget.state = buildHelmMovement(raw, options());
+  expect(root.querySelector('output').textContent).toContain('Following');
+  expect(root.querySelector('output').textContent).not.toBe(heldStatus);
+});

@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 
 /// Immutable authored axis bindings, derived at accepted entity installation.
 #[derive(bevy::prelude::Component, Clone, Debug)]
+#[require(HelmNavigationInputs)]
 pub struct CompiledHelmControl(pub HelmControlConfig);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -26,6 +27,74 @@ pub enum AxisIntent {
 #[serde(deny_unknown_fields)]
 pub struct HelmControlState {
     pub axes: BTreeMap<SystemId, AxisIntent>,
+}
+
+/// Current permitted input, rebuilt at the ordinary mechanical command boundary.
+/// This is derived and never captured as authoritative intent or paid work.
+#[derive(bevy::prelude::Component, Clone, Debug, Default)]
+pub struct HelmNavigationInputs {
+    pub tick: Option<u64>,
+    pub axes: BTreeMap<SystemId, NavigationMotion>,
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NavigationMotion {
+    pub generation: u64,
+    pub position: [f32; 2],
+    pub velocity: [f32; 2],
+}
+impl HelmNavigationInputs {
+    pub fn current(&self, tick: Option<u64>) -> Option<&Self> {
+        (tick.is_some() && self.tick == tick).then_some(self)
+    }
+}
+impl NavigationMotion {
+    /// Use actual own tuning and measured World-plane motion. No leader heading
+    /// or live body route is available here. The stopping-speed correction is
+    /// bounded by existing acceleration/speed limits rather than a new autopilot.
+    fn desired_velocity(
+        self,
+        actual: ShipPhysicsState,
+        config: &ShipPhysicsConfig,
+    ) -> Option<[f32; 2]> {
+        if self.generation == 0
+            || !self
+                .position
+                .iter()
+                .chain(&self.velocity)
+                .all(|value| value.is_finite())
+            || !actual.x.is_finite()
+            || !actual.z.is_finite()
+            || !actual.yaw.is_finite()
+        {
+            return None;
+        }
+        let error = [
+            f64::from(self.position[0]) - f64::from(actual.x),
+            f64::from(self.position[1]) - f64::from(actual.z),
+        ];
+        let distance = (error[0] * error[0] + error[1] * error[1]).sqrt();
+        let correction = (2.0 * f64::from(config.acceleration) * distance)
+            .sqrt()
+            .min(f64::from(config.max_speed));
+        let mut desired = std::array::from_fn::<_, 2, _>(|axis| {
+            f64::from(self.velocity[axis])
+                + if distance > 0.0 {
+                    error[axis] / distance * correction
+                } else {
+                    0.0
+                }
+        });
+        let speed = (desired[0] * desired[0] + desired[1] * desired[1]).sqrt();
+        if speed > f64::from(config.max_speed) && speed > 0.0 {
+            for axis in &mut desired {
+                *axis *= f64::from(config.max_speed) / speed;
+            }
+        }
+        desired
+            .iter()
+            .all(|value| value.is_finite() && value.abs() <= f64::from(f32::MAX))
+            .then(|| desired.map(|value| value as f32))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -176,6 +245,47 @@ impl HelmControlState {
             || profile.lateral.as_ref().is_some_and(|owner| owner == &profile.thrust || owner == &profile.steering || !matches!(self.axes.get(owner), Some(AxisIntent::Lateral(request)) if request.is_valid()))
         {
             return Err("Helm continuation differs from actual axis owners or has invalid intent".into());
+        }
+        Ok(())
+    }
+
+    pub fn follow_navigation(
+        &mut self,
+        owner: &SystemId,
+        generation: Option<u64>,
+        actual: ShipPhysicsState,
+    ) -> Result<(), String> {
+        if generation == Some(0) || !actual.forward_speed.is_finite() || !actual.yaw.is_finite() {
+            return Err("Navigation generation and own axis readings must be valid".into());
+        }
+        let intent = self.axes.get_mut(owner).ok_or("unknown Helm axis owner")?;
+        match intent {
+            AxisIntent::Thrust(request) => {
+                *request = ThrustIntent::Assisted {
+                    demand: match generation {
+                        Some(generation) => SpeedDemand::Navigation { generation },
+                        None => SpeedDemand::Absolute {
+                            speed: actual.forward_speed,
+                        },
+                    },
+                }
+            }
+            AxisIntent::Steering(request) => {
+                *request = SteeringIntent::Assisted {
+                    demand: match generation {
+                        Some(generation) => SteeringDemand::Navigation { generation },
+                        None => SteeringDemand::Heading {
+                            heading_rad: actual.yaw.rem_euclid(std::f32::consts::TAU),
+                        },
+                    },
+                }
+            }
+            AxisIntent::Lateral(request) => {
+                *request = match generation {
+                    Some(generation) => LateralIntent::Navigation { generation },
+                    None => LateralIntent::Assisted { value: 0.0 },
+                }
+            }
         }
         Ok(())
     }
@@ -380,6 +490,7 @@ impl HelmControlState {
         actual: ShipPhysicsState,
         dt: f32,
         config: &ShipPhysicsConfig,
+        navigation: Option<&HelmNavigationInputs>,
     ) -> Option<ResolvedHelmControl> {
         if !dt.is_finite()
             || dt <= 0.0
@@ -404,6 +515,21 @@ impl HelmControlState {
         let AxisIntent::Steering(steering) = self.axes.get(&profile.steering)? else {
             return None;
         };
+        let navigation_velocity = |owner: &SystemId, generation: u64| {
+            navigation?
+                .axes
+                .get(owner)
+                .filter(|motion| motion.generation == generation)?
+                .desired_velocity(actual, config)
+        };
+        let forward = [
+            crate::simmath::sin(actual.yaw),
+            -crate::simmath::cos(actual.yaw),
+        ];
+        let right = [
+            crate::simmath::cos(actual.yaw),
+            crate::simmath::sin(actual.yaw),
+        ];
         let (thrust, drive) = match thrust {
             ThrustIntent::Direct { force } => (*force, LongitudinalDriveMode::Force),
             ThrustIntent::Assisted {
@@ -411,6 +537,11 @@ impl HelmControlState {
             } => (*value, LongitudinalDriveMode::VelocityFraction),
             ThrustIntent::Assisted { demand } => {
                 let speed = match demand {
+                    SpeedDemand::Navigation { generation } => {
+                        navigation_velocity(&profile.thrust, *generation).map_or(0.0, |velocity| {
+                            velocity[0] * forward[0] + velocity[1] * forward[1]
+                        })
+                    }
                     SpeedDemand::Absolute { speed } | SpeedDemand::Match { speed, .. } => *speed,
                     _ => unreachable!(),
                 };
@@ -429,10 +560,20 @@ impl HelmControlState {
             SteeringIntent::Assisted {
                 demand: SteeringDemand::Rate { value },
             } => *value,
-            SteeringIntent::Assisted {
-                demand: SteeringDemand::Heading { heading_rad },
-            } => {
-                let delta = (*heading_rad as f64 - actual.yaw as f64 + std::f64::consts::PI)
+            SteeringIntent::Assisted { demand } => {
+                let heading_rad = match demand {
+                    SteeringDemand::Navigation { generation } => {
+                        navigation_velocity(&profile.steering, *generation)
+                            .filter(|velocity| velocity[0].abs() + velocity[1].abs() > f32::EPSILON)
+                            .map_or(actual.yaw, |velocity| {
+                                crate::simmath::atan2(velocity[0], -velocity[1])
+                                    .rem_euclid(std::f32::consts::TAU)
+                            })
+                    }
+                    SteeringDemand::Heading { heading_rad } => *heading_rad,
+                    _ => unreachable!(),
+                };
+                let delta = (heading_rad as f64 - actual.yaw as f64 + std::f64::consts::PI)
                     .rem_euclid(std::f64::consts::TAU)
                     - std::f64::consts::PI;
                 // Conservative maximum avoids overshooting while longitudinal
@@ -451,6 +592,18 @@ impl HelmControlState {
             .lateral
             .as_ref()
             .and_then(|owner| match self.axes.get(owner)? {
+                AxisIntent::Lateral(LateralIntent::Navigation { generation }) => Some((
+                    navigation_velocity(owner, *generation).map_or(0.0, |velocity| {
+                        if config.max_lateral_speed > 0.0 {
+                            ((velocity[0] * right[0] + velocity[1] * right[1])
+                                / config.max_lateral_speed)
+                                .clamp(-1.0, 1.0)
+                        } else {
+                            0.0
+                        }
+                    }),
+                    false,
+                )),
                 AxisIntent::Lateral(LateralIntent::Assisted { value }) => Some((*value, false)),
                 AxisIntent::Lateral(LateralIntent::Direct { force }) => Some((*force, true)),
                 _ => None,

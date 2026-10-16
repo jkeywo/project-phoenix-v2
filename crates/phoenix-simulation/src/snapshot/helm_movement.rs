@@ -7,6 +7,44 @@ fn validate_saved(
     profile: Option<&phoenix_model::helm_control::HelmControlConfig>,
     tick: u64,
 ) -> Result<(), String> {
+    // Older held plans/demands may name a superseded course. The live resolver
+    // holds them neutral; no retained value may invent a future generation.
+    let frontier = row
+        .navigation_waypoint
+        .as_ref()
+        .map_or(0, |waypoint| waypoint.generation);
+    let valid_generation = |generation: u64| generation > 0 && generation <= frontier;
+    if row
+        .motion_plan
+        .as_ref()
+        .and_then(|plan| plan.navigation_generation)
+        .is_some_and(|generation| !valid_generation(generation))
+    {
+        return Err("saved Helm plan invents a Navigation course generation".into());
+    }
+    if let Some(saved) = &row.helm_movement {
+        use phoenix_model::helm_control::{
+            LateralIntent, SpeedDemand, SteeringDemand, SteeringIntent, ThrustIntent,
+        };
+        use phoenix_sim_gameplay::ship::helm_control::AxisIntent;
+        for intent in saved.axes.values() {
+            let generation = match intent {
+                AxisIntent::Thrust(ThrustIntent::Assisted {
+                    demand: SpeedDemand::Navigation { generation },
+                })
+                | AxisIntent::Steering(SteeringIntent::Assisted {
+                    demand: SteeringDemand::Navigation { generation },
+                })
+                | AxisIntent::Lateral(LateralIntent::Navigation { generation }) => {
+                    Some(*generation)
+                }
+                _ => None,
+            };
+            if generation.is_some_and(|generation| !valid_generation(generation)) {
+                return Err("saved Helm axis invents a Navigation course generation".into());
+            }
+        }
+    }
     match (profile, row.helm_movement.as_ref()) {
         (None, None) => Ok(()),
         (Some(profile), Some(saved)) => {

@@ -532,6 +532,13 @@ export const ACTION_MAP = Object.freeze({
       payload: { type: 'CancelTransit' },
     });
   },
+  set_helm_follow_navigation: (a, send) => {
+    if(typeof a.control_system_id!=='string'||!a.control_system_id||!(a.generation===null||Number.isSafeInteger(a.generation)&&a.generation>0))return;
+    send(a.correlation?'ControlSystemCorrelated':'ControlSystem',{
+      ...(a.correlation?{correlation:a.correlation}:{}),target:a.control_system_id,
+      payload:{type:'SetFollowNavigation',data:{generation:a.generation}},
+    });
+  },
   set_helm_mode: (a, send) => {
     if (!a.control_system_id || !['assisted', 'direct'].includes(a.mode)) return;
     send(a.correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {

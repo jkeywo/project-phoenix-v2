@@ -596,3 +596,65 @@ malformed no-write candidates and ordinary Comms dismissal. Its native execution
 remains integrator-owned. Human Helm follow demand, completed physical formation
 movement, full-host JSON continuation and device acceptance remain open; this
 source checkpoint does not close increment 18.
+
+
+### Explicit Helm following checkpoint — 2026-10-16
+
+The existing actual thrust, steering and lateral intents can retain a selected
+Navigation generation. The explicit HUD action follows only a permitted typed
+Navigation course, with its original earned position/velocity sample and actual
+configured age bound. It shares no private routing identity or leader heading.
+Current-tick inputs are derived; missing, stale, withdrawn or unpaid Navigation
+holds ordinary braking/neutral actuation under the existing paid limits and
+inertia. Manual input replaces that axis's intent. Ordinary per-System AI can
+request the same demand only through its normal travel verbs; combat/pass,
+docking, hazard and Weapons-bearing decisions retain their ordinary precedence.
+The existing cadence-held motion plan carries its generation in its existing
+snapshot row and an empty-when-unused UUID-sorted digest contribution.
+
+Targeted client tests cover current authority, stale HUD activation, closed wire
+payloads and cancelling following. Pure and owner Rust witnesses are authored
+for dated current inputs, manual breakaway, real paid movement, fresh restore,
+future-generation no-write refusal and AI verb precedence. Native execution and
+physical multiplayer/browser acceptance remain pending; this checkpoint does
+not close increment 18 or claim a completed fleet formation scenario.
+
+
+The restored Helm HUD rebuilds its availability from the same permitted shared
+sample. The existing held-publication restore owner preserves a positive view
+only when it equals that projection at the saved counter or the preceding
+completed publication frontier. Empty held availability remains withheld. This
+never restores the mechanical current-tick input cache. The exact configured
+sample limit and first stale publication have a focused genuine-course source
+witness; native execution remains pending.
+
+`tests/formation_continuation.rs` adds a separate full-host source witness: a
+joined Human leader selects an actual hailable contact and transmits paid FormUp;
+ordinary backfill reading, acceptance, independently earned identity/motion,
+Navigation clearance and Helm travel must produce real actuator work. It then
+compares complete fresh-JSON captures/digests for 360 ordinary updates, including
+an actual Human source turn, checks two malformed generation candidates without
+writes, and requires continued displacement from the paid saved checkpoint.
+This is authored test source until the integrator runs it, with no device or
+multiplayer acceptance claim.
+
+### Joined Helm checkpoint — 16 October 2026
+
+The Formation consumer is integrated on the prepared media/capture baseline.
+Canonical movement intent, existing held motion plans, current-tick derived
+inputs and validated held HUD publication frontiers retain their original
+owners. Follow commands use the actual three authored movement kinds at the
+normal admission boundary. Empty/unbound plans preserve their prior digest;
+the exact added empty stage is characterised alongside the existing namespaces.
+
+The existing `HelmMotionPlan` resource is now declared `DeferredFold` rather
+than left on the unclassified baseline: only `navigation_generation` is newly
+folded. Its legacy held motion/hazard/docking fields remain the prior fold gap.
+This checkpoint does not claim a whole-resource hash or introduce a second plan.
+
+The replayed runtime/publication/snapshot joins passed independent source review.
+Two targeted client files passed 23 tests (1.16s) after updating the exact action
+catalogue expectations for four already integrated media/personnel entries.
+Layer rules passed; strict strings checked 6,427 IDs with zero errors/warnings.
+Native compilation, owner/JSON360 execution, compatibility versions and integrated
+gates remain with the parent integration thread. No Cargo or device test ran here.

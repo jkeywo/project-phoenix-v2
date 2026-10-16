@@ -493,6 +493,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("broad-tracks", fold_broad_tracks_namespace),
     ("navigation-sharing", fold_navigation_sharing_namespace),
     ("navigation-request", fold_navigation_request_namespace),
+    ("helm-navigation-plan", fold_helm_navigation_plan_namespace),
 ];
 
 /// The running accumulator after each named stage of the fold.
@@ -3110,4 +3111,36 @@ fn fold_comms_capture_namespace(world: &World, acc: u64) -> u64 {
         |owner: &crate::comms::capture::ShipCommsCapture| Some(owner.clone()),
         |acc, state| fold_serde(acc, &state),
     )
+}
+
+/// The existing AI cadence retains this plan between updates. Only its new
+/// future-affecting course provenance adds a namespace; an ordinary plan with
+/// no Navigation binding keeps the pre-existing digest contribution unchanged.
+fn fold_helm_navigation_plan_namespace(world: &World, mut acc: u64) -> u64 {
+    let Some(plan) = world.get_resource::<crate::ship::helm_planner::HelmMotionPlan>() else {
+        return acc;
+    };
+    let mut rows: Vec<_> = plan
+        .ships
+        .iter()
+        .filter_map(|(entity, held)| {
+            let generation = held.navigation_generation?;
+            let uuid = world.get::<EntityUuid>(*entity)?;
+            Some((
+                FoldKey::from_world_id(Namespace::Entity, &uuid.0),
+                entity.index(),
+                generation,
+            ))
+        })
+        .collect();
+    if rows.is_empty() {
+        return acc;
+    }
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+    acc = fold_str(acc, "helm-navigation-plan");
+    acc = fold_u64(acc, rows.len() as u64);
+    for (key, _, generation) in rows {
+        acc = fold_u64(fold_str(acc, &key.id), generation);
+    }
+    acc
 }

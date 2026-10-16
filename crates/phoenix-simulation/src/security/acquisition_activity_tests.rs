@@ -16,7 +16,7 @@ fn source(app: &mut App) {
             include_str!("../../../../assets/worlds/domains/security-acquisition.toml"),
         ),
     ]);
-    let mut base = load(
+    let loaded = load(
         LoadRequest::new(
             "tests/fixtures/acquisition-htn-world.toml",
             &reader,
@@ -26,8 +26,13 @@ fn source(app: &mut App) {
         &crate::entities::loader::FixtureTemplates,
         &crate::entities::include_resolve::FixtureFragments,
     )
-    .expect("full accepted World/domain closure before machinery tracing")
-    .config;
+    .expect("full accepted World/domain closure before machinery tracing");
+    assert!(
+        !crate::world::validate::has_error(&loaded.findings),
+        "{:?}",
+        loaded.findings
+    );
+    let mut base = loaded.config;
     // This reduced fixture uses the exact already-spawned stable identities.
     base.name_to_uuid
         .insert("operator".into(), "operator".into());
@@ -145,6 +150,32 @@ fn exact_planned_board_binds_before_work_then_acquires_and_settles_through_json1
     }
     assert!(partial, "actual paid partial Board job");
     let saved = crate::snapshot::capture(app.world());
+    // Body-only inverse leaves the World accepted scope in place. It cannot
+    // erase or rewind the exact physical job underneath that scope.
+    for fault in 0..2 {
+        let mut row = saved
+            .entities
+            .iter()
+            .find(|row| row.uuid == "operator")
+            .unwrap()
+            .clone();
+        if fault == 0 {
+            row.security = None;
+        } else {
+            row.security.as_mut().unwrap().jobs.teams[1]
+                .as_mut()
+                .unwrap()
+                .activity
+                .team
+                .elapsed = 0.0;
+        }
+        let before = crate::snapshot::capture(app.world());
+        let digest = crate::sim_digest::world_digest(app.world());
+        let tick = app.world().resource::<SimTick>().0;
+        crate::snapshot::apply_entity_state(app.world_mut(), actor, &row, tick);
+        assert_eq!(crate::snapshot::capture(app.world()), before);
+        assert_eq!(crate::sim_digest::world_digest(app.world()), digest);
+    }
     let saved: crate::snapshot::PhoenixSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
     let (mut resumed, _, _, _) = planned_fixture();
@@ -203,6 +234,25 @@ fn exact_planned_board_binds_before_work_then_acquires_and_settles_through_json1
     ));
     assert!(row.state.is_none());
     let completed = crate::snapshot::capture(app.world());
+    for fault in 0..2 {
+        let mut row = completed
+            .entities
+            .iter()
+            .find(|row| row.uuid == "prize")
+            .unwrap()
+            .clone();
+        if fault == 0 {
+            row.operational_owner = None;
+        } else {
+            row.operational_owner.as_mut().unwrap().controller = "foreign".into();
+        }
+        let before = crate::snapshot::capture(app.world());
+        let digest = crate::sim_digest::world_digest(app.world());
+        let tick = app.world().resource::<SimTick>().0;
+        crate::snapshot::apply_entity_state(app.world_mut(), target, &row, tick);
+        assert_eq!(crate::snapshot::capture(app.world()), before);
+        assert_eq!(crate::sim_digest::world_digest(app.world()), digest);
+    }
     for fault in 0..4 {
         let mut bad = completed.clone();
         let row = bad

@@ -120,6 +120,9 @@ fn acquisition_domain_closes_over_actual_actor_and_opt_in_subject_before_activat
             &crate::entities::include_resolve::FixtureFragments,
         );
         let loaded = loaded.map_err(|error| format!("{error:?}"))?;
+        if crate::world::validate::has_error(&loaded.findings) {
+            return Err(format!("activation findings: {:?}", loaded.findings));
+        }
         let findings = findings(
             &WorldSource::new(WORLD, &reader.0[WORLD], &loaded.config),
             &crate::entities::loader::FixtureTemplates,

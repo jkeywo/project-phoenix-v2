@@ -1083,6 +1083,41 @@ pub(crate) fn validate_single_row(world: &World, row: &EntityState) -> Result<()
     let Some(runtime) = world.get_resource::<WorldContentRuntime>() else {
         return Ok(());
     };
+    // A body-only inverse cannot erase or fabricate the target half while its
+    // accepted World execution remains untouched, including before fact ACK.
+    for instance in runtime
+        .situations
+        .instances
+        .values()
+        .filter(|row| row.accepted.is_some())
+    {
+        let ActivityRequest::AcquireVessel { target, .. } = &instance.request else {
+            continue;
+        };
+        let base = world
+            .get_resource::<crate::world::config::WorldConfig>()
+            .ok_or("bound acquisition lost accepted subject identity")?;
+        if base.name_to_uuid.get(target) != Some(&row.uuid) {
+            continue;
+        }
+        let actual = world
+            .try_query_filtered::<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>()
+            .and_then(|mut query| {
+                query
+                    .iter(world)
+                    .find_map(|(entity, uuid)| (uuid.0 == row.uuid).then_some(entity))
+            })
+            .ok_or("acquisition subject body inverse requires full-roster restore")?;
+        let owner = world
+            .get::<phoenix_sim_session::vessel_ownership::VesselOperationalOwner>(actual)
+            .map(|owner| &owner.0);
+        if row.operational_owner.as_ref() != owner {
+            return Err(
+                "single-row restore would change ownership beneath accepted World acquisition"
+                    .into(),
+            );
+        }
+    }
     let bound = runtime
         .situations
         .instances
@@ -1093,13 +1128,27 @@ pub(crate) fn validate_single_row(world: &World, row: &EntityState) -> Result<()
         return Ok(());
     }
     let entity = world
-        .try_query::<(Entity, &EntityUuid)>()
+        .try_query_filtered::<(Entity, &EntityUuid), Allow<bevy::ecs::entity_disabling::Disabled>>()
         .and_then(|mut query| {
             query
                 .iter(world)
                 .find_map(|(entity, uuid)| (uuid.0 == row.uuid).then_some(entity))
         })
         .ok_or("body-only inverse of accepted World activity requires full-roster restore")?;
+    if bound
+        .iter()
+        .any(|instance| matches!(instance.request, ActivityRequest::AcquireVessel { .. }))
+    {
+        let actual = world
+            .get::<crate::security::server::ShipSecurityTeams>(entity)
+            .ok_or("bound acquisition lacks current Security owner")?
+            .save_state();
+        if row.security.as_ref() != Some(&actual) {
+            return Err(
+                "single-row restore would rewind Security beneath accepted World activity".into(),
+            );
+        }
+    }
     if bound
         .iter()
         .any(|instance| matches!(instance.request, ActivityRequest::Repair { .. }))

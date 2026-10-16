@@ -71,6 +71,9 @@ name = "entity.marking_beacon.name"
 [[console.feed]]
 source = "comms"
 kind = "Comms"
+[[console.feed]]
+source = "sensor-radar"
+kind = "SensorRadar"
 
 [comms]
 range = 500

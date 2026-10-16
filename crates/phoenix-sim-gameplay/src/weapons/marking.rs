@@ -124,6 +124,10 @@ pub fn validate_entity(config: &EntityConfig) -> Result<(), String> {
             .feeds
             .iter()
             .any(|feed| &feed.source == owner && feed.kind == expected)
+            || (kind == COMMS_KIND
+                && !console.feeds.iter().any(|feed| {
+                    feed.source == marker.sensor && feed.kind == ConsoleObservationKind::SensorRadar
+                }))
         {
             return Err(refuse());
         }
@@ -153,6 +157,11 @@ pub fn validate_payload_recipe(
     validate_entity(child)
 }
 
+/// The actual body owns one causal attachment relation. Its pose is a checked
+/// projection while attached, then the ordinary retained pose after detachment.
+#[derive(bevy::prelude::Component, Clone, Debug, PartialEq)]
+pub struct ShipMarkingAttachment(pub phoenix_model::marking::MarkingAttachment);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,6 +184,11 @@ mod tests {
         assert!(ship.stations.is_empty());
         assert_eq!(ship.systems.len(), 2);
         assert_eq!(ship.consoles.len(), 2);
+        let marker = config.marking_beacon.as_ref().unwrap();
+        let radio_console = ship.console_for_system(&marker.radio).unwrap();
+        assert!(radio_console.feeds.iter().any(|feed| {
+            feed.source == marker.sensor && feed.kind == ConsoleObservationKind::SensorRadar
+        }));
         let energy = config.energy.as_ref().unwrap();
         assert_eq!(energy.reactor.max_output_per_sec, 0.0);
         assert_eq!(energy.consumers.len(), 2);
@@ -210,7 +224,7 @@ mod tests {
     #[test]
     fn beacon_refuses_unfunded_or_unowned_equipment_and_competing_actuators() {
         let config = accepted();
-        for fault in 0..9 {
+        for fault in 0..10 {
             let mut bad = config.clone();
             match fault {
                 0 => bad.energy.as_mut().unwrap().reactor.max_output_per_sec = 1.0,
@@ -234,7 +248,20 @@ mod tests {
                 7 => bad.ship_config.as_mut().unwrap().systems[0]
                     .damage_components
                     .clear(),
-                _ => bad.energy.as_mut().unwrap().groups[0].max_flow_per_sec = 1.0,
+                8 => bad.energy.as_mut().unwrap().groups[0].max_flow_per_sec = 1.0,
+                _ => {
+                    let sensor = bad.marking_beacon.as_ref().unwrap().sensor.clone();
+                    let radio = bad.marking_beacon.as_ref().unwrap().radio.clone();
+                    let console = bad
+                        .ship_config
+                        .as_mut()
+                        .unwrap()
+                        .consoles
+                        .iter_mut()
+                        .find(|console| console.feeds.iter().any(|feed| feed.source == radio))
+                        .unwrap();
+                    console.feeds.retain(|feed| feed.source != sensor);
+                }
             }
             assert!(
                 validate_entity(&bad).is_err(),

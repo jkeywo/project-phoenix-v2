@@ -339,3 +339,55 @@ API choice has Craft's additional read-only source/API review against the locked
 local dependency. Root adopts the contract after those reviews; actual consumer
 proof remains pending. No runtime, native execution,
 asset acceptance or full increment exit is claimed.
+
+
+## Physical presence follow-up awaiting integrator adoption
+
+The first runtime source review found an interaction with carried craft: an
+already attached beacon would remain an active world body if its deployed probe
+subject were later recovered. A missing observation or Disabled component is
+not evidence of destruction and must never detach it for that reason.
+
+Proposed bounded first-slice resolution: exclude actual carry-capable bodies
+(PhysicalProbe/ProbeCustody or an accepted ProbeProfile) from eligible marking
+contacts and from attached-subject continuation. Keep ordinary independent hull
+and facility contacts. A later carried-child presence design can deliberately
+extend this boundary; this change introduces no stored-child custody or cleaning
+operation. This proposal has not been adopted and its exclusion is not yet
+implemented. The current runtime work is not ready for integration or an exit
+claim until this physical presence boundary is resolved.
+
+
+## Isolated runtime checkpoint (not an integrated delivery)
+
+`codex/marking-beacon-runtime` contains reviewed commits `d1b0cb48` (finite
+accepted recipe/closed values; Personnel source review) and `e1a2ba68` (actual
+frozen launch faction/recipe, finite rounds/bursts and coarse-contact exclusion;
+Craft source review). Neither commit has worker Cargo/native evidence.
+
+Later source is intentionally held as work in progress: exact endpoint contact,
+ordinary equipped spawn, one physical projection at the pre-Rapier/post-Dock
+frontiers, exact mechanical-pair filtering, actual-removal detachment, limited
+subject-only Broad inputs and canonical continuation joins. Comms reviewed the
+narrow current-tick raw Radio receipt seam; its late report consumer is not yet
+implemented. Unsupported report frontiers are refused rather than accepted as
+paid history. Snapshot validation separates disposable row-shape checks from
+complete candidate or current-parent checks, and checks typed causal WorldId
+namespaces/frontiers without adding a birth ledger.
+
+Owned formatting and diff checks pass. The recipe chunk previously passed strict
+strings (6,510 strings, zero errors/warnings). Rust owner tests, real accepted
+loader execution, actual host tracing, continuation forgeries, collision/native
+acceptance and final gates remain integrator-owned and unexecuted for this packet.
+The carry-capable target boundary above, S066 foundation synchronization, actual
+paid limited report/provenance, complete dependent recipe/Workshop support and
+ordinary Human/AI host proof must close before a coherent vertical-slice claim.
+### Explicit sensor-to-radio knowledge binding
+
+The finite marker's Radio Console explicitly receives its configured own
+SensorRadar feed. Accepted-recipe validation requires that typed binding; a
+missing binding refuses the recipe. This permits the selected reporting
+consumer to read its own sensor evidence without pooling unrelated Console
+knowledge. The accepted-loader positive and missing-feed tests are authored but
+not executed in this worker. Independent source review passed; the actual paid
+report consumer and carried-target policy remain separate unfinished work.

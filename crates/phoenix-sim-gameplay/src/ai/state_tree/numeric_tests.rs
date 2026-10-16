@@ -133,3 +133,132 @@ fn numeric_access_and_outputs_are_closed_and_failure_is_transactional() {
     )
     .is_err());
 }
+
+#[test]
+fn borrowed_definitions_preserve_nested_trace_transition_and_transaction() {
+    let config: AiTreeConfig = serde_json::from_value(serde_json::json!({
+        "root":"main", "tree":[
+            {"id":"main", "initial":"active", "state":[
+                {"id":"active", "transition":[{"id":"stop", "when":[
+                    {"value":{"source":"fact","name":"stop"},"equals":true}
+                ],"target":{"kind":"state","state":"stopped"}}], "task":[
+                    {"id":"first","action":{"kind":"write_number","channel":"output","value":1.0}},
+                    {"id":"child","action":{"kind":"call","tree":"child"}},
+                    {"id":"last","action":{"kind":"write_number","channel":"output","value":4.0}}
+                ]},
+                {"id":"stopped","task":[{"id":"off","action":{"kind":"write_number","channel":"output","value":0.0}}]}
+            ]},
+            {"id":"child","initial":"active","memory":{"visited":false},"state":[{"id":"active","task":[
+                {"id":"mark","action":{"kind":"remember","key":"visited","value":{"source":"literal","value":true}}},
+                {"id":"middle","action":{"kind":"write_number","channel":"output","value":2.0}},
+                {"id":"grandchild","action":{"kind":"call","tree":"grandchild"}}
+            ]}]},
+            {"id":"grandchild","initial":"active","state":[{"id":"active","task":[
+                {"id":"third","action":{"kind":"write_number","channel":"output","value":3.0}}
+            ]}]}
+        ]
+    })).unwrap();
+    let program = compile_with_numbers(
+        &config,
+        &SupportedBindings {
+            facts: ["stop".into()].into(),
+            channels: Default::default(),
+        },
+        &NumericBindings {
+            facts: Default::default(),
+            channels: BTreeMap::from([("output".into(), NumericBounds { min: 0.0, max: 4.0 })]),
+        },
+    )
+    .unwrap();
+    let mut runtime = TreeRuntime::default();
+    let facts = BTreeMap::from([("stop".into(), false)]);
+    let first = step_with_numbers(
+        &program,
+        &facts,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &mut runtime,
+        1,
+    )
+    .unwrap();
+    assert_eq!(
+        first.numeric_intents,
+        BTreeMap::from([("output".into(), 4.0)])
+    );
+    assert!(first.intents.is_empty());
+    // Exact reference trace pins parent-before-child, inline references and last write.
+    assert_eq!(
+        serde_json::to_value(&first.trace).unwrap(),
+        serde_json::json!([
+            {"kind":"read","node":"main/active/stop","source":{"source":"fact","name":"stop"},"value":false},
+            {"kind":"write_number","node":"main/active/first","channel":"output","value":1.0},
+            {"kind":"call","node":"main/active/child","tree":"child"},
+            {"kind":"read","node":"main/active/child/active/mark","source":{"source":"literal","value":true},"value":true},
+            {"kind":"remember","node":"main/active/child/active/mark","key":"visited","value":true},
+            {"kind":"write_number","node":"main/active/child/active/middle","channel":"output","value":2.0},
+            {"kind":"call","node":"main/active/child/active/grandchild","tree":"grandchild"},
+            {"kind":"write_number","node":"main/active/child/active/grandchild/active/third","channel":"output","value":3.0},
+            {"kind":"write_number","node":"main/active/last","channel":"output","value":4.0}
+        ])
+    );
+    assert!(runtime.root.as_ref().unwrap().calls["active/child"].memory["visited"]);
+    let before = runtime.clone();
+    assert!(step_with_numbers(
+        &program,
+        &facts,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &mut runtime,
+        1
+    )
+    .is_err());
+    assert_eq!(runtime, before);
+    assert!(step_with_numbers(
+        &program,
+        &facts,
+        &BTreeMap::from([("unexpected".into(), f64::NAN)]),
+        &BTreeMap::new(),
+        &mut runtime,
+        2
+    )
+    .is_err());
+    assert_eq!(runtime, before);
+    let mut restored: TreeRuntime =
+        serde_json::from_value(serde_json::to_value(&before).unwrap()).unwrap();
+    let stop = BTreeMap::from([("stop".into(), true)]);
+    let result = step_with_numbers(
+        &program,
+        &stop,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &mut runtime,
+        2,
+    )
+    .unwrap();
+    assert_eq!(
+        result,
+        step_with_numbers(
+            &program,
+            &stop,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &mut restored,
+            2
+        )
+        .unwrap()
+    );
+    assert_eq!(runtime, restored);
+    assert!(runtime.root.as_ref().unwrap().calls.is_empty());
+    assert_eq!(
+        result.numeric_intents,
+        BTreeMap::from([("output".into(), 0.0)])
+    );
+    assert_eq!(
+        serde_json::to_value(&result.trace).unwrap(),
+        serde_json::json!([
+            {"kind":"read","node":"main/active/stop","source":{"source":"fact","name":"stop"},"value":true},
+            {"kind":"transition","node":"main/active/stop","target":{"kind":"state","state":"stopped"}},
+            {"kind":"write_number","node":"main/stopped/off","channel":"output","value":0.0}
+        ])
+    );
+}

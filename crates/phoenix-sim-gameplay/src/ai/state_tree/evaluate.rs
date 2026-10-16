@@ -204,8 +204,10 @@ impl Context<'_> {
         if frame.result.is_some() {
             return Ok(());
         }
-        let tree = self.program.trees[&frame.tree].clone();
-        let old = path(&tree, &frame.active_leaf)?;
+        // Program is external immutable data, not part of the mutable execution context.
+        let program = self.program;
+        let tree = &program.trees[&frame.tree];
+        let old = path(tree, &frame.active_leaf)?;
         let mut transition = None;
         'outer: for (depth, id) in old.iter().enumerate() {
             let state = tree.state.iter().find(|s| &s.id == id).unwrap();
@@ -231,8 +233,8 @@ impl Context<'_> {
                     return Ok(());
                 }
                 TransitionTarget::State { state } => {
-                    frame.active_leaf = descend(&tree, &state)?;
-                    let new = path(&tree, &frame.active_leaf)?;
+                    frame.active_leaf = descend(tree, &state)?;
+                    let new = path(tree, &frame.active_leaf)?;
                     let keep: Vec<_> = old
                         .iter()
                         .zip(&new)
@@ -246,7 +248,7 @@ impl Context<'_> {
                 }
             }
         }
-        for id in path(&tree, &frame.active_leaf)? {
+        for id in path(tree, &frame.active_leaf)? {
             self.visit()?;
             let state = tree.state.iter().find(|s| s.id == id).unwrap();
             for task in &state.task {
@@ -298,14 +300,14 @@ impl Context<'_> {
                         tree: callee,
                         parameters,
                     } => {
-                        let definition = self.program.trees[callee].clone();
+                        let definition = &program.trees[callee];
                         let mut bound = definition.parameters.clone();
                         for (name, source) in parameters {
                             bound.insert(name.clone(), self.read(source, frame, params, &node)?);
                         }
                         let mut child = match frame.calls.remove(&key) {
                             Some(child) => child,
-                            None => self::frame(&definition)?,
+                            None => self::frame(definition)?,
                         };
                         self.trace.push(TraceEvent::Call {
                             node: node.clone(),

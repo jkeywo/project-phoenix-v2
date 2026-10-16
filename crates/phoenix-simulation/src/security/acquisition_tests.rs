@@ -2,15 +2,15 @@
 //! preconditions; this is not an encounter, transport or Human-device playtest.
 use super::*;
 use crate::core::messages::{
-    AdmittedCommand, AdmittedCommands, SensorRadarBlackboard, SystemBlackboard,
-    SystemControlPayload,
+    AdmittedCommand, AdmittedCommands, SystemBlackboard, SystemControlPayload,
 };
-use crate::science::broad::{BroadMeasurement, BroadProfile, BroadTrackState, BroadTracks};
+use crate::science::broad::{BroadMeasurement, BroadProfile, BroadTracks};
 use crate::security::server::{
     handle_security_commands, publish_security_blackboard, tick_security_teams,
 };
 use crate::ship::system_registry::{security_system_id, sensor_radar_system_id};
 use crate::sim_tick::SimTick;
+use bevy::ecs::system::RunSystemOnce;
 
 fn fixture() -> (App, Entity, Entity, String) {
     let operator = crate::entities::include_resolve::load_entity_config(
@@ -49,7 +49,15 @@ fn fixture() -> (App, Entity, Entity, String) {
     app.init_resource::<crate::world::server::WorldContentRuntime>();
     app.init_resource::<crate::effect_queue::EffectQueue<crate::core::task_lifecycle::TaskLifecycleRequest>>();
     app.insert_resource(SimTick(0));
-    app.insert_resource(Time::<Fixed>::default());
+    app.insert_resource(Time::<Fixed>::from_hz(60.0));
+    // The same read-model inputs used by ordinary post-restore publishers.
+    // No scene contacts, measurements, work or grants are inserted here.
+    app.insert_resource(crate::lobby::server::ShipClientConfigResource(
+        crate::lobby::server::project_ship_client_config(&operator),
+    ));
+    app.insert_resource(crate::lobby::WorldResource(
+        crate::core::messages::WorldData::default(),
+    ));
     let mut time = Time::<()>::default();
     time.advance_by(std::time::Duration::from_secs_f64(1.0 / 60.0));
     app.insert_resource(time);
@@ -117,61 +125,98 @@ fn fixture() -> (App, Entity, Entity, String) {
         &ship.0,
         app.world().get::<crate::ship::power::ShipPowerSystem>(b)
     ));
-    let profiles = BroadProfile::from_config(&operator).unwrap().unwrap();
     let owner = sensor_radar_system_id();
-    let profile = &profiles.0[&owner].profile;
-    let mut tracks = BroadTrackState::new(profile);
-    tracks
-        .advance(
-            profile,
-            0,
-            0.5,
-            1.0,
-            &[BroadMeasurement {
-                elevation: None,
-                source: "prize".into(),
-                selectable: true,
-                observation: None,
-                position: [80., 0.],
-                support: 1.0,
-                identity: None,
-                classification: None,
-                assessment: Some(phoenix_model::sensing_tracks::TrackAssessment {
-                    protection: None,
-                    alert: None,
-                    weapons_restrained: None,
-                    disabled: Some(true),
-                }),
-            }],
-        )
-        .unwrap();
-    let mut public = tracks.projection(profile, 0, 0.5).unwrap();
-    // The concrete fixture supplies an assessed return through the ordinary
-    // observation schema; routing still requires the real private association.
-    public[0].assessment = Some(phoenix_model::sensing_tracks::TrackAssessment {
-        protection: None,
-        alert: None,
-        weapons_restrained: None,
-        disabled: Some(true),
-    });
-    let contact = public[0].contact_id.clone();
-    app.world_mut()
-        .entity_mut(a)
-        .insert(BroadTracks(std::collections::BTreeMap::from([(
-            owner.clone(),
-            tracks,
-        )])));
-    app.world_mut()
-        .get_mut::<crate::server_app::ShipSystemBlackboards>(a)
+    let profiles = &app.world().get::<BroadProfile>(a).unwrap().0;
+    let profile = profiles[&owner].profile.clone();
+    let before = app.world().get::<BroadTracks>(a).unwrap().0.clone();
+    assert!(profiles.keys().eq(before.keys()));
+    let dt = app
+        .world()
+        .resource::<Time<Fixed>>()
+        .timestep()
+        .as_secs_f32();
+    let measurement = BroadMeasurement {
+        elevation: None,
+        source: "prize".into(),
+        selectable: true,
+        observation: None,
+        position: [80., 0.],
+        support: 1.0,
+        identity: None,
+        classification: None,
+        assessment: Some(phoenix_model::sensing_tracks::TrackAssessment {
+            protection: None,
+            alert: None,
+            weapons_restrained: None,
+            disabled: Some(true),
+        }),
+    };
+    // Explicit measured-return precondition for this Security-owner fixture,
+    // not paid sensor/encounter evidence. Earn assessment through the accepted
+    // instrument's real cadence instead of inventing a public assessed field.
+    let budget = (f64::from(profile.assessment_secs) / f64::from(dt)).ceil() as u64
+        + (f64::from(profile.sample_interval_secs) / f64::from(dt)).ceil() as u64
+        + 1;
+    let mut assessed = None;
+    for tick in 0..budget {
+        let mut all = app.world_mut().get_mut::<BroadTracks>(a).unwrap();
+        let tracks = all
+            .0
+            .get_mut(&owner)
+            .expect("ordinary spawned sensor owner");
+        tracks
+            .advance(&profile, tick, dt, 1.0, std::slice::from_ref(&measurement))
+            .unwrap();
+        if tracks
+            .projection(&profile, tick, dt)
+            .unwrap()
+            .iter()
+            .any(|track| {
+                track
+                    .assessment
+                    .as_ref()
+                    .is_some_and(|assessment| assessment.disabled == Some(true))
+            })
+        {
+            assessed = Some(tick);
+            break;
+        }
+    }
+    let sampled = assessed.expect("accepted instrument earns the measured disabled assessment");
+    app.world_mut().resource_mut::<SimTick>().0 = sampled + 1;
+    let measured = &app.world().get::<BroadTracks>(a).unwrap().0;
+    assert!(measured.keys().eq(before.keys()));
+    for (instrument, original) in &before {
+        if instrument != &owner {
+            assert_eq!(
+                &measured[instrument], original,
+                "other accepted Broad owners stay intact"
+            );
+        }
+    }
+    fixture_publications(app.world_mut());
+    let boards = &app
+        .world()
+        .get::<crate::server_app::ShipSystemBlackboards>(a)
         .unwrap()
-        .0
-        .insert(
-            owner,
-            SystemBlackboard::SensorRadar(SensorRadarBlackboard {
-                tracks: Some(public),
-                ..Default::default()
-            }),
-        );
+        .0;
+    let Some(SystemBlackboard::SensorRadar(board)) = boards.get(&owner) else {
+        panic!("ordinary sensor publisher supplies the measured return");
+    };
+    let contact = board
+        .tracks
+        .as_ref()
+        .unwrap()
+        .iter()
+        .find(|track| {
+            track
+                .assessment
+                .as_ref()
+                .is_some_and(|assessment| assessment.disabled == Some(true))
+        })
+        .expect("canonical assessed return")
+        .contact_id
+        .clone();
     assert_eq!(
         acquisition_alias(
             &operator.ship_config.unwrap(),
@@ -190,11 +235,46 @@ fn fixture() -> (App, Entity, Entity, String) {
             tick_security_teams,
             commit_ready_acquisitions,
             publish_security_blackboard,
+            fixture_publications,
             clear,
         )
             .chain(),
     );
     (app, a, b, contact)
+}
+/// The same ordinary derived-capability and read-model rebuilds as restore;
+/// no sensing or machinery work runs here. Use the real current frontier.
+fn fixture_publications(world: &mut World) {
+    world
+        .run_system_once(crate::modifiers::coordination::translate_power_modifiers)
+        .unwrap();
+    world
+        .run_system_once(crate::modifiers::coordination::apply_radar_damage_modifiers)
+        .unwrap();
+    world
+        .run_system_once(crate::modifiers::coordination::translate_impulse_modifiers)
+        .unwrap();
+    world
+        .run_system_once(crate::science::server::publish_scan_blackboard)
+        .unwrap();
+    world
+        .run_system_once(crate::science::passive::publish)
+        .unwrap();
+    world
+        .run_system_once(crate::ship::sensors::publish_sensor_radar_blackboard)
+        .unwrap();
+    world
+        .run_system_once(crate::console::helm::server::publish_helm_blackboard)
+        .unwrap();
+    world
+        .run_system_once(crate::console::navigation::server::publish_navigation_blackboard)
+        .unwrap();
+    world
+        .run_system_once(crate::console::weapons::blackboard::publish_tactical_radar_blackboard)
+        .unwrap();
+    world
+        .run_system_once(crate::console::command::server::publish_command_blackboard)
+        .unwrap();
 }
 fn clear(mut commands: Query<&mut AdmittedCommands>) {
     for mut commands in &mut commands {
@@ -276,6 +356,15 @@ fn paid_board_acquires_same_vessel_then_returns_same_team_and_json_continues() {
         .iter()
         .find(|row| row.uuid == "operator")
         .unwrap();
+    let profiles = &live.world().get::<BroadProfile>(actor).unwrap().0;
+    let saved_tracks = source
+        .broad
+        .as_ref()
+        .expect("all real Broad owners are captured");
+    assert!(
+        profiles.keys().eq(saved_tracks.keys()),
+        "measuring one sensor must retain every accepted instrument owner"
+    );
     let saved_board = source
         .blackboards
         .iter()
@@ -291,6 +380,26 @@ fn paid_board_acquires_same_vessel_then_returns_same_team_and_json_continues() {
         .unwrap()
         .iter()
         .any(|track| track.contact_id == contact));
+    let dt = live
+        .world()
+        .resource::<Time<Fixed>>()
+        .timestep()
+        .as_secs_f32();
+    let instrument = sensor_radar_system_id();
+    assert!(
+        [Some(saved.tick), saved.tick.checked_sub(1)]
+            .into_iter()
+            .flatten()
+            .any(|tick| crate::science::sharing::projection(
+                "operator",
+                &saved_tracks[&instrument],
+                &profiles[&instrument].profile,
+                tick,
+                dt
+            )
+            .is_ok_and(|canonical| board.tracks.as_deref() == Some(canonical.as_slice()))),
+        "saved held view must be the actual source projection at its publication frontier"
+    );
     let job = source.security.as_ref().unwrap().jobs.teams[0]
         .as_ref()
         .unwrap();

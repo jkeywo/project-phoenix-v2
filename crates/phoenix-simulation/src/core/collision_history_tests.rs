@@ -134,6 +134,57 @@ fn collision_history_is_independent_of_reports_and_preserves_every_folded_field(
 }
 
 #[test]
+fn restored_collision_collection_uses_logical_time_on_a_younger_bootstrap_clock() {
+    let mut live = app();
+    live.add_systems(FixedUpdate, emit_each_tick);
+    for _ in 0..75 {
+        live.update();
+    }
+    let tick = live.world().resource::<SimTick>().0;
+    let rows: Vec<CollisionRecord> = serde_json::from_slice(
+        &serde_json::to_vec(live.world().resource::<CollisionHistory>().records()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 75);
+
+    let mut resumed = app();
+    resumed.add_systems(FixedUpdate, emit_each_tick);
+    assert_ne!(
+        live.world().resource::<Time<Fixed>>().elapsed(),
+        resumed.world().resource::<Time<Fixed>>().elapsed(),
+        "ordinary fresh bootstrap must retain its own younger Bevy clock"
+    );
+    // Isolate the same two owners full restore writes, without rebasing Time:
+    // retained collision rows/cursor and the canonical logical tick. The real
+    // Recovery full-host test separately exercises whole-state JSON restore.
+    restore(resumed.world_mut(), &rows);
+    resumed.world_mut().resource_mut::<SimTick>().0 = tick;
+    for step in 0..4 {
+        live.update();
+        resumed.update();
+        let actual = live.world().resource::<CollisionHistory>().records();
+        let restored = resumed.world().resource::<CollisionHistory>().records();
+        assert_eq!(actual, restored, "all historical/new fields at step {step}");
+        assert!(actual.starts_with(&rows));
+        assert_eq!(actual.len(), rows.len() + step + 1);
+        assert_eq!(
+            actual.last().unwrap().tick + 1,
+            live.world().resource::<SimTick>().0
+        );
+        assert_eq!(
+            actual.last().unwrap().sim_t,
+            (STEP * u32::try_from(tick + step as u64 + 1).unwrap()).as_secs_f64(),
+            "new attribution uses the actual logical interval end"
+        );
+        assert_ne!(
+            live.world().resource::<Time<Fixed>>().elapsed(),
+            resumed.world().resource::<Time<Fixed>>().elapsed(),
+            "collection must not synchronize process-local clocks"
+        );
+    }
+}
+
+#[test]
 fn collision_history_new_mission_discards_prior_history_and_pending_input() {
     let mut app = app();
     app.world_mut()

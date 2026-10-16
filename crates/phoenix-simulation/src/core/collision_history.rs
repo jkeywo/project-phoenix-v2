@@ -123,11 +123,15 @@ fn collect(
     tick: Res<crate::sim_tick::SimTick>,
     time: Res<Time<Fixed>>,
 ) {
+    // SimTick is restored; a fresh host's process-local elapsed clock is not.
+    // This collector precedes advance_sim_tick, so the completed interval ends
+    // at tick + 1. Retain Duration rounding from the actual accepted timestep.
+    let sim_t = time.timestep().mul_f64(tick.0 as f64 + 1.0).as_secs_f64();
     let CollisionHistory { records, cursor } = &mut *history;
     records.extend(
-        cursor.read(&events).filter_map(|event| {
-            CollisionRecord::from_event(event, tick.0, time.elapsed_secs_f64())
-        }),
+        cursor
+            .read(&events)
+            .filter_map(|event| CollisionRecord::from_event(event, tick.0, sim_t)),
     );
 }
 

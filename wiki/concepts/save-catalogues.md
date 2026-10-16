@@ -42,8 +42,11 @@ so capture includes the collision events from the step just completed. The
 snapshot preserves all collision rows; restore replaces history and advances
 each collision/report reader past bootstrap messages without clearing their
 shared input stream. Optional headless `RunTelemetry` does not affect the
-digest. Rules `0.5` name this correction; the collision row shape still uses
-snapshot format `32`, and older rules are refused.
+digest. New collision timestamps use the restored logical interval end,
+`(SimTick + 1) × Time<Fixed>.timestep`, preserving Duration rounding. They do
+not read a fresh host's younger elapsed clock or alter that Bevy clock.
+Compatibility follows the current rules gate; collision rows retain their
+existing schema and older incompatible rules are refused.
 
 A named manual request is local intent for the peer's next fixed boundary. It
 captures only while the phase is `InProgress`; a request that reaches its

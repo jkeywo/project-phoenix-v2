@@ -1,10 +1,11 @@
 # Increment 13 — Measured fitting rehearsal
 
-**Draft for root adoption; no runtime or new asset.** Prepared from the actual
+**Adopted implementation contract; runtime remains unimplemented.** Prepared from the actual
 fitting and disposable Test owners on 16 October 2026. The approved direction
 closes the missing whole-fit comparison and direct favourite rehearsal selected
-by [increment 13](increment-13.md). The accompanying proposed PASM decision is
-not implementation or a playable exit. Cargo, epochs and integration remain root-owned.
+by [increment 13](increment-13.md). Root adopted this contract after independent
+source review of its actual boot, fitting and sampling owners. This is not
+implementation or a playable exit. Cargo, epochs and integration remain root-owned.
 
 ## First actual consumer
 
@@ -215,6 +216,7 @@ made from a bounded trial or a target that was never acquired.
   authority and saves unchanged after success, cancellation and failed launch.
   Device/native acceptance remains distinct from source/mocked UI tests.
 
-This draft adds no runtime, request codec, global asset, compatibility epoch or
-full increment13 completion. Root must adopt the exact boot, sampling and failure
-contracts before implementation begins.
+This contract adds no runtime, request codec, global asset, compatibility epoch or
+full increment13 completion. Implementation follows the adopted boot, sampling
+and failure boundaries above. The complete native frame, including status prefix
+and line terminator, must satisfy the existing framing bound.

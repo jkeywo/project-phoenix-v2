@@ -76,10 +76,10 @@ entities:
 
   - decision: fitting-disposable-measured-rehearsal-consumer
     core:
-      status: proposed
-      confidence: tentative
+      status: accepted
+      confidence: confirmed
       title: Rehearse Personal Fits In The Existing Disposable Test
-      summary: "Draft bounded increment13 consumer: private prelaunch host Workshop rehearses validated Beam/Reactor favourites through independent fresh ordinary Test children and measured sustained/burst/thermal/cooling outcomes. Exact initialization/sample/failure contracts await root adoption; no runtime or forecast model is introduced."
+      summary: "Adopted bounded increment13 consumer: private prelaunch host Workshop rehearses validated Beam/Reactor favourites through independent fresh ordinary Test children and measured sustained/burst/thermal/cooling outcomes. Root source review accepts the exact initialization, sampling and failure contracts; runtime and playable evidence remain required."
       rationale:
         - "docs/gameplay-redesign/implementation/increment-13-rehearsal.md pins source owners, closed request limits, phase boundaries and proof. Existing phone/Live plan save/share/Queue gains no host WASM, private Test route, spare stock, installation authority or Live-state snapshot. Model Preview remains geometry only."
         - "Bind the existing version1 hull/content-scoped favourite to real immutable capture, accepted include resolver and original CompiledFitting. First two closed reference profiles have bounded phases/fixed intervals and declared active-System/duty/initial-charge/heat/coolant/ammo/reactor/cooling assumptions. Unsupported or changed contexts refuse rather than silently retagging plans."

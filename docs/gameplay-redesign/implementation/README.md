@@ -15,6 +15,8 @@ The subsequent [Cruiser balance pass](./cruiser-balance-followup-2026-10-16.html
 
 The [Destroyer engagement correction](./destroyer-engagement-2026-10-16.html) fixes runaway AI impulse and expired torpedo holds, and retains Cruiser alert through attack-pass retreats. The final original matrix is 5W/0L/9D/6T; fresh seeds give 5W/0L/7D/8T. All five 300-second Destroyer diagnostics remain active, but none wins. Damage values and balance thresholds are unchanged. Runtime and authored commits are `9b963bf4` and `58eaae87`; rules advance to 0.77.
 
+The [Cruiser combat-effectiveness pass](./cruiser-combat-effectiveness-2026-10-16.html) changes standard beam reach 40→55 and penetration 10→2, including the default fitted fore assembly. Destroyer wins improve from 0/5 to 3/5 on both original and fresh seeds; complete matrices improve from 5 to 10 and 5 to 9 wins respectively. All 40 final runs execute, but each matrix still misses 8/16 unchanged thresholds. Nominal DPS, weapon cycles and runtime code are unchanged.
+
 ## Per-increment progress — 16 October 2026
 
 The user requested a pause after finishing increments 8–12 on 16 October.

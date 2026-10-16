@@ -44,7 +44,7 @@ interface = "cruiser-beam"
 size = 1
 storage_space = 1
 work = { class = "field", work_secs = 8, manual_work_fraction = 0.25, requirements = [{ resource = "machinery_parts", service = "machinery_parts", amount = 1 }] }
-hardware = { kind = "beam", beam_range = 40, auto_arc_deg = 270, beam_damage_per_sec = 32, beam_duration_secs = 6, cooldown_secs = 6, cycle_jitter = 0.33, shield_pierce = 0, impact = {damage_type = "laser", penetration = 10}, continuous_cost_per_sec = 1 }
+hardware = { kind = "beam", beam_range = 55, auto_arc_deg = 270, beam_damage_per_sec = 32, beam_duration_secs = 6, cooldown_secs = 6, cycle_jitter = 0.33, shield_pierce = 0, impact = {damage_type = "laser", penetration = 2}, continuous_cost_per_sec = 1 }
 
 [[fitting.equipment]]
 id = "cruiser-beam-pulse"
@@ -52,7 +52,8 @@ interface = "cruiser-beam"
 size = 1
 storage_space = 1
 # More intense short bursts cost more local work and have a narrower automatic
-# window and longer rest. This is an option, not an automatic baseline upgrade.
+# window and longer rest. Its shorter reach and deeper penetration remain an
+# authored alternative; it does not inherit the standard surface-deposition retune.
 work = { class = "field", work_secs = 8, manual_work_fraction = 0.25, requirements = [{ resource = "machinery_parts", service = "machinery_parts", amount = 1 }] }
 hardware = { kind = "beam", beam_range = 40, auto_arc_deg = 120, beam_damage_per_sec = 40, beam_duration_secs = 4, cooldown_secs = 8, cycle_jitter = 0.33, shield_pierce = 0, impact = {damage_type = "laser", penetration = 20}, continuous_cost_per_sec = 1.5 }
 

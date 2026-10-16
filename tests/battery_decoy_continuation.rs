@@ -175,6 +175,27 @@ fn reserve(app: &App, actor: Entity, owner: &str) -> f32 {
         .consumers[&id(owner)]
         .energy
 }
+// A canonical reserve may lose at most the authored full-battery passive
+// rate over this actual fixed interval. Machinery work would exceed this bound;
+// no ephemeral work receipt is assumed to survive storage or restoration.
+fn passive_loss_bound(app: &App, actor: Entity, owner: &str, started: u64) -> f64 {
+    let power = &app.world().get::<ShipPowerSystem>(actor).unwrap().0;
+    let rate = power
+        .config()
+        .consumers
+        .iter()
+        .find(|consumer| consumer.system == id(owner))
+        .unwrap()
+        .reserve
+        .passive_loss_at_full_per_sec;
+    let ticks = app
+        .world()
+        .resource::<project_phoenix::sim_tick::SimTick>()
+        .0
+        - started;
+    let period = sim_tick_period(app.world().resource::<WorldConfig>().global.sim_tick_hz);
+    f64::from(rate) * ticks as f64 * period.as_secs_f64() + 0.001
+}
 fn first_difference(a: &serde_json::Value, b: &serde_json::Value, path: &str) -> Option<String> {
     match (a, b) {
         (serde_json::Value::Object(a), serde_json::Value::Object(b)) => a
@@ -255,20 +276,33 @@ fn picture(
     source: &str,
 ) -> Option<(String, String, Option<String>, u64)> {
     let tracks = app.world().get::<BroadTracks>(observer)?;
-    let state = tracks.0.get(&id("sensor-radar"))?;
+    let owner = id("sensor-radar");
+    let state = tracks.0.get(&owner)?;
+    let config = app.world().get::<ShipConfigComponent>(observer)?;
+    let boards = app.world().get::<ShipSystemBlackboards>(observer)?;
+    let permitted = config.0.observations_for_system(&owner, &boards.0);
+    let SystemBlackboard::SensorRadar(board) = permitted.get(&owner)? else {
+        return None;
+    };
+    let published = board.tracks.as_deref()?;
     state.tracks.iter().find_map(|(alias, track)| {
-        (track.selectable && !track.predicted && state.resolve_current(alias) == Some(source))
-            .then(|| {
-                track.identity.as_ref().map(|identity| {
-                    (
-                        alias.clone(),
-                        identity.name.clone(),
-                        identity.faction.clone(),
-                        track.observed_tick,
-                    )
-                })
-            })
-            .flatten()
+        if !track.selectable || state.resolve_current(alias) != Some(source) {
+            return None;
+        }
+        let current = published.iter().find(|record| {
+            record.contact_id == *alias
+                && record.selectable
+                && !record.predicted
+                && record.observed_tick == track.observed_tick
+        })?;
+        current.identity.as_ref().map(|identity| {
+            (
+                alias.clone(),
+                identity.name.clone(),
+                identity.faction.clone(),
+                current.observed_tick,
+            )
+        })
     })
 }
 fn recovery_contact(app: &App, parent: Entity, uuid: &str) -> Option<String> {
@@ -374,7 +408,10 @@ fn actual_sensorless_decoy_handles_paid_claim_storage_depletion_and_same_body_js
         &mut live,
         "tactical",
         "probe-bay",
-        Control::RecoverCraft { contact },
+        Control::RecoverCraft {
+            contact,
+            reception: None,
+        },
     );
     wait(&mut live, |app| stored(app, decoy));
     steps(&mut live, 2);
@@ -383,16 +420,27 @@ fn actual_sensorless_decoy_handles_paid_claim_storage_depletion_and_same_body_js
         finite > 0.0 && finite < before,
         "recover a still-useful finite emitter rather than an exhausted fixture"
     );
+    let stored_tick = live
+        .world()
+        .resource::<project_phoenix::sim_tick::SimTick>()
+        .0;
+    let intent = live
+        .world()
+        .get::<ShipIdentityEmitters>(decoy)
+        .unwrap()
+        .clone();
     steps(&mut live, 30);
     assert!(!paid(&live, &uuid));
     assert!(reserve(&live, decoy, "identity-emitter") < finite);
+    assert!(
+        f64::from(finite - reserve(&live, decoy, "identity-emitter"))
+            <= passive_loss_bound(&live, decoy, "identity-emitter", stored_tick),
+        "funded stored emitter performs no active work"
+    );
     assert_eq!(
-        live.world()
-            .get::<ShipPowerSystem>(decoy)
-            .unwrap()
-            .0
-            .emitted_work(&id("identity-emitter")),
-        0.0
+        live.world().get::<ShipIdentityEmitters>(decoy).unwrap(),
+        &intent,
+        "storage preserves actual selected intent rather than switching machinery off"
     );
     assert!(live.world().get::<RapierColliderHandle>(decoy).is_none());
     let saved = json(&live);

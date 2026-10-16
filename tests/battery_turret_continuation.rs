@@ -167,6 +167,27 @@ fn reserve(app: &App, actor: Entity, owner: &str) -> f32 {
         .consumers[&id(owner)]
         .energy
 }
+// A canonical reserve may lose at most the authored full-battery passive
+// rate over this actual fixed interval. Machinery work would exceed this bound;
+// no ephemeral work receipt is assumed to survive storage or restoration.
+fn passive_loss_bound(app: &App, actor: Entity, owner: &str, started: u64) -> f64 {
+    let power = &app.world().get::<ShipPowerSystem>(actor).unwrap().0;
+    let rate = power
+        .config()
+        .consumers
+        .iter()
+        .find(|consumer| consumer.system == id(owner))
+        .unwrap()
+        .reserve
+        .passive_loss_at_full_per_sec;
+    let ticks = app
+        .world()
+        .resource::<project_phoenix::sim_tick::SimTick>()
+        .0
+        - started;
+    let period = sim_tick_period(app.world().resource::<WorldConfig>().global.sim_tick_hz);
+    f64::from(rate) * ticks as f64 * period.as_secs_f64() + 0.001
+}
 fn first_difference(a: &serde_json::Value, b: &serde_json::Value, path: &str) -> Option<String> {
     match (a, b) {
         (serde_json::Value::Object(a), serde_json::Value::Object(b)) => a
@@ -251,9 +272,7 @@ fn paid_firing(app: &App, turret: Entity, hostile: &str) -> bool {
             .get::<ShipPowerSystem>(turret)
             .unwrap()
             .0
-            .network()
-            .consumers[&id("phaser-turret")]
-            .emitted_work
+            .emitted_work(&id("phaser-turret"))
             > 0.0
 }
 fn recovery_contact(app: &App, parent: Entity, uuid: &str) -> Option<String> {
@@ -373,7 +392,10 @@ fn human_launch_ordinary_acquired_beam_and_stored_custody_continue_json360() {
         &mut live,
         "tactical",
         "probe-bay",
-        Control::RecoverCraft { contact },
+        Control::RecoverCraft {
+            contact,
+            reception: None,
+        },
     );
     wait(&mut live, |app| stored(app, turret));
     steps(&mut live, 2);
@@ -381,6 +403,21 @@ fn human_launch_ordinary_acquired_beam_and_stored_custody_continue_json360() {
     assert!(live.world().get::<RapierRigidBodyHandle>(turret).is_none());
     let hp_stored = hp(&live, hostile);
     let finite = reserve(&live, turret, "phaser-turret");
+    assert!(
+        finite > 0.0,
+        "stored inactivity is checked with usable weapon energy"
+    );
+    let stored_tick = live
+        .world()
+        .resource::<project_phoenix::sim_tick::SimTick>()
+        .0;
+    let cycle: Vec<_> = live
+        .world()
+        .get::<ActiveBeam>(turret)
+        .unwrap()
+        .live_banks()
+        .map(|(bank, slot)| (bank.clone(), slot.clone()))
+        .collect();
     let held = live.world().get::<BroadTracks>(turret).unwrap().clone();
     steps(&mut live, 30);
     assert_eq!(
@@ -393,15 +430,21 @@ fn human_launch_ordinary_acquired_beam_and_stored_custody_continue_json360() {
         "ordinary passive reserve loss continues"
     );
     assert_eq!(live.world().get::<BroadTracks>(turret).unwrap().0, held.0);
+    assert!(
+        f64::from(finite - reserve(&live, turret, "phaser-turret"))
+            <= passive_loss_bound(&live, turret, "phaser-turret", stored_tick),
+        "stored weapon reserve only ages passively"
+    );
+    let after: Vec<_> = live
+        .world()
+        .get::<ActiveBeam>(turret)
+        .unwrap()
+        .live_banks()
+        .map(|(bank, slot)| (bank.clone(), slot.clone()))
+        .collect();
     assert_eq!(
-        live.world()
-            .get::<ShipPowerSystem>(turret)
-            .unwrap()
-            .0
-            .network()
-            .consumers[&id("phaser-turret")]
-            .emitted_work,
-        0.0
+        after, cycle,
+        "Carried equipment cannot advance or start an active beam cycle"
     );
     let saved: PhoenixSnapshot =
         serde_json::from_str(&serde_json::to_string(&capture(live.world())).unwrap()).unwrap();

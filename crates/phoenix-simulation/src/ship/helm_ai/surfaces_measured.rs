@@ -184,9 +184,12 @@ pub(super) fn build(
                     .as_deref()
                     .and_then(|id| uuid::Uuid::parse_str(id).ok())
             }),
-            // An uncertainty envelope is conservative avoidance geometry,
-            // not a measured hull size, heading or collision guarantee.
+            // A current uncertainty envelope is conservative avoidance geometry.
+            // Lost history stays available for navigation/knowledge, but growing
+            // uncertainty is not an expanding solid obstacle that can force the
+            // ship away from a separate current contact indefinitely.
             radius: track.position_error,
+            dangerous: !track.predicted,
             // Unknown physical size cannot satisfy an ignore-smaller rule;
             // do not invent an authored mobile-hull profile from a return.
             movable: false,

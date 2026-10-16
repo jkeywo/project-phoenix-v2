@@ -658,7 +658,8 @@ pub const SNAPSHOT_FORMAT: u32 = 89;
 /// restores fixed Cruiser fore beams, and counts CLI duel neutralizations.
 /// "0.77" releases AI impulse when pursuit loses its target or alignment.
 /// Broadside torpedo holds resume approach after an uncommitted target escapes.
-pub const SIMULATION_RULES: &str = "0.77";
+/// "0.78" keeps predicted radar history out of physical Helm avoidance.
+pub const SIMULATION_RULES: &str = "0.78";
 
 /// The authored data, computed rather than remembered.
 ///

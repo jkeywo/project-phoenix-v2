@@ -169,6 +169,10 @@ fn actual_helm_frame_uses_permitted_measured_pose_and_never_fills_foreign_facts_
         [issued_position[0], 0.0, issued_position[1]]
     );
     assert_ne!(target.uuid, actual);
+    assert!(
+        target.dangerous,
+        "current measured obstacles retain avoidance"
+    );
     assert_eq!(target.name, None);
     assert_eq!(target.hull_fraction, None);
     assert_eq!(target.yaw, None);
@@ -206,7 +210,8 @@ fn predicted_and_missing_helm_scope_never_reacquire_the_real_actor() {
         .unwrap()
         .advance(&profile, 2, 0.5, 1.0, &[])
         .unwrap();
-    let held = tracks.0[&owner].projection(&profile, 2, 0.5).unwrap();
+    let mut held = tracks.0[&owner].projection(&profile, 2, 0.5).unwrap();
+    held[0].position_error = 500.0;
     assert!(held[0].predicted);
     let expected = held[0].position;
     let contact = held[0].contact_id.clone();
@@ -226,6 +231,38 @@ fn predicted_and_missing_helm_scope_never_reacquire_the_real_actor() {
     assert_eq!(
         predicted.visible_view.entities[0].position,
         [expected[0], 0.0, expected[1]]
+    );
+    let history = &predicted.visible_view.entities[0];
+    assert!(!history.dangerous, "lost history is not a solid obstacle");
+    assert_eq!(
+        history.radius, 500.0,
+        "uncertainty remains in the knowledge view"
+    );
+    assert_eq!(
+        crate::ai::avoidance_steering(
+            [0.0; 3],
+            0.0,
+            5.0,
+            1.5,
+            uuid::Uuid::nil(),
+            &predicted.visible_view.entities,
+            crate::ai::AVOIDANCE_BUFFER,
+            crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
+            crate::ai::HAZARD_THREAT_EXPONENT,
+        ),
+        0.0
+    );
+    assert_eq!(
+        crate::ai::assess_hazards(
+            &predicted.visible_view,
+            5.0,
+            crate::ai::AVOIDANCE_BUFFER,
+            crate::ai::AVOIDANCE_LOOK_AHEAD_SECS,
+            crate::ai::HAZARD_IGNORE_SIZE_RATIO,
+            crate::ai::HAZARD_THREAT_EXPONENT,
+        )
+        .urgency,
+        0.0
     );
     assert_eq!(predicted.weapons_target, None);
     assert!(!predicted

@@ -17,6 +17,8 @@ The [Destroyer engagement correction](./destroyer-engagement-2026-10-16.html) fi
 
 The [Cruiser combat-effectiveness pass](./cruiser-combat-effectiveness-2026-10-16.html) changes standard beam reach 40→55 and penetration 10→2, including the default fitted fore assembly. Destroyer wins improve from 0/5 to 3/5 on both original and fresh seeds; complete matrices improve from 5 to 10 and 5 to 9 wins respectively. All 40 final runs execute, but each matrix still misses 8/16 unchanged thresholds. Nominal DPS, weapon cycles and runtime code are unchanged.
 
+The [Warhawk combat-effectiveness correction](./warhawk-combat-effectiveness-2026-10-16.html) stops predicted radar history from becoming expanding physical avoidance obstacles, and makes both steering paths respect hazard eligibility. Warhawk wins improve from 0/10 to 10/10 without changing weapon values. The original matrix now wins 20/20; fresh seeds win 19/20 with one Destroyer draw. All 40 runs execute. Four death-TTK checks per matrix remain unmeasurable; the fresh Destroyer win-rate check also fails. Focused native tests and deterministic replay pass; rules advance to 0.78. Accepted optimisation code is preserved.
+
 ## Per-increment progress — 16 October 2026
 
 The user requested a pause after finishing increments 8–12 on 16 October.
@@ -29,7 +31,7 @@ exits; physical-device and human-workload acceptance remain open. Later initial
 commits are implementation checkpoints, not verified increment exits.
 
 Current integrated compatibility is **protocol 46, snapshot 89 and simulation
-rules 0.77**, after the Destroyer engagement correction at `9b963bf4`. These versions identify supported
+rules 0.78**, after the Warhawk radar-history avoidance correction. These versions identify supported
 state; they do not establish a verified gameplay exit.
 
 The selected four-owner union at `8ac62cce` / rules 0.74 passes **1618/1618**

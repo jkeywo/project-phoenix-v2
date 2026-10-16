@@ -614,7 +614,9 @@ pub fn avoidance_steering(
     let mut total_avoidance: f32 = 0.0;
 
     for entity in world_entities {
-        if entity.uuid == excluded_uuid {
+        // Match assess_hazards: informational records can share this view
+        // without becoming physical steering obstacles.
+        if !entity.dangerous || entity.uuid == excluded_uuid {
             continue;
         }
         let avoidance_radius = self_radius + entity.radius + avoidance_buffer;

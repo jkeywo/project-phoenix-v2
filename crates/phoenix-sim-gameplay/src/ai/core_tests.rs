@@ -253,6 +253,50 @@ fn avoidance_steering_is_zero_when_stationary() {
 
 // ── operate_helm patrol ───────────────────────────────────────────────
 
+#[test]
+fn avoidance_steering_ignores_nonhazard_history_but_keeps_current_obstacles() {
+    let mut contact = AiWorldEntity {
+        uuid: Uuid::from_u128(2),
+        position: [1.0, 0.0, -8.0],
+        radius: 200.0,
+        dangerous: false,
+        ..Default::default()
+    };
+    let steer = |entities: &[AiWorldEntity]| {
+        avoidance_steering(
+            [0.0; 3],
+            0.0,
+            5.0,
+            2.0,
+            Uuid::nil(),
+            entities,
+            AVOIDANCE_BUFFER,
+            AVOIDANCE_LOOK_AHEAD_SECS,
+            HAZARD_THREAT_EXPONENT,
+        )
+    };
+    assert_eq!(
+        steer(std::slice::from_ref(&contact)),
+        0.0,
+        "an expanding historical envelope must not steer the ship"
+    );
+    contact.dangerous = true;
+    let current = steer(std::slice::from_ref(&contact));
+    assert!(
+        current.abs() > 0.0,
+        "current obstacles must still bend travel"
+    );
+    let mut history = contact.clone();
+    history.uuid = Uuid::from_u128(3);
+    history.position[0] = -1.0;
+    history.dangerous = false;
+    assert_eq!(
+        steer(&[history, contact]),
+        current,
+        "historical evidence must not cancel avoidance of a current obstacle"
+    );
+}
+
 fn patrol_pool() -> Vec<crate::core::messages::ScoredObjective> {
     vec![crate::core::messages::ScoredObjective {
         id: "patrol".into(),

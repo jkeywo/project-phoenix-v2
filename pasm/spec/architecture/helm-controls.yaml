@@ -560,6 +560,7 @@ entities:
       rationale:
         - The intended architecture replaces separate helm and lateral avoidance calculations with a single ship-level planning pass.
         - "[ai] Fine systems should interpret a shared desired motion field rather than each generating independent avoidance commands."
+        - "[ai] Lost predicted radar records remain permitted historical knowledge, but their expanding uncertainty envelopes are not confirmed collision obstacles. Helm projects them with dangerous=false; both shared hazard assessment and steering avoidance respect that eligibility. Current observations and charted geometry retain collision avoidance. No live world lookup or additional information grant repairs a lost record."
     architecture:
       kind: service
       authority: authoritative

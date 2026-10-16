@@ -417,3 +417,28 @@ The optional turret has no radio equipment: autonomy without a command link is
 covered, while an actual installed-radio link-loss journey remains open. Mounted
 Workshop Preview/Test, browser/native visuals and full increment19 acceptance
 remain open; source undo/redo equivalence is not a mounted history claim.
+
+
+### Next fixed equipment consumer: finite physical identity decoy
+
+After the frozen beam-turret source/evidence checkpoint, adopt a narrowly
+sensorless and unarmed actual fixed body with the existing IdentityEmitter
+composition. Its ordinary AI-only Console/System has a configured state tree,
+Boolean enabled channel, real PowerInput and finite paid local battery. Existing
+static equipment installation already provides those ordinary owners; no Ship
+marker, family controller, virtual target or transport is introduced.
+
+The battery gives the emitted claim its short useful life. Exhaustion stops paid
+identity substitution; the same physical body remains recoverable. No bespoke
+lifetime clock or timed destruction is added, and Bay handling cannot refill it.
+An observer still needs its own real Broad acquisition of this actual tagged
+body. Its declared identity grants no true relationship, permission or hidden
+route, and independent evidence/history remain ordinary observations. The first
+recipe promises neither onboard sensing nor a remote control link.
+
+Deliver actual Human/AI paid Bay operation, observer acquisition and paid claim,
+real depletion and withdrawal, stored inactivity/same identity, full fresh JSON360
+and malformed no-write, plus existing Workshop exact-source composition evidence.
+Native and mounted authoring/browser/device acceptance remain distinct from
+source checkpoints. Moving craft and richer decoy signatures remain later
+supported compositions, rather than being admitted by this narrow subtype.

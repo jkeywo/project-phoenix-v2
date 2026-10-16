@@ -14,6 +14,10 @@ fn fixture() -> (App, Entity, SystemId, SystemId, SystemId) {
     )
     .unwrap();
     let ship = content.ship_config.unwrap();
+    let mount_profiles = crate::weapons::mounts::MountProfiles::from_ship(&ship)
+        .unwrap()
+        .expect("accepted Cruiser has physical turret owners");
+    let mounts = crate::weapons::mounts::ShipMounts::new(&mount_profiles);
     let hardware = content.energy.unwrap();
     let trees =
         crate::ai::state_tree_runtime::compile_ship_trees_with_energy(&ship, Some(&hardware))
@@ -43,6 +47,11 @@ fn fixture() -> (App, Entity, SystemId, SystemId, SystemId) {
     );
     let mut app = App::new();
     app.init_resource::<crate::sim_tick::SimTick>();
+    // Turret continuation uses the same logical period as this owner rig's
+    // paid shield steps; the generic Time below supplies that current delta.
+    app.insert_resource(Time::<Fixed>::from_duration(
+        std::time::Duration::from_millis(100),
+    ));
     app.init_resource::<crate::world::server::WorldContentRuntime>();
     app.init_resource::<crate::effect_queue::EffectQueue<crate::infrastructure::CapacityAdjustment>>();
     app.init_resource::<crate::effect_queue::EffectQueue<crate::infrastructure::ConditionAdjustment>>();
@@ -99,6 +108,9 @@ fn fixture() -> (App, Entity, SystemId, SystemId, SystemId) {
             trees,
         ))
         .id();
+    // Keep the actual accepted mount profile and canonical owner together,
+    // exactly as mounts::install does. Idle turrets still require saved state.
+    world.entity_mut(entity).insert((mount_profiles, mounts));
     (app, entity, donor, recipient, partial)
 }
 
@@ -260,6 +272,19 @@ fn shield_snapshot_resumes_mid_recovery_partial_interception_and_private_tree_ex
     let saved: PhoenixSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
     assert_eq!(saved.entities.len(), 1);
+    let mounts = saved.entities[0]
+        .mounts
+        .as_ref()
+        .expect("accepted physical turrets");
+    mounts
+        .validate(
+            live.world()
+                .get::<crate::weapons::mounts::MountProfiles>(entity)
+                .unwrap(),
+            saved.tick,
+        )
+        .unwrap();
+    assert!(!mounts.0.is_empty());
     assert!(saved.entities[0]
         .weapon_targets
         .as_ref()
@@ -392,6 +417,14 @@ fn interior_snapshot_rejects_missing_team_owner_before_writing_any_entity_or_clo
     }
     let (source, _) = with_teams();
     let mut invalid = capture(source.world());
+    // Prove the complete sparse accepted-owner frontier is restorable before
+    // testing removal of one team owner; an unrelated refusal is insufficient.
+    let (mut target, _) = with_teams();
+    let valid = restore(target.world_mut(), &invalid);
+    assert!(
+        valid.is_complete(),
+        "valid team fixture must restore: {valid:?}"
+    );
     assert!(invalid.entities[0]
         .repair
         .as_ref()
@@ -404,7 +437,6 @@ fn interior_snapshot_rejects_missing_team_owner_before_writing_any_entity_or_clo
     invalid.entities[0].repair = None;
     invalid.entities[0].red_alert = Some(true);
     invalid.tick = 999;
-    let (mut target, _) = with_teams();
     let before = serde_json::to_value(capture(target.world())).unwrap();
     let report = restore(target.world_mut(), &invalid);
     assert!(

@@ -58,6 +58,9 @@ fn actor() -> (App, Entity) {
         .unwrap();
     let mut app = App::new();
     app.add_message::<crate::ai::server::AiEntityDisabled>();
+    app.init_resource::<crate::sim_tick::SimTick>();
+    app.init_resource::<Time<Fixed>>();
+    app.init_resource::<crate::world::server::WorldContentRuntime>();
     let world = app.world_mut();
     world.register_component::<ShipPhysics>();
     world.register_component::<EntitySystemHull>();
@@ -67,6 +70,10 @@ fn actor() -> (App, Entity) {
     // Use the same Backfill seed as an actual NPC installation, without adding
     // human occupancy or changing this isolated disablement event fixture.
     let ship_config = config.ship_config.unwrap();
+    let mount_profiles = crate::weapons::mounts::MountProfiles::from_ship(&ship_config)
+        .unwrap()
+        .expect("accepted Cruiser has physical turret owners");
+    let mounts = crate::weapons::mounts::ShipMounts::new(&mount_profiles);
     let (sources, ratings) = crate::ship::rating::seed_boot_ratings(&ship_config, |_| {
         crate::ship::rating::BACKFILL_RATING.into()
     });
@@ -84,6 +91,9 @@ fn actor() -> (App, Entity) {
             crate::lobby::crew_replication::ShipCrewPresence::default(),
         ))
         .id();
+    // Match the accepted physical-turret installation, including its idle
+    // canonical state; no weapon operation is scheduled by this event rig.
+    world.entity_mut(entity).insert((mount_profiles, mounts));
     (app, entity)
 }
 
@@ -115,6 +125,19 @@ fn full_snapshot_preserves_the_actor_frontier_and_next_recovery_occurs_once() {
     let saved: PhoenixSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
     assert_eq!(saved.entities.len(), 1);
+    let mounts = saved.entities[0]
+        .mounts
+        .as_ref()
+        .expect("accepted physical turrets");
+    mounts
+        .validate(
+            live.world()
+                .get::<crate::weapons::mounts::MountProfiles>(entity)
+                .unwrap(),
+            saved.tick,
+        )
+        .unwrap();
+    assert!(!mounts.0.is_empty());
     assert!(saved.entities[0]
         .weapon_targets
         .as_ref()

@@ -189,7 +189,7 @@ fn helm_snapshots(messages: &[OutboundMessage]) -> Value {
                     assert!(!scope.iter().any(|id| id.0 == "repair"));
                     assert!(!updates
                         .iter()
-                        .any(|(_, board)| matches!(board, SystemBlackboard::Repair(_))));
+                        .any(|(_, board)| matches!(board.as_ref(), SystemBlackboard::Repair(_))));
                 }
             })
             .cloned()
@@ -250,7 +250,7 @@ fn coherent_pair(extra: &[ServerMessage], target: &SystemId) -> bool {
     );
     let repair: Vec<_> = updates
         .iter()
-        .filter_map(|(_, board)| match board {
+        .filter_map(|(_, board)| match board.as_ref() {
             SystemBlackboard::Repair(board) => Some(board),
             _ => None,
         })

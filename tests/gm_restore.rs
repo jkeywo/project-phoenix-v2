@@ -1317,7 +1317,7 @@ fn a_restored_session_stays_held_until_an_explicit_gm_resume() {
             {
                 if updates.iter().any(|(_, board)| {
                     matches!(
-                        board,
+                        board.as_ref(),
                         project_phoenix::core::messages::SystemBlackboard::Comms(_)
                     )
                 }) {

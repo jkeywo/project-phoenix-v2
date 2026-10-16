@@ -109,11 +109,11 @@ fn assert_selected_wire(wire: &[OutboundMessage]) {
                     assert!(!scope.iter().any(|id| id.0 == "repair"));
                     assert!(!updates
                         .iter()
-                        .any(|(_, board)| matches!(board, SystemBlackboard::Repair(_))));
+                        .any(|(_, board)| matches!(board.as_ref(), SystemBlackboard::Repair(_))));
                     withheld = true;
                 }
                 for (id, board) in updates {
-                    match (id.0.as_str(), board, &message.target) {
+                    match (id.0.as_str(), board.as_ref(), &message.target) {
                         ("power", SystemBlackboard::Power(_), Target::Token(token))
                             if token == "publisher-engineer" =>
                         {

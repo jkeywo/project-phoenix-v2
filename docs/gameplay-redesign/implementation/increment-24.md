@@ -383,3 +383,39 @@ existing assignment/activity state, not another owner. Canonical disposition
 folding normalizes signed zero while preserving exact HP/clock differences.
 The post-delegation override checkpoint explicitly retains the same actual Job
 and paid partial progress before fresh-JSON capture.
+
+
+## Released delivery demand: bounded follow-on contract
+
+Native execution of the initial maintenance proof found a real setup conflict:
+consuming local parts worked, but ordinary maintained target 8 replenished them
+while the existing ammunition job delayed discovery. The fixture now establishes
+its need through a normal Human local-stock target of zero before consuming the
+finite existing stock. The exact offer must belong to that damaged actor.
+
+A stored target of zero must not silently prevent the crew's subsequently accepted
+finite Delivery commitment. Increment 22/24 therefore intentionally extends the
+increment 12 target-only rule: a released, unaccepted Delivery request visible to
+its own Logistics Console can contribute its exact finite immediate demand.
+Ordinary dispatch retains its target cap outside that supported scope. Never reset
+or raise stored targets on delegation or on accepting a mission.
+
+Validate the permitted row against the current authoritative plan frontier for
+that exact actor/owner, original leaf/release, source, destination, commodity and
+amount. Use existing real source availability/floors, destination occupancy and
+receiving room, handling batch/concurrency and route checks. Prioritize a feasible
+whole mission batch over ordinary target replenishment in the same next-delivery
+view; both Human maintained work and the existing state tree keep their ordinary
+admitted DispatchDelivery path and shared physical executor. Revalidate at commit.
+An already accepted or terminal scope, stale/private/foreign/future row, existing
+incoming stock or mismatched amount grants no mission exception and no top-up.
+No physical reservation, Job, extra resource or controller is created by this view.
+
+The owner tests must preserve ordinary zero-target refusal, demonstrate exact
+permitted current demand with unchanged stored goals, and refuse stale/foreign/
+missing-feed or already accepted requests without duplicate reservations/jobs.
+The actual optional-maintenance proof keeps its normal Human offer decision and
+then requires ordinary delegated AI to originate the actual supply and repair
+jobs. Preserve finite stocks, paid partial work, prerequisite and override checks,
+full JSON continuation and complete state/digest comparisons. Native results are
+pending the integration owner; this contract does not close increment 24.

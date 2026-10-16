@@ -11,6 +11,17 @@ entities:
         - "Inventory reads permitted demand reports, source readings and reserve policy through explicit typed Console bindings. Co-hosted tabs do not pool knowledge; no central omniscient planner or second temporary-Backfill policy is introduced."
         - "For a Human controller, enabled targets are standing machinery orders: routine eligible batches do not require repeated dispatch presses. Delegated/Backfill controllers use the ordinary authored tree to choose their dispatch/start intent. Both consume the same permitted candidate view and shared physical executor; no AI runs beside a Human controller. Execution rechecks current targets, actual incoming/held occupancy and floors before committing."
 
+  - decision: released-mission-delivery-demand
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Current Released Delivery Work Adds Bounded Immediate Demand
+      summary: "Increment 22/24 extends ordinary target replenishment: an exact current released Delivery request visible through the owning Logistics Console contributes its finite immediate demand without changing stored local targets. The existing candidate, Human/AI admission and paid physical dispatcher remain the only execution path."
+      rationale:
+        - "Ordinary manual and maintained deliveries still recheck current target deficit. The exception requires an exact own permitted current actor, owner, source, destination, commodity, original scope/release and amount matching the authoritative accepted plan frontier; missing, private, foreign, stale, unreleased, already accepted or terminal rows confer no demand."
+        - "Publish the finite released request ahead of routine refill candidates only when actual unclaimed source stock above its floor, destination/shared receiving room, current occupancy and concurrency support the complete requested batch. Incoming/held stock and already bound jobs cannot create repeat or top-up mission credit. Dispatch repeats the same checks before committing."
+        - "Do not rewrite the operator's stored goals or create a reservation, Job, resource, controller, clock or capability while deriving demand. Human maintained work and ordinary per-System AI consume the same permitted candidate and same actual stock, paid machinery, route and receiving-claim transaction. Actual accepted/completed scope removes the derived request."
+
   - decision: located-delivery-batches-and-receiving-claims
     core:
       status: accepted

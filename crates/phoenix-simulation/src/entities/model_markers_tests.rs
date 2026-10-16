@@ -1,5 +1,6 @@
 use super::*;
 use crate::entities::config::{MeshConfig, MeshShape};
+use bevy::ecs::system::RunSystemOnce;
 
 fn primary_mesh() -> MeshSection {
     MeshSection(MeshConfig {
@@ -460,7 +461,9 @@ fn stable_marker_sync_preserves_readiness_change_tick_and_required_paths() {
         .clone();
     assert!(!required.is_empty());
     app.world_mut().clear_trackers();
-    sync_authoritative_model_markers(app.world_mut());
+    app.world_mut()
+        .run_system_once(sync_authoritative_model_markers)
+        .unwrap();
     assert!(!app.world().is_resource_changed::<ModelRigReadiness>());
     assert_eq!(
         app.world()
@@ -479,7 +482,9 @@ fn stable_marker_sync_preserves_readiness_change_tick_and_required_paths() {
         .variant = Some("new-requirement".into());
     let expected =
         primary_sidecar_path(&app.world().get::<MeshSection>(entity).unwrap().0).unwrap();
-    sync_authoritative_model_markers(app.world_mut());
+    app.world_mut()
+        .run_system_once(sync_authoritative_model_markers)
+        .unwrap();
     assert!(app
         .world()
         .resource::<ModelRigReadiness>()
@@ -490,4 +495,66 @@ fn stable_marker_sync_preserves_readiness_change_tick_and_required_paths() {
             .resource::<ModelRigReadiness>()
             .required_sidecars
     ));
+}
+
+#[test]
+fn retained_marker_queries_refresh_membership_after_new_archetypes_and_removed_markers() {
+    #[derive(Component)]
+    struct LateArchetype;
+    let (mut app, original) = profile(false, primary_mesh());
+    // The scheduled query has already run, and the next entity introduces an
+    // archetype its initial match list could not contain.
+    let late = app
+        .world_mut()
+        .spawn((primary_mesh(), Transform::default(), LateArchetype))
+        .id();
+    app.world_mut()
+        .entity_mut(original)
+        .remove::<ModelMarkers>();
+    app.update();
+    for entity in [original, late] {
+        assert!(app
+            .world()
+            .get::<ModelMarkers>(entity)
+            .unwrap()
+            .resolve_world_position(&Transform::IDENTITY, "fore_emitter")
+            .is_some());
+    }
+    let old_markers = app.world().get::<ModelMarkers>(late).unwrap().clone();
+    app.world_mut()
+        .get_mut::<MeshSection>(late)
+        .unwrap()
+        .0
+        .variant = Some("late-requirement".into());
+    let path = primary_sidecar_path(&app.world().get::<MeshSection>(late).unwrap().0).unwrap();
+    app.update();
+    assert!(app
+        .world()
+        .resource::<ModelRigReadiness>()
+        .required_sidecars
+        .contains(&path));
+    assert_eq!(
+        app.world()
+            .get::<ModelMarkers>(late)
+            .unwrap()
+            .resolve_world_position(&Transform::IDENTITY, "fore_emitter"),
+        old_markers.resolve_world_position(&Transform::IDENTITY, "fore_emitter")
+    );
+    // A new entity generation/archetype must not be hidden by retained matches.
+    assert!(app.world_mut().despawn(late));
+    let replacement = app
+        .world_mut()
+        .spawn((primary_mesh(), Transform::default(), LateArchetype))
+        .id();
+    app.update();
+    assert!(app
+        .world()
+        .get::<ModelMarkers>(replacement)
+        .unwrap()
+        .resolve_world_position(&Transform::IDENTITY, "fore_emitter")
+        .is_some());
+    assert!(!app
+        .world()
+        .resource::<ModelRigReadiness>()
+        .blocks_simulation());
 }

@@ -158,6 +158,13 @@ fn resolve_sidecar_rig_where(
     }
 }
 
+/// Query membership is refreshed by Bevy on every scan. Retaining the query
+/// machinery avoids rebuilding its archetype/access metadata at both hooks.
+pub struct ModelMarkerQueries {
+    meshes: QueryState<&'static MeshSection>,
+    missing: QueryState<(Entity, &'static MeshSection), Without<ModelMarkers>>,
+}
+
 /// Prime primary rigs and synchronise live entities with their canonical
 /// marker geometry.
 ///
@@ -167,7 +174,10 @@ fn resolve_sidecar_rig_where(
 /// outside that cache. This is an exclusive `World` system so a resolved rig is
 /// inserted immediately: no fixed consumer can run between observing readiness
 /// and seeing the component.
-pub fn sync_authoritative_model_markers(world: &mut World) {
+pub fn sync_authoritative_model_markers(
+    world: &mut World,
+    mut queries: Local<Option<ModelMarkerQueries>>,
+) {
     let primed = world.resource::<ModelRigReadiness>().primed;
     let mut discovered = BTreeSet::new();
 
@@ -182,9 +192,12 @@ pub fn sync_authoritative_model_markers(world: &mut World) {
 
     // Borrow authored mesh data: most live entities already have markers, and
     // cloning their complete MeshConfig twice per frame does no useful work.
+    let queries = queries.get_or_insert_with(|| ModelMarkerQueries {
+        meshes: world.query::<&MeshSection>(),
+        missing: world.query_filtered::<(Entity, &MeshSection), Without<ModelMarkers>>(),
+    });
     {
-        let mut meshes = world.query::<&MeshSection>();
-        for mesh in meshes.iter(world) {
+        for mesh in queries.meshes.iter(world) {
             register_primary_sidecar(&mut discovered, &mesh.0);
         }
     }
@@ -207,8 +220,8 @@ pub fn sync_authoritative_model_markers(world: &mut World) {
     }
 
     let candidates: Vec<(Entity, crate::entities::config::MeshConfig)> = {
-        let mut entities = world.query_filtered::<(Entity, &MeshSection), Without<ModelMarkers>>();
-        entities
+        queries
+            .missing
             .iter(world)
             .filter(|(_, mesh)| mesh.0.model.is_some())
             .map(|(entity, mesh)| (entity, mesh.0.clone()))

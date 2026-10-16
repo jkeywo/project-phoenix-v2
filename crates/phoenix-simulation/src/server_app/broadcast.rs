@@ -412,13 +412,16 @@ pub(crate) fn ingest_station_importance(world: &mut World) {
         q.iter(world).next().map(|r| r.0).unwrap_or(false)
     };
 
-    // Owned as a value (not borrowing the world), so the resource can be
-    // borrowed mutably below.
-    let config = {
-        let mut query = world
-            .query_filtered::<&crate::ship::components::ShipConfigComponent, With<LocalShip>>();
-        query.iter(world).next().map(|config| config.0.clone())
+    let local_ship_uuid = {
+        let mut query =
+            world.query_filtered::<&crate::entities::spawner::EntityUuid, With<LocalShip>>();
+        query.iter(world).next().map(|uuid| uuid.0.clone())
     };
+    // Retain only the attributed owners, not a copy of the ship's authored
+    // topology. This immutable borrow ends before importance is updated below.
+    let mut config_query =
+        world.query_filtered::<&crate::ship::components::ShipConfigComponent, With<LocalShip>>();
+    let config = config_query.iter(world).next().map(|config| &config.0);
     let attributed: Vec<_> = objectives
         .into_iter()
         .map(|(id, targets, status)| {
@@ -440,11 +443,6 @@ pub(crate) fn ingest_station_importance(world: &mut World) {
     if red_alert {
         critical_stations.push(AttentionOwner::Core);
     }
-    let local_ship_uuid = {
-        let mut query =
-            world.query_filtered::<&crate::entities::spawner::EntityUuid, With<LocalShip>>();
-        query.iter(world).next().map(|uuid| uuid.0.clone())
-    };
     if world
         .get_resource::<crate::comms::server::CommsInboxRes>()
         .is_some_and(|inbox| {

@@ -7612,3 +7612,83 @@ fn initial_and_incremental_entity_publication_share_the_complete_projection() {
     assert!(later.infrastructure.is_some());
     assert!(later.shield_fraction.is_some());
 }
+
+#[test]
+fn importance_uses_first_bound_target_and_refreshes_console_binding_without_rearming_edges() {
+    use crate::station_importance::AttentionOwner;
+    let mut world = World::new();
+    world.init_resource::<StationImportanceRes>();
+    let config = toml::from_str(
+        r#"
+[[console]]
+id="radio"
+[[console]]
+id="navigation"
+[[system]]
+id="first"
+kind="comms"
+console="radio"
+[[system]]
+id="second"
+kind="navigation"
+console="navigation"
+"#,
+    )
+    .unwrap();
+    let ship = world
+        .spawn((
+            LocalShip,
+            crate::ship::components::ShipConfigComponent(config),
+        ))
+        .id();
+    let mut objectives = crate::world::server::ObjectiveManagerRes::default();
+    objectives.0.add(
+        "rescue",
+        "objective.rescue",
+        true,
+        vec![
+            "missing".into(),
+            "first".into(),
+            "first".into(),
+            "second".into(),
+        ],
+    );
+    objectives.0.complete("rescue");
+    world.insert_resource(objectives);
+    let radio = AttentionOwner::Console(ConsoleId("radio".into()));
+    let navigation = AttentionOwner::Console(ConsoleId("navigation".into()));
+    ingest_station_importance(&mut world);
+    let importance = &world.resource::<StationImportanceRes>().0;
+    assert!(importance.flags_of(&radio).unread);
+    assert!(!importance.flags_of(&navigation).unread);
+    assert!(!importance.flags_of(&AttentionOwner::Core).unread);
+    world.resource_mut::<StationImportanceRes>().0.visit(&radio);
+    ingest_station_importance(&mut world);
+    assert!(build_console_importance_snapshots(&mut world).is_empty());
+
+    // A subsequent authored binding is read afresh, but the previous terminal
+    // objective does not acquire a new unread edge merely because it moved.
+    world
+        .entity_mut(ship)
+        .get_mut::<crate::ship::components::ShipConfigComponent>()
+        .unwrap()
+        .0
+        .systems[0]
+        .console = Some(ConsoleId("navigation".into()));
+    ingest_station_importance(&mut world);
+    assert!(build_console_importance_snapshots(&mut world).is_empty());
+    {
+        let mut objectives = world.resource_mut::<crate::world::server::ObjectiveManagerRes>();
+        objectives.0.add(
+            "followup",
+            "objective.followup",
+            true,
+            vec!["first".into(), "first".into()],
+        );
+        objectives.0.complete("followup");
+    }
+    ingest_station_importance(&mut world);
+    let importance = &world.resource::<StationImportanceRes>().0;
+    assert!(!importance.flags_of(&radio).unread);
+    assert!(importance.flags_of(&navigation).unread);
+}

@@ -2,7 +2,19 @@
   "date": "2026-10-16",
   "status": "partial",
   "current_summary": {
-    "source": "256911e6; protocol43/snapshot86/rules0.70; listening/contextual reports now integrated alongside shared loaders, disruption, acquisition and exact planned deliveries; follow-up evidence below",
+    "source": "0e47b03b; protocol45/snapshot88/rules0.73. Current priority is verification of increments8-12; selected runs are non-green. Historical source pins below retain their original configurations/results; isolated donors are not integrated evidence.",
+    "verification_8_12": {
+      "status": "open; selected native owner and host batches failed; no increment closure or push",
+      "evidence_document_donor": "65bcceb4, docs/acceptance/1562-integrated-8-12.md, integrated with this checkpoint packet",
+      "native_owners": "34aa3e04:1250PASS/55FAIL; Content12/0,Gameplay521/0,World11/0,Simulation706/55. .phoenix/verify-8-12-native-owners.log. Later fixture corrections require their own retries.",
+      "owner_retry": "9a3b2f89:141PASS/6FAIL,42.34s; .phoenix/verify-8-12-corrected-owner-retry.log. Energy/thrust/shield notification and three restore failures remain; fixes under review. This selected retry does not replace the original1250/55 result.",
+      "host": "9493bc5a:10PASS/8FAIL; Activity3/0,Facility2/0,FittingFacility0/2,Logistics1/2,Physical3/0,Production1/1,Recovery0/3. .phoenix/verify-8-12-whole-host.log. No green combined host result.",
+      "production_diagnostic": "8bc01405:0PASS/1FAIL; all360 fullcapture/digest comparisons matched, but actual secondbatch exhausted reserve with no intake and stopped at9.355852/10. Normal Engineering priority correction2d34c831 is integrated as0e47b03b, native verification pending. No deadline extension or energy grant.",
+      "shield_host": "895e234d runtime with67d581cb proof:1PASS,50.95sbuild/7.49sexecution, including360 paid/current-credit continuation and no-write. .phoenix/verify-9-shield-whole-host.log.",
+      "client": "Original19files223PASS/2FAIL. Production affected retry3/3PASS; corrected Workshop affected surfaces53/53PASS. Current21file selection121PASS at5cb35b1a; .phoenix/verify-8-12-current-client-retry.log. These do not relabel the failed original batches. Browser/render discovery1 is not execution.",
+      "pasm": "Clean450836ac:validateOK1202entities/630nonerrors; scanPASS4154files/8685dependencies/18packages; traceabilityPASS246rows. No later-current whole gate claim.",
+      "pending": "Integrated fixture corrections and isolated donors require affected native retries. Real browser/render, native-device, multiplayer, balance/performance and station-workload acceptance remain separate. Broader13-24 delivery/acceptance remains open; Patrol/War/Sandbox/Director are not delivered."
+    },
     "current_followup": {
       "host": "Atbc5ada43 all5 actual decoy/capture/formation host cases PASS,28.51sbuild; .phoenix/resumed-decoy-capture-formation-native-retry.log. First efcddb08 attempt failed test-only ConsoleKnowledgeView.values compilation; bc5 uses actual permission-filtered get. Turret2 and census4 retain priorfd3 evidence; emission2/reception2 retain35f evidence, not one current integrated batch.",
       "radio": "At300add84 non_roster_ owner2PASS; first broader radio16PASS/1FAIL sparse publication fixture. Corrected e01556d2; all17 radio tests including whole JSON360 PASS in the later83PASS/4FAIL Simulation owner batch. Earlier logs retained; current .phoenix/resumed-radio-delivery-acquisition-simulation-owners-retry.log.",
@@ -15,7 +27,7 @@
       "new_host_batch": "At86fc659c code/c3c3500b equipment, four targets fail before gameplay: TickSecurityTeams singleton contains team tick plus acquisition commit, not duplicate physical execution. Shared loader2, maintenance4 and disruption/census targets blocked. Correction210cd6e9 keeps singleton on physical tick and same-step completion before following owner; integrated, native retry pending. Log .phoenix/resumed-loaders-disruption-maintenance-host.log.",
       "listening": "Coherent consumer a04b3448 plus historical dated-view correction9b2f894d integrated; central epochs52a9f4b7. First native selection failed on missing test SystemId import, corrected ab501fa4; retry7PASS (Model2/Gameplay5 incl actual accepted recipe),1m07build. .phoenix/resumed-listening-accepted-and-pure-owners-retry.log. First client selection143PASS/1FAIL action inventory; corrected retry4files144PASS .phoenix/resumed-listening-client-integration-retry.log. Renderer-free Simulation lib/tests check PASS1m00 .phoenix/resumed-listening-simulation-compile.log. Actual combined Radio/traffic/Security/retained-beam owner run currently pending .phoenix/resumed-listening-security-beam-simulation-owners.log.",
       "acquisition_followup": "At3a1e7e6e acquisition8tests7PASS/1FAIL after4m10build: real paid continuation digest differs. Source analysis finds five normal run-scope resources absent in sparse fixture but inserted by restore. Reviewed fixture-only0c1c1ff3 initializes those owners and adds immediate capture/digest diagnostics without weakening folds/restore; native retry pending in combined Simulation owner run.",
-      "remaining": "Current acquisition retry, Security stage correction and new host native verification; moving utilitycraft runtime, physical marking, fitting rehearsal/forecast, listening/chatter, Patrol/War/Sandbox, broader operations/actors/Director and all applicable acceptance. Only0closed; no push."
+      "remaining": "Current verification8-12 is non-green; see current_summary.verification_8_12. This current_followup object retains earlier source-pinned evidence, not the current queue. Later integrated implementations and isolated donors do not establish native/device/playable acceptance. Only0closed; no push."
     },
     "latest_host_result": {
       "source": "fd3d06de; runtime correction28bc37c8",
@@ -83,9 +95,9 @@
     },
     "push": "Not performed. Full integration gate and outstanding acceptance have not passed.",
     "compatibility": {
-      "protocol": 43,
-      "snapshot": 86,
-      "rules": "0.70"
+      "protocol": 45,
+      "snapshot": 88,
+      "rules": "0.73"
     },
     "current_four_owner_native": {
       "source": "3f783eec",

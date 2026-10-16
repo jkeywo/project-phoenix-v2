@@ -10,6 +10,27 @@ The user approved the [incremental implementation roadmap](../implementation/ind
 
 Preserve the selected mechanisms and ownership boundaries. Detailed System rules, schemas and tuning are specified when their increment is prepared; do not restart the earlier broad interview. Adopt the relevant design into PASM before runtime work, and keep shipped content functional. Increment 0 changes planning/design records and captures evidence without changing gameplay.
 
+## Current verification checkpoint — 16 October 2026
+
+Current integrated compatibility is protocol 45, snapshot 88 and simulation
+rules 0.73 (`0e47b03b` documentation source). The current increments 8–12
+verification is **non-green**: the selected owner run passed 1250/failed 55 at
+`34aa3e04`; the seven-target host run passed 10/failed 8 at `9493bc5a`. Separate
+shield JSON360/no-write and physical-route host results passed, while the
+production positive preserved 360-step equivalence but failed final completion
+from zero allocated intake. Its ordinary Engineering priority correction is
+integrated at `0e47b03b`, awaiting native execution. A selected owner retry at
+`9a3b2f89` passed 141 and failed six; those failures remain open.
+
+These implementation and verification states do not reopen the mechanism design.
+Follow the [current implementation summary](../implementation/README.md) and
+[source-pinned checkpoint](../implementation/parallel-checkpoint.json) for the
+current queue. Historical report diagrams and the baseline orientation table
+below are design inputs, not evidence of a current runtime audit or passed exit.
+Browser/device, multiplayer, workload, balance/performance and remaining authored
+modes/generation acceptance stay open. No all-green gate, closure or push is
+claimed here.
+
 ## Requested outcome
 
 Develop a coherent design from the selected gameplay rules using a limited library of reusable mechanisms. Cover world activity as well as ship operation, authored configuration, runtime state, local data-oriented processing, remote communication, consoles and Workshop. Present the resulting proposal as linked HTML reports with flow charts for review and approval. Identify current implementation, selected gameplay requirements, proposed architecture and unresolved choices distinctly.
@@ -48,7 +69,7 @@ Retain the existing networking architecture and individual AI per System with co
 
 The attached sketch is a candidate model. The accompanying prose proposes Console blackboards whereas the image labels Station blackboards; ownership and data bindings require a deliberate resolution rather than treating the drawing as final authority.
 
-## Current implementation evidence
+## Baseline implementation evidence — retained design context
 
 | Concern | Current seam | Consequence for the proposal |
 |---|---|---|

@@ -13,48 +13,42 @@ Only increment 0 is formally closed. Increments 1–7 have recorded automated
 exits; physical-device and human-workload acceptance remain open. Later initial
 commits are implementation checkpoints, not verified increment exits.
 
-The eight-target host batch at `fd3d06de` passed 11 tests and failed 12. A
-focused retry at `35f62881` passed both emission and both reception cases, plus
-ordinary AI decoy launch. After the remaining reviewed corrections, all five
-decoy, capture/decoding and formation host cases pass at `bc5ada43`, including
-whole-JSON continuation. The first attempt failed to compile a test-only
-Console-knowledge lookup; its corrected retry is the passing result. Fixed
-turrets, the original four personnel journeys and the authoritative-state checks
-retain their earlier pinned evidence; this is not one green integrated batch.
+Current integrated compatibility is **protocol 45, snapshot 88 and simulation
+rules 0.73**, at the `0e47b03b` documentation source. Compatibility numbers
+identify supported state; they do not establish a verified gameplay exit.
 
-Shared loaders, Comms-owned disruption, bounded uncrewed acquisition and scoped
-planned-delivery demand are now source-integrated. At `0ca0d986`, selected owner
-checks passed 16 tests and failed one: the optional disruption hull inherited an
-unsupported Console rating. The auxiliary-Console data correction now passes its
-actual accepted-recipe native test at `27e579fa`. The ordinary Full3D utility hull
-also passes its accepted-recipe native test at `c3c3500b`; this is not flight
-or sortie evidence. The shared-loader actual accepted
-recipe and pure handling tests pass, as do Model/Session acquisition guards and
-Content acquisition closure. Seven combined client files pass 150 tests.
-The Simulation owner retry passed 83 tests and failed four: two retained-beam
-cases were blocked by that now-corrected disruption recipe, and two acquisition
-continuations exposed incomplete sensing fixtures. Their fixture correction is
-integrated at `3a1e7e6e`; its retry passes seven of eight acquisition tests. The
-remaining continuation mismatch comes from missing normal run-scope fixture
-resources; reviewed correction `0c1c1ff3` is integrated for retry.
+The current priority is verification of increments 8–12. The selected owner run
+at `34aa3e04` finished **1250 passed, 55 failed**. The seven-target whole-host run
+compiled at `9493bc5a` finished **10 passed, 8 failed**: Activity Foundation 3/0,
+Facility Supply 2/0 and Physical Damage Routes 3/0 passed; Fitting Facility 0/2,
+Logistics 1/2, Production 1/1 and Recovery 0/3 remain non-green. The production
+positive matched every full snapshot/digest comparison through 360 steps but
+failed final completion; a diagnostic at `8bc01405` identified exhausted local
+energy and zero allocation, not a continuation divergence.
 
-The latest loader, disruption, maintenance and authoritative-state host batch
-fails before gameplay because the singleton `TickSecurityTeams` stage contains
-both the team tick and the acquisition commit. A minimal stage/order correction
-is integrated at `210cd6e9`, with native verification pending; this does not mean
-the physical team tick executes twice. These results establish neither
-a green host batch nor the full integrated gate. Earlier
-owner, codec, transport and host evidence, with its source pins and limitations,
-remains in the integration checkpoint. Human/device, balance and workload
-acceptance remain separate.
+The separate shield whole-host proof at runtime `895e234d` passed its 360-step
+paid/current-credit and malformed-state no-write checks. Original client runs
+remain recorded as failures; affected production-panel and Workshop retries
+passed 3/3 and 53/53 respectively. A current 21-file client selection at `5cb35b1a`
+passed all 121 selected tests; this is its own selection, not a relabelled pass
+for the earlier 225 tests. Clean pinned PASM at `450836ac` passed
+validation, scan and traceability. None of these narrower results replaces the
+failed combined native runs or supplies browser/device, balance, performance or
+station-workload acceptance.
 
-Listening priorities and contextual reports are integrated at `a04b3448`, with
-historical held-view restoration corrected at `9b2f894d`. Actual accepted-recipe
-and pure owner checks pass seven tests at `ab501fa4`; four affected client files
-pass 144 tests. Simulation/native host verification remains open. Compatibility
-is protocol 43, snapshot 86 and simulation rules 0.70. Physical marking, moving
-craft and the reviewed fitting rehearsal contract remain active implementation
-lanes, not completed capabilities.
+A selected owner retry at `9a3b2f89` finished **141 passed, 6 failed** in
+42.34s (`.phoenix/verify-8-12-corrected-owner-retry.log`). Energy/thrust/shield
+notification and three restore failures remain, with corrections under review;
+this does not replace the original 1250/55 result.
+
+The source-reviewed production power-priority correction `2d34c831` is integrated
+as `0e47b03b`, with native verification pending. The bounded verification document
+`65bcceb4` accompanies this checkpoint packet. The correction uses the ordinary
+Engineering command and preserves the original six-second continuation and two
+outputs; it grants no energy. Detailed source pins and logs are retained in
+[the integration checkpoint](parallel-checkpoint.json). No all-green integration,
+increment closure or push is claimed. Broader increments 13–24 and authored
+Patrol, War, Sandbox and Director work remain subject to their recorded gaps.
 
 | Increment | Implementation state | Material remaining work |
 |---|---|---|
@@ -66,18 +60,18 @@ lanes, not completed capabilities.
 | 5 — Jobs/teams | Implemented; automated exit passed | Physical-device and human acceptance. |
 | 6 — Stores/services | Implemented; automated exit passed | Physical-device and human acceptance. |
 | 7 — Configurable weapons | Implemented; initial automated exit passed | Retained-beam regression fix integrated; native retry and human/device acceptance. |
-| 8 — Energy/thermal | Core implemented | Selected energy/continuation and final authored Power policy checks pass; full integrated, balance, performance and playable acceptance. |
-| 9 — Shield energy | Core implemented | Full integrated and playable acceptance. |
-| 10 — Interiors/routes | Core implemented | Full integrated and playable acceptance. |
-| 11 — Damage/restoration | Core implemented | Retained Repair adapter corrections pass targeted native checks; full integrated and playable acceptance. |
-| 12 — Logistics/production | Local stock targets, timed delivery, fabrication, salvage/processing and port replenishment/trade implemented | Combined production/logistics failure journeys, current authoring and full acceptance; coolant recycling remains provisional. |
-| 13 — Equipment fitting | Beam/reactor fitting, physical spares/refit/salvage and personal favourites implemented | Personal-plan disposable rehearsal and measured whole-fit sustained/burst/thermal/cooling comparisons are under implementation; full acceptance. |
+| 8 — Energy/thermal | Core implemented | Current selected owner run is non-green; retry integrated corrections and prove actual resource operation, balance/performance and playable acceptance. |
+| 9 — Shield energy | Core implemented; separate paid whole-host JSON360/no-write proof passed | Corrected owner retry, full integration and playable acceptance remain. |
+| 10 — Interiors/routes | Core implemented; actual physical-route host target passed3/3 | Browser layout authoring, supported hull/team journeys, full integration and playable acceptance remain. |
+| 11 — Damage/restoration | Core implemented; actual damage/route host target passed3/3 | Selected owner failures and corrected fixture retries remain; full integration and Human/AI repair acceptance remain. |
+| 12 — Logistics/production | Local stock targets, timed delivery, fabrication, salvage/processing and port replenishment/trade implemented | Observed Logistics/recovery/fabrication-completion failures and affected native retries, browser authoring and full acceptance; coolant recycling remains provisional. |
+| 13 — Equipment fitting | Beam/reactor fitting, physical spares/refit/salvage and personal favourites implemented | Personal-plan disposable rehearsal and measured whole-fit trial code is integrated with separate owner evidence; full-host/native-device and broader fitting acceptance remain. |
 | 14 — Sensing/environment | Substantial implementation | Knowledge, presentation, balance and full acceptance. |
-| 15 — Layered combat | Combat core implemented; shared loaders/priorities integrated and accepted-recipe/pure handling checks pass | Physical marking payloads remain unimplemented; loader host continuation, broader illumination/link-loss/payload journeys, combat styles, balance/workload and full acceptance. |
+| 15 — Layered combat | Combat core implemented; shared loaders/priorities integrated and accepted-recipe/pure handling checks pass | Physical marking code and accepted recipe/launcher owner evidence are integrated; loader/marking full-host continuation, broader illumination/link-loss/payload journeys, combat styles, balance/workload and full acceptance remain. |
 | 16 — Comms/orders | Channels, requests and relay operational; both actual capture/decoding host journeys pass; listening/chatter integrated with accepted-recipe, pure-owner and client passes | Listening/chatter Simulation and host verification, broader contextual operations, native media edge/device acceptance and playable acceptance remain. |
 | 17 — Electronic operations | Jamming/protection/identity operational; both emission host cases pass; bounded disruption integrated and its corrected hull passes actual accepted-recipe validation | Disruption host continuation is blocked by the Security singleton-stage membership error. Broader information/access and acceptance remain. |
 | 18 — Movement/transit | Local jumps verified; sector code integrated; actual formation movement/JSON360 host case passes | Remaining assistance and broader acceptance. |
-| 19 — Craft/deployables | Physical probe, both fixed beam-turret and both decoy host journeys verified; ordinary Full3D utility hull passes actual accepted-recipe validation | Moving custody, XYZ navigation consumers, sorties, remote operation and acceptance remain. |
+| 19 — Craft/deployables | Physical probe, both fixed beam-turret and both decoy host journeys verified; ordinary Full3D utility hull passes actual accepted-recipe validation | Charted XYZ flight code and proof source are integrated; its actual host evidence, moving custody/sorties/remote operation and full acceptance remain. |
 | 20 — Personnel | Officers/care/roster, four physical personnel and both reception host journeys verified; bounded acquisition source integrated | Model/Session and Content acquisition checks pass; Simulation/continuation verification, broader boarding/away/rescue/capture and acceptance remain. |
 | 21 — Facilities/actors | Finite ports and physical supply verified | Workforce, broader objectives/dependencies and acceptance. |
 | 22 — Authored HTN execution | Working scheduling/activity core; scoped planned-delivery consumer integrated | Delivery native verification, broader operator/scenario coverage and full integration. |

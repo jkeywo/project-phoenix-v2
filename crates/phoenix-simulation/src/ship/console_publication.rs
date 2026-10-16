@@ -11,16 +11,6 @@ pub struct LastConsolePublications(
     pub BTreeMap<String, (Option<u64>, BTreeMap<SystemId, SharedSystemBlackboard>)>,
 );
 
-fn share_publication(
-    previous: Option<&SharedSystemBlackboard>,
-    current: &SystemBlackboard,
-) -> SharedSystemBlackboard {
-    previous
-        .filter(|previous| previous.as_ref() == current)
-        .cloned()
-        .unwrap_or_else(|| std::sync::Arc::new(current.clone()))
-}
-
 pub(crate) type ConsolePublicationQuery = QueryState<
     (
         &'static ShipConfigComponent,
@@ -133,6 +123,9 @@ pub(crate) fn publish_console_blackboards_with_query(
     let sessions = world.resource::<crate::lobby::Sessions>();
     let previous = world.resource::<LastConsolePublications>();
     let local = crate::console_bridge::LOCAL_CONSOLE_TOKEN;
+    // Share only within this call. Numeric equality is the suppression rule,
+    // not proof of identical serialization (+0.0 and -0.0 compare equal).
+    // Every emitted complete scope must contain the current source values.
     let mut raw_publications = BTreeMap::new();
     // Repair projection depends on current visibility, not just raw board
     // equality. Recompute it once per producing source in this publication.
@@ -154,10 +147,6 @@ pub(crate) fn publish_console_blackboards_with_query(
                     })
                 })
                 .map(|(source, board)| {
-                    let old = previous
-                        .0
-                        .get(&player.token)
-                        .and_then(|(_, boards)| boards.get(source));
                     let shared = if matches!(board, SystemBlackboard::Repair(_)) {
                         let projected =
                             repair_projections.entry(source.clone()).or_insert_with(|| {
@@ -168,20 +157,11 @@ pub(crate) fn publish_console_blackboards_with_query(
                                     vis.as_ref(),
                                 ))
                             });
-                        old.filter(|old| old.as_ref() == projected.as_ref())
-                            .cloned()
-                            .unwrap_or_else(|| projected.clone())
+                        projected.clone()
                     } else {
                         raw_publications
                             .entry(source.clone())
-                            .or_insert_with(|| {
-                                let old = previous
-                                    .0
-                                    .get(local)
-                                    .and_then(|(_, boards)| boards.get(source))
-                                    .or(old);
-                                share_publication(old, board)
-                            })
+                            .or_insert_with(|| std::sync::Arc::new(board.clone()))
                             .clone()
                     };
                     (source.clone(), shared)
@@ -213,10 +193,9 @@ pub(crate) fn publish_console_blackboards_with_query(
                     .0
                     .iter()
                     .map(|(id, board)| {
-                        let old = previous.0.get(local).and_then(|(_, boards)| boards.get(id));
                         let shared = raw_publications
                             .entry(id.clone())
-                            .or_insert_with(|| share_publication(old, board))
+                            .or_insert_with(|| std::sync::Arc::new(board.clone()))
                             .clone();
                         (id.clone(), shared)
                     })

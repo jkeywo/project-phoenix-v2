@@ -47,9 +47,10 @@ similarly resolves visibility lazily for actual human RepairRequest popups,
 sharing that projection within one ship's delivery pass.
 
 The recipient cache and outgoing `BlackboardUpdate` values share immutable board
-copies. Unchanged source values retain their allocation even when another board
-changes. Serde keeps the existing board JSON shape; canonical ship blackboards,
-AI knowledge and saved boards keep their owned values. The last delivery
+copies within one publication. Complete packets use fresh current values even
+when numeric equality hides a signed-zero change. Serde keeps the existing board
+JSON shape; canonical ship blackboards, AI knowledge and saved boards keep their
+owned values. The last delivery
 projection copies a shared board only when its privacy fields actually change,
 so retained messages and cache entries cannot be rewritten by a phone projection.
 

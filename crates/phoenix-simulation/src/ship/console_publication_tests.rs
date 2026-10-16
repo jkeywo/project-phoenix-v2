@@ -442,8 +442,238 @@ fn shared_update(message: &ServerMessage, id: &str) -> SharedSystemBlackboard {
         .clone()
 }
 
+fn every_sent(app: &mut App, generation: u64) -> BTreeMap<String, ServerMessage> {
+    publish_console_blackboards(app.world_mut(), Some(generation));
+    app.world_mut()
+        .resource_mut::<crate::server_app::SimOutbox>()
+        .drain()
+        .into_iter()
+        .map(|entry| {
+            assert_eq!(
+                entry.delivery,
+                crate::core::messages::DeliveryClass::Snapshot
+            );
+            let crate::lobby::Target::Token(token) = entry.target else {
+                panic!("recipient-scoped publication")
+            };
+            (token, entry.message)
+        })
+        .collect()
+}
+
 #[test]
-fn outgoing_values_share_unchanged_sources_but_old_messages_survive_changes_and_handoff() {
+fn complete_packets_use_current_signed_zero_after_numeric_suppression_or_generation_change() {
+    use std::sync::Arc;
+    for generation_change in [false, true] {
+        let (mut app, entity) = fixture();
+        let local = crate::console_bridge::LOCAL_CONSOLE_TOKEN;
+        let initial = every_sent(&mut app, 1);
+        assert_eq!(initial.len(), 2);
+        let initial_json = serde_json::to_vec(&initial).unwrap();
+        {
+            let mut boards = app
+                .world_mut()
+                .get_mut::<crate::server_app::ShipSystemBlackboards>(entity)
+                .unwrap();
+            let SystemBlackboard::Helm(a) = boards.0.get_mut(&SystemId("a".into())).unwrap() else {
+                unreachable!()
+            };
+            a.x = -0.0;
+        }
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+        assert!(
+            every_sent(&mut app, 1).is_empty(),
+            "keep the original whole-scope numeric suppression"
+        );
+        if !generation_change {
+            let mut boards = app
+                .world_mut()
+                .get_mut::<crate::server_app::ShipSystemBlackboards>(entity)
+                .unwrap();
+            let SystemBlackboard::Helm(b) = boards.0.get_mut(&SystemId("b".into())).unwrap() else {
+                unreachable!()
+            };
+            b.x = 42.0;
+        }
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+        let packets = every_sent(&mut app, if generation_change { 2 } else { 1 });
+        assert_eq!(packets.len(), 2);
+        let current = &app
+            .world()
+            .get::<crate::server_app::ShipSystemBlackboards>(entity)
+            .unwrap()
+            .0;
+        for token in ["crew", local] {
+            let ServerMessage::BlackboardUpdate {
+                updates,
+                console_scope,
+                ..
+            } = &packets[token]
+            else {
+                unreachable!()
+            };
+            assert_eq!(
+                updates
+                    .iter()
+                    .map(|(id, _)| id.0.as_str())
+                    .collect::<Vec<_>>(),
+                ["a", "b"]
+            );
+            assert_eq!(console_scope.as_ref().unwrap().len(), 2);
+            for (id, board) in updates {
+                assert_eq!(serde_json::to_vec(board.as_ref()).unwrap(), serde_json::to_vec(&current[id]).unwrap(), "complete payload must use the current owned source, not prior numeric-equal bits");
+            }
+            let shared = shared_update(&packets[token], "a");
+            let SystemBlackboard::Helm(a) = shared.as_ref() else {
+                unreachable!()
+            };
+            assert_eq!(a.x.to_bits(), (-0.0_f32).to_bits());
+            let original = shared_update(&initial[token], "a");
+            let SystemBlackboard::Helm(a) = original.as_ref() else {
+                unreachable!()
+            };
+            assert_eq!(a.x.to_bits(), 0.0_f32.to_bits());
+            assert!(!Arc::ptr_eq(&shared, &original));
+        }
+        assert!(Arc::ptr_eq(
+            &shared_update(&packets["crew"], "a"),
+            &shared_update(&packets[local], "a")
+        ));
+        assert_eq!(serde_json::to_vec(&initial).unwrap(), initial_json);
+    }
+}
+
+#[test]
+fn complete_repair_projection_uses_current_signed_zero_and_keeps_old_packets() {
+    let (mut app, entity) = fixture();
+    let local = crate::console_bridge::LOCAL_CONSOLE_TOKEN;
+    let mut config = repair_config();
+    config.consoles[0].feeds.push(ConsoleFeed {
+        source: SystemId("a".into()),
+        kind: ConsoleObservationKind::Helm,
+    });
+    let group = crate::modifiers::repair_teams::repair_group(&SystemId("repair".into()), &config);
+    let raw = SystemBlackboard::Repair(RepairBlackboard {
+        system_hull: ["repair", "hidden"]
+            .into_iter()
+            .map(|id| SystemHullStatus {
+                system_id: SystemId(id.into()),
+                display_name: id.into(),
+                current: 100.0,
+                max_hp: 100.0,
+                tier: crate::ship::damage::DamageTier::Operational,
+                debuff_magnitude: 0.0,
+                physical: None,
+            })
+            .collect(),
+        queue_depth: vec![QueueEntryPreview {
+            observations: vec![],
+            group,
+            station_label: "own repair".into(),
+            tier: crate::ship::damage::DamageTier::Operational,
+            deficit: 0.0,
+        }],
+        ..Default::default()
+    });
+    app.world_mut()
+        .get_mut::<ShipConfigComponent>(entity)
+        .unwrap()
+        .0 = config.clone();
+    app.world_mut().get_mut::<ConsoleHosts>(entity).unwrap().0[0].console =
+        ConsoleId("repair-screen".into());
+    app.world_mut()
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(entity)
+        .unwrap()
+        .0 = HashMap::from([
+        (
+            SystemId("a".into()),
+            SystemBlackboard::Helm(HelmBlackboard::default()),
+        ),
+        (SystemId("repair".into()), raw),
+    ]);
+    app.world_mut()
+        .entity_mut(entity)
+        .insert(crate::entities::spawner::EntitySystemHull(
+            crate::ship::damage::SystemHull::from_config(&[
+                (SystemId("repair".into()), 100.0),
+                (SystemId("hidden".into()), 100.0),
+            ]),
+        ));
+    let initial = every_sent(&mut app, 1);
+    assert_eq!(initial.len(), 2);
+    let initial_json = serde_json::to_vec(&initial).unwrap();
+    {
+        let mut boards = app
+            .world_mut()
+            .get_mut::<crate::server_app::ShipSystemBlackboards>(entity)
+            .unwrap();
+        let SystemBlackboard::Repair(repair) =
+            boards.0.get_mut(&SystemId("repair".into())).unwrap()
+        else {
+            unreachable!()
+        };
+        repair.queue_depth[0].deficit = -0.0;
+    }
+    assert!(every_sent(&mut app, 1).is_empty());
+    {
+        let mut boards = app
+            .world_mut()
+            .get_mut::<crate::server_app::ShipSystemBlackboards>(entity)
+            .unwrap();
+        let SystemBlackboard::Helm(a) = boards.0.get_mut(&SystemId("a".into())).unwrap() else {
+            unreachable!()
+        };
+        a.x = 42.0;
+    }
+    let packets = every_sent(&mut app, 1);
+    assert_eq!(packets.len(), 2);
+    let current = app
+        .world()
+        .get::<crate::server_app::ShipSystemBlackboards>(entity)
+        .unwrap()
+        .0[&SystemId("repair".into())]
+        .clone();
+    let visibility = crate::console::repair::visibility::hull_visibility(app.world_mut()).unwrap();
+    let projected = project_permitted_board(
+        &config,
+        &SystemId("repair".into()),
+        &current,
+        Some(&visibility),
+    );
+    for (token, expected) in [(local, &current), ("crew", &projected)] {
+        let shared = shared_update(&packets[token], "repair");
+        assert_eq!(
+            serde_json::to_vec(shared.as_ref()).unwrap(),
+            serde_json::to_vec(expected).unwrap(),
+            "retain the original owned Repair projection's complete JSON"
+        );
+        let SystemBlackboard::Repair(repair) = shared.as_ref() else {
+            unreachable!()
+        };
+        assert_eq!(
+            repair.queue_depth.len(),
+            1,
+            "actual own Repair queue survives projection"
+        );
+        assert_eq!(
+            repair.queue_depth[0].deficit.to_bits(),
+            (-0.0_f32).to_bits()
+        );
+        assert!(
+            !repair.system_hull.is_empty(),
+            "exercise a real hull visibility projection"
+        );
+        let original = shared_update(&initial[token], "repair");
+        let SystemBlackboard::Repair(repair) = original.as_ref() else {
+            unreachable!()
+        };
+        assert_eq!(repair.queue_depth[0].deficit.to_bits(), 0.0_f32.to_bits());
+    }
+    assert_eq!(serde_json::to_vec(&initial).unwrap(), initial_json);
+}
+
+#[test]
+fn outgoing_values_share_within_one_publication_but_old_messages_survive_changes_and_handoff() {
     use std::sync::Arc;
     let (mut app, entity) = fixture();
     let local = crate::console_bridge::LOCAL_CONSOLE_TOKEN;
@@ -475,7 +705,7 @@ fn outgoing_values_share_unchanged_sources_but_old_messages_survive_changes_and_
     let changed = sent(&mut app, 1).remove(0);
     let changed_a = shared_update(&changed, "a");
     let changed_b = shared_update(&changed, "b");
-    assert!(Arc::ptr_eq(&a, &changed_a));
+    assert!(!Arc::ptr_eq(&a, &changed_a));
     assert!(!Arc::ptr_eq(&b, &changed_b));
     assert_eq!(serde_json::to_value(&initial).unwrap(), initial_json);
     let SystemBlackboard::Helm(previous) = b.as_ref() else {
@@ -483,8 +713,8 @@ fn outgoing_values_share_unchanged_sources_but_old_messages_survive_changes_and_
     };
     assert_eq!(previous.x, 0.0);
     let rebased = sent(&mut app, 2).remove(0);
-    assert!(Arc::ptr_eq(&changed_a, &shared_update(&rebased, "a")));
-    assert!(Arc::ptr_eq(&changed_b, &shared_update(&rebased, "b")));
+    assert!(!Arc::ptr_eq(&changed_a, &shared_update(&rebased, "a")));
+    assert!(!Arc::ptr_eq(&changed_b, &shared_update(&rebased, "b")));
 
     // A fresh generation still sends a complete envelope; reconnect reads the
     // actual permitted source and cannot mutate these retained cache values.
@@ -525,7 +755,7 @@ fn outgoing_values_share_unchanged_sources_but_old_messages_survive_changes_and_
         let cache = app.world().resource::<LastConsolePublications>();
         assert!(cache.0["crew"].1.is_empty());
         assert!(Arc::ptr_eq(
-            &changed_b,
+            &cache.0[local].1[&SystemId("b".into())],
             &cache.0["visitor"].1[&SystemId("b".into())]
         ));
     }

@@ -412,6 +412,19 @@ fn radio_inbox_and_paid_reserves_continue_after_json_and_malformed_copies_do_not
         let _ = app.world_mut().run_system_once(
             crate::console::weapons::blackboard::publish_tactical_radar_blackboard,
         );
+        // Restore also rebuilds the actual Command/emission publication. Match
+        // that ordinary projection before capture; no machinery state is set.
+        app.world_mut()
+            .run_system_once(crate::console::command::server::publish_command_blackboard)
+            .unwrap();
+        assert!(matches!(
+            app.world()
+                .get::<crate::server_app::ShipSystemBlackboards>(source)
+                .unwrap()
+                .0
+                .get(&SystemId("command".into())),
+            Some(SystemBlackboard::Command(_))
+        ));
         (app, source)
     }
     fn advance(app: &mut App) {

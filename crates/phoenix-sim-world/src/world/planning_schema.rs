@@ -283,7 +283,7 @@ pub struct PlanChoice {
 }
 
 /// A derived own-owner order; definitions and observations remain with the plan.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PlanIntentRequest {
     pub config: crate::world::activities::SituationConfig,
     pub chosen_tick: u64,

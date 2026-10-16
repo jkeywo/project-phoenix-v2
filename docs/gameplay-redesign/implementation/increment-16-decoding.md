@@ -179,8 +179,9 @@ execution is root-owned; this handoff claims no native or milestone exit.
 Required next evidence is joined native owner execution, actual Human/ordinary AI
 full-host partially paid JSON360/digest/no-write proof, explicit-feed isolation and
 actual Workshop Preview/Test. It is not replaced by the pure state JSON test or
-the focused GUI/history fixtures. Dynamic keys and retransmission/hop capture
-remain explicit later consumers within 16; other unfinished 16/17 scope remains.
+the focused GUI/history fixtures. Dynamic keys and retransmission/hop capture require separately selected later
+consumers; they are not required by this bounded accepted decoder contract.
+Other selected 16/17 scope and acceptance remain open.
 
 ### Central integration checkpoint — 16 October 2026
 
@@ -212,3 +213,22 @@ duplicate media IDs introduced by the capture donor while keeping the prepared
 media definitions. Owned Rust formatting and diff checks passed. No Cargo, full
 integration gates, device/native execution or milestone exit is claimed. Root
 owns compatibility epochs, final integration and native continuation evidence.
+
+
+### Remaining scope reconciliation — 16 October 2026
+
+The adopted captured-text decision uses immutable accepted receiver keys. Dynamic
+key acquisition/revocation, opaque keyless forwarding and relay-hop/retransmission
+capture are future consumers requiring their own selected contracts. They are not
+new exit requirements created by this first slice's roadmap wording. Audio/video
+recording/interception and a crypto economy are likewise not implied.
+
+The selected original typed-content disclosure remains incomplete: current decoded
+evidence presents body and kind while omitting safe typed request parameters and
+outcome facts. Complete that read-only evidence without exposing source routing,
+creating a contact alias or admitting participation in intercepted conversations.
+The broader selected Comms scope still needs finite listening/search priorities,
+routine public chatter, applicable pending-request lifecycle rules and concrete
+contextual request/relationship consumers. Several of those joins belong with
+movement, craft, personnel and continuing missions. Source audit does not establish
+native execution or human/device/Workshop acceptance.

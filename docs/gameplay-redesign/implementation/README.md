@@ -39,7 +39,7 @@ checks pass. These results do not establish a passing integrated exit.
 | 13 — Equipment fitting | Supported beam/reactor implementation | Cross-system coverage and full acceptance. |
 | 14 — Sensing/environment | Substantial implementation | Knowledge, presentation, balance and full acceptance. |
 | 15 — Layered combat | Substantial implementation | Broader combat/balance/workload coverage and full acceptance. |
-| 16 — Comms/orders | Channels, requests and relay operational | Human media and paid decoding source integrated; native/full-host execution, remaining operations and acceptance. |
+| 16 — Comms/orders | Channels, requests and relay operational | Human media and paid decoding source integrated; typed decoded claims, listening priorities/chatter, contextual operations and native/playable acceptance. |
 | 17 — Electronic operations | Jamming/protection/identity operational | Concealment owner/snapshot checks pass; full-host proof, low-emission advice and disruption remain. |
 | 18 — Movement/transit | Local jumps verified; sector code integrated | Formation owner/restore checks pass; full-host proofs, Helm follow controls, remaining assistance and acceptance. |
 | 19 — Craft/deployables | Physical probe handling verified | Other craft/deployables, sorties, remote operation and acceptance. |

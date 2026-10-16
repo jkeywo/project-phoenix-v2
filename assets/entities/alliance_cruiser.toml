@@ -1,3 +1,6 @@
+# [ai] October 2026 physical-damage retune: standard beams use range 55 and
+# penetration 2 at unchanged 32 DPS / 6-second burn and rest. Earlier tuning
+# narratives below are historical; the current definitions and balance report govern.
 name = "entity.alliance_cruiser.name"
 # Player-facing proper name (the flagship). John-specified as "AEV Phoenix".
 display_name = "entity.alliance_cruiser.display_name"
@@ -557,7 +560,7 @@ marker = "phasers_fore"
 [weapon.mount]
 facing_deg = 0
 fire_arc_deg = 270
-range = 40
+range = 55
 
 [weapon.delivery]
 kind = "beam"
@@ -595,8 +598,8 @@ color = [ 0.25, 0.75, 1, 1 ]
 
 [weapon.impact]
 damage_type = "laser"
-# [ai] Deposit more energy locally; reduced internal reach. See the October balance report.
-penetration = 10
+# [ai] Standard surface-deposition beam: penetration 2 limits waste through light compartments.
+penetration = 2
 [[weapon]]
 id = "phaser-aft"
 strategy_id = "aft"
@@ -611,7 +614,7 @@ marker = "phasers_aft"
 [weapon.mount]
 facing_deg = 180
 fire_arc_deg = 270
-range = 40
+range = 55
 
 [weapon.delivery]
 kind = "beam"
@@ -640,8 +643,8 @@ color = [ 0.25, 0.75, 1, 1 ]
 
 [weapon.impact]
 damage_type = "laser"
-# [ai] Deposit more energy locally; reduced internal reach. See the October balance report.
-penetration = 10
+# [ai] Standard surface-deposition beam: penetration 2 limits waste through light compartments.
+penetration = 2
 
 [torpedoes]
 # Frozen finite guidance equipment; physical collision does not grant tracking.

@@ -795,7 +795,7 @@ pub(crate) fn publish(
                     &actor.0,
                     &state.0.owner,
                     config,
-                    boards,
+                    &boards,
                     tick.as_ref().map_or(0, |tick| tick.0),
                 )
             })

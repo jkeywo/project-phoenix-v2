@@ -134,13 +134,18 @@ their current owners. No extra pilot/state tree runs beside those Systems.
 
 ## Recovery and physical receipts
 
-Add accepted finite nonnegative `maximum_relative_speed` to the actual Bay
-profile, alongside existing recovery_range and maximum_parent_speed. Existing
-fixed recipes retain zero-child-motion validation; the new capture field defaults
-to zero for legacy authored Bay profiles and the moving consumer explicitly
-authors its supported finite positive limit. Compare actual child/parent
-World-space XYZ velocity at recovery admission and again at
-end-Physics commit. Use actual yaw-transformed forward/lateral velocity and
+Add optional `maximum_relative_speed` to the actual Bay profile, alongside
+existing recovery_range and maximum_parent_speed. Absence preserves legacy fixed
+handling: the child must still have zero motion, and the parent may move within
+its existing authored speed limit. Never default this new relative constraint to
+zero. Existing probe_carrier and reception_outpost allow parent speed up to 0.1;
+a stationary child and a parent creeping at 0.05 legitimately have relative speed
+0.05. A new zero relative limit would reject that previously supported recovery.
+
+Every supported moving profile requires an explicit finite positive relative
+bound in its compatible Bay; omission cannot admit unlimited moving recovery.
+With an authored bound, compare actual child/parent World-space XYZ velocity at
+recovery admission and again at end-Physics commit. Use actual yaw-transformed forward/lateral velocity and
 vertical velocity, not scalar speed difference or private observed guesses.
 Physical handling may validate its actual bound body; that check is not published
 remote telemetry or AI navigation knowledge.
@@ -215,8 +220,10 @@ Parent uncertainty and craft-local progress must remain independent.
 Use independently booted whole-JSON360 complete captures/digests at partial
 launch, moving flight, a real link gap, return and partial recovery. Validate
 mode, installed profiles, voyage/request/sequence/expiry, Job/course generation,
-same-body capture, presence and custody before any writes. Explicitly refuse
-fabricated launch history on an initially deployed body, old-voyage messages after
+same-body capture, presence and custody before any writes. Include a legacy
+fixed-child recovery with parent motion below its existing 0.1 limit, and reject
+a moving profile with an absent/nonpositive/nonfinite relative limit before work
+or writes. Explicitly refuse fabricated launch history on an initially deployed body, old-voyage messages after
 recovery/relaunch, Recall without an admitted trip, current generation/request
 mismatch and invalid later-owner authorization. Preserve genuine historical
 receipts after actual owner/home loss rather than retesting old eligibility.

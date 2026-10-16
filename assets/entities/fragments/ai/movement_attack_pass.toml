@@ -480,6 +480,8 @@ reenter_pivot_secs = 1.5
 # hull authors is how much daylight it wants beyond the other ship's guns. THE
 # safe-range knob.
 safe_range_margin = 60.0
+# [ai] Provisional chosen standoff for unknown enemy reach; not a capability estimate.
+unknown_target_safe_range = 120.0
 # Throttle fraction flown on the ring. Not zero: a hull parked inside a hostile's
 # reach is not shadowing it, it is a target.
 orbit_speed = 0.6

@@ -53,6 +53,16 @@ AI simulation LOD in `crates/phoenix-simulation/src/ai/lod.rs` promotes nearby N
 
 Mesh LOD is unrelated. It is selected by the renderer in `crates/phoenix-presentation/src/server_app_render.rs` from the model rig's authored levels and only changes visuals.
 
+## Unknown target capabilities
+
+Measured Helm contacts do not expose enemy weapon reach or facing shields. Recovery
+and shadow manoeuvres use `unknown_target_safe_range` only when the doctrine authors
+that fallback radius; a known reach still uses the existing reach-plus-margin ring.
+The fallback does not create a threat-range fact. The broadside torpedo manoeuvre's
+zero shield-gap setting explicitly permits an unknown shield finding; positive
+requirements still need an observed opening. Per-axis requirement facts are seeded
+in `tick_policy_machine` from that System's own parameters.
+
 ## Related
 
 - [Helm Runtime](./helm-control-intent.md)

@@ -448,6 +448,7 @@ engage_range = 220.0
 torpedo_run_range = 50.0
 # Minimum `target_facing_shield_down` reading the bow hold demands. 0.0 = any —
 # see the header. A hull that wants the Harrow's stricter reading authors 1.0.
+# Zero also permits an unobserved shield; it does not invent a shield reading.
 torpedo_run_shield_gap = 0.0
 # The posture rung at which the aggressive half of the doctrine unlocks.
 press_posture = 1.0
@@ -513,7 +514,7 @@ id = "orbit"
   [[helm_console.engines_ai.state.transition]]
   priority = 20
   to = "torpedo_run"
-  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(torpedo_run_range) and fact(tubes_full) > 0 and fact(tubes_fillable) > 0 and fact(target_facing_shield_down) >= param(torpedo_run_shield_gap)"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(torpedo_run_range) and fact(tubes_full) > 0 and fact(tubes_fillable) > 0 and (fact(torpedo_shield_requirement_disabled) > 0 or fact(target_facing_shield_down) >= param(torpedo_run_shield_gap))"
 
   # A transition guarded on hazard urgency here would drop the hull out of the
   # ring for the duration of a detour it is already handling additively, and
@@ -652,6 +653,7 @@ torpedo_bearing_speed = 0.0
 torpedo_run_range = 50.0
 # Restated on this axis because its OWN guards reference it; content validation
 # rejects an undeclared `param(...)`. See the header.
+# Zero also permits an unobserved shield; it does not invent a shield reading.
 torpedo_run_shield_gap = 0.0
 # ── The six scalars the HOST reads off this axis to fly the DEFENSIVE ring ────
 # Gated as one unit (`RECOVERY_PARAMS`): omit any one and the host declines the
@@ -664,6 +666,8 @@ torpedo_run_shield_gap = 0.0
 # safe-range knob, and the counterpart of `combat_orbit_range`, which is a
 # property of the hull's own guns instead.
 safe_range_margin = 60.0
+# [ai] Provisional chosen standoff for unknown enemy reach; not a capability estimate.
+unknown_target_safe_range = 120.0
 # Throttle fraction flown on the defensive ring. Deliberately LOW — this is a hull
 # standing off, not patrolling — but not zero: a ship parked inside a hostile's
 # reach is not standing off from it, it is a target.
@@ -797,7 +801,7 @@ yields_to_arc_requests = false
   [[helm_console.steering_ai.state.transition]]
   priority = 20
   to = "torpedo_run"
-  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(torpedo_run_range) and fact(tubes_full) > 0 and fact(tubes_fillable) > 0 and fact(target_facing_shield_down) >= param(torpedo_run_shield_gap)"
+  when = "fact(target_valid) > 0 and fact(range_to_target) <= param(torpedo_run_range) and fact(tubes_full) > 0 and fact(tubes_fillable) > 0 and (fact(torpedo_shield_requirement_disabled) > 0 or fact(target_facing_shield_down) >= param(torpedo_run_shield_gap))"
 
   [[helm_console.steering_ai.state.transition]]
   priority = 10

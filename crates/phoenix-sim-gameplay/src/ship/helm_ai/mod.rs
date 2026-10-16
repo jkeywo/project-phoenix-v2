@@ -234,6 +234,7 @@ where
     // nothing else (AC3) — including the memory-derived fact.
     let mut facts_with_memory = facts.clone();
     seed_memory_derived_facts(&mut facts_with_memory, &state.memory);
+    seed_torpedo_requirement_facts(&mut facts_with_memory, &policy.params);
     let memory = state.memory_at(now);
     let current = state.current.clone();
 
@@ -306,6 +307,7 @@ pub fn resolve_helm_channel<'a>(
         (Some(_), Some(st)) => {
             let mut facts = facts.clone();
             seed_memory_derived_facts(&mut facts, &st.memory);
+            seed_torpedo_requirement_facts(&mut facts, &policy.params);
             policy.resolve_channel_in_state(
                 &st.current,
                 channel,
@@ -464,6 +466,9 @@ pub fn helm_axis_outcome_for<'p, H: HelmAxisHost>(
             (Some(_), Some(st)) => {
                 let mut seeded = facts.clone();
                 seed_memory_derived_facts(&mut seeded, &st.memory);
+                if let Some(policy) = policy {
+                    seed_torpedo_requirement_facts(&mut seeded, &policy.params);
+                }
                 let memory = st.memory_at(now);
                 let tick = HostTick {
                     system,

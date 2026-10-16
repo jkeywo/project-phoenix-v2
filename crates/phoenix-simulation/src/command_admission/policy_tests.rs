@@ -118,10 +118,10 @@ screen = "fixture.html"
 
 [[system]]
 id = "repair"
-kind = "repair_control"
+kind = "repair"
 console = "repair-console"
 "#,
-        &["repair_control"],
+        &[crate::ship::system_registry::REPAIR_KIND],
     )
     .unwrap()
 }
@@ -527,10 +527,10 @@ screen = "fixture.html"
 
 [[system]]
 id = "repair"
-kind = "repair_control"
+kind = "repair"
 console = "shields-console"
 "#,
-        &["repair_control"],
+        &[crate::ship::system_registry::REPAIR_KIND],
     )
     .unwrap();
     assert_eq!(

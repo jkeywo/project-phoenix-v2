@@ -16,6 +16,8 @@ const editorModules = [
   'asset-dependencies', 'crc32', 'indexed-db', 'workshop-assets', 'workshop-handoff', 'workshop-source-provider',
   'workshop-models', 'workshop-model-structure', 'workshop-model-preview', 'workshop-entity-composition', 'workshop-ship-authoring', 'workshop-system-composition', 'workshop-state-trees', 'workshop-spatial', 'workshop-preview', 'workshop-preview-runtime',
   'workshop-damage', 'workshop-damage-model',
+  'workshop-emission-profile', 'workshop-concealment', 'workshop-protection', 'workshop-identity',
+  'workshop-loader-model', 'workshop-shared-loaders', 'fitting-rehearsal', 'workshop-world-routes',
   'workshop-document', 'workshop-asset-job', 'workshop-acceptance', 'workshop-runtime', 'workshop-recovery', 'workshop-provider', 'workshop-launch', 'workshop-billboard-capture', 'workshop-lod-generation', 'workshop-test', 'workshop-sound-cues', 'mod-actions', 'mod-pack-workspace', 'mod-pack-export',
   'ordered-form', 'workshop-migration', 'workshop-diff', 'workshop-definitions', 'workshop-composition', 'workshop-entity', 'workshop-resources', 'workshop-logistics', 'workshop-production', 'workshop-fields', 'workshop-fitting', 'workshop-sensing', 'workshop-helm-projection', 'workshop-helm-movement', 'workshop-transit', 'workshop-resource-recovery', 'workshop-ports', 'workshop-stock-bindings', 'workshop-weapons', 'workshop-weapon-model', 'workshop-weapon-groups', 'workshop-energy', 'workshop-energy-ai', 'workshop-energy-model', 'workshop-generated-systems', 'workshop-shields', 'workshop-shield-ai', 'workshop-interiors',
   'workshop-personnel', 'workshop-security',

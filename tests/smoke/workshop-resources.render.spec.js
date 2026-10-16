@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync, readdirSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { parse, stringify } from 'smol-toml';
 import { resolveTemplate } from '../../editor/entity-includes.js';
 import { createStoreZip, readStoreZip } from '../../editor/mod-pack-export.js';
@@ -61,6 +62,12 @@ transform={position=[1000.0,0.0,0.0]}
 `;
 const byId = (page, id) => page.locator('#workshop-resource-' + id);
 const options = locator => locator.evaluate(select => [...select.options].map(option => option.value));
+const startupDiagnostics = new WeakMap();
+test.afterEach(async ({ page }, testInfo) => {
+  const diagnostics = startupDiagnostics.get(page);
+  if (diagnostics) await writeFile(testInfo.outputPath('workshop-startup.json'),
+    JSON.stringify({ ...diagnostics, url: page.url() }, null, 2));
+});
 async function sourceOf(page, member = HULL) {
   await revealWorkshopPanel(page, 'files'); await page.locator('#workshop-files').selectOption(member);
   await revealWorkshopPanel(page, 'source'); return page.locator('#workshop-source').inputValue();
@@ -70,8 +77,9 @@ async function resourceForm(page) {
   await expect(byId(page, 'capacity-apply')).toBeEnabled();
 }
 async function importPack(page, bytes) {
-  const chooser = page.waitForEvent('filechooser'); await page.locator('#workshop-import').click();
-  await (await chooser).setFiles({ name: 'resource-workshop.zip', mimeType: 'application/zip', buffer: Buffer.from(bytes) });
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser', { timeout: 30_000 }),
+    page.locator('#workshop-import').click()]);
+  await chooser.setFiles({ name: 'resource-workshop.zip', mimeType: 'application/zip', buffer: Buffer.from(bytes) });
   await expect(page.locator('.workshop-findings')).toContainText(ts('workshop.imported'));
   await resourceForm(page);
 }
@@ -98,7 +106,30 @@ async function previewColours(page) {
 test('Workshop edits inherited stores and service links, then reloads and exercises the authored hull',
   { tag: '@core' }, async ({ page }, testInfo) => {
     test.setTimeout(360_000);
-    const errors = []; page.on('pageerror', error => errors.push(error.message));
+    const errors = [], diagnostics = { ready: false, pageErrors: errors, console: [], requestFailures: [], badResponses: [] };
+    startupDiagnostics.set(page, diagnostics);
+    let rejectStartup;
+    const startupFailed = new Promise((_, reject) => { rejectStartup = reject; });
+    // Navigation may report a linking error before the readiness race is installed.
+    void startupFailed.catch(() => {});
+    const record = (rows, value) => { if (rows.length < 100) rows.push(value); };
+    const failStartup = message => rejectStartup?.(new Error(`Workshop startup: ${message}`));
+    page.on('pageerror', error => {
+      record(errors, error.message.slice(0, 4000)); failStartup(error.message);
+    });
+    page.on('console', message => record(diagnostics.console,
+      { type: message.type(), text: message.text().slice(0, 4000) }));
+    page.on('requestfailed', request => {
+      const failure = { url: request.url(), type: request.resourceType(), error: request.failure()?.errorText };
+      record(diagnostics.requestFailures, failure);
+      if (['document', 'script'].includes(failure.type)) failStartup(`${failure.url}: ${failure.error}`);
+    });
+    page.on('response', response => {
+      if (response.status() < 400) return;
+      const failure = { url: response.url(), status: response.status(), type: response.request().resourceType() };
+      record(diagnostics.badResponses, failure);
+      if (['document', 'script'].includes(failure.type)) failStartup(`${failure.url}: HTTP ${failure.status}`);
+    });
     await page.addInitScript(() => Object.defineProperty(navigator, 'webdriver', { get: () => false }));
     // Use the real providers and WASM validator. Bound only the asset preflight
     // to the two hulls used by this disposable fixture.
@@ -111,7 +142,14 @@ test('Workshop edits inherited stores and service links, then reloads and exerci
       source.base_asset_manifest = Object.fromEntries([...selected].map(name => [name, all[name]]));
       await route.fulfill({ response, json: source });
     });
-    await page.goto('/workshop.html');
+    try {
+      await page.goto('/workshop.html');
+      await Promise.race([(async () => {
+        await page.locator('#workshop-import').waitFor({ state: 'visible', timeout: 30_000 });
+        await expect(page.locator('#workshop-import')).toBeEnabled();
+      })(), startupFailed]);
+      diagnostics.ready = true;
+    } finally { rejectStartup = null; }
     await importPack(page, createStoreZip([
       { path: 'scenarios.toml', text: WORKSHOP_MANIFEST }, { path: WORLD, text: WORLD_TEXT },
       { path: HULL, text: HULL_TEXT }, { path: BASE, text: BASE_TEXT }, { path: DEPOT, text: DEPOT_TEXT },

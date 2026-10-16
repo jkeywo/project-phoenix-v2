@@ -938,15 +938,17 @@ fn physical_rng_and_mint_handles_resolve_only_to_existing_canonical_owners() {
     let replication =
         std::any::type_name::<project_phoenix::core::broadcast::ReplicationLifecycleRegistry>();
     let requests = std::any::type_name::<project_phoenix::core::broadcast::ReconnectRequests>();
-    assert_eq!(census.aliases().len(), 12);
+    let power_flow = std::any::type_name::<project_phoenix::sim_rng::PowerFlowRng>();
+    assert_eq!(census.aliases().len(), 13);
     assert_eq!(census.alias_owner(requests), Some(replication));
+    assert_eq!(census.alias_owner(power_flow), Some(rng));
     assert_eq!(
         census
             .aliases()
             .values()
             .filter(|owner| **owner == rng)
             .count(),
-        7
+        8
     );
     assert_eq!(
         census

@@ -171,6 +171,32 @@ fn real_receive_selection_drops_one_shot_without_retrospective_delivery() {
 #[test]
 fn capture_observes_only_original_emissions_on_current_paid_receive_coverage() {
     let (mut app, source, receiver) = fixture();
+    // This owner fixture sends two actual four-unit fleet messages. The
+    // ordinary 7.5 initial reserve cannot pay eight units plus listening work.
+    // Establish a supported full initial reserve before any interval; never
+    // refill between emissions or fabricate an emission/captured payload.
+    let owner = SystemId("comms".into());
+    let capacity = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(source)
+        .unwrap()
+        .0
+        .config()
+        .consumers
+        .iter()
+        .find(|row| row.system == owner)
+        .unwrap()
+        .reserve
+        .capacity;
+    app.world_mut()
+        .get_mut::<crate::ship::power::ShipPowerSystem>(source)
+        .unwrap()
+        .0
+        .network_mut()
+        .consumers
+        .get_mut(&owner)
+        .unwrap()
+        .energy = capacity;
     let captures = |app: &App| {
         app.world()
             .get::<super::super::capture::ShipCommsCapture>(receiver)
@@ -214,6 +240,31 @@ fn capture_observes_only_original_emissions_on_current_paid_receive_coverage() {
     emit(&mut app, "Second actual protected emission");
     run(&mut app);
     assert_eq!(
+        app.world()
+            .resource::<super::super::server::CommsInboxRes>()
+            .0
+            .iter()
+            .filter(|message| message.sender_uuid == "source"
+                && message
+                    .transmission
+                    .as_ref()
+                    .is_some_and(|wire| wire.channel == "fleet" && wire.received_tick.is_none()))
+            .count(),
+        2,
+        "both source emissions must actually exist before testing interception"
+    );
+    assert!(
+        app.world()
+            .get::<crate::ship::power::ShipPowerSystem>(source)
+            .unwrap()
+            .0
+            .network()
+            .consumers[&owner]
+            .energy
+            < capacity - 8.0,
+        "real discrete sends and continuous listening consume the initial reserve"
+    );
+    assert_eq!(
         captures(&app),
         1,
         "a new paid covered emission is genuine evidence"
@@ -248,6 +299,20 @@ fn successful_report_commits_only_current_permitted_paid_semantic_and_never_repe
                 .unwrap()
                 .energy = 0.0;
         } else {
+            // The positive report needs both this interval's real continuous
+            // listening payment and its one-unit discrete public emission.
+            let capacity = app
+                .world()
+                .get::<crate::ship::power::ShipPowerSystem>(source)
+                .unwrap()
+                .0
+                .config()
+                .consumers
+                .iter()
+                .find(|row| row.system.0 == "comms")
+                .unwrap()
+                .reserve
+                .capacity;
             app.world_mut()
                 .get_mut::<crate::ship::power::ShipPowerSystem>(source)
                 .unwrap()
@@ -256,7 +321,7 @@ fn successful_report_commits_only_current_permitted_paid_semantic_and_never_repe
                 .consumers
                 .get_mut(&SystemId("comms".into()))
                 .unwrap()
-                .energy = 1.0;
+                .energy = capacity;
         }
         command(&mut app, source, Control::ReportCommsAlert);
         run(&mut app);

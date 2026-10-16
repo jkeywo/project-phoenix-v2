@@ -1,0 +1,135 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Combat corrections · Project Phoenix</title><style>body{font:16px/1.6 system-ui,sans-serif;background:#111822;color:#e8eef5;margin:0}main{max-width:1120px;margin:auto;padding:40px 24px}h1{font-size:2.4rem;line-height:1.15}h2{margin-top:36px;font-size:1.35rem}a{color:#8bd7ff}.muted{color:#b6c4d2}.cards{display:flex;flex-wrap:wrap;gap:16px}.card{background:#1c2939;padding:18px 24px;min-width:150px;border-radius:8px}.value{font-size:2rem;font-weight:700}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:13px 12px;border-bottom:1px solid #344355}th{color:#afdaee}code{overflow-wrap:anywhere}li{margin:8px 0}details{background:#1c2939;padding:16px;margin-top:24px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}</style><main><p class="muted">PROJECT PHOENIX · 16 OCTOBER 2026</p><h1>Combat corrections, before damage tuning</h1><p>The same four opponents and seeds 1–5, with a 120-second limit. These results compare the pre-fix redesign run with the requested integration corrections. Concurrent optimisation is excluded.</p><div class="cards"><div class="card"><div class="value">0 / 20</div>victories (previously 0)</div><div class="card"><div class="value">0</div>defeats</div><div class="card"><div class="value">20 / 0</div>draws / timeouts</div><div class="card"><div class="value">0</div>process failures</div></div><h2>Outcome and damage margin</h2><div class="scroll"><table><thead><tr><th>Opponent</th><th>Wins / 5<br>before → after</th><th>Draw / timeout<br>after</th><th>Median win<br>duration (s)</th><th>Death TTK (s)<br>(samples)</th><th>Mean damage margin<br>before → after</th></tr></thead><tbody><tr><th>destroyer</th><td>0 → 0</td><td>5 / 0</td><td>—</td><td>— (0)</td><td>111.3 → 76.5</td></tr><tr><th>cruiser</th><td>0 → 0</td><td>5 / 0</td><td>—</td><td>— (0)</td><td>186.5 → 159.0</td></tr><tr><th>patrol</th><td>0 → 0</td><td>5 / 0</td><td>—</td><td>— (0)</td><td>97.5 → 112.5</td></tr><tr><th>warhawk</th><td>0 → 0</td><td>5 / 0</td><td>—</td><td>— (0)</td><td>-324.9 → -62.7</td></tr></tbody></table></div><p class="muted">A disabled opponent can now produce a victory without death. Win duration is encounter resolution time; it is not a replacement TTK sample. Existing thresholds and death ledgers remain unchanged.</p><h2>Player activity</h2><div class="scroll"><table><thead><tr><th>Opponent</th><th>Forward torpedo<br>launches (5 runs)</th><th>Runs entering<br>torpedo manoeuvre</th><th>Mean fore<br>beam damage</th><th>Time in<br>shadow</th><th>Mean enemy<br>hull damage</th></tr></thead><tbody><tr><th>destroyer</th><td>0 → 16</td><td>0 → 5</td><td>69.4 → 152.9</td><td>20.8% → 53.9%</td><td>0.0 → 66.2</td></tr><tr><th>cruiser</th><td>15 → 22</td><td>0 → 0</td><td>94.0 → 147.8</td><td>59.8% → 67.9%</td><td>39.6 → 103.2</td></tr><tr><th>patrol</th><td>20 → 23</td><td>0 → 5</td><td>23.2 → 109.1</td><td>64.7% → 59.0%</td><td>35.0 → 102.5</td></tr><tr><th>warhawk</th><td>0 → 20</td><td>0 → 5</td><td>218.8 → 194.8</td><td>22.2% → 64.3%</td><td>221.3 → 118.3</td></tr></tbody></table></div><p class="muted">Each cell shows before → after. Shadow uses the player ledger only, divided by actual encounter duration. Forward torpedo tubes have distinct ledger IDs; the aft weapon label is shared with a beam, so this table does not claim a total torpedo count. This combined intervention establishes the resulting balance, not an isolated effect size for each fix.</p><h2>What remains unresolved</h2><ul><li>All 20 corrected runs reach 120 seconds still InProgress, with zero closing damage on both sides and no recorded System knockouts. The existing classifier therefore reports draws; no neutralization victory is recorded and the condition remains pending.</li><li>Forward tube launches rise from 35 to 81; torpedo-run manoeuvres return in 15 of 20 encounters. Fore-beam delivery improves against Destroyer, Cruiser and Patrol but falls against Warhawk.</li><li>Shadow now has a working authored standoff radius when enemy reach is unknown. Player shadow occupancy rises in three matchups; the defensive posture and re-engagement interaction needs investigation before assuming a damage-value increase is the next fix.</li><li>This matrix tests the combined changes, not one-fix-at-a-time causal attribution.</li></ul><h2>Changes</h2><ul><li>Helm treats a zero shield-gap requirement as optional, without inventing an observation.</li><li>Unknown enemy reach uses an explicit authored manoeuvre radius; observed reach retains precedence.</li><li>Single-shield Harrows opt out of focus in data. Mixed equipment ranks eligible focus separately from protection and recovery.</li><li>Cruiser fore beam uses its existing fixed arc; damage, range and cycle values are unchanged.</li><li>CLI duel victory uses the authored neutralization trigger, retaining actual death accounting.</li></ul><h2>Validation and remaining gates</h2><p>Focused Helm, shield, AI/admission, duel-generator and fresh-host continuation tests pass. JavaScript: 123 tests pass. PASM validate, scan and traceability pass. Independent source review passes.</p><p><strong>Balance: 4/16 checks pass.</strong> Win-rate and damage-margin checks fail for all four opponents; none provides a death-TTK sample.</p><p>Older broad tests remain blocked by stale fleet-policy assumptions, outdated sensor APIs and retired shield-controller expectations. Their failures are recorded below, not counted as passes. Full pre-push gates and human/device acceptance are not claimed.</p><details><summary>Detailed validation evidence and limitations</summary><pre>{
+  "targetedRust": {
+    "helmMeasuredFacts": "6 passed",
+    "shieldMechanics": "70 passed",
+    "shieldAuthoredConfiguration": "6 passed",
+    "shieldAIAdmissionKnowledgeAndRecovery": "74 passed",
+    "neutralizationMessageBridge": "1 passed",
+    "authoredFleetPolicies": "40 passed; 6 existing assumption failures"
+  },
+  "javascript": "123 passed across six focused files; strict strings: 0 errors/warnings",
+  "specifications": "PASM validate, scan and traceability passed; affected wiki source/index lint passed",
+  "review": "Independent read-only source review passed after separating focus eligibility from protection/recovery priority; final end-to-end regression commit 387777cc also passed independent read-only review; independent report review hash-checked all 20 before/after AAR pairs and confirmed the reported activity metrics",
+  "sourceAudit": "No weapon damage/range/cycle values or balance thresholds changed; fixed fore Turret removed; four base Harrow focus flags false",
+  "existingFailures": {
+    "baseline": "48dd565815cc5aefb6afe35dabea469f5ab0c63a",
+    "method": "Read-only source/input comparison, not a baseline test execution",
+    "tests": [
+      "captain_guard_truth_table",
+      "each_policy_kind_has_one_fleet_baseline_and_exactly_the_bespoke_hulls_depart_from_it",
+      "every_hull_authors_the_same_five_selectors",
+      "a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it",
+      "weapons_fire_guard_truth_table",
+      "an_unknown_channel_resolves_to_nothing_on_every_authored_policy"
+    ],
+    "cause": "Unchanged fleet enumeration now selects acquirable_harrow as canonical baseline, includes deliberate rehearsal selectors and inherited Cruiser variants, and still asserts historical policy counts. All failing test bodies/helpers and relevant policy data are unchanged."
+  },
+  "headlessGenerator": "27 passed",
+  "headlessNeutralization": "1 passed: two-opponent generated duel ends only after last neutralization; no fabricated death",
+  "snapshotContinuation": "1 passed: fresh-host serialization/restore and 30 subsequent steps preserve shield capability, charge and individual AI tree memory",
+  "balance": {
+    "totals": {
+      "runs": 20,
+      "wins": 0,
+      "losses": 0,
+      "draws": 20,
+      "timeouts": 0,
+      "reported": 0,
+      "failures": 0
+    },
+    "passed": 4,
+    "total": 16,
+    "failed": [
+      {
+        "matchup": "cruiser_vs_harrow_destroyer",
+        "metric": "min_win_rate",
+        "limit": 1,
+        "actual": 0,
+        "pass": false
+      },
+      {
+        "matchup": "cruiser_vs_harrow_destroyer",
+        "metric": "max_ttk_median",
+        "limit": 10,
+        "actual": null,
+        "pass": null
+      },
+      {
+        "matchup": "cruiser_vs_harrow_destroyer",
+        "metric": "min_damage_margin",
+        "limit": 100,
+        "actual": 76.4772,
+        "pass": false
+      },
+      {
+        "matchup": "cruiser_vs_harrow_cruiser",
+        "metric": "min_win_rate",
+        "limit": 1,
+        "actual": 0,
+        "pass": false
+      },
+      {
+        "matchup": "cruiser_vs_harrow_cruiser",
+        "metric": "max_ttk_median",
+        "limit": 25,
+        "actual": null,
+        "pass": null
+      },
+      {
+        "matchup": "cruiser_vs_harrow_cruiser",
+        "metric": "min_damage_margin",
+        "limit": 200,
+        "actual": 159.0494,
+        "pass": false
+      },
+      {
+        "matchup": "cruiser_vs_harrow_patrol",
+        "metric": "min_win_rate",
+        "limit": 1,
+        "actual": 0,
+        "pass": false
+      },
+      {
+        "matchup": "cruiser_vs_harrow_patrol",
+        "metric": "max_ttk_median",
+        "limit": 20,
+        "actual": null,
+        "pass": null
+      },
+      {
+        "matchup": "cruiser_vs_harrow_patrol",
+        "metric": "min_damage_margin",
+        "limit": 200,
+        "actual": 112.4952,
+        "pass": false
+      },
+      {
+        "matchup": "cruiser_vs_harrow_warhawk",
+        "metric": "min_win_rate",
+        "limit": 1,
+        "actual": 0,
+        "pass": false
+      },
+      {
+        "matchup": "cruiser_vs_harrow_warhawk",
+        "metric": "max_ttk_median",
+        "limit": 25,
+        "actual": null,
+        "pass": null
+      },
+      {
+        "matchup": "cruiser_vs_harrow_warhawk",
+        "metric": "min_damage_margin",
+        "limit": 25,
+        "actual": -62.67599999999999,
+        "pass": false
+      }
+    ]
+  },
+  "limits": "Full pre-push suite and human/device acceptance are not claimed. Concurrent optimisation remains separate.",
+  "existingHeadlessCompilation": "tests/headless_runner.rs has 11 existing errors using formerly nonoptional sensor fields and removed ShipScanRecord.last/refusal. New victory regression runs in tests/combat_balance.rs; unrelated old tests left untouched.",
+  "existingSnapshotFixtures": "Two unchanged older selected fixtures fail before their intended continuation checks: early hull damage is no longer guaranteed at 400 ticks; the legacy coarse-shield inbox is not consumed by per-arc state-tree AI. No baseline execution comparison is claimed.",
+  "balanceCommand": "node scripts/balance-runs.mjs scripts/balance-runs.cruiser.toml --out .phoenix/combat-balance-2026-10-16",
+  "balanceExitCode": 1,
+  "reportPresentation": "Desktop and 390px phone rendering inspected; no page-width overflow (tables scroll horizontally)"
+}</pre></details><details><summary>Provenance and machine-readable evidence</summary><p><a href="combat-balance-corrections-2026-10-16.json">Full comparison JSON</a> · <a href="balance-headless-profile-2026-10-16.html">Earlier investigation</a></p><p>Tested revision: <code>387777cc82194f7e84b19848aafb517c0390f7b9</code></p><p>Profile: measure (release-derived, thin LTO, 16 codegen units). The runner's release-path executable is a byte-identical frozen copy of the measure-profile build; this is gameplay evidence, not a speed comparison.</p><p>Unchanged matrix SHA256: <code>c6946bde4e6bfb9b702a9bb2dd1da38a59297ec5c1ef2a3eaf25bf89177be5ae</code></p></details></main></html>

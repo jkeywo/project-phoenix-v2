@@ -1,4 +1,17 @@
 entities:
+  - decision: redesign-comms-finite-listening-contextual-chatter
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Finite Listening Priorities And Paid Contextual Intent Reports
+      summary: "Optional Radio equipment covers a finite simultaneous subset of its own configured channels in an admitted priority order. Ordinary per-System Comms AI can report genuinely known own alert intent on introduction or meaningful change through the same paid public text path, without periodic noise, message quotas or another controller."
+      rationale:
+        - "[ai] Root approved the revised increment-16-listening.md contract before runtime. Absent optional coverage preserves all existing configured channels. An exact priority permutation and positive simultaneous coverage select receive channels at the same actual paid Radio endpoint boundary; no message-count stock, backlog, capture oracle or transport change is introduced."
+        - "Apply actual monitoring to addressed reception, returned outcomes, original-event capture, receiving relay hops and selected media carriers. Transmitting does not replace receive priorities. Preserve compatible keys, range, field/terrain, protection and direct-first routes. Missed one-shot traffic is not recoverable by later listening; only existing explicitly sustained paid services retain their ordinary delivery semantics and original clocks. Legacy narrative/hail contracts do not silently gain physical emitter provenance."
+        - "The first contextual producer uses one explicit permitted own Captain/alert publication, not a seat or global private flag. Extend that existing publication with dated ObservationMetadata bound to the actual Alert System; stale, absent, ambiguous or withdrawn context is unknown. At actual paid send revalidate the latest supported current/previous-boundary sample and chosen alert semantic. No copied knowledge store or invented freshness is allowed."
+        - "Optional authored public templates report red-alert selected or routine-alert selected as own intent, never enemy knowledge, completed work, effective machinery obedience or a promised signature. The same single ordinary Comms tree/admission executes below actual reading/decisions/planned requests, and Human control stands it down. Initial known posture can introduce once; thereafter only a semantic change plus minimum successful-send spacing is eligible. Retain only last successfully reported semantic/emission tick in the actual owner; unsuccessful attempts consume neither, intermediate unsent changes coalesce, and recovery never drains an overdue queue."
+        - "Accepted Workshop/history/includes/Preview/Test and actual Human/AI paid reception/reporting, no unchanged periodic noise, coverage withdrawal, no early/private disclosure, whole JSON360/digests and malformed owner/order/clock/publication no-write evidence remain required. This adoption is not a native/device/full16 exit; dynamic keys, hop interception, media recording and broader contextual consumers remain outside this bounded contract."
   - decision: redesign-comms-decoded-typed-claims
     core:
       status: accepted

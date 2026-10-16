@@ -466,7 +466,8 @@ use super::*;
 /// `79` retains selected radio call intent; device leases and media bytes are excluded.
 /// `80` retains actually intercepted emissions, decoder selection and paid progress.
 /// `81` retains held Helm course provenance and future repair dispositions/evidence.
-pub const SNAPSHOT_FORMAT: u32 = 81;
+/// `82` retains actual personnel holders, compound requests and physical reception receipts.
+pub const SNAPSHOT_FORMAT: u32 = 82;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -631,7 +632,9 @@ pub const SNAPSHOT_FORMAT: u32 = 81;
 /// through finite ordinary Comms work before publishing acquired evidence.
 /// "0.63" follows only permitted dated Navigation courses, monitors actual repair
 /// footprints and admits ordinary finite fixed beam turrets through carried craft.
-pub const SIMULATION_RULES: &str = "0.63";
+/// "0.64" receives craft only through actual consent and paid Bay work, preserves
+/// personnel custody, and retains permitted captured beam aim across selection changes.
+pub const SIMULATION_RULES: &str = "0.64";
 
 /// The authored data, computed rather than remembered.
 ///

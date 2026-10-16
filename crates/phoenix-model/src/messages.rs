@@ -52,7 +52,8 @@ use uuid::Uuid;
 /// Revision 36 carries explicitly selected human calls and bounded transient media.
 /// Revision 37 carries paid interception and decoder controls.
 /// Revision 38 carries permitted Helm following and future repair intent views.
-pub const PROTOCOL_VERSION: u32 = 38;
+/// Revision 39 carries compound personnel identities and consent-bound craft reception.
+pub const PROTOCOL_VERSION: u32 = 39;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).

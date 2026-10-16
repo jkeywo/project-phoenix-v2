@@ -392,3 +392,31 @@ consumer to read its own sensor evidence without pooling unrelated Console
 knowledge. The accepted-loader positive and missing-feed tests are authored but
 not executed in this worker. Independent source review passed; the actual paid
 report consumer and the adopted carried-target guard remain separate unfinished work.
+
+## Structural checkpoint for integrator foundation synchronization
+
+The isolated branch now implements the adopted first-slice independent-hull
+restriction at actual contact and both attached-parent continuation boundaries.
+It also contains endpoint shape contact, ordinary finite body creation, exact
+parent-pair filtering, the existing physical owner's bank-aware projection and
+actual removal transaction, limited subject-only Broad acquisition, raw Radio
+payment receipts, and canonical capture/fold/preflight/apply joins. `report`
+remains `None`: unsupported historical report frontiers are refused until the
+real paid provenance consumer exists.
+
+Craft independently source-reviewed the physical/contact and removal tests;
+Personnel reviewed the candidate/current-parent restore guards and typed causal
+closure; Comms reviewed limited sensing and the once-paid raw Radio receipt.
+These are bounded source verdicts, not execution evidence. The focused new owner
+tests are authored but not run here. Explicit owned-file Rust formatting and
+diff checks pass. Root separately ran the actual accepted-recipe tests against
+the integrated recipe and knowledge-binding donors: two tests passed at
+`1062d545`, recorded in
+`.phoenix/resumed-charted-and-marking-accepted-owners-retry.log`.
+
+This checkpoint permits the integrator to synchronize a clean tracked branch
+with current S066 source without stashing work. Paid late report delivery,
+historical report provenance, complete used-template dependency acceptance,
+Workshop payload authoring and full actual-host continuation remain unfinished.
+No complete marking consumer, generic carry-capable target support, native
+physical acceptance or increment15 playable exit is claimed.

@@ -1304,6 +1304,10 @@ pub(crate) fn apply_entity_state(world: &mut World, entity: Entity, row: &Entity
         );
         return;
     }
+    if let Err(reason) = super::marking::validate_single(world, entity, row, tick) {
+        bevy::log::error!("refused marking restore for {}: {}", row.uuid, reason);
+        return;
+    }
     if let Err(reason) = super::comms_capture::validate_single(world, entity, row, tick) {
         bevy::log::error!(
             "refused captured evidence restore for {}: {}",
@@ -1700,6 +1704,16 @@ pub(super) fn apply_entity_state_with(
     }
     if let Some(saved) = &row.mounts {
         entity_mut.insert(saved.clone());
+    }
+    if let Some(saved) = &row.marking_attachment {
+        entity_mut
+            .insert(phoenix_sim_gameplay::weapons::marking::ShipMarkingAttachment(saved.clone()));
+        entity_mut.insert(bevy_rapier3d::prelude::ActiveHooks::FILTER_CONTACT_PAIRS);
+    } else {
+        entity_mut.remove::<phoenix_sim_gameplay::weapons::marking::ShipMarkingAttachment>();
+    }
+    if entity_mut.contains::<crate::comms::radio::RadioProfile>() {
+        entity_mut.insert(crate::comms::paid_radio::PaidRadioWork::default());
     }
     if let Some(saved) = &row.comms_capture {
         entity_mut.insert(saved.clone());

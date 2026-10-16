@@ -68,6 +68,7 @@ pub(crate) fn spawn_entity_with_ship_seed(
     crate::science::enquiry::install(config, &mut entity_commands);
 
     super::ship_spawn::install(config, position, &uuid, seed, &mut entity_commands);
+    crate::console::weapons::marking::install(config, position, &mut entity_commands);
     entity_commands.id()
 }
 
@@ -140,36 +141,42 @@ pub use phoenix_sim_contracts::identity::*;
 
 pub use phoenix_sim_gameplay::entities::spawner::*;
 
+/// Exact supported physical shape owner, shared by installation and saved
+/// attachment contact validation. Visual/LOD scaling never changes this body.
+pub(crate) fn physical_collider(collider: &crate::entities::config::ColliderConfig) -> Collider {
+    match collider.shape {
+        crate::entities::config::ColliderShape::Ball => Collider::ball(collider.radius),
+        crate::entities::config::ColliderShape::Capsule => {
+            Collider::capsule_y(collider.length / 2.0, collider.radius)
+        }
+        // `Collider::cylinder` takes the half-height FIRST and the radius
+        // second, and takes the half-height rather than the full height —
+        // which is why the TOML authors `half_height` instead of reusing
+        // the Capsule's `length`. The number in the file is the number
+        // handed to rapier; nothing is doubled or halved on the way.
+        //
+        // A `Cylinder` cannot reach here without a half-height: the load
+        // path rejects one (`entity_config::validate_collider_config`),
+        // because a zero-thickness disc is a body nothing can ever be
+        // inside — the pass-through bug the station-collider correction
+        // just fixed. The fallback is the belt to that braces, and it errs
+        // UPWARDS to the radius, i.e. to the enclosing sphere this variant
+        // replaces: a degenerate authored body keeps ships outside a hull
+        // rather than letting them through it.
+        crate::entities::config::ColliderShape::Cylinder => Collider::cylinder(
+            collider.half_height.unwrap_or(collider.radius),
+            collider.radius,
+        ),
+    }
+}
+
 struct ColliderSpawn;
 
 impl SpawnSection for ColliderSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // Collider section â†’ Rapier collider + rigid body
         if let Some(collider) = &config.collider {
-            let rapier_collider = match collider.shape {
-                crate::entities::config::ColliderShape::Ball => Collider::ball(collider.radius),
-                crate::entities::config::ColliderShape::Capsule => {
-                    Collider::capsule_y(collider.length / 2.0, collider.radius)
-                }
-                // `Collider::cylinder` takes the half-height FIRST and the radius
-                // second, and takes the half-height rather than the full height —
-                // which is why the TOML authors `half_height` instead of reusing
-                // the Capsule's `length`. The number in the file is the number
-                // handed to rapier; nothing is doubled or halved on the way.
-                //
-                // A `Cylinder` cannot reach here without a half-height: the load
-                // path rejects one (`entity_config::validate_collider_config`),
-                // because a zero-thickness disc is a body nothing can ever be
-                // inside — the pass-through bug the station-collider correction
-                // just fixed. The fallback is the belt to that braces, and it errs
-                // UPWARDS to the radius, i.e. to the enclosing sphere this variant
-                // replaces: a degenerate authored body keeps ships outside a hull
-                // rather than letting them through it.
-                crate::entities::config::ColliderShape::Cylinder => Collider::cylinder(
-                    collider.half_height.unwrap_or(collider.radius),
-                    collider.radius,
-                ),
-            };
+            let rapier_collider = physical_collider(collider);
             cmds.insert((
                 rapier_collider,
                 // Pin the physics shape to its AUTHORED size regardless of the

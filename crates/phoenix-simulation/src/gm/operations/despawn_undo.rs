@@ -369,7 +369,10 @@ pub fn restore_precheck(
     };
     // A one-entity inverse cannot recreate contained actors or a historical
     // cross-entity custody/claim graph. Refuse before any body is created.
-    if state.probe_custody.is_some() || state.bay_jobs.is_some() {
+    if state.probe_custody.is_some()
+        || state.bay_jobs.is_some()
+        || state.marking_attachment.is_some()
+    {
         return Err(GmActionRefusalReason::InverseUnsupported);
     }
     // Physical shots outlive the removed body and may already have hit or

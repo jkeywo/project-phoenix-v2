@@ -667,6 +667,24 @@ pub(crate) fn handle_fire_torpedo(
                     continue;
                 }
             }
+            if let Some(recipe) = torpedo_sys
+                .tube(&tube_id)
+                .and_then(|tube| tube.marking.as_ref())
+            {
+                let accepted =
+                    crate::entities::config_cache::get_cached_entity_config(&recipe.template);
+                if accepted.as_ref().is_none_or(|config| {
+                    phoenix_sim_gameplay::weapons::marking::validate_payload_recipe(recipe, config)
+                        .is_err()
+                }) {
+                    super::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        WeaponActionResult::Refused(WeaponActionRefusal::UnknownMount),
+                    );
+                    continue;
+                }
+            }
             let launch_faction = factions.get(shooter).ok().map(|faction| faction.0);
             if torpedo_sys
                 .tube(&tube_id)
@@ -1368,6 +1386,7 @@ pub(crate) fn tick_torpedo_lifecycle(
     >,
     mut death_latch: crate::server_app::PlayerDeathLatch,
     mut commands: Commands,
+    marking: super::marking::MarkingRuntime,
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
     mut destroyed_events: MessageWriter<crate::ai::server::AiEntityDestroyed>,
     mut ship_vfx_events: MessageWriter<ShipDestroyedVfx>,
@@ -1404,6 +1423,7 @@ pub(crate) fn tick_torpedo_lifecycle(
     // component; this preserves the legacy Resource-only test paths.
     #[derive(Clone, Debug)]
     struct Detonation {
+        marking: Option<super::marking::MarkingContact>,
         target_uuid: String,
         incoming: [f32; 2],
         delivery: crate::weapons::mount::DamageDelivery,
@@ -1441,8 +1461,33 @@ pub(crate) fn tick_torpedo_lifecycle(
             continue;
         };
         any_ship_component = true;
-        let hits = torpedo_sys.0.find_detonation_hits(targets);
-        for (torpedo_uuid, target_uuid) in hits {
+        let proximity = torpedo_sys.0.find_detonation_hits(targets);
+        let exact = marking.contacts.hits(&torpedo_sys.0);
+        let hits: Vec<_> = torpedo_sys
+            .0
+            .in_flight
+            .iter()
+            .filter_map(|round| {
+                if round.profile.marking.is_some() {
+                    exact
+                        .iter()
+                        .find(|contact| contact.round == round.uuid)
+                        .map(|contact| {
+                            (
+                                round.uuid.clone(),
+                                contact.subject.clone(),
+                                Some(contact.clone()),
+                            )
+                        })
+                } else {
+                    proximity
+                        .iter()
+                        .find(|(id, _)| id == &round.uuid)
+                        .map(|(id, target)| (id.clone(), target.clone(), None))
+                }
+            })
+            .collect();
+        for (torpedo_uuid, target_uuid, marker_contact) in hits {
             let Some(det) = torpedo_sys.0.handle_collision_full(&torpedo_uuid) else {
                 continue;
             };
@@ -1451,6 +1496,7 @@ pub(crate) fn tick_torpedo_lifecycle(
                 ServerMessage::TorpedoDestroyed { uuid: torpedo_uuid },
             ));
             detonations.push(Detonation {
+                marking: marker_contact,
                 target_uuid,
                 incoming: det.incoming,
                 delivery: det.delivery(),
@@ -1467,8 +1513,33 @@ pub(crate) fn tick_torpedo_lifecycle(
     // Resource-only fallback: tests that only insert the global
     // `TorpedoSystemResource` and no Ship entity still work.
     if !any_ship_component && ships.is_empty() {
-        let hits = torpedo_sys_res.0.find_detonation_hits(targets);
-        for (torpedo_uuid, target_uuid) in hits {
+        let proximity = torpedo_sys_res.0.find_detonation_hits(targets);
+        let exact = marking.contacts.hits(&torpedo_sys_res.0);
+        let hits: Vec<_> = torpedo_sys_res
+            .0
+            .in_flight
+            .iter()
+            .filter_map(|round| {
+                if round.profile.marking.is_some() {
+                    exact
+                        .iter()
+                        .find(|contact| contact.round == round.uuid)
+                        .map(|contact| {
+                            (
+                                round.uuid.clone(),
+                                contact.subject.clone(),
+                                Some(contact.clone()),
+                            )
+                        })
+                } else {
+                    proximity
+                        .iter()
+                        .find(|(id, _)| id == &round.uuid)
+                        .map(|(id, target)| (id.clone(), target.clone(), None))
+                }
+            })
+            .collect();
+        for (torpedo_uuid, target_uuid, marker_contact) in hits {
             let Some(det) = torpedo_sys_res.0.handle_collision_full(&torpedo_uuid) else {
                 continue;
             };
@@ -1477,6 +1548,7 @@ pub(crate) fn tick_torpedo_lifecycle(
                 ServerMessage::TorpedoDestroyed { uuid: torpedo_uuid },
             ));
             detonations.push(Detonation {
+                marking: marker_contact,
                 target_uuid,
                 incoming: det.incoming,
                 delivery: det.delivery(),
@@ -1593,6 +1665,14 @@ pub(crate) fn tick_torpedo_lifecycle(
                 .as_ref()
                 .map(|s| s.0.hp_facing_bearing(bearing))
                 .unwrap_or(0);
+            if let Some(contact) = det.marking.clone() {
+                // A raised struck arc consumes the already intercepted/finite
+                // round without materialising equipment or granting penetration.
+                if struck_arc_hp <= 0 {
+                    marking.spawn(contact, &mut commands);
+                }
+                break;
+            }
             let delivery = det.delivery;
             let mut payload = delivery.payload(struck_arc_hp > 0);
             match shield_comp {

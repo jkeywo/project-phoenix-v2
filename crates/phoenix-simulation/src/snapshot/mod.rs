@@ -377,6 +377,7 @@ pub(crate) use activities::validate_single_row as validate_activity_single_row;
 mod craft;
 mod emp;
 mod helm_movement;
+mod marking;
 #[cfg(test)]
 mod mission_clock_tests;
 mod mounts;

@@ -145,6 +145,7 @@ fn parent_removed(
                 state.fail_removed(&uuid, now);
             }
         }
+        crate::ship::physics_systems::detach_marking_subject(world, &uuid, now);
         remove_carried_with_parent(world, &uuid);
     });
 }

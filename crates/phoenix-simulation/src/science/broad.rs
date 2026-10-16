@@ -164,6 +164,10 @@ pub(crate) fn tick(
         &crate::ship_plugin::ShipConfigComponent,
         Option<&crate::modifiers::ShipModifiers>,
         &crate::server_app::ShipSystemBlackboards,
+        (
+            Option<&crate::console::weapons::marking::MarkingBeaconProfile>,
+            Option<&phoenix_sim_gameplay::weapons::marking::ShipMarkingAttachment>,
+        ),
     )>,
 ) {
     let dt = fixed.timestep().as_secs_f32();
@@ -192,8 +196,15 @@ pub(crate) fn tick(
         ship_config,
         modifiers,
         boards,
+        (marker, attachment),
     ) in observers
     {
+        let attached_subject = attachment.and_then(|attachment| match &attachment.0.location {
+            phoenix_model::marking::MarkingLocation::Attached { subject, .. } => {
+                Some(subject.as_str())
+            }
+            phoenix_model::marking::MarkingLocation::Detached { .. } => None,
+        });
         for (system, instrument) in &profile.0 {
             let profile = &instrument.profile;
             let state = state
@@ -213,7 +224,10 @@ pub(crate) fn tick(
             });
             // Power already pays each fitted broad consumer once in Physics. The
             // observation producer never spends a second cost or uses incoming flow.
-            let paid = if usable {
+            let paid = if usable
+                && marker
+                    .is_none_or(|marker| marker.0.sensor == *system && attached_subject.is_some())
+            {
                 power.0.last_work_fraction(&profile.system).unwrap_or(0.0) * operation
             } else {
                 0.0
@@ -241,9 +255,10 @@ pub(crate) fn tick(
                     // Existing projectiles are not scene entities. Their one
                     // authoritative owner supplies positions to the same paid
                     // instrument, with no guidance/order/velocity shortcut.
-                    if radar
-                        .shows
-                        .contains(&phoenix_model::tags::EntityTag::Missile)
+                    if marker.is_none()
+                        && radar
+                            .shows
+                            .contains(&phoenix_model::tags::EntityTag::Missile)
                     {
                         for projectile in ordnance.iter().flat_map(|owner| &owner.0.in_flight) {
                             let position = Vec3::new(projectile.x, projectile.y, projectile.z);
@@ -313,7 +328,7 @@ pub(crate) fn tick(
                         let tags = tags.map(|tags| tags.0.as_slice()).or_else(|| {
                             rock.and_then(|_| snapshots.get(id).map(|row| row.tags.as_slice()))
                         });
-                        if id == observer.0 {
+                        if id == observer.0 || marker.is_some() && attached_subject != Some(id) {
                             continue;
                         }
                         let report = runtime.as_ref().and_then(|runtime| {
@@ -335,9 +350,11 @@ pub(crate) fn tick(
                         }
                         // GM reports are an observer's Sensors picture. Another
                         // independently fitted instrument does not inherit it.
-                        if ship_config.0.system(system).is_some_and(|system| {
-                            system.kind == crate::ship::system_registry::SENSOR_RADAR_KIND
-                        }) {
+                        if marker.is_none()
+                            && ship_config.0.system(system).is_some_and(|system| {
+                                system.kind == crate::ship::system_registry::SENSOR_RADAR_KIND
+                            })
+                        {
                             if let Some(report) = report {
                                 if let Some(measurement) =
                                     reported_measurement(system, id, report, target, &radar.selects)
@@ -482,6 +499,7 @@ pub(crate) fn tick(
                 }
             }
             if paid > 0.0
+                && marker.is_none()
                 && ship_config.0.system(system).is_some_and(|system| {
                     system.kind == crate::ship::system_registry::SENSOR_RADAR_KIND
                 })
@@ -508,6 +526,16 @@ pub(crate) fn tick(
                             measurements.push(sample);
                         }
                     }
+                }
+            }
+            if marker.is_some() {
+                // Physical position/observed motion only; no private identity,
+                // assessment, GM substitution or invented association evidence.
+                for measurement in &mut measurements {
+                    measurement.identity = None;
+                    measurement.classification = None;
+                    measurement.assessment = None;
+                    measurement.observation = None;
                 }
             }
             // Equal observed labels are not proof that two returns are the

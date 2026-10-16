@@ -544,6 +544,7 @@ pub(super) fn validate_entity_resources(
     super::concealment::validate_entity(world, entity, row)?;
     super::comms_media::validate_entity(world, entity, row)?;
     super::emission_intent::validate_entity(world, entity, row)?;
+    super::marking::validate_row(world, row)?;
     super::comms_capture::validate_entity(world, entity, row, u64::MAX)?;
     match (
         world.get::<crate::console::navigation::sharing::NavigationSharingProfile>(entity),

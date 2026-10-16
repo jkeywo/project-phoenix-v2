@@ -23,6 +23,7 @@ pub(crate) fn install(
     if let Some(radio) = config.comms.as_ref().and_then(|comms| comms.radio.as_ref()) {
         commands.insert((
             RadioProfile(radio.clone()),
+            super::paid_radio::PaidRadioWork::default(),
             super::media_control::ShipCommsMediaIntent::default(),
         ));
     }
@@ -53,7 +54,10 @@ pub(crate) type Sources<'w, 's> = Query<
         &'static ShipConfigComponent,
         &'static ShipSystemControlSources,
         &'static AdmittedCommands,
-        &'static mut ShipPowerSystem,
+        (
+            &'static mut ShipPowerSystem,
+            Option<&'static mut super::paid_radio::PaidRadioWork>,
+        ),
         &'static mut crate::server_app::ShipSystemBlackboards,
         (
             Option<&'static ShipDamage>,
@@ -190,7 +194,7 @@ pub(crate) fn tick_radio(
             config,
             controls,
             _,
-            mut power,
+            (mut power, paid),
             _,
             (damage, hull, modifiers),
             (slot, faction, name),
@@ -210,14 +214,22 @@ pub(crate) fn tick_radio(
                 phoenix_model::damage::DamageBinding::Operation,
             )
         });
-        let listening = if available {
+        let raw_paid = if available {
             power
                 .0
                 .work_continuous(&profile.0.system, fixed.timestep().as_secs_f32(), 1.0)
                 .map_or(0.0, |grant| grant.fraction)
         } else {
             0.0
-        } * operation.clamp(0.0, 1.0);
+        };
+        let raw_paid = if let Some(mut receipt) = paid {
+            receipt.record(&profile.0.system, tick.0, raw_paid);
+            receipt.raw(&profile.0.system, tick.0)
+        } else {
+            // Bare owner fixtures retain their previous one-payment behavior.
+            raw_paid
+        };
+        let listening = raw_paid * operation.clamp(0.0, 1.0);
         endpoints.push(Endpoint {
             entity,
             uuid: uuid.0.clone(),
@@ -233,7 +245,7 @@ pub(crate) fn tick_radio(
     }
     own_contacts::publish(&endpoints, &mut sources, &hailable, &paths);
     for source in &endpoints {
-        let Ok((_, _, _, _, _, config, _, commands, mut power, boards, _, _)) =
+        let Ok((_, _, _, _, _, config, _, commands, (mut power, _), boards, _, _)) =
             sources.get_mut(source.entity)
         else {
             continue;
@@ -496,6 +508,10 @@ pub(super) use route::available as route_available;
 
 pub(crate) fn register(app: &mut App) {
     use crate::authoritative::{DeclareState, StateClass};
+    app.declare_state::<super::paid_radio::PaidRadioWork>(
+        StateClass::Cache,
+        "current-paid-radio-work",
+    );
     use crate::sim_sets::{FixedStep, SimSet};
     app.declare_state::<RadioProfile>(StateClass::Derived, "comms-range-state")
         .add_systems(

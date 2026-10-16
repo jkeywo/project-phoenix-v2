@@ -9,6 +9,8 @@ use super::*;
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EntityState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marking_attachment: Option<phoenix_model::marking::MarkingAttachment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub emission_intent: Option<phoenix_sim_gameplay::ship::emission_profile::EmissionIntentState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comms_capture: Option<crate::comms::capture::ShipCommsCapture>,

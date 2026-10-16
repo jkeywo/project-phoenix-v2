@@ -54,12 +54,93 @@ fn boost_work_fraction(
         * operation
 }
 
+/// Same physical rotation used by sync, exact contact and attachment restore.
+pub fn physical_rotation(physics: &ShipPhysics) -> Quat {
+    Quat::from_euler(EulerRot::YXZ, -physics.yaw, 0.0, physics.roll)
+}
+
+/// A rigid relation is a projection, not another integration of velocity.
+pub fn marking_attached_pose(subject: &ShipPhysics, offset: [f32; 3]) -> ShipPhysics {
+    let point = Vec3::new(subject.x, subject.y, subject.z)
+        + physical_rotation(subject) * Vec3::from_array(offset);
+    ShipPhysics {
+        x: point.x,
+        y: point.y,
+        z: point.z,
+        ..*subject
+    }
+}
+
+/// Sole attachment pose owner, called before physical sync and after Dock's
+/// final placement. Missing observations never detach; only actual body loss does.
+#[allow(clippy::type_complexity)]
+pub fn project_marking_attachments(
+    tick: Option<Res<crate::sim_tick::SimTick>>,
+    mut bodies: ParamSet<(
+        Query<
+            (&crate::entities::spawner::EntityUuid, &ShipPhysics),
+            (
+                Without<crate::weapons::marking::ShipMarkingAttachment>,
+                bevy::ecs::query::Allow<bevy::ecs::entity_disabling::Disabled>,
+            ),
+        >,
+        Query<(
+            &mut ShipPhysics,
+            &mut Transform,
+            &mut crate::weapons::marking::ShipMarkingAttachment,
+        )>,
+    )>,
+) {
+    let Some(tick) = tick else { return };
+    let parents: std::collections::BTreeMap<_, _> = bodies
+        .p0()
+        .iter()
+        .map(|(id, pose)| (id.0.clone(), *pose))
+        .collect();
+    for (mut pose, mut transform, mut attachment) in &mut bodies.p1() {
+        let phoenix_model::marking::MarkingLocation::Attached { subject, offset } =
+            &attachment.0.location
+        else {
+            continue;
+        };
+        if let Some(parent) = parents.get(subject) {
+            *pose = marking_attached_pose(parent, *offset);
+            transform.translation = Vec3::new(pose.x, pose.y, pose.z);
+            transform.rotation = physical_rotation(&pose);
+        } else {
+            attachment.0.location =
+                phoenix_model::marking::MarkingLocation::Detached { tick: tick.0 };
+            pose.forward_speed = 0.0;
+            pose.lateral_speed = 0.0;
+            pose.vertical_speed = 0.0;
+        }
+    }
+}
+
+/// Actual removal transaction uses the same relation owner. This cannot infer
+/// removal from missing information and never moves the last projected body.
+pub fn detach_marking_subject(world: &mut World, subject: &str, tick: u64) {
+    let mut markers = world.query_filtered::<(
+        &mut ShipPhysics,
+        &mut crate::weapons::marking::ShipMarkingAttachment,
+    ), bevy::ecs::query::Allow<bevy::ecs::entity_disabling::Disabled>>();
+    for (mut pose, mut marker) in markers.iter_mut(world) {
+        if matches!(&marker.0.location, phoenix_model::marking::MarkingLocation::Attached { subject: parent, .. } if parent == subject)
+        {
+            marker.0.location = phoenix_model::marking::MarkingLocation::Detached { tick };
+            pose.forward_speed = 0.0;
+            pose.lateral_speed = 0.0;
+            pose.vertical_speed = 0.0;
+        }
+    }
+}
+
 pub fn sync_ship_position(mut ship_query: Query<(&ShipPhysics, &mut Transform)>) {
     for (physics, mut transform) in ship_query.iter_mut() {
         transform.translation.x = physics.x;
         transform.translation.y = physics.y;
         transform.translation.z = physics.z;
-        transform.rotation = Quat::from_euler(EulerRot::YXZ, -physics.yaw, 0.0, physics.roll);
+        transform.rotation = physical_rotation(physics);
     }
 }
 
@@ -745,3 +826,7 @@ pub fn integrate_ship_physics(
         physics.roll = physics.roll + (target_roll - physics.roll) * lerp_factor;
     }
 }
+
+#[cfg(test)]
+#[path = "marking_projection_tests.rs"]
+mod marking_projection_tests;

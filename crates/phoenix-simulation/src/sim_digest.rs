@@ -476,6 +476,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("helm-movement-intent", fold_helm_movement_namespace),
     ("transit-drive-orders", fold_transit_namespace),
     ("physical-craft", fold_craft_namespace),
+    ("marking-attachment", fold_marking_namespace),
     ("weapon-target-assignments", fold_weapon_targets_namespace),
     (
         "guided-source-order-knowledge",
@@ -3169,6 +3170,18 @@ fn fold_emission_intent_namespace(world: &World, acc: u64) -> u64 {
         acc,
         "ship-emission-intent",
         |owner: &crate::console::command::emission::ShipEmissionIntent| Some(owner.0.clone()),
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+
+fn fold_marking_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "marking-attachment",
+        |owner: &phoenix_sim_gameplay::weapons::marking::ShipMarkingAttachment| {
+            Some(owner.0.clone())
+        },
         |acc, state| fold_serde(acc, &state),
     )
 }

@@ -81,6 +81,7 @@ fn active_schema_and_runtime_rows_are_classified_without_generic_mutation() {
         comms_console: Some(Default::default()),
         shield_arcs: vec![crate::entities::config::ShieldArcConfig {
             damage_components: Vec::new(),
+            focus_available: true,
             id: "fore".into(),
             label: "Fore".into(),
             center_deg: 0.0,

@@ -522,6 +522,14 @@ pub fn handle_shields_messages(
                 let SystemControlPayload::SetShieldArcFocus { focused } = &cmd.payload else {
                     continue;
                 };
+                if *focused && !shields.0.facings[index].focus_available {
+                    crate::command_admission::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        ActionFeedbackOutcome::Refused,
+                    );
+                    continue;
+                }
                 if *focused {
                     // Locate the arc index and mark it as the new focus.
                     let idx = shields.0.facings.iter().position(|f| f.id == *arc_id);
@@ -953,6 +961,7 @@ pub fn publish_shields_blackboard(
                                     .min(f32::MAX as f64) as f32
                             }),
                         operation: Some(crate::core::messages::ShieldOperationBlackboard {
+                            focus_available: facing.focus_available,
                             raised: facing.raised,
                             can_recharge: facing.raised
                                 && facing.is_online()

@@ -61,6 +61,18 @@ describe('PhShieldFacings', () => {
     vi.useRealTimers();
   });
 
+  it('keeps an unavailable arc visible but prevents pointer and keyboard focus', () => {
+    const activateSemanticAction = vi.fn();
+    const { el } = setup({ activateSemanticAction });
+    el.state = { facings: [{ arc_id:'fore', hp:40, max_hp:40, online:true, operation:{focus_available:false} }] };
+    const target = el.shadowRoot.querySelector('.hit-path');
+    expect(target.getAttribute('aria-disabled')).toBe('true');
+    target.dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    el.dispatchEvent(new KeyboardEvent('keydown', { key:'Home', bubbles:true }));
+    el.dispatchEvent(new KeyboardEvent('keydown', { key:'Enter', bubbles:true }));
+    expect(activateSemanticAction).not.toHaveBeenCalled();
+  });
+
   it('is defined and registered as a custom element', () => {
     expect(customElements.get('ph-shield-facings')).toBeDefined();
   });

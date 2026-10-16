@@ -137,3 +137,18 @@ fn work_configuration_survives_authored_and_runtime_conversion() {
     assert_eq!(toml::from_str::<ShieldArcConfig>(&source).unwrap(), arc);
     assert_eq!(arc.to_runtime().energy, arc.energy);
 }
+
+#[test]
+fn focus_availability_defaults_on_and_round_trips_explicit_opt_out() {
+    let enabled = arc("fore", 0.5, &[]);
+    assert!(enabled.focus_available);
+    let mut value = toml::Value::try_from(&enabled).unwrap();
+    value
+        .as_table_mut()
+        .unwrap()
+        .insert("focus_available".into(), false.into());
+    let disabled: ShieldArcConfig = value.try_into().unwrap();
+    assert!(!disabled.to_runtime().focus_available);
+    let roundtrip: ShieldArcConfig = toml::from_str(&toml::to_string(&disabled).unwrap()).unwrap();
+    assert_eq!(roundtrip, disabled);
+}

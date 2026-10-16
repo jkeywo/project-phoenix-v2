@@ -15,6 +15,7 @@ export function mountWorkshopShields({ root, provider, runtime, draft: getDraft,
   const materialise = input('materialise', 'checkbox'), targets = el('select', 'targets', null, { multiple: '', size: '4' });
   const compartment = el('select', 'compartment');
   const resetAi = input('reset-ai', 'checkbox');
+  const focusAvailable = input('focus-available', 'checkbox');
   const status = el('p', 'status', null, { role: 'status' }), create = el('button', 'new', 'workshop.shield.new', { type: 'button' });
   const save = el('button', 'save', 'workshop.shield.save', { type: 'button' }), remove = el('button', 'remove', 'workshop.shield.remove', { type: 'button' });
   const fields = Object.fromEntries(['id', 'label', 'center_deg', 'width_deg', 'max_hp', 'regen_per_sec', 'offline_duration']
@@ -26,6 +27,7 @@ export function mountWorkshopShields({ root, provider, runtime, draft: getDraft,
     label(template, 'workshop.shield.template'), label(existing, 'workshop.shield.existing'), create,
     label(materialise, 'workshop.shield.materialise'), status,
     ...Object.entries(fields).map(([key, control]) => label(control, 'workshop.shield.' + key)),
+    label(focusAvailable, 'workshop.shield.focus_available'),
     ...Object.entries(work).map(([key, control]) => label(control, 'workshop.shield.' + key)),
     label(targets, 'workshop.shield.targets'), label(compartment, 'workshop.interior.placement'), label(resetAi, 'workshop.shield.reset_ai'), save, remove);
   node.append(el('h4',null,'workshop.shield.frequency_title'),label(loss,'workshop.shield.mismatch_loss'),label(cycling,'workshop.shield.cycling'),
@@ -40,6 +42,7 @@ export function mountWorkshopShields({ root, provider, runtime, draft: getDraft,
   function paint(arc = selected || defaultShieldArc()) {
     for (const [key, control] of Object.entries(fields)) control.value = arc[key] ?? '';
     for (const [key, control] of Object.entries(work)) control.value = arc.energy?.[key] ?? '';
+    focusAvailable.checked = arc.focus_available !== false;
     targets.replaceChildren();
     compartment.replaceChildren();
     for (const room of inspection?.resolved.value.interior?.compartment || []) option(compartment, room.id, room.label || room.id);
@@ -83,6 +86,7 @@ export function mountWorkshopShields({ root, provider, runtime, draft: getDraft,
       if (['id', 'label'].includes(key)) arc[key] = control.value;
       else if (control.value === '') delete arc[key]; else arc[key] = control.valueAsNumber;
     }
+    arc.focus_available = focusAvailable.checked;
     arc.energy = Object.fromEntries(Object.entries(work).map(([key, control]) => [key, control.valueAsNumber]));
     arc.energy.recovery_targets = [...targets.selectedOptions].map(option => option.value);
     const token = ++generation, draft = getDraft(), operation = { path: template.value, arc, remove: deleting,

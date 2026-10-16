@@ -627,6 +627,10 @@ impl EntityConfig {
                 )?;
                 let mut synthesised_config = toml::value::Table::new();
                 synthesised_config.insert(
+                    "focus_available".into(),
+                    toml::Value::Boolean(arc.focus_available),
+                );
+                synthesised_config.insert(
                     "ai".into(),
                     toml::Value::try_from(&arc.ai).map_err(SerdeError::custom)?,
                 );

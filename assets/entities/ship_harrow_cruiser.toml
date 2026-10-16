@@ -197,6 +197,7 @@ description = "entity.ship_harrow_cruiser.target.description"
 # Single omni arc, as on every other NPC hull: NPCs have no `[shields]` station,
 # so the auto-generated `[[system]]` entry is ownerless and `ai_only`.
 [[shield_arc]]
+focus_available = false
 id = "all"
 label = "shield_arc.all.label"
 center_deg = 0

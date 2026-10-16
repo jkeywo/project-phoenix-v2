@@ -4748,6 +4748,8 @@ pub struct ShieldArcBlackboard {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct ShieldOperationBlackboard {
+    /// Authored capability, not inferred from the number of shield arcs.
+    pub focus_available: bool,
     pub raised: bool,
     pub can_recharge: bool,
     pub protection_fraction: f32,

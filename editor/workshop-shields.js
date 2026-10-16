@@ -38,7 +38,7 @@ export async function applyShieldFrequencyOperation({draft,provider,runtime,depe
 export const SHIELD_ENERGY_FIELDS = Object.freeze(['upkeep_per_sec', 'recharge_energy_per_hp', 'recovery_energy_per_hp', 'discharge_hp_per_sec']);
 const clone = value => structuredClone(value);
 const systemId = arc => shieldArcSystemId(arc.id);
-export const defaultShieldArc = () => ({ id: '', label: '', center_deg: 0, width_deg: 90, ai: initialShieldTree([]),
+export const defaultShieldArc = () => ({ id: '', label: '', focus_available: true, center_deg: 0, width_deg: 90, ai: initialShieldTree([]),
   damage_component: ['operation', 'intake', 'cooling'].map(binding => defaultDamageComponent(binding)),
   energy: { upkeep_per_sec: 0.05, recharge_energy_per_hp: 0.5, recovery_energy_per_hp: 0.25, discharge_hp_per_sec: 5, recovery_targets: [] } });
 export function inspectShields(draft, dependencies, path) {

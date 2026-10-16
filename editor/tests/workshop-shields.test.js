@@ -76,10 +76,11 @@ describe('Workshop shield work and composition', () => {
   });
   it('keeps history and exported source coherent and never lands authoritative refusal', async () => {
     const current = draft(), before = current.read(path), runtime = { dependencies: async () => dependencies, validate: vi.fn(async () => ({ accepted: true, findings: [] })) };
-    const arc = arcOf(current); arc.energy.upkeep_per_sec = 0.2;
+    const arc = arcOf(current); arc.energy.upkeep_per_sec = 0.2; arc.focus_available = false;
     await applyShieldOperation({ draft: current, runtime, operation: { path, originalId: arc.id, arc } });
     const after = current.read(path); current.undo(); expect(current.read(path)).toBe(before); current.redo(); expect(current.read(path)).toBe(after);
     expect(parse(new WorkshopDocument(current.archive()).read(path)).shield_arc[0].energy.upkeep_per_sec).toBe(0.2);
+    expect(parse(new WorkshopDocument(current.archive()).read(path)).shield_arc[0].focus_available).toBe(false);
     runtime.validate.mockResolvedValueOnce({ accepted: false, findings: [{ message: 'Unsupported shield AI reference' }] });
     await expect(applyShieldOperation({ draft: current, runtime, operation: { path, originalId: arc.id, arc } })).rejects.toThrow();
     expect(current.read(path)).toBe(after); expect(current.snapshot().history.undo).toHaveLength(1);

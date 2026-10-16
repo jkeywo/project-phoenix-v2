@@ -32,9 +32,12 @@ describe('Workshop shield form', () => {
     const { source, draft, changed, panel } = fixture(); await settle();
     for (const input of panel.node.querySelectorAll('input,select')) expect(panel.node.querySelector(`label[for="${input.id}"]`)).not.toBeNull();
     control('upkeep_per_sec').value = '0.2';
+    expect(control('focus-available').checked).toBe(true);
+    control('focus-available').checked = false;
     [...control('targets').options].find(option => option.value === 'shield-arc-aft').selected = true;
     control('reset-ai').checked = true; control('save').click(); await settle();
     expect(parse(draft.read(path)).shield_arc[0].energy).toMatchObject({ upkeep_per_sec: 0.2, recovery_targets: ['shield-arc-aft'] });
+    expect(parse(draft.read(path)).shield_arc[0].focus_available).toBe(false);
     expect(changed).toHaveBeenCalledWith(path); draft.undo(); panel.refresh(); expect(draft.read(path)).toBe(source); panel.dispose();
   });
   it('creates and removes a powered arc as complete accepted edits', async () => {

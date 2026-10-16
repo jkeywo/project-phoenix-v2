@@ -57,3 +57,12 @@ entities:
       summary: "S024 selects defensive retuning for every generator, with equipment-dependent performance, a timed raised-shield transition, temporarily reduced protection and energy/heat cost. G050 probing remains optional with generally persistent findings until configuration changes. These interactions belong to increment 15; increment 9 upkeep, recharge and redistribution operate independently. Electronic protection against disruption remains increment 17."
       rationale:
         - "Selected S024 and G050 are retained explicitly rather than silently dropped or mistaken for completed current controls. The approved serial roadmap places probing/layered combat after the ordinary shield energy migration."
+
+  - decision: shield-focus-authored-availability
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Author Shield Focus Availability Per Arc
+      summary: "Each shield arc declares focus_available, default true. Disabled arcs cannot be focused by human or ordinary AI commands, and their permitted operation view and Workshop control expose that capability. Shipped single-shield Harrows explicitly disable focus in their data; arc count never determines capability, so a custom single-arc design may retain focus."
+      rationale:
+        - "User correction of the combat balance regression: single-shield ships should have no focus available, configured in data rather than an arc-count rule in runtime or tests. Other shield operations remain available independently."

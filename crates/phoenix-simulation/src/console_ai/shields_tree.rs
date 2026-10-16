@@ -153,11 +153,9 @@ pub(super) fn ai_shields(
             {
                 commands.push(Control::SetShieldRaised { raised: *raised });
             }
-            if let Some(focused) = result
-                .intents
-                .get("focus")
-                .filter(|value| **value != own.is_focused)
-            {
+            if let Some(focused) = result.intents.get("focus").filter(|value| {
+                **value != own.is_focused && (!**value || operation.focus_available)
+            }) {
                 commands.push(Control::SetShieldArcFocus { focused: *focused });
             }
             // The supported result is one physical destination. Resolve multiple

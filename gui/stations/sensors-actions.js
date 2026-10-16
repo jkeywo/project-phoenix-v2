@@ -148,7 +148,7 @@ function visibleTarget(view, selected) {
 
 function facingChoice(view, selected) {
   const facings = (Array.isArray(view && view.facings) ? view.facings : [])
-    .filter((facing) => facing && (
+    .filter((facing) => facing && facing.operation?.focus_available !== false && (
       (typeof facing.arc_id === 'string' && facing.arc_id)
       || (typeof facing.id === 'string' && facing.id)
     ))

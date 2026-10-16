@@ -198,6 +198,7 @@ description = "entity.ship_harrow_warhawk.target.description"
 # Single omni shield arc (issue #514). NPCs have no `[shields]` station so
 # the auto-generated `[[system]]` entry is `ai_only = true` and ownerless.
 [[shield_arc]]
+focus_available = false
 id = "all"
 label = "shield_arc.all.label"
 center_deg = 0

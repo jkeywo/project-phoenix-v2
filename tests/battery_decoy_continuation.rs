@@ -342,6 +342,22 @@ fn actual_sensorless_decoy_handles_paid_claim_storage_depletion_and_same_body_js
     let (mut live, parent, decoy) = boot(false);
     let observer = entity(&mut live, "decoy-observer");
     let uuid = live.world().get::<EntityUuid>(decoy).unwrap().0.clone();
+    let accepted = project_phoenix::entities::config::EntityConfig::from_toml(include_str!(
+        "../assets/entities/battery_decoy.toml"
+    ))
+    .unwrap();
+    let actual_name = accepted
+        .name
+        .expect("the accepted decoy has its real public name");
+    assert_eq!(
+        live.world().get::<EntityId>(decoy).unwrap().0,
+        "battery-decoy"
+    );
+    assert_eq!(
+        live.world().get::<EntityName>(decoy).unwrap().0,
+        actual_name
+    );
+    assert_ne!(actual_name, "Harrow frigate");
     assert!(stored(&live, decoy));
     assert!(
         live.world().get::<BroadTracks>(decoy).is_none(),
@@ -386,7 +402,7 @@ fn actual_sensorless_decoy_handles_paid_claim_storage_depletion_and_same_body_js
     );
     assert_eq!(
         live.world().get::<EntityName>(decoy).unwrap().0,
-        "battery-decoy"
+        actual_name
     );
     assert_eq!(
         live.world()
@@ -491,7 +507,7 @@ fn actual_sensorless_decoy_handles_paid_claim_storage_depletion_and_same_body_js
     });
     wait(&mut live, |app| {
         picture(app, observer, &uuid).is_some_and(|(_, name, faction, _)| {
-            name == "battery-decoy"
+            name == actual_name
                 && faction.as_deref() == Some("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa")
         })
     });
@@ -501,6 +517,10 @@ fn actual_sensorless_decoy_handles_paid_claim_storage_depletion_and_same_body_js
         "short claim life is not a bespoke body expiry"
     );
     assert_eq!(live.world().get::<EntityUuid>(decoy).unwrap().0, uuid);
+    assert_eq!(
+        live.world().get::<EntityName>(decoy).unwrap().0,
+        actual_name
+    );
 }
 #[test]
 fn ordinary_bay_tree_can_launch_the_same_identity_only_equipment() {

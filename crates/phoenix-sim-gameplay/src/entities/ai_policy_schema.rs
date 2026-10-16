@@ -477,9 +477,16 @@ pub const COMMS_RESPOND_VERB: &str = "respond_to_message";
 /// The registered output channels a Comms response policy may drive (#786).
 pub const COMMS_REQUEST_CHANNEL: &str = "comms_request";
 pub const COMMS_REQUEST_VERB: &str = "send_planned_comms_request";
-pub const COMMS_RESPOND_CHANNELS: &[&str] = &[COMMS_RESPOND_CHANNEL, COMMS_REQUEST_CHANNEL];
+pub const COMMS_DECODE_CHANNEL: &str = "comms_decode";
+pub const COMMS_DECODE_VERB: &str = "decode_captured_comms";
+pub const COMMS_RESPOND_CHANNELS: &[&str] = &[
+    COMMS_RESPOND_CHANNEL,
+    COMMS_REQUEST_CHANNEL,
+    COMMS_DECODE_CHANNEL,
+];
 /// The registered verbs a Comms response policy may emit (issue #786).
-pub const COMMS_RESPOND_VERBS: &[&str] = &[COMMS_RESPOND_VERB, COMMS_REQUEST_VERB];
+pub const COMMS_RESPOND_VERBS: &[&str] =
+    &[COMMS_RESPOND_VERB, COMMS_REQUEST_VERB, COMMS_DECODE_VERB];
 
 // ── Weapons doctrine: which family the ship turns to present (issue #956) ─────
 //
@@ -1193,6 +1200,7 @@ fn decode_verb(r: &FineSystemAiRuleToml) -> Result<crate::ai::policy::AiPolicyVe
         // WHICH message is being answered comes from the host context.
         COMMS_RESPOND_VERB => crate::ai::policy::AiPolicyVerb::RespondToMessage(r.response_index),
         COMMS_REQUEST_VERB => crate::ai::policy::AiPolicyVerb::SendPlannedCommsRequest,
+        COMMS_DECODE_VERB => crate::ai::policy::AiPolicyVerb::DecodeCapturedComms,
         // Weapons doctrine family verbs (issue #956): value-less, like the
         // fire verbs. The RANK is the channel and the FAMILY is the verb; the
         // arcs, ranges and geometry the resulting `ArcBearingRequest` carries

@@ -101,10 +101,12 @@ mod tests {
             point: Vec3::ZERO,
             radio: CommsRadioConfig {
                 media: None,
+                capture: None,
                 system: SystemId("comms".into()),
                 request_reading_ticks: 30,
                 keys: vec!["fleet-key".into()],
                 channels: vec![CommsChannelConfig {
+                    protection_level: 1,
                     id: "fleet".into(),
                     range: 100.0,
                     work_units: 1,

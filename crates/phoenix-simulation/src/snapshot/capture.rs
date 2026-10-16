@@ -1469,6 +1469,7 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                     jamming: entity.get::<crate::comms::jamming::ShipJamming>().cloned(),
                     signal_protection: entity.get::<crate::science::protection::ShipSignalProtection>().cloned(),
                     comms_media: entity.get::<crate::comms::media_control::ShipCommsMediaIntent>().cloned(),
+                    comms_capture: entity.get::<crate::comms::capture::ShipCommsCapture>().cloned(),
                     identity_emitters: entity.get::<crate::science::identity::ShipIdentityEmitters>().cloned(),
                     concealment_emitters: entity.get::<crate::science::concealment::ShipConcealmentEmitters>().cloned(),
                     weapon_targets: entity

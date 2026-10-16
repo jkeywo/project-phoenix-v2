@@ -12,6 +12,10 @@ export function mountWorkshopCommsRadio({ root, provider, runtime, draft: getDra
   const node = el('section', 'panel'), template = el('select', 'template'), materialise = input('materialise', '', 'checkbox');
   const requestReading = input('request-reading', '', 'number'); requestReading.min = '1'; requestReading.max = '4294967295'; requestReading.step = '1';
   const media = el('select', 'media');
+  const captureEnabled = input('capture-enabled', '', 'checkbox'), captureLevel = input('capture-level', '', 'number');
+  const captureTicks = input('capture-ticks', '', 'number'), keyTicks = input('capture-key-ticks', '', 'number');
+  captureLevel.min = '0'; captureLevel.max = '3'; captureLevel.step = '1';
+  for (const control of [captureTicks, keyTicks]) { control.min = '1'; control.max = '36000'; control.step = '1'; }
   for (const [value, key] of [['', 'media_none'], ['audio', 'media_audio'], ['audio_video', 'media_video']]) {
     const option = el('option', null, key); option.value = value; media.append(option);
   }
@@ -24,13 +28,14 @@ export function mountWorkshopCommsRadio({ root, provider, runtime, draft: getDra
   }
   function addRow(kind, value) {
     const section = el('fieldset'), index = serial++, rows = kind === 'channel' ? channelRows : keyRows;
-    const fields = kind === 'channel' ? ['id', 'range', 'work_units', 'key', 'relay'] : ['identity'];
+    const fields = kind === 'channel' ? ['id', 'range', 'work_units', 'key', 'relay', 'protection_level'] : ['identity'];
     const row = { section, fields: {} }; rows.push(row);
     for (const field of fields) {
-      const numeric = ['range', 'work_units'].includes(field);
+      const numeric = ['range', 'work_units', 'protection_level'].includes(field);
       const control = input(kind + '-' + field + '-' + index, value[field] ?? '', numeric ? 'number' : field === 'relay' ? 'checkbox' : 'text');
       if (field === 'relay') control.checked = value.relay === true;
       if (numeric) control.min = field === 'range' ? '0' : '1'; if (field === 'work_units') { control.step = '1'; control.max = '4294967295'; }
+      if (field === 'protection_level') { control.step = '1'; control.max = '3'; }
       row.fields[field] = control; section.append(label(control, field));
     }
     section.append(button(null, 'remove', () => { rows.splice(rows.indexOf(row), 1); section.remove(); }));
@@ -47,6 +52,10 @@ export function mountWorkshopCommsRadio({ root, provider, runtime, draft: getDra
       inspection = inspectCommsRadio(draft, dependencies, selected); observed = key; observedDraft = draft; materialise.checked = false;
       channels.replaceChildren(); keys.replaceChildren(); channelRows = []; keyRows = [];
       requestReading.value = inspection.radio.request_reading_ticks ?? '';
+      captureEnabled.checked = inspection.radio.capture !== undefined;
+      captureLevel.value = inspection.radio.capture?.max_level ?? '1';
+      captureTicks.value = inspection.radio.capture?.ticks_per_level ?? '90';
+      keyTicks.value = inspection.radio.capture?.held_key_ticks ?? '';
       media.value = inspection.radio.media ?? '';
       for (const value of inspection.radio.channel) addRow('channel', value);
       for (const identity of inspection.radio.keys || []) addRow('key', { identity });
@@ -64,10 +73,14 @@ export function mountWorkshopCommsRadio({ root, provider, runtime, draft: getDra
   }
   const save = button('save', 'save', () => {
     if (!inspection?.capable || busy()) return;
-    const value = { system: 'comms', ...(media.value ? {media: media.value} : {}), ...(requestReading.value.trim() ? { request_reading_ticks: requestReading.valueAsNumber } : {}), keys: keyRows.map(row => row.fields.identity.value), channel: channelRows.map(row => ({
+    const value = { system: 'comms', ...(media.value ? {media: media.value} : {}),
+      ...(captureEnabled.checked ? { capture: { max_level: captureLevel.valueAsNumber, ticks_per_level: captureTicks.valueAsNumber,
+        ...(keyTicks.value.trim() ? { held_key_ticks: keyTicks.valueAsNumber } : {}) } } : {}),
+      ...(requestReading.value.trim() ? { request_reading_ticks: requestReading.valueAsNumber } : {}), keys: keyRows.map(row => row.fields.identity.value), channel: channelRows.map(row => ({
       id: row.fields.id.value, range: row.fields.range.valueAsNumber, work_units: row.fields.work_units.valueAsNumber,
       ...(row.fields.key.value ? { key: row.fields.key.value } : {}),
       ...(row.fields.relay.checked ? { relay: true } : {}),
+      ...(row.fields.protection_level.value.trim() ? { protection_level: row.fields.protection_level.valueAsNumber } : {}),
     })) };
     const capturedDraft = getDraft(), token = ++generation, operation = { path: template.value, materialise: materialise.checked, value };
     const current = () => !disposed && token === generation && getDraft() === capturedDraft;
@@ -78,7 +91,8 @@ export function mountWorkshopCommsRadio({ root, provider, runtime, draft: getDra
   });
   const show = button('preview', null, () => { if (!busy() && inspection) preview(template.value); }); show.textContent = t('workshop.entity.preview');
   const fly = button('test', null, () => { if (!busy() && inspection) test(template.value); }); fly.textContent = t('workshop.entity.test');
-  node.append(el('h3', null, 'title'), el('p', null, 'hint'), label(template, 'template'), owner, label(requestReading, 'request_reading_ticks'), label(media, 'media'), label(materialise, 'materialise'),
+  node.append(el('h3', null, 'title'), el('p', null, 'hint'), label(template, 'template'), owner, label(requestReading, 'request_reading_ticks'), label(media, 'media'),
+    label(captureEnabled, 'capture_enabled'), label(captureLevel, 'capture_level'), label(captureTicks, 'capture_ticks'), label(keyTicks, 'capture_key_ticks'), label(materialise, 'materialise'),
     el('h4', null, 'channels'), channels, button('add-channel', 'add_channel', () => addRow('channel', { id: '', range: inspection?.endpointRange ?? 1, work_units: 1 })),
     el('h4', null, 'keys'), keys, button('add-key', 'add_key', () => addRow('key', { identity: '' })), save, show, fly, status);
   template.addEventListener('change', () => inspect(true)); if (attach) root.append(node); controls(); void load();

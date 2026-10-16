@@ -3,10 +3,12 @@ use super::*;
 fn radio() -> CommsRadioConfig {
     CommsRadioConfig {
         media: None,
+        capture: None,
         system: SystemId("comms".into()),
         request_reading_ticks: 30,
         keys: vec!["fleet".into()],
         channels: vec![CommsChannelConfig {
+            protection_level: 1,
             id: "protected".into(),
             range: 100.0,
             work_units: 4,
@@ -22,6 +24,15 @@ fn channels_require_actual_finite_reach_paid_work_and_held_keys() {
     assert!(original.validate(100.0).is_ok());
     for mutate in [
         |r: &mut CommsRadioConfig| r.request_reading_ticks = 0,
+        |r: &mut CommsRadioConfig| r.channels[0].protection_level = 0,
+        |r: &mut CommsRadioConfig| r.channels[0].protection_level = 4,
+        |r: &mut CommsRadioConfig| {
+            r.capture = Some(crate::comms_capture::CommsCaptureConfig {
+                max_level: 4,
+                ticks_per_level: 1,
+                held_key_ticks: None,
+            })
+        },
         |r: &mut CommsRadioConfig| r.channels[0].range = f32::NAN,
         |r: &mut CommsRadioConfig| r.channels[0].range = 101.0,
         |r: &mut CommsRadioConfig| r.channels[0].work_units = 0,

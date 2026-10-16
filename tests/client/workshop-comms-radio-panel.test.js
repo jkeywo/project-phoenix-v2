@@ -19,6 +19,18 @@ function fixture(source = stringify(entity()), dependencies = { base_files: {}, 
   return { panel, runtime, preview, test, draft: () => draft, replace: value => { draft = documentFor(value); } };
 }
 const field = (kind, name) => document.querySelector(`[id*="workshop-comms-radio-${kind}-${name}-"]`);
+it('authors optional capture and decoder equipment with normal accepted history', async () => {
+  const f = fixture(); await settle(); control('add-channel').click();
+  field('channel', 'id').value = 'monitor'; field('channel', 'range').value = '60'; field('channel', 'work_units').value = '1';
+  control('capture-enabled').checked = true; control('capture-level').value = '1'; control('capture-ticks').value = '45'; control('capture-key-ticks').value = '2';
+  field('channel', 'protection_level').value = '3'; control('save').click(); await settle();
+  const radio = parse(f.draft().read(path)).comms.radio;
+  expect(radio.capture).toEqual({ max_level: 1, ticks_per_level: 45, held_key_ticks: 2 }); expect(radio.channel[0].protection_level).toBe(3);
+  f.draft().undo(); f.panel.refresh(); expect(control('capture-enabled').checked).toBe(false);
+  f.draft().redo(); f.panel.refresh(); expect(control('capture-enabled').checked).toBe(true); expect(control('capture-ticks').value).toBe('45');
+  control('capture-enabled').checked = false; control('save').click(); await settle();
+  expect(parse(f.draft().read(path)).comms.radio.capture).toBeUndefined(); f.panel.dispose();
+});
 it('adds structured channels and held keys through actual accepted draft history and Preview/Test', async () => {
   const f = fixture(); await settle(); control('add-channel').click(); control('add-key').click();
   field('channel', 'id').value = 'operations'; field('channel', 'range').value = '70'; field('channel', 'work_units').value = '2';

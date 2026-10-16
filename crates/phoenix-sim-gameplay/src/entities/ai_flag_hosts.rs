@@ -561,6 +561,7 @@ pub const COMMS_AVAILABLE: FactId = FactId("comms_available");
 pub const REQUEST_REPORT_STATUS: FactId = FactId("request_report_status");
 pub const REQUEST_FORM_UP: FactId = FactId("request_form_up");
 pub const REQUEST_MEDIA_CALL: FactId = FactId("request_media_call");
+pub const CAPTURE_FEASIBLE: FactId = FactId("capture_feasible");
 pub const POWER_RATING: FactId = FactId("power_rating");
 pub const CONTACT_COUNT: FactId = FactId("contact_count");
 // Weapon banks / tubes
@@ -690,6 +691,7 @@ pub const FACT_CATALOGUE: &[FactId] = &[
     REQUEST_REPORT_STATUS,
     REQUEST_FORM_UP,
     REQUEST_MEDIA_CALL,
+    CAPTURE_FEASIBLE,
     COMMS_AVAILABLE,
     POWER_RATING,
     CONTACT_COUNT,
@@ -930,6 +932,13 @@ const SHIELDS_FACTS: &[FactDescriptor] = &[
 ];
 
 const COMMS_RESPONSE_FACTS: &[FactDescriptor] = &[
+    ship(
+        CAPTURE_FEASIBLE,
+        "comms",
+        "1.0 for the current permitted undecoded feasible capture header",
+        "absent outside the own captured-header decision",
+        "comms::capture_ai::decision",
+    ),
     ship(
         RESPONSE_COUNT,
         "comms",

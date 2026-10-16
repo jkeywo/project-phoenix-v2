@@ -47,6 +47,7 @@
 
 import {visibleCommsMessages, mediaCallOrigin} from '../comms-requests.js';
 import {mountCommsMediaControls} from '../comms-media-client.js';
+import {mountCommsCaptureControls} from '../components/comms-capture-controls.js';
 import {COMMS_SELECT_MEDIA_ACTION_ID} from './comms-actions.js';
 import { t } from '../strings.js';
 import { setAutoState } from '../console-ui.js';
@@ -84,6 +85,7 @@ export function makeCommsRender(variant) {
   let boundComposer = null;
   let lastState = null;
   let mediaControls = null;
+  let captureControls = null;
 
   const commsView = (s) => (variant.commsView ? variant.commsView(s) : s);
 
@@ -208,6 +210,17 @@ export function makeCommsRender(variant) {
       });
     }
     if (composer) composer.state = view;
+    // Interception need not create an addressed thread. Keep its independent
+    // controls reachable even when the ordinary inbox/overlay is empty.
+    const captureHost = doc.getElementById('comms-capture-host');
+    if (captureHost) {
+      captureHost.hidden = !view.comms_capture;
+      if (!captureControls) {
+        captureControls = mountCommsCaptureControls(doc); captureHost.append(captureControls.node);
+        doc.defaultView?.addEventListener('pagehide', () => captureControls?.dispose(), {once:true});
+      }
+      captureControls.update(view.comms_capture);
+    }
     const msgs = visibleCommsMessages(view.messages, showCleared);
     if (pendingThreadId && msgs.some(message => effectiveThreadId(message) === pendingThreadId)) {
       selectedThreadId = pendingThreadId;

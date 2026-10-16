@@ -17,6 +17,8 @@
 //! `console::comms::server::operate_comms_response_ai`.
 
 pub mod ai_choice;
+pub mod capture;
+pub(crate) mod capture_ai;
 pub mod component;
 pub mod content;
 pub mod formation;

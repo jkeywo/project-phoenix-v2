@@ -9,6 +9,8 @@ use super::*;
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EntityState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comms_capture: Option<crate::comms::capture::ShipCommsCapture>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comms_media: Option<crate::comms::media_control::ShipCommsMediaIntent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe_custody: Option<crate::entities::craft::ProbeCustody>,

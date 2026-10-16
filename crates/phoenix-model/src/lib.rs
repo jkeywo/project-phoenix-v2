@@ -1,5 +1,6 @@
 //! Shared Phoenix data vocabulary; no simulation, I/O or renderer.
 #![forbid(unsafe_code)]
+pub mod comms_capture;
 pub mod comms_channel;
 pub mod comms_history;
 pub mod comms_media;

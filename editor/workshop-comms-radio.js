@@ -16,18 +16,26 @@ function equipment(entity) {
 }
 export function validateCommsRadio(radio, entity) {
   if (!equipment(entity)) throw new Error('Radio needs the installed Comms System, its owning Console, finite endpoint reach and positive continuous/discrete energy costs.');
-  if (!closed(radio, ['system', 'keys', 'channel', 'request_reading_ticks', 'media']) || radio.system !== 'comms'
+  if (!closed(radio, ['system', 'keys', 'channel', 'request_reading_ticks', 'media', 'capture']) || radio.system !== 'comms'
     || (radio.media !== undefined && !['audio', 'audio_video'].includes(radio.media))
     || !Array.isArray(radio.keys === undefined ? [] : radio.keys) || !Array.isArray(radio.channel) || !radio.channel.length)
     throw new Error('Configure the canonical Comms owner and at least one supported radio channel.');
   if (radio.request_reading_ticks !== undefined && (!Number.isSafeInteger(radio.request_reading_ticks) || radio.request_reading_ticks <= 0 || radio.request_reading_ticks > 0xffffffff))
     throw new Error('Request reading requires positive whole logical ticks.');
+  if (radio.capture !== undefined) {
+    const capture = radio.capture, ticks = value => Number.isSafeInteger(value) && value > 0 && value <= 36000;
+    if (!closed(capture, ['max_level', 'ticks_per_level', 'held_key_ticks']) || !Number.isSafeInteger(capture.max_level)
+      || capture.max_level < 0 || capture.max_level > 3 || !ticks(capture.ticks_per_level)
+      || (capture.held_key_ticks !== undefined && !ticks(capture.held_key_ticks)))
+      throw new Error('Capture needs a closed equipment ceiling and positive bounded paid decode ticks.');
+  }
   const keys = radio.keys === undefined ? [] : radio.keys, ids = new Set();
   if (keys.some(key => !identity(key)) || new Set(keys).size !== keys.length) throw new Error('Held protection keys require distinct bounded identities.');
   for (const channel of radio.channel) {
-    if (!closed(channel, ['id', 'range', 'work_units', 'key', 'relay']) || typeof channel.id !== 'string'
+    if (!closed(channel, ['id', 'range', 'work_units', 'key', 'relay', 'protection_level']) || typeof channel.id !== 'string'
       || !/^[a-z0-9-]+$/.test(channel.id) || bytes(channel.id) > 128 || ids.has(channel.id)
       || (channel.relay !== undefined && typeof channel.relay !== 'boolean')
+      || (channel.protection_level !== undefined && (!Number.isSafeInteger(channel.protection_level) || channel.protection_level < 1 || channel.protection_level > 3))
       || !positive(channel.range) || Math.fround(channel.range) > Math.fround(entity.comms.range)
       || !Number.isSafeInteger(channel.work_units) || channel.work_units <= 0 || channel.work_units > 0xffffffff
       || (channel.key !== undefined && (!identity(channel.key) || !keys.includes(channel.key))))

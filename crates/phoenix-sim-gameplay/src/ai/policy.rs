@@ -362,6 +362,8 @@ pub enum AiPolicyVerb {
     RespondToMessage(u8),
     /// Send the current own permitted planned status request through normal admission.
     SendPlannedCommsRequest,
+    /// Select the current oldest feasible own captured header for paid decoding.
+    DecodeCapturedComms,
 }
 
 /// One inline stateless policy rule.

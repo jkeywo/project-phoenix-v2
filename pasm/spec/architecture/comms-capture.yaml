@@ -1,0 +1,31 @@
+entities:
+  - component: captured-comms-control
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Captured Comms Control
+      summary: Existing paid radio processing captures current actual foreign emissions and advances one explicitly selected paid decoder frontier. Publications expose only local headers and completed dated evidence.
+    architecture:
+      kind: command-consumer
+      authority: authoritative
+      reads: [comms-inbox-state]
+      writes: [ship-comms-capture]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/comms/capture.rs, crates/phoenix-simulation/src/comms/capture_ai.rs, crates/phoenix-sim-gameplay/src/electronic/capture.rs]
+      symbols: [ShipCommsCapture, CaptureState, settle, views]
+  - state: ship-comms-capture
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Captured Comms Evidence and Decoder Frontier
+      summary: Bounded immutable captured provenance, selected local handle and paid integer work survive continuation independently of the original emitter. Available source recipes and retained copies constrain consistency; missing historical emitters require no archive.
+    architecture:
+      classification: authoritative
+      owner: captured-comms-control
+      writers: [captured-comms-control]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/comms/capture.rs, crates/phoenix-simulation/src/snapshot/comms_capture.rs, crates/phoenix-simulation/src/sim_digest.rs]
+      symbols: [ShipCommsCapture, CaptureState]

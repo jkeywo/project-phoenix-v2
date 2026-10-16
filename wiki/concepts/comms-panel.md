@@ -2,11 +2,26 @@
 title: Comms Panel
 type: concept
 tags: [comms, client, inbox, hails, priority, localisation, input, feedback]
-sources: [crates/phoenix-simulation/src/comms/media_control.rs, crates/phoenix-simulation/src/comms/media_session.rs, crates/phoenix-simulation/src/comms/media_edge.rs, crates/phoenix-simulation/src/comms/media_mesh.rs, gui/comms-media-client.js, gui/fleet-media.js, crates/phoenix-simulation/src/comms/formation.rs, crates/phoenix-simulation/src/comms/planned.rs, crates/phoenix-simulation/src/comms/request_delivery.rs, crates/phoenix-simulation/src/comms/radio_route.rs, assets/entities/relay_cruiser.toml, crates/phoenix-model/src/comms_request.rs, crates/phoenix-simulation/src/comms/requests.rs, crates/phoenix-simulation/src/comms/request_returns.rs, crates/phoenix-simulation/src/snapshot/comms_requests.rs, gui/comms-requests.js, gui/components/ph-comms-text-composer.js, editor/workshop-comms-radio.js, gui/workshop-comms-radio-panel.js, gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/world/server/mod.rs, tests/publisher_ordering.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm/operations/comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
+sources: [crates/phoenix-simulation/src/comms/capture.rs, crates/phoenix-simulation/src/snapshot/comms_capture.rs, gui/comms-capture.js, gui/components/comms-capture-controls.js, crates/phoenix-simulation/src/comms/media_control.rs, crates/phoenix-simulation/src/comms/media_session.rs, crates/phoenix-simulation/src/comms/media_edge.rs, crates/phoenix-simulation/src/comms/media_mesh.rs, gui/comms-media-client.js, gui/fleet-media.js, crates/phoenix-simulation/src/comms/formation.rs, crates/phoenix-simulation/src/comms/planned.rs, crates/phoenix-simulation/src/comms/request_delivery.rs, crates/phoenix-simulation/src/comms/radio_route.rs, assets/entities/relay_cruiser.toml, crates/phoenix-model/src/comms_request.rs, crates/phoenix-simulation/src/comms/requests.rs, crates/phoenix-simulation/src/comms/request_returns.rs, crates/phoenix-simulation/src/snapshot/comms_requests.rs, gui/comms-requests.js, gui/components/ph-comms-text-composer.js, editor/workshop-comms-radio.js, gui/workshop-comms-radio-panel.js, gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/world/server/mod.rs, tests/publisher_ordering.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm/operations/comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
 updated: 2026-10-16
 ---
 
 # Comms Panel
+
+## Captured evidence
+
+The existing radio pass measures new paid foreign emissions into one optional
+ShipCommsCapture owner. Human selection and ordinary Comms AI use the same
+permitted headers and admitted local decoder handle. The decoder pays additional
+continuous work; only completed evidence reveals dated attributed text. Captured
+requests never become addressed messages or command receipts.
+
+The canonical frontier and bounded history join snapshot and digest. Whole-candidate
+preflight checks exact receiving equipment, retained source equipment and surviving
+emission copies. A historical emitter may be gone; no body or actor archive is
+required. Saved capture publications must agree with canonical paid progress.
+gui/comms-capture.js and the shared Comms renderer expose independent controls
+on the existing screen and preserve explicit Console feed/ownership boundaries.
 
 ## Selected human media
 

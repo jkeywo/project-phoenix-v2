@@ -2582,9 +2582,12 @@ fn the_composed_battleship_holds_its_impulse_drive_idle() {
 /// old pooled allocations and legacy policy declarations are not a second AI.
 #[test]
 fn authored_power_trees_drive_actual_finite_hardware_without_legacy_policy() {
+    use phoenix_model::energy::EnergyAllocationMode;
     use phoenix_sim_gameplay::ai::host::{decide_tree_with_numbers, TreeHostOutcome};
+    use phoenix_sim_gameplay::ai::state_tree::{BoolSource, TaskAction};
     use std::collections::BTreeMap;
     let mut checked = 0;
+    let mut checked_recovery = 0;
     for (stem, hull) in ai_hulls() {
         let Some(hardware) = hull.energy.as_ref() else {
             continue;
@@ -2606,6 +2609,29 @@ fn authored_power_trees_drive_actual_finite_hardware_without_legacy_policy() {
         let (programs, mut frames) =
             crate::ai::state_tree_runtime::compile_ship_trees_with_energy(ship, Some(hardware))
                 .unwrap();
+        let resolved = programs.0[&reactor].resolved();
+        let authored_numbers: std::collections::BTreeSet<_> = resolved
+            .tree
+            .iter()
+            .flat_map(|tree| &tree.state)
+            .flat_map(|state| &state.task)
+            .filter_map(|task| match &task.action {
+                TaskAction::WriteNumber { channel, .. } => Some(channel.clone()),
+                _ => None,
+            })
+            .collect();
+        // Hardware ceilings do not imply an AI recovery rule. New small
+        // receivers can intentionally author only their stable baseline; read
+        // the actual program's decision inputs before expecting a response.
+        let recovery_target = |channel: &str, input: &str| {
+            resolved.tree.iter().flat_map(|tree| &tree.state)
+                .flat_map(|state| &state.task)
+                .filter_map(|task| match &task.action {
+                    TaskAction::WriteNumber { channel: actual, value }
+                        if actual == channel && task.when.iter().any(|condition| matches!(&condition.value, BoolSource::NumberCompare { name, .. } if name == input)) => Some(*value as f32),
+                    _ => None,
+                }).last()
+        };
         let mut physical = crate::modifiers::power_system::PowerSystem::from_energy(
             hardware.clone(),
             ship.clone(),
@@ -2655,8 +2681,7 @@ fn authored_power_trees_drive_actual_finite_hardware_without_legacy_policy() {
                     ),
                     (
                         "priority-allocation".into(),
-                        physical.network().mode
-                            == phoenix_model::energy::EnergyAllocationMode::Minimal,
+                        physical.network().mode == EnergyAllocationMode::Minimal,
                     ),
                 ]),
                 frames.0.get_mut(&reactor).unwrap(),
@@ -2682,31 +2707,111 @@ fn authored_power_trees_drive_actual_finite_hardware_without_legacy_policy() {
                 .numeric_intents
                 .values()
                 .all(|value| value.is_finite() && *value >= 0.0));
+            assert_eq!(
+                result.intents.get("priority-allocation"),
+                Some(&true),
+                "{stem}: the actual shipped controller selects priority allocation"
+            );
+            physical.set_mode(if result.intents["priority-allocation"] {
+                EnergyAllocationMode::Minimal
+            } else {
+                EnergyAllocationMode::Manual
+            });
+            assert_eq!(physical.network().mode, EnergyAllocationMode::Minimal);
+            physical
+                .set_output(result.numeric_intents["reactor-output"] as f32)
+                .unwrap();
+            physical
+                .set_reactor_cooling(result.numeric_intents["reactor-cooling"] as f32)
+                .unwrap();
+            if let Some(enabled) = result.intents.get("reactor-generation") {
+                physical.set_generation_enabled(*enabled);
+            }
             for group in &hardware.groups {
-                let flow = result.numeric_intents[&format!("flow-{}", group.id.0)] as f32;
-                let cooling = result.numeric_intents[&format!("cooling-{}", group.id.0)] as f32;
-                assert_eq!(
-                    flow,
-                    if recovering {
-                        group.max_flow_per_sec
-                    } else {
-                        group.default_flow_per_sec
-                    },
-                    "{stem}/{}: reserve recovery uses authored flow",
-                    group.id.0
-                );
-                assert_eq!(
-                    cooling,
-                    if recovering {
-                        group.max_cooling_per_sec
-                    } else {
-                        group.default_cooling_per_sec
-                    },
-                    "{stem}/{}: heat recovery uses authored cooling",
-                    group.id.0
-                );
-                physical.set_flow(&group.id, flow).unwrap();
-                physical.set_cooling(&group.id, cooling).unwrap();
+                let flow_channel = format!("flow-{}", group.id.0);
+                let cooling_channel = format!("cooling-{}", group.id.0);
+                let reserve_recovery =
+                    recovery_target(&flow_channel, &format!("reserve-{}", group.id.0));
+                let heat_recovery =
+                    recovery_target(&cooling_channel, &format!("heat-{}", group.id.0));
+                for (target, baseline, limit) in [
+                    (
+                        reserve_recovery,
+                        group.default_flow_per_sec,
+                        group.max_flow_per_sec,
+                    ),
+                    (
+                        heat_recovery,
+                        group.default_cooling_per_sec,
+                        group.max_cooling_per_sec,
+                    ),
+                ] {
+                    if let Some(target) = target {
+                        assert!(target >= baseline && target <= limit, "{stem}/{}: authored recovery remains nondecreasing and within actual hardware", group.id.0);
+                    }
+                }
+                if recovering {
+                    checked_recovery += usize::from(reserve_recovery.is_some())
+                        + usize::from(heat_recovery.is_some());
+                }
+                let prior = physical.network().groups[&group.id].clone();
+                // A priority-only tree does not author individual settings for
+                // every hardware subgroup. Absence must preserve standing
+                // requests, rather than fabricate fine control from bindings.
+                if authored_numbers.contains(&flow_channel) {
+                    let flow = *result
+                        .numeric_intents
+                        .get(&flow_channel)
+                        .unwrap_or_else(|| {
+                            panic!("{stem}/{}: authored flow output must execute", group.id.0)
+                        }) as f32;
+                    assert_eq!(
+                        flow,
+                        if recovering {
+                            reserve_recovery.unwrap_or(group.default_flow_per_sec)
+                        } else {
+                            group.default_flow_per_sec
+                        },
+                        "{stem}/{}: flow follows its authored reserve response or stable baseline",
+                        group.id.0
+                    );
+                    physical.set_flow(&group.id, flow).unwrap();
+                } else {
+                    assert!(!result.numeric_intents.contains_key(&flow_channel));
+                    assert_eq!(
+                        physical.network().groups[&group.id].desired_flow_per_sec,
+                        prior.desired_flow_per_sec
+                    );
+                }
+                if authored_numbers.contains(&cooling_channel) {
+                    let cooling =
+                        *result
+                            .numeric_intents
+                            .get(&cooling_channel)
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "{stem}/{}: authored cooling output must execute",
+                                    group.id.0
+                                )
+                            }) as f32;
+                    assert_eq!(
+                        cooling,
+                        if recovering {
+                            heat_recovery.unwrap_or(group.default_cooling_per_sec)
+                        } else {
+                            group.default_cooling_per_sec
+                        },
+                        "{stem}/{}: cooling follows its authored heat response or stable baseline",
+                        group.id.0
+                    );
+                    physical.set_cooling(&group.id, cooling).unwrap();
+                } else {
+                    assert!(!result.numeric_intents.contains_key(&cooling_channel));
+                    assert_eq!(
+                        physical.network().groups[&group.id].desired_cooling_per_sec,
+                        prior.desired_cooling_per_sec
+                    );
+                }
             }
         }
         let consumer = hardware
@@ -2715,6 +2820,8 @@ fn authored_power_trees_drive_actual_finite_hardware_without_legacy_policy() {
             .find(|consumer| consumer.continuous_cost_per_sec > 0.0)
             .unwrap();
         let before = physical.network().consumers[&consumer.system].energy;
+        let heat_before = physical.network().consumers[&consumer.system].heat;
+        physical.begin_work_interval();
         let grant = physical
             .work_continuous(&consumer.system, 0.2, 1.0)
             .unwrap();
@@ -2723,9 +2830,30 @@ fn authored_power_trees_drive_actual_finite_hardware_without_legacy_policy() {
             "{stem}: the actual local reserve funds work"
         );
         assert!(physical.network().consumers[&consumer.system].energy < before);
+        assert!(
+            (before - physical.network().consumers[&consumer.system].energy - grant.granted).abs()
+                < 1e-4,
+            "{stem}: work consumes exactly its actual reserve grant"
+        );
+        assert!(
+            (physical.network().consumers[&consumer.system].heat
+                - heat_before
+                - grant.granted * consumer.reserve.discharge_heat_per_unit)
+                .abs()
+                < 1e-4,
+            "{stem}: actual work produces its authored discharge heat"
+        );
+        assert_eq!(
+            physical.emitted_work(&consumer.system),
+            f64::from(grant.granted)
+        );
         checked += 1;
     }
     assert!(checked > 0, "the pin must execute real shipped Power trees");
+    assert!(
+        checked_recovery > 0,
+        "the pin must exercise actual authored recovery decisions as well as static outputs"
+    );
 }
 
 /// The offensive-weapon RED-ALERT fire gate, on all three fire channels, in

@@ -7,7 +7,7 @@
       "source": "f1643e85",
       "compile": "PASS,9.14s: cargo check -p project-phoenix --features headless,host --lib and eight explicit integration-test targets. Initial API/import failures corrected in593814b0/f1643e85 without dropping paid-work, authority, current-observation or continuation assertions.",
       "compile_log": ".phoenix/resumed-eight-host-target-check-retry.log",
-      "execution": "Running: cargo test -p project-phoenix --features headless,host --no-fail-fast with eight explicit targets; no execution outcome claimed yet.",
+      "execution": "Build completed7m25s;0passed/23failed across8targets. Every case refused boot on the same accepted catalogue error: battery_turret.toml replaces energy but omits required reactor. No gameplay execution result. Data-only correction is being prepared, with current f1643e85 binaries retained for an explicitly pinned content retry.",
       "targets": ["comms_capture_continuation", "emission_continuation", "formation_continuation", "battery_turret_continuation", "battery_decoy_continuation", "personnel_craft_continuation", "optional_maintenance_continuation", "authoritative_state_enumeration"],
       "log": ".phoenix/resumed-eight-host-native.log"
     },

@@ -26,7 +26,10 @@ integrated exit.
 At `f1643e85`, all eight selected host-test targets compile successfully with
 `headless,host`: Comms capture, emissions, formation, fixed turrets, finite decoys,
 personnel reception, optional maintenance and authoritative-state enumeration.
-Their native execution is running; compilation does not establish a playable exit.
+The native build completed in 7m25s, but all 23 selected tests refused boot on a
+shared catalogue error: `battery_turret.toml` replaces the energy table without
+the required reactor definition. A data-only correction is being prepared; no
+gameplay result or playable exit is claimed from this run.
 
 | Increment | Implementation state | Material remaining work |
 |---|---|---|

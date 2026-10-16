@@ -11357,13 +11357,36 @@ fn handle_fire_torpedo_launches_from_admitted_command() {
     let mut app = torpedo_ai_test_app();
     load_tube_now(&mut app, "fore_port");
     let ship = local_ship(&mut app);
+    // This is a focused pre-admitted consumer fixture, with no sensor profile.
+    // Its explicit legacy target still needs a real in-range physical actor.
+    spawn_asteroid_target(&mut app, "target-uuid", 0.0, -30.0);
+    let owner = crate::ship::system_registry::torpedo_tube_fore_port_system_id();
+    // The helper seeds a preloaded round. Remove that same round from the
+    // finite magazine so the initial physical stock remains within capacity.
+    let before_rounds = {
+        let mut torpedoes = app
+            .world_mut()
+            .get_mut::<TorpedoSystemResource>(ship)
+            .unwrap();
+        assert_eq!(torpedoes.0.magazine.adjust(-1_i64), -1);
+        assert!(torpedoes.0.validate_magazine().is_ok());
+        torpedoes.0.rounds_aboard()
+    };
+    let before_energy = {
+        let mut power = app
+            .world_mut()
+            .get_mut::<crate::ship::power::ShipPowerSystem>(ship)
+            .unwrap();
+        power.0.begin_work_interval();
+        power.0.network().consumers[&owner].energy
+    };
     app.world_mut()
         .entity_mut(ship)
         .get_mut::<AdmittedCommands>()
         .unwrap()
         .0
         .push(AdmittedCommand {
-            target: SystemId("torpedo-tube-fore-port".into()),
+            target: owner.clone(),
             payload: SystemControlPayload::FireTorpedo {
                 target_uuid: Some("target-uuid".into()),
             },
@@ -11381,6 +11404,24 @@ fn handle_fire_torpedo_launches_from_admitted_command() {
             .iter()
             .any(|(_, m)| matches!(m, ServerMessage::TorpedoLaunched { .. })),
         "the consumer must advance the torpedo state machine from the admitted command"
+    );
+    let torpedoes = &app.world().get::<TorpedoSystemResource>(ship).unwrap().0;
+    assert_eq!(torpedoes.rounds_aboard(), before_rounds - 1);
+    assert!(torpedoes.validate_magazine().is_ok());
+    assert_eq!(torpedoes.in_flight.len(), 1);
+    assert_eq!(
+        torpedoes.in_flight[0].target_uuid.as_deref(),
+        Some("target-uuid")
+    );
+    let power = &app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(ship)
+        .unwrap()
+        .0;
+    let paid = power.emitted_work(&owner);
+    assert!(paid > 0.0, "the actual source tube must pay for its launch");
+    assert!(
+        (f64::from(before_energy - power.network().consumers[&owner].energy) - paid).abs() < 1e-6
     );
 }
 
@@ -15627,20 +15668,31 @@ fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
         .entity_mut(npc_entity)
         .remove::<crate::ship_plugin::ShipConfigComponent>();
 
-    // Deliberately BEYOND the bank's 35-unit range: `tick_blaster_auto_fire`
-    // would skip the bank (out of range) and emit nothing, so the injected
-    // explicit order is the ONLY thing that can arm it. handle_fire_blaster
-    // applies an arc check (360° here → passes) but no range gate on an explicit
-    // order, so a successful bank-id resolution is what arms the volley.
+    // Explicit and AI fire now share the actual range gate. Keep this target
+    // inside the unchanged bank's 35-unit envelope. This reduced actor has no
+    // bank AI policy, so only its pre-admitted order can arm the volley.
+    assert!(app
+        .world()
+        .get::<crate::console::weapons::BlasterBankAiPolicies>(npc_entity)
+        .is_none());
     app.world_mut().spawn((
         EntityUuid(target_uuid_str.to_string()),
         crate::entities::spawner::EntitySystemHull(crate::ship::damage::SystemHull::from_config(
             &[(SystemId("captain".into()), 50.0)],
         )),
-        Transform::from_xyz(0.0, 0.0, -100.0),
+        Transform::from_xyz(0.0, 0.0, -30.0),
     ));
 
-    app.update();
+    let owner = crate::ship::system_registry::blaster_bank_system_id("fore_port").unwrap();
+    let before_energy = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(npc_entity)
+        .unwrap()
+        .0
+        .network()
+        .consumers[&owner]
+        .energy;
+    let out = tick(&mut app);
 
     let blaster_res = app
         .world()
@@ -15649,6 +15701,25 @@ fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
     assert!(
         blaster_res.0[0].volley.on_cooldown,
         "an underscore-authored bank id must still receive its fire order"
+    );
+    assert_eq!(
+        out.iter()
+            .filter(|message| matches!(&message.msg,
+        ServerMessage::BlasterFired { bank, source_uuid, .. }
+            if bank == "fore_port" && source_uuid == npc_uuid))
+            .count(),
+        1,
+        "the single actual barrel must emit once from this exact underscore-authored bank"
+    );
+    let power = &app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(npc_entity)
+        .unwrap()
+        .0;
+    assert!(power.emitted_work(&owner) > 0.0);
+    assert!(
+        power.network().consumers[&owner].energy < before_energy,
+        "the correctly resolved actual bank must fund its projectile"
     );
 }
 

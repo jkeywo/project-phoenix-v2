@@ -16,6 +16,14 @@ sources:
   - editor/workshop-identity.js
   - assets/entities/identity_cruiser.toml
   - crates/phoenix-sim-gameplay/src/electronic/jamming.rs
+  - crates/phoenix-sim-gameplay/src/electronic/protection.rs
+  - crates/phoenix-simulation/src/science/protection.rs
+  - crates/phoenix-simulation/src/science/protection_control.rs
+  - crates/phoenix-simulation/src/snapshot/protection.rs
+  - gui/components/protection-controls.js
+  - gui/stations/protection-actions.js
+  - editor/workshop-protection.js
+  - assets/entities/protection_cruiser.toml
   - crates/phoenix-sim-gameplay/src/ship/composition.rs
   - crates/phoenix-simulation/src/comms/jamming.rs
   - crates/phoenix-simulation/src/regions/signal_path.rs
@@ -38,7 +46,8 @@ updated: 2026-10-16
 
 # Electronic Equipment
 
-The first electronic equipment consumer is the composed Comms `JammingEmitter`.
+The composed Comms `JammingEmitter` supports an explicitly authored Comms or
+Sensors effect; omitted effect preserves the Comms profile.
 `ShipJamming` stores only its actual System's generic enabled and target channels.
 Shared mount state owns traversal. Commands, ordinary System AI and equipment
 controls use that same intent; there is no separate Tactical selection or target
@@ -54,8 +63,9 @@ mount bearing; later Physics movement/traversal affects the next boundary.
 
 `JammingEmissions` is a derived current-step view of actual paid emissions.
 `RegionSignalQuery` sums each source's strength, shared falloff, coverage, natural
-emitter-to-receiver Comms transmission and granted work exactly once. The factor
-`1/(1+exposure)` scales each receiver endpoint's own reach. The existing natural
+emitter-to-receiver transmission in the selected signal class and granted work
+exactly once. Current paid protection is subtracted before the factor
+`1/(1+remaining exposure)` scales each receiver endpoint's own reach. The existing natural
 conversation path stays separate. Self and friendly receivers use the same
 physical rule. Environmental `CommsJammed` retains its existing zero-factor denial.
 
@@ -72,13 +82,41 @@ next ordinary paid boundary. Whole-candidate and single-row validation bind the
 exact accepted source recipe and closed channel roster before writes, including
 actors that need materialization.
 
-The equipment detail view shows only own enabled/emitting intent and permitted
+Broad, Focused and Passive use the Sensors effect at their actual receiver
+origin once in their existing range/fidelity path. Natural Sensors terrain and
+fields stay separate; this equipment does not expand environmental `SensorBlind`.
+Held measurements and original sample dates remain with their sensing owners.
+
+Science `SignalProtection` uses `ShipSignalProtection` as the sole generic
+Boolean enabled and ordered `SystemPriority` channel store. Optional typed
+channel initials are validated at composition and instantiated only at creation;
+restore applies saved intent. Explicit own radio/Broad/Focused/Passive receiver
+IDs have authored whole capacity costs. Allocation follows the operator's order,
+skips a cost that does not fit, and can fund a later cheaper receiver. The
+technical 64-record bound does not grant capacity.
+
+Enabled operational protection pays real continuous work even without exposure.
+Paid fraction scales suppression, while whole-cost allocation stays independent
+of hidden exposure. `ProtectionGrants` is derived for the same paid Input tick;
+links and sensing match exact actor UUID and receiver System, never position or
+LocalShip. Missing/stale grants are neutral. Restore clears grants and requires
+new work. The ordinary protection tree uses retained nonempty priorities to
+enable operation; Human controls share the same admitted channel applier.
+
+The equipment detail view shows own ordered priorities, compatible receiver
+costs, capacity and current funded allocations. Station presets expand the same
+explicit eligible own IDs. Display names use actual own equipment labels; no
+exposure strengths, affected receiver census or hostile source identity are
+published. Delegated summaries remain read-only. Workshop edits costs, typed
+initials and the same composition/history transaction. Its enabled-only tree
+output does not create another allocation owner. `protection_cruiser.toml` places
+the owner explicitly in both inherited Science ratings.
+
+The jammer equipment detail view shows only own enabled/emitting intent and permitted
 aim choices. The Comms composer can show a Boolean own-receiver interference
 notice, without source identity, victim counts or success reporting. Workshop
 uses the actual component schema, shared Boolean host vocabulary and accepted
 composition/history transaction. `jamming_cruiser.toml` is the finite reference.
-This code path does not establish the remaining electronic protection, spoof,
-access, sensor interference, cloak or decoy consumers.
 
 The composed `identity-emitter` has one Boolean enabled channel, one actual
 PowerInput, real Operation/placement and one ordinary state-tree controller.
@@ -126,3 +164,7 @@ document transactions. The optional `emission_profile_cruiser.toml` is the
 reference fit. Targeted client tests cover mounted controls, retired cards and
 status advice; native host continuation and physical policy execution require
 the integration lane's separate evidence.
+
+The rendered protection-controls smoke test covers the shipped Science document,
+ordered priorities, Station presets, delegation and foreign-owner refusal using
+permitted fixture data. It does not establish host sensing or resource payment.

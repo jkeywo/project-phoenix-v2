@@ -51,7 +51,7 @@ Current implementation orientation only. For intended design use
 - [Equipment Fitting](./concepts/equipment-fitting.md) — fixed-slot hardware, actual assemblies, physical team work and recovery
 - [Physical Craft Handling](./concepts/physical-craft-handling.md) — actual probe custody, paid Bay Jobs, stored presence and canonical continuation
 - [Sensing and Spatial Fields](./concepts/sensing-and-fields.md) — paid enquiries, retained readings, passive reception and shared signal paths
-- [Electronic Equipment](./concepts/electronic-equipment.md) — paid independent Comms interference and shared physical receiver exposure
+- [Electronic Equipment](./concepts/electronic-equipment.md) — paid Comms/Sensors interference and ordered finite own-System protection
 - [Weapons Runtime](./concepts/weapons-intent.md)
 - [Weapons Plugin](./concepts/weapons-plugin.md)
 - [Shields Runtime](./concepts/shields-intent.md)

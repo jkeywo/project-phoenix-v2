@@ -908,3 +908,130 @@ fn inverse_routes_keep_first_source_and_do_not_route_missing_or_unknown_rows() {
     assert_eq!(state.current_routes().collect::<Vec<_>>(), expected);
     assert_eq!(expected, vec![("a-first", contact.as_str())]);
 }
+
+#[test]
+fn prepared_geometry_matches_raw_sort_confusion_and_association_boundaries() {
+    let mut inputs: Vec<_> = (-24..25)
+        .map(|n| {
+            let mut value = sample(&format!("source-{n}"), n as f32 * 0.37);
+            value.position[1] = (n % 7) as f32 * -0.21;
+            value
+        })
+        .collect();
+    inputs.push(reported(&profile(), 0));
+    let mut held = BroadTrackState::new(&profile());
+    held.advance(&profile(), 0, 0.5, 1.0, &[sample("old", 0.0)])
+        .unwrap();
+    for error in [0.0, 0.8, 1.0, 5.0] {
+        let mut raw: Vec<_> = inputs.iter().collect();
+        // Original unprepared formulas are the reference, including exact
+        // quantization, private tie order and inclusive overlap boundaries.
+        raw.sort_by(|a, b| {
+            let a_pos = sample_position(a, error);
+            let b_pos = sample_position(b, error);
+            a_pos[0]
+                .total_cmp(&b_pos[0])
+                .then_with(|| a_pos[1].total_cmp(&b_pos[1]))
+                .then_with(|| a.source.cmp(&b.source))
+        });
+        let mut prepared = prepared_samples(&inputs, 1.0, error);
+        prepared.sort_by(|(a, a_pos), (b, b_pos)| {
+            a_pos[0]
+                .total_cmp(&b_pos[0])
+                .then_with(|| a_pos[1].total_cmp(&b_pos[1]))
+                .then_with(|| a.source.cmp(&b.source))
+        });
+        for ((actual, point), expected) in prepared.iter().zip(&raw) {
+            assert_eq!(actual.source, expected.source);
+            assert_eq!(
+                point.map(f32::to_bits),
+                sample_position(expected, error).map(f32::to_bits)
+            );
+            let old_overlap: Vec<_> = raw
+                .iter()
+                .filter(|other| {
+                    expected.source != other.source
+                        && distance(
+                            sample_position(expected, error),
+                            sample_position(other, error),
+                        ) <= f64::from(error) * 2.0
+                })
+                .map(|other| &other.source)
+                .collect();
+            let new_overlap: Vec<_> = prepared
+                .iter()
+                .filter(|(other, other_point)| {
+                    actual.source != other.source
+                        && distance(*point, *other_point) <= f64::from(error) * 2.0
+                })
+                .map(|(other, _)| &other.source)
+                .collect();
+            assert_eq!(new_overlap, old_overlap);
+            for track in held.tracks.values() {
+                let raw_match = distance(
+                    prediction(track, 2, 0.5).0,
+                    sample_position(expected, error),
+                ) <= f64::from(prediction(track, 2, 0.5).1)
+                    + f64::from(error)
+                    + 1.0 * f64::from(profile().drift_error_per_sec);
+                let (predicted, uncertainty) = prediction(track, 2, 0.5);
+                let prepared_match = distance(predicted, *point)
+                    <= f64::from(uncertainty)
+                        + f64::from(error)
+                        + 1.0 * f64::from(profile().drift_error_per_sec);
+                assert_eq!(prepared_match, raw_match);
+            }
+        }
+    }
+}
+
+#[test]
+fn prepared_multi_contact_reassociation_keeps_canonical_outputs_after_reordering_and_json() {
+    let p = profile();
+    let mut first = BroadTrackState::new(&p);
+    let mut reversed = first.clone();
+    let mut original = BTreeMap::new();
+    for tick in 0..5 {
+        let rows = match tick {
+            0 => vec![sample("a", 0.0), sample("b", 20.0), sample("c", 40.0)],
+            1 => Vec::new(),
+            2 => vec![
+                sample("new-a", 0.0),
+                sample("new-b", 20.0),
+                sample("new-c", 40.0),
+            ],
+            _ => vec![
+                sample("new-a", 19.8),
+                sample("new-b", 20.0),
+                sample("new-c", 40.0),
+            ],
+        };
+        first.advance(&p, tick, 0.5, 1.0, &rows).unwrap();
+        let mut reversed_rows = rows.clone();
+        reversed_rows.reverse();
+        reversed
+            .advance_live(&p, tick, 0.5, 1.0, &reversed_rows)
+            .unwrap();
+        assert_eq!(first, reversed);
+        assert_eq!(
+            first.projection(&p, tick, 0.5).unwrap(),
+            reversed.projection_live(&p, tick, 0.5)
+        );
+        if tick == 0 {
+            original = first.current.clone();
+        }
+        if tick == 1 {
+            reversed = serde_json::from_str(&serde_json::to_string(&reversed).unwrap()).unwrap();
+        }
+        if tick == 2 {
+            for (old, new) in [("a", "new-a"), ("b", "new-b"), ("c", "new-c")] {
+                assert_eq!(first.current[new], original[old]);
+            }
+        }
+        if tick == 3 {
+            assert_ne!(first.current["new-a"], original["a"]);
+            assert_ne!(first.current["new-b"], original["b"]);
+            assert_eq!(first.current["new-c"], original["c"]);
+        }
+    }
+}

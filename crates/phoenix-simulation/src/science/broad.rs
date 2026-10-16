@@ -233,6 +233,14 @@ pub(crate) fn tick(
                 0.0
             };
             let origin = physical_position(physics, transform);
+            // This instrument's permitted publication cannot change during its
+            // physical observation pass. Resolve it once, not once per label.
+            let view = ship_config.0.observations_for_system(system, &boards.0);
+            let routine_view = match view.get(&crate::ship::system_registry::viewscreen_system_id())
+            {
+                Some(crate::core::messages::SystemBlackboard::Viewscreen(board)) => Some(board),
+                _ => None,
+            };
             let mut measurements = Vec::new();
             if paid > 0.0 {
                 let radar = &instrument.radar;
@@ -436,16 +444,10 @@ pub(crate) fn tick(
                             source: id.to_owned(),
                             observation: None,
                             selectable: target.is_some_and(|target| {
-                                crate::entities::tags::matches_any(
-                                    &crate::entities::tags::parse_tags(&target.0.tags),
-                                    &radar.selects,
-                                )
+                                matches_raw_tags(&target.0.tags, &radar.selects)
                             }) || rock.is_some()
                                 && snapshots.get(id).is_some_and(|snapshot| {
-                                    crate::entities::tags::matches_any(
-                                        &crate::entities::tags::parse_tags(&snapshot.target_tags),
-                                        &radar.selects,
-                                    )
+                                    matches_raw_tags(&snapshot.target_tags, &radar.selects)
                                 }),
                             position: [position.x, position.z],
                             support,
@@ -456,15 +458,7 @@ pub(crate) fn tick(
                                     .then(|| identity_claim.map_or_else(||faction.map(|faction|faction.0.to_string()),|claim|claim.faction.clone()))
                                     .flatten(),
                                 references: if identity_claim.is_some() {Vec::new()} else {world_config.as_ref().map_or_else(Vec::new, |world| {
-                                    let view =
-                                        ship_config.0.observations_for_system(system, &boards.0);
-                                    let Some(crate::core::messages::SystemBlackboard::Viewscreen(
-                                        board,
-                                    )) = view
-                                        .get(&crate::ship::system_registry::viewscreen_system_id())
-                                    else {
-                                        return Vec::new();
-                                    };
+                                    let Some(board) = routine_view else { return Vec::new(); };
                                     routine_references(
                                         name,
                                         &world.entities,
@@ -663,12 +657,7 @@ fn reported_measurement(
                 ObservationUncertainty::Unspecified
             },
         )),
-        selectable: target.is_some_and(|target| {
-            crate::entities::tags::matches_any(
-                &crate::entities::tags::parse_tags(&target.0.tags),
-                selects,
-            )
-        }),
+        selectable: target.is_some_and(|target| matches_raw_tags(&target.0.tags, selects)),
         position: [
             sample.position_mm[0] as f32 / 1000.0,
             sample.position_mm[2] as f32 / 1000.0,
@@ -683,6 +672,11 @@ fn reported_measurement(
         classification: None,
         assessment: None,
     })
+}
+fn matches_raw_tags(raw: &[String], allowed: &[phoenix_model::tags::EntityTag]) -> bool {
+    raw.iter()
+        .filter_map(|tag| phoenix_model::tags::EntityTag::from_str(tag))
+        .any(|tag| allowed.contains(&tag))
 }
 fn routine_references<'a>(
     observed_name: &str,

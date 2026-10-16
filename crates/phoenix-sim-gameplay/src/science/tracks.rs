@@ -457,15 +457,10 @@ impl BroadTrackState {
         let due = next.last_sample_tick.is_none()
             || next.sample_elapsed >= f64::from(profile.sample_interval_secs);
         next.sample_elapsed %= f64::from(profile.sample_interval_secs);
-        let mut samples: Vec<_> = measurements
-            .iter()
-            .filter(|sample| paid_fraction > 0.0 && sample.support > 0.0)
-            .collect();
+        let mut samples = prepared_samples(measurements, paid_fraction, profile.position_error);
         // New anonymous identities follow measured geometry, not a hidden
         // UUID ordering. Private routing breaks only indistinguishable ties.
-        samples.sort_by(|a, b| {
-            let a_position = sample_position(a, profile.position_error);
-            let b_position = sample_position(b, profile.position_error);
+        samples.sort_by(|(a, a_position), (b, b_position)| {
             a_position[0]
                 .total_cmp(&b_position[0])
                 .then_with(|| a_position[1].total_cmp(&b_position[1]))
@@ -475,28 +470,25 @@ impl BroadTrackState {
         // disambiguated by the physical source key, including while crossing.
         let confused: BTreeSet<_> = samples
             .iter()
-            .filter(|a| {
-                samples.iter().any(|b| {
+            .filter(|(a, a_position)| {
+                samples.iter().any(|(b, b_position)| {
                     a.source != b.source
-                        && distance(
-                            sample_position(a, profile.position_error),
-                            sample_position(b, profile.position_error),
-                        ) <= f64::from(profile.position_error) * 2.0
+                        && distance(*a_position, *b_position)
+                            <= f64::from(profile.position_error) * 2.0
                 })
             })
-            .map(|sample| sample.source.as_str())
+            .map(|(sample, _)| sample.source.as_str())
             .collect();
         next.current.retain(|source, _| {
-            samples.iter().any(|sample| &sample.source == source)
+            samples.iter().any(|(sample, _)| &sample.source == source)
                 && !confused.contains(source.as_str())
         });
         if due && !samples.is_empty() {
             let claimed: BTreeSet<_> = next.current.values().cloned().collect();
             let candidates: BTreeMap<_, Vec<_>> = samples
                 .iter()
-                .filter(|sample| !next.current.contains_key(&sample.source))
-                .map(|sample| {
-                    let position = sample_position(sample, profile.position_error);
+                .filter(|(sample, _)| !next.current.contains_key(&sample.source))
+                .map(|(sample, position)| {
                     let candidates = next
                         .tracks
                         .iter()
@@ -505,19 +497,22 @@ impl BroadTrackState {
                                 && !claimed.contains(*id)
                                 && (tick - track.observed_tick) as f64 * f64::from(fixed_dt)
                                     <= f64::from(profile.track_retention_secs)
-                                && distance(prediction(track, tick, fixed_dt).0, position)
-                                    <= f64::from(prediction(track, tick, fixed_dt).1)
-                                        + f64::from(profile.position_error)
-                                        + (tick - track.observed_tick) as f64
-                                            * f64::from(fixed_dt)
-                                            * f64::from(profile.drift_error_per_sec)
+                                && {
+                                    let (predicted, error) = prediction(track, tick, fixed_dt);
+                                    distance(predicted, *position)
+                                        <= f64::from(error)
+                                            + f64::from(profile.position_error)
+                                            + (tick - track.observed_tick) as f64
+                                                * f64::from(fixed_dt)
+                                                * f64::from(profile.drift_error_per_sec)
+                                }
                         })
                         .map(|(id, _)| id.clone())
                         .collect();
                     (sample.source.clone(), candidates)
                 })
                 .collect();
-            for sample in &samples {
+            for (sample, position) in &samples {
                 if next.current.contains_key(&sample.source) {
                     continue;
                 }
@@ -557,7 +552,11 @@ impl BroadTrackState {
                             observation: None,
                             selectable: sample.selectable,
                             observed_tick: tick,
-                            position: measured_position(sample.position, profile.position_error),
+                            position: if sample.observation.is_some() {
+                                measured_position(sample.position, profile.position_error)
+                            } else {
+                                *position
+                            },
                             elevation: None,
                             velocity: None,
                             velocity_error: 0.0,
@@ -578,12 +577,12 @@ impl BroadTrackState {
             }
         }
         let mut identity_counts = BTreeMap::<&str, usize>::new();
-        for sample in &samples {
+        for (sample, _) in &samples {
             if let Some(identity) = &sample.identity {
                 *identity_counts.entry(&identity.name).or_default() += 1;
             }
         }
-        for sample in &samples {
+        for (sample, position) in &samples {
             let Some(id) = next.current.get(&sample.source) else {
                 continue;
             };
@@ -627,7 +626,7 @@ impl BroadTrackState {
                 track.identity_tick = None;
                 // A displaced reported point and a fresh physical return are
                 // not two measurements of a physical velocity.
-                track.position = sample_position(sample, profile.position_error);
+                track.position = *position;
                 track.observed_tick = tick;
                 track.velocity = None;
                 track.elevation = None;
@@ -654,7 +653,7 @@ impl BroadTrackState {
             if !due {
                 continue;
             }
-            let position = measured_position(sample.position, profile.position_error);
+            let position = *position;
             let elevation = sample.elevation.map(|sample| {
                 let rounded = measured_position([sample.height, 0.0], sample.error)[0];
                 // Casting a distant grid centre to f32 can move it beyond the
@@ -850,6 +849,19 @@ fn report_metadata_valid(observation: &ObservationMetadata, tick: u64) -> bool {
                 .is_some_and(|observed| observed <= received)
                 && received <= tick
         })
+}
+/// One transient grid point per supported input; ordering and physical inputs
+/// remain separate so reports keep their original (unquantized) evidence.
+fn prepared_samples(
+    measurements: &[BroadMeasurement],
+    paid_fraction: f32,
+    error: f32,
+) -> Vec<(&BroadMeasurement, [f32; 2])> {
+    measurements
+        .iter()
+        .filter(|sample| paid_fraction > 0.0 && sample.support > 0.0)
+        .map(|sample| (sample, sample_position(sample, error)))
+        .collect()
 }
 fn sample_position(sample: &BroadMeasurement, error: f32) -> [f32; 2] {
     if sample.observation.is_some() {

@@ -906,3 +906,49 @@ fn paid_physical_transponder_changes_only_acquired_identity_and_preserves_real_a
         last_observed_tick
     );
 }
+
+#[test]
+fn streamed_tag_matching_preserves_raw_alias_unknown_and_empty_filter_rules() {
+    use phoenix_model::tags::EntityTag;
+    let raw = ["unknown", "torpedo", "ship", "missile", "SHIP"].map(str::to_owned);
+    for allowed in [
+        vec![],
+        vec![EntityTag::Missile],
+        vec![EntityTag::Ship],
+        vec![EntityTag::Cargo],
+    ] {
+        assert_eq!(
+            matches_raw_tags(&raw, &allowed),
+            crate::entities::tags::matches_any(&crate::entities::tags::parse_tags(&raw), &allowed)
+        );
+    }
+    assert!(matches_raw_tags(&["torpedo".into()], &[EntityTag::Missile]));
+    assert!(!matches_raw_tags(&["SHIP".into()], &[EntityTag::Ship]));
+}
+
+#[test]
+fn physical_broad_preparation_and_output_do_not_advance_simulation_rng() {
+    let (mut app, observer, target, profile) = rig();
+    app.insert_resource(crate::sim_rng::SimRng::new(
+        42,
+        crate::sim_rng::SeedSource::Cli,
+    ));
+    let before = app.world().resource::<crate::sim_rng::SimRng>().state();
+    for tick in 0..6 {
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = tick;
+        app.world_mut().get_mut::<ShipPhysics>(target).unwrap().x = 10.0 + tick as f32;
+        app.world_mut()
+            .get_mut::<ShipPowerSystem>(observer)
+            .unwrap()
+            .0
+            .begin_work_interval();
+        fund(&mut app, observer, &profile, 1.0);
+        app.update();
+        let state = &app.world().get::<BroadTracks>(observer).unwrap().0[&profile.system];
+        assert!(!state.projection(&profile, tick, 0.5).unwrap().is_empty());
+        assert_eq!(
+            app.world().resource::<crate::sim_rng::SimRng>().state(),
+            before
+        );
+    }
+}

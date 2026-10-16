@@ -2,8 +2,8 @@
 title: Damage and Repair Information
 type: concept
 tags: [damage, repair, engineering, station, information]
-sources: [crates/phoenix-model/src/emp.rs, crates/phoenix-simulation/src/ship/emp.rs, crates/phoenix-simulation/src/snapshot/emp.rs, crates/phoenix-simulation/src/server_app/system_status.rs, crates/phoenix-sim-gameplay/src/ship/compartment_damage.rs, crates/phoenix-sim-gameplay/src/ship/physical_damage.rs, crates/phoenix-sim-gameplay/src/jobs/repair_physical.rs, crates/phoenix-simulation/src/core/broadcast/reconnect.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/modifiers/coordination.rs, crates/phoenix-sim-gameplay/src/modifiers/cache.rs, crates/phoenix-sim-gameplay/src/ship/control_source.rs, crates/phoenix-simulation/src/gm/actions/action.rs, crates/phoenix-simulation/src/gm/observation/projection.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/sim_digest.rs, gui/gm-system-panel.js, pasm/spec/architecture/engineering-damage.yaml, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, gui/console-state.js, gui/components/ph-repair-teams.js]
-updated: 2026-10-15
+sources: [crates/phoenix-simulation/src/snapshot/application.rs, crates/phoenix-model/src/emp.rs, crates/phoenix-simulation/src/ship/emp.rs, crates/phoenix-simulation/src/snapshot/emp.rs, crates/phoenix-simulation/src/server_app/system_status.rs, crates/phoenix-sim-gameplay/src/ship/compartment_damage.rs, crates/phoenix-sim-gameplay/src/ship/physical_damage.rs, crates/phoenix-sim-gameplay/src/jobs/repair_physical.rs, crates/phoenix-simulation/src/core/broadcast/reconnect.rs, crates/phoenix-sim-gameplay/src/ship/impulse_boost_systems.rs, crates/phoenix-sim-gameplay/src/ship/physics_systems.rs, crates/phoenix-sim-gameplay/src/modifiers/coordination.rs, crates/phoenix-sim-gameplay/src/modifiers/cache.rs, crates/phoenix-sim-gameplay/src/ship/control_source.rs, crates/phoenix-simulation/src/gm/actions/action.rs, crates/phoenix-simulation/src/gm/observation/projection.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/sim_digest.rs, gui/gm-system-panel.js, pasm/spec/architecture/engineering-damage.yaml, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, gui/console-state.js, gui/components/ph-repair-teams.js]
+updated: 2026-10-16
 ---
 
 # Damage and Repair Information
@@ -94,7 +94,7 @@ projected state for the shared `ph-repair-teams` control.
 normal availability policy blocks human commands, AI and operation while the
 latch is set. Damage synchronisation and rating changes cannot clear it, and
 Restore removes only the latch: physical structure, component conditions and repair eligibility are
-unchanged. `snapshot.rs` restores this state before continuation admission;
+unchanged. `snapshot/application.rs` restores this state before continuation admission;
 `sim_digest.rs` folds the sorted ship/System identities.
 
 Ongoing impulse and boost transitions enforce availability too: Disable cancels

@@ -3,7 +3,7 @@ title: Peer-Local Save Catalogues
 type: concept
 tags: [save, snapshot, persistence, autosave, browser, native, catalogue]
 sources: [crates/phoenix-simulation/src/world/server/state.rs, crates/phoenix-simulation/src/snapshot/capture.rs, crates/phoenix-simulation/src/snapshot/application.rs, crates/phoenix-simulation/src/save_slots.rs, crates/phoenix-simulation/src/save_slots_lifecycle.rs, crates/phoenix-simulation/src/startup_restore.rs, crates/phoenix-simulation/src/save_slots_store.rs, crates/phoenix-simulation/src/snapshot/mod.rs, crates/phoenix-simulation/src/core/collision_history.rs, tests/collision_history.rs, tests/same_target_damage_ordering.rs, crates/phoenix-simulation/src/gm/actions/action.rs, crates/phoenix-simulation/src/sim_digest.rs, src/headless/replay.rs, src/headless/replay/recorded_gm.rs, tests/recorded_gm_exports.rs, src/server/bridge.rs, crates/phoenix-simulation/src/server_app/world_setup.rs, crates/phoenix-simulation/src/lockstep/mod.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, src/bin/phoenix_host.rs, src/delivery/args.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-sim-world/src/world/config.rs, gui/save-slots.js, gui/browser-save-identity.js, gui/browser-save-identity-worker.js, server.html, tests/save_slots_persistence.rs, tests/smoke/save-slots.spec.js]
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # Peer-Local Save Catalogues
@@ -15,7 +15,7 @@ enter the simulation digest or fleet mesh.
 
 ## Capture lifecycle
 
-Entity capture in `snapshot.rs` uses one UUID-sorted traversal with private
+Entity capture in `snapshot/capture.rs` uses one UUID-sorted traversal with private
 state adapters. A per-capture context retains the former optional-query
 registration gates and reads fixed time, tick and motion-plan resources once.
 Absent and explicit default continuations keep their existing serialized forms.
@@ -24,9 +24,9 @@ Mission age uses integer `Duration` arithmetic. Capture stores the exact age,
 then restore rebases it against the receiving process's fixed clock. Authored
 timers, delayed work and Comms project seconds from that same age, so a younger
 bootstrap cannot introduce an `f32` cancellation difference. The digest includes
-exact mission age and repeat cooldown readings. Snapshot format `49` and rules
-`0.21` include this change with the port-visit continuation batch; older records
-are refused through the ordinary version check.
+exact mission age and repeat cooldown readings. Restore checks the current
+snapshot-format and simulation-rules versions before application; incompatible
+older records are refused through the ordinary version check.
 
 `save_slots::SaveSchedule` chooses completed logical ticks, and
 `save_slots_lifecycle` captures in `FixedLast` after the simulation work and

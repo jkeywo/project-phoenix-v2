@@ -10,7 +10,7 @@ const CONSOLE_URL = '/gui/battleship/repair.html';
 const CRUISER_ENGINEERING_URL = '/gui/cruiser/engineering.html';
 
 function repairState(overrides = {}) {
-  return Object.assign(
+  const repair = Object.assign(
     {
       teams: [
         { id: 0, label: 'Team 1', status: 'idle', target: '', progress_pct: 0 },
@@ -38,14 +38,19 @@ function repairState(overrides = {}) {
         { system_id: 'hull-plating', display_name: 'Hull Plating', tier: 'Disabled', current: 2, max_hp: 20, damage_pct: 0.9, prioritised: false, in_progress: true, prioritisable: false },
         { system_id: 'core', display_name: 'Core', tier: 'Damaged', current: 12, max_hp: 20, damage_pct: 0.4, prioritised: true, in_progress: false, prioritisable: true },
       ],
-      // #1287 moved dispatch and prioritise onto shared semantic actions, whose
-      // handlers resolve a control_system_id from this projection and REFUSE
-      // the action without it — a payload missing it sends nothing at all.
-      systems: { damage_control: {} },
-      system_families: { damage_control: 'repair' },
+      system_id: 'damage_control',
     },
     overrides,
   );
+  // The real Console envelope carries the populated family view under its
+  // actual controlling System. An empty keyed entry must not borrow flat
+  // fields: rendering and semantic commands both read this permitted view.
+  return {
+    console_id: 'repair',
+    system_ids: ['damage_control'],
+    system_families: { damage_control: 'repair' },
+    systems: { damage_control: repair },
+  };
 }
 
 /** One on-site team, so the card that carries the damaged list can be opened. */
@@ -128,8 +133,8 @@ test('repair console: dispatch buttons call __sendAction with correct envelope',
 
   const sent = await page.evaluate(() => window.__sent);
   expect(sent).toHaveLength(2);
-  expect(JSON.parse(sent[0])).toMatchObject({ action: 'dispatch_repair_team', console: 'repair', team_idx: 0, target: 'helm' });
-  expect(JSON.parse(sent[1])).toMatchObject({ action: 'dispatch_repair_team', console: 'repair', team_idx: 1, target: 'tactical' });
+  expect(JSON.parse(sent[0])).toMatchObject({ action: 'dispatch_repair_team', console: 'repair', control_system_id: 'damage_control', team_idx: 0, target: 'helm' });
+  expect(JSON.parse(sent[1])).toMatchObject({ action: 'dispatch_repair_team', console: 'repair', control_system_id: 'damage_control', team_idx: 1, target: 'tactical' });
 });
 
 test('repair console: selecting a second team closes the first card', async ({ page }) => {
@@ -174,7 +179,7 @@ test('repair console: an idle card sends a NAMED dispatch to the field target', 
   // Only the destination is the host's to resolve — it is Tactical's lock — so
   // `external` carries no id of its own (#1386).
   expect(JSON.parse(sent[0])).toMatchObject({
-    action: 'dispatch_repair_team', console: 'repair', team_idx: 1, target: 'external',
+    action: 'dispatch_repair_team', console: 'repair', control_system_id: 'damage_control', team_idx: 1, target: 'external',
   });
 });
 
@@ -219,7 +224,7 @@ test('repair console: the abroad card shows the target it works and recalls it',
   const sent = await page.evaluate(() => window.__sent);
   expect(sent).toHaveLength(1);
   expect(JSON.parse(sent[0])).toMatchObject({
-    action: 'recall_repair_team', console: 'repair', team_idx: 1,
+    action: 'recall_repair_team', console: 'repair', control_system_id: 'damage_control', team_idx: 1,
   });
 });
 
@@ -258,7 +263,7 @@ test('repair console: tapping a system in the on-site card sends set_repair_targ
   // system; the ordinal is untouched.
   expect(sent).toHaveLength(1);
   expect(JSON.parse(sent[0])).toMatchObject({
-    action: 'set_repair_target_priority', console: 'repair', system_id: 'aux-sensor',
+    action: 'set_repair_target_priority', console: 'repair', control_system_id: 'damage_control', system_id: 'aux-sensor',
   });
 });
 
@@ -342,7 +347,7 @@ test('repair console: RECALL on a team out on a job sends recall_repair_team', {
   // Names its team, unlike the fieldless external recall: a hull can have every
   // internal team out on a different job at once.
   expect(JSON.parse(sent[0])).toMatchObject({
-    action: 'recall_repair_team', console: 'repair', team_idx: 0,
+    action: 'recall_repair_team', console: 'repair', control_system_id: 'damage_control', team_idx: 0,
   });
 });
 

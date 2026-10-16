@@ -79,6 +79,31 @@ function beamCount(client) {
   );
 }
 
+// Read only the latest publication of each owner. The actual shared mounts
+// may still be slewing even when another bank (or an older packet) was ready.
+async function waitForReadyBank(tactical, contact, selectedBank = null) {
+  const result = await tactical.page.waitForFunction(({ contact, selectedBank }) => {
+    const messages = [...(window.__messages || [])].reverse();
+    const weapons = messages.find(message => message.type === 'WeaponsUpdate')?.data;
+    if (weapons?.target_uuid !== contact) return null;
+    let radar = null;
+    for (const message of messages) {
+      if (message.type !== 'BlackboardUpdate') continue;
+      const entry = (message.data.updates || []).find(([owner]) => owner === 'tactical-radar');
+      if (entry) { radar = entry[1]?.data; break; }
+    }
+    const track = radar?.tracks?.find(candidate => candidate.contact_id === contact);
+    if (radar?.selected_target !== contact || track?.selectable !== true || track.predicted !== false) return null;
+    const bank = weapons.banks?.find(candidate => ['fore', 'aft'].includes(candidate.id)
+      && (selectedBank === null || candidate.id === selectedBank)
+      && candidate.fire_ready === true && candidate.readiness?.ready === true
+      && candidate.readiness.blocking_reason === 'Ready'
+      && candidate.firing === false && candidate.on_cooldown === false);
+    return bank?.id || null;
+  }, { contact, selectedBank }, { timeout: 20000 });
+  return result.jsonValue();
+}
+
 // Capture only the actual phone's permitted publications, never host ECS data.
 // This distinguishes admission/consumer refusal from missing beam delivery.
 async function consoleEvidence(client) {
@@ -191,15 +216,8 @@ test('Tactical holds and releases firing independently of Engineering flow', { t
     message.type === 'TargetLock' && message.data.uuid === handle && message.data.locked === true),
   raiderContact, { timeout: 15000 });
   await tactical.page.bringToFront();
-  await tactical.page.waitForFunction(
-    () => window.__messages?.some(
-      (m) => m.type === 'WeaponsUpdate'
-        && Array.isArray(m.data.banks)
-        && m.data.banks.some((b) => b.fire_ready === true),
-    ),
-    undefined,
-    { timeout: 20_000 },
-  );
+  const bank = await waitForReadyBank(tactical, raiderContact);
+  const bankSystem = `phaser-${bank}`;
 
   // Engineering may stop incoming flow without suppressing an already
   // charged local weapon reserve. Tactical's explicit restraint does suppress it.
@@ -209,7 +227,7 @@ test('Tactical holds and releases firing independently of Engineering flow', { t
     && message.data.correlation === 'flow-cut' && message.data.outcome === 'Applied'));
   await setRestraint(tactical, true);
   expect(await beamCount(tactical)).toBe(0);
-  await tactical.send('ControlSystemCorrelated', { target: 'phaser-fore', correlation: 'held-fire', payload: { type: 'FirePhaser' } });
+  await tactical.send('ControlSystemCorrelated', { target: bankSystem, correlation: 'held-fire', payload: { type: 'FirePhaser' } });
   await tactical.page.waitForFunction(() => window.__messages?.some(message => message.type === 'ActionFeedback'
     && message.data.correlation === 'held-fire' && message.data.outcome === 'Refused'), undefined, { timeout: 15000 });
   expect(await beamCount(tactical), 'an acknowledged held fire order produces no beam').toBe(0);
@@ -217,8 +235,9 @@ test('Tactical holds and releases firing independently of Engineering flow', { t
   const beforeReleasedFire = {
     tactical: await consoleEvidence(tactical), engineering: await consoleEvidence(engineering),
   };
-  await tactical.send('ControlSystemCorrelated', { target: 'phaser-fore', correlation: 'released-fire', payload: { type: 'FirePhaser' } });
   try {
+    expect(await waitForReadyBank(tactical, raiderContact, bank)).toBe(bank);
+    await tactical.send('ControlSystemCorrelated', { target: bankSystem, correlation: 'released-fire', payload: { type: 'FirePhaser' } });
     const receipt = await tactical.page.waitForFunction(() => window.__messages?.find(message =>
       message.type === 'ActionFeedback' && message.data.correlation === 'released-fire')?.data,
     undefined, { timeout: 15000 });
@@ -226,9 +245,10 @@ test('Tactical holds and releases firing independently of Engineering flow', { t
     expect(feedback.outcome, 'the actual released-fire consumer must apply the command').toBe('Applied');
     const beamStarted = await tactical.waitForMessage('BeamStarted', 20000);
     expect(beamStarted.data.target_uuid).toBe(raiderContact);
+    expect(beamStarted.data.bank).toBe(bank);
   } catch (error) {
     const evidencePath = test.info().outputPath('released-fire-permitted-state.json');
-    writeFileSync(evidencePath, JSON.stringify({ target: raiderContact, before: beforeReleasedFire,
+    writeFileSync(evidencePath, JSON.stringify({ target: raiderContact, bank, before: beforeReleasedFire,
       after: { tactical: await consoleEvidence(tactical), engineering: await consoleEvidence(engineering) } }, null, 2), 'utf8');
     await test.info().attach('released-fire-permitted-state', {
       path: evidencePath, contentType: 'application/json',

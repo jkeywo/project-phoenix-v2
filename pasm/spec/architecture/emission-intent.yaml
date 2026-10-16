@@ -8,6 +8,7 @@ entities:
     architecture:
       kind: command-consumer
       authority: authoritative
+      owns: [ship-emission-intent]
       writes: [ship-emission-intent]
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
     implementation:

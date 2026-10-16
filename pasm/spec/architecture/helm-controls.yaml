@@ -561,6 +561,7 @@ entities:
         - desired-motion-state
         - hazard-assessment-state
         - docking-motion-intent-state
+        - helm-motion-blackboard-state
       reads:
         - helm-objective-state
         - world-snapshot-state

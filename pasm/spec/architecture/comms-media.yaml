@@ -8,6 +8,7 @@ entities:
     architecture:
       kind: command-consumer
       authority: authoritative
+      owns: [ship-comms-media-intent]
       reads: [comms-inbox-state]
       writes: [ship-comms-media-intent, comms-media-current-carriers]
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]

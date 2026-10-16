@@ -8,6 +8,7 @@ entities:
     architecture:
       kind: command-consumer
       authority: authoritative
+      owns: [ship-comms-capture]
       reads: [comms-inbox-state]
       writes: [ship-comms-capture]
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]

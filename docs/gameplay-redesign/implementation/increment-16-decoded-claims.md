@@ -67,3 +67,19 @@ Dynamic key acquisition/revocation, opaque keyless forwarding, relay-hop or
 retransmission interception, audio/video interception/recording and arbitrary
 phantom contacts are not added by this contract. They require separately selected
 real consumers and provenance rules.
+
+## Source handoff
+
+The leaf implements the separate closed claim DTO, a pure paid-evidence
+projection, strict client normalization and read-only rendering. Its owner
+regression checks actual finite partial work before typed disclosure, immutable
+parameters/clocks and recursive exclusion of private identities. The existing
+real Human/ordinary-AI capture proof retains full fresh-JSON360 comparisons and
+adds exact Report Status disclosure plus forged saved-claim no-write refusal.
+
+Independent Personnel source review passed. Eight focused client tests across
+two files passed (1.06s); strict strings and layer checks passed. Owned Rust was
+formatted; Cargo/native and actual device acceptance remain with integration.
+This donor is based on main `9d9e8746`. Joining the separately frozen Receive
+Craft enum requires an explicit kind-only request projection and `reception:
+None` in the new pure report fixture; no receipt fields may enter this DTO.

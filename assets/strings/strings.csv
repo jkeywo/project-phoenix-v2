@@ -1,6 +1,9 @@
 id,context,en,de,de_source,de_provenance
 entity.capture_cruiser.name,Optional codebreaking reference,Codebreaking Cruiser,Entschlüsselungskreuzer,Codebreaking Cruiser,machine
 comms.capture.title,Comms intercepted evidence,Captured traffic,Abgefangener Funk,Captured traffic,machine
+comms.capture.typed_claim,Attributed intercepted typed evidence,Intercepted claim: {content},,,
+comms.capture.request_emitted_at,Attributed intercepted typed evidence,Original request sent at tick {tick},,,
+comms.capture.receive_craft,Attributed intercepted typed evidence,Request craft reception,,,
 comms.capture.header,Comms captured header,{channel} · protection {level} · tick {tick},{channel} · Schutz {level} · Takt {tick},{channel} · protection {level} · tick {tick},machine
 comms.capture.evidence,Comms attributed intercepted claim,{sender}: {body},{sender}: {body},{sender}: {body},machine
 comms.capture.work,Comms paid decoding,Decode work: {progress}%,Entschlüsselung: {progress}%,Decode work: {progress}%,machine

@@ -2,14 +2,56 @@
 //! are supplied by the actual radio owner; this module never queries the world.
 use phoenix_model::{
     comms_capture::{
-        CapturedContentKind, CommsCaptureConfig, CommsCaptureView, DecodedCommsEvidence,
-        MAX_CAPTURE_ROWS, MAX_CAPTURE_SEQUENCE, WORK_PER_TICK,
+        CapturedContentKind, CommsCaptureConfig, CommsCaptureView, DecodedCommsClaim,
+        DecodedCommsEvidence, DecodedDecisionClaim, DecodedOutcomeClaim, DecodedRequestClaim,
+        DecodedStatusClaim, MAX_CAPTURE_ROWS, MAX_CAPTURE_SEQUENCE, WORK_PER_TICK,
     },
     comms_channel::{identity, valid_text, CommsTransmission},
-    comms_request::CommsRadioContent,
+    comms_request::{CommsRadioContent, GenericCommsRequest},
     identity::SystemId,
 };
 use serde::{Deserialize, Serialize};
+
+fn request_claim(request: &GenericCommsRequest) -> DecodedRequestClaim {
+    match request {
+        GenericCommsRequest::ReportStatus => DecodedRequestClaim::ReportStatus,
+        GenericCommsRequest::FormUp { slot } => DecodedRequestClaim::FormUp { slot: *slot },
+        GenericCommsRequest::MediaCall { mode } => DecodedRequestClaim::MediaCall { mode: *mode },
+    }
+}
+
+fn decoded_claim(content: &CommsRadioContent) -> DecodedCommsClaim {
+    match content {
+        CommsRadioContent::Text => DecodedCommsClaim::Text,
+        CommsRadioContent::Request { request } => DecodedCommsClaim::Request {
+            request: request_claim(request),
+        },
+        CommsRadioContent::Outcome { outcome } => {
+            DecodedCommsClaim::Outcome {
+                outcome: DecodedOutcomeClaim {
+                    request: request_claim(&outcome.request.request),
+                    request_emitted_tick: outcome.request.emitted_tick,
+                    heard_tick: outcome.request.heard_tick,
+                    read_tick: outcome.facts.read_tick,
+                    decision: outcome.facts.decision.as_ref().map(|decision| {
+                        DecodedDecisionClaim {
+                            choice: decision.choice,
+                            tick: decision.tick,
+                        }
+                    }),
+                    report: outcome
+                        .facts
+                        .report
+                        .as_ref()
+                        .map(|report| DecodedStatusClaim {
+                            available: report.available,
+                            observed_tick: report.observed_tick,
+                        }),
+                },
+            }
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -251,6 +293,7 @@ impl CaptureState {
                             CommsRadioContent::Outcome { .. } => CapturedContentKind::Outcome,
                         },
                         emitted_tick: row.payload.transmission.emitted_tick,
+                        claim: decoded_claim(&row.payload.transmission.content),
                     }),
                 }
             })

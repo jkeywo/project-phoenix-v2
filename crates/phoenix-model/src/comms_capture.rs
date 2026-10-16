@@ -61,6 +61,54 @@ pub enum CapturedContentKind {
     Outcome,
 }
 
+/// Read-only intercepted claims. Deliberately distinct from machinery requests.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DecodedRequestClaim {
+    ReportStatus,
+    FormUp {
+        slot: [i32; 2],
+    },
+    MediaCall {
+        mode: crate::comms_media::MediaMode,
+    },
+    /// A craft identifier is private even when the request itself is decoded.
+    ReceiveCraft,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DecodedDecisionClaim {
+    pub choice: crate::comms_request::CommsRequestDecision,
+    pub tick: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DecodedStatusClaim {
+    pub available: bool,
+    pub observed_tick: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DecodedOutcomeClaim {
+    pub request: DecodedRequestClaim,
+    pub request_emitted_tick: u64,
+    pub heard_tick: u64,
+    pub read_tick: Option<u64>,
+    pub decision: Option<DecodedDecisionClaim>,
+    pub report: Option<DecodedStatusClaim>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DecodedCommsClaim {
+    Text,
+    Request { request: DecodedRequestClaim },
+    Outcome { outcome: DecodedOutcomeClaim },
+}
+
 /// Literal attributed claim only: deliberately no actor UUID, recipient,
 /// request reference, accepted action, key or private transmission identifier.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,6 +119,7 @@ pub struct DecodedCommsEvidence {
     pub literal_body: bool,
     pub kind: CapturedContentKind,
     pub emitted_tick: u64,
+    pub claim: DecodedCommsClaim,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

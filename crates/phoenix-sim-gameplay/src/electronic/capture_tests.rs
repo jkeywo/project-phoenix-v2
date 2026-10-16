@@ -232,3 +232,97 @@ fn deterministic_retirement_is_bounded_and_never_recaptures_old_sustained_histor
         .validate(&SystemId("comms".into()), &config, &[], 1_000)
         .is_ok());
 }
+
+#[test]
+fn typed_claims_reveal_supported_parameters_only_after_the_same_paid_frontier() {
+    use phoenix_model::comms_request::{
+        CommsRequestDecision, CommsRequestFacts, CommsRequestOutcome, CommsRequestReference,
+        CommsStatusReport, DatedCommsDecision,
+    };
+    let config = config();
+    let contents = [
+        CommsRadioContent::Request {
+            request: GenericCommsRequest::FormUp { slot: [-20, 37] },
+        },
+        CommsRadioContent::Outcome {
+            outcome: CommsRequestOutcome {
+                request: CommsRequestReference {
+                    formation_sequence: None,
+                    origin_id: "private-original".into(),
+                    source_ship: "private-requester".into(),
+                    recipient_ship: "private-reporter".into(),
+                    emitted_tick: 2,
+                    heard_tick: 3,
+                    request: GenericCommsRequest::ReportStatus,
+                },
+                facts: CommsRequestFacts {
+                    read_tick: Some(4),
+                    decision: Some(DatedCommsDecision {
+                        choice: CommsRequestDecision::Report,
+                        tick: 5,
+                    }),
+                    report: Some(CommsStatusReport {
+                        system: SystemId("private-report-system".into()),
+                        available: false,
+                        observed_tick: 5,
+                    }),
+                },
+            },
+        },
+    ];
+    for content in contents {
+        let mut original = payload(1, 10);
+        original.literal_body = false;
+        original.body = match &content {
+            CommsRadioContent::Request { request } => request.body(),
+            _ => phoenix_model::comms_request::OUTCOME_BODY,
+        }
+        .into();
+        original.transmission.sustained = matches!(&content, CommsRadioContent::Request { .. });
+        original.transmission.formation_sequence = original.transmission.sustained.then_some(1);
+        original.transmission.content = content;
+        let mut state = state();
+        assert!(state.observe(original, 10));
+        assert!(state.select(Some(1), &config, &[]));
+        assert!(state.advance(11, 1.0, &config, &[]));
+        assert!(state.views(&config, &[])[0].evidence.is_none());
+        let json = serde_json::to_vec(&state).unwrap();
+        let mut restored: CaptureState = serde_json::from_slice(&json).unwrap();
+        for now in 12..=13 {
+            assert!(state.advance(now, 1.0, &config, &[]));
+            assert!(restored.advance(now, 1.0, &config, &[]));
+        }
+        assert_eq!(state.views(&config, &[]), restored.views(&config, &[]));
+        let evidence = state.views(&config, &[])[0].evidence.clone().unwrap();
+        match &evidence.claim {
+            DecodedCommsClaim::Request { request } => {
+                assert_eq!(request, &DecodedRequestClaim::FormUp { slot: [-20, 37] })
+            }
+            DecodedCommsClaim::Outcome { outcome } => {
+                assert_eq!(outcome.request, DecodedRequestClaim::ReportStatus);
+                assert_eq!(outcome.request_emitted_tick, 2);
+                assert_eq!(outcome.heard_tick, 3);
+                assert_eq!(outcome.read_tick, Some(4));
+                assert_eq!(outcome.decision.as_ref().unwrap().tick, 5);
+                assert!(!outcome.report.as_ref().unwrap().available);
+                assert_eq!(outcome.report.as_ref().unwrap().observed_tick, 5);
+            }
+            _ => panic!("actual typed captured content"),
+        }
+        let public = serde_json::to_string(&evidence).unwrap();
+        for private in [
+            "private-",
+            "somebody-else",
+            "genuinely-held-key",
+            "actual-10",
+        ] {
+            assert!(
+                !public.contains(private),
+                "private reference leaked: {private}"
+            );
+        }
+        let mut bad = serde_json::to_value(&evidence.claim).unwrap();
+        bad["source_ship"] = "private".into();
+        assert!(serde_json::from_value::<DecodedCommsClaim>(bad).is_err());
+    }
+}

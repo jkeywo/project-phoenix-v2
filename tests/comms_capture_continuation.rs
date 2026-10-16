@@ -2,7 +2,7 @@
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 use bevy::prelude::*;
 use phoenix_model::{
-    comms_capture::{CommsCaptureConfig, CommsCaptureView},
+    comms_capture::{CommsCaptureConfig, CommsCaptureView, DecodedCommsClaim, DecodedRequestClaim},
     comms_request::CommsRadioContent,
 };
 use project_phoenix::{
@@ -266,6 +266,12 @@ fn human_decodes_actual_foreign_request_without_early_plaintext_or_participation
                 evidence.kind,
                 phoenix_model::comms_capture::CapturedContentKind::Request
             );
+            assert_eq!(
+                evidence.claim,
+                DecodedCommsClaim::Request {
+                    request: DecodedRequestClaim::ReportStatus
+                }
+            );
             decoded = true;
             break;
         }
@@ -361,6 +367,14 @@ fn ordinary_ai_partially_paid_capture_resumes_json_360_complete_steps_and_bad_ca
             assert_extra_paid(&resumed);
         }
         decoded |= a.evidence.is_some();
+        if let Some(evidence) = &a.evidence {
+            assert_eq!(
+                evidence.claim,
+                DecodedCommsClaim::Request {
+                    request: DecodedRequestClaim::ReportStatus
+                }
+            );
+        }
     }
     same(&live, &resumed, 360);
     assert!(
@@ -401,6 +415,42 @@ fn ordinary_ai_partially_paid_capture_resumes_json_360_complete_steps_and_bad_ca
         after_loss.update();
     }
     assert!(ready_to_restore(after_loss.world(), &without_source));
+    // The retained public claim is derived from the same paid canonical row.
+    // A plausible changed request kind must refuse before any live write.
+    let mut forged = without_source.clone();
+    let captured_owner = forged
+        .entities
+        .iter_mut()
+        .find(|row| row.uuid == source)
+        .unwrap();
+    let SystemBlackboard::Comms(board) = &mut captured_owner
+        .blackboards
+        .iter_mut()
+        .find(|(owner, _)| owner == "comms")
+        .unwrap()
+        .1
+    else {
+        panic!("actual saved Comms")
+    };
+    board
+        .captured
+        .as_mut()
+        .unwrap()
+        .rows
+        .iter_mut()
+        .find(|row| row.capture == chosen)
+        .unwrap()
+        .evidence
+        .as_mut()
+        .unwrap()
+        .claim = DecodedCommsClaim::Request {
+        request: DecodedRequestClaim::FormUp { slot: [40, -5] },
+    };
+    let before = capture(after_loss.world());
+    let digest = world_digest(after_loss.world());
+    assert!(!restore(after_loss.world_mut(), &forged).is_complete());
+    assert_eq!(capture(after_loss.world()), before);
+    assert_eq!(world_digest(after_loss.world()), digest);
     assert!(restore(after_loss.world_mut(), &without_source).is_complete());
     assert!(after_loss
         .world_mut()

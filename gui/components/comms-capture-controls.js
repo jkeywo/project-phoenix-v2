@@ -1,5 +1,6 @@
 import { t, wireText } from '../strings.js';
 import { CAPTURE_SELECT_ACTION } from '../stations/comms-capture-actions.js';
+import {decodedClaimText} from '../comms-decoded-claims.js';
 export function mountCommsCaptureControls(doc) {
   const node = doc.createElement('section'), title = doc.createElement('h4'), rows = new Map();
   title.textContent = t('comms.capture.title'); node.append(title); node.dataset.commsCapture = '';
@@ -21,6 +22,7 @@ export function mountCommsCaptureControls(doc) {
       row.header.textContent = t('comms.capture.header', { channel: value.channel, level: value.level, tick: value.captured_tick });
       row.body.textContent = value.evidence ? t('comms.capture.evidence', { sender: wireText(value.evidence.sender_name),
         body: value.evidence.literal_body ? value.evidence.body : wireText(value.evidence.body) })
+        +' '+decodedClaimText(value.evidence.claim)
         : t(value.feasible ? 'comms.capture.work' : 'comms.capture.unsupported', { progress: (value.progress_per_mille / 10).toFixed(1) });
       row.button.textContent = t(value.selected ? 'comms.capture.pause' : 'comms.capture.select');
       row.button.hidden = !view.controllable || value.evidence != null;

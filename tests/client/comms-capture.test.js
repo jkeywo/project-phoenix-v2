@@ -35,7 +35,7 @@ it('mounts the independent controls in the existing Comms renderer and hides an 
 });
 afterEach(() => { document.body.replaceChildren(); delete window.activateSemanticAction; });
 it('keeps undecoded headers opaque and refuses premature or malformed plaintext', () => {
-  const decoded = { ...row(), decoded_tick: 30, evidence: { sender_name: 'Literal source', body: 'Literal text', literal_body: true, kind: 'request', emitted_tick: 10 } };
+  const decoded = { ...row(), decoded_tick: 30, evidence: { sender_name: 'Literal source', body: 'Literal text', literal_body: false, kind: 'request', emitted_tick: 10,claim:{kind:'request',request:{kind:'report_status'}} } };
   expect(capturedPayload({ rows: [decoded] }, 'comms', false).rows[0].evidence.kind).toBe('request');
   for (const bad of [{ ...decoded, decoded_tick: null }, { ...row(), capture: 0 }, { ...row(), capture: 9007199254740992 },
     { ...row(), captured_tick: NaN }, { ...row(), level: 4 }, { ...row(), progress_per_mille: 1001 },
@@ -63,7 +63,7 @@ it('shows evidence as text without reply machinery and preserves stable controls
   widget.update(view()); const button = widget.node.querySelector('button'); button.focus(); widget.update(view());
   expect(widget.node.querySelector('button')).toBe(button); expect(document.activeElement).toBe(button);
   button.click(); expect(window.activateSemanticAction).toHaveBeenCalledWith(CAPTURE_SELECT_ACTION.id, expect.objectContaining({ detail: { capture: 1 } }));
-  const decoded = view(); decoded.rows[0].decoded_tick = 30; decoded.rows[0].evidence = { sender_name: '<img src=x>', body: '<script>attack()</script>', literal_body: true, kind: 'request', emitted_tick: 10 };
+  const decoded = view(); decoded.rows[0].decoded_tick = 30; decoded.rows[0].evidence = { sender_name: '<img src=x>', body: '<script>attack()</script>', literal_body: true, kind: 'text', emitted_tick: 10,claim:{kind:'text'} };
   widget.update(decoded); expect(widget.node.querySelector('script,img')).toBeNull(); expect(widget.node.textContent).toContain('<script>attack()</script>');
   expect(widget.node.querySelectorAll('button')).toHaveLength(1); expect(button.hidden).toBe(true); expect(button.disabled).toBe(true);
   window.activateSemanticAction.mockClear(); widget.update({ ...view(), controllable: false }); button.click();

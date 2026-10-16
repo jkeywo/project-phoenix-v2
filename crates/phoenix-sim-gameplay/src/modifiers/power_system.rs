@@ -520,6 +520,7 @@ impl PowerSystem {
             .network
             .validate_against(self.definition.config(), self.definition.ship())?;
         self.validate_observations(
+            &self.network,
             saved.last_reactor_energy_delta_per_sec,
             &saved.last_intake_per_sec,
             &saved.last_work_fraction,
@@ -532,6 +533,7 @@ impl PowerSystem {
     // persistence. The network transaction validates its own pre/post state.
     fn validate_current_observations(&self) -> Result<(), String> {
         self.validate_observations(
+            &self.network,
             self.last_reactor_energy_delta_per_sec,
             &self.last_intake_per_sec,
             &self.last_work_fraction,
@@ -542,6 +544,7 @@ impl PowerSystem {
 
     fn validate_observations(
         &self,
+        network: &EnergyNetworkState,
         last_reactor_energy_delta_per_sec: f32,
         last_intake_per_sec: &BTreeMap<SystemId, f32>,
         last_work_fraction: &BTreeMap<SystemId, f32>,
@@ -549,14 +552,14 @@ impl PowerSystem {
         has_strike_boost: bool,
     ) -> Result<(), String> {
         if !last_reactor_energy_delta_per_sec.is_finite()
-            || last_intake_per_sec.keys().ne(self.network.consumers.keys())
+            || last_intake_per_sec.keys().ne(network.consumers.keys())
             || last_intake_per_sec
                 .values()
                 .any(|value| !value.is_finite() || *value < 0.0)
         {
             return Err("invalid saved energy observations".into());
         }
-        if last_work_fraction.keys().ne(self.network.consumers.keys())
+        if last_work_fraction.keys().ne(network.consumers.keys())
             || last_work_fraction
                 .values()
                 .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
@@ -703,10 +706,13 @@ impl PowerSystem {
             }
             budgets.insert(id.clone(), continuous);
         }
-        let mut next = self.clone();
-        let before = next.battery_charge();
-        let energy = next.network.tick_with_definition_in_place(
-            &next.definition,
+        // Only these fields participate in the transaction. Leave immutable
+        // hardware and unrelated work/strike observations on the current owner.
+        let mut network = self.network.clone();
+        let mut coolant_credit = self.coolant_credit.clone();
+        let before = self.battery_charge();
+        let energy = network.tick_with_definition_in_place(
+            &self.definition,
             dt,
             bindings,
             &budgets,
@@ -715,7 +721,7 @@ impl PowerSystem {
         )?;
         let mut withdrawals = BTreeMap::new();
         for (id, used) in &energy.coolant_used {
-            let old = next.coolant_credit.get(id).copied().unwrap_or(0.0);
+            let old = coolant_credit.get(id).copied().unwrap_or(0.0);
             let needed = (*used as f64 - old).max(0.0);
             let units = needed.ceil();
             let available = available_stock
@@ -732,21 +738,38 @@ impl PowerSystem {
             // Conservative IEEE rounding of sub-precision expenditure never
             // credits an entire extra stock unit or creates coolant.
             let credit = credit.min(f64::from_bits(1.0f64.to_bits() - 1));
-            next.coolant_credit.insert(id.clone(), credit);
+            coolant_credit.insert(id.clone(), credit);
             if units > 0.0 {
                 withdrawals.insert(id.clone(), units as i64);
             }
         }
-        if dt > 0.0 {
-            next.last_reactor_energy_delta_per_sec = (next.battery_charge() - before) / dt;
-            next.last_intake_per_sec = energy
+        let reactor_delta = if dt > 0.0 {
+            (network.reactor.energy - before) / dt
+        } else {
+            self.last_reactor_energy_delta_per_sec
+        };
+        let intake = (dt > 0.0).then(|| {
+            energy
                 .consumer_reports
                 .iter()
                 .map(|(id, report)| (id.clone(), report.accepted_energy / dt))
-                .collect();
+                .collect()
+        });
+        self.validate_observations(
+            &network,
+            reactor_delta,
+            intake.as_ref().unwrap_or(&self.last_intake_per_sec),
+            &self.last_work_fraction,
+            &coolant_credit,
+            self.strike_boost.is_some(),
+        )?;
+        // No fallible work remains: publish the staged fields together.
+        self.network = network;
+        self.coolant_credit = coolant_credit;
+        self.last_reactor_energy_delta_per_sec = reactor_delta;
+        if let Some(intake) = intake {
+            self.last_intake_per_sec = intake;
         }
-        next.validate_current_observations()?;
-        *self = next;
         Ok(PowerTickResult {
             energy,
             coolant_withdrawals: withdrawals,
@@ -1107,3 +1130,7 @@ mod tests;
 #[cfg(test)]
 #[path = "power_stored_tests.rs"]
 mod stored_tests;
+
+#[cfg(test)]
+#[path = "power_transaction_tests.rs"]
+mod transaction_tests;

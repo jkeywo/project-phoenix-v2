@@ -633,23 +633,38 @@ pub fn apply_external_repair(
     let mut rows: Vec<_> = set
         .p0()
         .iter_mut()
-        .map(
-            |(entity, uuid, dispatch, teams, power, inventory, services, damage, sources)| Row {
-                entity,
-                uuid: uuid.cloned(),
-                config: dispatch.config.clone(),
-                teams: teams.0.clone(),
-                power: power.map(|power| power.clone()),
-                inventory: inventory.map(|stock| stock.clone()),
-                services: services.cloned(),
-                operation: damage.map_or(1.0, |damage| {
-                    damage.factor(teams.0.owner(), DamageBinding::Operation)
-                }),
-                tools_available: sources
-                    .is_none_or(|sources| !sources.0.is_offline(teams.0.owner())),
+        .filter_map(
+            |(entity, uuid, dispatch, teams, power, inventory, services, damage, sources)| {
+                // A released/replaced Job may still own a reserved physical stage.
+                // Keep that row until the ordinary cleanup releases its claim;
+                // other internal/refit/returning jobs have no effect in this pass.
+                if teams.0.external_target().is_none()
+                    && teams.0.job_state().external_physical_work.is_empty()
+                {
+                    return None;
+                }
+                Some(Row {
+                    entity,
+                    uuid: uuid.cloned(),
+                    config: dispatch.config.clone(),
+                    teams: teams.0.clone(),
+                    power: power.map(|power| power.clone()),
+                    inventory: inventory.map(|stock| stock.clone()),
+                    services: services.cloned(),
+                    operation: damage.map_or(1.0, |damage| {
+                        damage.factor(teams.0.owner(), DamageBinding::Operation)
+                    }),
+                    tools_available: sources
+                        .is_none_or(|sources| !sources.0.is_offline(teams.0.owner())),
+                })
             },
         )
         .collect();
+    // No work or stale claims means there is no transaction, lifecycle edge,
+    // clock or target mutation to apply. Avoid rebuilding the world claim view.
+    if rows.is_empty() {
+        return;
+    }
     rows.sort_by(|a, b| {
         a.uuid
             .as_ref()
@@ -696,7 +711,7 @@ pub fn apply_external_repair(
         })
         .collect();
     for (source, teams) in set.p2().iter() {
-        let saved = teams.0.save_state();
+        let saved = teams.0.job_state();
         for job in saved
             .teams
             .iter()
@@ -800,7 +815,7 @@ pub fn apply_external_repair(
                                 .teams
                                 .external_team()
                                 .and_then(|team| {
-                                    row.teams.save_state().teams[team]
+                                    row.teams.job_state().teams[team]
                                         .as_ref()
                                         .map(|job| job.id.0)
                                 })
@@ -881,7 +896,7 @@ pub fn apply_external_repair(
                                 owners.remove(&owner);
                             }
                             if let Some(work) =
-                                row.teams.save_state().external_physical_work.get(&job_id)
+                                row.teams.job_state().external_physical_work.get(&job_id)
                             {
                                 if let Some(target) = &work.target {
                                     claims

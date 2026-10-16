@@ -245,3 +245,244 @@ fn parallel_sources_share_target_claims_and_range_loss_releases_unconsumed_parts
         hp
     );
 }
+
+fn source_state(app: &App, entity: Entity) -> serde_json::Value {
+    serde_json::json!({
+        "teams": app.world().get::<ShipRepairTeams>(entity).unwrap().0.save_state(),
+        "power": app.world().get::<ShipPowerSystem>(entity).unwrap().0.capture_continuation(),
+        "inventory": app.world().get::<InfrastructureCondition>(entity).unwrap().0,
+        "damage": app.world().get::<ShipDamage>(entity).unwrap().state,
+    })
+}
+
+#[test]
+fn idle_external_application_preserves_an_internal_return_without_rewriting_owners() {
+    let mut app = app();
+    app.init_resource::<EffectQueue<TaskLifecycleRequest>>();
+    let source = source(&mut app, "idle-source");
+    {
+        let mut teams = app.world_mut().get_mut::<ShipRepairTeams>(source).unwrap();
+        assert!(teams.0.release_external());
+        teams.0.dispatch(
+            0,
+            crate::core::messages::SystemId("local-work".into()),
+            "local-work".into(),
+        );
+        assert!(teams.0.recall(0));
+        assert!(matches!(&teams.0.slots()[0], TeamSlot::Returning { .. }));
+        assert!(teams.0.job_state().external_physical_work.is_empty());
+    }
+    let before = source_state(&app, source);
+    app.world_mut().clear_trackers();
+    app.world_mut()
+        .run_system_once(apply_external_repair)
+        .unwrap();
+    assert_eq!(source_state(&app, source), before);
+    macro_rules! unchanged {
+        ($owner:ty) => {
+            assert!(
+                !app.world()
+                    .entity(source)
+                    .get_ref::<$owner>()
+                    .unwrap()
+                    .is_changed(),
+                "idle external work must not rewrite {}",
+                stringify!($owner)
+            );
+        };
+    }
+    unchanged!(ShipRepairTeams);
+    unchanged!(ShipPowerSystem);
+    unchanged!(InfrastructureCondition);
+    assert!(app
+        .world()
+        .resource::<EffectQueue<TaskLifecycleRequest>>()
+        .0
+        .is_empty());
+}
+
+#[test]
+fn dormant_source_does_not_change_active_work_payments_or_competing_claims() {
+    fn rig(with_idle: bool) -> (App, Entity, Entity, Entity) {
+        let mut app = app();
+        if with_idle {
+            let idle = source(&mut app, "aaa-idle");
+            assert!(app
+                .world_mut()
+                .get_mut::<ShipRepairTeams>(idle)
+                .unwrap()
+                .0
+                .release_external());
+        }
+        let first = source(&mut app, "source-a");
+        let second = source(&mut app, "source-b");
+        let target = target(&mut app, true).0;
+        (app, first, second, target)
+    }
+    let (mut baseline, first, second, target) = rig(false);
+    let (mut extra, extra_first, extra_second, extra_target) = rig(true);
+    let initial = level(&baseline, first) + level(&baseline, second);
+    let initial_target = baseline
+        .world()
+        .get::<ShipDamage>(target)
+        .unwrap()
+        .state
+        .clone();
+    for step in 0..1000 {
+        baseline
+            .world_mut()
+            .run_system_once(apply_external_repair)
+            .unwrap();
+        extra
+            .world_mut()
+            .run_system_once(apply_external_repair)
+            .unwrap();
+        assert_eq!(
+            source_state(&baseline, first),
+            source_state(&extra, extra_first),
+            "first {step}"
+        );
+        assert_eq!(
+            source_state(&baseline, second),
+            source_state(&extra, extra_second),
+            "second {step}"
+        );
+        assert_eq!(
+            baseline.world().get::<ShipDamage>(target).unwrap().state,
+            extra.world().get::<ShipDamage>(extra_target).unwrap().state,
+            "target {step}"
+        );
+        if step == 0 {
+            assert!(reserved(&baseline, first) > 0);
+            assert_eq!(
+                reserved(&baseline, second),
+                0,
+                "ordinary competing claims remain exclusive"
+            );
+        }
+        if baseline
+            .world()
+            .get::<ShipRepairTeams>(first)
+            .unwrap()
+            .0
+            .external_target()
+            .is_none()
+            && baseline
+                .world()
+                .get::<ShipRepairTeams>(second)
+                .unwrap()
+                .0
+                .external_target()
+                .is_none()
+        {
+            break;
+        }
+    }
+    for source in [first, second] {
+        assert!(
+            baseline
+                .world()
+                .get::<ShipRepairTeams>(source)
+                .unwrap()
+                .0
+                .external_target()
+                .is_none(),
+            "both physical jobs must finish within the existing owner-test budget"
+        );
+    }
+    assert!(level(&baseline, first) + level(&baseline, second) < initial);
+    assert_ne!(
+        baseline.world().get::<ShipDamage>(target).unwrap().state,
+        initial_target
+    );
+    assert_eq!(reserved(&baseline, first) + reserved(&baseline, second), 0);
+}
+
+#[test]
+fn recalled_and_lost_target_stages_still_release_parts_once_after_external_job_closes() {
+    for lost in [false, true] {
+        let mut app = app();
+        app.init_resource::<EffectQueue<TaskLifecycleRequest>>();
+        let source = source(&mut app, "source-a");
+        let target = target(&mut app, false).0;
+        let initial = level(&app, source);
+        app.world_mut()
+            .run_system_once(apply_external_repair)
+            .unwrap();
+        assert!(reserved(&app, source) > 0);
+        if lost {
+            assert!(app.world_mut().despawn(target));
+            app.world_mut()
+                .run_system_once(tick_external_repair)
+                .unwrap();
+        } else {
+            app.world_mut()
+                .entity_mut(source)
+                .insert(AdmittedCommands(vec![correlated_external_command(
+                    "cleanup-recall",
+                    SystemControlPayload::RecallExternalRepair,
+                )]));
+            app.world_mut()
+                .run_system_once(handle_external_repair_commands)
+                .unwrap();
+        }
+        let teams = &app.world().get::<ShipRepairTeams>(source).unwrap().0;
+        assert!(teams.external_target().is_none());
+        assert!(
+            !teams.job_state().external_physical_work.is_empty(),
+            "closed Job still has a reserved stage"
+        );
+        let notices = std::mem::take(
+            &mut app
+                .world_mut()
+                .resource_mut::<EffectQueue<TaskLifecycleRequest>>()
+                .0,
+        );
+        assert_eq!(
+            notices.len(),
+            1,
+            "normal recall/maintenance emits exactly one terminal notice"
+        );
+        let power = app
+            .world()
+            .get::<ShipPowerSystem>(source)
+            .unwrap()
+            .0
+            .capture_continuation();
+        app.world_mut()
+            .run_system_once(apply_external_repair)
+            .unwrap();
+        assert_eq!(reserved(&app, source), 0);
+        assert_eq!(
+            level(&app, source),
+            initial,
+            "unconsumed parts are released, not consumed/refunded twice"
+        );
+        assert!(app
+            .world()
+            .get::<ShipRepairTeams>(source)
+            .unwrap()
+            .0
+            .job_state()
+            .external_physical_work
+            .is_empty());
+        assert_eq!(
+            app.world()
+                .get::<ShipPowerSystem>(source)
+                .unwrap()
+                .0
+                .capture_continuation(),
+            power
+        );
+        let cleaned = source_state(&app, source);
+        app.world_mut()
+            .run_system_once(apply_external_repair)
+            .unwrap();
+        assert_eq!(source_state(&app, source), cleaned);
+        assert!(app
+            .world()
+            .resource::<EffectQueue<TaskLifecycleRequest>>()
+            .0
+            .is_empty());
+    }
+}

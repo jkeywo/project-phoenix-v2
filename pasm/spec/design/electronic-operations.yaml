@@ -1,4 +1,15 @@
 entities:
+  - decision: redesign-shared-emp-comms-disruption
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Bounded Comms Disruption Reuses Actual EMP Weapon Machinery
+      summary: "The first S021 disruption consumer is actual Comms-Console-owned finite generic bolt equipment using existing acquired targeting, physical impact, component EMP/resistance and status owners. No separate hacking/controller/job or hostile actuator authority is introduced."
+      rationale:
+        - "[ai] Root approved this bounded use before runtime; increment-17-disruptor.md fixes the contract. The optional six-seat Cruiser adds a Console/tab and actual bank, resource/room/damage bindings without changing base hulls. Explicit permitted TacticalRadar/shared-lock feeds and ordinary per-bank admitted Human/AI control are required; co-hosting grants no information or authority."
+        - "The real paid projectile obeys mount, geometry, shield/material/deck/compartment impact and eligible deposit. Existing finite EMP expiry and resistance supply counterplay; physical collateral remains. SignalProtection is not silently extended to physical EMP immunity, and reports disclose no private enemy interior/effect census."
+        - "Actual reusable screen/builder/semantic action reachability, accepted Workshop history/Preview/Test, Human and ordinary AI paid effects/refusals, automatic restoration, fresh JSON360/full captures/digests and malformed no-write evidence precede exit. This is one bounded disruption example, not hidden information access, takeover, full S021 possibility coverage or a verified increment17 exit."
   - decision: redesign-electronic-equipment-signal-contract
     core:
       status: accepted

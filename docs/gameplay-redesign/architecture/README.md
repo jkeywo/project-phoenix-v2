@@ -6,28 +6,38 @@ Start with the [feature reconciliation report](./feature-reconciliation.html): t
 
 ## Current implementation scope
 
-The user approved the [incremental implementation roadmap](../implementation/index.html) on 13 October 2026. Work proceeds serially from the baseline through explicit Consoles and the remaining capability migrations. The [canonical ledger](../implementation/migration-ledger.json) accounts for every catalogue entry and records completion evidence.
+The user approved the [incremental implementation roadmap](../implementation/index.html) on 13 October 2026. Implementation follows dependency-ordered increments with the later approved isolated validation lanes; active work is now limited to finishing increments 8-12 verification before pausing. The [canonical ledger](../implementation/migration-ledger.json) accounts for every catalogue entry and records completion evidence.
 
 Preserve the selected mechanisms and ownership boundaries. Detailed System rules, schemas and tuning are specified when their increment is prepared; do not restart the earlier broad interview. Adopt the relevant design into PASM before runtime work, and keep shipped content functional. Increment 0 changes planning/design records and captures evidence without changing gameplay.
 
 ## Current verification checkpoint — 16 October 2026
 
-Current integrated compatibility is protocol45, snapshot88 and simulation
-rules0.74 (`4ceb7d8a` runtime source). The original owner1250/55 and host10/8
-results remain recorded failures. The expanded owner selection passed425/failed15;
-all15 source corrections are integrated and its combined retry is running.
-At `dd1490ae`, whole-host Recovery3/3, Production2/2 and selected energy
-continuation2/2 pass. Intact salvage still needs its normal held-Helm fixture
-retry. These are separate source-pinned results, not a current all-green gate.
+Current integrated compatibility is protocol 45, snapshot 88 and simulation
+rules 0.75 (`e027e568`). The selected four-owner union at `8ac62cce` / rules 0.74
+passes 1618/1618; the eight current whole-host targets at `e027e568` pass 19/19,
+with the selected energy resume checks passing 2/2. Earlier failed results stay
+recorded. The empty-plan restore fix preserves authoritative absence and exact
+UUID rebinding rather than retaining bootstrap avoidance motion.
 
+The matching development host/client/preview bundle at `ded6653a` includes the
+WASM-only import correction `a794ac49`. Its complete 15-case Chromium selection
+passes at test source `dbfd0027` in 3.3 minutes, including browser reconnect and
+save portability. Workshop's missing existing startup modules are packaged at
+`2ea96d97`. After valid fixture corrections `956a385c` / `9bd7bab6`, the complete
+real resource/factions/disposable-Test render selection passes at `9bd7bab6`:
+3/3 in 6.1 minutes, including accepted source edits, history, reload/export and
+mesh Preview/Test. This is the actual Workshop browser journey, not all authored
+or Human workflows.
+
+Measurement compilation passes, but current timing/balance captures, Human/device
+and station-workload acceptance, and required pre-push gates remain open.
 Follow the [implementation summary](../implementation/README.md),
 [verification record](../../acceptance/1562-integrated-8-12.md) and
 [source-pinned checkpoint](../implementation/parallel-checkpoint.json).
 Historical diagrams and the baseline orientation table below are design inputs.
-Complete the remaining increments8–12 verification and commit its evidence,
-then pause as requested on16October. Later lanes are parked. Browser/device,
-workload, balance/performance and remaining authored modes/generation acceptance
-are not inferred from these checks; no increment closure or push is claimed.
+Finish the remaining increments 8-12 verification, commit its evidence, then
+pause as requested on 16 October. Increments 13-24 remain parked; no new automated
+exit, formal increment closure or push is claimed.
 
 ## Requested outcome
 

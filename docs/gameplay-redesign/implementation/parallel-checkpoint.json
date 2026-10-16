@@ -2,7 +2,7 @@
   "date": "2026-10-16",
   "status": "partial",
   "current_summary": {
-    "source": "Runtime4ceb7d8a (protocol45/snapshot88/rules0.74), owner fixture batch37c165a4 and held-Helm fixture0931723a; combined owner retry in progress; later lanes parked under the user pause instruction.",
+    "source": "Runtime e027e568 (protocol 45 / snapshot 88 / rules 0.75); scoped status through 9bd7bab6. Selected native owners, current host/browser selections and the complete three-case Workshop render selection pass. Actual performance/balance and wider acceptance remain open. Finish verification of 8-12 and pause; increments 13-24 are parked.",
     "verification_8_12": {
       "status": "open; selected native owner and host batches failed; no increment closure or push",
       "evidence_document_donor": "65bcceb4, docs/acceptance/1562-integrated-8-12.md, integrated with this checkpoint packet",
@@ -106,7 +106,7 @@
     "compatibility": {
       "protocol": 45,
       "snapshot": 88,
-      "rules": "0.74"
+      "rules": "0.75"
     },
     "current_four_owner_native": {
       "source": "3f783eec",
@@ -307,6 +307,172 @@
       },
       "browser": "Client component Chromium43/43 PASS25.4s; actual matching-host/render and reconnect remain open.",
       "remaining": "Finish owner and salvage retries, real Workshop/host browser, explicit reconnect, balance/performance, then commit evidence and pause. No later implementation."
+    },
+    "previous_current_summary_header_before_rules75": {
+      "source": "Runtime4ceb7d8a (protocol45/snapshot88/rules0.74), owner fixture batch37c165a4 and held-Helm fixture0931723a; combined owner retry in progress; later lanes parked under the user pause instruction.",
+      "compatibility": {
+        "protocol": 45,
+        "snapshot": 88,
+        "rules": "0.74"
+      }
+    },
+    "latest_verification_8_12": {
+      "cutoff_source": "9bd7bab6",
+      "status": "Targeted native, matching-host browser and complete Workshop render selections pass; verification remains open. No new automated exits, formal increment closure, full CI pass or push.",
+      "evidence_document": "docs/acceptance/1562-integrated-8-12.md; native evidence integrated as ded6653a; later browser and measurement results remain separately source-pinned here.",
+      "native_owner_union": {
+        "source": "8ac62cce",
+        "rules": "0.74",
+        "passed": 1618,
+        "failed": 0,
+        "owners": {
+          "content_preparation": 12,
+          "gameplay": 521,
+          "world": 11,
+          "simulation": 1074
+        },
+        "log": ".phoenix/verify-8-12-green-native-owners.log"
+      },
+      "current_host_batch": {
+        "source": "e027e568",
+        "rules": "0.75",
+        "passed": 19,
+        "failed": 0,
+        "targets": {
+          "activity_foundation_continuation": 3,
+          "facility_supply_continuation": 2,
+          "fitting_facility_continuation": 2,
+          "logistics_continuation": 3,
+          "physical_damage_routes": 3,
+          "production_continuation": 2,
+          "recovery_continuation": 3,
+          "shield_energy_continuation": 1
+        },
+        "scope": "Real paid work, finite stocks, malformed-state refusal and full JSON continuation; intact salvage now reaches actual preserved assembly transfer and ordinary AI Repair installation. No Human-device or full-workspace inference.",
+        "log": ".phoenix/verify-8-12-current-hosts-rules75.log"
+      },
+      "energy_resume": {
+        "source": "e027e568",
+        "rules": "0.75",
+        "passed": 2,
+        "failed": 0,
+        "other_filtered": 89,
+        "log": ".phoenix/verify-8-12-current-energy-resume-rules75.log"
+      },
+      "motion_restore": {
+        "implementation": "18e99858",
+        "rules_version_commit": "e027e568",
+        "contract": "Authoritative empty retained plan frontier clears existing bootstrap map; mixed rows preserve UUID remapping. No replan, cadence, payment or fold-coverage change.",
+        "regression_passed": 3,
+        "capture_owner_passed": 5,
+        "initial_wrong_filter": "Compilation succeeded but zero tests selected; not verification. Historical log retained."
+      },
+      "matching_browser_artifacts": {
+        "build_source": "ded6653a",
+        "runtime_source": "e027e568 plus WASM-only imports a794ac49",
+        "profile": "dev",
+        "client_stamp": "45/phoenix-base/4",
+        "built": [
+          "host WASM",
+          "client",
+          "preview WASM"
+        ],
+        "workshop_packaging": "2ea96d97",
+        "receipt": ".phoenix/verify-8-12-browser-artifact-receipt.json"
+      },
+      "matching_host_browser": {
+        "test_source": "dbfd0027",
+        "runtime_rules": "0.75",
+        "passed": 15,
+        "failed": 0,
+        "elapsed": "3.3 minutes",
+        "scope": "Energy crew journeys, engineering, measured weapons restraint/fire, browser reconnect/sever/revive, save portability and Station damage popup. Development browser bundle; no native-display or Human acceptance inference.",
+        "log": ".phoenix/verify-8-12-final-host-browser.log"
+      },
+      "workshop_render": {
+        "packaging_fix": "2ea96d97 adds eight existing required editor modules to the explicit copy list; no new gameplay capability.",
+        "disposable_test_and_factions_passes": [
+          {
+            "source": "2ea96d97",
+            "passed": 2,
+            "failed": 0,
+            "seconds": [
+              38.3,
+              49.8
+            ]
+          },
+          {
+            "source": "956a385c",
+            "passed": 2,
+            "failed": 0,
+            "seconds": [
+              34.0,
+              48.6
+            ]
+          }
+        ],
+        "resource_status": "PASS at 9bd7bab6: real resource-authoring/history/reload/export/mesh Preview/disposable-Test journey, 5.1 minutes.",
+        "resource_fixture_corrections": {
+          "956a385c": "Remove the new primary torpedoes resource from inherited additional Umbilical choices; preserve remaining resource choices.",
+          "9bd7bab6": "Select an actual unfitted Beam and the same finite Energy consumer for positive edits, preserving exact fitted-default machinery."
+        },
+        "three_case_retry": {
+          "source": "9bd7bab6",
+          "passed": 3,
+          "failed": 0,
+          "elapsed": "6.1 minutes",
+          "cases": {
+            "resources": "5.1 minutes",
+            "factions": "19.0s",
+            "disposable_test_runtime": "35.1s"
+          },
+          "log": ".phoenix/verify-8-12-workshop-unfitted-render.log",
+          "scope": "Real browser providers/Rust validation/mesh Preview/Test; no native-display or Human acceptance inference."
+        }
+      },
+      "measurement": {
+        "binary_compile": "PASS, 12m 30s",
+        "timing_capture": "Not yet collected or passed.",
+        "balance_capture": "Not yet collected or passed.",
+        "scope": "Compilation is not performance or balance evidence."
+      },
+      "pasm": {
+        "source": "e027e568",
+        "validate": "Status: OK; 1202 entities, 630 non-error findings.",
+        "scan": "Validation: OK; 4157 files, 8696 dependencies, 18 packages.",
+        "traceability": "Validation: OK; 246 rows.",
+        "logs": [
+          ".phoenix/verify-8-12-rules75-validate.log",
+          ".phoenix/verify-8-12-rules75-scan.log",
+          ".phoenix/verify-8-12-rules75-traceability.log"
+        ]
+      },
+      "bounded_wiki": {
+        "source": "e027e568",
+        "scope": "Seven affected pages and index/source references; no issues. Not a repository-wide wiki gate.",
+        "receipt": ".phoenix/verify-8-12-bounded-wiki-lint-e027e568.json"
+      },
+      "remaining": [
+        "Actual performance and balance captures",
+        "Station workload and Human/device acceptance",
+        "Required pre-push integration gates on the final integrated result"
+      ],
+      "pause_instruction": "Finish the agreed 8-12 verification and necessary fixes, commit evidence, then pause. Do not resume implementation through 24 without user instruction.",
+      "parked_increments": [
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24
+      ],
+      "history": "Earlier failed runs, source pins and archives elsewhere in this JSON are preserved; this scoped current record supersedes their old pending-status wording without relabelling historical executions."
     }
   },
   "scope": "Integrated communication, movement, illumination, local personnel and equipment-bound facility checkpoints; no increment exit",

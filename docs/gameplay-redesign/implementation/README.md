@@ -18,39 +18,53 @@ Only increment 0 is formally closed. Increments 1–7 have recorded automated
 exits; physical-device and human-workload acceptance remain open. Later initial
 commits are implementation checkpoints, not verified increment exits.
 
-Current integrated compatibility is **protocol45, snapshot88 and simulation
-rules0.74**, at runtime source `4ceb7d8a`. These versions identify supported
+Current integrated compatibility is **protocol 45, snapshot 88 and simulation
+rules 0.75**, at runtime source `e027e568`. These versions identify supported
 state; they do not establish a verified gameplay exit.
 
-The initial selected owner run at `34aa3e04` finished1250 passed/55 failed; the
-initial seven-target host run at `9493bc5a` finished10 passed/8 failed. Those
-results remain recorded. The expanded owner run at `4ceb7d8a` passed425/failed15
-in507.60s:52 of the original55 failures now pass, with three sparse restore
-fixtures missing accepted turret owners. Corrections for those and all12
-additional weapon-fixture failures are integrated at `37c165a4`. The combined
-four-owner selection is rerunning; no all-green current native result is claimed.
+The selected four-owner union at `8ac62cce` / rules 0.74 passes **1618/1618**
+(Content Preparation 12, Gameplay 521, World 11, Simulation 1074). The eight
+whole-host targets at `e027e568` / rules 0.75 pass **19/19**, including real intact
+recovery followed by ordinary Repair installation, finite Logistics/production,
+physical damage/routes and paid shield JSON360 continuation. The two selected
+energy resume checks also pass. Rules 0.75 fixes the real empty motion-plan
+restore frontier exposed after the held-Helm salvage correction; it retains full
+state comparisons and UUID remapping. Earlier failed runs remain historical
+evidence, rather than being relabelled as passes.
 
-At runtime `dd1490ae` (rules0.74), the affected host retry passes Recovery3/3,
-Production2/2 and the two selected energy continuation checks2/2. Collision
-attribution now uses the restored logical interval end instead of the fresh
-host's elapsed clock. The real facility refit passes. Intact salvage still
-fails because vacant Helm moves the receiver outside its unchanged eight-unit
-range; its ordinary Human-held Helm correction is integrated at `0931723a`,
-awaiting native retry. Earlier separate shield JSON360/no-write and physical-route
-host results remain pinned to `895e234d` and `9493bc5a` respectively.
+The matching development host/client/preview artifacts were built at `ded6653a`
+from runtime `e027e568` plus WASM-only import correction `a794ac49`. The artifact
+receipt is `.phoenix/verify-8-12-browser-artifact-receipt.json`. The complete
+15-case matching-host Chromium selection passes in **3.3 minutes** at test source
+`dbfd0027`, including actual Energy crew journeys, measured restraint/fire,
+engineering, browser reconnect/sever/revive, save portability and the Station
+damage popup. This is browser evidence for that pinned development bundle,
+not native display or Human acceptance.
 
-The current client selection passes121/121 across21 files. The corrected
-five-spec Chromium component run passes43/43, using projected fixture data.
-The affected Workshop authoring mount retry passes53/53. Clean pinned PASM at
-`4ceb7d8a` passes validation, scan and traceability (1202 entities,246 trace rows).
-Actual matching-host Workshop/render, reconnect, balance/performance and any
-remaining affected native checks stay open; component passes do not substitute
-for them. Original failures, narrower retries and their source boundaries are
+Workshop startup packaging now includes eight existing required editor modules
+(`2ea96d97`). The real disposable-Test and factions render journeys pass at that
+source (38.3s / 49.8s) and again at `956a385c` (34.0s / 48.6s). After fixture
+corrections `956a385c` / `9bd7bab6` preserve unique primary resources and exact
+fitted defaults, the complete real three-render selection at `9bd7bab6` passes
+in **6.1 minutes**: resources 5.1 minutes, factions 19.0s and disposable Test
+35.1s. The resource journey includes accepted edits, history, reload/export,
+mesh Preview and disposable Test. Its log is
+`.phoenix/verify-8-12-workshop-unfitted-render.log`.
+
+The measurement binary compiles (12m 30s), but no current balance or timing
+capture has passed. Pinned PASM at `e027e568` passes validation, scan and
+traceability; bounded affected-wiki checks pass separately. The earlier client
+121/121, projected-component Chromium 43/43 and affected authoring 53/53 results
+retain their original boundaries. Actual performance/balance, station workload,
+Human/device acceptance and the required
+pre-push integration gates remain open. Original failures, retries and pins are
 retained in [the verification record](../../acceptance/1562-integrated-8-12.md)
 and [the integration checkpoint](parallel-checkpoint.json).
 
-No increment closure or push is claimed. Later implementation lanes are parked
-under the user's pause instruction, with their isolated work preserved.
+No increment closure or push is claimed. Increments 8-12 have not been added to
+the initial automated exits. Complete their agreed verification and necessary
+fixes, commit the evidence, then pause. Later lanes and their isolated unfinished
+work remain parked.
 
 | Increment | Implementation state | Material remaining work |
 |---|---|---|
@@ -62,11 +76,11 @@ under the user's pause instruction, with their isolated work preserved.
 | 5 — Jobs/teams | Implemented; automated exit passed | Physical-device and human acceptance. |
 | 6 — Stores/services | Implemented; automated exit passed | Physical-device and human acceptance. |
 | 7 — Configurable weapons | Implemented; initial automated exit passed | Retained-beam regression fix integrated; native retry and human/device acceptance. |
-| 8 — Energy/thermal | Core implemented | Current selected owner run is non-green; retry integrated corrections and prove actual resource operation, balance/performance and playable acceptance. |
-| 9 — Shield energy | Core implemented; separate paid whole-host JSON360/no-write proof passed | Corrected owner retry, full integration and playable acceptance remain. |
-| 10 — Interiors/routes | Core implemented; actual physical-route host target passed3/3 | Browser layout authoring, supported hull/team journeys, full integration and playable acceptance remain. |
-| 11 — Damage/restoration | Core implemented; actual damage/route host target passed3/3 | Selected owner failures and corrected fixture retries remain; full integration and Human/AI repair acceptance remain. |
-| 12 — Logistics/production | Local stock targets, timed delivery, fabrication, salvage/processing and port replenishment/trade implemented | Observed Logistics/recovery/fabrication-completion failures and affected native retries, browser authoring and full acceptance; coolant recycling remains provisional. |
+| 8 — Energy/thermal | Core implemented; selected owner union and current host/energy continuation checks pass; matching-browser Energy and real Workshop resource journey pass | Actual performance/balance and station workload, Human/device acceptance and pre-push integration gates. |
+| 9 — Shield energy | Core implemented; current paid whole-host JSON360/no-write proof, corrected owners and real Workshop resource journey pass | Balance/workload, Human/device acceptance and full integration gates. |
+| 10 — Interiors/routes | Core implemented; current physical-route host target passes 3/3 with strict shipped-content corpus; real Workshop resource/layout edit and Preview/Test journey passes | Supported Human/team acceptance and full integration gates. |
+| 11 — Damage/restoration | Core implemented; corrected owners and current actual damage/route/repair continuation targets pass; matching-browser damage/repair/reconnect and real Workshop resource journey pass | Human/AI station workload and device acceptance, full integration gates. |
+| 12 — Logistics/production | Finite stock/delivery/production/recovery/port journeys and current host continuations pass, including actual intact salvage and AI Repair installation; full real Workshop resource journey passes | Representative resource/workload and performance/balance evidence, Human/device acceptance and full integration gates; coolant recycling remains provisional. |
 | 13 — Equipment fitting | Beam/reactor fitting, physical spares/refit/salvage and personal favourites implemented | Personal-plan disposable rehearsal and measured whole-fit trial code is integrated with separate owner evidence; full-host/native-device and broader fitting acceptance remain. |
 | 14 — Sensing/environment | Substantial implementation | Knowledge, presentation, balance and full acceptance. |
 | 15 — Layered combat | Combat core implemented; shared loaders/priorities integrated and accepted-recipe/pure handling checks pass | Physical marking code and accepted recipe/launcher owner evidence are integrated; loader/marking full-host continuation, broader illumination/link-loss/payload journeys, combat styles, balance/workload and full acceptance remain. |
@@ -116,12 +130,14 @@ evidence:
 
 ## Working contract
 
-On 15 October 2026 the user extended active implementation through increment 24,
-including the approved mission-planning changes above. Continue committing each
-increment, with later validation and fixes on isolated agent worktrees as already
-authorised. This extends the delivery scope; it does not mark unfinished increments
-or outstanding playable, performance and human acceptance as passed. Preserve
-networking and knowledge-limited individual System AI throughout.
+On 15 October 2026 the user extended implementation through increment 24,
+including the approved mission-planning changes above and per-increment commits
+with isolated validation work. On 16 October the user superseded that active-work
+instruction: finish increments 8-12 verification and necessary fixes, commit the
+evidence, then pause. The broader roadmap remains recorded, but implementation
+of increments 13-24 is parked until the user resumes it. Outstanding playable,
+performance and Human acceptance is not passed by that historical authorisation.
+Preserve networking and knowledge-limited individual System AI throughout.
 
 Implement capabilities in dependency order. Each changed capability includes authored
 configuration, runtime, human controls, ordinary individual System AI, Workshop

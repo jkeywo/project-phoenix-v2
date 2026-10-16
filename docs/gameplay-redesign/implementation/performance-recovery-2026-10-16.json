@@ -1,0 +1,4700 @@
+{
+  "schema_version": 2,
+  "date": "2026-10-16",
+  "status": "recovery-in-progress",
+  "phaseMet": false,
+  "wholeMet": false,
+  "decision": "Integrated source-equivalent composite improves paired combat timing; Skyway is effectively flat. Old speed is not recovered. No gain is assigned to an individual commit.",
+  "criterion": "Both worlds require three quiet valid runs, unchanged same-version gameplay reports and final continuation, with median run mean and p95 at or below the refreshed old reference. Three valid uninstrumented process runs per world must also match or beat the original binary. Invalid runs cannot establish recovery.",
+  "scope": "Performance recovery only; gameplay increments 13–24 stay parked. Balance private trials are a separate workstream.",
+  "workload": {
+    "ship": "assets/entities/alliance_cruiser.toml",
+    "worlds": [
+      "combat_test",
+      "falling_skyway"
+    ],
+    "seed": 42,
+    "sim_seconds": 60,
+    "profile": "measure",
+    "requestedFeatures": [
+      "headless"
+    ],
+    "defaultFeatures": true,
+    "executor": "SingleThreaded (ordinary --seed behaviour)",
+    "warmup_updates": 300,
+    "retained_update_samples": 3301,
+    "retained_fixed_invocations": 3300,
+    "instrumentation": "Ordinary phase capture in both paired groups; opt-in leaf diagnostics and bare process acceptance remain separate."
+  },
+  "comparison": {
+    "combat_test": {
+      "control": {
+        "mean": 5.176735958800373,
+        "p50": 4.724,
+        "p95": 9.313,
+        "p99": 10.9504
+      },
+      "candidate": {
+        "mean": 4.159987670402913,
+        "p50": 4.0144,
+        "p95": 5.8293,
+        "p99": 6.748900000000001
+      },
+      "oldTarget": {
+        "mean": 1.267421448046047,
+        "p50": 1.2163,
+        "p95": 1.6766999999999999,
+        "p99": 2.154
+      },
+      "meanChangePercent": -19.640721421555284,
+      "p95ChangePercent": -37.406850638891875,
+      "meanTimesOld": 3.282244968172398,
+      "p95TimesOld": 3.4766505636070857
+    },
+    "falling_skyway": {
+      "control": {
+        "mean": 2.8147047258406577,
+        "p50": 3.0284999999999997,
+        "p95": 3.5534999999999997,
+        "p99": 3.7612
+      },
+      "candidate": {
+        "mean": 2.7979206604059366,
+        "p50": 2.9381,
+        "p95": 3.5569,
+        "p99": 4.5573999999999995
+      },
+      "oldTarget": {
+        "mean": 1.1752601029990908,
+        "p50": 1.1472,
+        "p95": 1.5517,
+        "p99": 1.9122
+      },
+      "meanChangePercent": -0.596299330463812,
+      "p95ChangePercent": 0.09568031518223385,
+      "meanTimesOld": 2.380682074773112,
+      "p95TimesOld": 2.292260101823806
+    }
+  },
+  "evidence": [
+    {
+      "name": "old-refresh",
+      "path": ".phoenix/perf-recovery-old-refresh/summary.json",
+      "sha256": "44bd8be6cf6f90b28607793182ab650bab6ad2cee6e31ad0578ef2e0c72e9382",
+      "mode": "phases",
+      "receipt": ".phoenix/perf-recovery-old-refresh/receipt.json",
+      "receiptHash": "dc17235f59c4ffe7e1dfa50f5117e2e4cbc4a185604ed2a752c816f9089dc5b2",
+      "orchestrationSource": {
+        "sourceRevision": "77a619d181c46e534b237f7c35a8a5dba3ab4dd9",
+        "runtimeSourceSha256": "1d77204d21e42990dcf1328e74db0051dcedee8e5d3a81f9dad9b8e4e0bb4405",
+        "runtimeSourceClean": true,
+        "repositoryDirty": true,
+        "exampleSha256": "d749c79c915f0511d825b0e98a7a6700f29cbcd28947546967209278b21d5d5a"
+      },
+      "originalBinary": true,
+      "oldBuildContentProof": {
+        "path": ".phoenix/perf-recovery-old-refresh/provenance.json",
+        "sha256": "5ac7b0b42254a7292434359e811fee06267b81cad78d2254ebcc8ad15dbc680a"
+      },
+      "binarySha256": "b05e708bfe977138fc5bf7874fe77cc940d73f3af986ea03ea4c0bd66aaab3df",
+      "valid": true,
+      "problems": [],
+      "runs": [
+        {
+          "name": "combat_test-0",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 1.267421448046047,
+            "p50": 1.2163,
+            "p95": 1.6766999999999999,
+            "p99": 2.0986,
+            "max": 3.0485,
+            "over16_67": 0
+          },
+          "wallSeconds": 7.3872741,
+          "processWallSeconds": null,
+          "backgroundCpuCores": 0.28121331217769335,
+          "continuation": {
+            "tick": 3600,
+            "digest": "7873b6ad0df69a5b"
+          },
+          "reportHash": "2768d6b37b3864155cbcec47f4a7f010702be6c54642ce2a9e1359c19de6e3df",
+          "expectedHash": "585c05b99cd9744582131b8c9dc7e7b3e20447f8768763f20d8c9826d2885544",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-0",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 1.236622417449261,
+            "p50": 1.1855,
+            "p95": 1.6949,
+            "p99": 2.1342000000000003,
+            "max": 3.7201,
+            "over16_67": 0
+          },
+          "wallSeconds": 6.4141923,
+          "processWallSeconds": null,
+          "backgroundCpuCores": 0.9989283966244965,
+          "continuation": {
+            "tick": 3600,
+            "digest": "4a07d23baa4cf57c"
+          },
+          "reportHash": "7cfc164bc78213f6021f8b0d4ae90b620b2a85e909320991984402cde4f02c0d",
+          "expectedHash": "b0db6452a6cef231429fa28853e3ac0e0fc6c78b5230b64a06e5f931d12a85c3",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-1",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 1.1625939109360814,
+            "p50": 1.1411,
+            "p95": 1.5259,
+            "p99": 1.8041,
+            "max": 3.1168,
+            "over16_67": 0
+          },
+          "wallSeconds": 6.3246696,
+          "processWallSeconds": null,
+          "backgroundCpuCores": 0.4744776570369212,
+          "continuation": {
+            "tick": 3600,
+            "digest": "4a07d23baa4cf57c"
+          },
+          "reportHash": "c295d718158fbf70c4cbd500a697186db0860acbaa4816b3514ea805b86851cf",
+          "expectedHash": "b0db6452a6cef231429fa28853e3ac0e0fc6c78b5230b64a06e5f931d12a85c3",
+          "problems": []
+        },
+        {
+          "name": "combat_test-1",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 1.2562213874583477,
+            "p50": 1.2091,
+            "p95": 1.6553,
+            "p99": 2.154,
+            "max": 3.8136,
+            "over16_67": 0
+          },
+          "wallSeconds": 6.3065963,
+          "processWallSeconds": null,
+          "backgroundCpuCores": 0.44853518137033443,
+          "continuation": {
+            "tick": 3600,
+            "digest": "7873b6ad0df69a5b"
+          },
+          "reportHash": "fe6305894abd138176c484ebfb1d7d9c8e232dfbf18c4541f00cbd0d01b90af0",
+          "expectedHash": "585c05b99cd9744582131b8c9dc7e7b3e20447f8768763f20d8c9826d2885544",
+          "problems": []
+        },
+        {
+          "name": "combat_test-2",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 1.2852252347773399,
+            "p50": 1.2324,
+            "p95": 1.7235,
+            "p99": 2.3861,
+            "max": 3.4827,
+            "over16_67": 0
+          },
+          "wallSeconds": 6.4167433,
+          "processWallSeconds": null,
+          "backgroundCpuCores": 0.4207464313113109,
+          "continuation": {
+            "tick": 3600,
+            "digest": "7873b6ad0df69a5b"
+          },
+          "reportHash": "7681029efbd07e52a50eb01aafdae0910f082230418307d4e1dbb3b34819c10b",
+          "expectedHash": "585c05b99cd9744582131b8c9dc7e7b3e20447f8768763f20d8c9826d2885544",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-2",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 1.1752601029990908,
+            "p50": 1.1472,
+            "p95": 1.5517,
+            "p99": 1.9122,
+            "max": 4.4199,
+            "over16_67": 0
+          },
+          "wallSeconds": 6.3852329,
+          "processWallSeconds": null,
+          "backgroundCpuCores": 0.4404820108898002,
+          "continuation": {
+            "tick": 3600,
+            "digest": "4a07d23baa4cf57c"
+          },
+          "reportHash": "d5a9803d16d773e737f9e1c3add8095a02e29d6edcb0d0fb463d8f2afae22db2",
+          "expectedHash": "b0db6452a6cef231429fa28853e3ac0e0fc6c78b5230b64a06e5f931d12a85c3",
+          "problems": []
+        }
+      ],
+      "worlds": {
+        "combat_test": {
+          "update": {
+            "mean": 1.267421448046047,
+            "p50": 1.2163,
+            "p95": 1.6766999999999999,
+            "p99": 2.154
+          },
+          "processWallSeconds": null,
+          "pollingWallSeconds": 6.4167433
+        },
+        "falling_skyway": {
+          "update": {
+            "mean": 1.1752601029990908,
+            "p50": 1.1472,
+            "p95": 1.5517,
+            "p99": 1.9122
+          },
+          "processWallSeconds": null,
+          "pollingWallSeconds": 6.3852329
+        }
+      },
+      "worldValidity": {
+        "combat_test": true,
+        "falling_skyway": true
+      }
+    },
+    {
+      "name": "rules077-control-paired",
+      "path": ".phoenix/perf-recovery-rules077-control-paired/summary.json",
+      "sha256": "1bbdeb5895e8324e027dfe0dc8dc36c4c8caef13e0265d1a73f57f4aa3ba4c8b",
+      "mode": "phases",
+      "acceptanceEligible": true,
+      "measurementRole": "acceptance",
+      "gameplayReference": {
+        "path": ".phoenix/perf-rules077-gameplay-reference.json",
+        "sha256": "f370c7cc85d843b9eeda2d5e6858254caf77d156c8bc704f637a49fa33b35351",
+        "definition": {
+          "schema_version": 1,
+          "role": "Final rules0.77 control repeat consistency; external gameplay-equivalence reference for performance-only candidates. Control self-reference is not a performance improvement.",
+          "requireProvenance": true,
+          "sourceRevision": "9b963bf488edb27a32c4191683d9db51fde9b293",
+          "authoredRevision": "58eaae87dcc8da1e52f11533c87c4b0c0a95b9c2",
+          "rules": "0.77",
+          "controlStage": "rules077-control",
+          "binarySha256": "14ed60dc5a51cdebfc0fd9e79b6f431006e7872a8f47aed28a65b195dcc375ad",
+          "buildReceipt": ".phoenix/perf-recovery-rules077-control-build-receipt.json",
+          "buildReceiptSha256": "e96d8f93fc0e8896c865a15a0baa7843114fdd1d7026c9bc4f2d7c36a3d45fc9",
+          "contentProof": ".phoenix/perf-rules077-final-content-proof.json",
+          "contentProofSha256": "1ea79bb4707e2e1af1b5c99a2bd1b3e821c9c6ca15c9eb108c18a4fc74483da6",
+          "sourceCopyProof": ".phoenix/perf-rules077-control-source-copy.json",
+          "sourceCopyProofSha256": "c492df8d4375e1b2d3220c9a1a106c726020aa44adfcf34cb24c895c8336a802",
+          "worlds": {
+            "combat_test": {
+              "report": ".phoenix/perf-recovery-rules077-control/combat_test-0/report.json",
+              "continuation": ".phoenix/perf-recovery-rules077-control/combat_test-0/perf.json.continuation.json"
+            },
+            "falling_skyway": {
+              "report": ".phoenix/perf-recovery-rules077-control/falling_skyway-0/report.json",
+              "continuation": ".phoenix/perf-recovery-rules077-control/falling_skyway-0/perf.json.continuation.json"
+            }
+          },
+          "scope": "Frozen executable actually built at9b, final externally loaded data58e (combat_window_secs30, proximity150). Identical final content used for control and candidates; architecture, rules and observable work unchanged by optimisation."
+        }
+      },
+      "compiledBuildProof": {
+        "path": ".phoenix/perf-recovery-rules077-control-build-receipt.json",
+        "sha256": "e96d8f93fc0e8896c865a15a0baa7843114fdd1d7026c9bc4f2d7c36a3d45fc9",
+        "receipt": {
+          "source": {
+            "sourceRevision": "9b963bf488edb27a32c4191683d9db51fde9b293",
+            "runtimeSourceSha256": "8c037d2647a6cf167446c25f31b2461f10473b06565aa4a10b55ec34b74834c7",
+            "runtimeSourceClean": true,
+            "repositoryDirty": false,
+            "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+          },
+          "buildSource": "C:/Users/jkeyw/.codex/worktrees/combat-balance-fixes/increment-14-native-validation",
+          "profile": "measure",
+          "features": [
+            "default",
+            "server",
+            "headless"
+          ],
+          "configurationFromCommand": "cargo build --profile measure --features headless --bin phoenix-headless",
+          "defaultFeatures": true,
+          "requestedFeatures": [
+            "headless"
+          ],
+          "binary": ".phoenix/perf-recovery-rules077-control.exe",
+          "binarySha256": "14ed60dc5a51cdebfc0fd9e79b6f431006e7872a8f47aed28a65b195dcc375ad",
+          "originalReceipt": {
+            "path": ".phoenix/perf-recovery-rules077-control-original-receipt.json",
+            "sha256": "cbd8ab56a73b41d7e76be6e640131c8de52c2dc12bd21e603b5ad3cb69228166"
+          },
+          "originalBuildLog": {
+            "path": ".phoenix/perf-recovery-rules077-control-original-build.log",
+            "sha256": "0f7cb5e35bd97911db7b2b9e9528906985bfb48f76b81b559858bfe839956395"
+          },
+          "libraryDependencyRecord": {
+            "path": ".phoenix/perf-recovery-rules077-control-simulation.d",
+            "sha256": "c5b5d8d90d38f69c67db49eff20bc2a5be5408b195429b0a4fed389408e8dc48"
+          },
+          "contentProof": {
+            "path": ".phoenix/perf-rules077-control-content-proof.json",
+            "sha256": "daccb7b0fd0f6cd9248eb96dbb941a2fa0580c61d4fbf522cbdd964ccb44e612"
+          },
+          "sourceCopyProof": {
+            "path": ".phoenix/perf-rules077-control-source-copy.json",
+            "sha256": "c492df8d4375e1b2d3220c9a1a106c726020aa44adfcf34cb24c895c8336a802"
+          },
+          "scope": "Actual external Balance build at9b/rules0.77, successful measure build and dependency records retained. Root capture context is an exact runtime-byte copy, two EOL-only differences disclosed; it was not the build directory. No timing result yet."
+        }
+      },
+      "frozenContentProof": {
+        "path": ".phoenix/perf-rules077-final-content-proof.json",
+        "sha256": "1ea79bb4707e2e1af1b5c99a2bd1b3e821c9c6ca15c9eb108c18a4fc74483da6",
+        "sourceRevision": "58eaae87dcc8da1e52f11533c87c4b0c0a95b9c2",
+        "files": 741
+      },
+      "receipt": ".phoenix/perf-recovery-rules077-control-paired/receipt.json",
+      "receiptHash": "ba2408836fb7f69cb4c9a40fdba1c84997aeef0fd7661f3c87da64b19f56abbe",
+      "captureSource": {
+        "sourceRevision": "9b963bf488edb27a32c4191683d9db51fde9b293",
+        "runtimeSourceSha256": "8c037d2647a6cf167446c25f31b2461f10473b06565aa4a10b55ec34b74834c7",
+        "runtimeSourceClean": false,
+        "repositoryDirty": true,
+        "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+      },
+      "captureSourcePath": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-sensors",
+      "orchestrationSource": {
+        "sourceRevision": "1fbb123d62cee65f8523d3ff4744537bf207f3c0",
+        "runtimeSourceSha256": "e41b367227da87dbf01210ba3d4490bea4575a1c78bf075ef65b76acbb09c14b",
+        "runtimeSourceClean": true,
+        "repositoryDirty": true,
+        "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+      },
+      "originalBinary": false,
+      "oldBuildContentProof": null,
+      "binarySha256": "14ed60dc5a51cdebfc0fd9e79b6f431006e7872a8f47aed28a65b195dcc375ad",
+      "valid": true,
+      "problems": [],
+      "runs": [
+        {
+          "name": "combat_test-0",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 5.176735958800373,
+            "p50": 4.7287,
+            "p95": 9.2324,
+            "p99": 10.8398,
+            "max": 12.1338,
+            "over16_67": 0
+          },
+          "wallSeconds": 23.2187166,
+          "processWallSeconds": 22.9397852,
+          "backgroundCpuCores": 0.17678366039894194,
+          "continuation": {
+            "tick": 3600,
+            "digest": "42f92edb2d0b18f2"
+          },
+          "reportHash": "2112354479b1863b93892de209c65c6021fcf6e16c60f22ac3d3fad48676e6ee",
+          "expectedHash": "aa77c09b25d6e365a8e8b55324c44b99723cc3355d4c33d5ddc2b13ef86f7fb5",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-0",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 2.8101020296879744,
+            "p50": 3.0284999999999997,
+            "p95": 3.5321,
+            "p99": 3.7248,
+            "max": 5.5877,
+            "over16_67": 0
+          },
+          "wallSeconds": 15.0865113,
+          "processWallSeconds": 15.0460425,
+          "backgroundCpuCores": 0.12469406268721739,
+          "continuation": {
+            "tick": 3600,
+            "digest": "22190fbd13826108"
+          },
+          "reportHash": "4debc8a6bb5a0fa9a23603ccb1f9347ba562028a19141af429d1657f4fe7eaf2",
+          "expectedHash": "b708604c236ee9d893b3411e4b1bf85bb453fe092c5b57c80b036547f81edf54",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-1",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 2.8147047258406577,
+            "p50": 3.0109,
+            "p95": 3.5534999999999997,
+            "p99": 3.7612,
+            "max": 5.672199999999999,
+            "over16_67": 0
+          },
+          "wallSeconds": 15.2106463,
+          "processWallSeconds": 14.9906288,
+          "backgroundCpuCores": 0.08862939303652997,
+          "continuation": {
+            "tick": 3600,
+            "digest": "22190fbd13826108"
+          },
+          "reportHash": "be97f758fea73a746797aca2ef2620dfaa152152c2cda3069205b016c210f825",
+          "expectedHash": "b708604c236ee9d893b3411e4b1bf85bb453fe092c5b57c80b036547f81edf54",
+          "problems": []
+        },
+        {
+          "name": "combat_test-1",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 5.184154013935177,
+            "p50": 4.724,
+            "p95": 9.3438,
+            "p99": 11.1266,
+            "max": 13.3089,
+            "over16_67": 0
+          },
+          "wallSeconds": 23.241967,
+          "processWallSeconds": 22.8161433,
+          "backgroundCpuCores": 0.2764330432348008,
+          "continuation": {
+            "tick": 3600,
+            "digest": "42f92edb2d0b18f2"
+          },
+          "reportHash": "aed05488031b155636dc168984be20f8b8da8d7df183f5c50a97e6a47d4e9357",
+          "expectedHash": "aa77c09b25d6e365a8e8b55324c44b99723cc3355d4c33d5ddc2b13ef86f7fb5",
+          "problems": []
+        },
+        {
+          "name": "combat_test-2",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 5.1242792184186605,
+            "p50": 4.6691,
+            "p95": 9.313,
+            "p99": 10.9504,
+            "max": 12.357999999999999,
+            "over16_67": 0
+          },
+          "wallSeconds": 22.7177208,
+          "processWallSeconds": 22.587215,
+          "backgroundCpuCores": 0.1094078148623759,
+          "continuation": {
+            "tick": 3600,
+            "digest": "42f92edb2d0b18f2"
+          },
+          "reportHash": "80aa342d451f646e8d932dda45436531335df7c8653727725ca9b69d4e45c349",
+          "expectedHash": "aa77c09b25d6e365a8e8b55324c44b99723cc3355d4c33d5ddc2b13ef86f7fb5",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-2",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 3.032265010602846,
+            "p50": 3.0588,
+            "p95": 4.7668,
+            "p99": 6.300199999999999,
+            "max": 7.728,
+            "over16_67": 0
+          },
+          "wallSeconds": 16.308489,
+          "processWallSeconds": 16.1139164,
+          "backgroundCpuCores": 0.9592374868056487,
+          "continuation": {
+            "tick": 3600,
+            "digest": "22190fbd13826108"
+          },
+          "reportHash": "6f59aec288392d279a84715c1edf787424cc41bd78c9a326a55464f20206de9c",
+          "expectedHash": "b708604c236ee9d893b3411e4b1bf85bb453fe092c5b57c80b036547f81edf54",
+          "problems": []
+        }
+      ],
+      "worlds": {
+        "combat_test": {
+          "update": {
+            "mean": 5.176735958800373,
+            "p50": 4.724,
+            "p95": 9.313,
+            "p99": 10.9504
+          },
+          "processWallSeconds": 22.8161433,
+          "pollingWallSeconds": 23.2187166
+        },
+        "falling_skyway": {
+          "update": {
+            "mean": 2.8147047258406577,
+            "p50": 3.0284999999999997,
+            "p95": 3.5534999999999997,
+            "p99": 3.7612
+          },
+          "processWallSeconds": 15.0460425,
+          "pollingWallSeconds": 15.2106463
+        }
+      },
+      "worldValidity": {
+        "combat_test": true,
+        "falling_skyway": true
+      }
+    },
+    {
+      "name": "batch4-paired",
+      "path": ".phoenix/perf-recovery-batch4-paired/summary.json",
+      "sha256": "1b2d961d710900ac157a4f19a220cffc55fc39281e1db303bd27dac2dac75724",
+      "mode": "phases",
+      "acceptanceEligible": true,
+      "measurementRole": "acceptance",
+      "gameplayReference": {
+        "path": ".phoenix/perf-rules077-gameplay-reference.json",
+        "sha256": "f370c7cc85d843b9eeda2d5e6858254caf77d156c8bc704f637a49fa33b35351",
+        "definition": {
+          "schema_version": 1,
+          "role": "Final rules0.77 control repeat consistency; external gameplay-equivalence reference for performance-only candidates. Control self-reference is not a performance improvement.",
+          "requireProvenance": true,
+          "sourceRevision": "9b963bf488edb27a32c4191683d9db51fde9b293",
+          "authoredRevision": "58eaae87dcc8da1e52f11533c87c4b0c0a95b9c2",
+          "rules": "0.77",
+          "controlStage": "rules077-control",
+          "binarySha256": "14ed60dc5a51cdebfc0fd9e79b6f431006e7872a8f47aed28a65b195dcc375ad",
+          "buildReceipt": ".phoenix/perf-recovery-rules077-control-build-receipt.json",
+          "buildReceiptSha256": "e96d8f93fc0e8896c865a15a0baa7843114fdd1d7026c9bc4f2d7c36a3d45fc9",
+          "contentProof": ".phoenix/perf-rules077-final-content-proof.json",
+          "contentProofSha256": "1ea79bb4707e2e1af1b5c99a2bd1b3e821c9c6ca15c9eb108c18a4fc74483da6",
+          "sourceCopyProof": ".phoenix/perf-rules077-control-source-copy.json",
+          "sourceCopyProofSha256": "c492df8d4375e1b2d3220c9a1a106c726020aa44adfcf34cb24c895c8336a802",
+          "worlds": {
+            "combat_test": {
+              "report": ".phoenix/perf-recovery-rules077-control/combat_test-0/report.json",
+              "continuation": ".phoenix/perf-recovery-rules077-control/combat_test-0/perf.json.continuation.json"
+            },
+            "falling_skyway": {
+              "report": ".phoenix/perf-recovery-rules077-control/falling_skyway-0/report.json",
+              "continuation": ".phoenix/perf-recovery-rules077-control/falling_skyway-0/perf.json.continuation.json"
+            }
+          },
+          "scope": "Frozen executable actually built at9b, final externally loaded data58e (combat_window_secs30, proximity150). Identical final content used for control and candidates; architecture, rules and observable work unchanged by optimisation."
+        }
+      },
+      "compiledBuildProof": {
+        "path": ".phoenix/perf-recovery-batch4-build-receipt.json",
+        "sha256": "dcf88940ed2486e3d4b1ec09034b4fce8cb543d48c8908ab4c8a0fdc081c5106",
+        "receipt": {
+          "receiptRecovery": null,
+          "exactTestedSource": {
+            "source": {
+              "sourceRevision": "08a6f662208ac43390f46b630d1371868aa607c7",
+              "runtimeSourceSha256": "0ca198c7176558035a8f1a05cf12c9d19941fdd1737de820cf8d664f48f1d149",
+              "runtimeSourceClean": true,
+              "repositoryDirty": false,
+              "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c",
+              "validationEvidence": {
+                "path": ".phoenix/perf-recovery-batch4-validation.json",
+                "sha256": "64e6780d052304b749fd6162f3d68224602b3a6bb976d6fac271fe23ab3bda01",
+                "allSelectedTestsPassed": false,
+                "allNewEquivalenceAndContinuationTestsPassed": true,
+                "sourceSupportedInheritedNavigationFailures": 24,
+                "compiledBaselineRerun": false
+              }
+            },
+            "proof": ".phoenix/perf-recovery-batch4-tested-source.json",
+            "sha256": "9295aa3d072a8fd0bb1c3c356f41b5912575fe3ec6eb9704e1b71f1809d6dd88",
+            "note": "Compiled source revision and runtime bytes match the retained targeted-test source receipt."
+          },
+          "buildSource": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-station-health",
+          "libraryArtifact": {
+            "reason": "compiler-artifact",
+            "package_id": "path+file:///C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-station-health/crates/phoenix-simulation#0.1.0",
+            "manifest_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-station-health\\crates\\phoenix-simulation\\Cargo.toml",
+            "target": {
+              "kind": [
+                "lib"
+              ],
+              "crate_types": [
+                "lib"
+              ],
+              "name": "phoenix_simulation",
+              "src_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-station-health\\crates\\phoenix-simulation\\src\\lib.rs",
+              "edition": "2021",
+              "doc": true,
+              "doctest": true,
+              "test": true
+            },
+            "profile": {
+              "opt_level": "3",
+              "debuginfo": 0,
+              "debug_assertions": false,
+              "overflow_checks": false,
+              "test": false
+            },
+            "features": [
+              "headless",
+              "server"
+            ],
+            "filenames": [
+              "C:/Coding/project-phoenix-v2/target\\measure\\deps\\libphoenix_simulation-7e77ee5c1823ad7a.rlib",
+              "C:/Coding/project-phoenix-v2/target\\measure\\deps\\libphoenix_simulation-7e77ee5c1823ad7a.rmeta"
+            ],
+            "executable": null,
+            "fresh": false
+          },
+          "libraryDependencyRecord": {
+            "path": "C:/Coding/project-phoenix-v2/target\\measure\\deps\\phoenix_simulation-7e77ee5c1823ad7a.d",
+            "sha256": "bb67da671403ed0c480f5d17038b85a86ef99c49e2b9a6f4768241d2a81e5c73",
+            "verifiedSourceSuffix": "crates/phoenix-simulation/src/lib.rs",
+            "absoluteLibrarySource": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-station-health/crates/phoenix-simulation/src/lib.rs",
+            "relativeDependencyBase": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-station-health"
+          },
+          "source": {
+            "sourceRevision": "08a6f662208ac43390f46b630d1371868aa607c7",
+            "runtimeSourceSha256": "0ca198c7176558035a8f1a05cf12c9d19941fdd1737de820cf8d664f48f1d149",
+            "runtimeSourceClean": true,
+            "repositoryDirty": false,
+            "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+          },
+          "profile": "measure",
+          "features": [
+            "default",
+            "headless",
+            "server"
+          ],
+          "requestedFeatures": [
+            "headless"
+          ],
+          "defaultFeatures": true,
+          "artifact": {
+            "reason": "compiler-artifact",
+            "package_id": "path+file:///C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-station-health#project-phoenix@0.1.0",
+            "manifest_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-station-health\\Cargo.toml",
+            "target": {
+              "kind": [
+                "bin"
+              ],
+              "crate_types": [
+                "bin"
+              ],
+              "name": "phoenix-headless",
+              "src_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-station-health\\src\\bin\\phoenix_headless.rs",
+              "edition": "2021",
+              "required-features": [
+                "headless"
+              ],
+              "doc": true,
+              "doctest": false,
+              "test": true
+            },
+            "profile": {
+              "opt_level": "3",
+              "debuginfo": 0,
+              "debug_assertions": false,
+              "overflow_checks": false,
+              "test": false
+            },
+            "features": [
+              "default",
+              "headless",
+              "server"
+            ],
+            "filenames": [
+              "C:/Coding/project-phoenix-v2/target\\measure\\phoenix-headless.exe",
+              "C:/Coding/project-phoenix-v2/target\\measure\\phoenix_headless.pdb"
+            ],
+            "executable": "C:/Coding/project-phoenix-v2/target\\measure\\phoenix-headless.exe",
+            "fresh": false
+          },
+          "binary": ".phoenix/perf-recovery-batch4.exe",
+          "binarySha256": "cd67f03a62c68d7b4c6163e090e34d126a5021f6d0d127b94e41ffce3522c687",
+          "buildMessagesSha256": "a06d49f0f3fb296b8281f56a18f9f62c2dfb9dc968552acff42371e1ff6dbfb3",
+          "startedUtc": "2026-10-16T17:50:55.4140406Z",
+          "finishedUtc": "2026-10-16T18:03:51.001Z",
+          "scope": "Ordinary headless measure build, source verified unchanged before/after; exact artifact copied for isolated captures."
+        }
+      },
+      "frozenContentProof": {
+        "path": ".phoenix/perf-rules077-final-content-proof.json",
+        "sha256": "1ea79bb4707e2e1af1b5c99a2bd1b3e821c9c6ca15c9eb108c18a4fc74483da6",
+        "sourceRevision": "58eaae87dcc8da1e52f11533c87c4b0c0a95b9c2",
+        "files": 741
+      },
+      "receipt": ".phoenix/perf-recovery-batch4-paired/receipt.json",
+      "receiptHash": "51aa6591660887263933462ef1036bb13bb2e07d3b21dc5d9ad53894c72ed168",
+      "captureSource": {
+        "sourceRevision": "08a6f662208ac43390f46b630d1371868aa607c7",
+        "runtimeSourceSha256": "0ca198c7176558035a8f1a05cf12c9d19941fdd1737de820cf8d664f48f1d149",
+        "runtimeSourceClean": true,
+        "repositoryDirty": false,
+        "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+      },
+      "captureSourcePath": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-station-health",
+      "orchestrationSource": {
+        "sourceRevision": "1fbb123d62cee65f8523d3ff4744537bf207f3c0",
+        "runtimeSourceSha256": "e41b367227da87dbf01210ba3d4490bea4575a1c78bf075ef65b76acbb09c14b",
+        "runtimeSourceClean": true,
+        "repositoryDirty": true,
+        "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+      },
+      "originalBinary": false,
+      "oldBuildContentProof": null,
+      "binarySha256": "cd67f03a62c68d7b4c6163e090e34d126a5021f6d0d127b94e41ffce3522c687",
+      "valid": true,
+      "problems": [],
+      "runs": [
+        {
+          "name": "combat_test-0",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 4.144842805210541,
+            "p50": 3.9899,
+            "p95": 5.7923,
+            "p99": 6.833200000000001,
+            "max": 11.1626,
+            "over16_67": 0
+          },
+          "wallSeconds": 19.9804241,
+          "processWallSeconds": 19.3425183,
+          "backgroundCpuCores": 0.12619923520452442,
+          "continuation": {
+            "tick": 3600,
+            "digest": "42f92edb2d0b18f2"
+          },
+          "reportHash": "26d23fcf000fb011a0fed4b29da7361aa1a96d9d7de903d81e1bb3288eaf07c3",
+          "expectedHash": "aa77c09b25d6e365a8e8b55324c44b99723cc3355d4c33d5ddc2b13ef86f7fb5",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-0",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 2.8064058164192676,
+            "p50": 2.9381,
+            "p95": 3.5958,
+            "p99": 4.5573999999999995,
+            "max": 5.9255,
+            "over16_67": 0
+          },
+          "wallSeconds": 15.0860874,
+          "processWallSeconds": 15.0199643,
+          "backgroundCpuCores": 0.6222242490426175,
+          "continuation": {
+            "tick": 3600,
+            "digest": "22190fbd13826108"
+          },
+          "reportHash": "e5dd36612ccd9b16d399944d390ea78ace965d36527ebde84ffa3f91f7dd5b47",
+          "expectedHash": "b708604c236ee9d893b3411e4b1bf85bb453fe092c5b57c80b036547f81edf54",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-1",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 2.7979206604059366,
+            "p50": 2.9381,
+            "p95": 3.5569,
+            "p99": 4.7684,
+            "max": 6.069,
+            "over16_67": 0
+          },
+          "wallSeconds": 15.0707072,
+          "processWallSeconds": 14.9664199,
+          "backgroundCpuCores": 0.5580904288077293,
+          "continuation": {
+            "tick": 3600,
+            "digest": "22190fbd13826108"
+          },
+          "reportHash": "a945f6a3c2071ea452cf431510b6eb5acae52a2fb50dc9949cede7ee53ad71a7",
+          "expectedHash": "b708604c236ee9d893b3411e4b1bf85bb453fe092c5b57c80b036547f81edf54",
+          "problems": []
+        },
+        {
+          "name": "combat_test-1",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 4.163067100878519,
+            "p50": 4.0293,
+            "p95": 5.8326,
+            "p99": 6.7448999999999995,
+            "max": 9.4274,
+            "over16_67": 0
+          },
+          "wallSeconds": 19.9933862,
+          "processWallSeconds": 19.5291251,
+          "backgroundCpuCores": 0.23542234015758365,
+          "continuation": {
+            "tick": 3600,
+            "digest": "42f92edb2d0b18f2"
+          },
+          "reportHash": "d579d3e092551bedeacd45252a7d3b86bd958a8cbc0a612c1ef7a651519af902",
+          "expectedHash": "aa77c09b25d6e365a8e8b55324c44b99723cc3355d4c33d5ddc2b13ef86f7fb5",
+          "problems": []
+        },
+        {
+          "name": "combat_test-2",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 4.159987670402913,
+            "p50": 4.0144,
+            "p95": 5.8293,
+            "p99": 6.748900000000001,
+            "max": 9.527199999999999,
+            "over16_67": 0
+          },
+          "wallSeconds": 20.0270645,
+          "processWallSeconds": 19.5640321,
+          "backgroundCpuCores": 0.14063972144275064,
+          "continuation": {
+            "tick": 3600,
+            "digest": "42f92edb2d0b18f2"
+          },
+          "reportHash": "9729f964f6a693f1f49be0125570dbbe3fabe43ed587c847374d88606e070b79",
+          "expectedHash": "aa77c09b25d6e365a8e8b55324c44b99723cc3355d4c33d5ddc2b13ef86f7fb5",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-2",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 2.757533141472279,
+            "p50": 2.941,
+            "p95": 3.4511,
+            "p99": 3.7448,
+            "max": 5.0020999999999995,
+            "over16_67": 0
+          },
+          "wallSeconds": 15.1317165,
+          "processWallSeconds": 14.7994805,
+          "backgroundCpuCores": 0.19171318535343138,
+          "continuation": {
+            "tick": 3600,
+            "digest": "22190fbd13826108"
+          },
+          "reportHash": "3493ec097f7f85810de7b01c28192f17c14eafa671e9bf0583bd6490a2b67a0c",
+          "expectedHash": "b708604c236ee9d893b3411e4b1bf85bb453fe092c5b57c80b036547f81edf54",
+          "problems": []
+        }
+      ],
+      "worlds": {
+        "combat_test": {
+          "update": {
+            "mean": 4.159987670402913,
+            "p50": 4.0144,
+            "p95": 5.8293,
+            "p99": 6.748900000000001
+          },
+          "processWallSeconds": 19.5291251,
+          "pollingWallSeconds": 19.9933862
+        },
+        "falling_skyway": {
+          "update": {
+            "mean": 2.7979206604059366,
+            "p50": 2.9381,
+            "p95": 3.5569,
+            "p99": 4.5573999999999995
+          },
+          "processWallSeconds": 14.9664199,
+          "pollingWallSeconds": 15.0860874
+        }
+      },
+      "worldValidity": {
+        "combat_test": true,
+        "falling_skyway": true
+      }
+    }
+  ],
+  "historicalEvidence": [
+    {
+      "name": "batch1",
+      "path": ".phoenix/perf-recovery-batch1/summary.json",
+      "sha256": "db9a65874b484cca1cd73fc59b1ebc713660b2691ac2bcd40c3fda9e1ac587ca",
+      "mode": "phases",
+      "receipt": ".phoenix/perf-recovery-batch1/receipt.json",
+      "receiptHash": "2fc1ed0730048d4e7e3afd043722acfdd3fe5864ca87ed27db6d777ea0f7399d",
+      "orchestrationSource": {
+        "sourceRevision": "a68bf2ef88cede1f36d116ebc2c46a8c9b6d14d6",
+        "runtimeSourceSha256": "baaa8f8fa7332e8ca591afefa6cad5ed3a2aa50e1ab6df3f063a5360ef31efcb",
+        "runtimeSourceClean": true,
+        "repositoryDirty": true,
+        "exampleSha256": "d749c79c915f0511d825b0e98a7a6700f29cbcd28947546967209278b21d5d5a"
+      },
+      "originalBinary": false,
+      "oldBuildContentProof": null,
+      "binarySha256": "6b3a4c7a4ae265c25cd3a1c0346aca0caf598f646157aa4c8ab1541f7f7ef232",
+      "valid": false,
+      "problems": [],
+      "runs": [
+        {
+          "name": "combat_test-0",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 4.450296849439568,
+            "p50": 3.8409999999999997,
+            "p95": 7.5842,
+            "p99": 9.661100000000001,
+            "max": 17.808899999999998,
+            "over16_67": 1
+          },
+          "wallSeconds": 22.4281669,
+          "processWallSeconds": 21.8124713,
+          "backgroundCpuCores": 0.8100725687675497,
+          "continuation": {
+            "tick": 3600,
+            "digest": "b63f62905fd3b204"
+          },
+          "reportHash": "e2d9309d725d0d99f4caaf13a22f7255cc9b9290aae465182df245c5dd0b0035",
+          "expectedHash": "8cbc162dafcf4b214a78b2ddb660c7eeb9ab48fe8a3c2e1cc0da5a5d61642f81",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-0",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 3.8575305967888487,
+            "p50": 3.6202,
+            "p95": 5.914199999999999,
+            "p99": 7.1478,
+            "max": 13.413400000000001,
+            "over16_67": 0
+          },
+          "wallSeconds": 19.1380454,
+          "processWallSeconds": 18.9193171,
+          "backgroundCpuCores": 2.093909111391054,
+          "continuation": {
+            "tick": 3600,
+            "digest": "2d2b7c94531ffb3c"
+          },
+          "reportHash": "1b0832892c715bd46d96a7c0dcca7e9749a8d78cf10d3ddfab0a66c5dc342c0e",
+          "expectedHash": "8dfb0f641fc64f341aca4fa7271d5c509f6127986b71c4a3b8c5d3b77184abef",
+          "problems": [
+            "Background CPU not quiet"
+          ]
+        },
+        {
+          "name": "falling_skyway-1",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 3.504320266585887,
+            "p50": 3.3681,
+            "p95": 4.9504,
+            "p99": 5.6771,
+            "max": 9.811300000000001,
+            "over16_67": 0
+          },
+          "wallSeconds": 18.197452,
+          "processWallSeconds": 17.9555196,
+          "backgroundCpuCores": 1.0007905803148334,
+          "continuation": {
+            "tick": 3600,
+            "digest": "2d2b7c94531ffb3c"
+          },
+          "reportHash": "6388885caf9c378b5edbf130dc7ecab8c965ffe0c6ae9cf8456a2346c6997770",
+          "expectedHash": "8dfb0f641fc64f341aca4fa7271d5c509f6127986b71c4a3b8c5d3b77184abef",
+          "problems": [
+            "Background CPU not quiet"
+          ]
+        },
+        {
+          "name": "combat_test-1",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 4.371276916086034,
+            "p50": 3.8556,
+            "p95": 7.587,
+            "p99": 9.031600000000001,
+            "max": 12.4961,
+            "over16_67": 0
+          },
+          "wallSeconds": 20.7465453,
+          "processWallSeconds": 20.2426559,
+          "backgroundCpuCores": 0.7535744526563218,
+          "continuation": {
+            "tick": 3600,
+            "digest": "b63f62905fd3b204"
+          },
+          "reportHash": "d91ad2aa31ec8ef80ed474ba95e06d6910e89bb41f63a7d5f6e8d3e89908b462",
+          "expectedHash": "8cbc162dafcf4b214a78b2ddb660c7eeb9ab48fe8a3c2e1cc0da5a5d61642f81",
+          "problems": []
+        },
+        {
+          "name": "combat_test-2",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 4.285345652832473,
+            "p50": 3.7115,
+            "p95": 7.3669,
+            "p99": 9.1392,
+            "max": 14.7066,
+            "over16_67": 0
+          },
+          "wallSeconds": 20.1627269,
+          "processWallSeconds": 19.8118706,
+          "backgroundCpuCores": 0.7277903768431176,
+          "continuation": {
+            "tick": 3600,
+            "digest": "b63f62905fd3b204"
+          },
+          "reportHash": "fa2e497441d2716acbd9731b05d35df9b5f486e10129d22ef93a32e597fe85f8",
+          "expectedHash": "8cbc162dafcf4b214a78b2ddb660c7eeb9ab48fe8a3c2e1cc0da5a5d61642f81",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-2",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 3.4368648288397377,
+            "p50": 3.2369999999999997,
+            "p95": 5.1762,
+            "p99": 6.8388,
+            "max": 9.6784,
+            "over16_67": 0
+          },
+          "wallSeconds": 17.5103258,
+          "processWallSeconds": 17.3635177,
+          "backgroundCpuCores": 0.6927413658114528,
+          "continuation": {
+            "tick": 3600,
+            "digest": "2d2b7c94531ffb3c"
+          },
+          "reportHash": "09aa10de0af6ea73401332e77fe96911fc0af1325cd80a8dcf483ba0d1933193",
+          "expectedHash": "8dfb0f641fc64f341aca4fa7271d5c509f6127986b71c4a3b8c5d3b77184abef",
+          "problems": []
+        }
+      ],
+      "worlds": {
+        "combat_test": {
+          "update": {
+            "mean": 4.371276916086034,
+            "p50": 3.8409999999999997,
+            "p95": 7.5842,
+            "p99": 9.1392
+          },
+          "processWallSeconds": 20.2426559,
+          "pollingWallSeconds": 20.7465453
+        },
+        "falling_skyway": {
+          "update": {
+            "mean": 3.504320266585887,
+            "p50": 3.3681,
+            "p95": 5.1762,
+            "p99": 6.8388
+          },
+          "processWallSeconds": 17.9555196,
+          "pollingWallSeconds": 18.197452
+        }
+      },
+      "role": "historical only; never pooled with latest paired acceptance"
+    },
+    {
+      "name": "combined",
+      "path": ".phoenix/perf-recovery-combined/summary.json",
+      "sha256": "0eae92e63ed894c3646582c6b59090392da72f895881e05884e9f2d965666230",
+      "mode": "phases",
+      "gameplayReference": null,
+      "compiledBuildProof": {
+        "path": ".phoenix/perf-recovery-combined-build-receipt.json",
+        "sha256": "152d005cbac172b6dab5f15d9299c01f31ee4deeedbda86f2fe52cb0793a0268",
+        "receipt": {
+          "receiptRecovery": {
+            "reason": "Initial receipt checker required an absolute .d path; rustc uses paths relative to its verified Cargo source. Checker corrected, actual successful build and frozen binary reused after exact hash comparison.",
+            "startedUtcSource": "Observed Cargo process start from retained process inventory"
+          },
+          "exactTestedSource": {
+            "source": {
+              "sourceRevision": "e13490cc7f9ee62febb1169e5f2494b6f4ac880b",
+              "runtimeSourceSha256": "79ccfb4f5e842122cfec97dcc65f5c07d5a3b3fe48fd6becdc0b1d1cd580bad3",
+              "runtimeSourceClean": true,
+              "repositoryDirty": true,
+              "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+            },
+            "proof": ".phoenix/perf-recovery-measure-bytecopy.json",
+            "sha256": "2608b167cf05f48fcad199cd4214e951ba25f6facc313fbad1a1061849b946ba",
+            "note": "Pinned checkout has disclosed EOL-only Git differences to preserve exact tested working bytes; runtime source hashes match."
+          },
+          "buildSource": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-publication",
+          "libraryArtifact": {
+            "reason": "compiler-artifact",
+            "package_id": "path+file:///C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-publication/crates/phoenix-simulation#0.1.0",
+            "manifest_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-publication\\crates\\phoenix-simulation\\Cargo.toml",
+            "target": {
+              "kind": [
+                "lib"
+              ],
+              "crate_types": [
+                "lib"
+              ],
+              "name": "phoenix_simulation",
+              "src_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-publication\\crates\\phoenix-simulation\\src\\lib.rs",
+              "edition": "2021",
+              "doc": true,
+              "doctest": true,
+              "test": true
+            },
+            "profile": {
+              "opt_level": "3",
+              "debuginfo": 0,
+              "debug_assertions": false,
+              "overflow_checks": false,
+              "test": false
+            },
+            "features": [
+              "headless",
+              "server"
+            ],
+            "filenames": [
+              "C:/Coding/project-phoenix-v2/target\\measure\\deps\\libphoenix_simulation-7e77ee5c1823ad7a.rlib",
+              "C:/Coding/project-phoenix-v2/target\\measure\\deps\\libphoenix_simulation-7e77ee5c1823ad7a.rmeta"
+            ],
+            "executable": null,
+            "fresh": false
+          },
+          "libraryDependencyRecord": {
+            "path": "C:/Coding/project-phoenix-v2/target\\measure\\deps\\phoenix_simulation-7e77ee5c1823ad7a.d",
+            "sha256": "98867a3e420c5515975458ded20e1e64c82dbef2e7e721f5d97a2fbcd46fa496",
+            "verifiedSourceSuffix": "crates/phoenix-simulation/src/lib.rs",
+            "absoluteLibrarySource": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-publication/crates/phoenix-simulation/src/lib.rs",
+            "relativeDependencyBase": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-publication"
+          },
+          "source": {
+            "sourceRevision": "e13490cc7f9ee62febb1169e5f2494b6f4ac880b",
+            "runtimeSourceSha256": "79ccfb4f5e842122cfec97dcc65f5c07d5a3b3fe48fd6becdc0b1d1cd580bad3",
+            "runtimeSourceClean": false,
+            "repositoryDirty": true,
+            "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+          },
+          "profile": "measure",
+          "features": [
+            "default",
+            "headless",
+            "server"
+          ],
+          "requestedFeatures": [
+            "headless"
+          ],
+          "defaultFeatures": true,
+          "artifact": {
+            "reason": "compiler-artifact",
+            "package_id": "path+file:///C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-publication#project-phoenix@0.1.0",
+            "manifest_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-publication\\Cargo.toml",
+            "target": {
+              "kind": [
+                "bin"
+              ],
+              "crate_types": [
+                "bin"
+              ],
+              "name": "phoenix-headless",
+              "src_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-publication\\src\\bin\\phoenix_headless.rs",
+              "edition": "2021",
+              "required-features": [
+                "headless"
+              ],
+              "doc": true,
+              "doctest": false,
+              "test": true
+            },
+            "profile": {
+              "opt_level": "3",
+              "debuginfo": 0,
+              "debug_assertions": false,
+              "overflow_checks": false,
+              "test": false
+            },
+            "features": [
+              "default",
+              "headless",
+              "server"
+            ],
+            "filenames": [
+              "C:/Coding/project-phoenix-v2/target\\measure\\phoenix-headless.exe",
+              "C:/Coding/project-phoenix-v2/target\\measure\\phoenix_headless.pdb"
+            ],
+            "executable": "C:/Coding/project-phoenix-v2/target\\measure\\phoenix-headless.exe",
+            "fresh": false
+          },
+          "binary": ".phoenix/perf-recovery-combined.exe",
+          "binarySha256": "938d8d35fb283dd85af18c9d34ddc36a9ac835e752fc99ed546487772e96af81",
+          "buildMessagesSha256": "43dd8a6cba1626850bc7337c6e5d88b4dce18ff4d47e50d1eeac4ad64ddeed20",
+          "startedUtc": "2026-10-16T15:07:23.3291696Z",
+          "finishedUtc": "2026-10-16T15:22:33.382Z",
+          "scope": "Ordinary headless measure build, source verified unchanged before/after; exact artifact copied for isolated captures."
+        }
+      },
+      "frozenContentProof": {
+        "path": ".phoenix/perf-combined-content-proof.json",
+        "sha256": "5aa581f6368a1a1f006f26ef5c6faa17f240b5f132f74be810d87a50755bf353",
+        "sourceRevision": "ae9608c9ef0566f8c61ea0de861538deeb32d81b",
+        "files": 745
+      },
+      "receipt": ".phoenix/perf-recovery-combined/receipt.json",
+      "receiptHash": "9289b9f8750ff2de61e07422f934eb07ec2c974a66106b9839ee901b4a0c427e",
+      "captureSource": {
+        "sourceRevision": "e13490cc7f9ee62febb1169e5f2494b6f4ac880b",
+        "runtimeSourceSha256": "79ccfb4f5e842122cfec97dcc65f5c07d5a3b3fe48fd6becdc0b1d1cd580bad3",
+        "runtimeSourceClean": false,
+        "repositoryDirty": true,
+        "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+      },
+      "captureSourcePath": ".phoenix/worktrees/perf-publication",
+      "orchestrationSource": {
+        "sourceRevision": "aff0fad9b25575ccaee846b9eefdbeda803c9af1",
+        "runtimeSourceSha256": "29ac53492c936f940b46567c989cb639aaec1939b460ed36f4d59ecd7c4076b1",
+        "runtimeSourceClean": true,
+        "repositoryDirty": true,
+        "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+      },
+      "originalBinary": false,
+      "oldBuildContentProof": null,
+      "binarySha256": "938d8d35fb283dd85af18c9d34ddc36a9ac835e752fc99ed546487772e96af81",
+      "valid": true,
+      "problems": [],
+      "runs": [
+        {
+          "name": "combat_test-0",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 3.3460978491366236,
+            "p50": 3.2746,
+            "p95": 4.4167,
+            "p99": 5.899299999999999,
+            "max": 8.833499999999999,
+            "over16_67": 0
+          },
+          "wallSeconds": 18.2816705,
+          "processWallSeconds": 17.7353655,
+          "backgroundCpuCores": 0.1969694418913816,
+          "continuation": {
+            "tick": 3600,
+            "digest": "b63f62905fd3b204"
+          },
+          "reportHash": "eed39cd744e3d8effa0d104fcc7978e30a4bcca688d3e0991cb9aaaf904a3803",
+          "expectedHash": "8cbc162dafcf4b214a78b2ddb660c7eeb9ab48fe8a3c2e1cc0da5a5d61642f81",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-0",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 2.8808352317479486,
+            "p50": 2.8251999999999997,
+            "p95": 3.8752,
+            "p99": 4.9273,
+            "max": 10.2085,
+            "over16_67": 0
+          },
+          "wallSeconds": 15.5148394,
+          "processWallSeconds": 15.1282068,
+          "backgroundCpuCores": 0.6073325216332095,
+          "continuation": {
+            "tick": 3600,
+            "digest": "2d2b7c94531ffb3c"
+          },
+          "reportHash": "4233bc7b71c91d8591869713d6027f07a5512fcc5f93248f036d58d4a9777db9",
+          "expectedHash": "8dfb0f641fc64f341aca4fa7271d5c509f6127986b71c4a3b8c5d3b77184abef",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-1",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 2.8958121781278447,
+            "p50": 2.8411999999999997,
+            "p95": 4.011500000000001,
+            "p99": 5.0092,
+            "max": 7.1956,
+            "over16_67": 0
+          },
+          "wallSeconds": 15.5316498,
+          "processWallSeconds": 15.3571169,
+          "backgroundCpuCores": 0.7890502147904339,
+          "continuation": {
+            "tick": 3600,
+            "digest": "2d2b7c94531ffb3c"
+          },
+          "reportHash": "ab4699194704ce0d2538f6e867b2ef476a87c14784e71ab6feda464fb8c9046e",
+          "expectedHash": "8dfb0f641fc64f341aca4fa7271d5c509f6127986b71c4a3b8c5d3b77184abef",
+          "problems": []
+        },
+        {
+          "name": "combat_test-1",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 3.4408260527112953,
+            "p50": 3.3082,
+            "p95": 4.846299999999999,
+            "p99": 6.1201,
+            "max": 10.4458,
+            "over16_67": 0
+          },
+          "wallSeconds": 17.2282156,
+          "processWallSeconds": 17.2070986,
+          "backgroundCpuCores": 0.65173190858539,
+          "continuation": {
+            "tick": 3600,
+            "digest": "b63f62905fd3b204"
+          },
+          "reportHash": "1092dbb5782edaad0b7582cb8055b3503208818f8463cd065ef1ea13b8669a24",
+          "expectedHash": "8cbc162dafcf4b214a78b2ddb660c7eeb9ab48fe8a3c2e1cc0da5a5d61642f81",
+          "problems": []
+        },
+        {
+          "name": "combat_test-2",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 3.3115897000908876,
+            "p50": 3.2642,
+            "p95": 4.2279,
+            "p99": 5.6641,
+            "max": 8.5621,
+            "over16_67": 0
+          },
+          "wallSeconds": 16.7243615,
+          "processWallSeconds": 16.6431719,
+          "backgroundCpuCores": 0.277088552239896,
+          "continuation": {
+            "tick": 3600,
+            "digest": "b63f62905fd3b204"
+          },
+          "reportHash": "ba3ae101fed29252a47a4e0f6ef98c180fd173225e5e87218d85ebde351da367",
+          "expectedHash": "8cbc162dafcf4b214a78b2ddb660c7eeb9ab48fe8a3c2e1cc0da5a5d61642f81",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-2",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 2.8602061193577595,
+            "p50": 3.0423999999999998,
+            "p95": 3.6081,
+            "p99": 3.8355,
+            "max": 4.8261,
+            "over16_67": 0
+          },
+          "wallSeconds": 15.6405515,
+          "processWallSeconds": 15.221155,
+          "backgroundCpuCores": 0.21767565310706397,
+          "continuation": {
+            "tick": 3600,
+            "digest": "2d2b7c94531ffb3c"
+          },
+          "reportHash": "6d279b0f84b2fe6be3acfcafb294a1dabf60cf8c430eb45f5d055a3495c3c3d3",
+          "expectedHash": "8dfb0f641fc64f341aca4fa7271d5c509f6127986b71c4a3b8c5d3b77184abef",
+          "problems": []
+        }
+      ],
+      "worlds": {
+        "combat_test": {
+          "update": {
+            "mean": 3.3460978491366236,
+            "p50": 3.2746,
+            "p95": 4.4167,
+            "p99": 5.899299999999999
+          },
+          "processWallSeconds": 17.2070986,
+          "pollingWallSeconds": 17.2282156
+        },
+        "falling_skyway": {
+          "update": {
+            "mean": 2.8808352317479486,
+            "p50": 2.8411999999999997,
+            "p95": 3.8752,
+            "p99": 4.9273
+          },
+          "processWallSeconds": 15.221155,
+          "pollingWallSeconds": 15.5316498
+        }
+      },
+      "role": "historical only; never pooled with latest paired acceptance"
+    },
+    {
+      "name": "post-balance-control",
+      "path": ".phoenix/perf-recovery-post-balance-control/summary.json",
+      "sha256": "1264e1165d1dcbcad81fd530658d4968ae1f4a54c632684a620d9195c0bf0530",
+      "mode": "phases",
+      "acceptanceEligible": true,
+      "measurementRole": "acceptance",
+      "gameplayReference": {
+        "path": ".phoenix/perf-post-balance-gameplay-reference.json",
+        "sha256": "06c6fd150f0078294a8a78878be6d7bb181410eb0d9539381ae946a552604d33",
+        "definition": {
+          "schema_version": 1,
+          "role": "Post-balance control repeat consistency, and external gameplay-equivalence reference for subsequent performance-only changes.",
+          "sourceRevision": "25ccf11e75dbc30e74fec9b54cab5fb14546d284",
+          "rules": "0.76",
+          "controlStage": "post-balance-control",
+          "binarySha256": "f11e2b62b321360b561343f11292f88a997cc2af516ef25a963171ab66588bfd",
+          "buildReceipt": ".phoenix/perf-recovery-post-balance-control-build-receipt.json",
+          "buildReceiptSha256": "825eb2a8467a30154d73e4dcd07a26d37669a029203c958ae9aa1c214c8f64e1",
+          "contentProof": ".phoenix/perf-post-balance-control-proof.json",
+          "contentProofSha256": "9038a49c2465bfe93af7679e8fbd2a8e20073f333d201cfc5ae72cf086ab1b0b",
+          "worlds": {
+            "combat_test": {
+              "report": ".phoenix/perf-recovery-post-balance-control/combat_test-0/report.json",
+              "continuation": ".phoenix/perf-recovery-post-balance-control/combat_test-0/perf.json.continuation.json"
+            },
+            "falling_skyway": {
+              "report": ".phoenix/perf-recovery-post-balance-control/falling_skyway-0/report.json",
+              "continuation": ".phoenix/perf-recovery-post-balance-control/falling_skyway-0/perf.json.continuation.json"
+            }
+          }
+        }
+      },
+      "compiledBuildProof": {
+        "path": ".phoenix/perf-recovery-post-balance-control-build-receipt.json",
+        "sha256": "825eb2a8467a30154d73e4dcd07a26d37669a029203c958ae9aa1c214c8f64e1",
+        "receipt": {
+          "source": {
+            "sourceRevision": "25ccf11e75dbc30e74fec9b54cab5fb14546d284",
+            "runtimeSourceSha256": "c8810712d60621be7c453e2b5abb697d5ae3ad518ec6aa1bbb817f0e6c9be141",
+            "runtimeSourceClean": false,
+            "repositoryDirty": true,
+            "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+          },
+          "buildSource": "C:/Coding/project-phoenix-v2",
+          "profile": "measure",
+          "features": [
+            "default",
+            "server",
+            "headless"
+          ],
+          "binary": ".phoenix/perf-recovery-post-balance-control.exe",
+          "binarySha256": "f11e2b62b321360b561343f11292f88a997cc2af516ef25a963171ab66588bfd",
+          "originalReceipt": {
+            "path": ".phoenix/perf-recovery-post-balance-control-original-receipt.json",
+            "sha256": "4802d19dede23bc53d3723e7e4f42aaa6d71dba40c1ec1127cb1e367e5509c7e"
+          },
+          "contentProof": {
+            "path": ".phoenix/perf-post-balance-control-proof.json",
+            "sha256": "9038a49c2465bfe93af7679e8fbd2a8e20073f333d201cfc5ae72cf086ab1b0b"
+          },
+          "sourceCopyProof": {
+            "path": ".phoenix/perf-post-balance-control-source-copy.json",
+            "sha256": "d8ab82972964db6829c4ba6534b79a198321a425030ea9b5782e31b4a7a5aba5"
+          },
+          "scope": "Final integrated Balance artifact built on main; pinned capture-source worktree copies the same runtime bytes and frozen assets. It is not claimed to have been built in that capture worktree. Main Rustaff0/data25cc as original receipt; after balance, before next performance batch."
+        }
+      },
+      "frozenContentProof": null,
+      "receipt": ".phoenix/perf-recovery-post-balance-control/receipt.json",
+      "receiptHash": "dd222a313fc1ea16d3caceaaec0fca82c3339fa3bf0a519357802e36e421826e",
+      "captureSource": {
+        "sourceRevision": "25ccf11e75dbc30e74fec9b54cab5fb14546d284",
+        "runtimeSourceSha256": "c8810712d60621be7c453e2b5abb697d5ae3ad518ec6aa1bbb817f0e6c9be141",
+        "runtimeSourceClean": false,
+        "repositoryDirty": true,
+        "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+      },
+      "captureSourcePath": ".phoenix/worktrees/perf-repair-publication",
+      "orchestrationSource": {
+        "sourceRevision": "25ccf11e75dbc30e74fec9b54cab5fb14546d284",
+        "runtimeSourceSha256": "c8810712d60621be7c453e2b5abb697d5ae3ad518ec6aa1bbb817f0e6c9be141",
+        "runtimeSourceClean": true,
+        "repositoryDirty": true,
+        "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+      },
+      "originalBinary": false,
+      "oldBuildContentProof": null,
+      "binarySha256": "f11e2b62b321360b561343f11292f88a997cc2af516ef25a963171ab66588bfd",
+      "valid": true,
+      "problems": [],
+      "runs": [
+        {
+          "name": "combat_test-0",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 4.880830475613444,
+            "p50": 4.5176,
+            "p95": 8.563899999999999,
+            "p99": 9.6608,
+            "max": 15.4554,
+            "over16_67": 0
+          },
+          "wallSeconds": 22.9851922,
+          "processWallSeconds": 22.3914967,
+          "backgroundCpuCores": 0.4171170960887884,
+          "continuation": {
+            "tick": 3600,
+            "digest": "45095c0d958cd664"
+          },
+          "reportHash": "da240084b891b344d63cdfb259a40fa73b7224036d4f8f797b076d87a2711669",
+          "expectedHash": "da240084b891b344d63cdfb259a40fa73b7224036d4f8f797b076d87a2711669",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-0",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 2.777465919418353,
+            "p50": 2.7747,
+            "p95": 3.6685,
+            "p99": 4.832000000000001,
+            "max": 9.1417,
+            "over16_67": 0
+          },
+          "wallSeconds": 14.958208,
+          "processWallSeconds": 14.7823011,
+          "backgroundCpuCores": 0.40415878514416564,
+          "continuation": {
+            "tick": 3600,
+            "digest": "39fec0c0db1bc9ae"
+          },
+          "reportHash": "e30e9e7f2fa35c285908ebb8e4568ecbb8c4bd434ce88aa641f43bf8b575d375",
+          "expectedHash": "e30e9e7f2fa35c285908ebb8e4568ecbb8c4bd434ce88aa641f43bf8b575d375",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-1",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 2.7362175401393527,
+            "p50": 2.7504,
+            "p95": 3.5275,
+            "p99": 4.462899999999999,
+            "max": 6.8378,
+            "over16_67": 0
+          },
+          "wallSeconds": 15.0359485,
+          "processWallSeconds": 14.5518023,
+          "backgroundCpuCores": 0.24245311595520572,
+          "continuation": {
+            "tick": 3600,
+            "digest": "39fec0c0db1bc9ae"
+          },
+          "reportHash": "11d8d420a3adc7d3a39a8491722b91df481025af02de6ee8c2f5b2759e830ab1",
+          "expectedHash": "e30e9e7f2fa35c285908ebb8e4568ecbb8c4bd434ce88aa641f43bf8b575d375",
+          "problems": []
+        },
+        {
+          "name": "combat_test-1",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 4.747022447743103,
+            "p50": 4.3565000000000005,
+            "p95": 8.4301,
+            "p99": 9.59,
+            "max": 14.158199999999999,
+            "over16_67": 0
+          },
+          "wallSeconds": 21.4003372,
+          "processWallSeconds": 21.1574641,
+          "backgroundCpuCores": 0.20300959765852955,
+          "continuation": {
+            "tick": 3600,
+            "digest": "45095c0d958cd664"
+          },
+          "reportHash": "70e3da5dc3c1a444d1acc46a0582ac1c932bee13eaf83348d76c6f36d52a0179",
+          "expectedHash": "da240084b891b344d63cdfb259a40fa73b7224036d4f8f797b076d87a2711669",
+          "problems": []
+        },
+        {
+          "name": "combat_test-2",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 4.831280369584973,
+            "p50": 4.420999999999999,
+            "p95": 8.484,
+            "p99": 9.7782,
+            "max": 13.5444,
+            "over16_67": 0
+          },
+          "wallSeconds": 21.9396125,
+          "processWallSeconds": 21.6896166,
+          "backgroundCpuCores": 0.969925263777805,
+          "continuation": {
+            "tick": 3600,
+            "digest": "45095c0d958cd664"
+          },
+          "reportHash": "8e788b17641f636045ea3b9b29731e4dd438f10adda38c162af76df3ba082b91",
+          "expectedHash": "da240084b891b344d63cdfb259a40fa73b7224036d4f8f797b076d87a2711669",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-2",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 2.8728319600121193,
+            "p50": 2.8151,
+            "p95": 4.1561,
+            "p99": 5.6245,
+            "max": 7.4529000000000005,
+            "over16_67": 0
+          },
+          "wallSeconds": 15.516026,
+          "processWallSeconds": 15.2040509,
+          "backgroundCpuCores": 0.523617182678341,
+          "continuation": {
+            "tick": 3600,
+            "digest": "39fec0c0db1bc9ae"
+          },
+          "reportHash": "d38e4b858c5572895260aba4094e222a4d30a98ca0f15b20385b2af35bcb283d",
+          "expectedHash": "e30e9e7f2fa35c285908ebb8e4568ecbb8c4bd434ce88aa641f43bf8b575d375",
+          "problems": []
+        }
+      ],
+      "worlds": {
+        "combat_test": {
+          "update": {
+            "mean": 4.831280369584973,
+            "p50": 4.420999999999999,
+            "p95": 8.484,
+            "p99": 9.6608
+          },
+          "processWallSeconds": 21.6896166,
+          "pollingWallSeconds": 21.9396125
+        },
+        "falling_skyway": {
+          "update": {
+            "mean": 2.777465919418353,
+            "p50": 2.7747,
+            "p95": 3.6685,
+            "p99": 4.832000000000001
+          },
+          "processWallSeconds": 14.7823011,
+          "pollingWallSeconds": 15.0359485
+        }
+      },
+      "role": "historical only; never pooled with latest paired acceptance"
+    },
+    {
+      "name": "batch3",
+      "path": ".phoenix/perf-recovery-batch3/summary.json",
+      "sha256": "6f56b5a9ad9fb50a7df0c98cc8131057ef72552557d13d88e4110cbc2fa18a86",
+      "mode": "phases",
+      "acceptanceEligible": true,
+      "measurementRole": "acceptance",
+      "gameplayReference": {
+        "path": ".phoenix/perf-post-balance-gameplay-reference.json",
+        "sha256": "06c6fd150f0078294a8a78878be6d7bb181410eb0d9539381ae946a552604d33",
+        "definition": {
+          "schema_version": 1,
+          "role": "Post-balance control repeat consistency, and external gameplay-equivalence reference for subsequent performance-only changes.",
+          "sourceRevision": "25ccf11e75dbc30e74fec9b54cab5fb14546d284",
+          "rules": "0.76",
+          "controlStage": "post-balance-control",
+          "binarySha256": "f11e2b62b321360b561343f11292f88a997cc2af516ef25a963171ab66588bfd",
+          "buildReceipt": ".phoenix/perf-recovery-post-balance-control-build-receipt.json",
+          "buildReceiptSha256": "825eb2a8467a30154d73e4dcd07a26d37669a029203c958ae9aa1c214c8f64e1",
+          "contentProof": ".phoenix/perf-post-balance-control-proof.json",
+          "contentProofSha256": "9038a49c2465bfe93af7679e8fbd2a8e20073f333d201cfc5ae72cf086ab1b0b",
+          "worlds": {
+            "combat_test": {
+              "report": ".phoenix/perf-recovery-post-balance-control/combat_test-0/report.json",
+              "continuation": ".phoenix/perf-recovery-post-balance-control/combat_test-0/perf.json.continuation.json"
+            },
+            "falling_skyway": {
+              "report": ".phoenix/perf-recovery-post-balance-control/falling_skyway-0/report.json",
+              "continuation": ".phoenix/perf-recovery-post-balance-control/falling_skyway-0/perf.json.continuation.json"
+            }
+          }
+        }
+      },
+      "compiledBuildProof": {
+        "path": ".phoenix/perf-recovery-batch3-build-receipt.json",
+        "sha256": "93434eecd92a493e10f81966426807c0e64409d9b35d67e3babe9035a3d3e862",
+        "receipt": {
+          "receiptRecovery": null,
+          "exactTestedSource": {
+            "source": {
+              "sourceRevision": "1bf59f86a7622fc6eeef61175bef2d670bd687d6",
+              "runtimeSourceSha256": "1fbb74e864accb7c921ce1a09eac438c98a7d348e4667073aa78957b53d8969f",
+              "runtimeSourceClean": true,
+              "repositoryDirty": false,
+              "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+            },
+            "proof": ".phoenix/perf-recovery-batch3-tested-source.json",
+            "sha256": "43c5c76e2ff6bf4365ab46c168e794539e7e6db7970957a51df98e989652db5f",
+            "note": "Compiled source revision and runtime bytes match the retained targeted-test source receipt."
+          },
+          "buildSource": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-energy-topology",
+          "libraryArtifact": {
+            "reason": "compiler-artifact",
+            "package_id": "path+file:///C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-energy-topology/crates/phoenix-simulation#0.1.0",
+            "manifest_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-energy-topology\\crates\\phoenix-simulation\\Cargo.toml",
+            "target": {
+              "kind": [
+                "lib"
+              ],
+              "crate_types": [
+                "lib"
+              ],
+              "name": "phoenix_simulation",
+              "src_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-energy-topology\\crates\\phoenix-simulation\\src\\lib.rs",
+              "edition": "2021",
+              "doc": true,
+              "doctest": true,
+              "test": true
+            },
+            "profile": {
+              "opt_level": "3",
+              "debuginfo": 0,
+              "debug_assertions": false,
+              "overflow_checks": false,
+              "test": false
+            },
+            "features": [
+              "headless",
+              "server"
+            ],
+            "filenames": [
+              "C:/Coding/project-phoenix-v2/target\\measure\\deps\\libphoenix_simulation-7e77ee5c1823ad7a.rlib",
+              "C:/Coding/project-phoenix-v2/target\\measure\\deps\\libphoenix_simulation-7e77ee5c1823ad7a.rmeta"
+            ],
+            "executable": null,
+            "fresh": false
+          },
+          "libraryDependencyRecord": {
+            "path": "C:/Coding/project-phoenix-v2/target\\measure\\deps\\phoenix_simulation-7e77ee5c1823ad7a.d",
+            "sha256": "bb67da671403ed0c480f5d17038b85a86ef99c49e2b9a6f4768241d2a81e5c73",
+            "verifiedSourceSuffix": "crates/phoenix-simulation/src/lib.rs",
+            "absoluteLibrarySource": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-energy-topology/crates/phoenix-simulation/src/lib.rs",
+            "relativeDependencyBase": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-energy-topology"
+          },
+          "source": {
+            "sourceRevision": "1bf59f86a7622fc6eeef61175bef2d670bd687d6",
+            "runtimeSourceSha256": "1fbb74e864accb7c921ce1a09eac438c98a7d348e4667073aa78957b53d8969f",
+            "runtimeSourceClean": true,
+            "repositoryDirty": false,
+            "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+          },
+          "profile": "measure",
+          "features": [
+            "default",
+            "headless",
+            "server"
+          ],
+          "requestedFeatures": [
+            "headless"
+          ],
+          "defaultFeatures": true,
+          "artifact": {
+            "reason": "compiler-artifact",
+            "package_id": "path+file:///C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-energy-topology#project-phoenix@0.1.0",
+            "manifest_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-energy-topology\\Cargo.toml",
+            "target": {
+              "kind": [
+                "bin"
+              ],
+              "crate_types": [
+                "bin"
+              ],
+              "name": "phoenix-headless",
+              "src_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-energy-topology\\src\\bin\\phoenix_headless.rs",
+              "edition": "2021",
+              "required-features": [
+                "headless"
+              ],
+              "doc": true,
+              "doctest": false,
+              "test": true
+            },
+            "profile": {
+              "opt_level": "3",
+              "debuginfo": 0,
+              "debug_assertions": false,
+              "overflow_checks": false,
+              "test": false
+            },
+            "features": [
+              "default",
+              "headless",
+              "server"
+            ],
+            "filenames": [
+              "C:/Coding/project-phoenix-v2/target\\measure\\phoenix-headless.exe",
+              "C:/Coding/project-phoenix-v2/target\\measure\\phoenix_headless.pdb"
+            ],
+            "executable": "C:/Coding/project-phoenix-v2/target\\measure\\phoenix-headless.exe",
+            "fresh": false
+          },
+          "binary": ".phoenix/perf-recovery-batch3.exe",
+          "binarySha256": "7dc73ec45faacf88c17666585fd760972a8e403a20d4257dbcaf5ca1a55cb010",
+          "buildMessagesSha256": "fc9802114860f9101a28aa729f65b212adec6e99c36fadbc427c625373f1f65c",
+          "startedUtc": "2026-10-16T16:33:33.0324195Z",
+          "finishedUtc": "2026-10-16T16:45:20.407Z",
+          "scope": "Ordinary headless measure build, source verified unchanged before/after; exact artifact copied for isolated captures."
+        }
+      },
+      "frozenContentProof": {
+        "path": ".phoenix/perf-post-balance-control-proof.json",
+        "sha256": "9038a49c2465bfe93af7679e8fbd2a8e20073f333d201cfc5ae72cf086ab1b0b",
+        "files": 745
+      },
+      "receipt": ".phoenix/perf-recovery-batch3/receipt.json",
+      "receiptHash": "6dca768486c72eb0d1e58d76a3d03c468af62de0be11ae2ce7074b100a4df020",
+      "captureSource": {
+        "sourceRevision": "1bf59f86a7622fc6eeef61175bef2d670bd687d6",
+        "runtimeSourceSha256": "1fbb74e864accb7c921ce1a09eac438c98a7d348e4667073aa78957b53d8969f",
+        "runtimeSourceClean": true,
+        "repositoryDirty": false,
+        "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+      },
+      "captureSourcePath": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-energy-topology",
+      "orchestrationSource": {
+        "sourceRevision": "30ad2c1d5c47f32f677f0a1ec3b45fa76860240e",
+        "runtimeSourceSha256": "c8810712d60621be7c453e2b5abb697d5ae3ad518ec6aa1bbb817f0e6c9be141",
+        "runtimeSourceClean": true,
+        "repositoryDirty": true,
+        "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+      },
+      "originalBinary": false,
+      "oldBuildContentProof": null,
+      "binarySha256": "7dc73ec45faacf88c17666585fd760972a8e403a20d4257dbcaf5ca1a55cb010",
+      "valid": true,
+      "problems": [],
+      "runs": [
+        {
+          "name": "combat_test-0",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 5.178835716449551,
+            "p50": 4.6309000000000005,
+            "p95": 9.5429,
+            "p99": 10.6782,
+            "max": 12.097399999999999,
+            "over16_67": 0
+          },
+          "wallSeconds": 23.6769278,
+          "processWallSeconds": 23.1331354,
+          "backgroundCpuCores": 0.29347337105911,
+          "continuation": {
+            "tick": 3600,
+            "digest": "45095c0d958cd664"
+          },
+          "reportHash": "e8ee08cfea433f64fbfd0457c07c98ab18ded7abbcf9a0a78c93c9f5b66cddd5",
+          "expectedHash": "da240084b891b344d63cdfb259a40fa73b7224036d4f8f797b076d87a2711669",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-0",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 2.781473856407153,
+            "p50": 2.9452,
+            "p95": 3.5423999999999998,
+            "p99": 3.8262,
+            "max": 4.4645,
+            "over16_67": 0
+          },
+          "wallSeconds": 15.6431815,
+          "processWallSeconds": 15.1550975,
+          "backgroundCpuCores": 0.37778768143181984,
+          "continuation": {
+            "tick": 3600,
+            "digest": "39fec0c0db1bc9ae"
+          },
+          "reportHash": "acaaa528670108dd5c18efb04e4796aa16942f53ade8768db5bf62af62f2832c",
+          "expectedHash": "e30e9e7f2fa35c285908ebb8e4568ecbb8c4bd434ce88aa641f43bf8b575d375",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-1",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 3.0320198121781314,
+            "p50": 3.0416000000000003,
+            "p95": 4.2764999999999995,
+            "p99": 5.2246999999999995,
+            "max": 6.697500000000001,
+            "over16_67": 0
+          },
+          "wallSeconds": 16.2875615,
+          "processWallSeconds": 15.9395186,
+          "backgroundCpuCores": 0.7638792904450038,
+          "continuation": {
+            "tick": 3600,
+            "digest": "39fec0c0db1bc9ae"
+          },
+          "reportHash": "78a4fdf98fc850f11dd08835962631af975738b9c8447d986580723a65908568",
+          "expectedHash": "e30e9e7f2fa35c285908ebb8e4568ecbb8c4bd434ce88aa641f43bf8b575d375",
+          "problems": []
+        },
+        {
+          "name": "combat_test-1",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 5.263008118751891,
+            "p50": 4.6009,
+            "p95": 9.9277,
+            "p99": 11.775,
+            "max": 14.1769,
+            "over16_67": 0
+          },
+          "wallSeconds": 23.7575988,
+          "processWallSeconds": 23.3746082,
+          "backgroundCpuCores": 0.5176712372009644,
+          "continuation": {
+            "tick": 3600,
+            "digest": "45095c0d958cd664"
+          },
+          "reportHash": "4192aa53bea48c3f5a60b7a8b4abb4fcf986141c848248b04ae8a786dde3e298",
+          "expectedHash": "da240084b891b344d63cdfb259a40fa73b7224036d4f8f797b076d87a2711669",
+          "problems": []
+        },
+        {
+          "name": "combat_test-2",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 5.152057921841875,
+            "p50": 4.5741000000000005,
+            "p95": 9.5778,
+            "p99": 11.126199999999999,
+            "max": 13.858600000000001,
+            "over16_67": 0
+          },
+          "wallSeconds": 23.1762786,
+          "processWallSeconds": 22.7463451,
+          "backgroundCpuCores": 0.39963767509348236,
+          "continuation": {
+            "tick": 3600,
+            "digest": "45095c0d958cd664"
+          },
+          "reportHash": "3dcfaf3cd930c1352a499f0b34ecfe21ce4125f641907acb05897a2ca2481eb7",
+          "expectedHash": "da240084b891b344d63cdfb259a40fa73b7224036d4f8f797b076d87a2711669",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-2",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 2.7852117540139325,
+            "p50": 2.9689,
+            "p95": 3.5435000000000003,
+            "p99": 3.8461,
+            "max": 5.5937,
+            "over16_67": 0
+          },
+          "wallSeconds": 15.087045,
+          "processWallSeconds": 14.9565993,
+          "backgroundCpuCores": 0.50577544269281,
+          "continuation": {
+            "tick": 3600,
+            "digest": "39fec0c0db1bc9ae"
+          },
+          "reportHash": "d43be43e6504b18cb8d68281007241e5a985a0475a887621c3050f887fb4383a",
+          "expectedHash": "e30e9e7f2fa35c285908ebb8e4568ecbb8c4bd434ce88aa641f43bf8b575d375",
+          "problems": []
+        }
+      ],
+      "worlds": {
+        "combat_test": {
+          "update": {
+            "mean": 5.178835716449551,
+            "p50": 4.6009,
+            "p95": 9.5778,
+            "p99": 11.126199999999999
+          },
+          "processWallSeconds": 23.1331354,
+          "pollingWallSeconds": 23.6769278
+        },
+        "falling_skyway": {
+          "update": {
+            "mean": 2.7852117540139325,
+            "p50": 2.9689,
+            "p95": 3.5435000000000003,
+            "p99": 3.8461
+          },
+          "processWallSeconds": 15.1550975,
+          "pollingWallSeconds": 15.6431815
+        }
+      },
+      "role": "historical only; never pooled with latest paired acceptance"
+    },
+    {
+      "name": "rules077-control",
+      "path": ".phoenix/perf-recovery-rules077-control/summary.json",
+      "sha256": "832f37bedbc3d0f03511c4550912a445f70e832d5ba709e44a29b79947032f8f",
+      "mode": "phases",
+      "acceptanceEligible": true,
+      "measurementRole": "acceptance",
+      "gameplayReference": {
+        "path": ".phoenix/perf-rules077-gameplay-reference.json",
+        "sha256": "f370c7cc85d843b9eeda2d5e6858254caf77d156c8bc704f637a49fa33b35351",
+        "definition": {
+          "schema_version": 1,
+          "role": "Final rules0.77 control repeat consistency; external gameplay-equivalence reference for performance-only candidates. Control self-reference is not a performance improvement.",
+          "requireProvenance": true,
+          "sourceRevision": "9b963bf488edb27a32c4191683d9db51fde9b293",
+          "authoredRevision": "58eaae87dcc8da1e52f11533c87c4b0c0a95b9c2",
+          "rules": "0.77",
+          "controlStage": "rules077-control",
+          "binarySha256": "14ed60dc5a51cdebfc0fd9e79b6f431006e7872a8f47aed28a65b195dcc375ad",
+          "buildReceipt": ".phoenix/perf-recovery-rules077-control-build-receipt.json",
+          "buildReceiptSha256": "e96d8f93fc0e8896c865a15a0baa7843114fdd1d7026c9bc4f2d7c36a3d45fc9",
+          "contentProof": ".phoenix/perf-rules077-final-content-proof.json",
+          "contentProofSha256": "1ea79bb4707e2e1af1b5c99a2bd1b3e821c9c6ca15c9eb108c18a4fc74483da6",
+          "sourceCopyProof": ".phoenix/perf-rules077-control-source-copy.json",
+          "sourceCopyProofSha256": "c492df8d4375e1b2d3220c9a1a106c726020aa44adfcf34cb24c895c8336a802",
+          "worlds": {
+            "combat_test": {
+              "report": ".phoenix/perf-recovery-rules077-control/combat_test-0/report.json",
+              "continuation": ".phoenix/perf-recovery-rules077-control/combat_test-0/perf.json.continuation.json"
+            },
+            "falling_skyway": {
+              "report": ".phoenix/perf-recovery-rules077-control/falling_skyway-0/report.json",
+              "continuation": ".phoenix/perf-recovery-rules077-control/falling_skyway-0/perf.json.continuation.json"
+            }
+          },
+          "scope": "Frozen executable actually built at9b, final externally loaded data58e (combat_window_secs30, proximity150). Identical final content used for control and candidates; architecture, rules and observable work unchanged by optimisation."
+        }
+      },
+      "compiledBuildProof": {
+        "path": ".phoenix/perf-recovery-rules077-control-build-receipt.json",
+        "sha256": "e96d8f93fc0e8896c865a15a0baa7843114fdd1d7026c9bc4f2d7c36a3d45fc9",
+        "receipt": {
+          "source": {
+            "sourceRevision": "9b963bf488edb27a32c4191683d9db51fde9b293",
+            "runtimeSourceSha256": "8c037d2647a6cf167446c25f31b2461f10473b06565aa4a10b55ec34b74834c7",
+            "runtimeSourceClean": true,
+            "repositoryDirty": false,
+            "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+          },
+          "buildSource": "C:/Users/jkeyw/.codex/worktrees/combat-balance-fixes/increment-14-native-validation",
+          "profile": "measure",
+          "features": [
+            "default",
+            "server",
+            "headless"
+          ],
+          "configurationFromCommand": "cargo build --profile measure --features headless --bin phoenix-headless",
+          "defaultFeatures": true,
+          "requestedFeatures": [
+            "headless"
+          ],
+          "binary": ".phoenix/perf-recovery-rules077-control.exe",
+          "binarySha256": "14ed60dc5a51cdebfc0fd9e79b6f431006e7872a8f47aed28a65b195dcc375ad",
+          "originalReceipt": {
+            "path": ".phoenix/perf-recovery-rules077-control-original-receipt.json",
+            "sha256": "cbd8ab56a73b41d7e76be6e640131c8de52c2dc12bd21e603b5ad3cb69228166"
+          },
+          "originalBuildLog": {
+            "path": ".phoenix/perf-recovery-rules077-control-original-build.log",
+            "sha256": "0f7cb5e35bd97911db7b2b9e9528906985bfb48f76b81b559858bfe839956395"
+          },
+          "libraryDependencyRecord": {
+            "path": ".phoenix/perf-recovery-rules077-control-simulation.d",
+            "sha256": "c5b5d8d90d38f69c67db49eff20bc2a5be5408b195429b0a4fed389408e8dc48"
+          },
+          "contentProof": {
+            "path": ".phoenix/perf-rules077-control-content-proof.json",
+            "sha256": "daccb7b0fd0f6cd9248eb96dbb941a2fa0580c61d4fbf522cbdd964ccb44e612"
+          },
+          "sourceCopyProof": {
+            "path": ".phoenix/perf-rules077-control-source-copy.json",
+            "sha256": "c492df8d4375e1b2d3220c9a1a106c726020aa44adfcf34cb24c895c8336a802"
+          },
+          "scope": "Actual external Balance build at9b/rules0.77, successful measure build and dependency records retained. Root capture context is an exact runtime-byte copy, two EOL-only differences disclosed; it was not the build directory. No timing result yet."
+        }
+      },
+      "frozenContentProof": {
+        "path": ".phoenix/perf-rules077-final-content-proof.json",
+        "sha256": "1ea79bb4707e2e1af1b5c99a2bd1b3e821c9c6ca15c9eb108c18a4fc74483da6",
+        "sourceRevision": "58eaae87dcc8da1e52f11533c87c4b0c0a95b9c2",
+        "files": 741
+      },
+      "receipt": ".phoenix/perf-recovery-rules077-control/receipt.json",
+      "receiptHash": "8af1973cb01f3fc52f6a578b2cb4781b914bb48feade23a893435eb904fe6774",
+      "captureSource": {
+        "sourceRevision": "9b963bf488edb27a32c4191683d9db51fde9b293",
+        "runtimeSourceSha256": "8c037d2647a6cf167446c25f31b2461f10473b06565aa4a10b55ec34b74834c7",
+        "runtimeSourceClean": false,
+        "repositoryDirty": true,
+        "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+      },
+      "captureSourcePath": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-sensors",
+      "orchestrationSource": {
+        "sourceRevision": "30ad2c1d5c47f32f677f0a1ec3b45fa76860240e",
+        "runtimeSourceSha256": "c8810712d60621be7c453e2b5abb697d5ae3ad518ec6aa1bbb817f0e6c9be141",
+        "runtimeSourceClean": true,
+        "repositoryDirty": true,
+        "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+      },
+      "originalBinary": false,
+      "oldBuildContentProof": null,
+      "binarySha256": "14ed60dc5a51cdebfc0fd9e79b6f431006e7872a8f47aed28a65b195dcc375ad",
+      "valid": false,
+      "problems": [],
+      "runs": [
+        {
+          "name": "combat_test-0",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 5.780757830960326,
+            "p50": 5.1074,
+            "p95": 10.6686,
+            "p99": 12.491900000000001,
+            "max": 15.6139,
+            "over16_67": 0
+          },
+          "wallSeconds": 26.0250664,
+          "processWallSeconds": 25.4956492,
+          "backgroundCpuCores": 0.6677904279938854,
+          "continuation": {
+            "tick": 3600,
+            "digest": "42f92edb2d0b18f2"
+          },
+          "reportHash": "aa77c09b25d6e365a8e8b55324c44b99723cc3355d4c33d5ddc2b13ef86f7fb5",
+          "expectedHash": "aa77c09b25d6e365a8e8b55324c44b99723cc3355d4c33d5ddc2b13ef86f7fb5",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-0",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 2.9795863980611963,
+            "p50": 3.0897,
+            "p95": 3.8926,
+            "p99": 4.3388,
+            "max": 5.1805,
+            "over16_67": 0
+          },
+          "wallSeconds": 16.2464383,
+          "processWallSeconds": 15.8806666,
+          "backgroundCpuCores": 0.4141339930661992,
+          "continuation": {
+            "tick": 3600,
+            "digest": "22190fbd13826108"
+          },
+          "reportHash": "b708604c236ee9d893b3411e4b1bf85bb453fe092c5b57c80b036547f81edf54",
+          "expectedHash": "b708604c236ee9d893b3411e4b1bf85bb453fe092c5b57c80b036547f81edf54",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-1",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 3.2431171463192894,
+            "p50": 3.1536,
+            "p95": 5.1102,
+            "p99": 6.9963999999999995,
+            "max": 10.5586,
+            "over16_67": 0
+          },
+          "wallSeconds": 17.3850816,
+          "processWallSeconds": 17.0796966,
+          "backgroundCpuCores": 1.3431377421622435,
+          "continuation": {
+            "tick": 3600,
+            "digest": "22190fbd13826108"
+          },
+          "reportHash": "25388c0d92f94ea667a2b47ac748cff17372f602c51c0da90cc9c44bd998548a",
+          "expectedHash": "b708604c236ee9d893b3411e4b1bf85bb453fe092c5b57c80b036547f81edf54",
+          "problems": [
+            "Background CPU not quiet"
+          ]
+        },
+        {
+          "name": "combat_test-1",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 5.833684519842472,
+            "p50": 5.0842,
+            "p95": 11.0592,
+            "p99": 12.9873,
+            "max": 15.5213,
+            "over16_67": 0
+          },
+          "wallSeconds": 26.0331246,
+          "processWallSeconds": 25.5156,
+          "backgroundCpuCores": 0.6006807566677542,
+          "continuation": {
+            "tick": 3600,
+            "digest": "42f92edb2d0b18f2"
+          },
+          "reportHash": "a302b3cc821a317b3f5f317a7755c08155f83cee7a05e00a9e099bee25bba4da",
+          "expectedHash": "aa77c09b25d6e365a8e8b55324c44b99723cc3355d4c33d5ddc2b13ef86f7fb5",
+          "problems": []
+        },
+        {
+          "name": "combat_test-2",
+          "world": "combat_test",
+          "update": {
+            "count": 3301,
+            "mean": 5.705989669797034,
+            "p50": 5.0362,
+            "p95": 10.6347,
+            "p99": 13.1243,
+            "max": 15.2867,
+            "over16_67": 0
+          },
+          "wallSeconds": 25.4242277,
+          "processWallSeconds": 25.0367623,
+          "backgroundCpuCores": 0.43087232194385955,
+          "continuation": {
+            "tick": 3600,
+            "digest": "42f92edb2d0b18f2"
+          },
+          "reportHash": "077c4d56b9481edc7fa7c6f2d00d858cc92244747c1883912942c2f3f42533db",
+          "expectedHash": "aa77c09b25d6e365a8e8b55324c44b99723cc3355d4c33d5ddc2b13ef86f7fb5",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-2",
+          "world": "falling_skyway",
+          "update": {
+            "count": 3301,
+            "mean": 3.0209485913359564,
+            "p50": 3.1229,
+            "p95": 3.9731,
+            "p99": 4.4739,
+            "max": 5.6735,
+            "over16_67": 0
+          },
+          "wallSeconds": 16.2614117,
+          "processWallSeconds": 16.133241,
+          "backgroundCpuCores": 0.4012521251985264,
+          "continuation": {
+            "tick": 3600,
+            "digest": "22190fbd13826108"
+          },
+          "reportHash": "8618ab04b687736786ad25462f646fba382edb26b3d4a9f9163adb4fdcc4eaae",
+          "expectedHash": "b708604c236ee9d893b3411e4b1bf85bb453fe092c5b57c80b036547f81edf54",
+          "problems": []
+        }
+      ],
+      "worlds": {
+        "combat_test": {
+          "update": {
+            "mean": 5.780757830960326,
+            "p50": 5.0842,
+            "p95": 10.6686,
+            "p99": 12.9873
+          },
+          "processWallSeconds": 25.4956492,
+          "pollingWallSeconds": 26.0250664
+        },
+        "falling_skyway": {
+          "update": {
+            "mean": 3.0209485913359564,
+            "p50": 3.1229,
+            "p95": 3.9731,
+            "p99": 4.4739
+          },
+          "processWallSeconds": 16.133241,
+          "pollingWallSeconds": 16.2614117
+        }
+      },
+      "role": "historical only; never pooled with latest paired acceptance"
+    },
+    {
+      "name": "rules077-control-whole",
+      "path": ".phoenix/perf-recovery-rules077-control-whole/summary.json",
+      "sha256": "35f7e59a18688e91f9746b64fbfc6fbaab7979f0ab04f35bb92edfa289631cfe",
+      "mode": "whole-process",
+      "acceptanceEligible": true,
+      "measurementRole": "acceptance",
+      "gameplayReference": {
+        "path": ".phoenix/perf-rules077-gameplay-reference-whole.json",
+        "sha256": "aade64796f07a547f2503303b47ab772dd9b571d10d42f77e0701534da9cb017",
+        "definition": {
+          "schema_version": 1,
+          "role": "Uninstrumented rules0.77 control repeat consistency and external candidate equivalence reference.",
+          "requireProvenance": true,
+          "sourceRevision": "9b963bf488edb27a32c4191683d9db51fde9b293",
+          "authoredRevision": "58eaae87dcc8da1e52f11533c87c4b0c0a95b9c2",
+          "rules": "0.77",
+          "controlStage": "rules077-control",
+          "binarySha256": "14ed60dc5a51cdebfc0fd9e79b6f431006e7872a8f47aed28a65b195dcc375ad",
+          "buildReceipt": ".phoenix/perf-recovery-rules077-control-build-receipt.json",
+          "buildReceiptSha256": "e96d8f93fc0e8896c865a15a0baa7843114fdd1d7026c9bc4f2d7c36a3d45fc9",
+          "contentProof": ".phoenix/perf-rules077-final-content-proof.json",
+          "contentProofSha256": "1ea79bb4707e2e1af1b5c99a2bd1b3e821c9c6ca15c9eb108c18a4fc74483da6",
+          "sourceCopyProof": ".phoenix/perf-rules077-control-source-copy.json",
+          "sourceCopyProofSha256": "c492df8d4375e1b2d3220c9a1a106c726020aa44adfcf34cb24c895c8336a802",
+          "worlds": {
+            "combat_test": {
+              "report": ".phoenix/perf-recovery-rules077-control/combat_test-0/report.json",
+              "continuation": ".phoenix/perf-recovery-rules077-control/combat_test-0/perf.json.continuation.json",
+              "wholeReport": ".phoenix/perf-recovery-rules077-control-whole/combat_test-0/report.json"
+            },
+            "falling_skyway": {
+              "report": ".phoenix/perf-recovery-rules077-control/falling_skyway-0/report.json",
+              "continuation": ".phoenix/perf-recovery-rules077-control/falling_skyway-0/perf.json.continuation.json",
+              "wholeReport": ".phoenix/perf-recovery-rules077-control-whole/falling_skyway-0/report.json"
+            }
+          },
+          "scope": "Frozen executable actually built at9b, final externally loaded data58e (combat_window_secs30, proximity150). Identical final content used for control and candidates; architecture, rules and observable work unchanged by optimisation.",
+          "modeDifference": "Without perf capture the ConsoleLatency observer is absent and actions is empty; within-mode report comparison retains all fields (only the existing three latency wall quantiles are ever excluded)."
+        }
+      },
+      "compiledBuildProof": {
+        "path": ".phoenix/perf-recovery-rules077-control-build-receipt.json",
+        "sha256": "e96d8f93fc0e8896c865a15a0baa7843114fdd1d7026c9bc4f2d7c36a3d45fc9",
+        "receipt": {
+          "source": {
+            "sourceRevision": "9b963bf488edb27a32c4191683d9db51fde9b293",
+            "runtimeSourceSha256": "8c037d2647a6cf167446c25f31b2461f10473b06565aa4a10b55ec34b74834c7",
+            "runtimeSourceClean": true,
+            "repositoryDirty": false,
+            "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+          },
+          "buildSource": "C:/Users/jkeyw/.codex/worktrees/combat-balance-fixes/increment-14-native-validation",
+          "profile": "measure",
+          "features": [
+            "default",
+            "server",
+            "headless"
+          ],
+          "configurationFromCommand": "cargo build --profile measure --features headless --bin phoenix-headless",
+          "defaultFeatures": true,
+          "requestedFeatures": [
+            "headless"
+          ],
+          "binary": ".phoenix/perf-recovery-rules077-control.exe",
+          "binarySha256": "14ed60dc5a51cdebfc0fd9e79b6f431006e7872a8f47aed28a65b195dcc375ad",
+          "originalReceipt": {
+            "path": ".phoenix/perf-recovery-rules077-control-original-receipt.json",
+            "sha256": "cbd8ab56a73b41d7e76be6e640131c8de52c2dc12bd21e603b5ad3cb69228166"
+          },
+          "originalBuildLog": {
+            "path": ".phoenix/perf-recovery-rules077-control-original-build.log",
+            "sha256": "0f7cb5e35bd97911db7b2b9e9528906985bfb48f76b81b559858bfe839956395"
+          },
+          "libraryDependencyRecord": {
+            "path": ".phoenix/perf-recovery-rules077-control-simulation.d",
+            "sha256": "c5b5d8d90d38f69c67db49eff20bc2a5be5408b195429b0a4fed389408e8dc48"
+          },
+          "contentProof": {
+            "path": ".phoenix/perf-rules077-control-content-proof.json",
+            "sha256": "daccb7b0fd0f6cd9248eb96dbb941a2fa0580c61d4fbf522cbdd964ccb44e612"
+          },
+          "sourceCopyProof": {
+            "path": ".phoenix/perf-rules077-control-source-copy.json",
+            "sha256": "c492df8d4375e1b2d3220c9a1a106c726020aa44adfcf34cb24c895c8336a802"
+          },
+          "scope": "Actual external Balance build at9b/rules0.77, successful measure build and dependency records retained. Root capture context is an exact runtime-byte copy, two EOL-only differences disclosed; it was not the build directory. No timing result yet."
+        }
+      },
+      "frozenContentProof": {
+        "path": ".phoenix/perf-rules077-final-content-proof.json",
+        "sha256": "1ea79bb4707e2e1af1b5c99a2bd1b3e821c9c6ca15c9eb108c18a4fc74483da6",
+        "sourceRevision": "58eaae87dcc8da1e52f11533c87c4b0c0a95b9c2",
+        "files": 741
+      },
+      "receipt": ".phoenix/perf-recovery-rules077-control-whole/receipt.json",
+      "receiptHash": "165817574e2426506bf0037a377e07004bef539aa8a9f7132652142d7d2367e0",
+      "captureSource": {
+        "sourceRevision": "9b963bf488edb27a32c4191683d9db51fde9b293",
+        "runtimeSourceSha256": "8c037d2647a6cf167446c25f31b2461f10473b06565aa4a10b55ec34b74834c7",
+        "runtimeSourceClean": false,
+        "repositoryDirty": true,
+        "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+      },
+      "captureSourcePath": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-sensors",
+      "orchestrationSource": {
+        "sourceRevision": "30ad2c1d5c47f32f677f0a1ec3b45fa76860240e",
+        "runtimeSourceSha256": "c8810712d60621be7c453e2b5abb697d5ae3ad518ec6aa1bbb817f0e6c9be141",
+        "runtimeSourceClean": true,
+        "repositoryDirty": true,
+        "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+      },
+      "originalBinary": false,
+      "oldBuildContentProof": null,
+      "binarySha256": "14ed60dc5a51cdebfc0fd9e79b6f431006e7872a8f47aed28a65b195dcc375ad",
+      "valid": false,
+      "problems": [],
+      "runs": [
+        {
+          "name": "combat_test-0",
+          "world": "combat_test",
+          "update": null,
+          "wallSeconds": 17.7320313,
+          "processWallSeconds": 17.4920481,
+          "backgroundCpuCores": 0.9118873029757891,
+          "continuation": null,
+          "reportHash": "27508fab0ff733730f6b8bc582daa5dd63be72a37650b8be149779f290be7707",
+          "expectedHash": "27508fab0ff733730f6b8bc582daa5dd63be72a37650b8be149779f290be7707",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-0",
+          "world": "falling_skyway",
+          "update": null,
+          "wallSeconds": 11.3348763,
+          "processWallSeconds": 10.8546977,
+          "backgroundCpuCores": 1.5155478490426026,
+          "continuation": null,
+          "reportHash": "d665b668edc5cb922bcf0fbb7b64521a9757dfeebdc48691d77eb35b2ddbe3d2",
+          "expectedHash": "d665b668edc5cb922bcf0fbb7b64521a9757dfeebdc48691d77eb35b2ddbe3d2",
+          "problems": [
+            "Background CPU not quiet"
+          ]
+        },
+        {
+          "name": "falling_skyway-1",
+          "world": "falling_skyway",
+          "update": null,
+          "wallSeconds": 10.7336071,
+          "processWallSeconds": 10.2641674,
+          "backgroundCpuCores": 0.5039587905079495,
+          "continuation": null,
+          "reportHash": "d665b668edc5cb922bcf0fbb7b64521a9757dfeebdc48691d77eb35b2ddbe3d2",
+          "expectedHash": "d665b668edc5cb922bcf0fbb7b64521a9757dfeebdc48691d77eb35b2ddbe3d2",
+          "problems": []
+        },
+        {
+          "name": "combat_test-1",
+          "world": "combat_test",
+          "update": null,
+          "wallSeconds": 17.093214,
+          "processWallSeconds": 16.8420904,
+          "backgroundCpuCores": 0.4623728061101078,
+          "continuation": null,
+          "reportHash": "27508fab0ff733730f6b8bc582daa5dd63be72a37650b8be149779f290be7707",
+          "expectedHash": "27508fab0ff733730f6b8bc582daa5dd63be72a37650b8be149779f290be7707",
+          "problems": []
+        },
+        {
+          "name": "combat_test-2",
+          "world": "combat_test",
+          "update": null,
+          "wallSeconds": 18.2402693,
+          "processWallSeconds": 17.9379534,
+          "backgroundCpuCores": 1.0991053408944305,
+          "continuation": null,
+          "reportHash": "27508fab0ff733730f6b8bc582daa5dd63be72a37650b8be149779f290be7707",
+          "expectedHash": "27508fab0ff733730f6b8bc582daa5dd63be72a37650b8be149779f290be7707",
+          "problems": [
+            "Background CPU not quiet"
+          ]
+        },
+        {
+          "name": "falling_skyway-2",
+          "world": "falling_skyway",
+          "update": null,
+          "wallSeconds": 10.267947,
+          "processWallSeconds": 9.8864718,
+          "backgroundCpuCores": 0.4417251656953012,
+          "continuation": null,
+          "reportHash": "d665b668edc5cb922bcf0fbb7b64521a9757dfeebdc48691d77eb35b2ddbe3d2",
+          "expectedHash": "d665b668edc5cb922bcf0fbb7b64521a9757dfeebdc48691d77eb35b2ddbe3d2",
+          "problems": []
+        }
+      ],
+      "worlds": {
+        "combat_test": {
+          "update": null,
+          "processWallSeconds": 17.4920481,
+          "pollingWallSeconds": 17.7320313
+        },
+        "falling_skyway": {
+          "update": null,
+          "processWallSeconds": 10.2641674,
+          "pollingWallSeconds": 10.7336071
+        }
+      },
+      "role": "historical only; never pooled with latest paired acceptance"
+    },
+    {
+      "name": "batch3-whole",
+      "path": ".phoenix/perf-recovery-batch3-whole/summary.json",
+      "sha256": "b0774fe318a9d36fd5923a3eb79b29de6481dbc591337656ed7e205f84247bdc",
+      "mode": "whole-process",
+      "acceptanceEligible": true,
+      "measurementRole": "acceptance",
+      "gameplayReference": {
+        "path": ".phoenix/perf-post-balance-gameplay-reference-whole.json",
+        "sha256": "997d80e240769e729583e0eb868240a9659735bf10665e8fb4d49736472b6075",
+        "definition": {
+          "schema_version": 1,
+          "role": "Post-balance same-version whole-process repeat and subsequent optimisation reference; normal phase reference retained separately.",
+          "sourceRevision": "25ccf11e75dbc30e74fec9b54cab5fb14546d284",
+          "rules": "0.76",
+          "controlStage": "post-balance-control",
+          "binarySha256": "f11e2b62b321360b561343f11292f88a997cc2af516ef25a963171ab66588bfd",
+          "buildReceipt": ".phoenix/perf-recovery-post-balance-control-build-receipt.json",
+          "buildReceiptSha256": "825eb2a8467a30154d73e4dcd07a26d37669a029203c958ae9aa1c214c8f64e1",
+          "contentProof": ".phoenix/perf-post-balance-control-proof.json",
+          "contentProofSha256": "9038a49c2465bfe93af7679e8fbd2a8e20073f333d201cfc5ae72cf086ab1b0b",
+          "worlds": {
+            "combat_test": {
+              "report": ".phoenix/perf-recovery-post-balance-control/combat_test-0/report.json",
+              "continuation": ".phoenix/perf-recovery-post-balance-control/combat_test-0/perf.json.continuation.json",
+              "wholeReport": ".phoenix/perf-recovery-post-balance-control-whole/combat_test-0/report.json"
+            },
+            "falling_skyway": {
+              "report": ".phoenix/perf-recovery-post-balance-control/falling_skyway-0/report.json",
+              "continuation": ".phoenix/perf-recovery-post-balance-control/falling_skyway-0/perf.json.continuation.json",
+              "wholeReport": ".phoenix/perf-recovery-post-balance-control-whole/falling_skyway-0/report.json"
+            }
+          },
+          "modeDifference": "Whole-process runs do not install console-latency observers. Their actions list is empty; no gameplay fields or action counters are excluded from within-mode comparison."
+        }
+      },
+      "compiledBuildProof": {
+        "path": ".phoenix/perf-recovery-batch3-build-receipt.json",
+        "sha256": "93434eecd92a493e10f81966426807c0e64409d9b35d67e3babe9035a3d3e862",
+        "receipt": {
+          "receiptRecovery": null,
+          "exactTestedSource": {
+            "source": {
+              "sourceRevision": "1bf59f86a7622fc6eeef61175bef2d670bd687d6",
+              "runtimeSourceSha256": "1fbb74e864accb7c921ce1a09eac438c98a7d348e4667073aa78957b53d8969f",
+              "runtimeSourceClean": true,
+              "repositoryDirty": false,
+              "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+            },
+            "proof": ".phoenix/perf-recovery-batch3-tested-source.json",
+            "sha256": "43c5c76e2ff6bf4365ab46c168e794539e7e6db7970957a51df98e989652db5f",
+            "note": "Compiled source revision and runtime bytes match the retained targeted-test source receipt."
+          },
+          "buildSource": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-energy-topology",
+          "libraryArtifact": {
+            "reason": "compiler-artifact",
+            "package_id": "path+file:///C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-energy-topology/crates/phoenix-simulation#0.1.0",
+            "manifest_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-energy-topology\\crates\\phoenix-simulation\\Cargo.toml",
+            "target": {
+              "kind": [
+                "lib"
+              ],
+              "crate_types": [
+                "lib"
+              ],
+              "name": "phoenix_simulation",
+              "src_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-energy-topology\\crates\\phoenix-simulation\\src\\lib.rs",
+              "edition": "2021",
+              "doc": true,
+              "doctest": true,
+              "test": true
+            },
+            "profile": {
+              "opt_level": "3",
+              "debuginfo": 0,
+              "debug_assertions": false,
+              "overflow_checks": false,
+              "test": false
+            },
+            "features": [
+              "headless",
+              "server"
+            ],
+            "filenames": [
+              "C:/Coding/project-phoenix-v2/target\\measure\\deps\\libphoenix_simulation-7e77ee5c1823ad7a.rlib",
+              "C:/Coding/project-phoenix-v2/target\\measure\\deps\\libphoenix_simulation-7e77ee5c1823ad7a.rmeta"
+            ],
+            "executable": null,
+            "fresh": false
+          },
+          "libraryDependencyRecord": {
+            "path": "C:/Coding/project-phoenix-v2/target\\measure\\deps\\phoenix_simulation-7e77ee5c1823ad7a.d",
+            "sha256": "bb67da671403ed0c480f5d17038b85a86ef99c49e2b9a6f4768241d2a81e5c73",
+            "verifiedSourceSuffix": "crates/phoenix-simulation/src/lib.rs",
+            "absoluteLibrarySource": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-energy-topology/crates/phoenix-simulation/src/lib.rs",
+            "relativeDependencyBase": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-energy-topology"
+          },
+          "source": {
+            "sourceRevision": "1bf59f86a7622fc6eeef61175bef2d670bd687d6",
+            "runtimeSourceSha256": "1fbb74e864accb7c921ce1a09eac438c98a7d348e4667073aa78957b53d8969f",
+            "runtimeSourceClean": true,
+            "repositoryDirty": false,
+            "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+          },
+          "profile": "measure",
+          "features": [
+            "default",
+            "headless",
+            "server"
+          ],
+          "requestedFeatures": [
+            "headless"
+          ],
+          "defaultFeatures": true,
+          "artifact": {
+            "reason": "compiler-artifact",
+            "package_id": "path+file:///C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-energy-topology#project-phoenix@0.1.0",
+            "manifest_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-energy-topology\\Cargo.toml",
+            "target": {
+              "kind": [
+                "bin"
+              ],
+              "crate_types": [
+                "bin"
+              ],
+              "name": "phoenix-headless",
+              "src_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-energy-topology\\src\\bin\\phoenix_headless.rs",
+              "edition": "2021",
+              "required-features": [
+                "headless"
+              ],
+              "doc": true,
+              "doctest": false,
+              "test": true
+            },
+            "profile": {
+              "opt_level": "3",
+              "debuginfo": 0,
+              "debug_assertions": false,
+              "overflow_checks": false,
+              "test": false
+            },
+            "features": [
+              "default",
+              "headless",
+              "server"
+            ],
+            "filenames": [
+              "C:/Coding/project-phoenix-v2/target\\measure\\phoenix-headless.exe",
+              "C:/Coding/project-phoenix-v2/target\\measure\\phoenix_headless.pdb"
+            ],
+            "executable": "C:/Coding/project-phoenix-v2/target\\measure\\phoenix-headless.exe",
+            "fresh": false
+          },
+          "binary": ".phoenix/perf-recovery-batch3.exe",
+          "binarySha256": "7dc73ec45faacf88c17666585fd760972a8e403a20d4257dbcaf5ca1a55cb010",
+          "buildMessagesSha256": "fc9802114860f9101a28aa729f65b212adec6e99c36fadbc427c625373f1f65c",
+          "startedUtc": "2026-10-16T16:33:33.0324195Z",
+          "finishedUtc": "2026-10-16T16:45:20.407Z",
+          "scope": "Ordinary headless measure build, source verified unchanged before/after; exact artifact copied for isolated captures."
+        }
+      },
+      "frozenContentProof": null,
+      "receipt": ".phoenix/perf-recovery-batch3-whole/receipt.json",
+      "receiptHash": "6231e306e744c7a64b97e22ced30a87eb0cb34943b99342c73b3c608cfd0bfde",
+      "captureSource": {
+        "sourceRevision": "1bf59f86a7622fc6eeef61175bef2d670bd687d6",
+        "runtimeSourceSha256": "1fbb74e864accb7c921ce1a09eac438c98a7d348e4667073aa78957b53d8969f",
+        "runtimeSourceClean": true,
+        "repositoryDirty": false,
+        "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+      },
+      "captureSourcePath": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-energy-topology",
+      "orchestrationSource": {
+        "sourceRevision": "30ad2c1d5c47f32f677f0a1ec3b45fa76860240e",
+        "runtimeSourceSha256": "c8810712d60621be7c453e2b5abb697d5ae3ad518ec6aa1bbb817f0e6c9be141",
+        "runtimeSourceClean": true,
+        "repositoryDirty": true,
+        "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+      },
+      "originalBinary": false,
+      "oldBuildContentProof": null,
+      "binarySha256": "7dc73ec45faacf88c17666585fd760972a8e403a20d4257dbcaf5ca1a55cb010",
+      "valid": false,
+      "problems": [],
+      "runs": [
+        {
+          "name": "combat_test-0",
+          "world": "combat_test",
+          "update": null,
+          "wallSeconds": 19.4828919,
+          "processWallSeconds": 19.4434588,
+          "backgroundCpuCores": 1.7444045088098603,
+          "continuation": null,
+          "reportHash": "141a5a6f4c9e3c6ddf90b5a8b48fbd0b36ce55c43470e653b6535f5711f84748",
+          "expectedHash": "141a5a6f4c9e3c6ddf90b5a8b48fbd0b36ce55c43470e653b6535f5711f84748",
+          "problems": [
+            "Background CPU not quiet"
+          ]
+        },
+        {
+          "name": "falling_skyway-0",
+          "world": "falling_skyway",
+          "update": null,
+          "wallSeconds": 11.3589805,
+          "processWallSeconds": 10.8315563,
+          "backgroundCpuCores": 2.2863143532526182,
+          "continuation": null,
+          "reportHash": "d665b668edc5cb922bcf0fbb7b64521a9757dfeebdc48691d77eb35b2ddbe3d2",
+          "expectedHash": "d665b668edc5cb922bcf0fbb7b64521a9757dfeebdc48691d77eb35b2ddbe3d2",
+          "problems": [
+            "Background CPU not quiet"
+          ]
+        },
+        {
+          "name": "falling_skyway-1",
+          "world": "falling_skyway",
+          "update": null,
+          "wallSeconds": 11.3424141,
+          "processWallSeconds": 11.028385,
+          "backgroundCpuCores": 2.907654480024039,
+          "continuation": null,
+          "reportHash": "d665b668edc5cb922bcf0fbb7b64521a9757dfeebdc48691d77eb35b2ddbe3d2",
+          "expectedHash": "d665b668edc5cb922bcf0fbb7b64521a9757dfeebdc48691d77eb35b2ddbe3d2",
+          "problems": [
+            "Background CPU not quiet"
+          ]
+        },
+        {
+          "name": "combat_test-1",
+          "world": "combat_test",
+          "update": null,
+          "wallSeconds": 19.4932453,
+          "processWallSeconds": 19.1347381,
+          "backgroundCpuCores": 2.9685070080295697,
+          "continuation": null,
+          "reportHash": "141a5a6f4c9e3c6ddf90b5a8b48fbd0b36ce55c43470e653b6535f5711f84748",
+          "expectedHash": "141a5a6f4c9e3c6ddf90b5a8b48fbd0b36ce55c43470e653b6535f5711f84748",
+          "problems": [
+            "Background CPU not quiet"
+          ]
+        },
+        {
+          "name": "combat_test-2",
+          "world": "combat_test",
+          "update": null,
+          "wallSeconds": 18.8354349,
+          "processWallSeconds": 18.3613246,
+          "backgroundCpuCores": 2.176442190819911,
+          "continuation": null,
+          "reportHash": "141a5a6f4c9e3c6ddf90b5a8b48fbd0b36ce55c43470e653b6535f5711f84748",
+          "expectedHash": "141a5a6f4c9e3c6ddf90b5a8b48fbd0b36ce55c43470e653b6535f5711f84748",
+          "problems": [
+            "Background CPU not quiet"
+          ]
+        },
+        {
+          "name": "falling_skyway-2",
+          "world": "falling_skyway",
+          "update": null,
+          "wallSeconds": 10.2423097,
+          "processWallSeconds": 10.0761028,
+          "backgroundCpuCores": 0.7011571862012308,
+          "continuation": null,
+          "reportHash": "d665b668edc5cb922bcf0fbb7b64521a9757dfeebdc48691d77eb35b2ddbe3d2",
+          "expectedHash": "d665b668edc5cb922bcf0fbb7b64521a9757dfeebdc48691d77eb35b2ddbe3d2",
+          "problems": []
+        }
+      ],
+      "worlds": {
+        "combat_test": {
+          "update": null,
+          "processWallSeconds": 19.1347381,
+          "pollingWallSeconds": 19.4828919
+        },
+        "falling_skyway": {
+          "update": null,
+          "processWallSeconds": 10.8315563,
+          "pollingWallSeconds": 11.3424141
+        }
+      },
+      "role": "historical only; never pooled with latest paired acceptance"
+    },
+    {
+      "name": "old-refresh-whole",
+      "path": ".phoenix/perf-recovery-old-refresh-whole/summary.json",
+      "sha256": "bc7869d35cae97e8b8df9023f29494fe072f6b09c5506f5ce79c990a4d4133f7",
+      "mode": "whole-process",
+      "acceptanceEligible": true,
+      "measurementRole": "acceptance",
+      "gameplayReference": null,
+      "compiledBuildProof": null,
+      "frozenContentProof": null,
+      "receipt": ".phoenix/perf-recovery-old-refresh-whole/receipt.json",
+      "receiptHash": "96ab56d81acd80454c2e3177f3a2b55f6f9244c91a3919f1539747e1ddee6fa7",
+      "captureSource": {
+        "sourceRevision": "30ad2c1d5c47f32f677f0a1ec3b45fa76860240e",
+        "runtimeSourceSha256": "c8810712d60621be7c453e2b5abb697d5ae3ad518ec6aa1bbb817f0e6c9be141",
+        "runtimeSourceClean": true,
+        "repositoryDirty": true,
+        "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+      },
+      "captureSourcePath": "C:/Coding/project-phoenix-v2",
+      "orchestrationSource": {
+        "sourceRevision": "30ad2c1d5c47f32f677f0a1ec3b45fa76860240e",
+        "runtimeSourceSha256": "c8810712d60621be7c453e2b5abb697d5ae3ad518ec6aa1bbb817f0e6c9be141",
+        "runtimeSourceClean": true,
+        "repositoryDirty": true,
+        "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+      },
+      "originalBinary": true,
+      "oldBuildContentProof": {
+        "path": ".phoenix/perf-recovery-old-refresh/provenance.json",
+        "sha256": "5ac7b0b42254a7292434359e811fee06267b81cad78d2254ebcc8ad15dbc680a"
+      },
+      "binarySha256": "b05e708bfe977138fc5bf7874fe77cc940d73f3af986ea03ea4c0bd66aaab3df",
+      "valid": true,
+      "problems": [],
+      "runs": [
+        {
+          "name": "combat_test-0",
+          "world": "combat_test",
+          "update": null,
+          "wallSeconds": 4.1691109,
+          "processWallSeconds": 3.6227134,
+          "backgroundCpuCores": 0.34664492551356335,
+          "continuation": null,
+          "reportHash": "81f4c79b4d360c9ef4af21f77ea649ad1201cb68d8c438d7cc38a2e627e8e831",
+          "expectedHash": "81f4c79b4d360c9ef4af21f77ea649ad1201cb68d8c438d7cc38a2e627e8e831",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-0",
+          "world": "falling_skyway",
+          "update": null,
+          "wallSeconds": 3.2037422,
+          "processWallSeconds": 3.1356028,
+          "backgroundCpuCores": 0.24573133314331358,
+          "continuation": null,
+          "reportHash": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833",
+          "expectedHash": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-1",
+          "world": "falling_skyway",
+          "update": null,
+          "wallSeconds": 3.2176057,
+          "processWallSeconds": 3.1876594,
+          "backgroundCpuCores": 0.35492457687497836,
+          "continuation": null,
+          "reportHash": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833",
+          "expectedHash": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833",
+          "problems": []
+        },
+        {
+          "name": "combat_test-1",
+          "world": "combat_test",
+          "update": null,
+          "wallSeconds": 3.7567941,
+          "processWallSeconds": 3.5699024,
+          "backgroundCpuCores": 0.482660826175548,
+          "continuation": null,
+          "reportHash": "81f4c79b4d360c9ef4af21f77ea649ad1201cb68d8c438d7cc38a2e627e8e831",
+          "expectedHash": "81f4c79b4d360c9ef4af21f77ea649ad1201cb68d8c438d7cc38a2e627e8e831",
+          "problems": []
+        },
+        {
+          "name": "combat_test-2",
+          "world": "combat_test",
+          "update": null,
+          "wallSeconds": 3.7350904,
+          "processWallSeconds": 3.4832081,
+          "backgroundCpuCores": 0.2983295703769355,
+          "continuation": null,
+          "reportHash": "81f4c79b4d360c9ef4af21f77ea649ad1201cb68d8c438d7cc38a2e627e8e831",
+          "expectedHash": "81f4c79b4d360c9ef4af21f77ea649ad1201cb68d8c438d7cc38a2e627e8e831",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-2",
+          "world": "falling_skyway",
+          "update": null,
+          "wallSeconds": 3.221991,
+          "processWallSeconds": 3.15632,
+          "backgroundCpuCores": 0.24918013015111656,
+          "continuation": null,
+          "reportHash": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833",
+          "expectedHash": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833",
+          "problems": []
+        }
+      ],
+      "worlds": {
+        "combat_test": {
+          "update": null,
+          "processWallSeconds": 3.5699024,
+          "pollingWallSeconds": 3.7567941
+        },
+        "falling_skyway": {
+          "update": null,
+          "processWallSeconds": 3.15632,
+          "pollingWallSeconds": 3.2176057
+        }
+      },
+      "role": "historical only; never pooled with latest paired acceptance"
+    },
+    {
+      "name": "post-balance-control-whole",
+      "path": ".phoenix/perf-recovery-post-balance-control-whole/summary.json",
+      "sha256": "88c333b112f0d748ced45d1f8d0213b3cc1658084032b847688a37269e43e0e0",
+      "mode": "whole-process",
+      "acceptanceEligible": true,
+      "measurementRole": "acceptance",
+      "gameplayReference": {
+        "path": ".phoenix/perf-post-balance-gameplay-reference-whole.json",
+        "sha256": "997d80e240769e729583e0eb868240a9659735bf10665e8fb4d49736472b6075",
+        "definition": {
+          "schema_version": 1,
+          "role": "Post-balance same-version whole-process repeat and subsequent optimisation reference; normal phase reference retained separately.",
+          "sourceRevision": "25ccf11e75dbc30e74fec9b54cab5fb14546d284",
+          "rules": "0.76",
+          "controlStage": "post-balance-control",
+          "binarySha256": "f11e2b62b321360b561343f11292f88a997cc2af516ef25a963171ab66588bfd",
+          "buildReceipt": ".phoenix/perf-recovery-post-balance-control-build-receipt.json",
+          "buildReceiptSha256": "825eb2a8467a30154d73e4dcd07a26d37669a029203c958ae9aa1c214c8f64e1",
+          "contentProof": ".phoenix/perf-post-balance-control-proof.json",
+          "contentProofSha256": "9038a49c2465bfe93af7679e8fbd2a8e20073f333d201cfc5ae72cf086ab1b0b",
+          "worlds": {
+            "combat_test": {
+              "report": ".phoenix/perf-recovery-post-balance-control/combat_test-0/report.json",
+              "continuation": ".phoenix/perf-recovery-post-balance-control/combat_test-0/perf.json.continuation.json",
+              "wholeReport": ".phoenix/perf-recovery-post-balance-control-whole/combat_test-0/report.json"
+            },
+            "falling_skyway": {
+              "report": ".phoenix/perf-recovery-post-balance-control/falling_skyway-0/report.json",
+              "continuation": ".phoenix/perf-recovery-post-balance-control/falling_skyway-0/perf.json.continuation.json",
+              "wholeReport": ".phoenix/perf-recovery-post-balance-control-whole/falling_skyway-0/report.json"
+            }
+          },
+          "modeDifference": "Whole-process runs do not install console-latency observers. Their actions list is empty; no gameplay fields or action counters are excluded from within-mode comparison."
+        }
+      },
+      "compiledBuildProof": {
+        "path": ".phoenix/perf-recovery-post-balance-control-build-receipt.json",
+        "sha256": "825eb2a8467a30154d73e4dcd07a26d37669a029203c958ae9aa1c214c8f64e1",
+        "receipt": {
+          "source": {
+            "sourceRevision": "25ccf11e75dbc30e74fec9b54cab5fb14546d284",
+            "runtimeSourceSha256": "c8810712d60621be7c453e2b5abb697d5ae3ad518ec6aa1bbb817f0e6c9be141",
+            "runtimeSourceClean": false,
+            "repositoryDirty": true,
+            "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+          },
+          "buildSource": "C:/Coding/project-phoenix-v2",
+          "profile": "measure",
+          "features": [
+            "default",
+            "server",
+            "headless"
+          ],
+          "binary": ".phoenix/perf-recovery-post-balance-control.exe",
+          "binarySha256": "f11e2b62b321360b561343f11292f88a997cc2af516ef25a963171ab66588bfd",
+          "originalReceipt": {
+            "path": ".phoenix/perf-recovery-post-balance-control-original-receipt.json",
+            "sha256": "4802d19dede23bc53d3723e7e4f42aaa6d71dba40c1ec1127cb1e367e5509c7e"
+          },
+          "contentProof": {
+            "path": ".phoenix/perf-post-balance-control-proof.json",
+            "sha256": "9038a49c2465bfe93af7679e8fbd2a8e20073f333d201cfc5ae72cf086ab1b0b"
+          },
+          "sourceCopyProof": {
+            "path": ".phoenix/perf-post-balance-control-source-copy.json",
+            "sha256": "d8ab82972964db6829c4ba6534b79a198321a425030ea9b5782e31b4a7a5aba5"
+          },
+          "scope": "Final integrated Balance artifact built on main; pinned capture-source worktree copies the same runtime bytes and frozen assets. It is not claimed to have been built in that capture worktree. Main Rustaff0/data25cc as original receipt; after balance, before next performance batch."
+        }
+      },
+      "frozenContentProof": null,
+      "receipt": ".phoenix/perf-recovery-post-balance-control-whole/receipt.json",
+      "receiptHash": "7aeb735c330a7d34420032f3faf92048b689a333535ef366574b3bb22ab8b5e9",
+      "captureSource": {
+        "sourceRevision": "25ccf11e75dbc30e74fec9b54cab5fb14546d284",
+        "runtimeSourceSha256": "c8810712d60621be7c453e2b5abb697d5ae3ad518ec6aa1bbb817f0e6c9be141",
+        "runtimeSourceClean": false,
+        "repositoryDirty": true,
+        "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+      },
+      "captureSourcePath": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-repair-publication",
+      "orchestrationSource": {
+        "sourceRevision": "30ad2c1d5c47f32f677f0a1ec3b45fa76860240e",
+        "runtimeSourceSha256": "c8810712d60621be7c453e2b5abb697d5ae3ad518ec6aa1bbb817f0e6c9be141",
+        "runtimeSourceClean": true,
+        "repositoryDirty": true,
+        "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+      },
+      "originalBinary": false,
+      "oldBuildContentProof": null,
+      "binarySha256": "f11e2b62b321360b561343f11292f88a997cc2af516ef25a963171ab66588bfd",
+      "valid": false,
+      "problems": [],
+      "runs": [
+        {
+          "name": "combat_test-0",
+          "world": "combat_test",
+          "update": null,
+          "wallSeconds": 16.0659445,
+          "processWallSeconds": 15.8413797,
+          "backgroundCpuCores": 0.3982675424015105,
+          "continuation": null,
+          "reportHash": "141a5a6f4c9e3c6ddf90b5a8b48fbd0b36ce55c43470e653b6535f5711f84748",
+          "expectedHash": "141a5a6f4c9e3c6ddf90b5a8b48fbd0b36ce55c43470e653b6535f5711f84748",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-0",
+          "world": "falling_skyway",
+          "update": null,
+          "wallSeconds": 10.1530713,
+          "processWallSeconds": 9.7461147,
+          "backgroundCpuCores": 0.26551725863484277,
+          "continuation": null,
+          "reportHash": "d665b668edc5cb922bcf0fbb7b64521a9757dfeebdc48691d77eb35b2ddbe3d2",
+          "expectedHash": "d665b668edc5cb922bcf0fbb7b64521a9757dfeebdc48691d77eb35b2ddbe3d2",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-1",
+          "world": "falling_skyway",
+          "update": null,
+          "wallSeconds": 10.7672909,
+          "processWallSeconds": 10.4446912,
+          "backgroundCpuCores": 1.1324540625179438,
+          "continuation": null,
+          "reportHash": "d665b668edc5cb922bcf0fbb7b64521a9757dfeebdc48691d77eb35b2ddbe3d2",
+          "expectedHash": "d665b668edc5cb922bcf0fbb7b64521a9757dfeebdc48691d77eb35b2ddbe3d2",
+          "problems": [
+            "Background CPU not quiet"
+          ]
+        },
+        {
+          "name": "combat_test-1",
+          "world": "combat_test",
+          "update": null,
+          "wallSeconds": 17.6574812,
+          "processWallSeconds": 17.2977246,
+          "backgroundCpuCores": 0.9323520228671481,
+          "continuation": null,
+          "reportHash": "141a5a6f4c9e3c6ddf90b5a8b48fbd0b36ce55c43470e653b6535f5711f84748",
+          "expectedHash": "141a5a6f4c9e3c6ddf90b5a8b48fbd0b36ce55c43470e653b6535f5711f84748",
+          "problems": []
+        },
+        {
+          "name": "combat_test-2",
+          "world": "combat_test",
+          "update": null,
+          "wallSeconds": 18.8464529,
+          "processWallSeconds": 18.6793549,
+          "backgroundCpuCores": 0.6929097220332313,
+          "continuation": null,
+          "reportHash": "141a5a6f4c9e3c6ddf90b5a8b48fbd0b36ce55c43470e653b6535f5711f84748",
+          "expectedHash": "141a5a6f4c9e3c6ddf90b5a8b48fbd0b36ce55c43470e653b6535f5711f84748",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-2",
+          "world": "falling_skyway",
+          "update": null,
+          "wallSeconds": 10.7577668,
+          "processWallSeconds": 10.2735648,
+          "backgroundCpuCores": 0.27673647668526313,
+          "continuation": null,
+          "reportHash": "d665b668edc5cb922bcf0fbb7b64521a9757dfeebdc48691d77eb35b2ddbe3d2",
+          "expectedHash": "d665b668edc5cb922bcf0fbb7b64521a9757dfeebdc48691d77eb35b2ddbe3d2",
+          "problems": []
+        }
+      ],
+      "worlds": {
+        "combat_test": {
+          "update": null,
+          "processWallSeconds": 17.2977246,
+          "pollingWallSeconds": 17.6574812
+        },
+        "falling_skyway": {
+          "update": null,
+          "processWallSeconds": 10.2735648,
+          "pollingWallSeconds": 10.7577668
+        }
+      },
+      "role": "historical only; never pooled with latest paired acceptance"
+    }
+  ],
+  "wholeProcessEvidence": [
+    {
+      "name": "old-refresh-whole",
+      "path": ".phoenix/perf-recovery-old-refresh-whole/summary.json",
+      "sha256": "bc7869d35cae97e8b8df9023f29494fe072f6b09c5506f5ce79c990a4d4133f7",
+      "mode": "whole-process",
+      "acceptanceEligible": true,
+      "measurementRole": "acceptance",
+      "gameplayReference": null,
+      "compiledBuildProof": null,
+      "frozenContentProof": null,
+      "receipt": ".phoenix/perf-recovery-old-refresh-whole/receipt.json",
+      "receiptHash": "96ab56d81acd80454c2e3177f3a2b55f6f9244c91a3919f1539747e1ddee6fa7",
+      "captureSource": {
+        "sourceRevision": "30ad2c1d5c47f32f677f0a1ec3b45fa76860240e",
+        "runtimeSourceSha256": "c8810712d60621be7c453e2b5abb697d5ae3ad518ec6aa1bbb817f0e6c9be141",
+        "runtimeSourceClean": true,
+        "repositoryDirty": true,
+        "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+      },
+      "captureSourcePath": "C:/Coding/project-phoenix-v2",
+      "orchestrationSource": {
+        "sourceRevision": "30ad2c1d5c47f32f677f0a1ec3b45fa76860240e",
+        "runtimeSourceSha256": "c8810712d60621be7c453e2b5abb697d5ae3ad518ec6aa1bbb817f0e6c9be141",
+        "runtimeSourceClean": true,
+        "repositoryDirty": true,
+        "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+      },
+      "originalBinary": true,
+      "oldBuildContentProof": {
+        "path": ".phoenix/perf-recovery-old-refresh/provenance.json",
+        "sha256": "5ac7b0b42254a7292434359e811fee06267b81cad78d2254ebcc8ad15dbc680a"
+      },
+      "binarySha256": "b05e708bfe977138fc5bf7874fe77cc940d73f3af986ea03ea4c0bd66aaab3df",
+      "valid": true,
+      "problems": [],
+      "runs": [
+        {
+          "name": "combat_test-0",
+          "world": "combat_test",
+          "update": null,
+          "wallSeconds": 4.1691109,
+          "processWallSeconds": 3.6227134,
+          "backgroundCpuCores": 0.34664492551356335,
+          "continuation": null,
+          "reportHash": "81f4c79b4d360c9ef4af21f77ea649ad1201cb68d8c438d7cc38a2e627e8e831",
+          "expectedHash": "81f4c79b4d360c9ef4af21f77ea649ad1201cb68d8c438d7cc38a2e627e8e831",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-0",
+          "world": "falling_skyway",
+          "update": null,
+          "wallSeconds": 3.2037422,
+          "processWallSeconds": 3.1356028,
+          "backgroundCpuCores": 0.24573133314331358,
+          "continuation": null,
+          "reportHash": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833",
+          "expectedHash": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-1",
+          "world": "falling_skyway",
+          "update": null,
+          "wallSeconds": 3.2176057,
+          "processWallSeconds": 3.1876594,
+          "backgroundCpuCores": 0.35492457687497836,
+          "continuation": null,
+          "reportHash": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833",
+          "expectedHash": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833",
+          "problems": []
+        },
+        {
+          "name": "combat_test-1",
+          "world": "combat_test",
+          "update": null,
+          "wallSeconds": 3.7567941,
+          "processWallSeconds": 3.5699024,
+          "backgroundCpuCores": 0.482660826175548,
+          "continuation": null,
+          "reportHash": "81f4c79b4d360c9ef4af21f77ea649ad1201cb68d8c438d7cc38a2e627e8e831",
+          "expectedHash": "81f4c79b4d360c9ef4af21f77ea649ad1201cb68d8c438d7cc38a2e627e8e831",
+          "problems": []
+        },
+        {
+          "name": "combat_test-2",
+          "world": "combat_test",
+          "update": null,
+          "wallSeconds": 3.7350904,
+          "processWallSeconds": 3.4832081,
+          "backgroundCpuCores": 0.2983295703769355,
+          "continuation": null,
+          "reportHash": "81f4c79b4d360c9ef4af21f77ea649ad1201cb68d8c438d7cc38a2e627e8e831",
+          "expectedHash": "81f4c79b4d360c9ef4af21f77ea649ad1201cb68d8c438d7cc38a2e627e8e831",
+          "problems": []
+        },
+        {
+          "name": "falling_skyway-2",
+          "world": "falling_skyway",
+          "update": null,
+          "wallSeconds": 3.221991,
+          "processWallSeconds": 3.15632,
+          "backgroundCpuCores": 0.24918013015111656,
+          "continuation": null,
+          "reportHash": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833",
+          "expectedHash": "dbb6f35eead35f684f713b7a0b35e85a1edf4ec1d629f5eef2c45c32b6692833",
+          "problems": []
+        }
+      ],
+      "worlds": {
+        "combat_test": {
+          "update": null,
+          "processWallSeconds": 3.5699024,
+          "pollingWallSeconds": 3.7567941
+        },
+        "falling_skyway": {
+          "update": null,
+          "processWallSeconds": 3.15632,
+          "pollingWallSeconds": 3.2176057
+        }
+      }
+    }
+  ],
+  "currentWholeStatus": "pending; no latest bare comparison available",
+  "phaseCurrentStage": "batch4-paired",
+  "phaseBreakdown": {
+    "scope": "Observed wall intervals, median of per-run means after first 300 updates. Overlapping phases are not exclusive CPU shares.",
+    "stages": [
+      "old-refresh",
+      "rules077-control-paired",
+      "batch4-paired"
+    ],
+    "worlds": {
+      "combat_test": {
+        "old-refresh": {
+          "fixed.elapsed": 0.7671055151515142,
+          "sim.phase.membership.observed": 0.010612363636363429,
+          "sim.phase.input.observed": 0.06715760606060626,
+          "sim.phase.physics.observed": 0.15065824242424208,
+          "sim.phase.damage.observed": 0.026572363636363568,
+          "sim.phase.modifiers.observed": 0.03929509090909103,
+          "sim.phase.publish.observed": 0.09669251515151521,
+          "sim.phase.publishaggregate.observed": 0.03150657575757577,
+          "sim.phase.broadcast.observed": 0.054862939393939394
+        },
+        "rules077-control-paired": {
+          "fixed.elapsed": 4.605163727272721,
+          "sim.phase.membership.observed": 0.013928575757575827,
+          "sim.phase.input.observed": 1.069249272727272,
+          "sim.phase.physics.observed": 1.0225606363636368,
+          "sim.phase.damage.observed": 0.12361784848484828,
+          "sim.phase.modifiers.observed": 0.475534575757575,
+          "sim.phase.publish.observed": 1.1806746666666668,
+          "sim.phase.publishaggregate.observed": 0.17512927272727283,
+          "sim.phase.broadcast.observed": 0.06963796969696974
+        },
+        "batch4-paired": {
+          "fixed.elapsed": 3.599391999999997,
+          "sim.phase.membership.observed": 0.013707696969697026,
+          "sim.phase.input.observed": 0.2758019393939395,
+          "sim.phase.physics.observed": 0.9548193333333324,
+          "sim.phase.damage.observed": 0.12291793939393933,
+          "sim.phase.modifiers.observed": 0.45719327272727345,
+          "sim.phase.publish.observed": 1.0896638484848484,
+          "sim.phase.publishaggregate.observed": 0.18083593939393916,
+          "sim.phase.broadcast.observed": 0.06860133333333342
+        }
+      },
+      "falling_skyway": {
+        "old-refresh": {
+          "fixed.elapsed": 0.8028089393939417,
+          "sim.phase.membership.observed": 0.01261066666666657,
+          "sim.phase.input.observed": 0.08579757575757566,
+          "sim.phase.physics.observed": 0.14505975757575712,
+          "sim.phase.damage.observed": 0.024458636363636432,
+          "sim.phase.modifiers.observed": 0.05692445454545461,
+          "sim.phase.publish.observed": 0.11469151515151552,
+          "sim.phase.publishaggregate.observed": 0.018398484848484886,
+          "sim.phase.broadcast.observed": 0.06980278787878777
+        },
+        "rules077-control-paired": {
+          "fixed.elapsed": 2.467040515151512,
+          "sim.phase.membership.observed": 0.01566948484848498,
+          "sim.phase.input.observed": 0.1851032424242426,
+          "sim.phase.physics.observed": 0.8771244848484859,
+          "sim.phase.damage.observed": 0.11570281818181834,
+          "sim.phase.modifiers.observed": 0.21239081818181776,
+          "sim.phase.publish.observed": 0.49989684848484855,
+          "sim.phase.publishaggregate.observed": 0.06869445454545428,
+          "sim.phase.broadcast.observed": 0.08188678787878771
+        },
+        "batch4-paired": {
+          "fixed.elapsed": 2.4373459696969775,
+          "sim.phase.membership.observed": 0.01644333333333352,
+          "sim.phase.input.observed": 0.18778484848484878,
+          "sim.phase.physics.observed": 0.8533068484848485,
+          "sim.phase.damage.observed": 0.11755690909090916,
+          "sim.phase.modifiers.observed": 0.20314878787878746,
+          "sim.phase.publish.observed": 0.4909638181818196,
+          "sim.phase.publishaggregate.observed": 0.06980836363636367,
+          "sim.phase.broadcast.observed": 0.08345551515151513
+        }
+      }
+    },
+    "evidence": [
+      {
+        "stage": "old-refresh",
+        "path": ".phoenix/perf-recovery-old-refresh/summary.json",
+        "sha256": "44bd8be6cf6f90b28607793182ab650bab6ad2cee6e31ad0578ef2e0c72e9382"
+      },
+      {
+        "stage": "rules077-control-paired",
+        "path": ".phoenix/perf-recovery-rules077-control-paired/summary.json",
+        "sha256": "1bbdeb5895e8324e027dfe0dc8dc36c4c8caef13e0265d1a73f57f4aa3ba4c8b"
+      },
+      {
+        "stage": "batch4-paired",
+        "path": ".phoenix/perf-recovery-batch4-paired/summary.json",
+        "sha256": "1b2d961d710900ac157a4f19a220cffc55fc39281e1db303bd27dac2dac75724"
+      }
+    ]
+  },
+  "diagnosticLeafRanking": {
+    "path": ".phoenix/perf-recovery-batch4-leaf-ranking.json",
+    "sha256": "18a30e4c8907ef2575341d9f522c6f507cc1e5632fc48217ea5f2e989ca68598",
+    "acceptanceEligible": false,
+    "measurementRole": "diagnostic-only",
+    "source_valid": true,
+    "worlds": {
+      "combat_test": {
+        "fixedSteps": [
+          {
+            "fixed_step": "TickPowerSystem",
+            "duration_available": true,
+            "median_per_run_mean_observed_ms": 0.2889686969696973,
+            "run_mean_observed_ms": [
+              0.2879676969696972,
+              0.2889686969696973,
+              0.290497121212121
+            ],
+            "present_invocations": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_interval_counts": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_mean_when_present_ms": [
+              0.2879676969696972,
+              0.2889686969696973,
+              0.290497121212121
+            ],
+            "schedule_systems": [
+              {
+                "node": "SystemKey(180v1)",
+                "name": "phoenix_simulation::ship::energy_runtime::tick_power_system",
+                "fixed_steps": [
+                  "TickPowerSystem"
+                ],
+                "matching_phase_rows": [
+                  [
+                    "Physics"
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "fixed_step": "PublishTacticalRadarBlackboard",
+            "duration_available": true,
+            "median_per_run_mean_observed_ms": 0.23424645454545479,
+            "run_mean_observed_ms": [
+              0.23354066666666676,
+              0.23424645454545479,
+              0.23777587878787854
+            ],
+            "present_invocations": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_interval_counts": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_mean_when_present_ms": [
+              0.23354066666666676,
+              0.23424645454545479,
+              0.23777587878787854
+            ],
+            "schedule_systems": [
+              {
+                "node": "SystemKey(157v1)",
+                "name": "phoenix_simulation::console::weapons::blackboard::publish_tactical_radar_blackboard",
+                "fixed_steps": [
+                  "PublishTacticalRadarBlackboard"
+                ],
+                "matching_phase_rows": [
+                  [
+                    "Publish"
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "fixed_step": "PublishSensorRadarBlackboard",
+            "duration_available": true,
+            "median_per_run_mean_observed_ms": 0.21538196969696977,
+            "run_mean_observed_ms": [
+              0.21538196969696977,
+              0.21492993939393942,
+              0.21784996969697004
+            ],
+            "present_invocations": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_interval_counts": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_mean_when_present_ms": [
+              0.21538196969696977,
+              0.21492993939393942,
+              0.21784996969697004
+            ],
+            "schedule_systems": [
+              {
+                "node": "SystemKey(198v1)",
+                "name": "phoenix_simulation::ship::sensors::publish_sensor_radar_blackboard",
+                "fixed_steps": [
+                  "PublishSensorRadarBlackboard"
+                ],
+                "matching_phase_rows": [
+                  [
+                    "Publish"
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "fixed_step": "BroadcastBlackboardUpdates",
+            "duration_available": true,
+            "median_per_run_mean_observed_ms": 0.17617257575757603,
+            "run_mean_observed_ms": [
+              0.17266857575757572,
+              0.17617257575757603,
+              0.17837345454545434
+            ],
+            "present_invocations": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_interval_counts": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_mean_when_present_ms": [
+              0.17266857575757572,
+              0.17617257575757603,
+              0.17837345454545434
+            ],
+            "schedule_systems": [
+              {
+                "node": "SystemKey(235v1)",
+                "name": "phoenix_simulation::server_app::broadcast_publish::broadcast_blackboard_updates",
+                "fixed_steps": [
+                  "BroadcastBlackboardUpdates"
+                ],
+                "matching_phase_rows": [
+                  [
+                    "PublishAggregate"
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "fixed_step": "PublishRepairBlackboard",
+            "duration_available": true,
+            "median_per_run_mean_observed_ms": 0.1398372121212121,
+            "run_mean_observed_ms": [
+              0.1398372121212121,
+              0.13873121212121178,
+              0.14063093939393956
+            ],
+            "present_invocations": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_interval_counts": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_mean_when_present_ms": [
+              0.1398372121212121,
+              0.13873121212121178,
+              0.14063093939393956
+            ],
+            "schedule_systems": [
+              {
+                "node": "SystemKey(177v1)",
+                "name": "phoenix_simulation::console::repair::server::publish_repair_blackboard",
+                "fixed_steps": [
+                  "PublishRepairBlackboard"
+                ],
+                "matching_phase_rows": [
+                  [
+                    "Publish"
+                  ]
+                ]
+              }
+            ]
+          }
+        ],
+        "broadNameGroup": {
+          "name_group": "phoenix_simulation::science::broad::tick",
+          "duration_available": true,
+          "median_per_run_mean_observed_ms": 0.2531355757575761,
+          "run_mean_observed_ms": [
+            0.2529130606060603,
+            0.2531355757575761,
+            0.2544935151515149
+          ],
+          "present_invocations": [
+            3300,
+            3300,
+            3300
+          ],
+          "run_interval_counts": [
+            3300,
+            3300,
+            3300
+          ],
+          "run_mean_when_present_ms": [
+            0.2529130606060603,
+            0.2531355757575761,
+            0.2544935151515149
+          ],
+          "kind": "NAMEGROUP",
+          "matching_schedule_rows": [
+            {
+              "node": "SystemKey(330v1)",
+              "name": "phoenix_simulation::science::broad::tick",
+              "fixed_steps": []
+            }
+          ],
+          "run_nested_or_auxiliary_intervals": [
+            0,
+            0,
+            0
+          ],
+          "run_ambiguous_at_entry_intervals": [
+            0,
+            0,
+            0
+          ],
+          "run_live_system_spans_at_drain_histograms": [
+            {
+              "1": 3300
+            },
+            {
+              "1": 3300
+            },
+            {
+              "1": 3300
+            }
+          ],
+          "count_source": "intervals and flags from raw unattributed spans; live-System span count at frame drain is separate"
+        }
+      },
+      "falling_skyway": {
+        "fixedSteps": [
+          {
+            "fixed_step": "TickPowerSystem",
+            "duration_available": true,
+            "median_per_run_mean_observed_ms": 0.33839906060606006,
+            "run_mean_observed_ms": [
+              0.33839906060606006,
+              0.33919881818181813,
+              0.33650415151515156
+            ],
+            "present_invocations": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_interval_counts": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_mean_when_present_ms": [
+              0.33839906060606006,
+              0.33919881818181813,
+              0.33650415151515156
+            ],
+            "schedule_systems": [
+              {
+                "node": "SystemKey(180v1)",
+                "name": "phoenix_simulation::ship::energy_runtime::tick_power_system",
+                "fixed_steps": [
+                  "TickPowerSystem"
+                ],
+                "matching_phase_rows": [
+                  [
+                    "Physics"
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "fixed_step": "PublishRepairBlackboard",
+            "duration_available": true,
+            "median_per_run_mean_observed_ms": 0.17362530303030319,
+            "run_mean_observed_ms": [
+              0.1730566363636362,
+              0.17599869696969714,
+              0.17362530303030319
+            ],
+            "present_invocations": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_interval_counts": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_mean_when_present_ms": [
+              0.1730566363636362,
+              0.17599869696969714,
+              0.17362530303030319
+            ],
+            "schedule_systems": [
+              {
+                "node": "SystemKey(177v1)",
+                "name": "phoenix_simulation::console::repair::server::publish_repair_blackboard",
+                "fixed_steps": [
+                  "PublishRepairBlackboard"
+                ],
+                "matching_phase_rows": [
+                  [
+                    "Publish"
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "fixed_step": "BroadcastBlackboardUpdates",
+            "duration_available": true,
+            "median_per_run_mean_observed_ms": 0.05943403030303037,
+            "run_mean_observed_ms": [
+              0.058963454545454395,
+              0.0608392424242426,
+              0.05943403030303037
+            ],
+            "present_invocations": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_interval_counts": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_mean_when_present_ms": [
+              0.058963454545454395,
+              0.0608392424242426,
+              0.05943403030303037
+            ],
+            "schedule_systems": [
+              {
+                "node": "SystemKey(235v1)",
+                "name": "phoenix_simulation::server_app::broadcast_publish::broadcast_blackboard_updates",
+                "fixed_steps": [
+                  "BroadcastBlackboardUpdates"
+                ],
+                "matching_phase_rows": [
+                  [
+                    "PublishAggregate"
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "fixed_step": "PublishTacticalRadarBlackboard",
+            "duration_available": true,
+            "median_per_run_mean_observed_ms": 0.007770636363636192,
+            "run_mean_observed_ms": [
+              0.007780606060605853,
+              0.007770636363636192,
+              0.007646878787878679
+            ],
+            "present_invocations": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_interval_counts": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_mean_when_present_ms": [
+              0.007780606060605853,
+              0.007770636363636192,
+              0.007646878787878679
+            ],
+            "schedule_systems": [
+              {
+                "node": "SystemKey(157v1)",
+                "name": "phoenix_simulation::console::weapons::blackboard::publish_tactical_radar_blackboard",
+                "fixed_steps": [
+                  "PublishTacticalRadarBlackboard"
+                ],
+                "matching_phase_rows": [
+                  [
+                    "Publish"
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "fixed_step": "PublishSensorRadarBlackboard",
+            "duration_available": true,
+            "median_per_run_mean_observed_ms": 0.004888545454545551,
+            "run_mean_observed_ms": [
+              0.004888545454545551,
+              0.004902333333333425,
+              0.004884000000000097
+            ],
+            "present_invocations": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_interval_counts": [
+              3300,
+              3300,
+              3300
+            ],
+            "run_mean_when_present_ms": [
+              0.004888545454545551,
+              0.004902333333333425,
+              0.004884000000000097
+            ],
+            "schedule_systems": [
+              {
+                "node": "SystemKey(198v1)",
+                "name": "phoenix_simulation::ship::sensors::publish_sensor_radar_blackboard",
+                "fixed_steps": [
+                  "PublishSensorRadarBlackboard"
+                ],
+                "matching_phase_rows": [
+                  [
+                    "Publish"
+                  ]
+                ]
+              }
+            ]
+          }
+        ],
+        "broadNameGroup": {
+          "name_group": "phoenix_simulation::science::broad::tick",
+          "duration_available": true,
+          "median_per_run_mean_observed_ms": 0.027322696969696997,
+          "run_mean_observed_ms": [
+            0.027322696969696997,
+            0.02736930303030307,
+            0.027314787878787928
+          ],
+          "present_invocations": [
+            3300,
+            3300,
+            3300
+          ],
+          "run_interval_counts": [
+            3300,
+            3300,
+            3300
+          ],
+          "run_mean_when_present_ms": [
+            0.027322696969696997,
+            0.02736930303030307,
+            0.027314787878787928
+          ],
+          "kind": "NAMEGROUP",
+          "matching_schedule_rows": [
+            {
+              "node": "SystemKey(330v1)",
+              "name": "phoenix_simulation::science::broad::tick",
+              "fixed_steps": []
+            }
+          ],
+          "run_nested_or_auxiliary_intervals": [
+            0,
+            0,
+            0
+          ],
+          "run_ambiguous_at_entry_intervals": [
+            0,
+            0,
+            0
+          ],
+          "run_live_system_spans_at_drain_histograms": [
+            {
+              "1": 3300
+            },
+            {
+              "1": 3300
+            },
+            {
+              "1": 3300
+            }
+          ],
+          "count_source": "intervals and flags from raw unattributed spans; live-System span count at frame drain is separate"
+        }
+      }
+    }
+  },
+  "integrationReceipt": {
+    "schema_version": 1,
+    "main": "9ae43822522ca5477ad5a9cf92da7e03e852e999",
+    "compiledSource": "08a6f662208ac43390f46b630d1371868aa607c7",
+    "preservedAuthoredSource": "1fbb123d62cee65f8523d3ff4744537bf207f3c0",
+    "runtimeChangedPaths": [],
+    "authoredChangedPaths": [],
+    "allChangedPaths": [
+      "assets/entities/alliance_cruiser.toml",
+      "docs/gameplay-redesign/implementation/README.md",
+      "docs/gameplay-redesign/implementation/destroyer-engagement-2026-10-16.html",
+      "docs/gameplay-redesign/implementation/destroyer-engagement-2026-10-16.json",
+      "pasm/spec/architecture/data-driven-fine-system-ai.yaml",
+      "wiki/concepts/ai-helm-decomposition.md"
+    ],
+    "verifiedBy": "read-only git diff of exact pinned commits",
+    "independentSourceReview": "IntegrationReview PASS reported by root for the 20-commit composite and preserved assets/PASM",
+    "freshMainCompile": false,
+    "scope": "Runtime/build sources match the actual 08a6 build; main retains assets/PASM from 1fbb. This is source equivalence, not a new compilation or a claim that all main data was used in captures."
+  },
+  "balanceFollowup": {
+    "main": "dbda2b5f45a842f4b28514938c8bf1028304147e",
+    "balanceCommit": "63356d711e5801529eeea8041f3c98d8e0b0d178",
+    "reportedBy": "Root integration handoff",
+    "scope": "Subsequent main includes Balance beam-data/document changes. The paired performance benchmark remains frozen at 58e; these timings do not measure the new beam data. Root reports 40 Balance reports and equal before/after-performance replay; that separate evidence is not a new performance result.",
+    "runtimeChangedPaths": []
+  },
+  "integrationContext": {
+    "currentMain": "9ae43822522ca5477ad5a9cf92da7e03e852e999",
+    "compiledRevision": "08a6f662208ac43390f46b630d1371868aa607c7",
+    "binarySha256": "cd67f03a62c68d7b4c6163e090e34d126a5021f6d0d127b94e41ffce3522c687",
+    "controlRust": "9b963bf488edb27a32c4191683d9db51fde9b293",
+    "frozenContent": "58eaae87dcc8da1e52f11533c87c4b0c0a95b9c2",
+    "rules": "0.77",
+    "scope": "Latest paired control/candidate both use the frozen 58e data and final 0.77 reference. Historical 0.75/0.76 comparisons are separate; balance changes and private trials are not optimisation gains."
+  },
+  "validation": {
+    "path": ".phoenix/perf-recovery-batch4-validation.json",
+    "sha256": "64e6780d052304b749fd6162f3d68224602b3a6bb976d6fac271fe23ab3bda01",
+    "source": {
+      "sourceRevision": "08a6f662208ac43390f46b630d1371868aa607c7",
+      "runtimeSourceSha256": "0ca198c7176558035a8f1a05cf12c9d19941fdd1737de820cf8d664f48f1d149",
+      "runtimeSourceClean": true,
+      "repositoryDirty": false,
+      "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+    },
+    "status": "targeted-selection-has-inherited-fixture-failures",
+    "typecheck": {
+      "status": "passed",
+      "seconds": 97,
+      "log": ".phoenix/perf-recovery-batch4-owner-typecheck.log"
+    },
+    "tests": {
+      "model": {
+        "passed": 12,
+        "failed": 0
+      },
+      "contracts": {
+        "passed": 79,
+        "failed": 0
+      },
+      "gameplay": {
+        "passed": 217,
+        "failed": 0
+      },
+      "simulation": {
+        "passed": 179,
+        "failed": 24
+      }
+    },
+    "allNewEquivalenceAndContinuationTestsPassed": true,
+    "allSelectedTestsPassed": false,
+    "log": ".phoenix/perf-recovery-batch4-owner-tests.log",
+    "logSha256": "75b1309018cd6622c5f5a2be7c1ada62419f6cf1886f49c24fd208b1c385c103",
+    "sourceAudit": {
+      "baseline": "9b963bf488edb27a32c4191683d9db51fde9b293",
+      "current": "08a6f662208ac43390f46b630d1371868aa607c7",
+      "classification": "Source-supported inherited old Navigation fixture failures; no compiled baseline rerun",
+      "evidence": [
+        "All24 failures are existing console::navigation::server::tests; its sparse test_app is unchanged and lacks Power, ConsoleHosts, measured broad tracks and chart required by full Battleship composition.",
+        "Unchanged waypoint consumer refuses absent actual Power; unchanged hosted publication withholds phone board without ConsoleHosts; unchanged configured Picture cannot use raw world UUID as acquired contacts.",
+        "AdmissionPlugin uses EveryTick in the bare fixture; countdown excluded. New borrowed civilian-claim producer matches entire frozen original in actual parity test."
+      ],
+      "independentReview": "IntegrationReview independently confirmed fixture/guard source equivalence and log counts, without executing baseline tests."
+    },
+    "limits": [
+      "No full workspace gates, browser/native human acceptance or push.",
+      "Gameplay/performance equivalence still requires actual candidate AAR and continuation comparisons."
+    ],
+    "passedTotal": 487,
+    "failedTotal": 24,
+    "fullCI": false
+  },
+  "historicalBuildReceipts": [
+    {
+      "stage": "batch1",
+      "path": ".phoenix/perf-recovery-batch1-build-receipt.json",
+      "sha256": "f6db9bd5a4b7218b8969c6a72c547fcc32050b75814b221e2d7e1023b5721e0c",
+      "source": {
+        "sourceRevision": "a68bf2ef88cede1f36d116ebc2c46a8c9b6d14d6",
+        "runtimeSourceSha256": "baaa8f8fa7332e8ca591afefa6cad5ed3a2aa50e1ab6df3f063a5360ef31efcb",
+        "runtimeSourceClean": true,
+        "repositoryDirty": true,
+        "exampleSha256": "d749c79c915f0511d825b0e98a7a6700f29cbcd28947546967209278b21d5d5a"
+      },
+      "profile": "measure",
+      "features": [
+        "default",
+        "headless",
+        "server"
+      ],
+      "artifact": {
+        "reason": "compiler-artifact",
+        "package_id": "path+file:///C:/Coding/project-phoenix-v2#project-phoenix@0.1.0",
+        "manifest_path": "C:\\Coding\\project-phoenix-v2\\Cargo.toml",
+        "target": {
+          "kind": [
+            "bin"
+          ],
+          "crate_types": [
+            "bin"
+          ],
+          "name": "phoenix-headless",
+          "src_path": "C:\\Coding\\project-phoenix-v2\\src\\bin\\phoenix_headless.rs",
+          "edition": "2021",
+          "required-features": [
+            "headless"
+          ],
+          "doc": true,
+          "doctest": false,
+          "test": true
+        },
+        "profile": {
+          "opt_level": "3",
+          "debuginfo": 0,
+          "debug_assertions": false,
+          "overflow_checks": false,
+          "test": false
+        },
+        "features": [
+          "default",
+          "headless",
+          "server"
+        ],
+        "filenames": [
+          "C:\\Coding\\project-phoenix-v2\\target\\measure\\phoenix-headless.exe",
+          "C:\\Coding\\project-phoenix-v2\\target\\measure\\phoenix_headless.pdb"
+        ],
+        "executable": "C:\\Coding\\project-phoenix-v2\\target\\measure\\phoenix-headless.exe",
+        "fresh": false
+      },
+      "binarySha256": "6b3a4c7a4ae265c25cd3a1c0346aca0caf598f646157aa4c8ab1541f7f7ef232",
+      "buildMessagesSha256": "d4d4653d4e969c230e51b7a9748da1ad60372c91bb26f956c52f6a75076add1c",
+      "scope": "Working-checkout same-machine headless optimization diagnostic; unrelated output preserved."
+    },
+    {
+      "stage": "combined",
+      "path": ".phoenix/perf-recovery-combined-build-receipt.json",
+      "sha256": "152d005cbac172b6dab5f15d9299c01f31ee4deeedbda86f2fe52cb0793a0268",
+      "receiptRecovery": {
+        "reason": "Initial receipt checker required an absolute .d path; rustc uses paths relative to its verified Cargo source. Checker corrected, actual successful build and frozen binary reused after exact hash comparison.",
+        "startedUtcSource": "Observed Cargo process start from retained process inventory"
+      },
+      "exactTestedSource": {
+        "source": {
+          "sourceRevision": "e13490cc7f9ee62febb1169e5f2494b6f4ac880b",
+          "runtimeSourceSha256": "79ccfb4f5e842122cfec97dcc65f5c07d5a3b3fe48fd6becdc0b1d1cd580bad3",
+          "runtimeSourceClean": true,
+          "repositoryDirty": true,
+          "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+        },
+        "proof": ".phoenix/perf-recovery-measure-bytecopy.json",
+        "sha256": "2608b167cf05f48fcad199cd4214e951ba25f6facc313fbad1a1061849b946ba",
+        "note": "Pinned checkout has disclosed EOL-only Git differences to preserve exact tested working bytes; runtime source hashes match."
+      },
+      "buildSource": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-publication",
+      "libraryArtifact": {
+        "reason": "compiler-artifact",
+        "package_id": "path+file:///C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-publication/crates/phoenix-simulation#0.1.0",
+        "manifest_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-publication\\crates\\phoenix-simulation\\Cargo.toml",
+        "target": {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "phoenix_simulation",
+          "src_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-publication\\crates\\phoenix-simulation\\src\\lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        },
+        "profile": {
+          "opt_level": "3",
+          "debuginfo": 0,
+          "debug_assertions": false,
+          "overflow_checks": false,
+          "test": false
+        },
+        "features": [
+          "headless",
+          "server"
+        ],
+        "filenames": [
+          "C:/Coding/project-phoenix-v2/target\\measure\\deps\\libphoenix_simulation-7e77ee5c1823ad7a.rlib",
+          "C:/Coding/project-phoenix-v2/target\\measure\\deps\\libphoenix_simulation-7e77ee5c1823ad7a.rmeta"
+        ],
+        "executable": null,
+        "fresh": false
+      },
+      "libraryDependencyRecord": {
+        "path": "C:/Coding/project-phoenix-v2/target\\measure\\deps\\phoenix_simulation-7e77ee5c1823ad7a.d",
+        "sha256": "98867a3e420c5515975458ded20e1e64c82dbef2e7e721f5d97a2fbcd46fa496",
+        "verifiedSourceSuffix": "crates/phoenix-simulation/src/lib.rs",
+        "absoluteLibrarySource": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-publication/crates/phoenix-simulation/src/lib.rs",
+        "relativeDependencyBase": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-publication"
+      },
+      "source": {
+        "sourceRevision": "e13490cc7f9ee62febb1169e5f2494b6f4ac880b",
+        "runtimeSourceSha256": "79ccfb4f5e842122cfec97dcc65f5c07d5a3b3fe48fd6becdc0b1d1cd580bad3",
+        "runtimeSourceClean": false,
+        "repositoryDirty": true,
+        "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+      },
+      "profile": "measure",
+      "features": [
+        "default",
+        "headless",
+        "server"
+      ],
+      "requestedFeatures": [
+        "headless"
+      ],
+      "defaultFeatures": true,
+      "artifact": {
+        "reason": "compiler-artifact",
+        "package_id": "path+file:///C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-publication#project-phoenix@0.1.0",
+        "manifest_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-publication\\Cargo.toml",
+        "target": {
+          "kind": [
+            "bin"
+          ],
+          "crate_types": [
+            "bin"
+          ],
+          "name": "phoenix-headless",
+          "src_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-publication\\src\\bin\\phoenix_headless.rs",
+          "edition": "2021",
+          "required-features": [
+            "headless"
+          ],
+          "doc": true,
+          "doctest": false,
+          "test": true
+        },
+        "profile": {
+          "opt_level": "3",
+          "debuginfo": 0,
+          "debug_assertions": false,
+          "overflow_checks": false,
+          "test": false
+        },
+        "features": [
+          "default",
+          "headless",
+          "server"
+        ],
+        "filenames": [
+          "C:/Coding/project-phoenix-v2/target\\measure\\phoenix-headless.exe",
+          "C:/Coding/project-phoenix-v2/target\\measure\\phoenix_headless.pdb"
+        ],
+        "executable": "C:/Coding/project-phoenix-v2/target\\measure\\phoenix-headless.exe",
+        "fresh": false
+      },
+      "binary": ".phoenix/perf-recovery-combined.exe",
+      "binarySha256": "938d8d35fb283dd85af18c9d34ddc36a9ac835e752fc99ed546487772e96af81",
+      "buildMessagesSha256": "43dd8a6cba1626850bc7337c6e5d88b4dce18ff4d47e50d1eeac4ad64ddeed20",
+      "startedUtc": "2026-10-16T15:07:23.3291696Z",
+      "finishedUtc": "2026-10-16T15:22:33.382Z",
+      "scope": "Ordinary headless measure build, source verified unchanged before/after; exact artifact copied for isolated captures."
+    },
+    {
+      "stage": "post-balance-control",
+      "path": ".phoenix/perf-recovery-post-balance-control-build-receipt.json",
+      "sha256": "825eb2a8467a30154d73e4dcd07a26d37669a029203c958ae9aa1c214c8f64e1",
+      "source": {
+        "sourceRevision": "25ccf11e75dbc30e74fec9b54cab5fb14546d284",
+        "runtimeSourceSha256": "c8810712d60621be7c453e2b5abb697d5ae3ad518ec6aa1bbb817f0e6c9be141",
+        "runtimeSourceClean": false,
+        "repositoryDirty": true,
+        "exampleSha256": "f1b55768f6788f96abcc45623fa917faced5211b5d5d69846ecaef67dd35473f"
+      },
+      "buildSource": "C:/Coding/project-phoenix-v2",
+      "profile": "measure",
+      "features": [
+        "default",
+        "server",
+        "headless"
+      ],
+      "binary": ".phoenix/perf-recovery-post-balance-control.exe",
+      "binarySha256": "f11e2b62b321360b561343f11292f88a997cc2af516ef25a963171ab66588bfd",
+      "originalReceipt": {
+        "path": ".phoenix/perf-recovery-post-balance-control-original-receipt.json",
+        "sha256": "4802d19dede23bc53d3723e7e4f42aaa6d71dba40c1ec1127cb1e367e5509c7e"
+      },
+      "contentProof": {
+        "path": ".phoenix/perf-post-balance-control-proof.json",
+        "sha256": "9038a49c2465bfe93af7679e8fbd2a8e20073f333d201cfc5ae72cf086ab1b0b"
+      },
+      "sourceCopyProof": {
+        "path": ".phoenix/perf-post-balance-control-source-copy.json",
+        "sha256": "d8ab82972964db6829c4ba6534b79a198321a425030ea9b5782e31b4a7a5aba5"
+      },
+      "scope": "Final integrated Balance artifact built on main; pinned capture-source worktree copies the same runtime bytes and frozen assets. It is not claimed to have been built in that capture worktree. Main Rustaff0/data25cc as original receipt; after balance, before next performance batch."
+    },
+    {
+      "stage": "batch3",
+      "path": ".phoenix/perf-recovery-batch3-build-receipt.json",
+      "sha256": "93434eecd92a493e10f81966426807c0e64409d9b35d67e3babe9035a3d3e862",
+      "receiptRecovery": null,
+      "exactTestedSource": {
+        "source": {
+          "sourceRevision": "1bf59f86a7622fc6eeef61175bef2d670bd687d6",
+          "runtimeSourceSha256": "1fbb74e864accb7c921ce1a09eac438c98a7d348e4667073aa78957b53d8969f",
+          "runtimeSourceClean": true,
+          "repositoryDirty": false,
+          "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+        },
+        "proof": ".phoenix/perf-recovery-batch3-tested-source.json",
+        "sha256": "43c5c76e2ff6bf4365ab46c168e794539e7e6db7970957a51df98e989652db5f",
+        "note": "Compiled source revision and runtime bytes match the retained targeted-test source receipt."
+      },
+      "buildSource": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-energy-topology",
+      "libraryArtifact": {
+        "reason": "compiler-artifact",
+        "package_id": "path+file:///C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-energy-topology/crates/phoenix-simulation#0.1.0",
+        "manifest_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-energy-topology\\crates\\phoenix-simulation\\Cargo.toml",
+        "target": {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "phoenix_simulation",
+          "src_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-energy-topology\\crates\\phoenix-simulation\\src\\lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        },
+        "profile": {
+          "opt_level": "3",
+          "debuginfo": 0,
+          "debug_assertions": false,
+          "overflow_checks": false,
+          "test": false
+        },
+        "features": [
+          "headless",
+          "server"
+        ],
+        "filenames": [
+          "C:/Coding/project-phoenix-v2/target\\measure\\deps\\libphoenix_simulation-7e77ee5c1823ad7a.rlib",
+          "C:/Coding/project-phoenix-v2/target\\measure\\deps\\libphoenix_simulation-7e77ee5c1823ad7a.rmeta"
+        ],
+        "executable": null,
+        "fresh": false
+      },
+      "libraryDependencyRecord": {
+        "path": "C:/Coding/project-phoenix-v2/target\\measure\\deps\\phoenix_simulation-7e77ee5c1823ad7a.d",
+        "sha256": "bb67da671403ed0c480f5d17038b85a86ef99c49e2b9a6f4768241d2a81e5c73",
+        "verifiedSourceSuffix": "crates/phoenix-simulation/src/lib.rs",
+        "absoluteLibrarySource": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-energy-topology/crates/phoenix-simulation/src/lib.rs",
+        "relativeDependencyBase": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-energy-topology"
+      },
+      "source": {
+        "sourceRevision": "1bf59f86a7622fc6eeef61175bef2d670bd687d6",
+        "runtimeSourceSha256": "1fbb74e864accb7c921ce1a09eac438c98a7d348e4667073aa78957b53d8969f",
+        "runtimeSourceClean": true,
+        "repositoryDirty": false,
+        "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+      },
+      "profile": "measure",
+      "features": [
+        "default",
+        "headless",
+        "server"
+      ],
+      "requestedFeatures": [
+        "headless"
+      ],
+      "defaultFeatures": true,
+      "artifact": {
+        "reason": "compiler-artifact",
+        "package_id": "path+file:///C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-energy-topology#project-phoenix@0.1.0",
+        "manifest_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-energy-topology\\Cargo.toml",
+        "target": {
+          "kind": [
+            "bin"
+          ],
+          "crate_types": [
+            "bin"
+          ],
+          "name": "phoenix-headless",
+          "src_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-energy-topology\\src\\bin\\phoenix_headless.rs",
+          "edition": "2021",
+          "required-features": [
+            "headless"
+          ],
+          "doc": true,
+          "doctest": false,
+          "test": true
+        },
+        "profile": {
+          "opt_level": "3",
+          "debuginfo": 0,
+          "debug_assertions": false,
+          "overflow_checks": false,
+          "test": false
+        },
+        "features": [
+          "default",
+          "headless",
+          "server"
+        ],
+        "filenames": [
+          "C:/Coding/project-phoenix-v2/target\\measure\\phoenix-headless.exe",
+          "C:/Coding/project-phoenix-v2/target\\measure\\phoenix_headless.pdb"
+        ],
+        "executable": "C:/Coding/project-phoenix-v2/target\\measure\\phoenix-headless.exe",
+        "fresh": false
+      },
+      "binary": ".phoenix/perf-recovery-batch3.exe",
+      "binarySha256": "7dc73ec45faacf88c17666585fd760972a8e403a20d4257dbcaf5ca1a55cb010",
+      "buildMessagesSha256": "fc9802114860f9101a28aa729f65b212adec6e99c36fadbc427c625373f1f65c",
+      "startedUtc": "2026-10-16T16:33:33.0324195Z",
+      "finishedUtc": "2026-10-16T16:45:20.407Z",
+      "scope": "Ordinary headless measure build, source verified unchanged before/after; exact artifact copied for isolated captures."
+    },
+    {
+      "stage": "rules077-control",
+      "path": ".phoenix/perf-recovery-rules077-control-build-receipt.json",
+      "sha256": "e96d8f93fc0e8896c865a15a0baa7843114fdd1d7026c9bc4f2d7c36a3d45fc9",
+      "source": {
+        "sourceRevision": "9b963bf488edb27a32c4191683d9db51fde9b293",
+        "runtimeSourceSha256": "8c037d2647a6cf167446c25f31b2461f10473b06565aa4a10b55ec34b74834c7",
+        "runtimeSourceClean": true,
+        "repositoryDirty": false,
+        "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+      },
+      "buildSource": "C:/Users/jkeyw/.codex/worktrees/combat-balance-fixes/increment-14-native-validation",
+      "profile": "measure",
+      "features": [
+        "default",
+        "server",
+        "headless"
+      ],
+      "configurationFromCommand": "cargo build --profile measure --features headless --bin phoenix-headless",
+      "defaultFeatures": true,
+      "requestedFeatures": [
+        "headless"
+      ],
+      "binary": ".phoenix/perf-recovery-rules077-control.exe",
+      "binarySha256": "14ed60dc5a51cdebfc0fd9e79b6f431006e7872a8f47aed28a65b195dcc375ad",
+      "originalReceipt": {
+        "path": ".phoenix/perf-recovery-rules077-control-original-receipt.json",
+        "sha256": "cbd8ab56a73b41d7e76be6e640131c8de52c2dc12bd21e603b5ad3cb69228166"
+      },
+      "originalBuildLog": {
+        "path": ".phoenix/perf-recovery-rules077-control-original-build.log",
+        "sha256": "0f7cb5e35bd97911db7b2b9e9528906985bfb48f76b81b559858bfe839956395"
+      },
+      "libraryDependencyRecord": {
+        "path": ".phoenix/perf-recovery-rules077-control-simulation.d",
+        "sha256": "c5b5d8d90d38f69c67db49eff20bc2a5be5408b195429b0a4fed389408e8dc48"
+      },
+      "contentProof": {
+        "path": ".phoenix/perf-rules077-control-content-proof.json",
+        "sha256": "daccb7b0fd0f6cd9248eb96dbb941a2fa0580c61d4fbf522cbdd964ccb44e612"
+      },
+      "sourceCopyProof": {
+        "path": ".phoenix/perf-rules077-control-source-copy.json",
+        "sha256": "c492df8d4375e1b2d3220c9a1a106c726020aa44adfcf34cb24c895c8336a802"
+      },
+      "scope": "Actual external Balance build at9b/rules0.77, successful measure build and dependency records retained. Root capture context is an exact runtime-byte copy, two EOL-only differences disclosed; it was not the build directory. No timing result yet."
+    }
+  ],
+  "historicalIntegrationContext": {
+    "preBalanceRevision": "e13490cc",
+    "preBalanceRules": "0.75",
+    "separateBalanceMerge": "aff0fad9",
+    "balanceTuning": "25ccf11e",
+    "postBalanceControl": "post-balance-control",
+    "postBalanceRules": "0.76",
+    "scope": "Retained historical comparison groups only; not pooled into the final paired rules 0.77 decision."
+  },
+  "historicalValidation": [
+    {
+      "check": "Power energy topology",
+      "result": "50 passed",
+      "revision": "e9199895",
+      "evidence": ".phoenix/perf-recovery-batch2-energy-tests.log"
+    },
+    {
+      "check": "Affected Gameplay power, sensors, references, AI",
+      "result": "101 passed",
+      "revision": "952f3850",
+      "evidence": ".phoenix/perf-recovery-batch2-gameplay-tests.log; Gameplay runtime unchanged through 495a170a"
+    },
+    {
+      "check": "Model publication envelope",
+      "result": "1 passed",
+      "revision": "495a170a",
+      "evidence": ".phoenix/perf-recovery-combined-owner-tests.log"
+    },
+    {
+      "check": "Renderer-independent Simulation owners",
+      "result": "302 passed",
+      "revision": "495a170a",
+      "evidence": ".phoenix/perf-recovery-combined-owner-tests.log; signed-zero correction needs later rerun"
+    },
+    {
+      "check": "Affected root integration typecheck",
+      "result": "passed",
+      "revision": "495a170a",
+      "evidence": "gm_restore, reconnect_repair_boundary, publisher_ordering; .phoenix/perf-recovery-affected-root-check.log"
+    },
+    {
+      "check": "All root test typecheck",
+      "result": "failed (unchanged test)",
+      "revision": "495a170a",
+      "evidence": "tests/local_ship_neutrality.rs:529 refers to removed PendingAiResponseKey.host; file unchanged since performance base; .phoenix/perf-recovery-combined-root-check.log"
+    },
+    {
+      "check": "Selected client tests",
+      "result": "480 passed / 3 failed",
+      "revision": "495a170a",
+      "evidence": "Existing flat/composite/visiting fixture expectations omit boost/local_stock/physical fields. JS and fixture inputs unchanged from 7b52f05d. .phoenix/perf-recovery-combined-client-tests.log"
+    },
+    {
+      "check": "Earlier full Gameplay suite",
+      "result": "1762 passed / 11 failed",
+      "revision": "first optimisation batch",
+      "evidence": "Untouched marker/composition/blaster assertions; exact baseline full rerun not performed. Do not claim full suite green."
+    },
+    {
+      "check": "Layer dependency rules",
+      "result": "passed",
+      "revision": "495a170a",
+      "evidence": "npm run layers:check; .phoenix/perf-recovery-shared-publication-layers.log"
+    },
+    {
+      "check": "Full pre-push gates / browser / device / human",
+      "result": "not performed for this batch",
+      "revision": "n/a",
+      "evidence": "Local optimisation work only; no push planned. These results do not close increment acceptance."
+    },
+    {
+      "check": "Native pane snapshot transport and scoped queue",
+      "result": "13 passed",
+      "revision": "495a170a",
+      "evidence": ".phoenix/perf-recovery-native-snapshot-tests.log (10) and .phoenix/perf-recovery-native-registry-tests.log (3); publication correction follows as ae9608c9"
+    },
+    {
+      "check": "Signed-zero and handoff publication regressions",
+      "result": "7 passed after test-only pointer correction",
+      "revision": "e13490cc (same source bytes as tested correction)",
+      "evidence": ".phoenix/perf-recovery-signedzero-retry-tests.log; previous broader run had219 pass /1 incorrect test assumption; both new signed-zero tests passed there. No production change in retry."
+    },
+    {
+      "check": "Batch 3 owner typecheck",
+      "result": "passed",
+      "revision": "e6a2e59c",
+      "evidence": ".phoenix/perf-recovery-batch3-typecheck.log; Gameplay and Simulation tests, no default features"
+    },
+    {
+      "check": "Batch 3 affected owner tests",
+      "result": "34 Gameplay passed; 127 Simulation passed / 2 failed",
+      "revision": "e6a2e59c",
+      "evidence": ".phoenix/perf-recovery-batch3-owner-tests.log; all new equivalence cases passed. Existing mount fixture indexes removed Cruiser turret; navigation restore equality under investigation. No production acceptance claimed."
+    },
+    {
+      "check": "Batch 3 headless owner typecheck",
+      "result": "passed",
+      "revision": "1bf59f86",
+      "evidence": ".phoenix/perf-recovery-batch3-headless-typecheck.log; 1m19s"
+    },
+    {
+      "check": "Batch 3 headless targeted execution",
+      "result": "42 passed / 1 existing sparse-fixture failure",
+      "revision": "1bf59f86",
+      "evidence": ".phoenix/perf-recovery-batch3-headless-retry-tests.log; mount correction, leaf attribution and Power cleanup passed. Initial navigation restore equality now passes; later FollowNavigation checkpoint fails because live-only High AI bootstrap is not captured without LodTransitionTimer registration and fresh crew sources differ. Changed Helm builder is never run by this fixture. Static baseline source comparison only; no baseline native rerun claimed."
+    },
+    {
+      "check": "Headless leaf CLI validation",
+      "result": "1 passed",
+      "revision": "1bf59f86",
+      "evidence": ".phoenix/perf-recovery-batch3-cli-test.log; same freshly compiled project_phoenix-ce1d8cf38de330f5 unit executable, direct exact-filter execution after Cargo stopped at Simulation failure"
+    },
+    {
+      "check": "Affected wiki lint",
+      "result": "passed: 9 pages / 204 sources / 73 index links",
+      "revision": "1bf59f86",
+      "evidence": ".phoenix/perf-recovery-batch3-wiki-lint.json"
+    }
+  ],
+  "wikiLint": {
+    "path": ".phoenix/perf-recovery-batch4-main-wiki-lint.json",
+    "sha256": "012f2a854258f493838e30d555098be987abd53e48d3026a290852a30a095566",
+    "sourceRoot": "C:/Coding/project-phoenix-v2",
+    "pages": [
+      "wiki/concepts/ai-helm-decomposition.md",
+      "wiki/concepts/ai-ship-unification.md",
+      "wiki/concepts/broadcaster-seam.md",
+      "wiki/concepts/modifier-coordination.md",
+      "wiki/concepts/performance-measurement.md",
+      "wiki/concepts/power-plugin.md",
+      "wiki/concepts/sensing-and-fields.md",
+      "wiki/concepts/shields-intent.md",
+      "wiki/concepts/testing-strategy.md",
+      "wiki/concepts/weapons-intent.md"
+    ],
+    "sourcesChecked": 222,
+    "indexTargetsChecked": 73,
+    "failures": [],
+    "valid": true
+  },
+  "provenanceFiles": [
+    {
+      "path": ".phoenix/perf-recovery-old-refresh/summary.json",
+      "sha256": "44bd8be6cf6f90b28607793182ab650bab6ad2cee6e31ad0578ef2e0c72e9382"
+    },
+    {
+      "path": ".phoenix/perf-recovery-rules077-control-paired/summary.json",
+      "sha256": "1bbdeb5895e8324e027dfe0dc8dc36c4c8caef13e0265d1a73f57f4aa3ba4c8b"
+    },
+    {
+      "path": ".phoenix/perf-recovery-batch4-paired/summary.json",
+      "sha256": "1b2d961d710900ac157a4f19a220cffc55fc39281e1db303bd27dac2dac75724"
+    },
+    {
+      "path": ".phoenix/perf-recovery-batch4-build-receipt.json",
+      "sha256": "dcf88940ed2486e3d4b1ec09034b4fce8cb543d48c8908ab4c8a0fdc081c5106"
+    },
+    {
+      "path": ".phoenix/perf-recovery-batch4-tested-source.json",
+      "sha256": "9295aa3d072a8fd0bb1c3c356f41b5912575fe3ec6eb9704e1b71f1809d6dd88"
+    },
+    {
+      "path": ".phoenix/perf-recovery-batch4-validation.json",
+      "sha256": "64e6780d052304b749fd6162f3d68224602b3a6bb976d6fac271fe23ab3bda01"
+    },
+    {
+      "path": ".phoenix/perf-recovery-batch4-main-wiki-lint.json",
+      "sha256": "012f2a854258f493838e30d555098be987abd53e48d3026a290852a30a095566"
+    },
+    {
+      "path": ".phoenix/perf-rules077-gameplay-reference.json",
+      "sha256": "f370c7cc85d843b9eeda2d5e6858254caf77d156c8bc704f637a49fa33b35351"
+    },
+    {
+      "path": ".phoenix/perf-rules077-final-content-proof.json",
+      "sha256": "1ea79bb4707e2e1af1b5c99a2bd1b3e821c9c6ca15c9eb108c18a4fc74483da6"
+    },
+    {
+      "path": ".phoenix/perf-rules077-control-source-copy.json",
+      "sha256": "c492df8d4375e1b2d3220c9a1a106c726020aa44adfcf34cb24c895c8336a802"
+    },
+    {
+      "path": ".phoenix/perf-recovery-rules077-control-build-receipt.json",
+      "sha256": "e96d8f93fc0e8896c865a15a0baa7843114fdd1d7026c9bc4f2d7c36a3d45fc9"
+    },
+    {
+      "path": ".phoenix/perf-recovery-phase-ranking-latest.json",
+      "sha256": "09423728d49ddec37237fe175764e6d8d56fe006f962f8c1d76195b9c8239899"
+    },
+    {
+      "path": ".phoenix/perf-recovery-batch4-leaf-ranking.json",
+      "sha256": "18a30e4c8907ef2575341d9f522c6f507cc1e5632fc48217ea5f2e989ca68598"
+    }
+  ],
+  "buildReceipts": [
+    {
+      "stage": "batch4",
+      "path": ".phoenix/perf-recovery-batch4-build-receipt.json",
+      "sha256": "dcf88940ed2486e3d4b1ec09034b4fce8cb543d48c8908ab4c8a0fdc081c5106",
+      "receiptRecovery": null,
+      "exactTestedSource": {
+        "source": {
+          "sourceRevision": "08a6f662208ac43390f46b630d1371868aa607c7",
+          "runtimeSourceSha256": "0ca198c7176558035a8f1a05cf12c9d19941fdd1737de820cf8d664f48f1d149",
+          "runtimeSourceClean": true,
+          "repositoryDirty": false,
+          "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c",
+          "validationEvidence": {
+            "path": ".phoenix/perf-recovery-batch4-validation.json",
+            "sha256": "64e6780d052304b749fd6162f3d68224602b3a6bb976d6fac271fe23ab3bda01",
+            "allSelectedTestsPassed": false,
+            "allNewEquivalenceAndContinuationTestsPassed": true,
+            "sourceSupportedInheritedNavigationFailures": 24,
+            "compiledBaselineRerun": false
+          }
+        },
+        "proof": ".phoenix/perf-recovery-batch4-tested-source.json",
+        "sha256": "9295aa3d072a8fd0bb1c3c356f41b5912575fe3ec6eb9704e1b71f1809d6dd88",
+        "note": "Compiled source revision and runtime bytes match the retained targeted-test source receipt."
+      },
+      "buildSource": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-station-health",
+      "libraryArtifact": {
+        "reason": "compiler-artifact",
+        "package_id": "path+file:///C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-station-health/crates/phoenix-simulation#0.1.0",
+        "manifest_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-station-health\\crates\\phoenix-simulation\\Cargo.toml",
+        "target": {
+          "kind": [
+            "lib"
+          ],
+          "crate_types": [
+            "lib"
+          ],
+          "name": "phoenix_simulation",
+          "src_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-station-health\\crates\\phoenix-simulation\\src\\lib.rs",
+          "edition": "2021",
+          "doc": true,
+          "doctest": true,
+          "test": true
+        },
+        "profile": {
+          "opt_level": "3",
+          "debuginfo": 0,
+          "debug_assertions": false,
+          "overflow_checks": false,
+          "test": false
+        },
+        "features": [
+          "headless",
+          "server"
+        ],
+        "filenames": [
+          "C:/Coding/project-phoenix-v2/target\\measure\\deps\\libphoenix_simulation-7e77ee5c1823ad7a.rlib",
+          "C:/Coding/project-phoenix-v2/target\\measure\\deps\\libphoenix_simulation-7e77ee5c1823ad7a.rmeta"
+        ],
+        "executable": null,
+        "fresh": false
+      },
+      "libraryDependencyRecord": {
+        "path": "C:/Coding/project-phoenix-v2/target\\measure\\deps\\phoenix_simulation-7e77ee5c1823ad7a.d",
+        "sha256": "bb67da671403ed0c480f5d17038b85a86ef99c49e2b9a6f4768241d2a81e5c73",
+        "verifiedSourceSuffix": "crates/phoenix-simulation/src/lib.rs",
+        "absoluteLibrarySource": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-station-health/crates/phoenix-simulation/src/lib.rs",
+        "relativeDependencyBase": "C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-station-health"
+      },
+      "source": {
+        "sourceRevision": "08a6f662208ac43390f46b630d1371868aa607c7",
+        "runtimeSourceSha256": "0ca198c7176558035a8f1a05cf12c9d19941fdd1737de820cf8d664f48f1d149",
+        "runtimeSourceClean": true,
+        "repositoryDirty": false,
+        "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+      },
+      "profile": "measure",
+      "features": [
+        "default",
+        "headless",
+        "server"
+      ],
+      "requestedFeatures": [
+        "headless"
+      ],
+      "defaultFeatures": true,
+      "artifact": {
+        "reason": "compiler-artifact",
+        "package_id": "path+file:///C:/Coding/project-phoenix-v2/.phoenix/worktrees/perf-station-health#project-phoenix@0.1.0",
+        "manifest_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-station-health\\Cargo.toml",
+        "target": {
+          "kind": [
+            "bin"
+          ],
+          "crate_types": [
+            "bin"
+          ],
+          "name": "phoenix-headless",
+          "src_path": "C:\\Coding\\project-phoenix-v2\\.phoenix\\worktrees\\perf-station-health\\src\\bin\\phoenix_headless.rs",
+          "edition": "2021",
+          "required-features": [
+            "headless"
+          ],
+          "doc": true,
+          "doctest": false,
+          "test": true
+        },
+        "profile": {
+          "opt_level": "3",
+          "debuginfo": 0,
+          "debug_assertions": false,
+          "overflow_checks": false,
+          "test": false
+        },
+        "features": [
+          "default",
+          "headless",
+          "server"
+        ],
+        "filenames": [
+          "C:/Coding/project-phoenix-v2/target\\measure\\phoenix-headless.exe",
+          "C:/Coding/project-phoenix-v2/target\\measure\\phoenix_headless.pdb"
+        ],
+        "executable": "C:/Coding/project-phoenix-v2/target\\measure\\phoenix-headless.exe",
+        "fresh": false
+      },
+      "binary": ".phoenix/perf-recovery-batch4.exe",
+      "binarySha256": "cd67f03a62c68d7b4c6163e090e34d126a5021f6d0d127b94e41ffce3522c687",
+      "buildMessagesSha256": "a06d49f0f3fb296b8281f56a18f9f62c2dfb9dc968552acff42371e1ff6dbfb3",
+      "startedUtc": "2026-10-16T17:50:55.4140406Z",
+      "finishedUtc": "2026-10-16T18:03:51.001Z",
+      "scope": "Ordinary headless measure build, source verified unchanged before/after; exact artifact copied for isolated captures."
+    }
+  ],
+  "priorCurrent": {
+    "source": "9bd7bab6",
+    "runtimeEquivalentBase": "7b52f05d",
+    "path": ".phoenix/redesign-baseline/2026-10-16-verify-8-12",
+    "combat_test": {
+      "mean": 5.8647483,
+      "p50": 5.388,
+      "p95": 9.0916
+    },
+    "falling_skyway": {
+      "mean": 4.1570782,
+      "p50": 4.0296,
+      "p95": 5.4523
+    },
+    "scope": "Earlier same-machine measure baseline; retained separately from refreshed old version."
+  },
+  "limits": [
+    "No fresh main compile: measured executable was actually built at 08a6, SHA256 cd67f03a62c68d7b4c6163e090e34d126a5021f6d0d127b94e41ffce3522c687.",
+    "24 Navigation failures have source-supported inherited-fixture classification; no compiled baseline rerun proves that classification.",
+    "All new equivalence/continuation tests passed; full CI, browser/device/Human and pre-push gates were not run for this composite.",
+    "Leaf timings are diagnostic observed intervals, not exclusive CPU shares or accepted timing.",
+    "Latest bare process comparison remains pending; old/current versions have different gameplay and content."
+  ]
+}

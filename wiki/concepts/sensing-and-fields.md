@@ -96,6 +96,10 @@ paid grant and physical measurements, retains acquired findings with their sampl
 ticks and predicts lost positions using observed motion. Public contact IDs include
 their instrument owner; current actuator routing stays private and expires with
 measured support. Co-hosting instruments does not merge their knowledge.
+Installed live owners share the same lifecycle/projection body as the validating
+public APIs, avoiding repeated full-history copies and release-time validation.
+Construction and restore retain complete validation; physical input checks,
+every-tick paid support, routing and publication cadence remain unchanged.
 Physical returns also carry quantized elevation with their original sample tick
 and error bound. Vertical velocity requires two distinct paid physical samples;
 reports without measured height retain `None`. Held and relayed elevation stays

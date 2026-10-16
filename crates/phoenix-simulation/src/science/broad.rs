@@ -554,7 +554,7 @@ pub(crate) fn tick(
                 }
             }
             state
-                .advance(profile, tick.0, dt, paid.clamp(0.0, 1.0), &measurements)
+                .advance_live(profile, tick.0, dt, paid.clamp(0.0, 1.0), &measurements)
                 .expect("compiled broad profile and fixed physical observation must validate");
             phoenix_sim_gameplay::science::sharing::record_observer_pose(
                 state,

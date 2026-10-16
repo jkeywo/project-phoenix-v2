@@ -476,3 +476,32 @@ fn wrong_faction_and_real_comms_range_loss_leave_received_findings_historical() 
         serde_json::from_str(&json).unwrap();
     assert_eq!(&decoded, restored);
 }
+
+#[test]
+fn no_sender_delivery_at_processed_frontier_preserves_tracks_and_paid_work() {
+    use bevy::ecs::system::RunSystemOnce;
+    let (mut app, first, second) = rig();
+    step(&mut app, first);
+    // Repeat only delivery at the already-completed Broad frontier. No extra
+    // physical work, age, route refresh, share toggle or receipt is admitted.
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 -= 1;
+    let before: Vec<_> = [first, second]
+        .into_iter()
+        .map(|entity| {
+            (
+                entity,
+                app.world().get::<BroadTracks>(entity).unwrap().0.clone(),
+                app.world()
+                    .get::<ShipPowerSystem>(entity)
+                    .unwrap()
+                    .0
+                    .clone(),
+            )
+        })
+        .collect();
+    app.world_mut().run_system_once(deliver).unwrap();
+    for (entity, tracks, power) in before {
+        assert_eq!(app.world().get::<BroadTracks>(entity).unwrap().0, tracks);
+        assert_eq!(app.world().get::<ShipPowerSystem>(entity).unwrap().0, power);
+    }
+}

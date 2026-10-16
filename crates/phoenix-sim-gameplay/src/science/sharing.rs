@@ -114,12 +114,25 @@ pub fn projection(
     tick: u64,
     dt: f32,
 ) -> Result<Vec<SensorTrackSnapshot>, String> {
-    let mut records = state.projection(profile, tick, dt)?;
+    state.validate(profile, tick, dt)?;
+    projection_live(ship, state, profile, tick, dt)
+}
+
+/// Installed runtime owner; public ingress retains the validating projection.
+pub fn projection_live(
+    ship: &str,
+    state: &BroadTrackState,
+    profile: &BroadConfig,
+    tick: u64,
+    dt: f32,
+) -> Result<Vec<SensorTrackSnapshot>, String> {
+    let mut records = state.projection_live(profile, tick, dt);
+    let source = origin_handle(ship);
     for record in &mut records {
         if record.samples.is_empty() {
             let track = &state.tracks[&record.contact_id];
             let origin = RadarSampleOrigin {
-                source: origin_handle(ship),
+                source: source.clone(),
                 system: state.owner.clone(),
                 contact: record.contact_id.clone(),
             };
@@ -150,6 +163,12 @@ pub fn receive_samples(
 ) -> Result<(), String> {
     state.validate(profile, tick, dt)?;
     if !state.receive_shared {
+        return Ok(());
+    }
+    if samples.is_empty() {
+        // No receipt, allocation or pruning occurs in the empty transaction.
+        // Advancing this frontier still expires last-tick mechanical routes.
+        state.last_tick = Some(tick);
         return Ok(());
     }
     let mut next = state.clone();
@@ -273,9 +292,41 @@ pub fn receive_samples(
     Ok(())
 }
 
+/// Empty delivery on a validated runtime owner changes only the processing
+/// frontier. Nonempty packets keep the full transactional ingress boundary.
+pub fn receive_samples_live(
+    ship: &str,
+    state: &mut BroadTrackState,
+    profile: &BroadConfig,
+    tick: u64,
+    dt: f32,
+    samples: &[SharedRadarSample],
+) -> Result<(), String> {
+    if samples.is_empty() {
+        debug_assert!(state.validate(profile, tick, dt).is_ok());
+        if state.receive_shared {
+            state.last_tick = Some(tick);
+        }
+        return Ok(());
+    }
+    receive_samples(ship, state, profile, tick, dt, samples)
+}
+
 /// Conservative two-disc intersection. Useful independent geometry can reduce
 /// position uncertainty; no identity or condition is inferred by this function.
 pub fn refine_geometry(records: &mut Vec<SensorTrackSnapshot>) {
+    // Fusion needs two current originals from different observers. Ordinary
+    // single-observer pictures cannot change, so do not deep-clone their rows.
+    let mut origins = records
+        .iter()
+        .filter(|record| !record.predicted)
+        .filter_map(|record| record.samples.first().map(|sample| &sample.origin.source));
+    let Some(first) = origins.next() else {
+        return;
+    };
+    if origins.all(|source| source == first) {
+        return;
+    }
     let originals = records.to_vec();
     let mut removed = BTreeSet::new();
     for record in records.iter_mut() {

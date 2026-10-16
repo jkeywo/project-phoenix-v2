@@ -275,3 +275,47 @@ fn invalid_receipt_is_transactional_and_json_continuation_retains_the_same_sampl
         projection("receiver", &restored, &p, 3, 1.0).unwrap()
     );
 }
+
+#[test]
+fn empty_live_delivery_expires_routes_without_refreshing_original_evidence() {
+    let p = profile();
+    let source = observed(1, [20.0, 0.0], [-20.0, 0.0]);
+    let packet = export_samples("source", &source, &p, 1, 1.0).unwrap();
+    let mut receiver = BroadTrackState::new(&p);
+    receive_samples("receiver", &mut receiver, &p, 2, 1.0, &packet).unwrap();
+    let before = receiver.clone();
+    let id = receiver.tracks.keys().next().unwrap().clone();
+    assert!(receiver.resolve_current(&id).is_some());
+    let mut checked = receiver.clone();
+    receive_samples("receiver", &mut checked, &p, 3, 1.0, &[]).unwrap();
+    receive_samples_live("receiver", &mut receiver, &p, 3, 1.0, &[]).unwrap();
+    assert_eq!(receiver, checked);
+    assert_eq!(receiver.tracks, before.tracks);
+    assert_eq!(receiver.next_contact, before.next_contact);
+    assert_eq!(receiver.resolve_current(&id), None);
+    assert_eq!(
+        projection_live("receiver", &receiver, &p, 3, 1.0).unwrap(),
+        projection("receiver", &checked, &p, 3, 1.0).unwrap()
+    );
+    receiver.receive_shared = false;
+    let stopped = receiver.clone();
+    receive_samples_live("receiver", &mut receiver, &p, 4, 1.0, &[]).unwrap();
+    assert_eq!(receiver, stopped);
+}
+
+#[test]
+fn same_origin_fusion_keeps_each_contact_and_provenance_exactly() {
+    let p = profile();
+    let first = observed(1, [-2.0, 0.0], [-30.0, 0.0]);
+    let second = observed(1, [2.0, 0.0], [30.0, 0.0]);
+    let mut rows = projection("same-observer", &first, &p, 1, 1.0).unwrap();
+    let mut other = projection("same-observer", &second, &p, 1, 1.0)
+        .unwrap()
+        .remove(0);
+    other.contact_id.push_str("-other");
+    rows.push(other);
+    let before = rows.clone();
+    refine_geometry(&mut rows);
+    assert_eq!(rows, before);
+    // Cross-origin geometry remains exercised by the existing fusion tests.
+}

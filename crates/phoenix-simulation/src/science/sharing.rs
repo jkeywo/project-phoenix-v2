@@ -4,7 +4,10 @@ use crate::core::messages::{AdmittedCommands, SystemControlPayload, SystemId};
 use crate::entities::spawner::{EntityUuid, FactionComponent};
 use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
 use bevy::prelude::*;
-use phoenix_sim_gameplay::science::sharing::{export_samples, receive_samples, SharedRadarSample};
+pub(crate) use phoenix_sim_gameplay::science::sharing::projection_live;
+use phoenix_sim_gameplay::science::sharing::{
+    export_samples, receive_samples_live, SharedRadarSample,
+};
 pub use phoenix_sim_gameplay::science::sharing::{projection, ReceivedRadarSample};
 use std::collections::BTreeMap;
 
@@ -135,6 +138,22 @@ pub(crate) fn deliver(
     mut ships: ParamSet<(Query<Observer>, Query<&mut BroadTracks>)>,
 ) {
     let dt = fixed.timestep().as_secs_f32();
+    // Broad has already processed these owners this tick. With no deliberate
+    // sender, every receive would be an empty transaction at the same frontier:
+    // no route renewal, receipt or allocation can occur. Avoid cloning complete
+    // recipient configurations/profiles for this common default case.
+    if ships
+        .p0()
+        .iter()
+        .all(|(_, _, _, _, _, _, _, _, _, tracks, _, _)| {
+            tracks
+                .0
+                .values()
+                .all(|state| !state.share_own_faction && state.last_tick == Some(tick.0))
+        })
+    {
+        return;
+    }
     let mut feeds = Vec::new();
     let mut recipients = Vec::new();
     for (
@@ -261,7 +280,7 @@ pub(crate) fn deliver(
             // Source profiles and stored rows are already validated. Refusal
             // leaves this complete recipient owner unchanged.
             if let Err(error) =
-                receive_samples(&uuid, state, &profile.profile, tick.0, dt, &samples)
+                receive_samples_live(&uuid, state, &profile.profile, tick.0, dt, &samples)
             {
                 warn!("radar sharing refused malformed observation: {error}");
             }

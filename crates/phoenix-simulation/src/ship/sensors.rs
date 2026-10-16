@@ -999,7 +999,7 @@ pub fn publish_sensor_radar_blackboard(
                     .zip(tick.as_ref())
                     .zip(fixed.as_ref())
                     .and_then(|((state, tick), fixed)| {
-                        crate::science::sharing::projection(
+                        crate::science::sharing::projection_live(
                             &uuid?.0,
                             state,
                             profile,

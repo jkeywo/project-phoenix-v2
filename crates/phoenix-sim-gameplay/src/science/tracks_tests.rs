@@ -779,3 +779,49 @@ fn swapping_hidden_source_identifiers_does_not_change_anonymous_public_returns()
         "only private mechanical routing differs"
     );
 }
+
+#[test]
+fn live_lifecycle_preserves_paid_support_aging_ambiguity_and_restored_outputs() {
+    let mut p = profile();
+    p.sample_interval_secs = 1.0;
+    let mut checked = BroadTrackState::new(&p);
+    let mut live = checked.clone();
+    for tick in 0..40 {
+        let mut measurements = vec![sample("a", 20.0 + tick as f32 * 0.1)];
+        if (6..12).contains(&tick) {
+            measurements.push(sample("b", 20.2));
+        }
+        if (16..28).contains(&tick) {
+            measurements.clear();
+        }
+        let paid = if (10..15).contains(&tick) { 0.0 } else { 0.5 };
+        checked
+            .advance(&p, tick, 0.25, paid, &measurements)
+            .unwrap();
+        live.advance_live(&p, tick, 0.25, paid, &measurements)
+            .unwrap();
+        assert_eq!(live, checked, "canonical state differs at {tick}");
+        assert_eq!(
+            live.projection_live(&p, tick, 0.25),
+            checked.projection(&p, tick, 0.25).unwrap()
+        );
+        if tick == 18 {
+            live = serde_json::from_str(&serde_json::to_string(&live).unwrap()).unwrap();
+            live.validate(&p, tick, 0.25).unwrap();
+        }
+    }
+}
+
+#[test]
+fn checked_ingress_still_rejects_invalid_findings_transactionally() {
+    let mut p = profile();
+    p.identity_secs = 0.0;
+    let mut state = BroadTrackState::new(&p);
+    let mut invalid = sample("a", 20.0);
+    invalid.identity.as_mut().unwrap().name.clear();
+    let before = state.clone();
+    assert!(state.advance(&p, 0, 0.5, 1.0, &[invalid]).is_err());
+    assert_eq!(state, before);
+    state.owner = SystemId("foreign".into());
+    assert!(state.projection(&p, 0, 0.5).is_err());
+}

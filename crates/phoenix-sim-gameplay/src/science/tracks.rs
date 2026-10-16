@@ -353,6 +353,36 @@ impl BroadTrackState {
         measurements: &[BroadMeasurement],
     ) -> Result<(), String> {
         self.validate(profile, tick, fixed_dt)?;
+        let mut next = self.clone();
+        next.advance_inner(profile, tick, fixed_dt, paid_fraction, measurements)?;
+        next.validate(profile, tick, fixed_dt)?;
+        *self = next;
+        Ok(())
+    }
+    /// Runtime-only path for an installed profile and canonical state already
+    /// validated at construction/restore. Physical inputs still validate before
+    /// mutation; the shared lifecycle avoids cloning the complete held history.
+    pub fn advance_live(
+        &mut self,
+        profile: &BroadConfig,
+        tick: u64,
+        fixed_dt: f32,
+        paid_fraction: f32,
+        measurements: &[BroadMeasurement],
+    ) -> Result<(), String> {
+        debug_assert!(self.validate(profile, tick, fixed_dt).is_ok());
+        self.advance_inner(profile, tick, fixed_dt, paid_fraction, measurements)?;
+        debug_assert!(self.validate(profile, tick, fixed_dt).is_ok());
+        Ok(())
+    }
+    fn advance_inner(
+        &mut self,
+        profile: &BroadConfig,
+        tick: u64,
+        fixed_dt: f32,
+        paid_fraction: f32,
+        measurements: &[BroadMeasurement],
+    ) -> Result<(), String> {
         if !paid_fraction.is_finite() || !(0.0..=1.0).contains(&paid_fraction) {
             return Err("invalid paid broad work fraction".into());
         }
@@ -398,7 +428,7 @@ impl BroadTrackState {
         if self.last_tick.is_some_and(|last| tick < last) {
             return Err("broad work cannot rewind".into());
         }
-        let mut next = self.clone();
+        let next = self;
         next.last_tick = Some(tick);
         next.sample_elapsed += f64::from(fixed_dt);
         let due = next.last_sample_tick.is_none()
@@ -683,8 +713,6 @@ impl BroadTrackState {
                 || (tick - track.observed_tick) as f64 * f64::from(fixed_dt)
                     <= f64::from(profile.track_retention_secs)
         });
-        next.validate(profile, tick, fixed_dt)?;
-        *self = next;
         Ok(())
     }
     pub fn projection(
@@ -694,9 +722,19 @@ impl BroadTrackState {
         fixed_dt: f32,
     ) -> Result<Vec<SensorTrackSnapshot>, String> {
         self.validate(profile, tick, fixed_dt)?;
+        Ok(self.projection_live(profile, tick, fixed_dt))
+    }
+    /// Projection of installed, validated runtime state. External/saved inputs
+    /// must pass `validate` (or use `projection`) before reaching this path.
+    pub fn projection_live(
+        &self,
+        profile: &BroadConfig,
+        tick: u64,
+        fixed_dt: f32,
+    ) -> Vec<SensorTrackSnapshot> {
+        debug_assert!(self.validate(profile, tick, fixed_dt).is_ok());
         let current: BTreeSet<_> = self.current.values().collect();
-        Ok(self
-            .tracks
+        self.tracks
             .values()
             .map(|track| {
                 let (position, error) = prediction(track, tick, fixed_dt);
@@ -765,7 +803,7 @@ impl BroadTrackState {
                     },
                 }
             })
-            .collect())
+            .collect()
     }
 }
 fn report_metadata_valid(observation: &ObservationMetadata, tick: u64) -> bool {

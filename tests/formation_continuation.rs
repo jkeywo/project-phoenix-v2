@@ -12,7 +12,7 @@ use project_phoenix::{
     core::messages::{
         ClientMessage, GamePhase, SystemBlackboard, SystemControlPayload as Control, SystemId,
     },
-    entities::spawner::{EntityId, EntityUuid},
+    entities::spawner::{EntityId, EntityName, EntityUuid, WeaponsConsoleSection},
     headless::{build_headless_app, HeadlessArgs},
     lobby::{server::InboundMessage, Sessions},
     server_app::{LocalShip, ShipSystemBlackboards},
@@ -178,6 +178,29 @@ fn follower(app: &mut App) -> Entity {
         .find_map(|(entity, id)| (id.0 == "formation-wing").then_some(entity))
         .unwrap()
 }
+fn earned_leader_motion(app: &App, observer: Entity, public_name: &str) -> bool {
+    let config = &app.world().get::<ShipConfigComponent>(observer).unwrap().0;
+    let boards = app.world().get::<ShipSystemBlackboards>(observer).unwrap();
+    config
+        .observations_for_system(&id("navigation"), &boards.0)
+        .values()
+        .any(|board| {
+            let SystemBlackboard::TacticalRadar(board) = board else {
+                return false;
+            };
+            board.tracks.as_ref().is_some_and(|records| {
+                records.iter().any(|record| {
+                    !record.predicted
+                        && record.selectable
+                        && record.velocity.is_some()
+                        && record
+                            .identity
+                            .as_ref()
+                            .is_some_and(|identity| identity.name == public_name)
+                })
+            })
+        })
+}
 fn following(app: &App, actor: Entity) -> bool {
     let Some(waypoint) = app
         .world()
@@ -224,6 +247,37 @@ fn actual_human_form_up_drives_ordinary_backfill_motion_and_whole_json360_contin
         })
         .expect("actual own Comms roster must acquire the explicitly hailable receiver");
     assert_eq!(live.world().get::<EntityUuid>(wing).unwrap().0, receiver);
+    let slot = [10_i32, 20_i32];
+    let radar_range = live
+        .world()
+        .get::<WeaponsConsoleSection>(wing)
+        .unwrap()
+        .0
+        .radar
+        .as_ref()
+        .unwrap()
+        .range;
+    assert_eq!(
+        radar_range, 50.0,
+        "the ordinary hull radar remains unchanged"
+    );
+    assert!(
+        (slot[0] as f32).hypot(slot[1] as f32) < radar_range,
+        "the requested slot must fit inside the independently observed motion range"
+    );
+    // Only a prerequisite assertion uses the actual sender's public name. No
+    // private actor identity or position is supplied to Navigation or Helm.
+    let leader_name = live.world().get::<EntityName>(leader).unwrap().0.clone();
+    for _ in 0..1800 {
+        if earned_leader_motion(&live, wing, &leader_name) {
+            break;
+        }
+        live.update();
+    }
+    assert!(
+        earned_leader_motion(&live, wing, &leader_name),
+        "Navigation must independently earn the leader's public identity and motion through its permitted radar feed before coordination"
+    );
     control(
         &mut live,
         leader,
@@ -233,7 +287,7 @@ fn actual_human_form_up_drives_ordinary_backfill_motion_and_whole_json360_contin
             audience: CommsAudience::Contact {
                 target_uuid: receiver.clone(),
             },
-            request: GenericCommsRequest::FormUp { slot: [60, -160] },
+            request: GenericCommsRequest::FormUp { slot },
             planned_request: None,
         },
     );
@@ -249,7 +303,11 @@ fn actual_human_form_up_drives_ordinary_backfill_motion_and_whole_json360_contin
         }
         live.update();
     }
-    assert!(following(&live, wing), "ordinary paid reading, accepted coordination, earned identity, cleared Navigation and Helm travel must join without a synthetic order");
+    assert!(following(&live, wing), "ordinary paid reading, accepted coordination, earned identity, cleared Navigation and Helm travel must join without a synthetic order; waypoint={:?}, axes={:?}, paid_thrust={}",
+        live.world().get::<project_phoenix::console::navigation::NavigationWaypoint>(wing),
+        live.world().get::<HelmControlState>(wing),
+        live.world().get::<ShipPowerSystem>(wing).unwrap().0.emitted_work(&id("helm-thrust")));
+
     let own_uuid = live.world().get::<EntityUuid>(leader).unwrap().0.clone();
     let waypoint = live
         .world()

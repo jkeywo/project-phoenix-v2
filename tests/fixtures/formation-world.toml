@@ -14,7 +14,8 @@ template_path = "assets/entities/formation_cruiser.toml"
 id = "formation-wing"
 name = "formation-wing"
 spawn_on = "game_start"
-transform = { position = [0, 0, 120] }
+# Within the unchanged 50-unit TacticalRadar used by Navigation.
+transform = { position = [0, 0, 30] }
 [entity.overrides.comms]
 hailable = true
 display_name = "formation-wing"

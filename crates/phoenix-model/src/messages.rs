@@ -58,7 +58,8 @@ use uuid::Uuid;
 /// Revision 42 carries shared-loader priorities and explicit vessel-acquisition results.
 /// Revision 43 carries finite Radio listening priorities and dated contextual reports.
 /// Revision 44 carries explicitly known charted XYZ courses through Navigation.
-pub const PROTOCOL_VERSION: u32 = 44;
+/// Revision 45 carries planned vessel acquisition and configured physical marking payloads.
+pub const PROTOCOL_VERSION: u32 = 45;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).

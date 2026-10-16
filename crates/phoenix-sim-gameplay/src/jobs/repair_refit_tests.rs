@@ -35,6 +35,16 @@ fn refit_uses_real_route_then_holds_team_until_physical_return() {
     let mut teams = fixture();
     let id = claim(&mut teams);
     assert_eq!(teams.refit_job(1), Some(id));
+    let row = teams
+        .work_list()
+        .into_iter()
+        .find(|row| row.id == id)
+        .unwrap();
+    assert_eq!(row.target_system, Some(sid("a")));
+    assert!(
+        row.requested_work.is_none() && !row.sweeps_structure,
+        "real travelling Refit never projects a generic physical-repair footprint"
+    );
     assert_eq!(teams.free_team_indices(None), vec![1]);
     assert!(!teams.finish_refit(id));
     teams.tick_refits(1.0, &BTreeSet::new());

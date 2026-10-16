@@ -6437,3 +6437,22 @@ semantic_action.helm.follow_navigation.label,Explicit own formation control,Foll
 semantic_action.helm.follow_navigation.accessibility,Explicit own formation control,Follow or stop following the selected Navigation course on this axis,Follow or stop following the selected Navigation course on this axis,Follow or stop following the selected Navigation course on this axis,source
 semantic_action.navigation.formation.select.label,Explicit own formation control,Select formation course,Select formation course,Select formation course,source
 semantic_action.navigation.formation.select.accessibility,Explicit own formation control,Select the accepted formation request and measured leader for Navigation,Select the accepted formation request and measured leader for Navigation,Select the accepted formation request and measured leader for Navigation,source
+planning.intent.instruction,Accepted future repair intent,Planned repair {subject}: {requirements},,,
+planning.intent.wait_accepted,Accepted future repair intent,await assignment,,,
+planning.intent.wait_achieved,Accepted future repair intent,await useful work,,,
+planning.intent.wait_settled,Accepted future repair intent,await assignment settlement,,,
+planning.intent.wait_received,Accepted future repair intent,await delivery,,,
+planning.intent.wait_returned,Accepted future repair intent,await return,,,
+planning.intent.wait_communication_read,Accepted future repair intent,await message reading,,,
+planning.intent.wait_communication_reported,Accepted future repair intent,await report,,,
+planning.intent.wait_communication_declined,Accepted future repair intent,await refusal,,,
+planning.intent.wait_scenario_applied,Accepted future repair intent,await mission update,,,
+planning.intent.wait_release,Accepted future repair intent,await release,,,
+planning.intent.status_parts_unavailable,Accepted work monitoring,Blocked: waiting for local parts,,,
+planning.intent.status_route_unavailable,Accepted work monitoring,Blocked: no available team route,,,
+planning.intent.status_available,Accepted work monitoring,Block cleared; awaiting normal dispatch,,,
+planning.intent.status_restored_externally,Accepted work monitoring,Target already restored; no repair job credited,,,
+planning.intent.consequence_pending,Accepted work monitoring,Scenario consequence pending,,,
+planning.intent.consequence_applied,Accepted work monitoring,Scenario consequence applied,,,
+planning.intent.consequence_refused,Accepted work monitoring,Scenario consequence refused,,,
+planning.intent.status_work_in_progress,Accepted work monitoring,Blocked: another team already works on this target,,,

@@ -1052,6 +1052,17 @@ pub(crate) fn publish_repair_blackboard(
             .map(|config| repair_group_definitions(&config.0, &damageable_systems))
             .unwrap_or_default();
         let mut bb = RepairBlackboard {
+            planned_intents: actor
+                .map(|actor| {
+                    crate::world::planning::repair_intents(
+                        runtime.as_deref(),
+                        base_world.as_deref(),
+                        &actor.0,
+                        &repair_system_id(),
+                        tick.as_ref().map_or(0, |tick| tick.0),
+                    )
+                })
+                .unwrap_or_default(),
             planned_requests: actor
                 .map(|actor| {
                     crate::world::planning::repair_requests(
@@ -1502,6 +1513,47 @@ pub(crate) fn prune_repair_request_queue(
     }
 }
 
+/// A generic group visit can sweep its actual equipment compartment. Hold only
+/// that footprint while an exact accepted order is still unaccepted; unrelated
+/// groups and teams remain ordinary candidates. This creates no reservation.
+fn generic_repair_preempts_intent(
+    group: &RepairGroup,
+    intents: &[phoenix_model::activity::PlannedRepairIntent],
+    config: &crate::ship::config::ShipConfig,
+    damage: &crate::ship::compartment_damage::ShipDamage,
+) -> bool {
+    let Some(system) =
+        super::dispatch::resolve_physical_repair_target(&group.target(), config, damage)
+    else {
+        return false;
+    };
+    let Some(room) = damage.definition.interior.placements.get(&system) else {
+        return false;
+    };
+    intents
+        .iter()
+        .filter(|intent| {
+            intent.disposition.as_ref().is_none_or(|status| {
+                status.kind
+                    != phoenix_model::activity::PlannedRepairDispositionKind::RestoredExternally
+            })
+        })
+        .any(|intent| match &intent.target {
+            phoenix_model::damage::RepairWorkTarget::Compartment { compartment } => {
+                compartment == room
+            }
+            phoenix_model::damage::RepairWorkTarget::Component { system, component } => {
+                damage
+                    .definition
+                    .component_room(&phoenix_model::damage::ComponentRef {
+                        system: system.clone(),
+                        component: component.clone(),
+                    })
+                    == Some(room.as_str())
+            }
+        })
+}
+
 /// Per-kind AI loop for repair. Iterates every ship (`With<Ship>`) whose
 /// Repair system is `ControlSource::Ai` and dispatches its idle teams to the
 /// stations the AUTHORED [`RepairTargetSelector`] ranks highest. Ships with no
@@ -1655,16 +1707,19 @@ pub fn operate_repair_ai(
         {
             continue;
         }
+        // Human and AI consume this same own-Console mission publication.
+        // Hosting another tab does not pool its work or observation scope.
+        let own_repair_view = config_comp.zip(boards).map(|(config, boards)| {
+            config
+                .0
+                .observations_for_system(&repair_system_id(), &boards.0)
+        });
         // A mission instruction changes intent, not diagnosis. A current
         // ordinary Repair report must independently identify this visit's group.
         if let (Some(teams), Some(queue), Some(config), Some(damage)) =
             (teams_comp, repair_queue_comp, config_comp, physical)
         {
-            let permitted = boards.map(|boards| {
-                config
-                    .0
-                    .observations_for_system(&repair_system_id(), &boards.0)
-            });
+            let permitted = &own_repair_view;
             if let Some(crate::core::messages::SystemBlackboard::Repair(board)) = permitted
                 .as_ref()
                 .and_then(|view| view.get(&repair_system_id()))
@@ -1873,6 +1928,20 @@ pub fn operate_repair_ai(
                     let mut candidates: Vec<_> = queue
                         .entries
                         .iter()
+                        .filter(|entry| {
+                            let Some(SystemBlackboard::Repair(board)) = own_repair_view
+                                .as_ref()
+                                .and_then(|view| view.get(&repair_system_id()))
+                            else {
+                                return true;
+                            };
+                            !generic_repair_preempts_intent(
+                                &entry.group,
+                                &board.planned_intents,
+                                &config.0,
+                                damage,
+                            )
+                        })
                         .map(|entry| {
                             let key = entry.group.selector_key();
                             let system_count = config

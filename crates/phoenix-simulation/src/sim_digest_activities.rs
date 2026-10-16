@@ -308,10 +308,103 @@ pub(super) fn plan(mut acc: u64, value: &phoenix_sim_world::world::planning::Pla
             &value.temporal_reconsiderations,
         );
     }
+    if !value.node_dispositions.is_empty() {
+        let mut normalized = value.node_dispositions.clone();
+        for row in normalized.values_mut() {
+            for reading in [&mut row.first, &mut row.latest] {
+                if reading.hp == 0.0 {
+                    reading.hp = 0.0;
+                }
+                if reading.max_hp == 0.0 {
+                    reading.max_hp = 0.0;
+                }
+            }
+        }
+        acc = fold_serde(fold_str(acc, "plan-node-dispositions"), &normalized);
+    }
     acc = fold_u64(acc, value.released.len() as u64);
     for (node, tick) in &value.released {
         acc = fold_str(acc, node);
         acc = fold_u64(acc, *tick);
     }
     acc
+}
+
+#[cfg(test)]
+mod disposition_digest_tests {
+    use super::*;
+    use phoenix_sim_world::world::planning::*;
+    #[test]
+    fn node_readings_canonicalize_zero_and_retain_meaningful_changes() {
+        let mut choice:PlanChoice=serde_json::from_value(serde_json::json!({"id":"maintenance","execution":{"kind":"optional","source":"maintenance","ordinal":1},"root_arguments":{},"chosen_tick":1,"actor_uuid":"actor","released":{},"methods":{}})).unwrap();
+        let reading = PlanNodeReading {
+            observation: phoenix_model::observation::ObservationMetadata::at(
+                2,
+                phoenix_model::observation::ObservationSubject::System {
+                    id: phoenix_model::identity::SystemId("power".into()),
+                },
+                phoenix_model::observation::ObservationProvenance {
+                    kind: phoenix_model::observation::ObservationSource::Evidence,
+                    system: Some(phoenix_model::identity::SystemId("repair".into())),
+                    label: String::new(),
+                },
+                phoenix_model::observation::ObservationUncertainty::Qualitative,
+            )
+            .received(2),
+            hp: -0.0,
+            max_hp: 100.0,
+            local_available: Some(0),
+            required_parts: 1,
+            route_available: Some(true),
+            other_work: None,
+            reason: PlanNodeReason::PartsUnavailable,
+        };
+        choice.node_dispositions.insert(
+            "step-0".into(),
+            PlanNodeDisposition {
+                first: reading.clone(),
+                latest: reading,
+                consequence: None,
+            },
+        );
+        let original = plan(7, &choice);
+        let mut positive = choice.clone();
+        positive
+            .node_dispositions
+            .get_mut("step-0")
+            .unwrap()
+            .first
+            .hp = 0.0;
+        positive
+            .node_dispositions
+            .get_mut("step-0")
+            .unwrap()
+            .latest
+            .hp = 0.0;
+        assert_eq!(original, plan(7, &positive), "canonical zero equality");
+        positive
+            .node_dispositions
+            .get_mut("step-0")
+            .unwrap()
+            .latest
+            .hp = 1.0;
+        assert_ne!(
+            original,
+            plan(7, &positive),
+            "meaningful HP difference remains exact"
+        );
+        let mut clock = choice.clone();
+        clock
+            .node_dispositions
+            .get_mut("step-0")
+            .unwrap()
+            .latest
+            .observation
+            .observed_tick = Some(3);
+        assert_ne!(
+            original,
+            plan(7, &clock),
+            "original evidence clocks participate"
+        );
+    }
 }

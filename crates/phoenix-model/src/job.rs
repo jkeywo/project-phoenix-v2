@@ -39,6 +39,12 @@ pub struct JobWorkItem {
     pub paused: bool,
     pub workflow_error: bool,
     pub target_work: Option<crate::damage::RepairWorkTarget>,
+    /// Original exact order, distinct from the currently executing remedy stage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_work: Option<crate::damage::RepairWorkTarget>,
+    /// A real generic physical-repair visit; absent exact target alone is not one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sweeps_structure: bool,
     /// Completed thousandths of the current bounded stage, not System HP.
     pub work_progress: Option<u16>,
     pub waiting_parts: bool,

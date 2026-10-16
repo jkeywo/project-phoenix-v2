@@ -267,13 +267,15 @@ pub fn handle_dispatch_repair_team(
                     if let (Some(job), Some(runtime), Some(actor), Some(tick)) =
                         (accepted, world_runtime.as_deref_mut(), actor, tick.as_ref())
                     {
-                        if let Err(error) = runtime.situations.accept_repair(
+                        let excluded = crate::world::planning_monitor::withheld_instances(runtime);
+                        if let Err(error) = runtime.situations.accept_repair_excluding(
                             &actor.0,
                             &teams.0.job_state().jobs.owner,
                             u32::from(*team_idx),
                             repair_target,
                             job,
                             tick.0,
+                            &excluded,
                         ) {
                             warn!(%error, "Accepted Repair job could not bind its activity");
                         }

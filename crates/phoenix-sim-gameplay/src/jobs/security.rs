@@ -174,6 +174,8 @@ impl SecurityJobs {
                             .is_some_and(|cursor| cursor.blocked),
                     workflow_error: job.workflow_error,
                     target_work: None,
+                    requested_work: None,
+                    sweeps_structure: false,
                     work_progress: None,
                     waiting_parts: false,
                 })

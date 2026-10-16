@@ -257,3 +257,129 @@ A bound on_pick must return the closed Accept/Decline decision: a missing decisi
 or absent node refuses before effects or response selection, leaving the actual
 offer answerable. Historical preflight checks exact source/ref/actor/clocks and
 reserved promise absence, including an empty optional-record history.
+
+
+## Accepted prerequisite intent and explicit changed work
+
+This bounded runtime is implemented on the worker branch; native execution remains pending. Independent source review covers the
+complete bounded disposition joins. It extends the same generated
+maintenance child and introduces no physical executor.
+
+### Permitted intent and ordinary priority
+
+Publish an accepted future Repair leaf to that actor's controlling Repair Console,
+including its exact source-derived identity, team, requested visit, target, goal and
+unsatisfied prerequisite identity/condition. Distinguish waiting intent, a released
+request and actual accepted work. Do not present a forecast as a damage diagnosis
+or reserve a team, parts, route or JobId. Co-hosted Consoles gain no extra feeds.
+The ordinary Repair AI consumes the same own permitted intent in every control
+handoff; temporary Backfill introduces no special policy.
+
+Before the prerequisite is satisfied, compare each ordinary Repair candidate's
+actual router-resolved work footprint against the waiting exact target. Exclude
+only candidates that would prematurely perform that work, for every available
+team. Other rooms/groups and urgent unrelated work remain ordinary candidates;
+no actor-wide or team-wide hold is permitted. Once released, the existing planned
+request path and normal team/resource/route admission decide whether a real Job
+starts. Existing report requirements still apply. Busy teams do not become free
+because an order exists. Discovery continues to refuse already-owned work rather
+than stealing a job from ordinary automation.
+
+### Actual monitoring and retained node disposition
+
+Use the common Decomposition/PlanChoice boundary for dated future/unaccepted-node
+dispositions. A disposition is distinct from Accepted, RepairAchieved, settlement
+and Scenario application. It cannot carry a fake JobId or retroactively bind an
+unscoped job. Keep the original choice, released ticks, source, methods and deadline.
+Do not erase an already released historical leaf.
+
+The first closed terminal cause is externally changed work: the exact intended
+structural target is no longer in need before this leaf accepts a Job. Record the
+actual own permitted observation and tick that established this cause. This
+explains why a normal Human or independent repair can make frozen future work
+unnecessary; it does not claim the mission's scoped machinery performed it.
+Temporary current resource/route unavailability must instead be an explicit blocked
+state, preserving the same plan. Any recovery keeps the original choice/deadline
+and retains the dated cause; it does not silently choose a replacement method.
+Actual ongoing jobs keep their ordinary cancellation/return/settlement lifecycle.
+
+A terminal disposition can satisfy only an explicitly authored changed-work
+consequence, never a physical-achievement prerequisite. The source author decides
+the Promise consequence through the existing successful Scenario effect boundary;
+there is no automatic success credit. Prior actual physical work must still settle
+before another optional execution can reuse its resources. Normal own-Comms status
+and existing inspection must expose blocked/changed/refused work so crew can act.
+
+### Required evidence
+
+Prove the accepted missing-parts opportunity with Engineering delegated before
+Delivery begins: the ordinary Repair controller must wait, Logistics must deliver
+real parts, and only then may the released Repair leaf bind actual paid work.
+Also exercise a separate unrelated damaged group while the prerequisite waits.
+
+Prove a normal Human override or independent actual repair using another team:
+it remains admitted, cannot credit the unaccepted frozen leaf, and produces the
+explicit changed-work disposition and authored consequence. Retain original work
+and compare fresh-JSON continuation across waiting, override and disposition
+frontiers. Candidate preflight must reject forged target/cause/clocks, erased
+history and dispositions that contradict an already accepted scoped job.
+
+
+### Bounded implementation and evidence, 16 October 2026
+
+The common graph publishes accepted, unaccepted Repair intent through its own
+Console, including the original identity/team/target and actual acknowledged
+prerequisite booleans. The technical aggregate bound is 288 rows: one primary
+32-leaf graph plus eight retained optional graphs, without truncation. Ordinary
+Repair AI filters generic visits by their actual router-resolved compartment
+footprint for every free team; unrelated reported groups remain eligible. This
+uses the same controller and feed after delegation.
+
+Only the generated maintenance source currently supports dispositions, and only
+its final compartment Structure leaf. The source must declare a real one-context
+`changed_work = {script, function}` callback in the accepted World script closure.
+Unsupported activity families/targets cannot acquire a disposition. Retain at
+most first and latest observations per node. Current blockers are missing local
+parts, an unavailable known route, or another own visible job already performing
+that exact footprint. A dated cleared observation restores normal admission;
+original choices, deadlines and released ticks stay fixed. An observed job is
+never rebound or credited as the future leaf's execution.
+
+Reasons are derived from the actual own Repair, Stock and route/boundary views.
+The GUI presents readonly blocked/cleared/changed status with the callback's
+pending/applied/refused result. A restored target becomes immutable external
+change only before scoped Job acceptance. The existing trigger application body
+invokes its exact authored consequence using the same sandbox and shared tick
+budget. No Situation or Job is invented, and the callback alone chooses any
+Promise resolution. Actual earlier physical work and callbacks must still settle
+before subsequent admission. A refused consequence cannot establish settlement.
+
+Source-only projection review passed independently. Eleven targeted client tests
+pass, including multi-graph bounds, readonly status and no premature dispatch;
+strict string validation is rerun at handoff. New native owner tests cover exact
+footprints, real ordinary-AI dispatch to unrelated work, bounded blocked/cleared
+history, original clocks, manual binding exclusion and unfinished prior physical
+assignments. Two further full-host probes cover ordinary AI starting both useful
+Delivery and Repair after delegation, and a Human's other-team manual override
+followed by delegation. Each captures actual paid partial work, restores fresh
+JSON and compares 1200 complete state/digest updates; malformed cause/target/tick
+candidates must refuse before writes. These native tests are authored, not yet
+executed by this worker. Independent disposition source review passed after the footprint and signed-zero
+corrections; integration-owner native evidence remains required. This is not a 2/6-player acceptance result.
+
+A retained published disposition must agree exactly with canonical frozen node
+history. The candidate guards establish structural/provenance/clock consistency;
+they do not authenticate arbitrary coordinated replacement of every saved fact.
+No second action ledger is added for that purpose. Comms forwarding of these
+Repair statuses, richer visual opportunity authoring, broader plan repair and
+pacing remain separate work, as do the remaining full 23/24 playable exits.
+
+
+Review corrections keep the actual work footprint precise: ordinary work lists
+project their existing requested repair target and a generic physical-sweep flag.
+An absent exact target alone never makes Refit, Treatment or transfer a structural
+sweep. Component-only repair remains independent. These fields are derived from
+existing assignment/activity state, not another owner. Canonical disposition
+folding normalizes signed zero while preserving exact HP/clock differences.
+The post-delegation override checkpoint explicitly retains the same actual Job
+and paid partial progress before fresh-JSON capture.

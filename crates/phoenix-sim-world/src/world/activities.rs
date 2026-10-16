@@ -455,7 +455,7 @@ impl SituationInstances {
         owner: &SystemId,
         job: JobId,
         tick: u64,
-        matches: impl Fn(&ActivityRequest) -> bool,
+        matches: impl Fn(&str, &ActivityRequest) -> bool,
     ) -> Result<Option<String>, String> {
         if job.0 == 0 {
             return Err("invalid accepted activity JobId".into());
@@ -469,11 +469,11 @@ impl SituationInstances {
         let candidates: Vec<_> = self
             .instances
             .iter()
-            .filter(|(_, instance)| {
+            .filter(|(id, instance)| {
                 instance.accepted.is_none()
                     && instance.request.actor() == actor
                     && instance.request.owner() == owner
-                    && matches(&instance.request)
+                    && matches(id, &instance.request)
             })
             .map(|(id, _)| id.clone())
             .collect();
@@ -505,7 +505,22 @@ impl SituationInstances {
         job: JobId,
         tick: u64,
     ) -> Result<Option<String>, String> {
-        self.accept(actor,owner,job,tick,|binding|matches!(binding,ActivityRequest::Repair {team:expected,request:actual,..} if *expected==team&&actual==request))
+        self.accept(actor,owner,job,tick,|_,binding|matches!(binding,ActivityRequest::Repair {team:expected,request:actual,..} if *expected==team&&actual==request))
+    }
+    /// Human machinery remains admitted, but a withheld frozen plan node cannot
+    /// retroactively claim its ordinary unscoped work.
+    #[allow(clippy::too_many_arguments)]
+    pub fn accept_repair_excluding(
+        &mut self,
+        actor: &str,
+        owner: &SystemId,
+        team: u32,
+        request: &phoenix_model::messages::RepairTarget,
+        job: JobId,
+        tick: u64,
+        excluded: &BTreeSet<String>,
+    ) -> Result<Option<String>, String> {
+        self.accept(actor,owner,job,tick,|id,binding|!excluded.contains(id) && matches!(binding,ActivityRequest::Repair{team:expected,request:actual,..} if *expected==team && actual==request))
     }
     #[allow(clippy::too_many_arguments)]
     pub fn accept_delivery(
@@ -519,7 +534,7 @@ impl SituationInstances {
         job: JobId,
         tick: u64,
     ) -> Result<Option<String>, String> {
-        self.accept(actor,owner,job,tick,|request|matches!(request,ActivityRequest::Delivery {source:a,destination:b,commodity:c,amount:n,..} if a==source&&b==destination&&c==commodity&&*n==amount))
+        self.accept(actor,owner,job,tick,|_,request|matches!(request,ActivityRequest::Delivery {source:a,destination:b,commodity:c,amount:n,..} if a==source&&b==destination&&c==commodity&&*n==amount))
     }
     /// Select only a bound, still-reserved evidence slot. Pending events are
     /// checked by the adapter before enqueueing; no later physical polling.

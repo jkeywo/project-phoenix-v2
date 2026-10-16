@@ -5690,6 +5690,9 @@ pub struct QueueEntryPreview {
 /// blackboard (issue #564).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct RepairBlackboard {
+    /// Accepted future work; this reserves no team, resource, route or JobId.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub planned_intents: Vec<crate::activity::PlannedRepairIntent>,
     /// Exact own-System mission instructions; no hidden condition claims.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub planned_requests: Vec<crate::activity::PlannedRepairRequest>,

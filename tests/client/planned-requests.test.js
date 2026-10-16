@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import {afterEach,expect,it,vi} from 'vitest';
-import {plannedRequests,plannedRepairDispatch,plannedDeliveryDispatch} from '../../gui/planned-requests.js';
+import {plannedRequests,plannedRepairDispatch,plannedDeliveryDispatch,plannedRepairIntents} from '../../gui/planned-requests.js';
 import {buildRepairConsoleState,buildLogisticsConsoleState} from '../../gui/console-state.js';
 import {createEngineeringActionRegistry,REPAIR_DISPATCH_ACTION_ID} from '../../gui/stations/engineering-actions.js';
 import {LOGISTICS_ACTION_IDS} from '../../gui/stations/logistics-actions.js';
@@ -61,4 +61,47 @@ it('real Repair and Logistics widgets render voluntary mission instructions with
   expect(activate).not.toHaveBeenCalled();expect(repair.shadowRoot.querySelector('#planned-requests').textContent).toContain('Requested work');
   repair.shadowRoot.querySelector('#planned-requests button').click();expect(activate).toHaveBeenLastCalledWith(REPAIR_DISPATCH_ACTION_ID,expect.objectContaining({detail:{planned_request:'htn/maintenance/root/restore'}}));
   const offered=[...delivery.shadowRoot.querySelectorAll('button')].find(button=>button.textContent==='Undertake');expect(offered).toBeTruthy();offered.click();expect(activate).toHaveBeenLastCalledWith(LOGISTICS_ACTION_IDS.dispatch,expect.objectContaining({detail:{planned_request:'htn/maintenance/root/resupply'}}));
+});
+
+const future=()=>({id:'htn-optional/maintenance/1/step-1',chosen_tick:10,released_tick:null,team:0,request:{type:'Work',data:work},target:work,goal:'structure',prerequisites:[{id:'htn-optional/maintenance/1/step-0',condition:{kind:'received'},satisfied:false}]});
+it('accepted future intent stays read-only and is not a released dispatch',()=>{
+  const row=future();expect(plannedRepairIntents([row])).toEqual([row]);
+  const state={blackboardKinds:{repair:'Repair'},blackboards:{repair:{planned_intents:[row],teams:[]}},controlSources:{repair:'Human'}};
+  const view=buildRepairConsoleState(state,['repair']);
+  expect(view.planned_intents).toEqual([row]);expect(view.planned_requests).toBeUndefined();
+  expect(plannedRepairDispatch({...view,planned_controllable:true},row.id)).toBeNull();
+  const widget=document.createElement('ph-repair-teams');document.body.append(widget);widget.state={...view,auto:false};
+  const waiting=widget.shadowRoot.querySelector('#planned-intents');expect(waiting.textContent).toContain('await delivery');
+  expect(waiting.querySelector('button,input,select')).toBeNull();
+  expect(widget.shadowRoot.querySelector('#planned-requests').hidden).toBe(true);
+});
+it('future intent rejects inconsistent targets, invented fields and unsupported prerequisites',()=>{
+  for(const row of [{...future(),current_hp:0},{...future(),released_tick:9},{...future(),team:300},{...future(),target:{kind:'compartment',compartment:'foreign'}},{...future(),prerequisites:[{id:'foreign',condition:{kind:'teleport'},satisfied:true}]}])expect(plannedRepairIntents([row])).toEqual([]);
+  const row=future();row.target={kind:'compartment',compartment:'<img onerror=attack>'};row.request={type:'Work',data:row.target};
+  const widget=document.createElement('ph-repair-teams');document.body.append(widget);widget.state={planned_intents:plannedRepairIntents([row]),teams:[],auto:false};
+  expect(widget.shadowRoot.querySelector('#planned-intents').textContent).toContain('<img onerror=attack>');
+  expect(widget.shadowRoot.querySelector('#planned-intents img')).toBeNull();
+});
+
+it('future intent aggregates distinct primary and optional execution graphs without truncation',()=>{
+  const rows=Array.from({length:40},(_,index)=>({...future(),id:index<24?`htn/base/root/${index}`:`htn-optional/maintenance/${1+Math.floor((index-24)/8)}/step-${index%8}`}));
+  expect(plannedRepairIntents(rows)).toEqual(rows);
+  const bound=Array.from({length:288},(_,index)=>({...future(),id:`bounded/${index}`}));
+  expect(plannedRepairIntents(bound)).toHaveLength(288);
+  expect(plannedRepairIntents([...bound,{...future(),id:'over-bound'}])).toEqual([]);
+});
+
+it('changed or blocked work remains informational after release and never becomes physical credit',()=>{
+  const row={...future(),released_tick:12,disposition:{kind:'restored_externally',tick:14,consequence_applied:null}};
+  const accepted=plannedRepairIntents([row]);expect(accepted).toEqual([row]);
+  const widget=document.createElement('ph-repair-teams');document.body.append(widget);widget.state={planned_intents:accepted,teams:[],auto:false};
+  const panel=widget.shadowRoot.querySelector('#planned-intents');expect(panel.hidden).toBe(false);expect(panel.textContent).toContain('no repair job credited');expect(panel.querySelector('button')).toBeNull();
+  for(const disposition of [{...row.disposition,kind:'teleported'},{...row.disposition,tick:9},{...row.disposition,kind:'parts_unavailable',consequence_applied:true}])expect(plannedRepairIntents([{...row,disposition}])).toEqual([]);
+});
+
+it('future intent accepts full source-scoped identity and valid repeated predecessor conditions',()=>{
+  const row={...future(),id:`htn/${'s'.repeat(64)}/${'n'.repeat(1024)}`,prerequisites:Array.from({length:32},(_,index)=>[{id:`predecessor/${index}`,condition:{kind:'accepted'},satisfied:true},{id:`predecessor/${index}`,condition:{kind:'achieved'},satisfied:false}]).flat()};
+  expect(plannedRepairIntents([row])).toEqual([row]);
+  row.prerequisites.push({id:'predecessor/0',condition:{kind:'accepted'},satisfied:true});
+  expect(plannedRepairIntents([row])).toEqual([]);
 });

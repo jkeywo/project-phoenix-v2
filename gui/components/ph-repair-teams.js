@@ -1,4 +1,4 @@
-import {renderPlannedRequests} from './planned-requests.js';
+import {renderPlannedRequests,renderPlannedRepairIntents} from './planned-requests.js';
 // strings-boot first: its top-level await delays this module's evaluation —
 // and therefore this element's registration and upgrade — until the string
 // table is loaded, so the constructor's template t() calls never see an
@@ -177,6 +177,7 @@ export class PhRepairTeams extends PhElement {
   </div>
   <div id="teams-container"></div>
   <section id="personnel-controls" hidden></section>
+  <section id="planned-intents" hidden></section>
   <section id="planned-requests" hidden></section>
   <div id="observation-reports"></div>
   <div id="job-work-list" role="status"></div>
@@ -500,6 +501,7 @@ export class PhRepairTeams extends PhElement {
   #render() {
     const s = this.#state || {};
     renderPersonnelControls(this.shadowRoot.getElementById('personnel-controls'), s, this);
+    renderPlannedRepairIntents(this.shadowRoot.getElementById('planned-intents'),s);
     renderPlannedRequests(this.shadowRoot.getElementById('planned-requests'),s,id=>activateEngineeringAction(this,REPAIR_DISPATCH_ACTION_ID,{planned_request:id}));
     renderInteriorMap(this.shadowRoot.getElementById('interior-map'), {
       ...s, selectedTeam: this.#selectedTeamId,

@@ -255,7 +255,7 @@ impl PlanExecution {
 }
 /// The one saved choice frontier. Definitions and expanded leaves are derived
 /// from frozen content; SituationInstances own physical acceptance and evidence.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlanChoice {
     pub id: String,
@@ -277,4 +277,75 @@ pub struct PlanChoice {
     pub temporal: Option<super::temporal::TemporalCommitment>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub temporal_reconsiderations: Vec<super::temporal::TemporalReconsideration>,
+    /// Nonphysical monitoring of an exact frozen node, never execution credit.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub node_dispositions: BTreeMap<String, PlanNodeDisposition>,
+}
+
+/// A derived own-owner order; definitions and observations remain with the plan.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlanIntentRequest {
+    pub config: crate::world::activities::SituationConfig,
+    pub chosen_tick: u64,
+    pub released_tick: Option<u64>,
+    pub prerequisites: Vec<phoenix_model::activity::PlannedPrerequisite>,
+    pub disposition: Option<phoenix_model::activity::PlannedRepairDisposition>,
+}
+
+/// Bounded monitoring evidence read from the issuing owner's permitted Console.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanNodeReason {
+    PartsUnavailable,
+    RouteUnavailable,
+    WorkInProgress,
+    Available,
+    RestoredExternally,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanNodeReading {
+    pub observation: phoenix_model::observation::ObservationMetadata,
+    pub hp: f64,
+    pub max_hp: f64,
+    pub local_available: Option<i64>,
+    pub required_parts: i64,
+    pub route_available: Option<bool>,
+    pub other_work: Option<phoenix_model::job::JobWorkItem>,
+    pub reason: PlanNodeReason,
+}
+impl PlanNodeReading {
+    pub fn tick(&self) -> Option<u64> {
+        self.observation.received_tick
+    }
+    pub fn terminal(&self) -> bool {
+        self.reason == PlanNodeReason::RestoredExternally
+    }
+    pub fn blocked(&self) -> bool {
+        matches!(
+            self.reason,
+            PlanNodeReason::PartsUnavailable
+                | PlanNodeReason::RouteUnavailable
+                | PlanNodeReason::WorkInProgress
+        )
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanNodeCallReceipt {
+    pub tick: u64,
+    pub result: crate::world::activities::ScenarioCallResult,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanNodeDisposition {
+    pub first: PlanNodeReading,
+    pub latest: PlanNodeReading,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consequence: Option<PlanNodeCallReceipt>,
+}
+impl PlanNodeDisposition {
+    pub fn withheld(&self) -> bool {
+        self.latest.blocked() || self.latest.terminal()
+    }
 }

@@ -801,6 +801,16 @@ impl RepairTeams {
                     outcome: job.outcome,
                     paused: job.paused,
                     workflow_error: job.workflow_error,
+                    sweeps_structure: self
+                        .state
+                        .physical_work
+                        .get(&job.id.0)
+                        .is_some_and(|work| work.requested_target.is_none()),
+                    requested_work: self
+                        .state
+                        .physical_work
+                        .get(&job.id.0)
+                        .and_then(|work| work.requested_target.clone()),
                     target_work: self
                         .state
                         .physical_work

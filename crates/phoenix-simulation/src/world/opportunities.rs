@@ -429,6 +429,67 @@ pub(crate) fn validate_history(
                 }
                 let graph = source.derive(&record.reference, input, &record.proposal)?;
                 graph.validate_history(choice, &stored.situations, snapshot.tick)?;
+                for (node, disposition) in &choice.node_dispositions {
+                    let phoenix_sim_world::world::activities::ActivityRequest::Repair {
+                        target: phoenix_model::damage::RepairWorkTarget::Compartment { compartment },
+                        ..
+                    } = &graph.leaves[node].request
+                    else {
+                        return Err("unsupported changed-work target".into());
+                    };
+                    let layout = recipe
+                        .interior
+                        .as_ref()
+                        .ok_or("missing changed-work layout")?;
+                    let room = layout
+                        .compartments
+                        .iter()
+                        .find(|room| &room.id == compartment)
+                        .ok_or("missing changed-work room")?;
+                    for reading in [&disposition.first, &disposition.latest] {
+                        let phoenix_model::observation::ObservationSubject::System { id: subject } =
+                            &reading.observation.subject
+                        else {
+                            return Err(
+                                "changed-work evidence lacks actual own System subject".into()
+                            );
+                        };
+                        if let Some(work) = &reading.other_work {
+                            let target_room = match &work.requested_work {
+                                Some(phoenix_model::damage::RepairWorkTarget::Compartment {
+                                    compartment,
+                                }) => Some(compartment),
+                                Some(phoenix_model::damage::RepairWorkTarget::Component {
+                                    ..
+                                }) => None,
+                                None if work.sweeps_structure => work
+                                    .target_system
+                                    .as_ref()
+                                    .and_then(|system| layout.placements.get(system)),
+                                None => None,
+                            };
+                            if work.sweeps_structure && work.requested_work.is_some()
+                                || work.owner != source.config.repair_owner
+                                || target_room != Some(compartment)
+                                || work.team_idx
+                                    >= recipe
+                                        .repair
+                                        .as_ref()
+                                        .ok_or("missing actual Repair profile")?
+                                        .repair_team_count
+                            {
+                                return Err("blocked-work observation leaves its accepted own work footprint".into());
+                            }
+                        }
+                        if layout.placements.get(subject) != Some(compartment)
+                            || reading.max_hp != f64::from(room.max_hp)
+                            || reading.required_parts != input.required_parts
+                        {
+                            return Err("changed-work observation replaces the actual accepted target or recipe".into());
+                        }
+                    }
+                }
+
                 let settled = graph.settled_tick(choice, &stored.situations, snapshot.tick)?;
                 graphs.push((choice.clone(), graph));
                 settled
@@ -490,6 +551,7 @@ fn choice(record: &OpportunityRecord, now: u64) -> PlanChoice {
         refused_methods: Vec::new(),
         temporal: None,
         temporal_reconsiderations: Vec::new(),
+        node_dispositions: BTreeMap::new(),
     }
 }
 /// Conservative first join: prior work must actually settle and callbacks end.

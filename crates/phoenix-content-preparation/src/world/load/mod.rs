@@ -791,6 +791,12 @@ fn validate_opportunity_scripts(
     if !has(&source.config.offer_script, &source.config.offer_function) {
         return Err(LoadError::ParseFailed {path:path.into(),message:"opportunity_search offer_script/offer_function must name a real one-context function in the accepted World script set".into()});
     }
+    if !has(
+        &source.config.changed_work.script,
+        &source.config.changed_work.function,
+    ) {
+        return Err(LoadError::ParseFailed { path:path.into(), message:"opportunity_search.changed_work must name a real one-context consequence function in the accepted World scripts".into() });
+    }
     for (_, library) in source.catalog.libraries() {
         for definition in &library.definitions {
             for state in &definition.state {

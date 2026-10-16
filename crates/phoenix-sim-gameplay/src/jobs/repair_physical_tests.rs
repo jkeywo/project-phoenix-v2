@@ -538,3 +538,48 @@ fn a_foreign_active_stage_blocks_explicit_internal_work_without_preempting_it() 
         "the same waiting order resumes after foreign claim release"
     );
 }
+
+#[test]
+fn issued_work_list_preserves_exact_request_before_a_remedy_stage_exists() {
+    let (mut teams, _, _, _) = fixture(4);
+    let component = RepairWorkTarget::Component {
+        system: SystemId("scanner".into()),
+        component: "operation".into(),
+    };
+    let structure = RepairWorkTarget::Compartment {
+        compartment: "front".into(),
+    };
+    assert!(teams
+        .dispatch_physical_job(
+            0,
+            SystemId("scanner".into()),
+            Some(component.clone()),
+            "Scanner".into()
+        )
+        .is_some());
+    assert!(teams
+        .dispatch_physical_job(
+            1,
+            SystemId("engine".into()),
+            Some(structure.clone()),
+            "Front".into()
+        )
+        .is_some());
+    let before = teams.save_state();
+    let rows = teams.work_list();
+    assert_eq!(rows[0].requested_work, Some(component));
+    assert_eq!(rows[1].requested_work, Some(structure));
+    assert!(
+        rows.iter().all(|row| !row.sweeps_structure),
+        "exact orders are not generic sweeps"
+    );
+    assert!(
+        rows.iter().all(|row| row.target_work.is_none()),
+        "issued target is distinct from current remedy stage"
+    );
+    assert_eq!(
+        before,
+        teams.save_state(),
+        "projection adds no competing assignment state"
+    );
+}

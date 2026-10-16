@@ -382,3 +382,12 @@ acceptance and final gates remain integrator-owned and unexecuted for this packe
 The carry-capable target boundary above, S066 foundation synchronization, actual
 paid limited report/provenance, complete dependent recipe/Workshop support and
 ordinary Human/AI host proof must close before a coherent vertical-slice claim.
+### Explicit sensor-to-radio knowledge binding
+
+The finite marker's Radio Console explicitly receives its configured own
+SensorRadar feed. Accepted-recipe validation requires that typed binding; a
+missing binding refuses the recipe. This permits the selected reporting
+consumer to read its own sensor evidence without pooling unrelated Console
+knowledge. The accepted-loader positive and missing-feed tests are authored but
+not executed in this worker. Independent source review passed; the actual paid
+report consumer and carried-target policy remain separate unfinished work.

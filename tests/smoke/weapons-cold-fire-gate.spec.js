@@ -10,6 +10,7 @@ import {
   expectFixtureWorld,
 } from './fixtures';
 import { parse, stringify } from 'smol-toml';
+import { writeFileSync } from 'node:fs';
 
 // Self-contained smoke-test world, the same shape `tactical-fire-flow.spec.js`
 // uses: the player's cruiser at the origin facing -Z, one hostile 15.8 units off
@@ -226,10 +227,11 @@ test('Tactical holds and releases firing independently of Engineering flow', { t
     const beamStarted = await tactical.waitForMessage('BeamStarted', 20000);
     expect(beamStarted.data.target_uuid).toBe(raiderContact);
   } catch (error) {
+    const evidencePath = test.info().outputPath('released-fire-permitted-state.json');
+    writeFileSync(evidencePath, JSON.stringify({ target: raiderContact, before: beforeReleasedFire,
+      after: { tactical: await consoleEvidence(tactical), engineering: await consoleEvidence(engineering) } }, null, 2), 'utf8');
     await test.info().attach('released-fire-permitted-state', {
-      body: Buffer.from(JSON.stringify({ target: raiderContact, before: beforeReleasedFire,
-        after: { tactical: await consoleEvidence(tactical), engineering: await consoleEvidence(engineering) } }, null, 2)),
-      contentType: 'application/json',
+      path: evidencePath, contentType: 'application/json',
     });
     throw error;
   }

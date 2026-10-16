@@ -736,12 +736,16 @@ fn actual_paid_protection_reduces_only_exact_current_receiver_exposure_without_c
     );
 }
 fn fund_radar(world: &mut World, receiver: Entity) {
-    world
+    let grant = world
         .get_mut::<ShipPowerSystem>(receiver)
         .unwrap()
         .0
         .work_continuous(&id("tactical-radar"), 1.0 / 60.0, 1.0)
         .unwrap();
+    assert!(
+        grant.granted > 0.0,
+        "the actual receiver radar remains paid"
+    );
 }
 #[test]
 fn sensors_effect_actual_broad_acquisition_loss_and_priority_recovery_preserve_held_original_sample(
@@ -784,6 +788,10 @@ fn sensors_effect_actual_broad_acquisition_loss_and_priority_recovery_preserve_h
         .unwrap()
         .0[&id("tactical-radar")]
         .profile;
+    let recovery_ticks = (profile.sample_interval_secs
+        / world.resource::<Time<Fixed>>().timestep().as_secs_f32())
+    .ceil() as u64
+        + 1;
     let state = &world
         .get::<crate::science::broad::BroadTracks>(receiver)
         .unwrap()
@@ -828,6 +836,81 @@ fn sensors_effect_actual_broad_acquisition_loss_and_priority_recovery_preserve_h
     );
     fund_radar(&mut world, receiver);
     world.run_system_once(crate::science::broad::tick).unwrap();
+    assert_eq!(
+        owned_factor(
+            &mut world,
+            Vec3::new(0.0, 0.0, -20.0),
+            "actual-receiver",
+            "tactical-radar",
+            true,
+        ),
+        1.0,
+        "current paid allocated protection restores the actual receiver factor"
+    );
+    // Denial removes current acquisition immediately; a recovered receiver
+    // must still wait for its actual authored sampling cadence. Continue real
+    // funded work, without forcing a sample clock, refreshing the held record
+    // or letting transmitter failure stand in for successful protection.
+    for _ in 0..recovery_ticks {
+        if world
+            .get::<crate::science::broad::BroadTracks>(receiver)
+            .unwrap()
+            .0[&id("tactical-radar")]
+            .current
+            .contains_key("jam-source")
+        {
+            break;
+        }
+        world.resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+        let mut power = world.query::<&mut ShipPowerSystem>();
+        for mut power in power.iter_mut(&mut world) {
+            power.0.begin_work_interval();
+        }
+        let before = energy(&world, source);
+        let protection_before = world
+            .get::<ShipPowerSystem>(receiver)
+            .unwrap()
+            .0
+            .network()
+            .consumers[&id("signal-protection")]
+            .energy;
+        world
+            .run_system_once(crate::science::protection::tick)
+            .unwrap();
+        world.run_system_once(tick).unwrap();
+        assert!(
+            energy(&world, source) < before,
+            "the jammer stays genuinely paid"
+        );
+        assert!(
+            world
+                .get::<ShipPowerSystem>(receiver)
+                .unwrap()
+                .0
+                .network()
+                .consumers[&id("signal-protection")]
+                .energy
+                < protection_before,
+            "each recovery interval uses actual finite protection work"
+        );
+        assert!(world
+            .get::<JammingEmissions>(source)
+            .unwrap()
+            .entries
+            .contains_key(&id(OWNER)));
+        assert_eq!(
+            owned_factor(
+                &mut world,
+                Vec3::new(0.0, 0.0, -20.0),
+                "actual-receiver",
+                "tactical-radar",
+                true
+            ),
+            1.0
+        );
+        fund_radar(&mut world, receiver);
+        world.run_system_once(crate::science::broad::tick).unwrap();
+    }
     assert!(
         world
             .get::<crate::science::broad::BroadTracks>(receiver)
@@ -836,6 +919,15 @@ fn sensors_effect_actual_broad_acquisition_loss_and_priority_recovery_preserve_h
             .current
             .contains_key("jam-source"),
         "own paid priority allocation restores actual acquisition"
+    );
+    let state = &world
+        .get::<crate::science::broad::BroadTracks>(receiver)
+        .unwrap()
+        .0[&id("tactical-radar")];
+    let track = &state.tracks[&state.current["jam-source"]];
+    assert!(
+        track.observed_tick > baseline,
+        "recovery requires a genuine new instrument sample"
     );
 }
 

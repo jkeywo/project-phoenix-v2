@@ -34,16 +34,27 @@ Content acquisition closure. Seven combined client files pass 150 tests.
 The Simulation owner retry passed 83 tests and failed four: two retained-beam
 cases were blocked by that now-corrected disruption recipe, and two acquisition
 continuations exposed incomplete sensing fixtures. Their fixture correction is
-integrated at `3a1e7e6e`, with the native retry pending.
+integrated at `3a1e7e6e`; its retry passes seven of eight acquisition tests. The
+remaining continuation mismatch comes from missing normal run-scope fixture
+resources; reviewed correction `0c1c1ff3` is integrated for retry.
 
 The latest loader, disruption, maintenance and authoritative-state host batch
 fails before gameplay because the singleton `TickSecurityTeams` stage contains
 both the team tick and the acquisition commit. A minimal stage/order correction
-is in progress; this does not mean the physical team tick executes twice. These results establish neither
+is integrated at `210cd6e9`, with native verification pending; this does not mean
+the physical team tick executes twice. These results establish neither
 a green host batch nor the full integrated gate. Earlier
 owner, codec, transport and host evidence, with its source pins and limitations,
 remains in the integration checkpoint. Human/device, balance and workload
 acceptance remain separate.
+
+Listening priorities and contextual reports are integrated at `a04b3448`, with
+historical held-view restoration corrected at `9b2f894d`. Actual accepted-recipe
+and pure owner checks pass seven tests at `ab501fa4`; four affected client files
+pass 144 tests. Simulation/native host verification remains open. Compatibility
+is protocol 43, snapshot 86 and simulation rules 0.70. Physical marking, moving
+craft and the reviewed fitting rehearsal contract remain active implementation
+lanes, not completed capabilities.
 
 | Increment | Implementation state | Material remaining work |
 |---|---|---|
@@ -60,10 +71,10 @@ acceptance remain separate.
 | 10 — Interiors/routes | Core implemented | Full integrated and playable acceptance. |
 | 11 — Damage/restoration | Core implemented | Retained Repair adapter corrections pass targeted native checks; full integrated and playable acceptance. |
 | 12 — Logistics/production | Local stock targets, timed delivery, fabrication, salvage/processing and port replenishment/trade implemented | Combined production/logistics failure journeys, current authoring and full acceptance; coolant recycling remains provisional. |
-| 13 — Equipment fitting | Beam/reactor fitting, physical spares/refit/salvage and personal favourites implemented | Personal-plan disposable rehearsal and whole-fit sustained/burst/thermal/cooling forecasts remain unimplemented; full acceptance. |
+| 13 — Equipment fitting | Beam/reactor fitting, physical spares/refit/salvage and personal favourites implemented | Personal-plan disposable rehearsal and measured whole-fit sustained/burst/thermal/cooling comparisons are under implementation; full acceptance. |
 | 14 — Sensing/environment | Substantial implementation | Knowledge, presentation, balance and full acceptance. |
 | 15 — Layered combat | Combat core implemented; shared loaders/priorities integrated and accepted-recipe/pure handling checks pass | Physical marking payloads remain unimplemented; loader host continuation, broader illumination/link-loss/payload journeys, combat styles, balance/workload and full acceptance. |
-| 16 — Comms/orders | Channels, requests and relay operational; both actual capture/decoding host journeys pass | Listening priorities/chatter, contextual operations, native media edge/device acceptance and broader playable acceptance remain. |
+| 16 — Comms/orders | Channels, requests and relay operational; both actual capture/decoding host journeys pass; listening/chatter integrated with accepted-recipe, pure-owner and client passes | Listening/chatter Simulation and host verification, broader contextual operations, native media edge/device acceptance and playable acceptance remain. |
 | 17 — Electronic operations | Jamming/protection/identity operational; both emission host cases pass; bounded disruption integrated and its corrected hull passes actual accepted-recipe validation | Disruption host continuation is blocked by the Security singleton-stage membership error. Broader information/access and acceptance remain. |
 | 18 — Movement/transit | Local jumps verified; sector code integrated; actual formation movement/JSON360 host case passes | Remaining assistance and broader acceptance. |
 | 19 — Craft/deployables | Physical probe, both fixed beam-turret and both decoy host journeys verified; ordinary Full3D utility hull passes actual accepted-recipe validation | Moving custody, XYZ navigation consumers, sorties, remote operation and acceptance remain. |

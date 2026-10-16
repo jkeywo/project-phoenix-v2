@@ -4,6 +4,12 @@ seed=1572
 title="Acquisition activity owner proof"
 description="One real Board job and distinct owner/home evidence."
 
+# The real unacquired prize retains its authored patrol doctrine. Supply its
+# required route anchors rather than overriding that accepted equipment recipe.
+[anchors]
+ironveil_patrol_a=[80.0,0.0,-40.0]
+ironveil_patrol_b=[80.0,0.0,40.0]
+
 [[available_ships]]
 template_path="assets/entities/alliance_cruiser.toml"
 [[entity]]

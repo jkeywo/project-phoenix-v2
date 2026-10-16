@@ -635,3 +635,121 @@ consumer, prove advisory Human high-work operation, ordinary authored AI respons
 and urgency context, Console isolation, actual signature consequences, authoring
 and complete fresh-JSON continuation/no-write checks. No S027 runtime is claimed
 by this contract; the actual concealment host proof has priority first.
+
+### Adopted S027 composition and public boundary
+
+The first consumer authors an optional closed `emission_profile` block inside
+the existing actual Command System's `config`. It selects the initial Normal or
+LowEmission intent and a finite positive advisory rate threshold. Exactly one
+Command System may provide this capability on a hull; its actual System and
+Console identities remain the admission and knowledge owners. This adds no
+Entity-level owner or second Command controller.
+
+The Command publication carries the selected intent only. Existing per-System
+details derive their own current paid work rate, or actual generated output for
+the reactor, and its shared signature cause. A warning is visible only when
+that System has an explicit permitted Command publication with LowEmission
+selected and its actual rate exceeds the authored advisory threshold. The
+Command screen receives no automatic machinery census. The measurements are
+derived at the ordinary publication phase from the current completed work
+interval, never from desired allocations or retained previous-frame work.
+
+The first policy demonstration uses an optional transponder fit: its one
+ordinary state tree reads the permitted profile and existing alert context,
+quietens under LowEmission during normal operation, and may emit under high
+alert. An absent profile/feed cannot invent the quiet intent. Human transponder
+and reactor controls remain ordinary usable controls throughout. The authoring
+validator, Workshop transaction, runtime and continuation guards all use this
+same actual System binding. Central messages, registration, status mounts and
+snapshot/digest hooks remain integration-owned; a leaf alone closes no S027 exit.
+
+### S027 leaf handoff and remaining integration
+
+The supported composition parser and canonical `EmissionIntentState` live in
+`ship/emission_profile.rs`; the Simulation Command leaf installs, admits and
+projects that exact owner. `work_cause` extracts the existing signature cause
+classification without changing strongest-cause selection. The transponder's
+existing state-tree host adds only permitted profile/alert facts. Unknown alert
+is distinct from a known normal alert, and contradictory permitted reports are
+unknown. The optional `emission_profile_cruiser.toml` extends actual inherited
+equipment and appends tasks to the existing tree; it changes no power hardware,
+interior, seats or ratings. Its accepted-source regression checks those values
+and exercises the actual merged tree. These Rust tests have not run in the lane.
+
+Integration-owned joins are still required before native execution:
+
+- Export Model `emission_profile`, Gameplay `ship::emission_profile`, and the
+  Simulation Command leaf. Run its shared `profile` validation before accepted
+  entity Preview/Test/spawn; invalid authored config must not silently disappear.
+- Add the closed `SetEmissionIntent { intent }` Command payload with ordinary
+  current System/Console ownership and correlated feedback. The existing
+  Command controller remains singular; the leaf handles only this payload.
+  Preserve the actual configured Command identity rather than substituting a
+  Captain/seat or unconditionally using a different reserved System ID.
+- Add optional `CommandBlackboard.emission: EmissionIntentView`. Publish actual
+  profile intent even when that Command owner has no stance-directed Station.
+  Key the publication and `command_system_id` by its actual owner. The Command
+  publication carries no machinery measurement collection.
+- Install `ShipEmissionIntent` for every actual supported profile, including
+  ordinary AI hulls, and capture/digest/restore its single `EmissionIntentState`.
+  Validate exact accepted owner and required/forbidden state presence across the
+  whole candidate, including Disabled/carried actors, before any writes. Rebuild
+  the permitted Command publication after restore before normal AI resumes.
+- Project each System's optional `EmissionAdvisoryView` through existing status
+  details at Publish, after current work and before FixedLast increments the
+  logical tick. Do not call the current-interval helper from a later PostUpdate
+  and date the old work with the next tick. No measurement map/history is added;
+  restore clears ordinary derived work and cannot resurrect paid warnings.
+- Connect the independent GUI payload/action/control leaves to the existing
+  Command card and common status details. Supply only that Console's permitted
+  Command intent views to `registerEmissionProfileActions`; retain current
+  ownership rechecks in the action map and authoritative admission. Warning
+  labels never receive or disable a machinery control.
+
+The visual Workshop leaf uses the existing native `append_table`/`put` editor
+and accepted-source transaction. It explicitly materialises only the selected
+Command profile leaves, keeping inherited machinery/AI inherited; it does not
+rewrite an entire System. Root must mount `mountWorkshopEmissionProfile` with
+the existing draft/busy/Preview/disposable Test callbacks and add
+`guardEmissionProfileReferences` to the shared ship-authoring validation chain.
+The two actual native document proofs in `authoring/emission_profile_tests.rs`
+need their test-module hook and root-owned execution; JavaScript transaction
+tests use an explicit structural-packet model and make no native source
+preservation claim. The profile panel rejects stale/refused/disposed edits and
+reinspects a replaced draft even when its revision/path happen to match.
+
+Focused advisory and Workshop JavaScript tests passed: eight tests across three
+files. Strict strings (6329 entries) and layer rules passed. Independent bounded
+Rust, GUI and Workshop source reviews passed. Integrated client/device/native
+operation, mounted Workshop history/Preview/Test, ordinary policy/urgency
+physical evidence, exact Console isolation and full fresh-JSON/no-write
+continuation remain open; this is neither a compiled implementation nor an
+increment17 exit.
+
+### S027 central integration packet
+
+The central joins above are implemented in the isolated integration packet:
+closed Model payload and exact Command admission; accepted authored validation;
+ordinary spawn and singular Command registration; actual-owner/no-stance
+publication; current Broadcast paid-work advisory; required-state capture,
+row-local/whole-candidate guards, restore publication and digest/census; and the
+Command/common-status/Workshop shell mounts. Advisory presentation does not
+limit machinery controls. Command profile mounts retire before replacement,
+including replacement by the same owner, and profile-only cards omit unrelated
+stance UI. Compatibility versions remain owned by the final integration lane.
+
+Source regressions cover noncanonical Command identity with no stance target,
+required/forbidden saved equipment state, candidate-recipe precedence, Disabled
+actors and malformed publication bindings. The actual host proof uses ordinary
+joined controls, the actual transponder tree and finite paid hardware, plus
+fresh JSON continuation and whole-candidate no-write checks. These native tests
+are authored but have not run in this lane; root owns their execution.
+
+Eight focused JavaScript files pass all 573 tests, including mounted Command
+and shared-status integration, retired-card refusal, closed action inventory
+and Workshop transaction behavior. Layer rules, strict strings (6441 entries),
+the pure client build and owned Rust formatting also pass. Independent bounded
+source re-review passes
+for central authority, knowledge, interval timing, continuation and UI lifecycle.
+This packet does not claim native execution, device acceptance, complete
+Workshop Preview/Test acceptance, or an increment17 exit.

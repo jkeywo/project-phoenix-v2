@@ -7,6 +7,7 @@ pub mod control_source;
 pub mod coordination;
 pub mod damage;
 pub mod eligibility;
+pub mod emission_profile;
 pub mod energy_work;
 pub mod helm;
 pub mod helm_ai;

@@ -9,6 +9,29 @@ use crate::ship::system_registry::{
 };
 use phoenix_model::sensing::PassiveSignature;
 
+/// Shared classification for actual work and own advisory presentation.
+pub fn work_cause(kind: &str) -> PassiveSignature {
+    if [HELM_ENGINE_KIND, HELM_THRUST_KIND, HELM_BOOST_KIND].contains(&kind) {
+        PassiveSignature::Propulsion
+    } else if [
+        SENSORS_KIND,
+        HELM_RADAR_KIND,
+        SENSOR_RADAR_KIND,
+        TACTICAL_RADAR_KIND,
+        ILLUMINATION_KIND,
+    ]
+    .contains(&kind)
+    {
+        PassiveSignature::ActiveScan
+    } else if [PHASER_BANK_KIND, BLASTER_BANK_KIND, TORPEDO_TUBE_KIND].contains(&kind) {
+        PassiveSignature::Weapon
+    } else if [COMMS_KIND, IDENTITY_EMITTER_KIND].contains(&kind) {
+        PassiveSignature::Comms
+    } else {
+        PassiveSignature::Unclassified
+    }
+}
+
 /// Measure the strongest actual operating cause, including paid auxiliary work.
 ///
 /// `reactor_output` is actual output per second (zero when generation is off).
@@ -23,25 +46,7 @@ pub fn observed_signature<'a>(
     let mut strength = reactor_output;
     let mut signature = PassiveSignature::Reactor;
     for (kind, emitted_work) in machinery {
-        let cause = if [HELM_ENGINE_KIND, HELM_THRUST_KIND, HELM_BOOST_KIND].contains(&kind) {
-            PassiveSignature::Propulsion
-        } else if [
-            SENSORS_KIND,
-            HELM_RADAR_KIND,
-            SENSOR_RADAR_KIND,
-            TACTICAL_RADAR_KIND,
-            ILLUMINATION_KIND,
-        ]
-        .contains(&kind)
-        {
-            PassiveSignature::ActiveScan
-        } else if [PHASER_BANK_KIND, BLASTER_BANK_KIND, TORPEDO_TUBE_KIND].contains(&kind) {
-            PassiveSignature::Weapon
-        } else if [COMMS_KIND, IDENTITY_EMITTER_KIND].contains(&kind) {
-            PassiveSignature::Comms
-        } else {
-            PassiveSignature::Unclassified
-        };
+        let cause = work_cause(kind);
         let measured = emitted_work / f64::from(interval_secs);
         if measured > strength {
             strength = measured;

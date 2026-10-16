@@ -7,4 +7,5 @@
 //! operator, the stance→AI-host posture seam, and the console blackboard. The
 //! stance MATHS is pure and lives in `crate::ship::command_stance`.
 
+pub mod emission;
 pub mod server;

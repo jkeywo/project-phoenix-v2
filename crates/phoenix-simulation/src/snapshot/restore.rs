@@ -121,6 +121,12 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
             .push(RestoreGap::ResourceStateInvalid { uuid, reason });
         return report;
     }
+    if let Err((uuid, reason)) = super::emission_intent::validate_roster(world, snapshot) {
+        report
+            .gaps
+            .push(RestoreGap::ResourceStateInvalid { uuid, reason });
+        return report;
+    }
     if let Err((uuid, reason)) = super::comms_media::validate_roster(world, snapshot) {
         report
             .gaps
@@ -322,6 +328,7 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
         let _ = world.run_system_once(
             crate::console::weapons::blackboard::publish_tactical_radar_blackboard,
         );
+        let _ = world.run_system_once(crate::console::command::server::publish_command_blackboard);
     }
     super::sensing_publications::restore_held(world, snapshot);
     if let Some(mut media) = world.get_resource_mut::<crate::comms::media_mesh::MediaMesh>() {

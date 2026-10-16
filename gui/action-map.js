@@ -67,6 +67,10 @@ function logisticsCommand(type, fields) {
 
 export const ACTION_MAP = Object.freeze({
   identity_emitter_enabled: logisticsCommand('SetIdentityEmitterEnabled', ['enabled']),
+  set_emission_intent: (a, send) => {
+    if (!['normal', 'low_emission'].includes(a.intent)) return;
+    logisticsCommand('SetEmissionIntent', ['intent'])(a, send);
+  },
   concealment_enabled: logisticsCommand('SetConcealmentEnabled', ['enabled']),
   signal_protection_enabled: logisticsCommand('SetSignalProtectionEnabled', ['enabled']),
   signal_protection_priorities: logisticsCommand('SetSignalProtectionPriorities', ['systems']),

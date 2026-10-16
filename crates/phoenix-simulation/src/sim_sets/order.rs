@@ -44,6 +44,7 @@ pub(crate) fn configure_fixed_order(app: &mut App) {
             ReconcileStationStances,
             OperateCommandAi,
             HandleSetStationStance,
+            HandleEmissionIntent,
             ApplyAlertChangeToStances,
             ReconcileDirectedTargetControl,
             HandleStationRatingChange,

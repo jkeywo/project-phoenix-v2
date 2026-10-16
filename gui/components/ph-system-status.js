@@ -1,3 +1,5 @@
+import {mountEmissionAdvisory} from './emission-profile-controls.js';
+import {emissionAdvisoryPayload} from '../emission-profile.js';
 import {mountIdentityControls} from './identity-controls.js';
 import {mountConcealmentControls} from './concealment-controls.js';
 import { mountProtectionControls } from './protection-controls.js';
@@ -51,8 +53,8 @@ export function mountSystemStatus(document) {
       let entry = detailRows.get(row.system_id);
       if (!entry) {
         const node = document.createElement('section'), heading = document.createElement('h3'), facts = document.createElement('div');
-        const fitting = mountFittingControls(document), recovery = mountEquipmentRecoveryControls(document), guidance = mountGuidanceControls(document), illumination = mountIlluminationControls(document), jamming = mountJammingControls(document), protection = mountProtectionControls(document), identity = mountIdentityControls(document), concealment = mountConcealmentControls(document), bay = mountBayControls(document); node.append(heading, facts, fitting.node, recovery.node, guidance.node, illumination.node, jamming.node, protection.node, identity.node, concealment.node, bay.node); detail.append(node);
-        entry = { node, heading, facts, fitting, recovery, guidance, illumination, jamming, protection, identity, concealment, bay, signature: null }; detailRows.set(row.system_id, entry);
+        const emission = mountEmissionAdvisory(document), fitting = mountFittingControls(document), recovery = mountEquipmentRecoveryControls(document), guidance = mountGuidanceControls(document), illumination = mountIlluminationControls(document), jamming = mountJammingControls(document), protection = mountProtectionControls(document), identity = mountIdentityControls(document), concealment = mountConcealmentControls(document), bay = mountBayControls(document); node.append(heading, facts, emission.node, fitting.node, recovery.node, guidance.node, illumination.node, jamming.node, protection.node, identity.node, concealment.node, bay.node); detail.append(node);
+        entry = { node, heading, facts, emission, fitting, recovery, guidance, illumination, jamming, protection, identity, concealment, bay, signature: null }; detailRows.set(row.system_id, entry);
       }
       const label = statusLabel(row); if (entry.heading.textContent !== label) entry.heading.textContent = label;
       const signature = JSON.stringify([row.reasons, row.physical]);
@@ -71,6 +73,7 @@ export function mountSystemStatus(document) {
           }
         }
       }
+      entry.emission.update(emissionAdvisoryPayload(row.emission));
       entry.fitting.update(row.system_id, row.fitting || [], row.delegated || selected === delegatedSelection);
       entry.recovery.update(row.system_id, row.equipment_recovery, row.delegated || selected === delegatedSelection);
       entry.guidance.update(row.system_id, row.guidance, row.delegated || selected === delegatedSelection);
@@ -81,7 +84,7 @@ export function mountSystemStatus(document) {
       entry.concealment.update(row.system_id,row.concealment,row.delegated||selected===delegatedSelection);
       entry.bay.update(row.system_id, row.bay, row.delegated || selected === delegatedSelection);
     }
-    for (const [id, entry] of detailRows) if (!seen.has(id)) { entry.fitting.dispose(); entry.recovery.dispose(); entry.guidance.dispose(); entry.illumination.dispose(); entry.jamming.dispose(); entry.protection.dispose(); entry.identity.dispose(); entry.concealment.dispose(); entry.bay.dispose(); entry.node.remove(); detailRows.delete(id); }
+    for (const [id, entry] of detailRows) if (!seen.has(id)) { entry.emission.dispose(); entry.fitting.dispose(); entry.recovery.dispose(); entry.guidance.dispose(); entry.illumination.dispose(); entry.jamming.dispose(); entry.protection.dispose(); entry.identity.dispose(); entry.concealment.dispose(); entry.bay.dispose(); entry.node.remove(); detailRows.delete(id); }
   }
 
   function open(id) { selected = id; paintDetails(); if (selected === null) return; dialog.hidden = false; trap.activate(); }
@@ -106,10 +109,13 @@ export function mountSystemStatus(document) {
           const label = document.createElement('span'); button.append(light, label);
           button.addEventListener('click', () => open(row.system_id)); buttons.set(row.system_id, button);
         }
-        button.setAttribute('aria-label', statusLabel(row)); button.title = statusLabel(row);
+        const measured = emissionAdvisoryPayload(row.emission);
+        const advice = measured?.high ? t('emission.high', {rate: measured.rate, cause: t('emission.cause.' + measured.cause)}) : '';
+        button.dataset.emissionHigh = String(!!advice);
+        button.setAttribute('aria-label', statusLabel(row) + (advice ? '; ' + advice : '')); button.title = statusLabel(row) + (advice ? '; ' + advice : '');
         button.firstChild.dataset.availability = row.availability;
         if (button.firstChild.textContent !== icon(row)) button.firstChild.textContent = icon(row);
-        const label = wireText(row.display_name || row.system_id);
+        const label = (advice ? '⚑ ' : '') + wireText(row.display_name || row.system_id);
         if (button.lastChild.textContent !== label) button.lastChild.textContent = label;
         // Do not detach an unchanged focused control on every snapshot.
         if (list.children[index] !== button) list.insertBefore(button, list.children[index] || null);
@@ -121,6 +127,6 @@ export function mountSystemStatus(document) {
       root.hidden = !rows.length;
       if (selected !== null) paintDetails();
     },
-    dispose() { close(); plans.dispose(); for (const entry of detailRows.values()) { entry.fitting.dispose(); entry.recovery.dispose(); entry.guidance.dispose(); entry.illumination.dispose(); entry.jamming.dispose(); entry.protection.dispose(); entry.identity.dispose(); entry.concealment.dispose(); entry.bay.dispose(); } detailRows.clear(); root.remove(); dialog.remove(); },
+    dispose() { close(); plans.dispose(); for (const entry of detailRows.values()) { entry.emission.dispose(); entry.fitting.dispose(); entry.recovery.dispose(); entry.guidance.dispose(); entry.illumination.dispose(); entry.jamming.dispose(); entry.protection.dispose(); entry.identity.dispose(); entry.concealment.dispose(); entry.bay.dispose(); } detailRows.clear(); root.remove(); dialog.remove(); },
   };
 }

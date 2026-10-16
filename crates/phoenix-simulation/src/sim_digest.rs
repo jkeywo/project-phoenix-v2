@@ -489,6 +489,7 @@ const FOLD_STAGES: &[FoldStage] = &[
         fold_concealment_namespace,
     ),
     ("ship-comms-media-intent", fold_media_intent_namespace),
+    ("ship-emission-intent", fold_emission_intent_namespace),
     ("ship-comms-capture", fold_comms_capture_namespace),
     ("broad-tracks", fold_broad_tracks_namespace),
     ("navigation-sharing", fold_navigation_sharing_namespace),
@@ -3143,4 +3144,14 @@ fn fold_helm_navigation_plan_namespace(world: &World, mut acc: u64) -> u64 {
         acc = fold_u64(fold_str(acc, &key.id), generation);
     }
     acc
+}
+
+fn fold_emission_intent_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "ship-emission-intent",
+        |owner: &crate::console::command::emission::ShipEmissionIntent| Some(owner.0.clone()),
+        |acc, state| fold_serde(acc, &state),
+    )
 }

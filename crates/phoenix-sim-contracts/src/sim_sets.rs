@@ -109,6 +109,7 @@ pub enum FixedStep {
     ReconcileStationStances,
     OperateCommandAi,
     HandleSetStationStance,
+    HandleEmissionIntent,
     ApplyAlertChangeToStances,
     ReconcileDirectedTargetControl,
     HandleStationRatingChange,

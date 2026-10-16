@@ -26,8 +26,14 @@ sources:
   - gui/stations/jamming-actions.js
   - editor/workshop-system-composition.js
   - assets/entities/jamming_cruiser.toml
+  - crates/phoenix-simulation/src/console/command/emission.rs
+  - crates/phoenix-simulation/src/snapshot/emission_intent.rs
+  - crates/phoenix-sim-gameplay/src/ship/emission_profile.rs
+  - gui/components/emission-profile-controls.js
+  - editor/workshop-emission-profile.js
+  - pasm/spec/architecture/emission-intent.yaml
   - pasm/spec/design/electronic-operations.yaml
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # Electronic Equipment
@@ -102,3 +108,21 @@ factor is strictly positive and existing observations retain their normal ages,
 aliases and history. Central host registration, persistence and shared status
 mounting are integration-owned; leaf owner tests alone do not establish those
 host journeys.
+
+The optional Command `emission_profile` owns one retained `ShipEmissionIntent`.
+Its actual System identity admits `SetEmissionIntent`; Command publication also
+works without a stance-directed Station. Explicit Command/Captain feeds give
+the existing transponder tree profile and urgency facts, without another
+controller. The Command card edits intent, while common System details compare
+actual current paid work against the configured advisory threshold. The
+Broadcast frontier samples that interval before FixedLast advances its tick;
+Human machinery controls remain usable.
+
+`snapshot/emission_intent.rs` shares exact accepted-equipment validation between
+row-local and whole-candidate restore, including Disabled actors. Capture and
+the digest retain intent; restored Command publication is rebuilt from it.
+Workshop edits the supported profile and explicit feeds through existing native
+document transactions. The optional `emission_profile_cruiser.toml` is the
+reference fit. Targeted client tests cover mounted controls, retired cards and
+status advice; native host continuation and physical policy execution require
+the integration lane's separate evidence.

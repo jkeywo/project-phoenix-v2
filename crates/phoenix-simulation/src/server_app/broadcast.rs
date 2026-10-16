@@ -993,6 +993,8 @@ fn build_system_status(
         row.identity = crate::science::identity::project(world, entity, owner);
         row.concealment = crate::science::concealment::project(world, entity, owner);
         row.bay = crate::entities::craft::project(world, entity, owner);
+        // SimDispatch runs after all current paid work and before FixedLast.
+        row.emission = crate::console::command::emission::advisory(world, entity, owner);
     }
     let owners = config
         .0

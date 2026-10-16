@@ -1,0 +1,6 @@
+# Comms limited to its real home leaves its transponder on ordinary Backfill
+# while a Human hosts Command. No control-source/knowledge/work injection.
+includes = ["../../assets/entities/emission_profile_cruiser.toml"]
+[[console]]
+id = "comms"
+host_order = ["comms"]

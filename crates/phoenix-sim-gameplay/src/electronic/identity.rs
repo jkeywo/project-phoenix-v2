@@ -32,7 +32,16 @@ impl IdentityEmitterConfig {
 }
 pub fn bindings(enabled: &str) -> crate::ai::state_tree::SupportedBindings {
     crate::ai::state_tree::SupportedBindings {
-        facts: ["enabled".into()].into(),
+        facts: [
+            "enabled",
+            "emission_profile_known",
+            "low_emission",
+            "alert_known",
+            "red_alert",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect(),
         channels: [enabled.into()].into(),
     }
 }
@@ -83,6 +92,6 @@ mod tests {
         )
         .is_err());
         assert!(bindings("enabled").facts.contains("enabled"));
-        assert_eq!(bindings("enabled").facts.len(), 1);
+        assert_eq!(bindings("enabled").facts.len(), 5);
     }
 }

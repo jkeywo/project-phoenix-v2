@@ -20,6 +20,8 @@
  * resolved from the builder; this module only draws them and sends the click.
  */
 import { t } from '../strings.js';
+import {mountEmissionProfileControls} from '../components/emission-profile-controls.js';
+const mountedProfiles = new WeakMap();
 
 // A high-alert posture reads as "▲ armed"; a stood-down one as "▬ cold". A
 // glyph, not a colour, so the posture survives greyscale (issue #1107).
@@ -82,11 +84,15 @@ function buildStanceButton(doc, stance, { pressed, disabled, extraClass }, onCli
  * @param {Document} doc
  * @param {import('../console-state.js').CommandStationCard} station
  */
-function buildCard(doc, station) {
+function buildCard(doc, station, retire) {
   const directable = !!station.directed_station_ai;
 
   const card = doc.createElement('div');
   card.className = 'command-card';
+  if (station.emission) {
+    const profile = mountEmissionProfileControls(doc); profile.update(station.emission); card.append(profile.node); retire.push(() => profile.dispose());
+    if (!station.directed_station) return card;
+  }
   // A crewed station's card is greyed as a whole (criterion 3): the CREWED
   // cue inside it still reads at full contrast against its own bordered
   // badge, so dimming the card never hides the reason its buttons refuse.
@@ -222,9 +228,11 @@ export function renderStation(s, doc) {
   const list = doc.getElementById('stations-list');
   if (!list) return;
 
+  for (const dispose of mountedProfiles.get(list) || []) dispose();
+  const retire = []; mountedProfiles.set(list, retire);
   list.textContent = '';
   const stations = (s && s.stations) || [];
   for (const station of stations) {
-    list.appendChild(buildCard(doc, station));
+    list.appendChild(buildCard(doc, station, retire));
   }
 }

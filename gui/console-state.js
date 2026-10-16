@@ -1,3 +1,4 @@
+import { emissionIntentPayload } from './emission-profile.js';
 import { capturedPayload } from './comms-capture.js';
 import { formationNavigation } from './formation.js';
 import {plannedRequests,plannedRepairIntents} from './planned-requests.js';
@@ -1106,6 +1107,7 @@ export function buildCommandConsoleState(state, systemIds = []) {
     const defaultStance = allStances.find(st => st.kind === neutralKind) ?? null;
     const selectedKind = allStances.find(st => st.id === bb.selected_stance)?.kind ?? null;
     return {
+      ...(bb.emission ? {emission: emissionIntentPayload(bb.emission, entry.systemId, (state.controlSystemIds || systemIds).includes(entry.systemId) && state.controlSources?.[entry.systemId] === 'Human')} : {}),
       command_system_id:     bb.command_system_id     ?? entry.systemId,
       directed_station:      bb.directed_station       ?? '',
       directed_station_name: bb.directed_station_name  ?? '',

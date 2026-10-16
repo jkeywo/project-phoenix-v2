@@ -1,0 +1,16 @@
+[global]
+seed = 15621727
+[player_spawn]
+position = [0, 0, 0]
+[[entity]]
+template_path = "tests/fixtures/emission-policy-cruiser.toml"
+id = "emission-source"
+name = "emission-source"
+spawn_on = "game_start"
+transform = {position=[0,0,0]}
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "ordinary-observer"
+name = "ordinary-observer"
+spawn_on = "game_start"
+transform = {position=[400,0,0]}

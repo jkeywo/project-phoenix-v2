@@ -6,14 +6,25 @@ use serde::{Deserialize, Serialize};
 pub fn scan_blackboard_key_for(owner: &SystemId) -> SystemId {
     SystemId(format!("scan/{}:{}", owner.0.len(), owner.0))
 }
-pub fn scan_owner_from_blackboard_key(key: &SystemId) -> Option<SystemId> {
+/// Borrow the canonical owner without allocating an ID or rebuilding its key.
+pub fn scan_owner_from_blackboard_key_borrowed(key: &SystemId) -> Option<&str> {
     let (size, owner) = key.0.strip_prefix("scan/")?.split_once(':')?;
-    let size = size.parse::<usize>().ok()?;
-    if owner.len() != size || size == 0 || size > 128 || owner.chars().any(char::is_control) {
+    // Canonical decimal has neither a sign nor leading zeroes. The original
+    // owned parser enforced this by formatting the parsed length again.
+    if !matches!(size.as_bytes().first(), Some(b'1'..=b'9'))
+        || !size.bytes().all(|byte| byte.is_ascii_digit())
+    {
         return None;
     }
-    let owner = SystemId(owner.into());
-    (scan_blackboard_key_for(&owner) == *key).then_some(owner)
+    let size = size.parse::<usize>().ok()?;
+    if owner.len() != size || size > 128 || owner.chars().any(char::is_control) {
+        return None;
+    }
+    Some(owner)
+}
+
+pub fn scan_owner_from_blackboard_key(key: &SystemId) -> Option<SystemId> {
+    scan_owner_from_blackboard_key_borrowed(key).map(|owner| SystemId(owner.into()))
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -263,3 +274,7 @@ pub struct PassiveBlackboard {
 #[cfg(test)]
 #[path = "sensing_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "sensing_borrowed_owner_tests.rs"]
+mod borrowed_owner_tests;

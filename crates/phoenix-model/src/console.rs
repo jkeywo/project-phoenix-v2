@@ -190,8 +190,8 @@ impl ConsoleFeed {
             && self.kind == ConsoleObservationKind::of(observation)
             && match observation {
                 SystemBlackboard::Scan(scan) => {
-                    crate::sensing::scan_owner_from_blackboard_key(source).as_ref()
-                        == scan.owner.as_ref()
+                    crate::sensing::scan_owner_from_blackboard_key_borrowed(source)
+                        == scan.owner.as_ref().map(|owner| owner.0.as_str())
                         && scan.owner.is_some()
                 }
                 _ => true,

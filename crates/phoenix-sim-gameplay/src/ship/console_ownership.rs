@@ -116,8 +116,8 @@ impl<'a> ConsoleKnowledgeView<'a> {
         let console = self.console?;
         let value = self.publications.get(source)?;
         let derived_scan = if let phoenix_model::messages::SystemBlackboard::Scan(scan) = value {
-            let owner = phoenix_model::sensing::scan_owner_from_blackboard_key(source)?;
-            if scan.owner.as_ref() != Some(&owner) {
+            let owner = phoenix_model::sensing::scan_owner_from_blackboard_key_borrowed(source)?;
+            if scan.owner.as_ref().map(|owner| owner.0.as_str()) != Some(owner) {
                 return None;
             }
             Some(owner)
@@ -126,7 +126,9 @@ impl<'a> ConsoleKnowledgeView<'a> {
         };
         let owned = self
             .config
-            .system(derived_scan.as_ref().unwrap_or(source))
+            .systems
+            .iter()
+            .find(|system| system.id.0 == derived_scan.unwrap_or(source.0.as_str()))
             .is_some_and(|system| system.console.as_ref() == Some(&console.id));
         (owned || console.feeds.iter().any(|feed| feed.accepts(source, value))).then_some(value)
     }
@@ -403,3 +405,7 @@ mod tests;
 #[cfg(test)]
 #[path = "console_observation_tests.rs"]
 mod observation_tests;
+
+#[cfg(test)]
+#[path = "console_borrowed_scan_tests.rs"]
+mod borrowed_scan_tests;

@@ -942,3 +942,6 @@ mod radar_damage {
         assert_eq!(mods.get(&ModifierSlot::SensorRadarRange), 1.0);
     }
 }
+
+#[path = "coordination_power_projection_tests.rs"]
+mod power_cleanup_projection;

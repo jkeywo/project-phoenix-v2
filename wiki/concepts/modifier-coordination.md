@@ -22,6 +22,9 @@ Actual impulse and boost effects are resolved with their local energy grants by
 physics. The compatibility translator clears the former unconditional speed
 contribution, including after snapshot restore. Allocation never amplifies a
 modifier slot; machinery consumes actual energy at its owning work boundary.
+The compatibility cleanup retains its component-first/resource-only fallback
+boundary and removes the same retired keys directly, without building an unused
+allocation snapshot or multiplier defaults.
 
 Each adapter updates only its own source keys. Removing one effect recomputes the slot from the remaining contributions. Float bonuses sum first: a nonnegative sum produces `1 + sum`, while a negative sum produces `1 / (1 + abs(sum))`. Integer bonuses sum directly. Replacing or removing one source therefore preserves the other sources' contributions.
 

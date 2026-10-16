@@ -33,9 +33,10 @@ impl Plugin for ModifierCoordinationPlugin {
 
 /// Power → modifier translator system.
 ///
-/// Iterates every ship (`With<Ship>`) — player + NPC — and writes each
-/// ship's own power-level modifiers into its own `ShipModifiers` component.
-/// This is the single routing point for power-side modifier writes;
+/// Iterates every ship (`With<Ship>`) — player + NPC — and clears its
+/// retired fixed allocation contributions from `ShipModifiers`.
+/// Incoming energy pays machinery directly; it never amplifies these slots.
+/// This is the single routing point for this compatibility cleanup;
 /// `handle_power_messages` and `tick_power_system` no longer touch
 /// `ShipModifiers` directly.
 ///
@@ -44,7 +45,8 @@ impl Plugin for ModifierCoordinationPlugin {
 /// systems with explicit `.after()` ordering.
 pub fn translate_power_modifiers(
     power_res: Option<Res<ShipPowerSystem>>,
-    mult_res: Option<Res<PowerMultiplierResource>>,
+    // Retain the existing declared read access, without materialising its table.
+    _mult_res: Option<Res<PowerMultiplierResource>>,
     mut ships_q: Query<
         (
             Option<&ShipPowerSystem>,
@@ -57,54 +59,30 @@ pub fn translate_power_modifiers(
 ) {
     let mut any_ship_had_component = false;
 
-    for (power_comp, mult_comp, mut mods, _is_local) in ships_q.iter_mut() {
+    for (power_comp, _mult_comp, mut mods, _is_local) in ships_q.iter_mut() {
         // Only translate for ships that carry the per-entity power state.
-        let Some(power) = power_comp else {
+        let Some(_) = power_comp else {
             continue;
         };
         any_ship_had_component = true;
-        let read_state = power.0.read_state();
-
-        let mult_default;
-        let mult: &PowerMultiplierResource = match mult_comp {
-            Some(m) => m,
-            None => match mult_res.as_deref() {
-                Some(m) => m,
-                None => {
-                    mult_default = PowerMultiplierResource::default();
-                    &mult_default
-                }
-            },
-        };
-
-        apply_power_modifiers_from_read_state(&mut mods, &read_state, &mult.multipliers);
+        clear_retired_power_modifiers(&mut mods);
     }
 
     // Resource-only fallback for tests that don't spawn any ship entity
-    // with a per-entity `ShipPowerSystem` component. Reads the global
-    // `ShipPowerSystem` + `PowerMultiplierResource` resources and writes
-    // the per-entity `ShipModifiers` on the LocalShip.
+    // with a per-entity `ShipPowerSystem` component. A global power owner
+    // permits cleanup of the first LocalShip's per-entity modifiers.
     if any_ship_had_component {
         return;
     }
-    let Some(power) = power_res.as_deref() else {
+    let Some(_) = power_res.as_deref() else {
         return;
-    };
-    let read_state = power.0.read_state();
-    let mult_default;
-    let mult: &PowerMultiplierResource = match mult_res.as_deref() {
-        Some(m) => m,
-        None => {
-            mult_default = PowerMultiplierResource::default();
-            &mult_default
-        }
     };
     if let Some(mut mods) = ships_q
         .iter_mut()
         .find(|(_, _, _, is_local)| *is_local)
         .map(|(_, _, mods, _)| mods)
     {
-        apply_power_modifiers_from_read_state(&mut mods, &read_state, &mult.multipliers);
+        clear_retired_power_modifiers(&mut mods);
     }
 }
 
@@ -222,73 +200,28 @@ pub fn apply_radar_damage_modifiers(
     }
 }
 
-/// Apply power-level modifiers to `modifiers` based on the current `PowerSystem`
-/// state and per-group multiplier config.
-///
-/// Registers one `Modifier` per power group using
-/// [`ModifierSource::PowerGroup`]. Re-registration replaces the previous entry
-/// (no stacking). Multiplier arrays are indexed by power level 1–4 (1 maps
-/// to index 0).
-///
-/// # What each group buys (issues #955, #952)
-///
-/// * HELM → [`ModifierSlot::MaxSpeed`] + [`ModifierSlot::MaxYawRate`].
-/// * WEAPONS → [`ModifierSlot::PhaserDamage`]. Power buys INTENSITY: the beam
-///   hurts more. `console::weapons::beam::tick_beams` multiplies each bank's
-///   authored `beam_damage_per_sec` by this slot.
-/// * SHIELDS → [`ModifierSlot::ShieldRegen`]. Power buys RECOVERY: every arc
-///   climbs back faster. `ship::shields::tick_shields` scales each facing's
-///   authored `regen_per_sec` by this slot, so level 2 is exactly what the
-///   `[[shield_arc]]` blocks say and the rungs either side of it trade a
-///   reactor point for how quickly a battered ship gets its screens back.
-///
-/// Power buys neither REACH nor ACQUISITION any more, and both halves of that
-/// took a separate deletion. #955 removed the `beam_range × RadarRange`
-/// multiplication from every firing path: a gun reaches what it authors, at
-/// every power level. #952 then took `sensors` out of
-/// [`crate::modifiers::power_system::POWER_GROUP_ORDER`] entirely, so
-/// [`ModifierSlot::RadarRange`] has no power producer at all — a hull acquires
-/// through the horizon its `[weapons_console.radar] range` authors, reduced
-/// only by radar HULL DAMAGE (`apply_radar_damage_modifiers`) and by
-/// `RegionEffectKind::RadarDampening`. Both of those are things done TO the
-/// ship rather than choices made at the reactor, which is the right shape for a
-/// horizon: the Power officer should not be able to make the ship blind by
-/// spending elsewhere.
-///
-/// A LOCK remains a precondition for firing, so a horizon authored below a
-/// hull's own guns would still be a range cap wearing a different name. The
-/// fleet keeps its horizons clear of its guns by AUTHORING, pinned by
-/// `tests::every_hulls_acquisition_horizon_clears_its_longest_gun_at_rest`.
-///
-/// # A COLD group (level 0) reads the bottom rung
-///
-/// The multiplier tables have four rungs, for levels 1 to 4, and none for
-/// "off". A group commanded to 0 (issue #1395) therefore takes the level-1
-/// entry through the `saturating_sub(1)` below rather than a fifth value, and
-/// the table's own authoring stays four numbers per group.
-///
-/// That is the right shape for helm and shields, whose hulls floor them at 1 so
-/// the case never arises. It is deliberately NOT the whole answer for a cold
-/// weapons group: what a switched-off gun does is not fire at the level-1
-/// damage multiplier, it does not fire at all — and that is a FIRE GATE, read
-/// off `PowerSystem::is_group_cold` where the shot is authorised, not a number
-/// in this table. Issue #1396 owns it.
+/// Clear the former fixed allocation contributions without projecting power state.
+/// Incoming flow replenishes local reserves; it never amplifies machinery.
+/// The legacy power and multiplier arguments remain accepted for existing callers.
 pub fn apply_power_modifiers(
     modifiers: &mut ShipModifiers,
-    power: &PowerSystem,
-    multipliers: &HashMap<PowerGroupId, [f32; 4]>,
+    _power: &PowerSystem,
+    _multipliers: &HashMap<PowerGroupId, [f32; 4]>,
 ) {
-    apply_power_modifiers_from_read_state(modifiers, &power.read_state(), multipliers);
+    clear_retired_power_modifiers(modifiers);
 }
 
 pub fn apply_power_modifiers_from_read_state(
     modifiers: &mut ShipModifiers,
-    power: &PowerReadState,
-    multipliers: &HashMap<PowerGroupId, [f32; 4]>,
+    _power: &PowerReadState,
+    _multipliers: &HashMap<PowerGroupId, [f32; 4]>,
 ) {
+    clear_retired_power_modifiers(modifiers);
+}
+
+fn clear_retired_power_modifiers(modifiers: &mut ShipModifiers) {
     // Incoming flow replenishes local reserves. It never amplifies machinery.
     // Clear contributions left by restored/fixture modifier collections.
-    let _ = (power, multipliers);
     for (group, slots) in [
         (
             HELM_POWER_GROUP,

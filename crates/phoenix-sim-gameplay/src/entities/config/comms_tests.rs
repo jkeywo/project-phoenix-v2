@@ -1,4 +1,5 @@
 use super::*;
+use phoenix_model::identity::SystemId;
 
 #[test]
 fn listening_proof_fit_is_an_accepted_cruiser_with_only_opted_radio_and_feed_changes() {

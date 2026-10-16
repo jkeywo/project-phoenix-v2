@@ -457,3 +457,22 @@ cases, plus real Workshop exact-source callsign edit/stale rejection/source-ener
 refusal and preserved physical/resource source undo. Strict strings passed with
 6389 identifiers; owned formatting/diff and literal TOML syntax passed. Cargo,
 actual host execution and mounted authoring/device journeys remain pending.
+
+
+The physical decoy host evidence donor uses normal Human Bay admission plus a
+separate ordinary positive Bay-tree launch. An independent real paid Broad
+instrument acquires this same body and observes its paid false identity while
+actual EntityName/faction remain unchanged. The proof recovers a still-funded
+emitter, checks inactive stored work/backend with continued passive loss, then
+relaunches without refill and observes actual battery exhaustion followed by
+ordinary truthful identification of the same surviving body. Three fresh
+whole-JSON360 checkpoints cover partial handling, funded storage and relaunched
+paid emission/depletion; three malformed custody/pose candidates retain full
+no-write assertions. Both craft host witnesses now await actual stopped-parent
+velocity after normal stop commands; no physics injection is used.
+
+Independent final source review passed. Literal proof TOML syntax, owned Rust
+formatting and diff checks passed. These actual-host tests remain unexecuted
+pending root's sequential native queue. Installed-radio link loss, broader craft
+families, multiple-LocalShip and mounted Workshop/browser/native/device/full19
+acceptance remain open. A source proof donor is not a playable exit.

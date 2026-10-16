@@ -1,0 +1,23 @@
+# Ordinary fixed paid Broad instrument; no weapons or privileged observations.
+includes=["../../assets/entities/battery_probe.toml"]
+[[energy.consumer]]
+system = "sensor-radar"
+initial_energy = 120
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 120
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+

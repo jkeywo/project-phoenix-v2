@@ -1,0 +1,27 @@
+# Actual finite physical identity decoy and independent paid Broad observer.
+[global]
+seed=191919
+[player_spawn]
+position=[0,0,0]
+[[ship_slot]]
+id="crew"
+label="Crew"
+default_ship="assets/entities/probe_carrier.toml"
+[[ship_slot.ships]]
+template_path="assets/entities/probe_carrier.toml"
+[[entity]]
+template_path="assets/entities/probe_carrier.toml"
+id="player-ship"
+name="player-ship"
+spawn_on="game_start"
+[[entity]]
+template_path="assets/entities/battery_decoy.toml"
+id="battery-decoy"
+name="battery-decoy"
+spawn_on="game_start"
+carried_by={parent="player-ship",bay="probe-bay"}
+[[entity]]
+template_path="tests/fixtures/decoy-observer.toml"
+id="decoy-observer"
+name="decoy-observer"
+transform={position=[30,0,-18]}

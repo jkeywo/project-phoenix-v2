@@ -110,6 +110,13 @@ fn boot(auto: bool) -> (App, Entity, Entity) {
         "helm-steering",
         Control::SetSteering { value: 0.0 },
     );
+    wait(&mut app, |app| {
+        app.world().get::<ShipPhysics>(parent).is_some_and(|pose| {
+            [pose.forward_speed, pose.lateral_speed, pose.vertical_speed]
+                .iter()
+                .all(|speed| speed.abs() <= 0.03)
+        })
+    });
     (app, parent, child)
 }
 fn control(app: &mut App, station: &str, owner: &str, payload: Control) {

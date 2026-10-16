@@ -99,7 +99,12 @@ async function designateAndReadRadar(client, uuid, expectedCold) {
             if (m.type !== 'BlackboardUpdate') continue;
             const entry = (m.data.updates || []).find(([sid]) => sid === 'sensor-radar');
             const data = entry && entry[1] && entry[1].data;
-            if (data && data.selected_target === wanted && data.selected_target_weapons_cold === expectedCold) return data;
+            const track = data?.tracks?.find(candidate => candidate.contact_id === wanted);
+            if (data?.selected_target === wanted && data.selected_target_weapons_cold === expectedCold
+              && track?.selectable && track.predicted === false
+              && track.assessment?.weapons_restrained === expectedCold
+              && Number.isSafeInteger(track.assessment_tick) && track.assessment_tick >= 0
+              && Number.isSafeInteger(track.observed_tick) && track.observed_tick >= track.assessment_tick) return data;
           }
           return null;
         },
@@ -125,7 +130,11 @@ async function designateAndReadRadar(client, uuid, expectedCold) {
 // takes the system-keyed station payload. Both mount the same
 // `ph-sensor-panel` and both hand it the whole Sensors view unfiltered
 // (gui/stations/science-console.js), so the row under test is the same row.
-async function scanCardTextFor(consolePage, radarBlackboard) {
+async function scanCardFor(consolePage, radarBlackboard, expectedRestraint) {
+  const track = radarBlackboard.tracks.find(candidate => candidate.contact_id === radarBlackboard.selected_target);
+  expect(track.assessment.weapons_restrained).toBe(expectedRestraint);
+  expect(track.assessment_tick).toBeGreaterThanOrEqual(0);
+  expect(track.assessment_tick).toBeLessThanOrEqual(track.observed_tick);
   const payload = await consolePage.evaluate(async (bb) => {
     const mod = await import('/gui/console-state.js');
     return mod.buildSensorsConsoleState({
@@ -141,11 +150,31 @@ async function scanCardTextFor(consolePage, radarBlackboard) {
       blackboardKinds: { 'sensor-radar': 'SensorRadar' },
     });
   }, radarBlackboard);
+  expect(payload.target_uuid).toBe(track.contact_id);
+  expect(payload.target_track.id).toBe(track.contact_id);
+  expect(payload.target_restrained).toBe(expectedRestraint);
+  expect(payload.target_elevation.sample_tick).toBe(track.observed_tick);
   await consolePage.evaluate((p) => window.__updateConsole('sensors', JSON.stringify(p)), payload);
-  return consolePage.locator('ph-sensor-panel').locator('#scan-data');
+  const panel = consolePage.locator('ph-sensor-panel');
+  await expect(panel.locator('#target-name')).toHaveText(track.identity.name);
+  const scan = panel.locator('#scan-data');
+  const restraint = scan.locator('.scan-row').filter({
+    has: consolePage.getByText(ts('sensing.track.restrained'), { exact: true }),
+  });
+  await expect(restraint).toHaveCount(1);
+  await expect(restraint.locator('.k')).toHaveText(ts('sensing.track.restrained'));
+  await expect(restraint.locator('.v')).toHaveText(ts(expectedRestraint ? 'sensing.track.yes' : 'sensing.track.no'));
+  const altitude = scan.locator('.scan-row').filter({
+    has: consolePage.getByText(ts('sensing.track.elevation.title'), { exact: true }),
+  });
+  await expect(altitude).toHaveCount(1);
+  await expect(altitude.locator('.v')).toHaveText(
+    ts('sensing.track.elevation.value', { height: track.elevation.height, error: track.elevation.error })
+      + ' \u00b7 ' + ts('sensing.track.elevation.sample', { tick: track.observed_tick }),
+  );
 }
 
-test("a target with explicit restraint reads WEAPONS COLD on another ship's Sensors", { tag: '@core' }, async ({
+test("Sensors displays each target's dated observed weapons restraint", { tag: '@core' }, async ({
   context,
 }) => {
   test.setTimeout(90_000);
@@ -199,9 +228,7 @@ test("a target with explicit restraint reads WEAPONS COLD on another ship's Sens
 
   const consolePage = await context.newPage();
   await consolePage.goto('/gui/battleship/sensors.html');
-  const coldScan = await scanCardTextFor(consolePage, coldRadar);
-  await expect(coldScan).toContainText(ts('component.sensor_panel.weapons'));
-  await expect(coldScan).toContainText(ts('component.sensor_panel.weapons_cold'));
+  await scanCardFor(consolePage, coldRadar, true);
 
   // ── The control: the same hull with its weapons up ──────────────────────
   const armedRadar = await designateAndReadRadar(science, armedUuid, false);
@@ -211,8 +238,8 @@ test("a target with explicit restraint reads WEAPONS COLD on another ship's Sens
     'the reading is looked up per selection, so an armed hull reads Some(false)',
   ).toBe(false);
 
-  const armedScan = await scanCardTextFor(consolePage, armedRadar);
-  await expect(armedScan).toContainText(ts('component.sensor_panel.weapons_powered'));
+  expect(armedUuid).not.toBe(coldUuid);
+  await scanCardFor(consolePage, armedRadar, false);
 
   await consolePage.close();
   await helm.close();

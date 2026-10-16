@@ -45,6 +45,9 @@ delegated or temporarily unavailable. Current monitored capability is derived
 from the real paid Radio sample. The existing per-System controller can set the
 same order under normal admission; Human ownership stands it down. No special
 temporary-filling controller or extra AI scheduler is introduced.
+Default ordinary AI retains the current authored/operator priorities through
+handoff. A reusable authored policy can explicitly choose a justified supported
+change; starting Backfill alone never resets the crew's order.
 
 ## Actual reception boundary
 

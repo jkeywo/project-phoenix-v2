@@ -423,6 +423,29 @@ fn selection_limit(
     Ok((*stock).min(destination.headroom).min(deficit))
 }
 
+fn pay_work(
+    system: &SystemId,
+    seconds: f32,
+    factor: f32,
+    power: Option<&crate::ship::power::ShipPowerSystem>,
+    staged: &mut Option<crate::ship::power::ShipPowerSystem>,
+) -> Result<f32, String> {
+    if factor <= 0.0 {
+        return Ok(0.0);
+    }
+    // The existing Recovery transaction publishes this candidate only after its
+    // state/offer resolves successfully. No payment request means no Power copy.
+    if staged.is_none() {
+        *staged = power.cloned();
+    }
+    staged.as_mut().map_or(Ok(0.0), |power| {
+        power
+            .0
+            .work_continuous(system, seconds, 1.0)
+            .map(|grant| grant.fraction * factor)
+    })
+}
+
 #[allow(clippy::type_complexity)]
 pub(crate) fn tick(
     time: Res<Time<Fixed>>,
@@ -616,23 +639,13 @@ pub(crate) fn tick(
         } else {
             observed_limit.min(actual_limit)
         };
-        let mut next_power = power.as_deref().cloned();
+        let mut next_power = None;
         let result = next.advance(
             &profile.0,
             tick.0,
             time.delta_secs(),
             limit,
-            |system, seconds| {
-                if factor <= 0.0 {
-                    return Ok(0.0);
-                }
-                next_power.as_mut().map_or(Ok(0.0), |power| {
-                    power
-                        .0
-                        .work_continuous(system, seconds, 1.0)
-                        .map(|grant| grant.fraction * factor)
-                })
-            },
+            |system, seconds| pay_work(system, seconds, factor, power.as_deref(), &mut next_power),
         );
         let Ok(offered) = result else {
             continue;
@@ -664,8 +677,10 @@ pub(crate) fn tick(
                 });
         }
         owner.0 = next;
-        if let (Some(owner), Some(next)) = (power.as_deref_mut(), next_power) {
-            *owner = next;
+        if let Some(next) = next_power {
+            if let Some(owner) = power.as_deref_mut() {
+                *owner = next;
+            }
         }
     }
 }

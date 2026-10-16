@@ -429,3 +429,123 @@ fn cohosted_consoles_do_not_share_logistics_knowledge_for_human_or_ordinary_ai_s
         assert_quantity(&app, entity, 6, 8, 100);
     }
 }
+
+#[test]
+fn idle_production_advances_its_clock_without_marking_power_changed() {
+    use bevy::ecs::system::RunSystemOnce;
+    let (mut app, entity) = factory(ControlSource::Human, 0, |_| {});
+    app.update();
+    let before = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(entity)
+        .unwrap()
+        .0
+        .clone();
+    let mut expected = owner(&app, entity).clone();
+    let quantities = stocks(&app, entity);
+    app.world_mut().clear_trackers();
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+    let now = app.world().resource::<crate::sim_tick::SimTick>().0;
+    app.world_mut().run_system_once(tick).unwrap();
+    expected.last_tick = now;
+    expected.blocked = None;
+    assert_eq!(owner(&app, entity), &expected);
+    assert_eq!(stocks(&app, entity), quantities);
+    let power = app
+        .world()
+        .entity(entity)
+        .get_ref::<crate::ship::power::ShipPowerSystem>()
+        .unwrap();
+    assert_eq!(power.0, before);
+    assert!(
+        !power.is_changed(),
+        "no payment callback must leave Power untouched"
+    );
+}
+
+#[test]
+fn production_lazy_payment_matches_eager_power_for_funding_shortfall_and_errors() {
+    let (app, entity) = factory(ControlSource::Human, 0, |_| {});
+    let original = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(entity)
+        .unwrap();
+    for (system, seconds, available, factor) in [
+        (id("fabrication"), 0.2, true, 1.0),
+        (id("fabrication"), 1_000_000.0, true, 0.5),
+        (id("missing-system"), 0.2, true, 1.0),
+        (id("fabrication"), 0.2, false, 1.0),
+        (id("fabrication"), 0.2, true, 0.0),
+    ] {
+        let mut eager = original.clone();
+        let mut staged = None;
+        for _ in 0..2 {
+            let expected = if available && factor > 0.0 {
+                eager
+                    .0
+                    .work_continuous(&system, seconds, 1.0)
+                    .map(|grant| grant.fraction * factor)
+            } else {
+                Ok(0.0)
+            };
+            let actual = pay_work(
+                &system,
+                seconds,
+                available,
+                factor,
+                Some(original),
+                &mut staged,
+            );
+            assert_eq!(actual.map(f32::to_bits), expected.map(f32::to_bits));
+            assert_eq!(
+                staged.as_ref().map(|power| &power.0).unwrap_or(&original.0),
+                &eager.0
+            );
+        }
+        assert_eq!(staged.is_some(), available && factor > 0.0);
+    }
+}
+
+#[test]
+fn refused_production_after_actual_payment_discards_staged_power_and_materials() {
+    let (app, entity) = factory(ControlSource::Human, 6, |_| {});
+    let profile = &app.world().get::<CompiledShipProduction>(entity).unwrap().0;
+    let mut next = owner(&app, entity).clone();
+    let mut stocks = endpoint_view(
+        profile.logistics(),
+        app.world().get::<InfrastructureCondition>(entity),
+        app.world().get::<TorpedoSystemResource>(entity),
+    )
+    .unwrap();
+    let before_stocks = stocks.clone();
+    let before_state = next.clone();
+    let power = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(entity)
+        .unwrap();
+    let before_power = power.0.clone();
+    let mut staged = None;
+    // Exercise the existing invalid funded-fraction boundary AFTER real finite
+    // Power expenditure, not an injected energy grant or fabricated batch.
+    let refused = next.try_start(
+        profile,
+        1,
+        0.2,
+        &app.world().get::<ShipLogistics>(entity).unwrap().0.floors,
+        &mut stocks,
+        |system, seconds| pay_work(system, seconds, true, f32::NAN, Some(power), &mut staged),
+    );
+    assert!(refused.is_err());
+    let paid = &staged.as_ref().unwrap().0;
+    assert!(paid.emitted_work(&id("fabrication")) > before_power.emitted_work(&id("fabrication")));
+    assert!(
+        paid.network().consumers[&id("fabrication")].energy
+            < before_power.network().consumers[&id("fabrication")].energy
+    );
+    assert_eq!(next, before_state);
+    assert_eq!(stocks, before_stocks);
+    assert_eq!(
+        power.0, before_power,
+        "a refused transaction cannot publish its Power candidate"
+    );
+}

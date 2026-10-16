@@ -713,3 +713,112 @@ fn delegated_tree_can_stop_an_existing_human_standing_order() {
     );
     assert_eq!(stock(&app, ship) + stock(&app, source), 4);
 }
+
+#[test]
+fn idle_recovery_advances_its_settled_receipt_without_marking_power_changed() {
+    use bevy::ecs::system::RunSystemOnce;
+    let (mut app, ship, source) = rig(ControlSource::Human, 4, 2);
+    let before = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(ship)
+        .unwrap()
+        .0
+        .clone();
+    let mut expected = app.world().get::<ShipRecovery>(ship).unwrap().0.clone();
+    assert!(!expected.enabled && expected.target.is_none());
+    let before_stock = stock(&app, source);
+    app.world_mut().clear_trackers();
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+    let now = app.world().resource::<crate::sim_tick::SimTick>().0;
+    app.world_mut().run_system_once(tick).unwrap();
+    expected.last_tick = now;
+    expected.last_outcome = Some(crate::resources::recovery::RecoveryOutcome {
+        tick: now,
+        offered: 0,
+        moved: 0,
+        settled: true,
+    });
+    assert_eq!(app.world().get::<ShipRecovery>(ship).unwrap().0, expected);
+    assert_eq!(stock(&app, source), before_stock);
+    assert_settled(&app, ship);
+    let power = app
+        .world()
+        .entity(ship)
+        .get_ref::<crate::ship::power::ShipPowerSystem>()
+        .unwrap();
+    assert_eq!(power.0, before);
+    assert!(
+        !power.is_changed(),
+        "no payment callback must leave Power untouched"
+    );
+}
+
+#[test]
+fn recovery_lazy_payment_matches_eager_power_for_funding_shortfall_and_errors() {
+    let (app, ship, _) = rig(ControlSource::Human, 4, 2);
+    let original = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(ship)
+        .unwrap();
+    for (system, seconds, factor) in [
+        (id("resource-recovery"), 0.2, 1.0),
+        (id("resource-recovery"), 1_000_000.0, 0.5),
+        (id("missing-system"), 0.2, 1.0),
+        (id("resource-recovery"), 0.2, 0.0),
+    ] {
+        let mut eager = original.clone();
+        let mut staged = None;
+        for _ in 0..2 {
+            let expected = if factor > 0.0 {
+                eager
+                    .0
+                    .work_continuous(&system, seconds, 1.0)
+                    .map(|grant| grant.fraction * factor)
+            } else {
+                Ok(0.0)
+            };
+            let actual = pay_work(&system, seconds, factor, Some(original), &mut staged);
+            assert_eq!(actual.map(f32::to_bits), expected.map(f32::to_bits));
+            assert_eq!(
+                staged.as_ref().map(|power| &power.0).unwrap_or(&original.0),
+                &eager.0
+            );
+        }
+        assert_eq!(staged.is_some(), factor > 0.0);
+    }
+}
+
+#[test]
+fn refused_recovery_after_actual_payment_discards_staged_power_and_work() {
+    let (mut app, ship, _) = rig(ControlSource::Human, 4, 2);
+    start(&mut app);
+    app.update();
+    let mut next = app.world().get::<ShipRecovery>(ship).unwrap().0.clone();
+    assert!(next.enabled && next.target.is_some());
+    let profile = &app.world().get::<CompiledShipRecovery>(ship).unwrap().0;
+    let before = next.clone();
+    let power = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(ship)
+        .unwrap();
+    let before_power = power.0.clone();
+    let mut staged = None;
+    let refused = next.advance(profile, next.last_tick + 1, 0.2, 1, |system, seconds| {
+        pay_work(system, seconds, f32::NAN, Some(power), &mut staged)
+    });
+    assert!(refused.is_err());
+    let paid = &staged.as_ref().unwrap().0;
+    assert!(
+        paid.emitted_work(&id("resource-recovery"))
+            > before_power.emitted_work(&id("resource-recovery"))
+    );
+    assert!(
+        paid.network().consumers[&id("resource-recovery")].energy
+            < before_power.network().consumers[&id("resource-recovery")].energy
+    );
+    assert_eq!(next, before);
+    assert_eq!(
+        power.0, before_power,
+        "a refused transaction cannot publish its Power candidate"
+    );
+}

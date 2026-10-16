@@ -160,12 +160,18 @@ fn pay_work(
     seconds: f32,
     available: bool,
     factor: f32,
-    power: Option<&mut crate::ship::power::ShipPowerSystem>,
+    power: Option<&crate::ship::power::ShipPowerSystem>,
+    staged: &mut Option<crate::ship::power::ShipPowerSystem>,
 ) -> Result<f32, String> {
     if !available || factor <= 0.0 {
         return Ok(0.0);
     }
-    power.map_or(Ok(0.0), |owner| {
+    // Retain the same transaction candidate only once actual work asks to pay.
+    // Idle/disabled producers never copy or rewrite the machinery owner.
+    if staged.is_none() {
+        *staged = power.cloned();
+    }
+    staged.as_mut().map_or(Ok(0.0), |owner| {
         owner
             .0
             .work_continuous(system, seconds, 1.0)
@@ -217,7 +223,7 @@ fn tick(
         let mut next = owner.0.clone();
         let mut next_inventory = inventory.as_deref().cloned();
         let mut next_torpedoes = torpedoes.as_deref().cloned();
-        let mut next_power = power.as_deref().cloned();
+        let mut next_power = None;
         let Ok(mut stocks) = endpoint_view(
             profile.0.logistics(),
             next_inventory.as_ref(),
@@ -260,7 +266,16 @@ fn tick(
             tick.0,
             time.delta_secs(),
             &mut stocks,
-            |system, dt| pay_work(system, dt, available, factor, next_power.as_mut()),
+            |system, dt| {
+                pay_work(
+                    system,
+                    dt,
+                    available,
+                    factor,
+                    power.as_deref(),
+                    &mut next_power,
+                )
+            },
         );
         let Ok(advanced) = advanced else {
             warn!(%id, "Production step refused; staged stock and energy discarded");
@@ -279,7 +294,16 @@ fn tick(
                     remaining,
                     &logistics.0.floors,
                     &mut stocks,
-                    |system, dt| pay_work(system, dt, available, factor, next_power.as_mut()),
+                    |system, dt| {
+                        pay_work(
+                            system,
+                            dt,
+                            available,
+                            factor,
+                            power.as_deref(),
+                            &mut next_power,
+                        )
+                    },
                 )
             } else {
                 Ok(false)
@@ -307,8 +331,10 @@ fn tick(
         if let (Some(owner), Some(next)) = (torpedoes.as_deref_mut(), next_torpedoes) {
             *owner = next;
         }
-        if let (Some(owner), Some(next)) = (power.as_deref_mut(), next_power) {
-            *owner = next;
+        if let Some(next) = next_power {
+            if let Some(owner) = power.as_deref_mut() {
+                *owner = next;
+            }
         }
         if let Some(runtime) = runtime.as_deref_mut() {
             if let Some(inventory) = inventory.as_deref() {

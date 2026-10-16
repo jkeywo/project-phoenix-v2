@@ -84,10 +84,10 @@ pub struct CommsTransmission {
 
 impl CommsTransmission {
     pub fn validate(&self, now: u64) -> Result<(), &'static str> {
-        if matches!(&self.content, crate::comms_request::CommsRadioContent::Request { request } if request.is_media())
+        if matches!(&self.content, crate::comms_request::CommsRadioContent::Request { request } if request.is_media() || request.is_reception())
             && !matches!(self.audience, CommsAudience::Contact { .. })
         {
-            return Err("human media call requires one explicit Contact recipient");
+            return Err("media/reception request requires one explicit Contact recipient");
         }
         match &self.content {
             crate::comms_request::CommsRadioContent::Request { request } => {

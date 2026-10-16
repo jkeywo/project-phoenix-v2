@@ -29,7 +29,25 @@ pub(crate) fn publish(world: &mut World) {
             for (id, probe, custody) in bodies.iter(world) {
                 if matches!(&custody.0,CraftLocation::Carried{parent_uuid,bay} if parent_uuid==&uuid && bay==&owner)
                 {
+                    let mut people = Vec::new();
+                    if let Some(roster) =
+                        world.get_resource::<phoenix_sim_gameplay::personnel::PersonnelRoster>()
+                    {
+                        for (origin, record) in &roster.origins {
+                            for (officer, state) in &record.state.officers {
+                                if matches!(&state.location,phoenix_model::personnel::OfficerLocation::AboardCraft{craft,..} if craft==&id.0)
+                                {
+                                    people.push(phoenix_model::personnel::PersonRef {
+                                        origin: origin.clone(),
+                                        officer: officer.clone(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    people.sort();
                     view.stored.push(StoredCraftView {
+                        people,
                         id: id.0.clone(),
                         name: runtime::entity_for(world, &id.0)
                             .and_then(|entity| {
@@ -80,6 +98,22 @@ pub(crate) fn publish(world: &mut World) {
                 })
                 .collect();
         }
+        let now = world
+            .get_resource::<crate::sim_tick::SimTick>()
+            .map_or(0, |tick| tick.0);
+        view.receptions = runtime::accepted_receptions(world, parent, &owner, now)
+            .into_iter()
+            .map(|(order, source_name)| {
+                let contact = order
+                    .craft()
+                    .and_then(|craft| runtime::alias(world, parent, &owner, craft));
+                AcceptedCraftReception {
+                    order,
+                    contact,
+                    source_name,
+                }
+            })
+            .collect();
         let state = &world.get::<ShipBayJobs>(parent).unwrap().0[&owner];
         let active = state.job.as_ref().is_some_and(|job| job.outcome.is_none());
         view.crew_transfer_in_progress = world
@@ -146,6 +180,7 @@ pub(crate) fn project(world: &World, entity: Entity, owner: &SystemId) -> Option
         occupied_space: board.occupied_space,
         stored: board.stored.clone(),
         contacts: board.contacts.clone(),
+        receptions: board.receptions.clone(),
         progress: board
             .job
             .as_ref()

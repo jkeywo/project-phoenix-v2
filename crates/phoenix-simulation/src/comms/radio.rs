@@ -129,7 +129,7 @@ pub(crate) fn copy_message(
             && metadata.received_tick.is_some()
         {
             message.responses = [
-                match metadata.content {
+                match &metadata.content {
                     CommsRadioContent::Request { request } => request.positive_response(),
                     _ => unreachable!("received request"),
                 },
@@ -258,7 +258,9 @@ pub(crate) fn tick_radio(
                     channel,
                     audience,
                     request.body(),
-                    phoenix_model::comms_request::CommsRadioContent::Request { request: *request },
+                    phoenix_model::comms_request::CommsRadioContent::Request {
+                        request: request.clone(),
+                    },
                     planned_request.as_deref(),
                 ),
                 _ => continue,
@@ -338,6 +340,11 @@ pub(crate) fn tick_radio(
                                         .radio
                                         .media
                                         .is_some_and(|capability| capability.supports(*mode))
+                            }
+                            phoenix_model::comms_request::GenericCommsRequest::ReceiveCraft { craft } => {
+                                matches!(audience, CommsAudience::Contact { .. })
+                                    && boards.0.keys().filter_map(|source|permitted.get(source)).any(|board| matches!(board,
+                                        SystemBlackboard::Bay(bay) if bay.stored.iter().any(|row| &row.id == craft)))
                             }
                             _ => true,
                         }

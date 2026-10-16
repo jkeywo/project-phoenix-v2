@@ -514,3 +514,64 @@ fn formation_source_history_refuses_duplicate_gap_reordered_or_copy_changed_sequ
     heard.transmission.as_mut().unwrap().formation_sequence = Some(2);
     assert!(validate_transmissions(&[first, heard], 15).is_err());
 }
+
+#[test]
+fn reception_is_explicit_consent_then_exact_dated_physical_receipt_not_a_status_report() {
+    use crate::{
+        activity::ActivityJob,
+        craft::{CraftReceptionOrder, CraftReceptionReceipt},
+        job::JobId,
+    };
+    let mut reference = reference();
+    reference.request = GenericCommsRequest::ReceiveCraft {
+        craft: "own-pod".into(),
+    };
+    let mut progress = CommsRequestProgress::default();
+    progress
+        .decide(12, 15, CommsRequestDecision::Accept, None)
+        .unwrap();
+    let mut outcome = CommsRequestOutcome {
+        request: reference.clone(),
+        facts: progress.facts,
+    };
+    outcome.validate(20).unwrap();
+    assert_eq!(outcome.facts.stage(), CommsRequestStage::Decision);
+    outcome.facts.reception = Some(CraftReceptionReceipt {
+        order: CraftReceptionOrder {
+            request: reference,
+            decision_tick: 15,
+        },
+        scope: ActivityJob {
+            actor: "reporter".into(),
+            owner: SystemId("bay".into()),
+            job: JobId(1),
+        },
+        craft: "own-pod".into(),
+        handoff_tick: 20,
+        people: vec![crate::personnel::PersonRef {
+            origin: "requester".into(),
+            officer: "chief".into(),
+        }],
+    });
+    outcome.validate(20).unwrap();
+    assert_eq!(outcome.facts.stage(), CommsRequestStage::Completed);
+    for index in 0..6 {
+        let mut bad = outcome.clone();
+        let receipt = bad.facts.reception.as_mut().unwrap();
+        match index {
+            0 => receipt.order.decision_tick = 14,
+            1 => receipt.scope.actor = "another-receiver".into(),
+            2 => receipt.craft = "another-pod".into(),
+            3 => receipt.handoff_tick = 14,
+            4 => receipt.people.push(receipt.people[0].clone()),
+            _ => bad.request.request = GenericCommsRequest::ReportStatus,
+        }
+        assert!(bad.validate(20).is_err());
+    }
+    let mut older = outcome.facts.clone();
+    older.reception.as_mut().unwrap().people.clear();
+    assert!(!contains_facts(&outcome.facts, &older));
+    let restored: CommsRequestOutcome =
+        serde_json::from_slice(&serde_json::to_vec(&outcome).unwrap()).unwrap();
+    assert_eq!(outcome, restored);
+}

@@ -650,3 +650,41 @@ Workshop editing and validation, strict whole-candidate graph continuation and
 fresh JSON proofs for source/origin/receiver loss. No runtime reception or full
 Patrol acceptance is claimed by this contract commit. Root owns compatibility
 versions, central integration, Cargo and final gates.
+
+
+## Negotiated reception source slice
+
+ReceiveCraft now carries the sender's proposed craft identity internally. Its
+normal radio consumer requires a current own stored craft through an explicit
+Bay feed. The receiving Bay independently resolves its own earned current alias
+and exact accepted local Comms order; Human Comms cannot operate a Human Bay.
+The ordinary Bay state tree uses has_accepted_reception and normal admission.
+
+The same finite paid Bay Job retains the order and stages its physical receipt
+with the exact original receiving copy. Only successful actual set_carried and
+same-Job completion publish that receipt and mark the existing request completed.
+Its later paid reverse outcome reports the original handoff clock. People remain
+AboardCraft in the sole PersonnelRoster; local stored manifests are derived,
+including retained original identities after origin loss. No foreign room,
+second manifest owner, Activity kind, controller, queue or return phase is added.
+
+Whole-candidate checks join accepted Comms order, actual Bay Job/mint, known
+finite personnel and identical historical receipt copies. One physical Job
+cannot claim conflicting receipts. Current custody is not inferred from an old
+receipt. Ordinary source, receiver and pod destruction semantics remain intact.
+
+Optional reception_carrier preserves the six-seat machinery and adds an
+information-only Bay feed to Comms. reception_outpost is actual fixed equipment
+with finite positive listening/handling energy costs, interior and normal Bay/
+Comms policies. Existing own publication and authored policy installation cover
+that static equipment without adding propulsion. Existing Workshop composition,
+source/history and tree bindings edit the real capability.
+
+Targeted JS/authoring passed five files/34 tests (1.60 s). Layer rules and strict
+strings (6415 rows) passed. Independent source review passed the core plus narrow
+static publication joins. UI/data review passed after a missing positive radio listening cost and retired
+widget callbacks were corrected with assertions. Rust owner
+fixtures are authored but unexecuted here. Native compile, actual Human/AI radio
+and physical host proof, full JSON continuation/loss/forgery evidence and full
+reception/Patrol acceptance remain pending root integration. This source slice
+is not the full increment20/21/23 exit. Root owns versions, Cargo and final gates.

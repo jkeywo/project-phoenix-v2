@@ -2160,6 +2160,8 @@ pub enum SystemControlPayload {
     },
     RecoverCraft {
         contact: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reception: Option<crate::craft::CraftReceptionOrder>,
     },
     CancelCraftHandling,
     ToggleBoost,
@@ -5801,6 +5803,9 @@ pub struct RepairBlackboard {
 /// blackboard (issue #565).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct CommsBlackboard {
+    /// Current own stored craft from explicitly bound Bay publications only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reception_craft: Vec<crate::craft::StoredCraftView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub captured: Option<crate::comms_capture::CommsCaptureControlsView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

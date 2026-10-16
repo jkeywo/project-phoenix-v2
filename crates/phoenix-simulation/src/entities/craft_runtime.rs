@@ -311,6 +311,38 @@ fn eligible(
     }
 }
 
+pub(super) fn accepted_receptions(
+    world: &World,
+    parent: Entity,
+    owner: &SystemId,
+    now: u64,
+) -> Vec<(phoenix_model::craft::CraftReceptionOrder, String)> {
+    let (Some(config), Some(boards), Some(uuid), Some(inbox)) = (
+        world.get::<ShipConfigComponent>(parent),
+        world.get::<crate::server_app::ShipSystemBlackboards>(parent),
+        world.get::<EntityUuid>(parent),
+        world.get_resource::<crate::comms::server::CommsInboxRes>(),
+    ) else {
+        return Vec::new();
+    };
+    crate::comms::reception::accepted(config, boards, owner, &uuid.0, inbox, now)
+}
+fn order_permitted(
+    world: &World,
+    parent: Entity,
+    owner: &SystemId,
+    route: &str,
+    reception: Option<&phoenix_model::craft::CraftReceptionOrder>,
+    now: u64,
+) -> bool {
+    reception.is_none_or(|order| {
+        order.craft() == Some(route)
+            && accepted_receptions(world, parent, owner, now)
+                .iter()
+                .any(|(actual, _)| actual == order)
+    })
+}
+
 pub(crate) fn handle(world: &mut World) {
     let now = world
         .get_resource::<crate::sim_tick::SimTick>()
@@ -366,28 +398,33 @@ pub(crate) fn handle(world: &mut World) {
                     )
                     .is_ok()
             }),
-            Control::RecoverCraft { contact } => recovery_route(world, parent, owner, contact)
-                .and_then(|route| entity_for(world, &route).map(|target| (route, target)))
-                .is_some_and(|(route, target)| {
-                    eligible(
-                        world,
-                        parent,
-                        owner,
-                        &context,
-                        target,
-                        BayOperation::Recover,
-                        true,
-                    ) && state
-                        .begin(
-                            owner,
-                            &route,
-                            BayOperation::Recover,
-                            &context.config,
-                            context.cost,
-                            now,
-                        )
-                        .is_ok()
-                }),
+            Control::RecoverCraft { contact, reception } => {
+                recovery_route(world, parent, owner, contact)
+                    .and_then(|route| entity_for(world, &route).map(|target| (route, target)))
+                    .is_some_and(|(route, target)| {
+                        order_permitted(world, parent, owner, &route, reception.as_ref(), now)
+                            && eligible(
+                                world,
+                                parent,
+                                owner,
+                                &context,
+                                target,
+                                BayOperation::Recover,
+                                true,
+                            )
+                            && state
+                                .begin_order(
+                                    owner,
+                                    &route,
+                                    BayOperation::Recover,
+                                    &context.config,
+                                    context.cost,
+                                    now,
+                                    reception.as_ref(),
+                                )
+                                .is_ok()
+                    })
+            }
             _ => false,
         });
         if applied {
@@ -454,7 +491,14 @@ pub(crate) fn tick(world: &mut World) {
             .as_ref()
             .zip(entity_for(world, &job.activity.craft_uuid))
             .is_some_and(|(context, target)| {
-                eligible(
+                order_permitted(
+                    world,
+                    parent,
+                    &owner,
+                    &job.activity.craft_uuid,
+                    job.activity.reception.as_ref(),
+                    now,
+                ) && eligible(
                     world,
                     parent,
                     &owner,
@@ -534,15 +578,73 @@ pub(crate) fn commit(world: &mut World) {
         ) {
             continue;
         }
-        let transition = match job.activity.operation {
+        let receipt = if let Some(order) = &job.activity.reception {
+            if !order_permitted(
+                world,
+                parent,
+                &owner,
+                &job.activity.craft_uuid,
+                Some(order),
+                now,
+            ) {
+                continue;
+            }
+            let Some(roster) =
+                world.get_resource::<phoenix_sim_gameplay::personnel::PersonnelRoster>()
+            else {
+                continue;
+            };
+            let mut people = Vec::new();
+            for (origin, record) in &roster.origins {
+                for (officer, state) in &record.state.officers {
+                    if matches!(&state.location,phoenix_model::personnel::OfficerLocation::AboardCraft{craft,..}
+                        if craft == &job.activity.craft_uuid)
+                    {
+                        people.push(phoenix_model::personnel::PersonRef {
+                            origin: origin.clone(),
+                            officer: officer.clone(),
+                        });
+                    }
+                }
+            }
+            people.sort();
+            Some(phoenix_model::craft::CraftReceptionReceipt {
+                order: order.clone(),
+                scope: phoenix_model::activity::ActivityJob {
+                    actor: context.uuid.clone(),
+                    owner: owner.clone(),
+                    job: job.id,
+                },
+                craft: job.activity.craft_uuid.clone(),
+                handoff_tick: now,
+                people,
+            })
+        } else {
+            None
+        };
+        let completed_copy = if let Some(receipt) = &receipt {
+            let Some(inbox) = world.get_resource::<crate::comms::server::CommsInboxRes>() else {
+                continue;
+            };
+            let Some(message) = crate::comms::reception::completed_copy(inbox, receipt, now) else {
+                continue;
+            };
+            Some(message)
+        } else {
+            None
+        };
+        let operation = job.activity.operation;
+        let release_offset = job.activity.profile.release_offset;
+        if !state.complete_receiving(receipt) {
+            continue;
+        }
+        let transition = match operation {
             BayOperation::Recover => set_carried(world, target, &context.uuid, &owner),
             BayOperation::Launch => {
                 let Some((origin, rotation)) = context.pose else {
                     continue;
                 };
-                let Some(point) =
-                    release_point(origin, rotation, &job.activity.profile.release_offset)
-                else {
+                let Some(point) = release_point(origin, rotation, &release_offset) else {
                     continue;
                 };
                 let yaw = -rotation.to_euler(EulerRot::YXZ).0;
@@ -552,7 +654,20 @@ pub(crate) fn commit(world: &mut World) {
                 set_deployed(world, target, point, yaw)
             }
         };
-        if transition.is_ok() && state.complete() {
+        if transition.is_ok() {
+            if let Some(message) = completed_copy {
+                let mut inbox = world.resource_mut::<crate::comms::server::CommsInboxRes>();
+                let message_id = message.id.clone();
+                *inbox
+                    .0
+                    .request_copy_mut(&message_id, &context.uuid)
+                    .expect("staged exact local receiving copy in this exclusive commit") = message;
+                if let Some(mut runtime) =
+                    world.get_resource_mut::<crate::comms::server::CommsRuntime>()
+                {
+                    runtime.needs_broadcast = true;
+                }
+            }
             world
                 .get_mut::<ShipBayJobs>(parent)
                 .unwrap()

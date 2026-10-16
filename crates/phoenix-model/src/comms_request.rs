@@ -4,17 +4,21 @@
 use crate::{comms_channel::identity, identity::SystemId};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum GenericCommsRequest {
     ReportStatus,
     FormUp { slot: [i32; 2] },
     MediaCall { mode: crate::comms_media::MediaMode },
+    ReceiveCraft { craft: String },
 }
 /// Technical finite slot bound, exactly representable by the motion owner's f32.
 pub const MAX_FORMATION_SLOT: i32 = 1_000_000;
 impl GenericCommsRequest {
     pub fn validate(&self) -> Result<(), &'static str> {
+        if matches!(self,Self::ReceiveCraft {craft} if !identity(craft)) {
+            return Err("reception requires a bounded proposed craft identity");
+        }
         if matches!(self, Self::FormUp { slot } if slot.iter().any(|axis| !(-MAX_FORMATION_SLOT..=MAX_FORMATION_SLOT).contains(axis)))
         {
             return Err("formation slot exceeds supported finite World coordinates");
@@ -24,6 +28,9 @@ impl GenericCommsRequest {
     pub fn is_formation(&self) -> bool {
         matches!(self, Self::FormUp { .. })
     }
+    pub fn is_reception(&self) -> bool {
+        matches!(self, Self::ReceiveCraft { .. })
+    }
     pub fn is_media(&self) -> bool {
         matches!(self, Self::MediaCall { .. })
     }
@@ -31,6 +38,7 @@ impl GenericCommsRequest {
         match self {
             Self::ReportStatus => REPORT_STATUS_BODY,
             Self::FormUp { .. } => FORM_UP_BODY,
+            Self::ReceiveCraft { .. } => RECEIVE_CRAFT_BODY,
             Self::MediaCall {
                 mode: crate::comms_media::MediaMode::Audio,
             } => MEDIA_AUDIO_BODY,
@@ -43,6 +51,7 @@ impl GenericCommsRequest {
         match self {
             Self::ReportStatus => REPORT_RESPONSE,
             Self::FormUp { .. } => ACCEPT_RESPONSE,
+            Self::ReceiveCraft { .. } => RECEIVE_CRAFT_RESPONSE,
             Self::MediaCall { .. } => MEDIA_ACCEPT_RESPONSE,
         }
     }
@@ -54,11 +63,21 @@ impl GenericCommsRequest {
         }
     }
     fn validate_facts(&self, facts: &CommsRequestFacts) -> Result<(), &'static str> {
+        if facts
+            .reception
+            .as_ref()
+            .is_some_and(|receipt| !self.is_reception() || &receipt.order.request.request != self)
+        {
+            return Err("reception receipt differs from its actual receiving request");
+        }
         if let Some(decision) = &facts.decision {
             match (self, decision.choice) {
                 (_, CommsRequestDecision::Decline)
                 | (Self::ReportStatus, CommsRequestDecision::Report)
-                | (Self::FormUp { .. } | Self::MediaCall { .. }, CommsRequestDecision::Accept) => {}
+                | (
+                    Self::FormUp { .. } | Self::MediaCall { .. } | Self::ReceiveCraft { .. },
+                    CommsRequestDecision::Accept,
+                ) => {}
                 _ => return Err("request decision does not belong to this closed action"),
             }
         }
@@ -167,6 +186,8 @@ pub enum CommsRequestStage {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CommsRequestFacts {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reception: Option<crate::craft::CraftReceptionReceipt>,
     pub read_tick: Option<u64>,
     pub decision: Option<DatedCommsDecision>,
     pub report: Option<CommsStatusReport>,
@@ -174,7 +195,7 @@ pub struct CommsRequestFacts {
 
 impl CommsRequestFacts {
     pub fn stage(&self) -> CommsRequestStage {
-        if self.report.is_some() {
+        if self.report.is_some() || self.reception.is_some() {
             CommsRequestStage::Completed
         } else if self.decision.is_some() {
             CommsRequestStage::Decision
@@ -201,12 +222,24 @@ impl CommsRequestFacts {
                 return Err("request decision must follow reading on the original clock");
             }
             match (decision.choice, &self.report) {
-                (CommsRequestDecision::Decline | CommsRequestDecision::Accept, None) => {}
+                (CommsRequestDecision::Decline, None) if self.reception.is_none() => {}
+                (CommsRequestDecision::Accept, None) => {
+                    if let Some(receipt) = &self.reception {
+                        receipt.validate(now)?;
+                        if receipt.order.decision_tick != decision.tick
+                            || receipt.order.request.heard_tick != heard_tick
+                        {
+                            return Err("reception disagrees with actual consent/read clock");
+                        }
+                    }
+                }
                 (CommsRequestDecision::Report, Some(report))
-                    if identity(&report.system.0) && report.observed_tick == decision.tick => {}
+                    if self.reception.is_none()
+                        && identity(&report.system.0)
+                        && report.observed_tick == decision.tick => {}
                 _ => return Err("Report Status decision and actual local report disagree"),
             }
-        } else if self.report.is_some() {
+        } else if self.report.is_some() || self.reception.is_some() {
             return Err("request completion requires the actual receiving decision");
         }
         Ok(())
@@ -292,6 +325,22 @@ pub struct CommsRequestReference {
 }
 
 impl CommsRequestReference {
+    pub fn from_received(message: &crate::messages::CommsMessage) -> Option<Self> {
+        let wire = message.transmission.as_ref()?;
+        let CommsRadioContent::Request { request } = &wire.content else {
+            return None;
+        };
+        Some(Self {
+            formation_sequence: wire.formation_sequence,
+            origin_id: wire.origin_id.clone(),
+            source_ship: message.sender_uuid.clone(),
+            recipient_ship: message.recipient_ship.as_ref()?.0.clone(),
+            emitted_tick: wire.emitted_tick,
+            heard_tick: wire.received_tick?,
+            request: request.clone(),
+        })
+    }
+
     pub fn validate(&self, now: u64) -> Result<(), &'static str> {
         self.request.validate_sequence(self.formation_sequence)?;
         if !identity(&self.origin_id)
@@ -318,6 +367,14 @@ impl CommsRequestOutcome {
     pub fn validate(&self, now: u64) -> Result<(), &'static str> {
         self.request.validate(now)?;
         self.facts.validate(self.request.heard_tick, now)?;
+        if self
+            .facts
+            .reception
+            .as_ref()
+            .is_some_and(|receipt| receipt.order.request != self.request)
+        {
+            return Err("returned reception changes its original request lineage");
+        }
         self.request.request.validate_facts(&self.facts)
     }
 }
@@ -342,6 +399,8 @@ impl CommsRadioContent {
     }
 }
 
+pub const RECEIVE_CRAFT_BODY: &str = "comms.request.receive_craft";
+pub const RECEIVE_CRAFT_RESPONSE: &str = "comms.request.accept_reception";
 pub const REPORT_STATUS_BODY: &str = "comms.request.report_status";
 pub const FORM_UP_BODY: &str = "comms.request.form_up";
 pub const MEDIA_AUDIO_BODY: &str = "comms.request.media_audio";
@@ -449,6 +508,12 @@ pub(crate) fn validate_copy(
             if let Request { request } = &transmission.content {
                 progress.validate(transmission.received_tick, now)?;
                 request.validate_facts(&progress.facts)?;
+                if progress.facts.reception.as_ref().is_some_and(|receipt| {
+                    Some(receipt.order.request.clone())
+                        != CommsRequestReference::from_received(message)
+                }) {
+                    return Err("local reception changes its heard request lineage");
+                }
                 if message.body != request.body() {
                     return Err("request body is not its closed definition");
                 }
@@ -503,6 +568,10 @@ fn contains_facts(current: &CommsRequestFacts, older: &CommsRequestFacts) -> boo
             .report
             .as_ref()
             .is_none_or(|value| current.report.as_ref() == Some(value))
+        && older
+            .reception
+            .as_ref()
+            .is_none_or(|value| current.reception.as_ref() == Some(value))
 }
 
 /// Historical lineages stay in these same inbox records after local dismissal.
@@ -525,7 +594,10 @@ pub(crate) fn validate_lineage(
                             && source.transmission.as_ref().is_some_and(|original| {
                                 original.origin_id == transmission.origin_id
                                     && original.received_tick.is_none()
-                                    && original.content == (Request { request: *request })
+                                    && original.content
+                                        == (Request {
+                                            request: request.clone(),
+                                        })
                             })
                     });
                     if !issued || heard_tick < transmission.emitted_tick {
@@ -582,7 +654,7 @@ pub(crate) fn validate_lineage(
                                 && original.received_tick == Some(reference.heard_tick)
                                 && original.content
                                     == (Request {
-                                        request: reference.request,
+                                        request: reference.request.clone(),
                                     })
                         })
                 });

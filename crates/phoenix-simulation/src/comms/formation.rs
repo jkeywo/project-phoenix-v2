@@ -49,7 +49,7 @@ pub fn accepted(
             };
             let CommsRadioContent::Request {
                 request: GenericCommsRequest::FormUp { slot },
-            } = wire.content
+            } = &wire.content
             else {
                 continue;
             };
@@ -77,7 +77,7 @@ pub fn accepted(
                 source_ship: message.sender_uuid.clone(),
                 source_name: message.sender_name.clone(),
                 sequence,
-                slot,
+                slot: *slot,
                 heard_tick,
                 accepted_tick: decision.tick,
             };

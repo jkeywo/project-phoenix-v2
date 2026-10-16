@@ -1,0 +1,19 @@
+# Optional reception negotiation variant: unchanged six-seat carrier and machinery.
+includes=["personnel_carrier.toml"]
+[[console]]
+id="comms"
+[[console.feed]]
+source="command"
+kind="Command"
+[[console.feed]]
+source="comms"
+kind="Comms"
+[[console.feed]]
+source="dossiers"
+kind="Dossiers"
+[[console.feed]]
+source="viewscreen"
+kind="Viewscreen"
+[[console.feed]]
+source="probe-bay"
+kind="Bay"

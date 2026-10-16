@@ -151,6 +151,37 @@ pub(super) fn validate_roster(
                     })?
                     .continuous_cost_per_sec;
                 if let Some(job) = &state.job {
+                    if let Some(order) = &job.activity.reception {
+                        if order.request.recipient_ship != row.uuid {
+                            return Err((
+                                row.uuid.clone(),
+                                "Bay reception belongs to another recipient".into(),
+                            ));
+                        }
+                        let original = snapshot.comms.as_ref().and_then(|comms| {
+                            comms.inbox.iter().find(|message| {
+                                phoenix_model::comms_request::CommsRequestReference::from_received(
+                                    message,
+                                )
+                                .as_ref()
+                                    == Some(&order.request)
+                            })
+                        });
+                        let progress =
+                            original.and_then(|message| message.request_progress.as_ref());
+                        if !progress.is_some_and(|progress| {
+                            progress.facts.decision.as_ref().is_some_and(|decision| {
+                                decision.choice
+                                    == phoenix_model::comms_request::CommsRequestDecision::Accept
+                                    && decision.tick == order.decision_tick
+                            }) && progress.facts.reception == job.activity.receipt
+                        }) {
+                            return Err((
+                                row.uuid.clone(),
+                                "Bay reception lacks its actual accepted Comms copy/receipt".into(),
+                            ));
+                        }
+                    }
                     let period = world
                         .get_resource::<Time<Fixed>>()
                         .ok_or_else(|| {
@@ -172,6 +203,82 @@ pub(super) fn validate_roster(
                     }
                 }
                 bays.insert((row.uuid.as_str(), owner.clone()), (config.clone(), state));
+            }
+        }
+    }
+    // Completed receiving facts are historical. People may subsequently move or
+    // be lost, but identities must belong to the sole finite accepted population.
+    let mut receiving_scopes = BTreeMap::new();
+    if let Some(comms) = &snapshot.comms {
+        for message in &comms.inbox {
+            let local = message
+                .request_progress
+                .as_ref()
+                .and_then(|progress| progress.facts.reception.as_ref());
+            let returned = message
+                .transmission
+                .as_ref()
+                .and_then(|wire| match &wire.content {
+                    phoenix_model::comms_request::CommsRadioContent::Outcome { outcome } => {
+                        outcome.facts.reception.as_ref()
+                    }
+                    _ => None,
+                });
+            for receipt in local.into_iter().chain(returned) {
+                if receiving_scopes
+                    .insert(receipt.scope.clone(), receipt)
+                    .is_some_and(|older| older != receipt)
+                {
+                    return Err((
+                        receipt.scope.actor.clone(),
+                        "One actual Bay Job cannot claim different receiving receipts".into(),
+                    ));
+                }
+                receipt
+                    .validate(snapshot.tick)
+                    .map_err(|reason| (receipt.scope.actor.clone(), reason.into()))?;
+                for person in &receipt.people {
+                    let record =
+                        snapshot
+                            .personnel
+                            .origins
+                            .get(&person.origin)
+                            .ok_or_else(|| {
+                                (
+                                    receipt.scope.actor.clone(),
+                                    "Reception names an unknown personnel origin".into(),
+                                )
+                            })?;
+                    if !record.state.officers.contains_key(&person.officer)
+                        || record.accepted_tick > receipt.handoff_tick
+                    {
+                        return Err((
+                            receipt.scope.actor.clone(),
+                            "Reception names a person outside its accepted finite population"
+                                .into(),
+                        ));
+                    }
+                }
+                if let Some((_, state)) =
+                    bays.get(&(receipt.scope.actor.as_str(), receipt.scope.owner.clone()))
+                {
+                    if state.next_id <= receipt.scope.job.0
+                        || state.job.as_ref().is_some_and(|job| {
+                            job.id == receipt.scope.job
+                                && job.activity.receipt.as_ref() != Some(receipt)
+                        })
+                    {
+                        return Err((
+                            receipt.scope.actor.clone(),
+                            "Reception receipt differs from actual Bay mint/job".into(),
+                        ));
+                    }
+                } else if rows.contains_key(receipt.scope.actor.as_str()) {
+                    return Err((
+                        receipt.scope.actor.clone(),
+                        "Reception receipt names an absent receiving Bay".into(),
+                    ));
+                }
             }
         }
     }

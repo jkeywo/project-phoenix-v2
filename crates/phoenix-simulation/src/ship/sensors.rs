@@ -937,7 +937,10 @@ pub fn publish_sensor_radar_blackboard(
             Option<&crate::ship_plugin::ShipSystemControlSources>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
-        With<crate::server_app::Ship>,
+        Or<(
+            With<crate::server_app::Ship>,
+            With<crate::science::broad::BroadProfile>,
+        )>,
     >,
     // Read-only lookup of Red-Alert-capable ships by uuid. `ShipRedAlert` is a
     // ship-only capability (attached inside the `[behaviour]`/player spawn gate),

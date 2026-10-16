@@ -73,7 +73,7 @@ export const ACTION_MAP = Object.freeze({
   jamming_target: logisticsCommand('SetJammingTarget', ['target_uuid']),
   jamming_enabled: logisticsCommand('SetJammingEnabled', ['enabled']),
   launch_craft: logisticsCommand('LaunchCraft', ['craft']),
-  recover_craft: logisticsCommand('RecoverCraft', ['contact']),
+  recover_craft: logisticsCommand('RecoverCraft', ['contact', 'reception']),
   cancel_craft_handling: (a, send) => {
     if (!a.control_system_id) return;
     send(a.correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {

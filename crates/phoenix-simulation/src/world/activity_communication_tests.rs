@@ -202,6 +202,7 @@ fn only_own_heard_matching_outcome_credits_original_read_and_terminal_receipt_cl
     let outcome = CommsRequestOutcome {
         request: actual_reference(),
         facts: CommsRequestFacts {
+            reception: None,
             read_tick: Some(15),
             decision: Some(DatedCommsDecision {
                 choice: CommsRequestDecision::Report,

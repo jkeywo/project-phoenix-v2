@@ -46,3 +46,27 @@ it('authors optional finite passenger berths and explicit information-only Bay f
  expect(()=>validatePersonnel(carrier.personnel,carrier)).not.toThrow();
  const bad=structuredClone(carrier.personnel);bad.repair_team[0].competencies.push('invented-pilot');expect(()=>validatePersonnel(bad,carrier)).toThrow();
 });
+
+it('authors a genuinely fixed finite receiving facility and explicit negotiation feeds with existing composition editing',()=>{
+ const facility=resolve('assets/entities/reception_outpost.toml');
+ expect(facility.helm_console).toBeUndefined();expect(facility.behaviour).toBeUndefined();expect(facility.probe).toBeUndefined();
+ expect(facility.collider.movable).toBe(false);expect(facility.personnel).toBeUndefined();
+ const bay=facility.system.find(row=>row.id==='reception-bay');validateBayComposition(bay,bay.component,[]);
+ expect(facility.interior.placements[bay.id]).toBe(bay.component[1].config.compartment);
+ expect(facility.energy.consumer.map(row=>row.system).sort()).toEqual(['comms','reception-bay','sensor-radar']);
+ expect(facility.energy.consumer.every(row=>row.initial_energy>0&&row.initial_energy<=row.reserve.capacity)).toBe(true);
+ expect(facility.energy.consumer.find(row=>row.system==='comms').continuous_cost_per_sec).toBeGreaterThan(0);
+ expect(facility.energy.consumer.find(row=>row.system==='comms').discrete_cost).toBeGreaterThan(0);
+ expect(facility.console.find(row=>row.id==='bay').feed).toContainEqual({source:'comms',kind:'Comms'});
+ expect(facility.console.find(row=>row.id==='bay').feed).toContainEqual({source:'sensor-radar',kind:'SensorRadar'});
+ expect(bay.config.ai.tree[0].state[0].task[0].when[0].value.name).toBe('has_accepted_reception');
+ expect(facility.comms_console.ai.rule[0].response_index).toBe(0);
+ const carrier=resolve('assets/entities/reception_carrier.toml'),baseline=resolve('assets/entities/personnel_carrier.toml');
+ expect(carrier.station).toEqual(baseline.station);expect(carrier.system).toEqual(baseline.system);
+ expect(carrier.console.find(row=>row.id==='comms').feed).toContainEqual({source:'probe-bay',kind:'Bay'});
+ const components=structuredClone(bay.component);components[1].config.capacity_space=3;
+ const updated=parse(writeSystemComposition(read('assets/entities/reception_outpost.toml'),bay.id,{components,channels:[],materialise:true},bay));
+ expect(updated.system.find(row=>row.id===bay.id).component[1].config.capacity_space).toBe(3);
+ expect(updated.system.find(row=>row.id===bay.id).config.ai).toEqual(bay.config.ai);
+ expect(updated.comms).toEqual(facility.comms);
+});

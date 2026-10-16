@@ -100,8 +100,12 @@ pub(crate) fn publish_comms_blackboard(
             Option<&crate::ship::state::ShipPhysics>,
             Option<&Transform>,
             Option<&crate::modifiers::ShipModifiers>,
+            Option<&crate::ship_plugin::ShipConfigComponent>,
         ),
-        With<crate::server_app::Ship>,
+        Or<(
+            With<crate::server_app::Ship>,
+            With<crate::comms::radio::RadioProfile>,
+        )>,
     >,
     paths: crate::regions::signal_path::RegionSignalQuery,
     content: Option<Res<WorldContentRuntime>>,
@@ -123,9 +127,22 @@ pub(crate) fn publish_comms_blackboard(
         physics,
         transform,
         modifiers,
+        config,
     ) in &mut ships
     {
         let mut bb = CommsBlackboard::default();
+        if let Some(config) = config {
+            let permitted = config.0.observations_for_system(&key, &boards.0);
+            let mut stored = std::collections::BTreeMap::new();
+            for board in boards.0.keys().filter_map(|source| permitted.get(source)) {
+                if let SystemBlackboard::Bay(bay) = board {
+                    for craft in &bay.stored {
+                        stored.insert(craft.id.clone(), craft.clone());
+                    }
+                }
+            }
+            bb.reception_craft = stored.into_values().collect();
+        }
         bb.media_capability = radio.and_then(|profile| profile.0.media);
         bb.captured = captured
             .zip(radio)
@@ -445,30 +462,27 @@ struct RespondingHull<'a> {
 /// fixture hull) rather than archetype order, because the `on_pick` effects two
 /// hulls answer with in one tick mint ids and write flags in the order they run.
 pub(crate) fn handle_respond_to_message(
-    ship_query: Query<
-        (
-            Entity,
-            &crate::core::messages::AdmittedCommands,
-            // The host-neutral fleet identity, and the sort key below. `Option`
-            // for the bare-`App` fixtures that spawn a bridge without a roster.
-            Option<&crate::lockstep::FleetSlotOf>,
-            // Whether THIS host projects this hull to its own crew. Reaches the
-            // rejection channel and nothing else — see `RespondingHull::token`.
-            bevy::ecs::query::Has<crate::server_app::LocalShip>,
-            // The comms rejection channel is addressed to whoever is HOSTING
-            // the comms system (issue #984), which on the destroyer is the
-            // Tactical seat and on the courier the Captain's — resolved, never
-            // string-cast from the system id.
-            Option<&crate::ship_plugin::ShipConfigComponent>,
-            Option<&crate::ship_plugin::HumanSeekingHosts>,
-            // The answering side of a Comms beat (issue #1338): a
-            // `comms_answered` event is produced by THIS crew, so this hull is
-            // its narrative source. `Option` because a bare-`App` fixture can
-            // put `AdmittedCommands` on a hull with no `EntityUuid`.
-            Option<&EntityUuid>,
-        ),
-        With<crate::server_app::Ship>,
-    >,
+    ship_query: Query<(
+        Entity,
+        &crate::core::messages::AdmittedCommands,
+        // The host-neutral fleet identity, and the sort key below. `Option`
+        // for the bare-`App` fixtures that spawn a bridge without a roster.
+        Option<&crate::lockstep::FleetSlotOf>,
+        // Whether THIS host projects this hull to its own crew. Reaches the
+        // rejection channel and nothing else — see `RespondingHull::token`.
+        bevy::ecs::query::Has<crate::server_app::LocalShip>,
+        // The comms rejection channel is addressed to whoever is HOSTING
+        // the comms system (issue #984), which on the destroyer is the
+        // Tactical seat and on the courier the Captain's — resolved, never
+        // string-cast from the system id.
+        Option<&crate::ship_plugin::ShipConfigComponent>,
+        Option<&crate::ship_plugin::HumanSeekingHosts>,
+        // The answering side of a Comms beat (issue #1338): a
+        // `comms_answered` event is produced by THIS crew, so this hull is
+        // its narrative source. `Option` because a bare-`App` fixture can
+        // put `AdmittedCommands` on a hull with no `EntityUuid`.
+        Option<&EntityUuid>,
+    )>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut comms: ResMut<CommsRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
@@ -1112,13 +1126,10 @@ pub(crate) fn handle_respond_to_message(
 /// Drain every hull's admitted command on every peer. LocalShip is a screen
 /// choice and cannot decide which replicated crew's clear takes effect.
 pub(crate) fn handle_clear_comms(
-    ship_query: Query<
-        (
-            &crate::core::messages::AdmittedCommands,
-            Option<&EntityUuid>,
-        ),
-        With<crate::server_app::Ship>,
-    >,
+    ship_query: Query<(
+        &crate::core::messages::AdmittedCommands,
+        Option<&EntityUuid>,
+    )>,
     mut inbox: ResMut<CommsInboxRes>,
     mut comms: ResMut<CommsRuntime>,
     mut outbox: Option<ResMut<crate::server_app::SimOutbox>>,

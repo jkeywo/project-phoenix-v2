@@ -30,6 +30,7 @@ pub mod media_session;
 pub(crate) mod planned;
 pub mod radio;
 pub mod range;
+pub(crate) mod reception;
 mod request_returns;
 pub(crate) mod requests;
 pub mod roster;

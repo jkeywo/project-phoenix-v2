@@ -2,7 +2,7 @@
 title: AI Ship Unification
 type: concept
 tags: [ai, npc, ship, ecs, components, control-source, backfill]
-sources: [crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-sim-gameplay/src/ship/control_source.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-simulation/src/ship/helm_ai/, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/tractor/server.rs, crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/ai/host.rs]
+sources: [crates/phoenix-sim-gameplay/src/ai/selector.rs, crates/phoenix-sim-contracts/src/flags.rs, crates/phoenix-simulation/src/entities/ship_spawn.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-sim-gameplay/src/ship/control_source.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-simulation/src/ship/helm_ai/, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/tractor/server.rs, crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-simulation/src/ai/host.rs]
 updated: 2026-10-04
 ---
 
@@ -58,6 +58,8 @@ Examples:
   domain host;
 - scenario operation hosts use the same fine-system objectives and command
   adapters as their human controls.
+
+The shared target selector borrows the call's self, deduplicated candidate, and retained-target fact maps during predicate evaluation. Deduplication still owns its merged candidates; the owned `AiFactSet` API and snapshot representation remain unchanged. No fact view or selection cache crosses calls or systems.
 
 All policy hosts use the logical-tick cadence in `crates/phoenix-simulation/src/ai/cadence.rs`. World
 snapshots and policy memory are deterministic and snapshot-safe.

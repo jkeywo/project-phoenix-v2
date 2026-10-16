@@ -26,7 +26,7 @@
 //! the three fact contexts and authored ship power rating) lives in
 //! `world::flags`.
 
-use crate::world::flags::{AiFactSet, AiFacts, AiParams, FlagStore, Predicate};
+use crate::world::flags::{AiFacts, AiParams, FlagStore, Predicate};
 use std::collections::HashSet;
 
 /// The operating ship's context for one selection: its world position (for the
@@ -152,28 +152,36 @@ impl TargetSelector {
 
         // The currently-retained target's CANDIDATE facts become the shared
         // TARGET context for every candidate's eligibility/score evaluation.
-        let target_facts: AiFacts = current
-            .and_then(|cur| unique.iter().find(|c| c.uuid == cur))
-            .map(|c| c.facts.clone())
-            .unwrap_or_default();
+        let empty_target;
+        let target_facts = match current.and_then(|cur| unique.iter().find(|c| c.uuid == cur)) {
+            Some(candidate) => &candidate.facts,
+            None => {
+                empty_target = AiFacts::default();
+                &empty_target
+            }
+        };
 
         // 3 + 4. Keep eligible candidates and score each additively.
         let mut scored: Vec<(&SelectorCandidate, f64)> = Vec::new();
         for cand in &unique {
-            let facts = AiFactSet {
-                self_facts: self_ctx.facts.clone(),
-                candidate_facts: cand.facts.clone(),
-                target_facts: target_facts.clone(),
-            };
-            if !self
-                .eligibility
-                .evaluate_selector(&facts, &self.params, flags)
-            {
+            if !self.eligibility.evaluate_selector_borrowed(
+                &self_ctx.facts,
+                &cand.facts,
+                target_facts,
+                &self.params,
+                flags,
+            ) {
                 continue;
             }
             let mut score = 0.0;
             for term in &self.score {
-                if term.when.evaluate_selector(&facts, &self.params, flags) {
+                if term.when.evaluate_selector_borrowed(
+                    &self_ctx.facts,
+                    &cand.facts,
+                    target_facts,
+                    &self.params,
+                    flags,
+                ) {
                     score += term.weight;
                 }
             }

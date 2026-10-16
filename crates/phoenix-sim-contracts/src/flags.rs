@@ -918,6 +918,27 @@ impl Predicate {
         )
     }
 
+    /// Internal selector runtime entry for facts already owned by this call's
+    /// candidate list. The owned `AiFactSet` API and snapshot shape are unchanged.
+    #[doc(hidden)]
+    pub fn evaluate_selector_borrowed(
+        &self,
+        self_facts: &AiFacts,
+        candidate_facts: &AiFacts,
+        target_facts: &AiFacts,
+        params: &AiParams,
+        chain: &[&FlagStore],
+    ) -> bool {
+        self.evaluate_ctx(
+            self_facts,
+            candidate_facts,
+            target_facts,
+            &AiPolicyMemory::default(),
+            params,
+            chain,
+        )
+    }
+
     fn evaluate_ctx(
         &self,
         self_facts: &AiFacts,
@@ -1724,3 +1745,7 @@ pub fn parse_predicate(src: &str) -> Result<Predicate, String> {
 #[cfg(test)]
 #[path = "flags_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "flags_selector_borrowed_tests.rs"]
+mod selector_borrowed_tests;

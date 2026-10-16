@@ -1,6 +1,9 @@
 use super::*;
 use crate::world::flags::parse_predicate;
 
+#[path = "selector_borrowed_tests.rs"]
+mod borrowed_tests;
+
 fn facts(pairs: &[(&str, f64)]) -> AiFacts {
     let mut f = AiFacts::new();
     for (k, v) in pairs {

@@ -99,9 +99,27 @@ fn discrete_shortfall_keeps_loaded_ammunition_and_waits_for_full_cost() {
     assert_eq!(system.rounds_aboard(), before);
     assert_eq!(system.tube("fore_port").unwrap().loaded_count, 1);
     set_local_energy(&mut app, ship, &id, 1.0);
+    let retried = fire_torpedo(&mut app);
+    let power = app.world().get::<ShipPowerSystem>(ship).unwrap();
     assert_eq!(
-        feedback_for(&fire_torpedo(&mut app), "energy-shot"),
-        Some(ActionFeedbackOutcome::Applied)
+        feedback_for(&retried, "energy-shot"),
+        Some(ActionFeedbackOutcome::Applied),
+        "actual retry: tube={:?}, energy={:?}, restraint={}, control={:?}, target={:?}",
+        app.world()
+            .get::<TorpedoSystemResource>(ship)
+            .unwrap()
+            .0
+            .tube("fore_port"),
+        power.0.network().consumers.get(&id),
+        power.0.weapons_restrained(),
+        app.world()
+            .get::<crate::ship_plugin::ShipSystemControlSources>(ship)
+            .unwrap()
+            .0
+            .source_for(&id),
+        app.world()
+            .get::<TacticalRadarSelection>(ship)
+            .map(|selection| &selection.0),
     );
     assert_eq!(local_energy(&app, ship, &id), 0.0);
 }

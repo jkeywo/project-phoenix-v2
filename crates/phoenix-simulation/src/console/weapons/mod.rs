@@ -69,6 +69,17 @@ pub(crate) fn finish_action_feedback(
     >,
     result: WeaponActionResult,
 ) {
+    #[cfg(test)]
+    if cmd
+        .feedback_correlation
+        .as_ref()
+        .is_some_and(|id| id.as_str() == "energy-shot")
+    {
+        eprintln!(
+            "energy-shot actual owner result: target={:?} result={result:?}",
+            cmd.target
+        );
+    }
     crate::command_admission::finish_action_feedback(
         cmd,
         outbound,

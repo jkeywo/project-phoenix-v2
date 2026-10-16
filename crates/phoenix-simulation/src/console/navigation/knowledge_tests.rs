@@ -769,6 +769,11 @@ fn formation_boot() -> (App, Entity, Entity) {
 
 /// Same read-model rebuilds used after restoration; no sensing work or phase advances.
 fn formation_publications(world: &mut World) {
+    // Restore also rebuilds the ordinary Command publication. The sparse rig
+    // must run the same producer before capture, without adding any work.
+    world
+        .run_system_once(crate::console::command::server::publish_command_blackboard)
+        .unwrap();
     world
         .run_system_once(crate::science::server::publish_scan_blackboard)
         .unwrap();

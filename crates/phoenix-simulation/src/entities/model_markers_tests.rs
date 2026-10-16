@@ -449,3 +449,45 @@ fn blocked_runtime_rig_discards_only_unbegun_whole_steps() {
     assert_eq!(app.world().resource::<FixedConsumerProbe>().steps, 1);
     assert_eq!(app.world().resource::<Time<Fixed>>().overstep(), period / 2);
 }
+
+#[test]
+fn stable_marker_sync_preserves_readiness_change_tick_and_required_paths() {
+    let (mut app, entity) = profile(false, primary_mesh());
+    let required = app
+        .world()
+        .resource::<ModelRigReadiness>()
+        .required_sidecars
+        .clone();
+    assert!(!required.is_empty());
+    app.world_mut().clear_trackers();
+    sync_authoritative_model_markers(app.world_mut());
+    assert!(!app.world().is_resource_changed::<ModelRigReadiness>());
+    assert_eq!(
+        app.world()
+            .resource::<ModelRigReadiness>()
+            .required_sidecars,
+        required
+    );
+    assert!(app.world().get::<ModelMarkers>(entity).is_some());
+
+    // A pre-marked entity still contributes its requirement; discovery is not
+    // restricted to the missing-marker query or to newly spawned entities.
+    app.world_mut()
+        .get_mut::<MeshSection>(entity)
+        .unwrap()
+        .0
+        .variant = Some("new-requirement".into());
+    let expected =
+        primary_sidecar_path(&app.world().get::<MeshSection>(entity).unwrap().0).unwrap();
+    sync_authoritative_model_markers(app.world_mut());
+    assert!(app
+        .world()
+        .resource::<ModelRigReadiness>()
+        .required_sidecars
+        .contains(&expected));
+    assert!(required.is_subset(
+        &app.world()
+            .resource::<ModelRigReadiness>()
+            .required_sidecars
+    ));
+}

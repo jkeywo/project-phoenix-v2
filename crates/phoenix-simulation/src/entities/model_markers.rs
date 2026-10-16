@@ -180,22 +180,29 @@ pub fn sync_authoritative_model_markers(world: &mut World) {
         }
     }
 
-    let live_meshes: Vec<crate::entities::config::MeshConfig> = {
+    // Borrow authored mesh data: most live entities already have markers, and
+    // cloning their complete MeshConfig twice per frame does no useful work.
+    {
         let mut meshes = world.query::<&MeshSection>();
-        meshes.iter(world).map(|mesh| mesh.0.clone()).collect()
-    };
-    for mesh in &live_meshes {
-        register_primary_sidecar(&mut discovered, mesh);
+        for mesh in meshes.iter(world) {
+            register_primary_sidecar(&mut discovered, &mesh.0);
+        }
     }
 
-    let required_sidecars = {
-        let mut readiness = world.resource_mut::<ModelRigReadiness>();
-        readiness.required_sidecars.extend(discovered);
-        readiness.primed = true;
-        readiness.required_sidecars.clone()
-    };
+    {
+        let readiness = world.resource::<ModelRigReadiness>();
+        if !readiness.primed || !discovered.is_subset(&readiness.required_sidecars) {
+            let mut readiness = world.resource_mut::<ModelRigReadiness>();
+            readiness.required_sidecars.extend(discovered);
+            readiness.primed = true;
+        }
+    }
 
-    for path in &required_sidecars {
+    // Native reads synchronously when a missing marker is attached below.
+    // Browser requests still retry every required path, including future rigs
+    // from the frozen template cache; no delivered requirement is discarded.
+    #[cfg(target_arch = "wasm32")]
+    for path in &world.resource::<ModelRigReadiness>().required_sidecars {
         crate::entities::config_cache::request_sidecar_fetch(path.clone(), false);
     }
 
@@ -235,22 +242,20 @@ pub fn sync_authoritative_model_markers(world: &mut World) {
         }
     }
 
-    let delivered = required_sidecars
+    #[cfg(target_arch = "wasm32")]
+    let complete = world
+        .resource::<ModelRigReadiness>()
+        .required_sidecars
         .iter()
         .all(|path| crate::entities::config_cache::is_pending_sidecar_delivered(path));
-
-    let mut readiness = world.resource_mut::<ModelRigReadiness>();
-    readiness.live_blocked = live_blocked;
-    // Native resolves sidecars synchronously from disk, including the explicit
-    // identity-rig fallback for an absent file. Only WASM has a delivery wait.
-    #[cfg(target_arch = "wasm32")]
-    {
-        readiness.complete = delivered;
-    }
     #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = delivered;
-        readiness.complete = true;
+    let complete = true;
+
+    let readiness = world.resource::<ModelRigReadiness>();
+    if readiness.live_blocked != live_blocked || readiness.complete != complete {
+        let mut readiness = world.resource_mut::<ModelRigReadiness>();
+        readiness.live_blocked = live_blocked;
+        readiness.complete = complete;
     }
 }
 

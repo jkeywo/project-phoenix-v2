@@ -1,7 +1,6 @@
 use super::*;
 use crate::entities::spawner::EntityUuid;
 use crate::weapons::marking::ShipMarkingAttachment;
-use bevy::prelude::*;
 use phoenix_model::marking::*;
 
 fn attachment(subject: &str) -> ShipMarkingAttachment {

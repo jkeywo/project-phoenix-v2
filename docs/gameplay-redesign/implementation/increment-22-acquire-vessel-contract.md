@@ -269,6 +269,10 @@ they do not establish a lobby, encounter, paid-sensing or device acceptance.
 
 Targeted client tests passed: 31 tests across Security teams, Workshop activities
 and Workshop planning; strict strings checked 6576 keys with no errors. Personnel
-independently reviewed the actual admission/AI/ownership/settlement core on
-source. Full candidate, authoring and proof review and native verification remain
-separately reported. No full increment 22, 23 or Patrol exit is claimed.
+independently reviewed the admission/AI/ownership/settlement core and the
+remaining schema, accepted-source, full-candidate, single-row inverse, authoring
+and structural-proof seams on source (`4ef32bbb` through `5dd743cf`). Review
+identified and closed two body-only rewind paths and the requirement to inspect
+actual Activate findings. Source review ran no native or browser tests. Native
+verification remains pending in the integrator's sequential queue. No full
+increment 22, 23 or Patrol exit is claimed.

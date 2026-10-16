@@ -18,42 +18,39 @@ Only increment 0 is formally closed. Increments 1–7 have recorded automated
 exits; physical-device and human-workload acceptance remain open. Later initial
 commits are implementation checkpoints, not verified increment exits.
 
-Current integrated compatibility is **protocol 45, snapshot 88 and simulation
-rules 0.73**, at the `0e47b03b` documentation source. Compatibility numbers
-identify supported state; they do not establish a verified gameplay exit.
+Current integrated compatibility is **protocol45, snapshot88 and simulation
+rules0.74**, at runtime source `4ceb7d8a`. These versions identify supported
+state; they do not establish a verified gameplay exit.
 
-The current priority is verification of increments 8–12. The selected owner run
-at `34aa3e04` finished **1250 passed, 55 failed**. The seven-target whole-host run
-compiled at `9493bc5a` finished **10 passed, 8 failed**: Activity Foundation 3/0,
-Facility Supply 2/0 and Physical Damage Routes 3/0 passed; Fitting Facility 0/2,
-Logistics 1/2, Production 1/1 and Recovery 0/3 remain non-green. The production
-positive matched every full snapshot/digest comparison through 360 steps but
-failed final completion; a diagnostic at `8bc01405` identified exhausted local
-energy and zero allocation, not a continuation divergence.
+The initial selected owner run at `34aa3e04` finished1250 passed/55 failed; the
+initial seven-target host run at `9493bc5a` finished10 passed/8 failed. Those
+results remain recorded. The expanded owner run at `4ceb7d8a` passed425/failed15
+in507.60s:52 of the original55 failures now pass, with three sparse restore
+fixtures missing accepted turret owners. Corrections for those and all12
+additional weapon-fixture failures are integrated at `37c165a4`. The combined
+four-owner selection is rerunning; no all-green current native result is claimed.
 
-The separate shield whole-host proof at runtime `895e234d` passed its 360-step
-paid/current-credit and malformed-state no-write checks. Original client runs
-remain recorded as failures; affected production-panel and Workshop retries
-passed 3/3 and 53/53 respectively. A current 21-file client selection at `5cb35b1a`
-passed all 121 selected tests; this is its own selection, not a relabelled pass
-for the earlier 225 tests. Clean pinned PASM at `450836ac` passed
-validation, scan and traceability. None of these narrower results replaces the
-failed combined native runs or supplies browser/device, balance, performance or
-station-workload acceptance.
+At runtime `dd1490ae` (rules0.74), the affected host retry passes Recovery3/3,
+Production2/2 and the two selected energy continuation checks2/2. Collision
+attribution now uses the restored logical interval end instead of the fresh
+host's elapsed clock. The real facility refit passes. Intact salvage still
+fails because vacant Helm moves the receiver outside its unchanged eight-unit
+range; its ordinary Human-held Helm correction is integrated at `0931723a`,
+awaiting native retry. Earlier separate shield JSON360/no-write and physical-route
+host results remain pinned to `895e234d` and `9493bc5a` respectively.
 
-A selected owner retry at `9a3b2f89` finished **141 passed, 6 failed** in
-42.34s (`.phoenix/verify-8-12-corrected-owner-retry.log`). Energy/thrust/shield
-notification and three restore failures remain, with corrections under review;
-this does not replace the original 1250/55 result.
+The current client selection passes121/121 across21 files. The corrected
+five-spec Chromium component run passes43/43, using projected fixture data.
+The affected Workshop authoring mount retry passes53/53. Clean pinned PASM at
+`4ceb7d8a` passes validation, scan and traceability (1202 entities,246 trace rows).
+Actual matching-host Workshop/render, reconnect, balance/performance and any
+remaining affected native checks stay open; component passes do not substitute
+for them. Original failures, narrower retries and their source boundaries are
+retained in [the verification record](../../acceptance/1562-integrated-8-12.md)
+and [the integration checkpoint](parallel-checkpoint.json).
 
-The source-reviewed production power-priority correction `2d34c831` is integrated
-as `0e47b03b`, with native verification pending. The bounded verification document
-`65bcceb4` accompanies this checkpoint packet. The correction uses the ordinary
-Engineering command and preserves the original six-second continuation and two
-outputs; it grants no energy. Detailed source pins and logs are retained in
-[the integration checkpoint](parallel-checkpoint.json). No all-green integration,
-increment closure or push is claimed. Broader increments 13–24 and authored
-Patrol, War, Sandbox and Director work remain subject to their recorded gaps.
+No increment closure or push is claimed. Later implementation lanes are parked
+under the user's pause instruction, with their isolated work preserved.
 
 | Increment | Implementation state | Material remaining work |
 |---|---|---|
@@ -74,7 +71,7 @@ Patrol, War, Sandbox and Director work remain subject to their recorded gaps.
 | 14 — Sensing/environment | Substantial implementation | Knowledge, presentation, balance and full acceptance. |
 | 15 — Layered combat | Combat core implemented; shared loaders/priorities integrated and accepted-recipe/pure handling checks pass | Physical marking code and accepted recipe/launcher owner evidence are integrated; loader/marking full-host continuation, broader illumination/link-loss/payload journeys, combat styles, balance/workload and full acceptance remain. |
 | 16 — Comms/orders | Channels, requests and relay operational; both actual capture/decoding host journeys pass; listening/chatter integrated with accepted-recipe, pure-owner and client passes | Listening/chatter Simulation and host verification, broader contextual operations, native media edge/device acceptance and playable acceptance remain. |
-| 17 — Electronic operations | Jamming/protection/identity operational; both emission host cases pass; bounded disruption integrated and its corrected hull passes actual accepted-recipe validation | Disruption host continuation is blocked by the Security singleton-stage membership error. Broader information/access and acceptance remain. |
+| 17 — Electronic operations | Jamming/protection/identity operational; both emission host cases pass; bounded disruption integrated and its corrected hull passes actual accepted-recipe validation | The Security singleton-stage correction is integrated; disruption host continuation still needs its native retry. Broader information/access and acceptance remain. |
 | 18 — Movement/transit | Local jumps verified; sector code integrated; actual formation movement/JSON360 host case passes | Remaining assistance and broader acceptance. |
 | 19 — Craft/deployables | Physical probe, both fixed beam-turret and both decoy host journeys verified; ordinary Full3D utility hull passes actual accepted-recipe validation | Charted XYZ flight code and proof source are integrated; its actual host evidence, moving custody/sorties/remote operation and full acceptance remain. |
 | 20 — Personnel | Officers/care/roster, four physical personnel and both reception host journeys verified; bounded acquisition source integrated | Model/Session and Content acquisition checks pass; Simulation/continuation verification, broader boarding/away/rescue/capture and acceptance remain. |

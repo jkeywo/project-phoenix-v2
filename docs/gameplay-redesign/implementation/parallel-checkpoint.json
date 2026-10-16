@@ -2,7 +2,7 @@
   "date": "2026-10-16",
   "status": "partial",
   "current_summary": {
-    "source": "0e47b03b; protocol45/snapshot88/rules0.73. Current priority is verification of increments8-12; selected runs are non-green. Historical source pins below retain their original configurations/results; isolated donors are not integrated evidence.",
+    "source": "Runtime4ceb7d8a (protocol45/snapshot88/rules0.74), owner fixture batch37c165a4 and held-Helm fixture0931723a; combined owner retry in progress; later lanes parked under the user pause instruction.",
     "verification_8_12": {
       "status": "open; selected native owner and host batches failed; no increment closure or push",
       "evidence_document_donor": "65bcceb4, docs/acceptance/1562-integrated-8-12.md, integrated with this checkpoint packet",
@@ -27,7 +27,7 @@
       "new_host_batch": "At86fc659c code/c3c3500b equipment, four targets fail before gameplay: TickSecurityTeams singleton contains team tick plus acquisition commit, not duplicate physical execution. Shared loader2, maintenance4 and disruption/census targets blocked. Correction210cd6e9 keeps singleton on physical tick and same-step completion before following owner; integrated, native retry pending. Log .phoenix/resumed-loaders-disruption-maintenance-host.log.",
       "listening": "Coherent consumer a04b3448 plus historical dated-view correction9b2f894d integrated; central epochs52a9f4b7. First native selection failed on missing test SystemId import, corrected ab501fa4; retry7PASS (Model2/Gameplay5 incl actual accepted recipe),1m07build. .phoenix/resumed-listening-accepted-and-pure-owners-retry.log. First client selection143PASS/1FAIL action inventory; corrected retry4files144PASS .phoenix/resumed-listening-client-integration-retry.log. Renderer-free Simulation lib/tests check PASS1m00 .phoenix/resumed-listening-simulation-compile.log. Actual combined Radio/traffic/Security/retained-beam owner run currently pending .phoenix/resumed-listening-security-beam-simulation-owners.log.",
       "acquisition_followup": "At3a1e7e6e acquisition8tests7PASS/1FAIL after4m10build: real paid continuation digest differs. Source analysis finds five normal run-scope resources absent in sparse fixture but inserted by restore. Reviewed fixture-only0c1c1ff3 initializes those owners and adds immediate capture/digest diagnostics without weakening folds/restore; native retry pending in combined Simulation owner run.",
-      "remaining": "Current verification8-12 is non-green; see current_summary.verification_8_12. This current_followup object retains earlier source-pinned evidence, not the current queue. Later integrated implementations and isolated donors do not establish native/device/playable acceptance. Only0closed; no push."
+      "remaining": "Finish increments8–12 verification and necessary fixes, commit evidence, then pause. Later implementation lanes and their WIP are parked; do not resume through24 without user instruction."
     },
     "latest_host_result": {
       "source": "fd3d06de; runtime correction28bc37c8",
@@ -106,7 +106,7 @@
     "compatibility": {
       "protocol": 45,
       "snapshot": 88,
-      "rules": "0.73"
+      "rules": "0.74"
     },
     "current_four_owner_native": {
       "source": "3f783eec",
@@ -278,7 +278,36 @@
       "host_compilation": "Eight selected full-host targets attempted with root headless,host. Four targets blocked by test API/import mistakes: Formation and Emission used a non-direct Gameplay crate; Formation treated sender_uuid String as Option; Turret used nonexistent EnergyState.emitted_work and old RecoverCraft payload; Decoy used nonexistent BroadTrack.predicted and old RecoverCraft payload. Narrow corrections in progress; no host compile/execution pass claimed.",
       "host_compilation_log": ".phoenix/resumed-eight-host-target-check.log"
     },
-    "last_published_comment": "https://github.com/jkeywo/project-phoenix-v2/issues/1562#issuecomment-6204915653"
+    "last_published_comment": "https://github.com/jkeywo/project-phoenix-v2/issues/1562#issuecomment-6204915653",
+    "verification_8_12_followup": {
+      "owner": {
+        "source": "4ceb7d8a",
+        "passed": 425,
+        "failed": 15,
+        "seconds": 507.6,
+        "original_failures_passing": 52,
+        "original_failures_remaining": 3,
+        "corrections_integrated": "37c165a4",
+        "retry": "Running combined four-owner selection; .phoenix/verify-8-12-final-native-owners.log"
+      },
+      "host": {
+        "source": "dd1490ae",
+        "passed": 8,
+        "failed": 1,
+        "recovery": "3/3 PASS20.31s, full JSON360 after logical collision-time correction",
+        "production": "2/2 PASS16.61s, actual second batch and every JSON360 state/digest",
+        "energy_continuation": "2/2 PASS19.70s",
+        "fitting": "1/1; real facility refit passes; intact salvage outside unchanged range because vacant Helm moves receiving ship; ordinary held-Helm correction0931723a pending native"
+      },
+      "pasm": {
+        "source": "4ceb7d8a",
+        "validate": "PASS1202 entities",
+        "scan": "PASS",
+        "traceability": "PASS246 rows"
+      },
+      "browser": "Client component Chromium43/43 PASS25.4s; actual matching-host/render and reconnect remain open.",
+      "remaining": "Finish owner and salvage retries, real Workshop/host browser, explicit reconnect, balance/performance, then commit evidence and pause. No later implementation."
+    }
   },
   "scope": "Integrated communication, movement, illumination, local personnel and equipment-bound facility checkpoints; no increment exit",
   "source": "873ca2d9 plus authored illumination power-group correction ba716438; later fixture corrections are not part of this executable",

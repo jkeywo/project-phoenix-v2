@@ -12,24 +12,22 @@ Preserve the selected mechanisms and ownership boundaries. Detailed System rules
 
 ## Current verification checkpoint — 16 October 2026
 
-Current integrated compatibility is protocol 45, snapshot 88 and simulation
-rules 0.73 (`0e47b03b` documentation source). The current increments 8–12
-verification is **non-green**: the selected owner run passed 1250/failed 55 at
-`34aa3e04`; the seven-target host run passed 10/failed 8 at `9493bc5a`. Separate
-shield JSON360/no-write and physical-route host results passed, while the
-production positive preserved 360-step equivalence but failed final completion
-from zero allocated intake. Its ordinary Engineering priority correction is
-integrated at `0e47b03b`, awaiting native execution. A selected owner retry at
-`9a3b2f89` passed 141 and failed six; those failures remain open.
+Current integrated compatibility is protocol45, snapshot88 and simulation
+rules0.74 (`4ceb7d8a` runtime source). The original owner1250/55 and host10/8
+results remain recorded failures. The expanded owner selection passed425/failed15;
+all15 source corrections are integrated and its combined retry is running.
+At `dd1490ae`, whole-host Recovery3/3, Production2/2 and selected energy
+continuation2/2 pass. Intact salvage still needs its normal held-Helm fixture
+retry. These are separate source-pinned results, not a current all-green gate.
 
-These implementation and verification states do not reopen the mechanism design.
-Follow the [current implementation summary](../implementation/README.md) and
-[source-pinned checkpoint](../implementation/parallel-checkpoint.json) for the
-current queue. Historical report diagrams and the baseline orientation table
-below are design inputs, not evidence of a current runtime audit or passed exit.
-Browser/device, multiplayer, workload, balance/performance and remaining authored
-modes/generation acceptance stay open. No all-green gate, closure or push is
-claimed here.
+Follow the [implementation summary](../implementation/README.md),
+[verification record](../../acceptance/1562-integrated-8-12.md) and
+[source-pinned checkpoint](../implementation/parallel-checkpoint.json).
+Historical diagrams and the baseline orientation table below are design inputs.
+Complete the remaining increments8–12 verification and commit its evidence,
+then pause as requested on16October. Later lanes are parked. Browser/device,
+workload, balance/performance and remaining authored modes/generation acceptance
+are not inferred from these checks; no increment closure or push is claimed.
 
 ## Requested outcome
 

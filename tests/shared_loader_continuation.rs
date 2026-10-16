@@ -166,6 +166,17 @@ fn prepared(app: &App, entity: Entity) -> f32 {
         })
         .sum()
 }
+fn settled_empty(app: &App, entity: Entity) -> bool {
+    let system = &app.world().get::<TorpedoSystemResource>(entity).unwrap().0;
+    system.tubes.iter().all(|tube| {
+        tube.loaded_count == 0
+            && !matches!(
+                tube.load_state,
+                project_phoenix::weapons::torpedo::TubeLoadState::Loading { .. }
+                    | project_phoenix::weapons::torpedo::TubeLoadState::Unloading { .. }
+            )
+    }) && system.magazine.reserved_total() == 0
+}
 fn same(live: &App, resumed: &App, step: usize) {
     assert_eq!(
         capture(live.world()),
@@ -190,27 +201,21 @@ fn joined_priority_and_partial_shared_loading_survive_whole_json360_and_nowrite_
         );
     }
     for _ in 0..1800 {
-        if live
-            .world()
-            .get::<TorpedoSystemResource>(actor)
-            .unwrap()
-            .0
-            .tubes
-            .iter()
-            .all(|tube| tube.loaded_count == 0)
-        {
+        if settled_empty(&live, actor) {
             break;
         }
         live.update();
     }
-    assert!(live
-        .world()
+    assert!(
+        settled_empty(&live, actor),
+        "ordinary target-zero handling finishes prior loading, unloading and claims"
+    );
+    live.world()
         .get::<TorpedoSystemResource>(actor)
         .unwrap()
         .0
-        .tubes
-        .iter()
-        .all(|tube| tube.loaded_count == 0));
+        .validate_magazine()
+        .unwrap();
     control(
         &mut live,
         actor,

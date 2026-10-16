@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use project_phoenix::{
     console::weapons::TorpedoSystemResource,
-    core::messages::{ClientMessage, SystemControlPayload as Control, SystemId},
+    core::messages::{ClientMessage, GamePhase, SystemControlPayload as Control, SystemId},
     entities::spawner::EntityUuid,
     headless::{build_headless_app, HeadlessArgs},
     lobby::{server::InboundMessage, Sessions},
@@ -39,10 +39,10 @@ fn claim(app: &mut App, station: &str, rating: &str) {
         ClientMessage::SelectStation {
             station: station.into(),
         },
-        ClientMessage::SetReady { ready: true },
         ClientMessage::SetStationRating {
             rating_name: rating.into(),
         },
+        ClientMessage::SetReady { ready: true },
     ] {
         send(app, &token, msg);
         steps(app, 4);
@@ -79,6 +79,11 @@ fn boot(tactical_human: bool) -> (App, Entity) {
             claim(&mut app, &station.id.0, &station.ratings[0].name);
         }
     }
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "ordinary bootstrap reaches the actual mission phase"
+    );
     (app, entity)
 }
 fn control(app: &mut App, entity: Entity, owner: &str, payload: Control) {

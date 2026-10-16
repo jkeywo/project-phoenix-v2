@@ -1,19 +1,21 @@
 # Two ordinary Cruisers compete for one finite recoverable supply.
+# Six units keeps both inside real recovery range8 while separating the pod
+# from the other ship beyond the actual Broad instrument uncertainty discs.
 [global]
 seed = 156214
 command_delay_ticks = 2
 [player_spawn]
-position = [-4.0, 0.0, 0.0]
+position = [-6.0, 0.0, 0.0]
 [[entity]]
 template_path = "assets/entities/alliance_cruiser.toml"
 id = "fleet-ship-1"
 spawn_on = "game_start"
-transform = { position = [-4.0, 0.0, 0.0] }
+transform = { position = [-6.0, 0.0, 0.0] }
 [[entity]]
 template_path = "assets/entities/alliance_cruiser.toml"
 id = "fleet-ship-2"
 spawn_on = "game_start"
-transform = { position = [4.0, 0.0, 0.0] }
+transform = { position = [6.0, 0.0, 0.0] }
 [[entity]]
 template_path = "assets/entities/recovery_cargo_pod.toml"
 id = "finite-cargo"

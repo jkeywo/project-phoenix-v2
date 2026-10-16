@@ -8,7 +8,8 @@ use project_phoenix::{
     infrastructure::InfrastructureCondition,
     lobby::{server::InboundMessage, Sessions},
     resources::recovery_server::{RecoverableSource, ShipRecovery},
-    server_app::LocalShip,
+    science::{broad::BroadTracks, contact_routing},
+    server_app::{LocalShip, ShipSystemBlackboards},
     ship::power::ShipPowerSystem,
     ship_plugin::{
         ActiveStationRatings, HumanSeekingHosts, ShipConfigComponent, ShipSystemControlSources,
@@ -173,6 +174,76 @@ fn assert_operator(app: &mut App, token: &str, msg: &ClientMessage) {
         "the actual System → Console → host Station must authorise this sender"
     );
 }
+/// Read only this actual Science Console's held selectable picture. The
+/// private association is a test witness that the earned contact is the intended
+/// finite source; only the published handle enters ordinary command admission.
+fn science_handle(app: &App, entity: Entity, expected_source: &str) -> Option<String> {
+    let config = &app.world().get::<ShipConfigComponent>(entity)?.0;
+    let boards = app.world().get::<ShipSystemBlackboards>(entity)?;
+    let tracks = app.world().get::<BroadTracks>(entity)?;
+    let owner = SystemId("sensors".into());
+    let permitted = config.observations_for_system(&owner, &boards.0);
+    let board = permitted.get(&SystemId("sensor-radar".into()))?;
+    contact_routing::observations(board)?
+        .iter()
+        .filter(|record| record.selectable && !record.predicted)
+        .find_map(|record| {
+            let actual =
+                contact_routing::resolve(config, boards, Some(tracks), &owner, &record.contact_id)?;
+            (actual == expected_source).then(|| record.contact_id.clone())
+        })
+}
+fn with_earned_science_handle(
+    app: &App,
+    entity: Entity,
+    mut message: ClientMessage,
+    source: &str,
+) -> ClientMessage {
+    if let ClientMessage::ControlSystem {
+        target,
+        payload: SystemControlPayload::SetScienceTarget { uuid },
+    } = &mut message
+    {
+        assert_eq!(target, &SystemId("sensors".into()));
+        *uuid=science_handle(app,entity,source).expect("normal paid Broad sampling must have published a current selectable own Science contact");
+        assert_ne!(
+            uuid.as_str(),
+            source,
+            "private source UUID is not an admitted radar handle"
+        );
+    }
+    message
+}
+fn assert_science_selection(app: &App, entity: Entity, source: &str) {
+    let selection = &app
+        .world()
+        .get::<project_phoenix::ship::sensors::SensorRadarSelection>(entity)
+        .unwrap()
+        .0;
+    assert_eq!(
+        selection.as_deref(),
+        Some(source),
+        "actual admitted Science handle must resolve to the intended finite source"
+    );
+    let config = &app.world().get::<ShipConfigComponent>(entity).unwrap().0;
+    let boards = app.world().get::<ShipSystemBlackboards>(entity).unwrap();
+    let tracks = app.world().get::<BroadTracks>(entity).unwrap();
+    let owner = SystemId("sensors".into());
+    let permitted = config.observations_for_system(&owner, &boards.0);
+    let project_phoenix::core::messages::SystemBlackboard::SensorRadar(board) =
+        permitted.get(&SystemId("sensor-radar".into())).unwrap()
+    else {
+        panic!("actual typed Science radar publication");
+    };
+    let selected = board
+        .selected_target
+        .as_ref()
+        .expect("normal publication carries the admitted selection");
+    assert_eq!(
+        contact_routing::resolve(config, boards, Some(tracks), &owner, selected).as_deref(),
+        Some(source)
+    );
+}
 fn started() -> (App, Entity) {
     let mut app = unstarted("assets/worlds/probe_recovery.toml");
     app.finish();
@@ -180,15 +251,24 @@ fn started() -> (App, Entity) {
     for _ in 0..10 {
         app.update();
     }
+    assert_eq!(
+        app.world()
+            .resource::<State<project_phoenix::core::messages::GamePhase>>()
+            .get(),
+        &project_phoenix::core::messages::GamePhase::InProgress,
+        "normal actual host must be running before source work"
+    );
     let entity = local(&mut app);
     let (_, target) = source(&mut app);
     for msg in commands(&target) {
+        let msg = with_earned_science_handle(&app, entity, msg, &target);
         assert_operator(&mut app, "recovery-operator", &msg);
         send(&mut app, "recovery-operator", msg);
         for _ in 0..4 {
             app.update();
         }
     }
+    assert_science_selection(&app, entity, &target);
     (app, entity)
 }
 fn mid_work() -> (App, Entity) {
@@ -272,6 +352,17 @@ fn actual_recovery_json_restore_preserves_paid_fraction_and_finite_goods() {
         assert_eq!(live.world().resource::<SimTick>().0, tick + 1);
         assert_eq!(resumed.world().resource::<SimTick>().0, tick + 1);
     }
+    assert_eq!(
+        world_digest(live.world()),
+        world_digest(resumed.world()),
+        "final360 digest"
+    );
+    assert_eq!(
+        capture(live.world()),
+        capture(resumed.world()),
+        "final360 full capture"
+    );
+    assert_eq!(conservation(&mut live), conservation(&mut resumed));
     assert_eq!(stock(&live, entity), 12);
     assert_eq!(stock(&resumed, restored), 12);
     assert_eq!(conservation(&mut live).0, 0);
@@ -391,6 +482,15 @@ fn actual_recovery_competes_for_one_finite_source_on_both_local_ship_peers() {
     for _ in 0..10 {
         mesh_step(&mut hosts);
     }
+    for host in &hosts {
+        assert_eq!(
+            host.world()
+                .resource::<State<project_phoenix::core::messages::GamePhase>>()
+                .get(),
+            &project_phoenix::core::messages::GamePhase::InProgress,
+            "both actual fleet hosts must be running"
+        );
+    }
     let targets = hosts.each_mut().map(|app| source(app).1);
     assert_eq!(targets[0], targets[1]);
     let journey_len = commands(&targets[0]).len();
@@ -425,12 +525,18 @@ fn actual_recovery_competes_for_one_finite_source_on_both_local_ship_peers() {
                     mesh_step(&mut hosts);
                 }
             }
+            let own = local(&mut hosts[index]);
+            msg = with_earned_science_handle(&hosts[index], own, msg, &targets[index]);
             assert_operator(&mut hosts[index], &token, &msg);
             send(&mut hosts[index], &token, msg);
         }
         for _ in 0..6 {
             mesh_step(&mut hosts);
         }
+    }
+    for index in 0..2 {
+        let own = local(&mut hosts[index]);
+        assert_science_selection(&hosts[index], own, &targets[index]);
     }
     let mut paid = BTreeSet::new();
     let mut locals = BTreeMap::new();

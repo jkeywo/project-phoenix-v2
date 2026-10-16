@@ -121,6 +121,57 @@ mod tests {
     use super::*;
     use crate::weapons::torpedo::{TorpedoConfig, TorpedoWork};
     use std::collections::HashMap;
+    #[test]
+    fn actual_optional_loader_hull_resolves_complete_inherited_equipment_without_changing_base() {
+        use crate::{core::messages::SystemId, entities::config::EntityConfig};
+        let accepted = |path| {
+            let resolved = crate::test_fixtures::resolve_from_disk(path).unwrap();
+            EntityConfig::from_toml(&resolved.toml).unwrap()
+        };
+        let base = accepted("assets/entities/alliance_cruiser.toml");
+        let shared = accepted("assets/entities/shared_loader_cruiser.toml");
+        let base_torpedoes = base.torpedoes.as_ref().unwrap();
+        assert!(base_torpedoes.loader_groups.is_empty());
+        let torpedoes = shared.torpedoes.as_ref().unwrap();
+        assert_eq!(torpedoes.loader_groups.len(), 1);
+        let group = &torpedoes.loader_groups[0];
+        assert_eq!(group.id, "forward");
+        assert_eq!(group.tubes, ["fore_port", "fore_starboard"]);
+        assert_eq!(group.work_rate, 1.0);
+        assert!(torpedoes.tubes.iter().any(|tube| tube.id == "aft"));
+        let ship = shared.ship_config.as_ref().unwrap();
+        assert_eq!(ship.stations.len(), 6);
+        let energy = shared.energy.as_ref().unwrap();
+        assert!(energy.reactor.max_output_per_sec > 0.0);
+        assert!(energy.reactor.reserve.capacity > 0.0);
+        let interior = shared.interior.as_ref().unwrap();
+        for owner in std::iter::once(SystemId("torpedo-magazine".into())).chain(
+            group
+                .tubes
+                .iter()
+                .map(|tube| SystemId(format!("torpedo-tube-{}", tube.replace('_', "-")))),
+        ) {
+            let system = ship.system(&owner).unwrap();
+            assert!(ship.console_for_system(&owner).is_some());
+            assert!(interior.placements.contains_key(&owner));
+            let battery = energy
+                .consumers
+                .iter()
+                .find(|consumer| consumer.system == owner)
+                .unwrap();
+            assert!(battery.reserve.capacity > 0.0);
+            assert!(!system.damage_components.is_empty());
+        }
+        // Compare the entire accepted recipe, not a private JSON merge or a
+        // handful of scalar fields: this optional hull changes only its public
+        // name and shared handling declaration. The independent source stays
+        // complete and unchanged, including reactor, Console, layout and AI data.
+        let mut equivalent = shared;
+        equivalent.name = base.name.clone();
+        equivalent.torpedoes.as_mut().unwrap().loader_groups.clear();
+        assert_eq!(equivalent, base);
+    }
+
     fn system(grouped: bool) -> TorpedoSystem {
         let mut system = TorpedoSystem::new(TorpedoConfig {
             load_time: 2.0,

@@ -25,7 +25,14 @@ for (const hull of [
   await expect(tabs.locator(`[data-tab-id="${hull.comms}"]`)).toBeVisible();
   await expect(tabs.locator(`[data-tab-id="${hull.navigation}"]`)).toBeVisible();
   expect(await phone.evaluate(() => Object.keys(window.simState.stationSystems).length)).toBe(hull.seats);
+  // A visiting Console can be selected first during hosting reconciliation.
+  // Open the actual working screen; tapping an already-selected tab opens damage.
+  const primaryTab = tabs.locator(`[data-tab-id="${hull.primary}"]`);
+  if (await primaryTab.getAttribute('aria-selected') !== 'true') await primaryTab.click();
+  await expect(primaryTab).toHaveAttribute('aria-selected', 'true');
+  await expect(phone.locator(`#${hull.primary}-ui`)).toHaveClass(/\bactive\b/);
   const selector = `#${hull.primary}-iframe`, frame = phone.frameLocator(selector);
+  await expect(phone.locator(selector)).toBeVisible();
   await dismissTutorialCards(phone, selector);
   await expect(frame.locator('ph-energy-controls')).toBeVisible();
   const depth = frame.locator('ph-energy-controls #depth'); await depth.selectOption('mid');

@@ -98,8 +98,10 @@ projection. For an attached body that projection is its sole pose writer:
 there is no Helm integrator, low-LOD motion, Dock/Tractor writer, independent
 velocity integration or thrust. ShipPhysics/Transform are the physical projection
 used by current collision, sensing and presentation consumers, not another
-independent position intent. Child motion cannot move the subject or spend free
-propulsion on its behalf.
+independent position intent. Captured attached ShipPhysics is a checked projection
+of the candidate relation and subject pose, not independent canonical intent;
+it becomes ordinary retained pose only on actual detach. Child motion cannot
+move the subject or spend free propulsion on its behalf.
 
 The same projection must run at the physical synchronization boundary before
 Rapier SyncBackend, and after existing Modifiers pose corrections (including
@@ -109,6 +111,17 @@ The exact integration seam and sanctioned writer/census change need Root/Craft
 review. Reordering the entire existing physics/damage/Dock graph is not implied.
 If this cannot be joined coherently, record that dependency rather than adding a
 second independently scheduled pose writer or measuring from a different pose.
+
+At contact, the real beacon can touch or overlap its subject collider. Exclude
+only this exact attached mechanical pair from physical contact/solver response
+and from `server_app/collision.rs::handle_collisions` damage/de-overlap. The
+existing Physics registration must gain a narrow relation-aware pair filter;
+there is no existing attachment filter to assume. Join that filter and the
+ordinary collision consumer before enabling contact spawning. The exclusion
+ends on actual detach and grants no immunity against other bodies, weapons,
+ray queries, compartment damage or detection. Prove prolonged attachment causes
+neither recurring parent-pair damage nor solver forces, while an actual third
+body/weapon can still damage the beacon through normal consumers.
 
 Actual subject removal detaches the real body at its last physical pose and
 withdraws new subject-only measurements. Missing observations or a broken radio
@@ -137,27 +150,35 @@ only controllers of those Systems.
 
 Proposed exact report frontier:
 
-1. TickCommsRadio pays ordinary listening once on its real current endpoints.
-   Expose only derived current-tick payment/availability facts for this optional
-   consumer, cleared on restore. Do not pay again or infer payment from an
-   unrelated work receipt or a range-only legacy endpoint.
+1. TickCommsRadio pays ordinary listening once. Expose a derived receipt keyed
+   by exact actor/System and current tick containing the **raw paid fraction**,
+   before Operation multiplication. It is cleared on restore and absent means
+   zero. `Endpoint.listening` already includes Operation and its point is sampled
+   before later motion; neither is a safe late-report receipt. Do not infer
+   payment from unrelated work or a range-only legacy endpoint.
 2. After final constrained pose and actual Broad measurement in Modifiers, stage
    one newest original sample for the beacon's configured channel. Each new
-   observed tick can emit once. Failed payment retains eligibility; no unbounded
-   backlog or same-tick chaining is created.
-3. Recheck actual current equipment/condition, current physical positions and
-   compatible Radio route, keys, receiver listening selection, jamming/protection
-   and channel policy. Cached pre-motion coordinates are not current geometry.
-   The source additionally pays the normal discrete transmission cost once per
-   successful emission; ordinary continuous receiver work is not charged twice.
-4. Emission success advances one retained report frontier, regardless of whether
-   anyone hears. Only actually reachable, paid and monitoring compatible receivers
-   receive through existing sample validation. Existing range-only sharing is
-   not a fallback for a failed beacon Radio.
-5. Copy original sample identity/time/error/origin into recipient BroadTracks.
-   Receipt or retransmission cannot refresh measurement age or turn a private
-   subject UUID into identity/correlation evidence. Losing link/power stops new
-   arrivals; retained history ages and expires normally.
+   observed tick can emit once. Failed source work retains eligibility; no
+   unbounded backlog or same-tick chaining is created.
+3. Rebuild source availability from its exact current-tick raw receipt, actual
+   current equipment and current Operation **once**, with its configured channel
+   and keys. A ready source pays the normal discrete transmission cost once and
+   emits/stamps its frontier even when there are no viable receivers. No receiver
+   existence, range, key or coverage fact can gate source emission/payment or
+   create an implicit retry oracle.
+4. For delivery only, rebuild each candidate's real current physical pose and
+   current Operation/availability from its exact raw paid receipt once; recheck
+   compatible channel/keys, receiver listening selection and current physical
+   route, jamming/protection. Missing payment withholds receipt, never falls
+   back to legacy sharing. Cached pre-Dock coordinates and already-multiplied
+   listening factors are not current pose/raw payment. Ordinary continuous work
+   is not paid twice and Operation is not multiplied twice.
+5. Deliver only to actually eligible receivers. Copy original sample identity,
+   time/error/origin into their existing BroadTracks. Receipt or retransmission
+   cannot refresh measurement age or turn a private subject UUID into identity/
+   correlation evidence. Losing link/power stops new arrivals; retained history
+   ages and expires normally. Emission success still advances one retained
+   source frontier regardless of delivery.
 
 The emission frontier belongs to this equipment's existing observation/report
 owner. No transport changes, player message-capacity accounting, AI voice,
@@ -197,6 +218,8 @@ no global list of secretly attached beacons or owner-free controls is added.
 - Single physical constraint owner through steering, transit-compatible local
   motion and Dock/tractor corrections; no subject force or Carried-disable trick.
   Subject loss detaches at last pose and ends subject-only measurements.
+  The exact attached pair produces no recurring collision damage/forces, while
+  an actual third body/weapon still damages the equipment normally.
 - Actual paid limited samples and compatible radio reception beyond the original
   observing ship's sensor reach; no identity/interior/aim bonus. Blocked/keyed/
   unmonitored/unpowered links withhold new reports while history ages unchanged.
@@ -210,3 +233,12 @@ no global list of secretly attached beacons or owner-free controls is added.
 This draft changes no runtime, asset, balance value, compatibility epoch or
 existing selected decision. The slice becomes adopted only after Root, Craft
 and Comms review of its exact missing physical/report joins.
+
+## Draft review receipt
+
+Craft's read-only physical contract review and Comms' read-only report contract
+review pass after the contact-pair, checked-pose, raw-payment and independent
+source-emission clarifications. These reviews endorse the proposed contracts;
+they do not establish that a shape-query, attachment filter or paid-report API
+already exists. Root adoption remains pending. No runtime, native execution,
+asset acceptance or full increment exit is claimed.

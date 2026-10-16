@@ -286,9 +286,14 @@ fn strike_simultaneous_families_use_fixed_schedule_order_on_two_peers() {
 #[test]
 fn strike_blaster_charge_and_cancel_are_free_and_emission_pays_exactly_once() {
     let mut app = test_app();
+    // Real legacy target geometry for this reduced consumer fixture. The
+    // unchanged bank's range1000 permits it, and it stays beyond the actual
+    // projectile's travel during the charge/emission witness.
+    setup_weapons_world_with_entity(&mut app, 0.0, -100.0);
     start_game_with_weapons(&mut app);
     let ship = reserve(&mut app, 3.0, &["blaster-fore"]);
-    let mut bank =
+    let owner = SystemId("blaster-fore".into());
+    let bank =
         crate::weapons::blaster::BlasterSystem::new(crate::weapons::blaster::BlasterBankConfig {
             impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore".into(),
@@ -297,30 +302,135 @@ fn strike_blaster_charge_and_cancel_are_free_and_emission_pays_exactly_once() {
             range: 1000.0,
             ..Default::default()
         });
-    assert!(bank.request_charge_start());
     app.world_mut()
         .entity_mut(ship)
         .insert(BlasterSystemResource(vec![bank]));
-    tick(&mut app);
-    assert_eq!(charge(&app, ship), 3.0);
-    app.world_mut()
-        .get_mut::<BlasterSystemResource>(ship)
-        .unwrap()
-        .0[0]
-        .request_charge_cancel();
-    tick(&mut app);
-    assert_eq!(charge(&app, ship), 3.0);
-    assert!(app
-        .world_mut()
-        .get_mut::<BlasterSystemResource>(ship)
-        .unwrap()
-        .0[0]
-        .request_charge_start());
-    for _ in 0..6 {
+    // Select through ordinary Tactical admission. Other automatic beam work
+    // is outside this single-bank spending proof, so select Manual first.
+    for (target, payload) in [
+        (
+            SystemId("phaser-control".into()),
+            SystemControlPayload::SetPhaserMode {
+                mode: PhaserMode::Manual,
+            },
+        ),
+        (
+            crate::ship::system_registry::tactical_radar_system_id(),
+            SystemControlPayload::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        ),
+    ] {
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::ControlSystem { target, payload },
+        );
         tick(&mut app);
     }
-    assert_eq!(charge(&app, ship), 0.0);
+    assert_eq!(get_weapons_target(&mut app).as_deref(), Some("target-uuid"));
+    assert_eq!(charge(&app, ship), 3.0);
+    let initial_energy = app
+        .world()
+        .get::<ShipPowerSystem>(ship)
+        .unwrap()
+        .0
+        .network()
+        .consumers[&owner]
+        .energy;
+    let command = |app: &mut App, payload| {
+        push(
+            app,
+            "weapons",
+            ClientMessage::ControlSystem {
+                target: owner.clone(),
+                payload,
+            },
+        );
+        tick(app)
+    };
+    let first = command(&mut app, SystemControlPayload::ChargeBlasterStart);
+    assert_eq!(
+        charge(&app, ship),
+        3.0,
+        "starting charge consumes no strike reserve"
+    );
+    let bank = &app.world().get::<BlasterSystemResource>(ship).unwrap().0[0];
+    assert!(bank.volley.charging && bank.volley.charge_elapsed > 0.0);
+    assert!(bank.in_flight.is_empty());
+    assert!(!first
+        .iter()
+        .any(|message| matches!(message.msg, ServerMessage::BlasterFired { .. })));
+    let after_charge = app
+        .world()
+        .get::<ShipPowerSystem>(ship)
+        .unwrap()
+        .0
+        .network()
+        .consumers[&owner]
+        .energy;
+    assert!(
+        after_charge < initial_energy,
+        "actual charging still pays its local energy work"
+    );
+    command(&mut app, SystemControlPayload::ChargeBlasterCancel);
+    assert_eq!(
+        charge(&app, ship),
+        3.0,
+        "cancelling consumes no strike reserve"
+    );
+    let bank = &app.world().get::<BlasterSystemResource>(ship).unwrap().0[0];
+    assert!(!bank.volley.charging);
+    assert_eq!(bank.volley.charge_elapsed, 0.0);
+    assert!(bank.in_flight.is_empty());
+    assert_eq!(
+        app.world()
+            .get::<ShipPowerSystem>(ship)
+            .unwrap()
+            .0
+            .network()
+            .consumers[&owner]
+            .energy,
+        after_charge,
+        "the cancel command itself creates no machinery work"
+    );
+    let mut emitted = command(&mut app, SystemControlPayload::ChargeBlasterStart);
+    for _ in 0..5 {
+        emitted.extend(tick(&mut app));
+    }
+    assert_eq!(
+        charge(&app, ship),
+        0.0,
+        "the one actual emission pays the full strike cost once"
+    );
+    assert_eq!(emitted.iter().filter(|message| matches!(&message.msg,
+        ServerMessage::BlasterFired { bank, source_uuid, .. } if bank == "fore" && source_uuid == "test-local-ship")).count(), 1);
     let bank = &app.world().get::<BlasterSystemResource>(ship).unwrap().0[0];
     assert_eq!(bank.in_flight.len(), 1);
     assert_eq!(bank.in_flight[0].damage, bank.config.damage * 2);
+    assert!(bank.volley.on_cooldown);
+    let after_emission = app
+        .world()
+        .get::<ShipPowerSystem>(ship)
+        .unwrap()
+        .0
+        .network()
+        .consumers[&owner]
+        .energy;
+    assert!(after_emission < after_charge);
+    let cooldown = tick(&mut app);
+    assert_eq!(charge(&app, ship), 0.0);
+    assert_eq!(
+        app.world()
+            .get::<ShipPowerSystem>(ship)
+            .unwrap()
+            .0
+            .network()
+            .consumers[&owner]
+            .energy,
+        after_emission
+    );
+    assert!(!cooldown
+        .iter()
+        .any(|message| matches!(message.msg, ServerMessage::BlasterFired { .. })));
 }

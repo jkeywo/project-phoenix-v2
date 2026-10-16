@@ -916,3 +916,166 @@ fn world_snapshot_storage_is_borrowed_only_when_present_and_fallback_matches_own
     ));
     world.run_system_once(inspect).unwrap();
 }
+
+#[test]
+fn borrowed_scan_projection_preserves_canonical_instrument_and_current_typed_feed_rules() {
+    use crate::core::messages::{ScanBlackboard, SystemBlackboard, SystemId};
+    use phoenix_model::console::{ConsoleFeed, ConsoleObservationKind};
+    let (mut world, observer, _, _) = rig();
+    let authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    let instrument = authored
+        .sensing
+        .as_ref()
+        .unwrap()
+        .focused
+        .first()
+        .unwrap()
+        .system
+        .clone();
+    let key = phoenix_model::sensing::scan_blackboard_key_for(&instrument);
+    let permitted = |world: &World, source: &SystemId| {
+        shared_helm_observations(
+            Some(
+                &world
+                    .get::<crate::ship::components::ShipConfigComponent>(observer)
+                    .unwrap()
+                    .0,
+            ),
+            world.get::<ShipSystemControlSources>(observer).unwrap(),
+            world
+                .get::<crate::server_app::ShipSystemBlackboards>(observer)
+                .unwrap(),
+        )
+        .get(source)
+        .is_some()
+    };
+    for console in &mut world
+        .get_mut::<crate::ship::components::ShipConfigComponent>(observer)
+        .unwrap()
+        .0
+        .consoles
+    {
+        console.feeds.push(ConsoleFeed {
+            source: key.clone(),
+            kind: ConsoleObservationKind::Scan,
+        });
+    }
+    world
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(observer)
+        .unwrap()
+        .0
+        .insert(
+            key.clone(),
+            SystemBlackboard::Scan(ScanBlackboard {
+                owner: Some(instrument.clone()),
+                capable: true,
+                ..Default::default()
+            }),
+        );
+    assert!(permitted(&world, &key));
+    assert_projection_parity(&world, observer);
+    assert_frame_parity(&mut world, observer, "canonical generated Scan feed");
+
+    if let SystemBlackboard::Scan(board) = world
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(observer)
+        .unwrap()
+        .0
+        .get_mut(&key)
+        .unwrap()
+    {
+        board.owner = Some(SystemId("other-instrument".into()));
+    }
+    assert!(!permitted(&world, &key));
+    assert_projection_parity(&world, observer);
+    assert_frame_parity(&mut world, observer, "mismatched Scan owner is withheld");
+    if let SystemBlackboard::Scan(board) = world
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(observer)
+        .unwrap()
+        .0
+        .get_mut(&key)
+        .unwrap()
+    {
+        board.owner = Some(instrument.clone());
+    }
+    let malformed = SystemId(format!("scan/0{}:{}", instrument.0.len(), instrument.0));
+    for console in &mut world
+        .get_mut::<crate::ship::components::ShipConfigComponent>(observer)
+        .unwrap()
+        .0
+        .consoles
+    {
+        console.feeds.push(ConsoleFeed {
+            source: malformed.clone(),
+            kind: ConsoleObservationKind::Scan,
+        });
+    }
+    world
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(observer)
+        .unwrap()
+        .0
+        .insert(
+            malformed.clone(),
+            SystemBlackboard::Scan(ScanBlackboard {
+                owner: Some(instrument),
+                capable: true,
+                ..Default::default()
+            }),
+        );
+    assert!(!permitted(&world, &malformed));
+    assert!(permitted(&world, &key));
+    assert_projection_parity(&world, observer);
+    assert_frame_parity(
+        &mut world,
+        observer,
+        "noncanonical Scan channel is withheld",
+    );
+
+    let mut config = world
+        .get_mut::<crate::ship::components::ShipConfigComponent>(observer)
+        .unwrap();
+    let console = config
+        .0
+        .console_for_system(&crate::ship::system_registry::helm_thrust_system_id())
+        .unwrap()
+        .id
+        .clone();
+    config
+        .0
+        .consoles
+        .iter_mut()
+        .find(|candidate| candidate.id == console)
+        .unwrap()
+        .feeds
+        .retain(|feed| feed.source != key);
+    drop(config);
+    assert!(!permitted(&world, &key));
+    assert_projection_parity(&world, observer);
+    assert_frame_parity(
+        &mut world,
+        observer,
+        "withdrawn Scan feed takes effect on next assembly",
+    );
+    world
+        .get_mut::<crate::ship::components::ShipConfigComponent>(observer)
+        .unwrap()
+        .0
+        .consoles
+        .iter_mut()
+        .find(|candidate| candidate.id == console)
+        .unwrap()
+        .feeds
+        .push(ConsoleFeed {
+            source: key.clone(),
+            kind: ConsoleObservationKind::Sensors,
+        });
+    assert!(!permitted(&world, &key));
+    assert_projection_parity(&world, observer);
+    assert_frame_parity(
+        &mut world,
+        observer,
+        "wrong typed Scan feed remains withheld",
+    );
+}

@@ -739,8 +739,10 @@ mod shared_target_scope_tests;
 
 /// Shared coordination work is restricted to the intersection of its readers.
 struct SharedHelmObservations<'a> {
-    boards: &'a crate::server_app::ShipSystemBlackboards,
-    readers: Vec<phoenix_sim_gameplay::ship::console_ownership::ConsoleKnowledgeView<'a>>,
+    boards: std::collections::HashMap<
+        &'a crate::core::messages::SystemId,
+        &'a crate::core::messages::SystemBlackboard,
+    >,
 }
 
 impl HelmObservations for SharedHelmObservations<'_> {
@@ -748,15 +750,7 @@ impl HelmObservations for SharedHelmObservations<'_> {
         &self,
         source: &crate::core::messages::SystemId,
     ) -> Option<&crate::core::messages::SystemBlackboard> {
-        if self.readers.is_empty()
-            || self
-                .readers
-                .iter()
-                .any(|reader| reader.get(source).is_none())
-        {
-            return None;
-        }
-        self.boards.0.get(source)
+        self.boards.get(&source).copied()
     }
 
     fn iter(
@@ -767,10 +761,7 @@ impl HelmObservations for SharedHelmObservations<'_> {
             &crate::core::messages::SystemBlackboard,
         ),
     > {
-        self.boards
-            .0
-            .iter()
-            .filter(move |(source, _)| self.get(source).is_some())
+        self.boards.iter().map(|(source, board)| (*source, *board))
     }
 }
 
@@ -779,7 +770,7 @@ fn shared_helm_observations<'a>(
     sources: &ShipSystemControlSources,
     boards: &'a crate::server_app::ShipSystemBlackboards,
 ) -> SharedHelmObservations<'a> {
-    let readers = config
+    let readers: Vec<_> = config
         .into_iter()
         .flat_map(|config| {
             config
@@ -799,5 +790,15 @@ fn shared_helm_observations<'a>(
                 .map(move |system| config.observations_for_system(&system.id, &boards.0))
         })
         .collect();
-    SharedHelmObservations { boards, readers }
+    // Resolve typed scope once. Later existence checks, point lookups and the
+    // measured publication walk must not repeat owner/feed or Scan-key parsing.
+    // Both keys and values borrow this call's publications; no board or ID is copied.
+    let boards = boards
+        .0
+        .iter()
+        .filter(|(source, _)| {
+            !readers.is_empty() && readers.iter().all(|reader| reader.get(source).is_some())
+        })
+        .collect();
+    SharedHelmObservations { boards }
 }

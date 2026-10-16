@@ -55,7 +55,8 @@ use uuid::Uuid;
 /// Revision 39 carries compound personnel identities and consent-bound craft reception.
 /// Revision 40 carries safe attributed typed claims after paid decoding.
 /// Revision 41 carries explicit low-emission intent and measured per-System advice.
-pub const PROTOCOL_VERSION: u32 = 41;
+/// Revision 42 carries shared-loader priorities and explicit vessel-acquisition results.
+pub const PROTOCOL_VERSION: u32 = 42;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).

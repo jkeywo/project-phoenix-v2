@@ -469,7 +469,8 @@ use super::*;
 /// `82` retains actual personnel holders, compound requests and physical reception receipts.
 /// `83` validates the derived typed claims in retained decoded publications.
 /// `84` retains accepted Command emission intent without restoring prepaid activity.
-pub const SNAPSHOT_FORMAT: u32 = 84;
+/// `85` retains grouped-tube priorities and exact paid vessel-acquisition history.
+pub const SNAPSHOT_FORMAT: u32 = 85;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -641,7 +642,9 @@ pub const SNAPSHOT_FORMAT: u32 = 84;
 /// declared intent, and accepts finite physical identity decoys through ordinary craft.
 /// "0.67" preserves physical modifier order before late Navigation sharing and
 /// generates shield knowledge Consoles only for actual shield equipment.
-pub const SIMULATION_RULES: &str = "0.67";
+/// "0.68" derives paid NPC radio contacts, fulfills exact released delivery demand,
+/// shares guided-loader work and commits paid uncrewed vessel acquisition.
+pub const SIMULATION_RULES: &str = "0.68";
 
 /// The authored data, computed rather than remembered.
 ///

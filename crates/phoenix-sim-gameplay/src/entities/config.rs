@@ -6,6 +6,10 @@ use serde::de::Error as SerdeError;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[cfg(test)]
+#[path = "config/disruptor_tests.rs"]
+mod disruptor_tests;
+
 // The fine-system AI policy schema lives in its own module (issue #1196); this
 // glob re-export preserves every historical `entities::config::<name>` path,
 // including the `pub(crate)` `default_evaluate_every_ticks` serde default that

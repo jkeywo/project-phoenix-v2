@@ -266,6 +266,9 @@ pub type TorpedoTubeId = String;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TorpedoTubeConfig {
+    /// Optional physical marker payload. Its actual recipe/faction freeze at launch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marking: Option<phoenix_model::marking::MarkingPayloadConfig>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -825,6 +828,9 @@ impl TorpedoesConfig {
                 .validate()?;
         }
         for tube in &self.tubes {
+            if let Some(marking) = &tube.marking {
+                marking.validate()?;
+            }
             runtime.round_profile(tube.impact).validate()?;
         }
         if !self.burst_interval_secs.is_finite() || self.burst_interval_secs <= 0.0 {

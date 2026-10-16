@@ -4180,7 +4180,7 @@ fn torpedo_hit_reduces_ship_shields_on_local_ship() {
         previous_position: None,
         collision_interval_secs: None,
         last_guidance: None,
-        profile,
+        profile: profile.clone(),
         durability_remaining: profile.durability,
         strike_damage_bonus: 0.0,
         uuid: "test-torp-1".into(),
@@ -4341,7 +4341,7 @@ fn torpedo_hit_from_astern_damages_the_astern_arc_not_the_fore_arc() {
         previous_position: None,
         collision_interval_secs: None,
         last_guidance: None,
-        profile,
+        profile: profile.clone(),
         durability_remaining: profile.durability,
         strike_damage_bonus: 0.0,
         uuid: "test-torp-astern".into(),
@@ -4511,7 +4511,7 @@ fn launch_astern(app: &mut App, ship: Entity, shield_pierce: f32) {
         previous_position: None,
         collision_interval_secs: None,
         last_guidance: None,
-        profile,
+        profile: profile.clone(),
         durability_remaining: profile.durability,
         strike_damage_bonus: 0.0,
         uuid: "payload-probe-round".into(),
@@ -11306,6 +11306,7 @@ fn handle_fire_torpedo_patterned_launch_resolves_barrel_origin() {
 
     // Alternating two-barrel pattern on a fresh tube.
     let tube_cfg = crate::entities::config::TorpedoTubeConfig {
+        marking: None,
         load_priority: 100,
         targets: None,
         impact: phoenix_model::damage::DamageProfile::default(),
@@ -11922,6 +11923,7 @@ fn torpedo_kill_on_the_local_ship_latches_game_over() {
         ..TorpedoConfig::default()
     });
     let profile = phoenix_model::guided_round::GuidedRoundProfile {
+        marking: None,
         shield_pierce: 1.0,
         ..enemy_torpedoes.config.round_profile(Default::default())
     };
@@ -11931,7 +11933,7 @@ fn torpedo_kill_on_the_local_ship_latches_game_over() {
             previous_position: None,
             collision_interval_secs: None,
             last_guidance: None,
-            profile,
+            profile: profile.clone(),
             durability_remaining: profile.durability,
             strike_damage_bonus: 0.0,
             uuid: "torpedo-uuid".into(),
@@ -14346,6 +14348,7 @@ fn magazine_claim_routes_to_shooter_ship_when_multiple_ships_have_magazines() {
     );
     let npc_torpedo_sys = TorpedoSystem::from_configs(
         &[crate::entities::config::TorpedoTubeConfig {
+            marking: None,
             load_priority: 100,
             targets: None,
             impact: phoenix_model::damage::DamageProfile::default(),

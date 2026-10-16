@@ -126,6 +126,7 @@ impl TorpedoConfig {
         impact: phoenix_model::damage::DamageProfile,
     ) -> GuidedRoundProfile {
         GuidedRoundProfile {
+            marking: None,
             speed: self.speed,
             turn_rate: self.turn_rate,
             lifespan: self.lifespan,
@@ -340,6 +341,7 @@ impl TubeLoadState {
 
 #[derive(Clone, Debug)]
 pub struct TorpedoTube {
+    pub marking: Option<phoenix_model::marking::MarkingPayloadConfig>,
     pub targets: Option<Vec<phoenix_model::tags::EntityTag>>,
     pub impact: phoenix_model::damage::DamageProfile,
     /// Tube identifier from TOML (e.g. `"fore_port"`, `"aft"`).
@@ -548,6 +550,7 @@ pub struct TorpedoSystem {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum LaunchResult {
+    MissingMarkingIdentity,
     /// First torpedo of a burst was launched. `count_remaining` is the number
     /// of additional torpedoes still to be fired (0 for a single shot).
     Launched {
@@ -618,6 +621,7 @@ impl TorpedoSystem {
         let ai_target_count = config.ai_volley_target.unwrap_or(1).min(1);
         let tubes = vec![
             TorpedoTube {
+                marking: None,
                 targets: None,
                 impact: phoenix_model::damage::DamageProfile::default(),
                 id: "fore_port".to_string(),
@@ -636,6 +640,7 @@ impl TorpedoSystem {
                 pattern_step: 0,
             },
             TorpedoTube {
+                marking: None,
                 targets: None,
                 impact: phoenix_model::damage::DamageProfile::default(),
                 id: "fore_starboard".to_string(),
@@ -654,6 +659,7 @@ impl TorpedoSystem {
                 pattern_step: 0,
             },
             TorpedoTube {
+                marking: None,
                 targets: None,
                 impact: phoenix_model::damage::DamageProfile::default(),
                 id: "aft".to_string(),
@@ -694,6 +700,7 @@ impl TorpedoSystem {
         let tubes = tubes
             .iter()
             .map(|c| TorpedoTube {
+                marking: c.marking.clone(),
                 targets: c.targets.clone(),
                 impact: c.impact,
                 id: c.id.clone(),
@@ -1083,6 +1090,36 @@ impl TorpedoSystem {
         target_uuid: Option<String>,
         source_uuid: Option<String>,
     ) -> LaunchResult {
+        self.launch_with_barrels_faction(
+            tube_id,
+            uuid,
+            barrel_origins,
+            launch_x,
+            launch_y,
+            launch_z,
+            launch_heading,
+            target_uuid,
+            source_uuid,
+            None,
+        )
+    }
+
+    /// The actual runtime supplies the source's real launch faction. Marker
+    /// identity freezes before any ammunition/reservation mutation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn launch_with_barrels_faction(
+        &mut self,
+        tube_id: &str,
+        uuid: String,
+        barrel_origins: &[(f32, f32, f32)],
+        launch_x: f32,
+        launch_y: f32,
+        launch_z: f32,
+        launch_heading: f32,
+        target_uuid: Option<String>,
+        source_uuid: Option<String>,
+        faction: Option<uuid::Uuid>,
+    ) -> LaunchResult {
         let burst_interval = self.config.burst_interval_secs;
         let Some(idx) = self.tubes.iter().position(|t| t.id == tube_id) else {
             return LaunchResult::UnknownTube;
@@ -1096,7 +1133,24 @@ impl TorpedoSystem {
             return LaunchResult::TubeNotLoaded;
         }
         let count = self.tubes[idx].loaded_count;
-        let profile = self.config.round_profile(self.tubes[idx].impact);
+        let mut profile = self.config.round_profile(self.tubes[idx].impact);
+        if let Some(recipe) = &self.tubes[idx].marking {
+            let Some(faction) = faction.filter(|id| !id.is_nil()) else {
+                return LaunchResult::MissingMarkingIdentity;
+            };
+            if source_uuid.as_ref().is_none_or(|id| id.is_empty()) || recipe.validate().is_err() {
+                return LaunchResult::MissingMarkingIdentity;
+            }
+            profile.marking = Some(phoenix_model::marking::FrozenMarkingPayload {
+                recipe: recipe.clone(),
+                faction,
+            });
+            profile.damage_hull = 0;
+            profile.damage_shields = 0;
+            profile.shield_pierce = 0.0;
+            profile.detonation_radius = 0.0;
+            profile.impact = Default::default();
+        }
         // Resolve the tube's barrel firing sequence up-front (origin map only —
         // never affects `count`).
         let sequence = self.tubes[idx].barrel_sequence();
@@ -1127,7 +1181,7 @@ impl TorpedoSystem {
             previous_position: None,
             collision_interval_secs: None,
             last_guidance: None,
-            profile,
+            profile: profile.clone(),
             durability_remaining: profile.durability,
             strike_damage_bonus: 0.0,
             uuid: uuid.clone(),
@@ -1400,7 +1454,7 @@ impl TorpedoSystem {
                     previous_position: None,
                     collision_interval_secs: None,
                     last_guidance: None,
-                    profile: burst.profile,
+                    profile: burst.profile.clone(),
                     durability_remaining: burst.profile.durability,
                     strike_damage_bonus: 0.0,
                     uuid: uuid.clone(),
@@ -1532,6 +1586,7 @@ impl TorpedoSystem {
             }
         };
         Some(TorpedoDetonation {
+            marking: removed.profile.marking,
             impact: removed.profile.impact,
             incoming: [
                 simmath::sin(removed.heading),
@@ -1574,6 +1629,7 @@ impl TorpedoSystem {
 ///   whole, to the hull.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TorpedoDetonation {
+    pub marking: Option<phoenix_model::marking::FrozenMarkingPayload>,
     pub impact: phoenix_model::damage::DamageProfile,
     /// Arrival azimuth is retained before removing the guided projectile.
     /// Near-vertical approaches use its stored azimuth, never the launcher.
@@ -1650,6 +1706,9 @@ impl TorpedoSystem {
     ) -> Vec<(String, String)> {
         let mut hits = Vec::new();
         for torpedo in &self.in_flight {
+            if torpedo.profile.marking.is_some() {
+                continue;
+            }
             let mut best: Option<(f32, &String)> = None;
             for (uuid, tx, ty, tz, radius) in targets {
                 if torpedo.source_uuid.as_ref() == Some(uuid) {

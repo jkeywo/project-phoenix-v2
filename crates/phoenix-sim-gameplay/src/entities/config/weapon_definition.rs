@@ -70,6 +70,8 @@ pub enum WeaponDeliveryConfig {
     },
     /// Guided payload and flight tuning remain shared in `[torpedoes]`.
     Guided {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        marking: Option<phoenix_model::marking::MarkingPayloadConfig>,
         #[serde(default = "super::weapons::default_load_priority")]
         load_priority: u16,
         #[serde(default)]
@@ -209,11 +211,15 @@ impl WeaponDefinition {
                 pierce(*shield_pierce)?;
             }
             WeaponDeliveryConfig::Guided {
+                marking,
                 load_time,
                 volley_max,
                 ai_target_count,
                 load_priority: _,
             } => {
+                if let Some(marking) = marking {
+                    marking.validate()?;
+                }
                 let tuning = torpedoes
                     .ok_or("guided delivery requires [torpedoes] payload/flight tuning")?;
                 positive("torpedoes.speed", tuning.speed)?;
@@ -326,12 +332,14 @@ impl WeaponDefinition {
                 )
             }
             WeaponDeliveryConfig::Guided {
+                marking,
                 load_priority,
                 load_time,
                 volley_max,
                 ai_target_count,
             } => {
                 let tube = TorpedoTubeConfig {
+                    marking,
                     load_priority,
                     targets: self.targets,
                     impact: self.impact,

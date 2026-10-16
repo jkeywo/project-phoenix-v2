@@ -1936,7 +1936,7 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
                     (
                         &round.uuid,
                         &round.last_guidance,
-                        round.profile,
+                        &round.profile,
                         round.durability_remaining,
                         [round.x, round.y, round.z],
                         round.heading,
@@ -1961,7 +1961,7 @@ fn fold_entity_namespace(world: &World, mut acc: u64) -> u64 {
                     (
                         &burst.launch_uuid,
                         &burst.tube_id,
-                        burst.profile,
+                        &burst.profile,
                         burst.burst_interval_secs,
                         burst.pending,
                         burst.timer,

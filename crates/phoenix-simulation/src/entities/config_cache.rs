@@ -59,6 +59,15 @@ pub fn nested_template_paths(config: &crate::entities::config::EntityConfig) -> 
             out.push(p.path().to_string());
         }
     }
+    if let Some(torpedoes) = &config.torpedoes {
+        out.extend(torpedoes.tubes.iter().filter_map(|tube| {
+            tube.marking
+                .as_ref()
+                .map(|payload| payload.template.clone())
+        }));
+    }
+    out.sort();
+    out.dedup();
     out
 }
 

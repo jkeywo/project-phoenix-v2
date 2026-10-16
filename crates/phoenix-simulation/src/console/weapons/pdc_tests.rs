@@ -71,7 +71,7 @@ fn incoming() -> super::super::TorpedoSystemResource {
     let mut system = TorpedoSystem::new(config);
     for index in 0..3 {
         system.in_flight.push(Torpedo {
-            profile,
+            profile: profile.clone(),
             durability_remaining: profile.durability,
             strike_damage_bonus: 0.0,
             uuid: format!("incoming-{index}"),

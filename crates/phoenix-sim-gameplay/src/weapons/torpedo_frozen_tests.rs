@@ -50,7 +50,7 @@ fn loaded(count: u32) -> TorpedoSystem {
 #[test]
 fn committed_burst_keeps_flight_payload_and_cadence_without_inheriting_paid_boost() {
     let mut system = loaded(3);
-    let original = system.in_flight[0].profile;
+    let original = system.in_flight[0].profile.clone();
     system.in_flight[0].strike_damage_bonus = 0.5; // Work granted only to the emitted first round.
     system.config.speed = 80.0;
     system.config.turn_rate = 4.0;
@@ -120,7 +120,7 @@ fn committed_burst_keeps_flight_payload_and_cadence_without_inheriting_paid_boos
 #[test]
 fn contact_and_detonation_read_launched_equipment_not_current_launcher() {
     let mut system = loaded(1);
-    let original = system.in_flight[0].profile;
+    let original = system.in_flight[0].profile.clone();
     system.in_flight[0].strike_damage_bonus = 0.5;
     system.config.detonation_radius = 0.0;
     system.config.damage_hull = 400;
@@ -466,4 +466,94 @@ fn external_illumination_opt_in_improves_only_existing_intent_without_own_seeker
     let stopped = round.clone();
     assert!(!round.assist_guidance(&reading));
     assert_eq!(round, &stopped);
+}
+
+#[test]
+fn marker_launch_freezes_real_faction_recipe_and_remains_nonproximity_finite_ammunition() {
+    let mut system = TorpedoSystem::new(TorpedoConfig {
+        count: 3,
+        load_time: 0.1,
+        burst_interval_secs: 0.1,
+        ..Default::default()
+    });
+    let tube = system.tubes[0].id.clone();
+    system.tubes[0].marking = Some(phoenix_model::marking::MarkingPayloadConfig {
+        template: "assets/entities/marking_beacon.toml".into(),
+    });
+    system.tubes[0].volley_max = 2;
+    system.set_volley_target(&tube, 2);
+    system.tick(0.1, &HashMap::new(), &mut || {
+        panic!("loading cannot mint a round")
+    });
+    system.tick(0.1, &HashMap::new(), &mut || {
+        panic!("loading cannot mint a round")
+    });
+    system.tick(0.1, &HashMap::new(), &mut || {
+        panic!("loading cannot mint a round")
+    });
+    assert_eq!(system.tubes[0].loaded_count, 2);
+    let aboard = system.rounds_aboard();
+    assert_eq!(
+        system.launch_with_barrels(
+            &tube,
+            "refused".into(),
+            &[],
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            None,
+            Some("source".into())
+        ),
+        LaunchResult::MissingMarkingIdentity
+    );
+    assert_eq!(system.rounds_aboard(), aboard);
+    assert_eq!(system.tubes[0].loaded_count, 2);
+    assert!(system.in_flight.is_empty() && system.burst_states.is_empty());
+    let faction = uuid::Uuid::from_u128(17);
+    assert!(matches!(
+        system.launch_with_barrels_faction(
+            &tube,
+            "marker-0".into(),
+            &[],
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            None,
+            Some("source".into()),
+            Some(faction)
+        ),
+        LaunchResult::Launched { .. }
+    ));
+    let frozen = system.in_flight[0].profile.clone();
+    frozen.validate().unwrap();
+    assert_eq!(frozen.marking.as_ref().unwrap().faction, faction);
+    assert_eq!(system.burst_states[0].profile, frozen);
+    assert_eq!(system.rounds_aboard() + system.in_flight.len() as u32, 3);
+    // Existing coarse target radius must never consume mark-only payloads.
+    assert!(system
+        .find_detonation_hits(&[("hull".into(), 0.0, 0.0, 0.0, 100.0)])
+        .is_empty());
+    system.tubes[0].marking = None;
+    system.config.damage_hull = 999;
+    system.config.detonation_radius = 100.0;
+    system.set_volley_target(&tube, 0);
+    system.tick(0.1, &HashMap::new(), &mut || "marker-1".into());
+    assert_eq!(system.in_flight.len(), 2);
+    assert!(system.burst_states.is_empty());
+    assert!(system.in_flight.iter().all(|round| round.profile == frozen));
+    assert_eq!(system.rounds_aboard() + system.in_flight.len() as u32, 3);
+    let delivery = system.handle_collision_full("marker-0").unwrap();
+    assert_eq!(delivery.marking, frozen.marking);
+    assert_eq!((delivery.damage_hull, delivery.damage_shields), (0, 0));
+    assert_eq!(
+        system
+            .apply_interception("marker-1", frozen.durability)
+            .unwrap(),
+        Some(0.0)
+    );
+    assert!(system.in_flight.is_empty());
+    assert!(system.handle_collision_full("marker-1").is_none());
+    assert_eq!(system.rounds_aboard(), 1);
 }

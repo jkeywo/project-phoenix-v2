@@ -147,6 +147,7 @@ fn family_delivery_views_do_not_rewrite_integer_payload_or_launch_time_pierce() 
     assert_eq!(hit.delivery().split(true), (10.0, 10.0));
     assert_eq!(hit.delivery().split(false), (20.0, 0.0));
     let detonation = super::super::torpedo::TorpedoDetonation {
+        marking: None,
         impact: Default::default(),
         incoming: [0.0, -1.0],
         damage_hull: 40,

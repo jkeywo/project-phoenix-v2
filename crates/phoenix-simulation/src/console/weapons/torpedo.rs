@@ -346,6 +346,7 @@ pub(crate) fn handle_fire_torpedo(
         With<crate::server_app::Ship>,
     >,
     physical: Query<&crate::ship::compartment_damage::ShipDamage>,
+    factions: Query<&crate::entities::spawner::FactionComponent>,
     aims: super::assignments::WeaponAimInputs,
     guidance: super::guidance_link::GuidanceMeasurements,
     tick: Option<Res<crate::sim_tick::SimTick>>,
@@ -666,6 +667,19 @@ pub(crate) fn handle_fire_torpedo(
                     continue;
                 }
             }
+            let launch_faction = factions.get(shooter).ok().map(|faction| faction.0);
+            if torpedo_sys
+                .tube(&tube_id)
+                .is_some_and(|tube| tube.marking.is_some())
+                && (launch_faction.is_none_or(|id| id.is_nil()) || source_uuid_opt.is_none())
+            {
+                super::finish_action_feedback(
+                    cmd,
+                    &mut outbound,
+                    WeaponActionResult::Refused(WeaponActionRefusal::UnknownMount),
+                );
+                continue;
+            }
             if physical.get(shooter).is_ok_and(|damage| {
                 damage.factor(&cmd.target, phoenix_model::damage::DamageBinding::Operation) <= 0.0
             }) || !power_opt
@@ -720,7 +734,7 @@ pub(crate) fn handle_fire_torpedo(
                 })
                 .collect();
             use crate::weapons::torpedo::LaunchResult;
-            let result = torpedo_sys.launch_with_barrels(
+            let result = torpedo_sys.launch_with_barrels_faction(
                 tube_id.as_str(),
                 uuid.clone(),
                 &barrel_origins,
@@ -730,6 +744,7 @@ pub(crate) fn handle_fire_torpedo(
                 launch_heading,
                 homing_uuid.clone(),
                 source_uuid.clone(),
+                launch_faction,
             );
             match result {
                 LaunchResult::Launched {
@@ -826,11 +841,13 @@ pub(crate) fn handle_fire_torpedo(
                     &mut outbound,
                     WeaponActionResult::Refused(WeaponActionRefusal::NoTorpedoes),
                 ),
-                LaunchResult::UnknownTube => super::finish_action_feedback(
-                    cmd,
-                    &mut outbound,
-                    WeaponActionResult::Refused(WeaponActionRefusal::UnknownMount),
-                ),
+                LaunchResult::UnknownTube | LaunchResult::MissingMarkingIdentity => {
+                    super::finish_action_feedback(
+                        cmd,
+                        &mut outbound,
+                        WeaponActionResult::Refused(WeaponActionRefusal::UnknownMount),
+                    )
+                }
             }
         }
 

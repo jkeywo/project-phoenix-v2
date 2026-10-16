@@ -1,12 +1,14 @@
-# Proposed: bind vessel acquisition to a real planned activity
+# Bind vessel acquisition to a real planned activity
 
-**Proposed for root review, 16 October 2026. Not adopted or implemented.**
+**Adopted implementation contract, 16 October 2026. Runtime is not implemented.**
+Root adopted the independently reviewed contract with unavailable acquisition
+remaining pending; it adds no new unaccepted-task terminal lifecycle.
 This is a bounded increment 22/23 prerequisite. It connects the existing paid
 Security acquisition to the existing Situation/HTN evidence path. It does not
 deliver Patrol return, external repair, remote Navigation, negotiated surrender,
 passenger transport or another continuing mode. See [increment 22](increment-22.md),
 [increment 23](increment-23.md), the [acquisition contract](capture-acquisition-contract.md)
-and [proposed PASM decision](../../../pasm/spec/design/vessel-acquisition-activities.yaml).
+and [PASM decision](../../../pasm/spec/design/vessel-acquisition-activities.yaml).
 
 ## Audited baseline
 

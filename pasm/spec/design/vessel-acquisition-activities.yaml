@@ -1,12 +1,12 @@
 entities:
   - decision: planned-acquire-vessel-uses-real-security-cause-and-settlement
     core:
-      status: proposed
-      confidence: provisional
+      status: accepted
+      confidence: confirmed
       title: Planned Acquisition Binds One Actual Security Job And Two Causal Frontiers
-      summary: "Proposed bounded increment 22/23 prerequisite: a distinct typed Vessel subject preserves the one executing Actor rule; AcquireVessel binds normal admitted external Security Board work before progress, acknowledges the exact existing ownership cause, and waits separately for actual Security Job settlement. This proposal is not runtime adoption or a Patrol return implementation."
+      summary: "Adopted bounded increment 22/23 prerequisite: a distinct typed Vessel subject preserves the one executing Actor rule; AcquireVessel binds normal admitted external Security Board work before progress, acknowledges the exact existing ownership cause, and waits separately for actual Security Job settlement. Runtime evidence and the separate Patrol return implementation remain required."
       rationale:
-        - "[ai] Root approved contract preparation only, 2026-10-16. Exact source, typed arguments, admission, outcome clocks, unaccepted-leaf handling, authoring and continuation obligations are in docs/gameplay-redesign/implementation/increment-22-acquire-vessel-contract.md. Runtime starts only after review/adoption."
+        - "[ai] Root adopted the independently reviewed minimal-pending contract, 2026-10-16. Exact source, typed arguments, admission, outcome clocks, unaccepted-leaf handling, authoring and continuation obligations are in docs/gameplay-redesign/implementation/increment-22-acquire-vessel-contract.md. Adoption is not implementation or a playable exit."
         - "Value::Vessel retains a declared named base-World subject, not another executing Actor, slot, dynamic/layer reference, private UUID publication or machinery authority. Simulation resolves the accepted subject privately at the physical boundary; existing PlanChoice/source history and full-candidate reconstruction bind the result."
         - "Only the current released unaccepted request can contribute an own Security intent through its existing permitted selectable assessed-disabled alias. Human and ordinary individual Security AI use the same admitted Board command and real finite Job/team/energy/range checks. Exact physical acceptance and Situation binding commit together before work; independent earlier acquisition is never retrospectively credited."
         - "VesselAcquired carries the immutable subject reference and exact existing Session acquisition receipt/cause at successful owner+hold commit. SecuritySettled is the same actual Job's later terminal outcome and original settlement tick. Withdrawal, elapsed forecasts, flags and a changed faction cannot substitute for either frontier. Reuse bounded pending evidence and acknowledgement, without another owner, executor or receipt archive."

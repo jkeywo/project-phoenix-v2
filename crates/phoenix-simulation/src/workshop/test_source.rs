@@ -15,6 +15,8 @@ pub struct TestCatalog {
     /// itself is represented by the breakpoint's absent `layer`, never by a
     /// `WorldLayerMap` key.
     pub layers: BTreeMap<String, Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rehearsal_fitting: Option<phoenix_model::system_status::FittingPlannerContext>,
 }
 
 #[derive(Debug, Serialize)]
@@ -67,6 +69,13 @@ pub fn catalog(files: BTreeMap<String, String>) -> TestCatalog {
         })
         .collect();
     TestCatalog {
+        rehearsal_fitting: source
+            .load_template(super::rehearsal_request::CRUISER)
+            .and_then(|config| crate::resources::fitting_server::planner_context(&config))
+            .map(|mut context| {
+                context.hull_path = super::rehearsal_request::CRUISER.into();
+                context
+            }),
         worlds,
         slots,
         ships: source

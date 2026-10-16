@@ -1,0 +1,33 @@
+# Disposable Test reference, deliberately absent from the scenario manifest.
+# Every observation, firing cycle and resource payment uses ordinary machinery.
+[global]
+title = "world.fitting_rehearsal_sustained.title"
+seed = 156213
+sim_tick_hz = 60
+
+[test_rehearsal]
+workload = "sustained-engagement"
+warmup_intervals = 120
+phases = [{ activity = "engagement", intervals = 1800 }]
+
+[player_spawn]
+position = [0, 0, 0]
+
+[[ship_slot]]
+id = "rehearsal"
+default_ship = "assets/entities/alliance_cruiser.toml"
+unclaimed = "backfill"
+[[ship_slot.ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[entity]]
+id = "rehearsal"
+template_path = "assets/entities/alliance_cruiser.toml"
+spawn_on = "game_start"
+transform = { position = [0, 0, 0] }
+
+[[entity]]
+id = "rehearsal-subject"
+name = "world.fitting_rehearsal.subject.name"
+template_path = "assets/entities/fitting_rehearsal_subject.toml"
+transform = { position = [0, 0, -25] }

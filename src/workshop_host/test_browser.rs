@@ -16,6 +16,7 @@ pub(crate) struct BrowserTest {
     pub launch: Launch,
     pub assets: Arc<BTreeMap<String, Arc<[u8]>>>,
     pub frozen_slots: Option<crate::ship_slots::FrozenShipSlots>,
+    pub rehearsal: Option<crate::workshop::rehearsal::PreparedRehearsal>,
 }
 
 impl BrowserTest {
@@ -24,11 +25,12 @@ impl BrowserTest {
         if crate::server::bridge::wasm_boot_profile() != "not-started" {
             return Err(fail("Workshop Test requires a fresh iframe"));
         }
-        let launch: Launch = crate::core::codec::from_json_bytes(launch.as_bytes())
-            .map_err(|e| fail(&e.to_string()))?;
+        let launch = Launch::decode(launch.as_bytes()).map_err(|e| fail(&e.to_string()))?;
         let captured = super::captured_source::capture(source, "Workshop Test", "Test")
             .map_err(|message| fail(&message))?;
         let (assets, text) = (captured.assets, captured.text);
+        let rehearsal = crate::workshop::rehearsal::prepare(text.clone(), &launch)
+            .map_err(|message| fail(&message))?;
         // The captured factions ARE the Test's registry (issue #1474): a
         // faction the draft deleted is gone, one it added is there, and the
         // compiled-in set never fills a gap. Validation already refuses an
@@ -87,6 +89,7 @@ impl BrowserTest {
             launch,
             assets: Arc::new(assets),
             frozen_slots,
+            rehearsal,
         })
     }
 }
@@ -125,6 +128,7 @@ pub(crate) fn install(
     app: &mut App,
     launch: Launch,
     frozen_slots: Option<crate::ship_slots::FrozenShipSlots>,
+    rehearsal: Option<crate::workshop::rehearsal::PreparedRehearsal>,
 ) {
     use crate::authoritative::{DeclareState, StateClass};
     crate::sim_rng::install(
@@ -135,6 +139,7 @@ pub(crate) fn install(
     if let Some(frozen) = frozen_slots {
         app.insert_resource(frozen);
     }
+    crate::workshop::rehearsal::install(app, rehearsal);
     app.declare_state::<BrowserTestRun>(StateClass::Timer, "gm-milestone-integrated-workshop")
         .insert_resource(super::test_breakpoint::TestBreakpointState::configured(
             launch.breakpoint.clone(),
@@ -170,19 +175,21 @@ fn publish_status(
     view: Res<super::test_view::TestViewState>,
     trace: Res<super::test_trace::TestTrace>,
     breakpoint: Res<super::test_breakpoint::TestBreakpointState>,
+    rehearsal: Option<Res<crate::workshop::rehearsal::PreparedRehearsal>>,
+    measured: Option<Res<crate::workshop::rehearsal::Measurements>>,
 ) {
     use crate::core::messages::GamePhase;
     EDGE.with(|edge| {
         edge.borrow_mut().status = Some(TestStatus {
             frame_url: None,
             presentation_url: None,
-            running: true,
+            running: rehearsal.as_ref().is_none_or(|r| r.error.is_none()),
             starting: matches!(phase.get(), GamePhase::Lobby | GamePhase::Loading),
             paused: clock.paused,
             tick: tick.0,
             multiplier: clock.multiplier,
             acknowledged: run.acknowledged,
-            error: None,
+            error: rehearsal.and_then(|r| r.error.clone()),
             revision: run.launch.revision.clone(),
             selection: run.launch.selection.clone(),
             view: view.requested.clone(),
@@ -190,6 +197,7 @@ fn publish_status(
             trace: trace.records(),
             breakpoint: breakpoint.configured.clone(),
             breakpoint_hit: breakpoint.hit.clone(),
+            rehearsal: measured.map(|m| m.result.clone()),
         })
     });
 }
@@ -222,7 +230,7 @@ pub fn wasm_workshop_test_status() -> Result<Option<String>, JsValue> {
         edge.borrow()
             .status
             .as_ref()
-            .map(crate::core::codec::to_json)
+            .map(TestStatus::bounded_json)
             .transpose()
             .map_err(|e| JsValue::from_str(&e.to_string()))
     })

@@ -87,7 +87,23 @@ pub fn apply_controls(
     mut visibility: ResMut<crate::presentation_contracts::TestWindowVisibility>,
     mut requested_view: ResMut<super::test_view::TestViewState>,
     mut breakpoint: ResMut<super::test_breakpoint::TestBreakpointState>,
+    rehearsal: Option<Res<super::rehearsal::PreparedRehearsal>>,
 ) {
+    if rehearsal.is_some_and(|run| run.error.is_some()) {
+        // A refused initial fit can never be resumed as default equipment.
+        // Retirement still belongs to this existing private clock/lifecycle.
+        requests.0.clear();
+        clock.paused = true;
+        clock.steps = 0;
+        clock.stepping = false;
+        paused.0 = true;
+        virtual_time.pause();
+        let remainder = fixed_time.overstep();
+        fixed_time.discard_overstep(remainder);
+        *strategy = TimeUpdateStrategy::ManualDuration(std::time::Duration::ZERO);
+        exit.write(AppExit::error());
+        return;
+    }
     // Keep this local wall-clock cursor moving while held. Always feed manual
     // durations: switching a manually stepped Real clock back to Automatic
     // would otherwise repay the entire paused interval as simulation time.

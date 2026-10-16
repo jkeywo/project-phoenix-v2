@@ -265,7 +265,7 @@ impl WorkshopWorker {
                                             };
                                             let id = request.id;
                                             let result = match request.operation {
-                                    Operation::TestStart { files, selection, breakpoint } => {
+                                    Operation::TestStart { files, selection, breakpoint, rehearsal, run_generation } => {
                                         if let Some(preview) = preview.as_mut() {
                                             preview.retire();
                                         }
@@ -275,7 +275,7 @@ impl WorkshopWorker {
                                         if let Some(run) = lod_generation.as_mut() {
                                             run.retire();
                                         }
-                                        match provider.prepare_test(files, selection, breakpoint) {
+                                        match provider.prepare_test_rehearsal(files, selection, breakpoint, rehearsal, run_generation) {
                                             Ok(snapshot) => {
                                                 let started = std::env::current_exe()
                                                     .map_err(|e| e.to_string())

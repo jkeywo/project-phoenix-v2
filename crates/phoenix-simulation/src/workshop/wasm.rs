@@ -41,11 +41,11 @@ pub fn wasm_workshop_test_catalog(files: &str) -> Result<String, JsValue> {
 
 #[wasm_bindgen]
 pub fn wasm_workshop_test_check_selection(files: &str, launch: &str) -> Result<String, JsValue> {
-    let files = crate::core::codec::from_json(files)
+    let files: std::collections::BTreeMap<String, String> = crate::core::codec::from_json(files)
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    let launch: super::test_protocol::Launch =
-        crate::core::codec::from_json_bytes(launch.as_bytes())
-            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let launch = super::test_protocol::Launch::decode(launch.as_bytes())
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    super::rehearsal::prepare(files.clone(), &launch).map_err(|error| JsValue::from_str(&error))?;
     crate::core::codec::to_json(&super::test_source::validate_selection(
         files,
         &launch.selection,

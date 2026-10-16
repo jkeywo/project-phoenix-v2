@@ -223,6 +223,38 @@ pub struct Launch {
     pub breakpoint: Option<TestBreakpoint>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rehearsal: Option<super::rehearsal_request::RehearsalRequest>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub run_generation: u64,
+}
+fn is_zero(value: &u64) -> bool {
+    *value == 0
+}
+impl Launch {
+    /// Conservatively bound the complete rehearsal launch to the request's
+    /// 32 KiB limit, including JSON whitespace/header fields. Ordinary Tests
+    /// retain their existing 64 KiB native envelope.
+    pub fn decode(bytes: &[u8]) -> Result<Self, String> {
+        if bytes.len() > 65_536 {
+            return Err("Test launch descriptor is too large".into());
+        }
+        let launch: Self = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+        if launch.rehearsal.is_some() && bytes.len() > super::rehearsal_request::MAX_REQUEST_BYTES {
+            return Err("Fitting rehearsal launch exceeds its encoded request bound".into());
+        }
+        Ok(launch)
+    }
+    pub fn bounded_json(&self) -> Result<String, String> {
+        let json = serde_json::to_string(self).map_err(|e| e.to_string())?;
+        let limit = if self.rehearsal.is_some() {
+            super::rehearsal_request::MAX_REQUEST_BYTES
+        } else {
+            65_536
+        };
+        if json.len() > limit {
+            return Err("Test launch descriptor is too large".into());
+        }
+        Ok(json)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -254,8 +286,43 @@ pub struct TestStatus {
     pub breakpoint: Option<TestBreakpoint>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub breakpoint_hit: Option<TestBreakpointHit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rehearsal: Option<super::rehearsal::RehearsalResult>,
 }
 impl TestStatus {
+    /// The private native frame includes its prefix and newline. Browser Tests
+    /// use the same conservative envelope, including all ordinary status fields.
+    pub fn bounded_json(&self) -> Result<String, String> {
+        const PREFIX: &str = "PHOENIX_WORKSHOP_TEST ";
+        let report_fits = self
+            .rehearsal
+            .as_ref()
+            .map_or(Ok(true), |report| {
+                serde_json::to_vec(report).map(|bytes| bytes.len() <= 32_768)
+            })
+            .map_err(|e| e.to_string())?;
+        let record = serde_json::to_string(self).map_err(|e| e.to_string())?;
+        if report_fits && PREFIX.len() + record.len() + 1 <= 65_536 {
+            return Ok(record);
+        }
+        let mut refused = self.clone();
+        refused.running = false;
+        refused.starting = false;
+        refused.paused = true;
+        refused.error = Some("result-too-large".into());
+        refused.rehearsal = None;
+        refused.trace.clear();
+        refused.ships.clear();
+        refused.breakpoint_hit = None;
+        refused.breakpoint = None;
+        refused.view = TestView::default();
+        let record = serde_json::to_string(&refused).map_err(|e| e.to_string())?;
+        if PREFIX.len() + record.len() + 1 > 65_536 {
+            return Err("result-too-large".into());
+        }
+        Ok(record)
+    }
+
     pub fn starting(launch: &Launch) -> Self {
         Self {
             frame_url: None,
@@ -274,6 +341,7 @@ impl TestStatus {
             trace: Vec::new(),
             breakpoint: launch.breakpoint.clone(),
             breakpoint_hit: None,
+            rehearsal: None,
         }
     }
 }

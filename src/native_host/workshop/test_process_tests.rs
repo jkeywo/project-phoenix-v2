@@ -25,6 +25,8 @@ pub(super) fn snapshot() -> TestSnapshot {
         },
         revision: "fixture".into(),
         breakpoint: None,
+        rehearsal: None,
+        run_generation: 0,
     }
 }
 struct Fixture(PathBuf);

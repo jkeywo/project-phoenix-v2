@@ -3,7 +3,10 @@ use super::{rehearsal_request::*, test_protocol::Launch};
 use crate::entities::loader::TemplateLoader;
 use crate::resources::fitting_server::{CompiledShipFitting, FittingPlannerCatalog, ShipFitting};
 use crate::ship::power::ShipPowerSystem;
+#[path = "rehearsal_report.rs"]
+mod report;
 use bevy::prelude::*;
+pub use report::{result, Measurements, ReferenceProfile, RehearsalResult};
 use std::collections::BTreeMap;
 
 #[derive(Resource)]
@@ -11,8 +14,13 @@ pub struct PreparedRehearsal {
     request: RehearsalRequest,
     choices: BTreeMap<String, String>,
     accepted: crate::entities::config::EntityConfig,
+    profile: ReferenceProfile,
+    revision: String,
+    workload_revision: String,
+    run_generation: u64,
+    selection: super::test_protocol::TestSelection,
     pub(crate) attempted: bool,
-    pub(crate) error: Option<String>,
+    pub error: Option<String>,
     pub(crate) target: Option<Entity>,
     pub(crate) initialized_tick: Option<u64>,
 }
@@ -25,7 +33,11 @@ pub fn prepare(
     let Some(request) = launch.rehearsal.as_ref() else {
         return Ok(None);
     };
+    launch.bounded_json()?;
     request.validate(&launch.selection)?;
+    if launch.run_generation == 0 || launch.revision.is_empty() || launch.revision.len() > 256 {
+        return Err("Rehearsal requires a bounded immutable capture and run generation".into());
+    }
     if launch.breakpoint.is_some() {
         return Err(
             "A rehearsal owns its finite window; a Test breakpoint cannot replace it".into(),
@@ -36,6 +48,19 @@ pub fn prepare(
         return Err("Captured rehearsal source did not pass Test validation".into());
     }
     let source = super::Sources(files);
+    let world_text = source
+        .0
+        .get(&launch.selection.world)
+        .ok_or("Captured reference World is absent")?;
+    let value: toml::Value = toml::from_str(world_text).map_err(|e| e.to_string())?;
+    let profile: ReferenceProfile = value
+        .get("test_rehearsal")
+        .cloned()
+        .ok_or("Captured World has no reference workload declaration")?
+        .try_into()
+        .map_err(|e: toml::de::Error| e.to_string())?;
+    profile.validate(request.workload)?;
+    let workload_revision = format!("{:016x}", vellum_digest::fnv1a(world_text.as_bytes()));
     let accepted = source
         .load_template(&launch.selection.ship)
         .ok_or("Captured rehearsal hull did not resolve")?;
@@ -57,6 +82,11 @@ pub fn prepare(
         .get(&launch.selection.world)
         .and_then(|text| crate::world::config::parse_world(text).ok())
         .ok_or("Captured rehearsal World did not resolve")?;
+    if world.global.sim_tick_hz != 60.0 || world.ship_slots.len() != 1 {
+        return Err(
+            "The first reference profiles require their authored 60 Hz single-slot setup".into(),
+        );
+    }
     let slot_row = world
         .entities
         .iter()
@@ -69,6 +99,11 @@ pub fn prepare(
         request: request.clone(),
         choices,
         accepted,
+        profile,
+        revision: launch.revision.clone(),
+        workload_revision,
+        run_generation: launch.run_generation,
+        selection: launch.selection.clone(),
         attempted: false,
         error: None,
         target: None,
@@ -83,7 +118,12 @@ pub fn install(app: &mut App, prepared: Option<PreparedRehearsal>) {
             StateClass::TestInfra,
             "equipment-fitting-and-refitting",
         )
-        .insert_resource(prepared);
+        .declare_state::<Measurements>(StateClass::TestInfra, "equipment-fitting-and-refitting")
+        .insert_resource(prepared)
+        .add_systems(
+            FixedLast,
+            report::sample.before(crate::sim_tick::advance_sim_tick),
+        );
     }
 }
 
@@ -241,8 +281,10 @@ fn stage(world: &mut World) -> Result<Entity, String> {
     if before != power.0.capture_continuation() {
         return Err("Hypothetical equipment must preserve actual initial reserves and heat".into());
     }
+    let measurements = report::initial(world, entity, &power)?;
     world.entity_mut(entity).insert((fitting, power));
     crate::resources::fitting_server::apply_capability(world, entity, &effective);
+    world.insert_resource(measurements);
     Ok(entity)
 }
 

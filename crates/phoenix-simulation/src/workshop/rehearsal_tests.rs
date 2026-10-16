@@ -38,6 +38,18 @@ fn fixture() -> (World, Entity) {
         Some("rehearsal".into()),
     );
     world.flush();
+    let subject = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/fitting_rehearsal_subject.toml",
+    )
+    .unwrap();
+    crate::entities::spawner::spawn_entity(
+        &mut world.commands(),
+        &subject,
+        Vec3::new(0.0, 0.0, -25.0),
+        "00000000-0000-0000-0000-000000000014".into(),
+        Some("rehearsal-subject".into()),
+    );
+    world.flush();
     world
         .entity_mut(entity)
         .insert(crate::ship_slots::AuthoredShipSlotId("rehearsal".into()));
@@ -56,6 +68,11 @@ fn fixture() -> (World, Entity) {
     world.insert_resource(super::super::test_clock::TestClock::default());
     world.insert_resource(crate::gm::actions::action::SimulationPaused::default());
     world.insert_resource(crate::sim_tick::SimTick(0));
+    world.insert_resource(Time::<Fixed>::from_hz(60.0));
+    world.insert_resource(super::super::test_clock::TestControls::default());
+    world.insert_resource(crate::effect_queue::EffectQueue::<
+        crate::infrastructure::CapacityAdjustment,
+    >::default());
     let choices = request
         .choices(
             &crate::resources::fitting_server::planner_context(&config)
@@ -70,12 +87,79 @@ fn fixture() -> (World, Entity) {
         request,
         choices,
         accepted: config,
+        profile: ReferenceProfile {
+            workload: Workload::SustainedEngagement,
+            warmup_intervals: 0,
+            phases: vec![report::ReferencePhase {
+                activity: report::Activity::Engagement,
+                intervals: 60,
+            }],
+        },
+        revision: "fixture".into(),
+        workload_revision: "accepted-world".into(),
+        run_generation: 1,
+        selection: super::super::test_protocol::TestSelection {
+            world: Workload::SustainedEngagement.world().into(),
+            slot: Some("rehearsal".into()),
+            ship: CRUISER.into(),
+            seed: 13,
+        },
         attempted: false,
         error: None,
         target: None,
         initialized_tick: None,
     });
     (world, entity)
+}
+
+#[test]
+fn settled_sampler_skips_initialization_pause_and_duplicate_ticks_and_freezes_exact_window() {
+    let (mut world, _) = fixture();
+    world.insert_resource(State::new(crate::core::messages::GamePhase::InProgress));
+    initialize(&mut world);
+    report::sample(&mut world);
+    assert_eq!(result(&world).unwrap().measured_intervals, 0);
+    world.resource_mut::<crate::sim_tick::SimTick>().0 = 1;
+    world
+        .resource_mut::<crate::gm::actions::action::SimulationPaused>()
+        .0 = true;
+    report::sample(&mut world);
+    assert_eq!(result(&world).unwrap().measured_intervals, 0);
+    world
+        .resource_mut::<crate::gm::actions::action::SimulationPaused>()
+        .0 = false;
+    for tick in 1..=65 {
+        world.resource_mut::<crate::sim_tick::SimTick>().0 = tick;
+        report::sample(&mut world);
+        report::sample(&mut world);
+    }
+    let actual = result(&world).unwrap();
+    assert!(actual.complete && actual.insufficient_activity);
+    assert_eq!(actual.measured_intervals, 60);
+    assert_eq!(actual.last_measured_tick, Some(60));
+    assert!(actual.buffers.values().all(|b| b.paid_energy == 0.0));
+    assert_eq!(
+        world
+            .resource::<super::super::test_clock::TestControls>()
+            .0
+            .len(),
+        1
+    );
+    assert_eq!(actual.charts.last().unwrap().measured_intervals, 60);
+}
+
+#[test]
+fn sampler_refuses_unsettled_resource_effects_instead_of_applying_them_twice() {
+    let (mut world, _) = fixture();
+    world.insert_resource(State::new(crate::core::messages::GamePhase::InProgress));
+    initialize(&mut world);
+    world.resource_mut::<crate::sim_tick::SimTick>().0 = 1;
+    world.resource_mut::<crate::effect_queue::EffectQueue<crate::infrastructure::CapacityAdjustment>>().0
+        .push(crate::infrastructure::CapacityAdjustment { uuid: "unsettled-owner".into(), capacity: "coolant".into(), delta: -1 });
+    report::sample(&mut world);
+    let refused = result(&world).unwrap();
+    assert_eq!(refused.measured_intervals, 0);
+    assert!(refused.error.unwrap().contains("not settled"));
 }
 
 #[test]
@@ -236,6 +320,19 @@ fn private_request_refuses_duplicate_keys_unknown_fields_and_stale_choices() {
         seed: 13,
     };
     request.validate(&selection).unwrap();
+    let launch = Launch {
+        selection: selection.clone(),
+        revision: "capture".into(),
+        breakpoint: None,
+        rehearsal: Some(request.clone()),
+        run_generation: 1,
+    };
+    let encoded = launch.bounded_json().unwrap();
+    Launch::decode(encoded.as_bytes()).unwrap();
+    assert!(
+        Launch::decode(format!("{}{}", " ".repeat(32_768), encoded).as_bytes()).is_err(),
+        "wire whitespace cannot bypass the complete encoded rehearsal envelope"
+    );
     let json = serde_json::to_string(request).unwrap();
     for malformed in [
         json.replacen("\"version\":1", "\"version\":1,\"version\":1", 1),
@@ -268,4 +365,80 @@ fn private_request_refuses_duplicate_keys_unknown_fields_and_stale_choices() {
         .choices
         .clear();
     assert!(wrong.choices(&context).is_err());
+}
+
+#[test]
+fn actual_captured_reference_worlds_resolve_and_compile_complete_cruiser_equipment() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut files = BTreeMap::new();
+    crate::native_capture::walk(&root.join("assets"), &mut |entry| {
+        if entry.file_type().unwrap().is_dir() {
+            return Ok(Some(entry.path()));
+        }
+        let path = crate::native_capture::relative_name(&entry.path(), &root)?;
+        if path.ends_with(".toml") || path.ends_with(".rhai") {
+            files.insert(
+                path,
+                std::fs::read_to_string(entry.path()).map_err(|e| e.to_string())?,
+            );
+        }
+        Ok(None)
+    })
+    .unwrap();
+    let (world, _) = fixture();
+    for workload in [Workload::SustainedEngagement, Workload::BurstRecovery] {
+        let mut request = world.resource::<PreparedRehearsal>().request.clone();
+        request.workload = workload;
+        let launch = Launch {
+            selection: super::super::test_protocol::TestSelection {
+                world: workload.world().into(),
+                slot: Some("rehearsal".into()),
+                ship: CRUISER.into(),
+                seed: 13,
+            },
+            revision: "actual-source-capture".into(),
+            breakpoint: None,
+            rehearsal: Some(request),
+            run_generation: 1,
+        };
+        let selected = prepare(files.clone(), &launch).unwrap().unwrap();
+        assert_eq!(
+            selected
+                .accepted
+                .ship_config
+                .as_ref()
+                .unwrap()
+                .stations
+                .len(),
+            6
+        );
+        assert!(
+            selected.accepted.energy.is_some()
+                && selected.accepted.damage.is_some()
+                && selected.accepted.interior.is_some()
+        );
+        let profile = crate::resources::fitting::CompiledFitting::compile(&selected.accepted)
+            .unwrap()
+            .unwrap();
+        let mut fit = crate::resources::fitting::FittingState::from_profile(&profile).unwrap();
+        for (slot, definition) in [
+            ("fore-beam", "cruiser-beam-pulse"),
+            ("reactor", "cruiser-reactor-responsive"),
+        ] {
+            profile.compatible(slot, definition).unwrap();
+            let id = fit.installed(slot).unwrap().id.clone();
+            fit.assemblies.get_mut(&id).unwrap().definition = definition.into();
+            fit.desired.insert(slot.into(), definition.into());
+        }
+        let alternative = profile.effective_config(&fit).unwrap();
+        assert_eq!(alternative.ship_config, selected.accepted.ship_config);
+        assert_eq!(alternative.interior, selected.accepted.interior);
+        assert_eq!(
+            alternative.energy.as_ref().unwrap().consumers.len(),
+            selected.accepted.energy.as_ref().unwrap().consumers.len()
+        );
+        let mut bad = launch.clone();
+        bad.rehearsal.as_mut().unwrap().plan.content_id = "0000000000000000".into();
+        assert!(prepare(files.clone(), &bad).is_err());
+    }
 }

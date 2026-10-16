@@ -1,0 +1,43 @@
+# Same finite subject and machinery. At twelve ordinary scenario seconds the
+# subject is retired through the existing World effect. This is not damage or
+# a kill credited to the fit; the report measures actual preceding work and
+# subsequent ordinary reserve recovery, not a fabricated firing duty cycle.
+[global]
+title = "world.fitting_rehearsal_burst.title"
+seed = 156213
+sim_tick_hz = 60
+
+[test_rehearsal]
+workload = "burst-recovery"
+warmup_intervals = 120
+phases = [{ activity = "engagement", intervals = 600 }, { activity = "recovery", intervals = 1200 }]
+
+[player_spawn]
+position = [0, 0, 0]
+
+[[ship_slot]]
+id = "rehearsal"
+default_ship = "assets/entities/alliance_cruiser.toml"
+unclaimed = "backfill"
+[[ship_slot.ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+
+[[entity]]
+id = "rehearsal"
+template_path = "assets/entities/alliance_cruiser.toml"
+spawn_on = "game_start"
+transform = { position = [0, 0, 0] }
+
+[[entity]]
+id = "rehearsal-subject"
+name = "world.fitting_rehearsal.subject.name"
+template_path = "assets/entities/fitting_rehearsal_subject.toml"
+transform = { position = [0, 0, -25] }
+
+[script]
+setup = '''
+on_timer(12, "retire_reference_subject");
+fn retire_reference_subject(ctx) {
+    ctx.effects.destroy_entity("world.fitting_rehearsal.subject.name");
+}
+'''

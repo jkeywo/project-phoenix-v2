@@ -1,8 +1,9 @@
 # Increment 15 — bounded physical marking payload
 
-Status: proposed contract; no runtime adoption or implementation claim. Based on
-`efcddb08`. Root approved preparing this contract, including review of contact,
-attachment projection and report timing by Root, Craft and Comms before runtime.
+Status: adopted implementation contract, 16 October 2026; no implementation or
+playable-exit claim. Prepared against `efcddb08` and reviewed through `b5d4faba`.
+Root adopts the bounded contact, attachment and paid-report contracts after
+independent Craft and Comms source/API review, before runtime implementation.
 
 ## Selected scope and open choices
 
@@ -13,7 +14,7 @@ placement, paid operation and a working report link. It does not select a generi
 accuracy bonus, hidden interior access or permanent perfect tracking.
 
 Exact measurements, endurance, link, removal and countermeasures were left open.
-The bounded choices below are proposed implementation contracts, not quotations
+The bounded choices below are selected implementation contracts, not quotations
 of settled tuning. Equipment-specific penetration is separate. General mines,
 terrain manipulation, Bay handling, recovery and cleaning are outside this slice.
 No new authored entity enters the global catalogue before an actual accepted
@@ -240,7 +241,7 @@ retarget a missile, illuminate, issue an order or grant control. Routine emissio
 needs no per-beacon polling; the ordinary sensor/radio controllers remain the
 only controllers of those Systems.
 
-Proposed exact report frontier:
+Selected exact report frontier:
 
 1. TickCommsRadio pays ordinary listening once. Expose a derived receipt keyed
    by exact actor/System and current tick containing the **raw paid fraction**,
@@ -322,9 +323,9 @@ no global list of secretly attached beacons or owner-free controls is added.
   human activity evidence. Worker source review and owner checks remain separate
   from root Cargo/native/integration gates and physical device acceptance.
 
-This draft changes no runtime, asset, balance value, compatibility epoch or
-existing selected decision. The slice becomes adopted only after Root, Craft
-and Comms review of its exact missing physical/report joins.
+This contract changes no runtime, asset, balance value or compatibility epoch.
+The missing physical/report joins are implementation requirements, not evidence
+that an attached body or a working report path already exists.
 
 ## Draft review receipt
 
@@ -335,5 +336,6 @@ they do not establish that an attachment filter or paid-report join already
 exists. The subsequent local dependency audit pins available existing Collider
 point/projection APIs for the explicitly bounded endpoint contact model; that
 API choice has Craft's additional read-only source/API review against the locked
-local dependency; actual consumer proof and Root adoption remain pending. No runtime, native execution,
+local dependency. Root adopts the contract after those reviews; actual consumer
+proof remains pending. No runtime, native execution,
 asset acceptance or full increment exit is claimed.

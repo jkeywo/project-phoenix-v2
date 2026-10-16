@@ -23,6 +23,11 @@ decoder owner tests pass. Separately, 188 codec, seven native transport and 17
 selected content/Workshop checks pass. These results do not establish a passing
 integrated exit.
 
+At `f1643e85`, all eight selected host-test targets compile successfully with
+`headless,host`: Comms capture, emissions, formation, fixed turrets, finite decoys,
+personnel reception, optional maintenance and authoritative-state enumeration.
+Their native execution is running; compilation does not establish a playable exit.
+
 | Increment | Implementation state | Material remaining work |
 |---|---|---|
 | 0 — Baseline | Complete | None within the baseline scope. |
@@ -44,7 +49,7 @@ integrated exit.
 | 16 — Comms/orders | Channels, requests and relay operational | Media/decoder owner checks pass on their tested revision; typed claims source integrated; listening priorities/chatter, contextual operations and full native/playable acceptance remain. |
 | 17 — Electronic operations | Jamming/protection/identity operational | Concealment owner/snapshot checks pass; low-emission source/proofs integrated but unexecuted; bounded disruption, broader information/access and acceptance remain. |
 | 18 — Movement/transit | Local jumps verified; sector code integrated | Formation owner/restore checks pass; Helm follow source/proofs integrated but unexecuted; remaining assistance and acceptance. |
-| 19 — Craft/deployables | Physical probe handling verified | Fixed beam turret and finite physical decoy source/proofs integrated; host proof API corrections/native execution, other craft, sorties, remote operation and acceptance remain. |
+| 19 — Craft/deployables | Physical probe handling verified | Fixed beam turret and finite physical decoy source/proofs integrated and host targets compile; native execution, moving craft, sorties, remote operation and acceptance remain. |
 | 20 — Personnel | Officers, care and retained roster operational | Transfer and consent-bound reception source/proofs integrated but native unverified; broader boarding/away/rescue/capture and acceptance remain. |
 | 21 — Facilities/actors | Finite ports and physical supply verified | Workforce, broader objectives/dependencies and acceptance. |
 | 22 — Authored HTN execution | Working scheduling/activity core | Broader operator/scenario coverage and full integration. |

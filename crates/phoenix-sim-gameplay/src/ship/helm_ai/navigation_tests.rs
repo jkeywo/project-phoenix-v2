@@ -120,7 +120,7 @@ fn ordinary_vertical_axis_uses_only_cleared_full3d_chart_plan_and_keeps_bounded_
         ..Default::default()
     };
     plan.motion.desired_velocity_local.y = 0.75;
-    let mut capability = HelmCapabilitySection(HelmCapabilityConfig {
+    let capability = HelmCapabilitySection(HelmCapabilityConfig {
         vertical_movement_mode: VerticalMovementMode::Full3D,
         ..Default::default()
     });
@@ -158,8 +158,9 @@ fn ordinary_vertical_axis_uses_only_cleared_full3d_chart_plan_and_keeps_bounded_
     assert!(
         matches!(VerticalAxis::act(HostOutcome::Act(&verb),&cx,&mut io),Some(SystemControlPayload::VerticalThrustInput{vertical}) if vertical==0.0)
     );
-    capability.0.vertical_movement_mode = VerticalMovementMode::Bounded;
-    cx.capability = Some(&capability);
+    let mut bounded_capability = capability.clone();
+    bounded_capability.0.vertical_movement_mode = VerticalMovementMode::Bounded;
+    cx.capability = Some(&bounded_capability);
     assert!(
         matches!(VerticalAxis::act(HostOutcome::Act(&verb),&cx,&mut io),Some(SystemControlPayload::VerticalThrustInput{vertical}) if vertical<0.0)
     );

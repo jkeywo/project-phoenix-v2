@@ -338,6 +338,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
         helm_control: _,
         arrival_gravity: _,
         probe: _,
+        marking_beacon: _,
         helm_capability: _,
         weapons_console: _,
         engineering_console: _,

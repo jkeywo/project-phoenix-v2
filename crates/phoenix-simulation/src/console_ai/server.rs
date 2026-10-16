@@ -255,33 +255,9 @@ fn ai_power_allocation(
                 energy.reactor.output_actual_per_sec as f64,
             ),
         ]);
-        for group in &energy.groups {
-            let mut reserve = 1.0f32;
-            let mut heat = 0.0f32;
-            for consumer in &energy.consumers {
-                let mut cursor = consumer.group.as_ref().map(|id| id.0.as_str());
-                let mut belongs = false;
-                for _ in 0..=energy.groups.len() {
-                    let Some(id) = cursor else {
-                        break;
-                    };
-                    if id == group.id {
-                        belongs = true;
-                        break;
-                    }
-                    cursor = energy
-                        .groups
-                        .iter()
-                        .find(|candidate| candidate.id == id)
-                        .and_then(|candidate| candidate.parent.as_deref());
-                }
-                if belongs {
-                    reserve = reserve.min(consumer.energy / consumer.capacity);
-                    heat = heat.max(consumer.heat / consumer.trip_heat);
-                }
-            }
-            facts.insert(format!("reserve-{}", group.id), reserve as f64);
-            facts.insert(format!("heat-{}", group.id), heat as f64);
+        for (group, reserve, heat) in power_group_observations(energy) {
+            facts.insert(format!("reserve-{group}"), reserve as f64);
+            facts.insert(format!("heat-{group}"), heat as f64);
         }
         let result = match decide_tree_with_numbers(
             &sources.0,
@@ -1161,6 +1137,50 @@ fn console_combat_lock(
         _ => None,
     }
 }
+
+/// Fold each permitted consumer once into each of its ancestors. Consumer
+/// order and f32 min/max operations match the original per-group traversal.
+fn power_group_observations(
+    energy: &phoenix_model::energy::PowerEnergyBlackboard,
+) -> Vec<(&str, f32, f32)> {
+    use std::collections::BTreeMap;
+    // First occurrence supplies the parent, matching the old linear `find`
+    // even for malformed duplicate group IDs in diagnostic observations.
+    let mut groups = BTreeMap::new();
+    for group in &energy.groups {
+        groups
+            .entry(group.id.as_str())
+            .or_insert((group.parent.as_deref(), 1.0f32, 0.0f32, None));
+    }
+    for (consumer_index, consumer) in energy.consumers.iter().enumerate() {
+        let mut cursor = consumer.group.as_ref().map(|id| id.0.as_str());
+        for _ in 0..=energy.groups.len() {
+            let Some(group) = cursor.and_then(|id| groups.get_mut(id)) else {
+                break;
+            };
+            // A cycle must not apply the same consumer twice to an ancestor.
+            if group.3 == Some(consumer_index) {
+                break;
+            }
+            group.3 = Some(consumer_index);
+            group.1 = group.1.min(consumer.energy / consumer.capacity);
+            group.2 = group.2.max(consumer.heat / consumer.trip_heat);
+            cursor = group.0;
+        }
+    }
+    energy
+        .groups
+        .iter()
+        .map(|group| {
+            let (_, reserve, heat, _) = groups[group.id.as_str()];
+            (group.id.as_str(), reserve, heat)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+#[path = "power_group_observations_tests.rs"]
+mod power_group_observations_tests;
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 

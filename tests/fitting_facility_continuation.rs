@@ -424,7 +424,23 @@ fn intact_recovery_preserves_actual_condition_then_vacant_repair_fetches_and_ins
         &mut live,
         "science",
         "sensors",
-        Control::SetScienceTarget { uuid: contact },
+        Control::SetScienceTarget {
+            uuid: contact.clone(),
+        },
+    );
+    let recovery_feed = |app: &App| {
+        let config = &app.world().get::<ShipConfigComponent>(entity).unwrap().0;
+        let boards = app.world().get::<ShipSystemBlackboards>(entity).unwrap();
+        config
+            .observations_for_system(&sid("resource-recovery"), &boards.0)
+            .get(&sid("sensor-radar"))
+            .cloned()
+    };
+    assert!(
+        matches!(recovery_feed(&live), Some(SystemBlackboard::SensorRadar(board))
+            if board.selected_target.as_deref() == Some(contact.as_str())),
+        "the actual Recovery Console must receive the earned Science selection: {:?}",
+        recovery_feed(&live)
     );
     let offered = |app: &App| {
         project_phoenix::resources::equipment_recovery_server::project(app.world(), entity)?
@@ -443,8 +459,24 @@ fn intact_recovery_preserves_actual_condition_then_vacant_repair_fetches_and_ins
         }
         live.update();
     }
-    let option =
-        offered(&live).expect("normal current Recovery projection offers real intact equipment");
+    let option = offered(&live).unwrap_or_else(|| {
+        let world = live.world();
+        let damage = world.get::<ShipDamage>(source.0).unwrap();
+        let source_config = &world.get::<ShipConfigComponent>(source.0).unwrap().0;
+        eprintln!(
+            "intact Recovery failure: own_position={:?} source_position={:?} neutralized={} source_condition={:?} receiving_tool={:?} source_fitting={:?} recovery={:?} permitted_feed={:?} projection={:?}",
+            world.get::<Transform>(entity).map(|pose| pose.translation),
+            world.get::<Transform>(source.0).map(|pose| pose.translation),
+            damage.neutralized(source_config, world.get::<ShipPowerSystem>(source.0)),
+            damage.state.components[&sid("phaser-fore")]["operation"],
+            world.get::<project_phoenix::resources::recovery_server::CompiledShipRecovery>(entity).map(|tool| &tool.0),
+            fit(&live, source.0),
+            world.get::<ShipEquipmentRecovery>(entity),
+            recovery_feed(&live),
+            project_phoenix::resources::equipment_recovery_server::project(world, entity),
+        );
+        panic!("normal current Recovery projection offers real intact equipment");
+    });
     control(
         &mut live,
         "engineering",

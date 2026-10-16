@@ -1,7 +1,8 @@
 //! On-rig named-system attribution. This example uses production App builders;
 //! its control and wrapped runs are separate from ordinary binary baselines.
 //! Usage: profile_systems <headless|native> <control|wrapped> <world> <new-dir>
-//! Native also requires <explicit-zero-profile>. Assets resolve from the CWD.
+//! Native also requires <explicit-zero-profile>; headless accepts [ship-path].
+//! Assets resolve from the CWD.
 
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "profile_systems/timing.rs"]
@@ -43,6 +44,7 @@ fn main() {
         runtime: &'a str,
         mode: &'a str,
         world: &'a str,
+        ship: &'a str,
         trace_truncated: bool,
         systems: Vec<&'a timing::Row>,
         updates: Vec<Update>,
@@ -63,6 +65,13 @@ fn main() {
         "native" => true,
         "headless" => false,
         _ => panic!("unknown runtime"),
+    };
+    let ship = if native {
+        "assets/entities/alliance_destroyer.toml"
+    } else {
+        args.get(4)
+            .map(String::as_str)
+            .unwrap_or("assets/entities/alliance_destroyer.toml")
     };
     let enabled = match args[1].as_str() {
         "wrapped" => true,
@@ -100,7 +109,7 @@ fn main() {
         native_host::pin_content_root(".").unwrap();
         let preload = native_host::preload_content_templates(".").unwrap();
         let mut config = native_host::NativeHostConfig::new(&args[2]);
-        config.ship_path = Some("assets/entities/alliance_destroyer.toml".into());
+        config.ship_path = Some(ship.into());
         config.seed = Some(42);
         config.solo = true;
         config.surface = project_phoenix::boot::NativeRenderSurface::Window;
@@ -150,7 +159,7 @@ fn main() {
                 "--world",
                 args[2].as_str(),
                 "--ship",
-                "assets/entities/alliance_destroyer.toml",
+                ship,
                 "--seed",
                 "42",
                 "--sim-seconds",
@@ -219,6 +228,7 @@ fn main() {
     let rows: Vec<_> = rows.iter().map(|row| row.as_ref()).collect();
     let gpu_capture = gpu.lock().unwrap();
     let artifact = Artifact { runtime: &args[0], mode: &args[1], world: &args[2],
+        ship,
         trace_truncated: control.truncated.load(Ordering::Relaxed), systems: rows, updates, continuation,
         window_seconds: control.window.map(|(start, end)| [start.as_secs_f64(), end.as_secs_f64()]),
         native_update_tag: "Main counter observed at span start, not a causal render-frame ID; unordered First systems can see the previous value. Native windows use the exact frames.json monotonic origin.",

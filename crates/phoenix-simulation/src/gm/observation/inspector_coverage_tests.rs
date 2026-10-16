@@ -949,6 +949,7 @@ fn complete_active_schema_inventory_is_ratcheted_across_all_five_domains() {
     exhaustive_struct!(
         torpedo_tube_schema,
         crate::entities::config::TorpedoTubeConfig,
+        marking,
         targets,
         impact,
         id,

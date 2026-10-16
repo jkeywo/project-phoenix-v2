@@ -138,7 +138,7 @@ pub(crate) fn settle(
         if captured.0.owner() != &receiver.radio.system {
             continue;
         }
-        let Ok((_, _, _, _, _, config, _, admitted, mut power, boards, (damage, _, _), _)) =
+        let Ok((_, _, _, _, _, config, _, admitted, (mut power, _), boards, (damage, _, _), _)) =
             sources.get_mut(receiver.entity)
         else {
             continue;

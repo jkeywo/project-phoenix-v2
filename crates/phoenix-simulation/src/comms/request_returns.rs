@@ -70,7 +70,7 @@ pub(super) fn settle(
         else {
             continue;
         };
-        let Ok((_, _, _, _, _, _, _, _, mut power, _, _, _)) = sources.get_mut(source.entity)
+        let Ok((_, _, _, _, _, _, _, _, (mut power, _), _, _, _)) = sources.get_mut(source.entity)
         else {
             continue;
         };

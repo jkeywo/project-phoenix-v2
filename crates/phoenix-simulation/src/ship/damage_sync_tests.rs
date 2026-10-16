@@ -236,12 +236,22 @@ fn sync_damage_tiers_keeps_disabled_system_offline_across_ticks() {
 
 #[test]
 fn engine_port_offline_reduces_thrust_compared_to_both_online() {
-    // With both engines online, terminal velocity = max_speed (25 m/s by default).
-    // With one engine offline, effective thrust = 0.5, so terminal = 0.5 * max_speed = 12.5.
-    // We run enough ticks to approach terminal velocity at the 50%-thrust case,
-    // then verify the one-engine-offline ship is slower than the both-online ship.
+    // The same accepted hull, Human throttle request and finite power supply
+    // must produce less motion when actual port-engine Operation is destroyed.
     const TICK_MS: u64 = 34; // slightly above 1/30s, the physics' own scale
-    const TICKS: usize = 120; // 120 ticks × 34ms ≈ 4s, enough to reach ~12.5 m/s terminal
+    const TICKS: usize = 120; // 120 ticks × 34ms ≈ 4s
+    let thrust_owner = |app: &App, ship: Entity| {
+        app.world()
+            .get::<crate::ship_plugin::ShipConfigComponent>(ship)
+            .unwrap()
+            .0
+            .systems
+            .iter()
+            .find(|system| system.kind == crate::ship::system_registry::HELM_THRUST_KIND)
+            .unwrap()
+            .id
+            .clone()
+    };
 
     let make_app = || {
         let mut app = test_app_with_engine_hull();
@@ -266,24 +276,102 @@ fn engine_port_offline_reduces_thrust_compared_to_both_online() {
             .query_filtered::<Entity, With<LocalShip>>()
             .single(app.world())
             .unwrap();
-        app.world_mut().entity_mut(ship).insert(damage);
+        // This accepted hull has no opt-in assisted/direct movement profile;
+        // its existing admitted SetThrust consumer owns the ordinary latch.
+        assert!(config.helm_control.is_none());
+        let tuning = config.helm_console.as_ref().unwrap();
+        app.world_mut().entity_mut(ship).insert((
+            damage,
+            crate::ship_plugin::ShipPhysicsConfigResource(
+                crate::ship::physics::ShipPhysicsConfig {
+                    max_speed: tuning.max_speed,
+                    max_reverse_speed: tuning.max_reverse_speed,
+                    acceleration: tuning.acceleration,
+                    deceleration: tuning.deceleration,
+                    max_yaw_rate: tuning.max_yaw_rate,
+                    low_speed_turn_boost: tuning.low_speed_turn_boost,
+                    ..Default::default()
+                },
+            ),
+        ));
+        // An empty seat is Backfill: its ordinary Engines AI correctly sends
+        // idle thrust and replaces a hand-seeded stick latch. Claim the actual
+        // Helm seat normally instead of overriding that controller in the rig.
+        let ownership = config.ship_config.as_ref().unwrap();
+        let station = ownership
+            .system_home_station(ownership.system(&thrust_owner(&app, ship)).unwrap())
+            .unwrap()
+            .clone();
+        for message in [
+            crate::core::messages::ClientMessage::Identify {
+                token: "engine-test-helm".into(),
+                name: "Engine test operator".into(),
+            },
+            crate::core::messages::ClientMessage::SelectStation { station: station.0 },
+            crate::core::messages::ClientMessage::SetReady { ready: true },
+        ] {
+            push(&mut app, "engine-test-helm", message);
+            tick(&mut app);
+        }
         app
     };
 
-    // Full-ahead helm intent, seeded directly on the intent component
-    // (issue #824): `process_helm_inputs` applies admitted commands to
-    // the intents rather than replaying `LastHelmInput` every tick, so a
-    // test that wants sustained thrust seeds the intent the integrator
-    // actually reads.
+    // This is an owner integration fixture using AdmissionPlugin's ordinary
+    // EveryTick seam, not a full lobby/encounter acceptance claim.
     let set_full_thrust = |app: &mut App| {
         let ship = app
             .world_mut()
             .query_filtered::<Entity, With<LocalShip>>()
             .single(app.world())
             .unwrap();
-        app.world_mut()
-            .entity_mut(ship)
-            .insert(crate::ship::helm::ThrustInput(1.0));
+        let owner = thrust_owner(app, ship);
+        let policy = app
+            .world()
+            .get::<ShipSystemControlSources>(ship)
+            .unwrap()
+            .0
+            .policy_for(&owner);
+        assert!(
+            policy.accept_human_input && !policy.operate_ai,
+            "actual Helm holder must own the throttle before admission: {policy:?}"
+        );
+        push(
+            app,
+            "engine-test-helm",
+            crate::core::messages::ClientMessage::ControlSystem {
+                target: owner,
+                payload: crate::core::messages::SystemControlPayload::SetThrust { value: 1.0 },
+            },
+        );
+        tick(app);
+        assert_eq!(
+            app.world()
+                .get::<crate::ship::helm::ThrustInput>(ship)
+                .unwrap()
+                .0,
+            1.0,
+            "normal admitted request must set the actual Helm intent"
+        );
+    };
+    let assert_held_thrust = |app: &App, ship: Entity| {
+        let owner = thrust_owner(app, ship);
+        let policy = app
+            .world()
+            .get::<ShipSystemControlSources>(ship)
+            .unwrap()
+            .0
+            .policy_for(&owner);
+        assert!(
+            policy.accept_human_input && !policy.operate_ai,
+            "actual Human Helm ownership must persist: {policy:?}"
+        );
+        assert_eq!(
+            app.world()
+                .get::<crate::ship::helm::ThrustInput>(ship)
+                .unwrap()
+                .0,
+            1.0
+        );
     };
 
     // ── Both engines online ────────────────────────────────────────────
@@ -291,18 +379,24 @@ fn engine_port_offline_reduces_thrust_compared_to_both_online() {
     set_full_thrust(&mut app_both);
     let mut paid_both = 0.0;
     for _ in 0..TICKS {
+        let before = app_both.world().resource::<crate::sim_tick::SimTick>().0;
         tick(&mut app_both);
+        assert_eq!(
+            app_both.world().resource::<crate::sim_tick::SimTick>().0,
+            before + 1
+        );
         let ship = app_both
             .world_mut()
             .query_filtered::<Entity, With<LocalShip>>()
             .single(app_both.world())
             .unwrap();
+        assert_held_thrust(&app_both, ship);
         paid_both += app_both
             .world()
             .get::<crate::ship::power::ShipPowerSystem>(ship)
             .unwrap()
             .0
-            .emitted_work(&crate::ship::system_registry::helm_thrust_system_id());
+            .emitted_work(&thrust_owner(&app_both, ship));
     }
     let speed_both = app_both
         .world_mut()
@@ -348,13 +442,19 @@ fn engine_port_offline_reduces_thrust_compared_to_both_online() {
     );
     let mut paid_one = 0.0;
     for _ in 0..TICKS {
+        let before = app_one.world().resource::<crate::sim_tick::SimTick>().0;
         tick(&mut app_one);
+        assert_eq!(
+            app_one.world().resource::<crate::sim_tick::SimTick>().0,
+            before + 1
+        );
+        assert_held_thrust(&app_one, ship);
         paid_one += app_one
             .world()
             .get::<crate::ship::power::ShipPowerSystem>(ship)
             .unwrap()
             .0
-            .emitted_work(&crate::ship::system_registry::helm_thrust_system_id());
+            .emitted_work(&thrust_owner(&app_one, ship));
     }
     let speed_one = app_one
         .world_mut()

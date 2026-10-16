@@ -112,6 +112,7 @@ fn optional_namespace_exact_fold_characterization() {
             ("asteroid", 12536570469048620948),
             ("collisions", 8899963866678085940),
             ("security", 16191184914516307137),
+            ("vessel-ownership", 16191184914516307137),
             ("internal-repair", 13509907477215362722),
             ("personnel-custody", 13509907477215362722),
             ("interior-access", 13509907477215362722),
@@ -140,9 +141,11 @@ fn optional_namespace_exact_fold_characterization() {
             ("ship-comms-media-intent", 13509907477215362722),
             ("ship-emission-intent", 13509907477215362722),
             ("ship-comms-capture", 13509907477215362722),
+            ("ship-comms-traffic", 13509907477215362722),
             ("broad-tracks", 13509907477215362722),
             ("navigation-sharing", 13509907477215362722),
             ("navigation-request", 13509907477215362722),
+            ("navigation-charted-course", 13509907477215362722),
             ("helm-navigation-plan", 13509907477215362722),
         ]
     );
@@ -170,7 +173,10 @@ fn optional_namespaces_leave_unregistered_and_registered_empty_worlds_unchanged(
             fold_internal_repair_namespace,
             fold_umbilical_namespace,
             fold_security_namespace,
+            fold_vessel_ownership_namespace,
             fold_comms_capture_namespace,
+            fold_comms_traffic_namespace,
+            fold_navigation_charted_namespace,
             fold_helm_navigation_plan_namespace,
         ] {
             assert_eq!(fold(&world, 12345), 12345);

@@ -471,7 +471,8 @@ use super::*;
 /// `84` retains accepted Command emission intent without restoring prepaid activity.
 /// `85` retains grouped-tube priorities and exact paid vessel-acquisition history.
 /// `86` retains Radio listening intent and successful contextual emission frontiers.
-pub const SNAPSHOT_FORMAT: u32 = 86;
+/// `87` retains original charted XYZ intent under the existing Navigation owner.
+pub const SNAPSHOT_FORMAT: u32 = 87;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -647,7 +648,8 @@ pub const SNAPSHOT_FORMAT: u32 = 86;
 /// shares guided-loader work and commits paid uncrewed vessel acquisition.
 /// "0.69" preserves authored height when ordinary Full3D hulls are spawned.
 /// "0.70" selects actual receive coverage and emits permitted contextual Radio reports.
-pub const SIMULATION_RULES: &str = "0.70";
+/// "0.71" admits charted XYZ intent to the ordinary Full3D Navigation/Helm path.
+pub const SIMULATION_RULES: &str = "0.71";
 
 /// The authored data, computed rather than remembered.
 ///

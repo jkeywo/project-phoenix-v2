@@ -341,21 +341,22 @@ proof remains pending. No runtime, native execution,
 asset acceptance or full increment exit is claimed.
 
 
-## Physical presence follow-up awaiting integrator adoption
+## Adopted first-slice physical presence boundary
 
 The first runtime source review found an interaction with carried craft: an
 already attached beacon would remain an active world body if its deployed probe
 subject were later recovered. A missing observation or Disabled component is
 not evidence of destruction and must never detach it for that reason.
 
-Proposed bounded first-slice resolution: exclude actual carry-capable bodies
-(PhysicalProbe/ProbeCustody or an accepted ProbeProfile) from eligible marking
-contacts and from attached-subject continuation. Keep ordinary independent hull
-and facility contacts. A later carried-child presence design can deliberately
-extend this boundary; this change introduces no stored-child custody or cleaning
-operation. This proposal has not been adopted and its exclusion is not yet
-implemented. The current runtime work is not ready for integration or an exit
-claim until this physical presence boundary is resolved.
+Root adopts the bounded first-slice resolution before its runtime change:
+exclude any actual ProbeCustody owner or accepted ProbeProfile from eligible
+marking contacts and from attached-subject continuation, even while deployed.
+Keep ordinary independent hull and facility contacts. Absence of current
+Carried state is not enough: the body must not be carry-capable. Both actual
+contact and complete-candidate/current-parent restore guards enforce this same
+boundary. A later attached-stored-body physical-presence design can deliberately
+extend it; that remains open and this slice introduces no stored-child custody
+or cleaning operation. No generic all-target attachment claim is made.
 
 
 ## Isolated runtime checkpoint (not an integrated delivery)
@@ -379,8 +380,8 @@ Owned formatting and diff checks pass. The recipe chunk previously passed strict
 strings (6,510 strings, zero errors/warnings). Rust owner tests, real accepted
 loader execution, actual host tracing, continuation forgeries, collision/native
 acceptance and final gates remain integrator-owned and unexecuted for this packet.
-The carry-capable target boundary above, S066 foundation synchronization, actual
-paid limited report/provenance, complete dependent recipe/Workshop support and
+Implementation of the adopted carry-capable target boundary above, S066
+foundation synchronization, actual paid limited report/provenance, complete dependent recipe/Workshop support and
 ordinary Human/AI host proof must close before a coherent vertical-slice claim.
 ### Explicit sensor-to-radio knowledge binding
 
@@ -390,4 +391,4 @@ missing binding refuses the recipe. This permits the selected reporting
 consumer to read its own sensor evidence without pooling unrelated Console
 knowledge. The accepted-loader positive and missing-feed tests are authored but
 not executed in this worker. Independent source review passed; the actual paid
-report consumer and carried-target policy remain separate unfinished work.
+report consumer and the adopted carried-target guard remain separate unfinished work.

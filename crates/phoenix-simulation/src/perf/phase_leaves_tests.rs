@@ -64,6 +64,42 @@ fn typed_leaf_membership_is_observed_only_after_normal_execution_without_mutatio
     coverage.record(&app, &[], &BTreeMap::new()).unwrap();
     assert_eq!(coverage.schedule.as_ref(), Some(&rows));
     assert!(coverage.samples.is_empty());
+    let name = duplicates[0].name.clone();
+    let raw = RawInvocation {
+        id: 0,
+        interval: interval(0, 2),
+        systems: vec![
+            super::super::RawSystem {
+                name: name.clone(),
+                interval: interval(0, 1),
+                unattributed: false,
+                ambiguous: true,
+            },
+            super::super::RawSystem {
+                name: "condition-with-no-graph-node".into(),
+                interval: interval(1, 2),
+                unattributed: true,
+                ambiguous: false,
+            },
+        ],
+    };
+    coverage
+        .record(&app, &[raw], &BTreeMap::from([(name.clone(), 2)]))
+        .unwrap();
+    let metadata = &coverage.unattributed_name_metadata[&name];
+    assert_eq!(metadata.schedule_nodes.len(), 2);
+    assert_eq!(metadata.fixed_step_memberships.len(), 2);
+    assert!(
+        coverage.unattributed_name_metadata["condition-with-no-graph-node"]
+            .schedule_nodes
+            .is_empty()
+    );
+    assert_eq!(
+        serde_json::to_value(&coverage).unwrap()["unattributed_timing_kind"],
+        "NAMEGROUP"
+    );
+    assert_eq!(coverage.samples.len(), 1);
+
     // A real graph change is refused after its normal initialization too.
     app.add_systems(FixedUpdate, duplicate.in_set(FixedStep::TickCommsRadio));
     app.world_mut().run_schedule(FixedUpdate);
@@ -177,4 +213,100 @@ fn empty_or_ambiguous_metadata_never_invents_a_leaf() {
         attribution(&rows),
         BTreeMap::from([("same".into(), None), ("empty".into(), None)])
     );
+}
+
+#[test]
+fn unattributed_namegroup_unions_duplicate_and_nested_spans_without_claiming_node_costs() {
+    let make = |name: &str, start, end, unattributed, ambiguous| super::super::RawSystem {
+        name: name.into(),
+        interval: interval(start, end),
+        unattributed,
+        ambiguous,
+    };
+    let raw = RawInvocation {
+        id: 7,
+        interval: interval(0, 12),
+        systems: vec![
+            make("known", 0, 1, false, false),
+            make("duplicate-name", 1, 5, false, true),
+            make("duplicate-name", 3, 7, true, true),
+            make("duplicate-name", 9, 10, false, false),
+            make("other-name", 4, 9, true, false),
+            make("closed-span", 10, 11, false, true),
+        ],
+    };
+    let membership = BTreeMap::from([
+        ("known".into(), Some("TickMounts".into())),
+        ("duplicate-name".into(), Some("TickMounts".into())),
+    ]);
+    let counts = BTreeMap::from([
+        ("known".into(), 1),
+        ("duplicate-name".into(), 2),
+        ("other-name".into(), 1),
+    ]);
+    // Snapshot the independent existing phase reduction and its public schema.
+    let ordinary = || {
+        crate::perf::phase::reduce(&[crate::perf::phase::FixedInvocation {
+            id: raw.id,
+            interval: raw.interval,
+            systems: raw
+                .systems
+                .iter()
+                .map(|span| crate::perf::phase::ObservedSystem {
+                    interval: span.interval,
+                    phase: Some(SimSet::Input),
+                })
+                .collect(),
+        }])
+        .unwrap()
+    };
+    let phase_before = ordinary();
+    let schema_before = serde_json::to_value(super::super::PhaseCoverage::default()).unwrap();
+    let output = reduce(&raw, &membership, &counts);
+    let name = &output.unattributed_name_groups["duplicate-name"];
+    assert_eq!(
+        (name.observed_ms, name.envelope_ms, name.intervals),
+        (7.0, 9.0, 3)
+    );
+    assert_eq!(name.nested_or_auxiliary_intervals, 1);
+    assert_eq!(name.ambiguous_at_entry_intervals, 2);
+    assert_eq!(name.live_system_spans_at_drain, Some(2));
+    let closed = &output.unattributed_name_groups["closed-span"];
+    assert_eq!(closed.live_system_spans_at_drain, None);
+    assert_eq!(closed.ambiguous_at_entry_intervals, 1);
+    assert_eq!(output.unattributed_names["duplicate-name"], name.intervals);
+    assert!(!output.unattributed_name_groups.contains_key("known"));
+    let known = output
+        .groups
+        .iter()
+        .find(|row| row.fixed_step.as_deref() == Some("TickMounts"))
+        .unwrap();
+    assert_eq!(
+        (known.observed_ms, known.envelope_ms, known.intervals),
+        (1.0, 1.0, 1)
+    );
+    let unknown = output
+        .groups
+        .iter()
+        .find(|row| row.fixed_step.is_none())
+        .unwrap();
+    assert_eq!(
+        (unknown.observed_ms, unknown.envelope_ms, unknown.intervals),
+        (10.0, 10.0, 5)
+    );
+    assert!(
+        output
+            .unattributed_name_groups
+            .values()
+            .map(|row| row.observed_ms)
+            .sum::<f64>()
+            > unknown.observed_ms,
+        "different name groups overlap; never add them as exclusive costs"
+    );
+    assert_eq!(ordinary(), phase_before);
+    assert_eq!(
+        serde_json::to_value(super::super::PhaseCoverage::default()).unwrap(),
+        schema_before
+    );
+    assert!(schema_before.get("unattributed_name_groups").is_none());
 }

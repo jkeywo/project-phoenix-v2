@@ -63,6 +63,17 @@ interval union, envelope and interval count; group envelopes can overlap, so
 these are neither exclusive CPU costs nor inclusive set durations. Missing
 work is not zero. Conditions/deferred coverage follows the existing producer.
 
+The optional sidecar also retains `unattributed_name_groups` per invocation,
+explicitly labelled `NAMEGROUP`. Each entry unions only that name's already
+unattributed intervals and reports its envelope/count, raw nested/ambiguous
+flags, and still-registered System-span count at frame drain. These are
+separate counts: the latter is neither invocation multiplicity nor a node
+identity. Header metadata retains every matching schedule node/membership;
+conditions or composed spans can have no graph node. Duplicate names can
+combine several nodes. Name-group unions overlap each other and the existing
+unknown-group union, so their totals are not additive exclusive CPU costs.
+The original unknown group, counts, known leaves and phase output remain.
+
 This opt-in adds metadata/aggregation work after updates; use it for diagnostic
 attribution and retain matching unflagged control captures for acceptance. It
 does not disable or replace existing phase instrumentation. Recording/replay

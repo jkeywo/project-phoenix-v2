@@ -23,6 +23,9 @@ The ordinary headless `--perf-capture` phase producer also offers opt-in
 same intervals by actual initialized `FixedStep` membership, retaining unknown
 or ambiguous work. It adds no schedule systems or ordering edges. Diagnostic
 aggregation adds observer overhead; ordinary phase capture stays unchanged.
+Unattributed `NAMEGROUP` entries union the same raw intervals by name, retaining
+span/graph ambiguity and counts. They do not identify individual duplicate
+nodes or report exclusive CPU costs.
 
 The `profile_systems` example builds the production headless or native App and optionally wraps named systems. Deferred work has its own spans. Native GPU/pass evidence comes from Bevy's `RenderDiagnosticsPlugin` when the adapter supports it. System wall times can overlap, and nested GPU pass paths are not exclusive costs. Headless attribution accepts an optional ship path after the output directory and records the hull in its artifact; the default remains the Destroyer. Native uses that position for its explicit zero-pane profile.
 

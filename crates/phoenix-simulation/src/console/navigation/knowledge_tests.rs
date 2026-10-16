@@ -705,6 +705,8 @@ fn formation_boot() -> (App, Entity, Entity) {
     // equipment, work or observations. Its legacy all-optional tuple gate
     // otherwise omits every blackboard when an unused weapon type is absent.
     app.world_mut()
+        .register_component::<crate::ai::server::LodTransitionTimer>();
+    app.world_mut()
         .register_component::<crate::console::weapons::beam::ActiveBeam>();
     app.world_mut()
         .register_component::<crate::console::weapons::beam::PhaserCooldown>();
@@ -1227,6 +1229,31 @@ fn formation_selection_uses_actual_heard_acceptance_and_earned_measurement_with_
     exercise_formation_follow(&mut again);
 }
 
+// This sparse owner proof declares Human control of the same three fitted
+// axes on both sides of an ordinary restore. Save restore intentionally keeps
+// the fresh world's crew authority rather than restoring a prior session's.
+fn formation_follow_human_axes(app: &mut App, observer: Entity) {
+    let profile = app
+        .world()
+        .get::<phoenix_sim_gameplay::ship::helm_control::CompiledHelmControl>(observer)
+        .unwrap()
+        .0
+        .clone();
+    for axis in [&profile.thrust, &profile.steering]
+        .into_iter()
+        .chain(profile.lateral.iter())
+    {
+        app.world_mut()
+            .get_mut::<crate::ship_plugin::ShipSystemControlSources>(observer)
+            .unwrap()
+            .0
+            .set(
+                axis.clone(),
+                crate::ship::control_source::ControlSource::Human,
+            );
+    }
+}
+
 /// Same genuine heard/accepted/earned course, now consumed by the ordinary
 /// admitted Helm boundary and sole paid physics integrator.
 fn exercise_formation_follow(app: &mut App) {
@@ -1259,19 +1286,7 @@ fn exercise_formation_follow(app: &mut App) {
     app.insert_resource(clock);
     #[cfg(debug_assertions)]
     app.insert_resource(crate::ship::helm::HelmPhysicsFrame(1));
-    for axis in [&profile.thrust, &profile.steering]
-        .into_iter()
-        .chain(profile.lateral.iter())
-    {
-        app.world_mut()
-            .get_mut::<crate::ship_plugin::ShipSystemControlSources>(observer)
-            .unwrap()
-            .0
-            .set(
-                axis.clone(),
-                crate::ship::control_source::ControlSource::Human,
-            );
-    }
+    formation_follow_human_axes(app, observer);
     let follow = |axis: SystemId, generation| crate::core::messages::AdmittedCommand {
         target: axis,
         payload: SystemControlPayload::SetFollowNavigation {
@@ -1360,6 +1375,7 @@ fn exercise_formation_follow(app: &mut App) {
     )
     .unwrap();
     let (mut resumed, resumed_observer, _) = formation_boot();
+    formation_follow_human_axes(&mut resumed, resumed_observer);
     let result = crate::snapshot::restore(resumed.world_mut(), &saved);
     assert!(
         result.is_complete(),
@@ -1531,6 +1547,7 @@ fn exercise_formation_publication_frontier(app: &mut App, observer: Entity) {
     )
     .unwrap();
     let (mut resumed, restored, _) = formation_boot();
+    formation_follow_human_axes(&mut resumed, restored);
     let result = crate::snapshot::restore(resumed.world_mut(), &saved);
     assert!(
         result.is_complete(),

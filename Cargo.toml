@@ -163,7 +163,7 @@ required-features = ["capture"]
 [[example]]
 name = "profile_systems"
 path = "examples/profile_systems.rs"
-required-features = ["host", "headless", "perf"]
+required-features = ["headless", "perf"]
 
 [features]
 default = ["server"]

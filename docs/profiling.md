@@ -57,6 +57,8 @@ node scripts/profile-provenance.mjs build . ./.phoenix/profile/attribution attri
 ./scripts/profile-systems.ps1 -Receipt ./.phoenix/profile/attribution/build-receipt.json -ContentRoot . -Hardware ./.phoenix/profile/hardware.json -Runtime native -Mode wrapped -World falling_skyway -Profile ./.phoenix/profile/profiles/zero.toml -Output ./.phoenix/profile/named-skyway-render
 ```
 
+For focused headless attribution, build with `cargo build --profile measure --features headless,perf --example profile_systems`. Native attribution additionally requires `host`; native mode refuses a build without it. Keep comparisons within the same feature/profile group.
+
 Headless also accepts an optional fifth positional ship path, and records the actual hull in `systems.json`. For example, `profile_systems headless wrapped assets/worlds/combat_test.toml <new-output-directory> assets/entities/alliance_cruiser.toml` uses the six-seat redesign reference. Omitting the path retains the Destroyer. Native still uses its fifth argument for the explicit zero-pane profile.
 
 For each world/runtime, run control → wrapped → control three times, rotating world order. Headless excludes the first 300 updates and writes the final continuation digest; compare it with both controls. Native observes the 40–70 second window using the exact App-cadence collector's monotonic origin. Exclude spans crossing either edge when comparing complete intervals. Native update tags are the main counter observed at span start, not causal render-frame ids. Retain raw spans and report the combined CPU-wrapper/GPU-query overhead against bracketing controls.

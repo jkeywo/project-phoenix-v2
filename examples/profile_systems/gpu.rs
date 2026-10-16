@@ -1,8 +1,10 @@
 //! Bevy's supported render-pass diagnostic path. Values are delivered samples:
 //! Bevy retains the latest completed render batch, so this is not an assertion
 //! that every submitted GPU frame has been observed.
+#[cfg(any(feature = "host", test))]
 use bevy::{diagnostic::DiagnosticsStore, prelude::*};
 use serde::Serialize;
+#[cfg(any(feature = "host", test))]
 use std::{
     collections::BTreeMap,
     sync::{atomic::Ordering, Arc, Mutex},
@@ -25,11 +27,13 @@ pub(crate) struct Sample {
     pub value: f64,
 }
 
+#[cfg(any(feature = "host", test))]
 pub(crate) struct GpuPlugin {
     pub control: Arc<super::timing::Control>,
     pub capture: Arc<Mutex<Capture>>,
 }
 
+#[cfg(any(feature = "host", test))]
 impl Plugin for GpuPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin);

@@ -20,10 +20,14 @@ fn main() {
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
     use bevy::prelude::*;
-    use project_phoenix::{headless, native_host};
+    use project_phoenix::headless;
+    #[cfg(feature = "host")]
+    use project_phoenix::native_host;
+    #[cfg(feature = "host")]
+    use std::time::Duration;
     use std::{
         sync::{atomic::Ordering, Arc, Mutex},
-        time::{Duration, Instant},
+        time::Instant,
     };
 
     #[derive(serde::Serialize)]
@@ -59,7 +63,7 @@ fn main() {
     let args: Vec<_> = std::env::args().skip(1).collect();
     assert!(
         args.len() >= 4,
-        "profile_systems <headless|native> <control|wrapped> <world> <new-dir> [zero-profile]"
+        "profile_systems <headless|native> <control|wrapped> <world> <new-dir> [zero-profile|ship-path]"
     );
     let native = match args[0].as_str() {
         "native" => true,
@@ -83,76 +87,85 @@ fn main() {
     // At most 20k entries per system, with explicit truncation. Headless runs
     // retain every normal 3601-update span; native traces cap memory even if
     // an uncapped renderer produces unusually many iterations.
+    #[cfg(feature = "host")]
     let mut control = Arc::new(timing::Control::new(20_000));
+    #[cfg(not(feature = "host"))]
+    let control = Arc::new(timing::Control::new(20_000));
     let rows = Arc::new(Mutex::new(Vec::<Arc<timing::Row>>::new()));
     let gpu = Arc::new(Mutex::new(gpu::Capture::default()));
     let mut updates = Vec::new();
-    let mut continuation = None;
+    let continuation;
     if native {
-        struct TimerPlugin {
-            control: Arc<timing::Control>,
-            rows: Arc<Mutex<Vec<Arc<timing::Row>>>>,
-        }
-        impl Plugin for TimerPlugin {
-            fn build(&self, _: &mut App) {}
-            fn finish(&self, app: &mut App) {
-                let mut rows = timing::instrument_world(app.world_mut(), self.control.clone());
-                if let Some(render) = app.get_sub_app_mut(bevy::render::RenderApp) {
-                    rows.extend(timing::instrument_world(
-                        render.world_mut(),
-                        self.control.clone(),
-                    ));
-                }
-                self.rows.lock().unwrap().extend(rows);
+        #[cfg(not(feature = "host"))]
+        panic!("native profiling requires the host feature; rebuild with --features host,headless,perf");
+        #[cfg(feature = "host")]
+        {
+            continuation = None;
+            struct TimerPlugin {
+                control: Arc<timing::Control>,
+                rows: Arc<Mutex<Vec<Arc<timing::Row>>>>,
             }
-        }
-        native_host::pin_content_root(".").unwrap();
-        let preload = native_host::preload_content_templates(".").unwrap();
-        let mut config = native_host::NativeHostConfig::new(&args[2]);
-        config.ship_path = Some(ship.into());
-        config.seed = Some(42);
-        config.solo = true;
-        config.surface = project_phoenix::boot::NativeRenderSurface::Window;
-        config.log_spec = "warn".into();
-        let profile =
-            std::fs::read_to_string(args.get(4).expect("explicit zero-pane profile required"))
-                .unwrap();
-        config.bridge_profile = Some(
-            native_host::bridge_profile::BridgeProfile::from_toml(&profile)
+            impl Plugin for TimerPlugin {
+                fn build(&self, _: &mut App) {}
+                fn finish(&self, app: &mut App) {
+                    let mut rows = timing::instrument_world(app.world_mut(), self.control.clone());
+                    if let Some(render) = app.get_sub_app_mut(bevy::render::RenderApp) {
+                        rows.extend(timing::instrument_world(
+                            render.world_mut(),
+                            self.control.clone(),
+                        ));
+                    }
+                    self.rows.lock().unwrap().extend(rows);
+                }
+            }
+            native_host::pin_content_root(".").unwrap();
+            let preload = native_host::preload_content_templates(".").unwrap();
+            let mut config = native_host::NativeHostConfig::new(&args[2]);
+            config.ship_path = Some(ship.into());
+            config.seed = Some(42);
+            config.solo = true;
+            config.surface = project_phoenix::boot::NativeRenderSurface::Window;
+            config.log_spec = "warn".into();
+            let profile =
+                std::fs::read_to_string(args.get(4).expect("explicit zero-pane profile required"))
+                    .unwrap();
+            config.bridge_profile = Some(
+                native_host::bridge_profile::BridgeProfile::from_toml(&profile)
+                    .unwrap()
+                    .validate()
+                    .unwrap(),
+            );
+            let mut app = native_host::build_native_host_app(&config, &preload).unwrap();
+            // Install the same cadence collector as the normal native runner,
+            // retaining its origin for all other observers before cloning Control.
+            std::env::set_var("PHOENIX_FRAME_CAPTURE", output.join("frames.json"));
+            std::env::set_var("PHOENIX_FRAME_CAPTURE_SECONDS", "70");
+            let capture =
+                project_phoenix::perf::native_frames::NativeFrameCapture::install_from_environment(
+                    &mut app,
+                )
                 .unwrap()
-                .validate()
-                .unwrap(),
-        );
-        let mut app = native_host::build_native_host_app(&config, &preload).unwrap();
-        // Install the same cadence collector as the normal native runner,
-        // retaining its origin for all other observers before cloning Control.
-        std::env::set_var("PHOENIX_FRAME_CAPTURE", output.join("frames.json"));
-        std::env::set_var("PHOENIX_FRAME_CAPTURE_SECONDS", "70");
-        let capture =
-            project_phoenix::perf::native_frames::NativeFrameCapture::install_from_environment(
-                &mut app,
-            )
-            .unwrap()
-            .unwrap();
-        let setup = Arc::get_mut(&mut control).unwrap();
-        setup.epoch = capture.clock_origin();
-        setup.window = Some((Duration::from_secs(40), Duration::from_secs(70)));
-        if enabled {
-            app.add_plugins(gpu::GpuPlugin {
-                control: control.clone(),
-                capture: gpu.clone(),
+                .unwrap();
+            let setup = Arc::get_mut(&mut control).unwrap();
+            setup.epoch = capture.clock_origin();
+            setup.window = Some((Duration::from_secs(40), Duration::from_secs(70)));
+            if enabled {
+                app.add_plugins(gpu::GpuPlugin {
+                    control: control.clone(),
+                    capture: gpu.clone(),
+                });
+                app.add_plugins(TimerPlugin {
+                    control: control.clone(),
+                    rows: rows.clone(),
+                });
+            }
+            let observation = control.clone();
+            app.add_systems(First, move || {
+                observation.update.fetch_add(1, Ordering::Relaxed);
             });
-            app.add_plugins(TimerPlugin {
-                control: control.clone(),
-                rows: rows.clone(),
-            });
+            let exit = app.run();
+            capture.finish(&exit).unwrap();
         }
-        let observation = control.clone();
-        app.add_systems(First, move || {
-            observation.update.fetch_add(1, Ordering::Relaxed);
-        });
-        let exit = app.run();
-        capture.finish(&exit).unwrap();
     } else {
         let headless::ParseOutcome::Run(config) = headless::parse_args(
             [

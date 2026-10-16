@@ -2,7 +2,7 @@
 title: Power Runtime
 type: concept
 tags: [power, energy, battery, coolant, heat, ai, continuation]
-sources: [crates/phoenix-sim-gameplay/src/resources/energy.rs, crates/phoenix-sim-gameplay/src/resources/energy_network.rs, crates/phoenix-sim-gameplay/src/modifiers/power_system.rs, crates/phoenix-sim-gameplay/src/ship/power.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/ship/energy_runtime.rs, crates/phoenix-simulation/src/ship/energy_publication.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/snapshot/preflight.rs, crates/phoenix-simulation/src/sim_digest.rs, editor/workshop-energy.js, editor/workshop-energy-ai.js, gui/components/ph-energy-controls.js, gui/stations/energy-actions.js, pasm/spec/design/local-energy-and-thermal.yaml]
+sources: [crates/phoenix-sim-gameplay/src/resources/energy.rs, crates/phoenix-sim-gameplay/src/resources/energy_network.rs, crates/phoenix-sim-gameplay/src/resources/energy_topology.rs, crates/phoenix-sim-gameplay/src/modifiers/power_system.rs, crates/phoenix-sim-gameplay/src/ship/power.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/ship/energy_runtime.rs, crates/phoenix-simulation/src/ship/energy_publication.rs, crates/phoenix-simulation/src/console_ai/server.rs, crates/phoenix-simulation/src/snapshot/preflight.rs, crates/phoenix-simulation/src/sim_digest.rs, editor/workshop-energy.js, editor/workshop-energy-ai.js, gui/components/ph-energy-controls.js, gui/stations/energy-actions.js, pasm/spec/design/local-energy-and-thermal.yaml]
 updated: 2026-10-16
 ---
 
@@ -20,6 +20,13 @@ processor borrows that candidate and retains network pre/post validation; public
 network calls still stage their own candidate. Runtime observation validation
 borrows the current readings rather than materialising a save snapshot. Failure
 discards the candidate before actual energy, coolant credit or readings commit.
+
+Power retains a compiled immutable definition with indexed group ancestry,
+children and ordered consumers. Construction and refitting validate and replace
+that definition together. The live tick reuses it while retaining pre/post checks
+on all mutable reserves, allocations, cuts, cooling and resource use. Raw Network
+APIs and continuation preflight retain full definition validation; the indices
+are derived data and do not change saved state or deterministic digests.
 
 Battery-only equipment uses the same network with explicitly zero sustainable
 generation. Positive intake capacity cannot supply energy without actual incoming

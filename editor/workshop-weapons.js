@@ -1,3 +1,4 @@
+import {guardLoaderReferences} from './workshop-loader-model.js';
 import { validateWeaponTargets } from './workshop-weapon-model.js';
 import { guardFittingReferences } from './workshop-fitting.js';
 import { parse, stringify } from 'smol-toml';
@@ -17,7 +18,7 @@ export function weaponSystemAddress(weapon) {
 export const WEAPON_PARAMETERS = Object.freeze({
   beam: ['auto_arc_deg', 'damage_per_sec', 'duration_secs', 'cooldown_secs', 'cycle_jitter', 'shield_pierce'],
   bolt: ['volley_count', 'volley_interval_secs', 'cooldown_secs', 'charge_time_secs', 'projectile_speed', 'collision_radius', 'visual_scale', 'damage', 'shield_pierce', 'recoil_impulse', 'screenshake_magnitude'],
-  guided: ['load_time', 'volley_max', 'ai_target_count'],
+  guided: ['load_time', 'volley_max', 'ai_target_count', 'load_priority'],
 });
 export function defaultWeapon(kind = 'beam') {
   const delivery = {
@@ -117,6 +118,7 @@ export function prepareWeaponOperation(draft, dependencies, operation) {
     }
   }
   guardFittingReferences(inspection.resolved.value, inspectWeapons({ paths: () => draft.paths(), isBinary: path => draft.isBinary(path), read: path => path === operation.path ? after : draft.read(path) }, dependencies, operation.path).resolved.value);
+  guardLoaderReferences(inspection.resolved.value,inspectWeapons({paths:()=>draft.paths(),isBinary:path=>draft.isBinary(path),read:path=>path===operation.path?after:draft.read(path)},dependencies,operation.path).resolved.value);
   parse(after);
   return { changes: [{ path: operation.path, before, after }] };
 }

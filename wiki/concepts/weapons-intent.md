@@ -2,8 +2,8 @@
 title: Weapons Intent
 type: concept
 tags: [weapons, tactical, phaser, blaster, torpedo, replication, reconnect]
-sources: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/core/broadcast/lifecycle.rs, crates/phoenix-sim-gameplay/src/weapons/blaster.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, gui/components/ph-phasers-controls.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js, crates/phoenix-sim-gameplay/src/weapons/mount.rs, crates/phoenix-sim-gameplay/src/weapons/pattern.rs, crates/phoenix-sim-gameplay/src/entities/config/weapon_definition.rs, gui/components/weapon-target-controls.js, gui/stations/weapon-target-actions.js, editor/workshop-weapon-groups.js, gui/workshop-weapon-groups-panel.js, crates/phoenix-simulation/src/console/weapons/readiness.rs, gui/sensor-tracks.js, crates/phoenix-simulation/src/console/weapons/guidance_link.rs, crates/phoenix-simulation/src/console/weapons/guidance_ui.rs, crates/phoenix-sim-gameplay/src/weapons/guided_orders.rs, gui/components/guidance-controls.js, gui/stations/guidance-actions.js, crates/phoenix-simulation/src/console/weapons/illumination.rs, crates/phoenix-sim-gameplay/src/weapons/illumination.rs, gui/components/illumination-controls.js, editor/workshop-guided-profile.js, gui/workshop-guided-profile.js]
-updated: 2026-10-15
+sources: [crates/phoenix-simulation/src/console/weapons/mod.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-simulation/src/console/weapons/beam.rs, crates/phoenix-simulation/src/console/weapons/blaster.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/core/broadcast/lifecycle.rs, crates/phoenix-sim-gameplay/src/weapons/blaster.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, gui/components/ph-phasers-controls.js, gui/components/ph-blasters-controls.js, gui/components/ph-torpedo-controls.js, crates/phoenix-sim-gameplay/src/weapons/mount.rs, crates/phoenix-sim-gameplay/src/weapons/pattern.rs, crates/phoenix-sim-gameplay/src/entities/config/weapon_definition.rs, gui/components/weapon-target-controls.js, gui/stations/weapon-target-actions.js, editor/workshop-weapon-groups.js, gui/workshop-weapon-groups-panel.js, crates/phoenix-simulation/src/console/weapons/readiness.rs, gui/sensor-tracks.js, crates/phoenix-simulation/src/console/weapons/guidance_link.rs, crates/phoenix-simulation/src/console/weapons/guidance_ui.rs, crates/phoenix-sim-gameplay/src/weapons/guided_orders.rs, gui/components/guidance-controls.js, gui/stations/guidance-actions.js, crates/phoenix-simulation/src/console/weapons/illumination.rs, crates/phoenix-sim-gameplay/src/weapons/illumination.rs, gui/components/illumination-controls.js, editor/workshop-guided-profile.js, gui/workshop-guided-profile.js, crates/phoenix-sim-gameplay/src/weapons/shared_loaders.rs, crates/phoenix-simulation/src/console/weapons/shared_loaders.rs, editor/workshop-shared-loaders.js, gui/workshop-shared-loaders.js]
+updated: 2026-10-16
 ---
 
 # Weapons Intent
@@ -122,3 +122,21 @@ System details expose exact-owner target/enabled controls. Workshop edits the
 composed emitter and shared guided flight/seeker/receiver profile through its
 normal source validation and document history; explicit `false` disables inherited
 seeker/receiver equipment. Already emitted rounds retain their frozen profiles.
+
+Optional `torpedoes.loader_groups` share a finite load-work rate between actual
+guided tubes. `weapons/shared_loaders.rs` computes stable priority order and a
+fresh interval budget; the existing tube timers, magazine claims and paid work
+remain their sole physical owners. Independent tubes preserve their loading
+path. The existing magazine claim consumer arbitrates grouped manual and
+standing readiness requests together, using actual supply and its ordinary grant
+policy. Shared magazine Operation availability limits group progress.
+
+`SetTorpedoLoadPriority` addresses one actual tube. Its own publication carries
+priority and handling wait information, without other members' private state.
+The Tactical tube surface uses current permitted control authority. Workshop
+edits only the actual group leaf through native accepted document transactions;
+initial tube priority is available in the guided weapon form. Snapshot tube rows
+retain grouped priorities and validate required/forbidden presence; the ordinary
+resource-stock fold includes them. Derived waiting receipts clear on restore.
+The optional `shared_loader_cruiser.toml` is the reference fit. Native execution
+and device acceptance remain separately recorded integration evidence.

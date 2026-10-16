@@ -792,7 +792,11 @@ export function buildWeaponsConsoleState(state, systemIds = []) {
   const targetUuid   = trackMode ? observed.target_uuid : tacRadarBb.selected_target ?? bb.target_uuid ?? state.weaponsTarget ?? null;
   const targetName   = trackMode ? observed.target_name : bb.target_name ?? state.weaponsTargetName ?? null;
   const bankStates   = bb.banks         ?? state.weaponsBanks        ?? [];
-  const tubes        = bb.tubes         ?? state.weaponsTubes        ?? [];
+  const tubes = (bb.tubes ?? state.weaponsTubes ?? []).map(tube => {
+    const owner = 'torpedo-tube-' + String(tube.id).replaceAll('_','-');
+    const own = blackboardsOfKind(state,'TorpedoTube',systemIds).find(entry=>entry.systemId===owner)?.data?.loader;
+    return own ? {...tube,loader:{...own,owner,controllable:(state.controlSystemIds||systemIds).includes(owner)&&state.controlSources?.[owner]==='Human'}} : tube;
+  });
   const torpedoCount = bb.torpedo_count ?? state.weaponsTorpedoCount ?? 0;
   const torpedoMagEntry = blackboardOfKind(state, 'TorpedoMagazine', systemIds);
   const torpedoMagBb = torpedoMagEntry?.data || {};

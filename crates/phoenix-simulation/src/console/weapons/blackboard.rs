@@ -1726,6 +1726,7 @@ pub(crate) fn publish_torpedo_tube_blackboards(
             entity_bbs.0.insert(
                 tube_sysid,
                 SystemBlackboard::TorpedoTube(crate::core::messages::TorpedoTubeBlackboard {
+                    loader: torpedo_sys.0.loader_view(&tube_state.id),
                     is_online,
                     loaded: tube_state.loaded,
                     state: tube_state.state.clone(),

@@ -21,6 +21,7 @@ import { weaponReadinessView } from '../weapon-readiness.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
 import { PhElement, phDefine } from './ph-element.js';
 import {
+  TACTICAL_LOADER_PRIORITY_ACTION_ID,
   TACTICAL_TORPEDO_FIRE_ACTION_ID,
   TACTICAL_TORPEDO_VOLLEY_DOWN_ACTION_ID,
   TACTICAL_TORPEDO_VOLLEY_UP_ACTION_ID,
@@ -186,6 +187,16 @@ export class PhTorpedoControls extends PhElement {
     controls.appendChild(plusBtn);
     controls.appendChild(fireBtn);
     row.appendChild(controls);
+    const loaderRow = document.createElement('label'); loaderRow.className='loader-priority';
+    const loaderText=document.createElement('span'), priority=document.createElement('input');
+    priority.type='number'; priority.min='0'; priority.max='65535'; priority.step='1'; priority.setAttribute('aria-label',t('loader.priority'));
+    loaderRow.append(loaderText,priority); row.append(loaderRow); loaderRow.hidden=true;
+    priority.addEventListener('change',()=>{
+      const tube=this.state?.tubes?.find(tube=>tube.id===tubeId);
+      if (!row.isConnected || !tube?.loader?.controllable || priority.disabled) return;
+      activateTacticalAction(this,TACTICAL_LOADER_PRIORITY_ACTION_ID,{tube:tubeId,priority:priority.valueAsNumber,control_system_id:tube.loader.owner},'set_torpedo_load_priority');
+    });
+    priority.addEventListener('keydown',event=>{if(!['Tab','Escape'].includes(event.key))event.stopPropagation();});
 
     // Patterned-attack indicator (issue #766): current pattern step + active
     // barrels. Hidden unless the tube has a multi-barrel pattern.
@@ -199,7 +210,7 @@ export class PhTorpedoControls extends PhElement {
     patternRow.appendChild(barrelsEl);
     row.appendChild(patternRow);
 
-    return { row, lbl, status, slotsEl, minusBtn, plusBtn, fireBtn, slotEls: [], patternRow };
+    return { row, lbl, status, slotsEl, minusBtn, plusBtn, fireBtn, slotEls: [], patternRow,loaderRow,loaderText,priority };
   }
 
   // Rebuild slot <div> elements when volley_max changes.
@@ -292,6 +303,12 @@ export class PhTorpedoControls extends PhElement {
       }
 
       els.lbl.textContent = String(tube.label || tube.id).replace(/_/g, ' ').toUpperCase();
+      els.loaderRow.hidden=!tube.loader;
+      if(tube.loader){
+        els.loaderText.textContent=t('loader.summary',{group:tube.loader.group,rate:tube.loader.work_rate}) + (tube.loader.waiting?' · '+t('loader.wait.'+tube.loader.waiting):'');
+        els.priority.disabled=!tube.loader.controllable;
+        if(this.shadowRoot.activeElement!==els.priority)els.priority.value=String(tube.loader.priority);
+      }
 
       const vollMax = typeof tube.volley_max === 'number' ? tube.volley_max : 1;
       const slotEls = this.#ensureSlotEls(els, vollMax);

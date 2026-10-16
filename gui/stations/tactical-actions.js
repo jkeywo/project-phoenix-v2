@@ -15,6 +15,7 @@ import { familyView } from '../console-payload.js';
 import { createSemanticActionRegistry } from '../semantic-action-registry.js';
 
 export const TACTICAL_ACTION_CONTEXT = 'tactical';
+export const TACTICAL_LOADER_PRIORITY_ACTION_ID = 'tactical.loader-priority';
 export const TACTICAL_TARGET_ACTION_ID = 'tactical.target-selection';
 export const TACTICAL_PHASER_MODE_ACTION_ID = 'tactical.phaser-mode';
 export const TACTICAL_PHASER_FIRE_ACTION_ID = 'tactical.phaser-fire';
@@ -47,6 +48,7 @@ export const TACTICAL_ACTIONS = Object.freeze([
   action(TACTICAL_STRIKE_BOOST_ACTION_ID, 'strike_boost', 'strike_boost', key('KeyV'), button('face-top')),
   action(TACTICAL_RESTRAINT_ACTION_ID, 'weapons_restraint', 'weapons_restraint', key('KeyH'), null),
   defineStationAction({ id: TACTICAL_PHASER_STOP_ACTION_ID, contexts: [TACTICAL_ACTION_CONTEXT], labelKey: 'tactical.phaser_stop', accessibilityKey: 'tactical.phaser_stop', bindings: [null, null] }),
+  defineStationAction({id:TACTICAL_LOADER_PRIORITY_ACTION_ID,contexts:[TACTICAL_ACTION_CONTEXT],labelKey:'loader.priority',bindings:[null,null]}),
 ]);
 
 export function tacticalActionView(state) {
@@ -132,6 +134,11 @@ export function registerTacticalActions(registry, options = {}) {
   const getState = typeof options.getState === 'function' ? options.getState : () => null;
   const sendAction = typeof options.sendAction === 'function' ? options.sendAction : null;
   const send = createCorrelatedActionSender(sendAction);
+  registry.register(TACTICAL_ACTIONS[12],({actionId,correlation,inputMs,detail}={})=>{
+    const loader = tacticalActionView(getState())?.tubes?.find(tube=>tube.id===detail?.tube)?.loader;
+    if (!loader?.controllable || !Number.isInteger(detail.priority) || detail.priority<0 || detail.priority>65535) return false;
+    return send(actionId,correlation,inputMs,'set_torpedo_load_priority',{control_system_id:loader.owner,priority:detail.priority});
+  });
   registry.register(TACTICAL_ACTIONS[11], ({ actionId, correlation, inputMs, detail } = {}) => {
     const view = tacticalActionView(getState());
     if (!view || view.phaser_mode !== 'Manual') return false;

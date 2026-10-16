@@ -345,6 +345,15 @@ export const ACTION_MAP = Object.freeze({
   /** Set the volley target count for a torpedo tube (issue #632).
    *  Sends a ControlSystem message to the tube's fine SystemId with
    *  payload type SetTorpedoVolleyTarget. */
+  set_torpedo_load_priority: (a, send) => {
+    if (!Number.isInteger(a.priority) || a.priority < 0 || a.priority > 65535) return;
+    if (typeof a.control_system_id !== 'string' || !a.control_system_id) return;
+    const correlated = typeof a.correlation === 'string' && a.correlation;
+    send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(correlated ? {correlation:a.correlation}:{}), target:a.control_system_id,
+      payload:{type:'SetTorpedoLoadPriority',data:{priority:a.priority}},
+    });
+  },
   set_torpedo_volley_target: (a, send) => {
     if (a.tube == null || a.count == null) return;
     const sysId = 'torpedo-tube-' + String(a.tube).replace(/_/g, '-');

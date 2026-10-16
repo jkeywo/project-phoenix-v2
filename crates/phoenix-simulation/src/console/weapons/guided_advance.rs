@@ -12,6 +12,7 @@ pub(crate) fn advance_torpedo_flights(
             &mut TorpedoSystemResource,
             Option<&mut crate::ship::power::ShipPowerSystem>,
             Option<&mut super::guidance_link::ShipGuidanceKnowledge>,
+            Option<&crate::ship_plugin::ShipSystemControlSources>,
         ),
         Or<(
             With<crate::server_app::Ship>,
@@ -34,7 +35,7 @@ pub(crate) fn advance_torpedo_flights(
     let mut any_ship_component = false;
     let mut shooter_order: Vec<((String, bevy::ecs::entity::EntityIndex), Entity)> = torpedo_sys_q
         .iter()
-        .map(|(entity, uuid, _, _, _)| {
+        .map(|(entity, uuid, _, _, _, _)| {
             (
                 (
                     uuid.map(|u| u.0.clone()).unwrap_or_default(),
@@ -47,7 +48,8 @@ pub(crate) fn advance_torpedo_flights(
     shooter_order.sort();
 
     for shooter in shooter_order.into_iter().map(|(_, entity)| entity) {
-        let Ok((_, _, mut torpedo_sys, mut power, mut knowledge)) = torpedo_sys_q.get_mut(shooter)
+        let Ok((_, _, mut torpedo_sys, mut power, mut knowledge, controls)) =
+            torpedo_sys_q.get_mut(shooter)
         else {
             continue;
         };
@@ -64,9 +66,18 @@ pub(crate) fn advance_torpedo_flights(
             .iter()
             .map(|burst| (burst.tube_id.clone(), burst.launch_uuid.clone()))
             .collect();
-        let result = torpedo_sys.0.advance_with_work(
+        let magazine = crate::ship::system_registry::torpedo_magazine_system_id();
+        let magazine_operation = if controls.is_none_or(|sources| sources.0.is_offline(&magazine)) {
+            0.0
+        } else {
+            machinery.map_or(1.0, |damage| {
+                damage.factor(&magazine, phoenix_model::damage::DamageBinding::Operation)
+            })
+        };
+        let result = torpedo_sys.0.advance_with_loader_work(
             dt,
             guidance,
+            magazine_operation,
             &mut |work| {
                 use crate::weapons::torpedo::TorpedoWork;
                 let Some(power) = power.as_deref_mut() else {

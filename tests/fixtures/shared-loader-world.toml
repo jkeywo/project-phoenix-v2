@@ -1,0 +1,4 @@
+[global]
+seed = 15621504
+[player_spawn]
+position = [0, 0, 0]

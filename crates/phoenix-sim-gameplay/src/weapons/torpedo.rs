@@ -355,6 +355,7 @@ pub struct TorpedoTube {
     pub load_state: TubeLoadState,
     /// Seconds to load or unload one torpedo.
     pub load_time: f32,
+    pub load_priority: u16,
     /// Maximum number of torpedoes this tube can hold at once (from TOML).
     pub volley_max: u32,
     /// Number of torpedoes currently loaded and ready to fire.
@@ -533,6 +534,9 @@ pub enum LoadTickOutcome {
 #[derive(Clone, Debug)]
 pub struct TorpedoSystem {
     pub tubes: Vec<TorpedoTube>,
+    pub loader_groups: Vec<super::shared_loaders::LoaderGroupConfig>,
+    /// Current derived work receipt only; never used by the executor or restored.
+    pub loader_wait: std::collections::BTreeMap<String, phoenix_model::shared_loader::LoaderWait>,
     pub config: TorpedoConfig,
     /// Physical rounds in the magazine, including claimed rounds being loaded.
     pub magazine: Stock,
@@ -621,6 +625,7 @@ impl TorpedoSystem {
                 fire_arc_deg: 90.0,
                 load_state: TubeLoadState::Unloaded,
                 load_time,
+                load_priority: 100,
                 volley_max: 1,
                 loaded_count: 0,
                 target_count: 0,
@@ -638,6 +643,7 @@ impl TorpedoSystem {
                 fire_arc_deg: 90.0,
                 load_state: TubeLoadState::Unloaded,
                 load_time,
+                load_priority: 100,
                 volley_max: 1,
                 loaded_count: 0,
                 target_count: 0,
@@ -655,6 +661,7 @@ impl TorpedoSystem {
                 fire_arc_deg: 90.0,
                 load_state: TubeLoadState::Unloaded,
                 load_time,
+                load_priority: 100,
                 volley_max: 1,
                 loaded_count: 0,
                 target_count: 0,
@@ -667,6 +674,8 @@ impl TorpedoSystem {
         ];
         Self {
             tubes,
+            loader_groups: Vec::new(),
+            loader_wait: Default::default(),
             config,
             magazine: Stock::new(i64::from(initial), i64::from(count))
                 .expect("u32 ammunition is bounded"),
@@ -692,6 +701,7 @@ impl TorpedoSystem {
                 fire_arc_deg: c.fire_arc_deg,
                 load_state: TubeLoadState::Unloaded,
                 load_time: c.load_time.unwrap_or(global_load_time),
+                load_priority: c.load_priority,
                 volley_max: c.volley_max,
                 loaded_count: 0,
                 // Tubes start empty for everyone — human and AI alike. The AI
@@ -714,6 +724,8 @@ impl TorpedoSystem {
         let initial = config.initial_count.unwrap_or(count);
         Self {
             tubes,
+            loader_groups: Vec::new(),
+            loader_wait: Default::default(),
             config,
             magazine: Stock::new(i64::from(initial), i64::from(count))
                 .expect("u32 ammunition is bounded"),
@@ -1190,18 +1202,48 @@ impl TorpedoSystem {
         work: &mut impl FnMut(TorpedoWork<'_>) -> f32,
         next_uuid: &mut impl FnMut() -> String,
     ) -> TorpedoTickResult {
+        self.advance_with_loader_work(dt, guidance, 1.0, work, next_uuid)
+    }
+
+    pub fn advance_with_loader_work(
+        &mut self,
+        dt: f32,
+        guidance: &std::collections::HashMap<String, GuidanceObservation>,
+        magazine_operation: f32,
+        work: &mut impl FnMut(TorpedoWork<'_>) -> f32,
+        next_uuid: &mut impl FnMut() -> String,
+    ) -> TorpedoTickResult {
         let mut result = TorpedoTickResult::default();
+        self.loader_wait.clear();
+        let mut loader_budgets = self.loader_budgets(dt, magazine_operation);
+        let order = self.loader_order();
+        let grouped: std::collections::BTreeMap<_, _> = self
+            .tubes
+            .iter()
+            .filter_map(|tube| {
+                self.loader_group(&tube.id)
+                    .map(|group| (tube.id.clone(), group.id.clone()))
+            })
+            .collect();
 
         // ── Tube load/unload progression ──────────────────────────────────
         let mut unload_completions: u32 = 0;
-        for t in &mut self.tubes {
+        for index in order {
+            let t = &mut self.tubes[index];
+            let budget = grouped
+                .get(&t.id)
+                .and_then(|id| loader_budgets.get(id))
+                .copied()
+                .unwrap_or(f32::INFINITY);
             let work_dt = if matches!(
                 t.load_state,
                 TubeLoadState::Loading { .. } | TubeLoadState::Unloading { .. }
             ) {
                 let phase_dt = match t.load_state {
                     TubeLoadState::Loading { remaining, .. }
-                    | TubeLoadState::Unloading { remaining, .. } => dt.min(remaining.max(0.0)),
+                    | TubeLoadState::Unloading { remaining, .. } => {
+                        dt.min(remaining.max(0.0)).min(budget)
+                    }
                     _ => 0.0,
                 };
                 phase_dt
@@ -1213,6 +1255,30 @@ impl TorpedoSystem {
             } else {
                 0.0
             };
+            if grouped.contains_key(&t.id)
+                && matches!(
+                    t.load_state,
+                    TubeLoadState::Loading { .. } | TubeLoadState::Unloading { .. }
+                )
+                && work_dt == 0.0
+            {
+                use phoenix_model::shared_loader::LoaderWait;
+                self.loader_wait.insert(
+                    t.id.clone(),
+                    if magazine_operation <= 0.0 {
+                        LoaderWait::MagazineUnavailable
+                    } else if budget <= 0.0 {
+                        LoaderWait::SharedHandling
+                    } else {
+                        LoaderWait::TubeWork
+                    },
+                );
+            }
+            if let Some(group) = grouped.get(&t.id) {
+                if let Some(budget) = loader_budgets.get_mut(group) {
+                    *budget = (*budget - work_dt).max(0.0);
+                }
+            }
             let awaiting_completion = matches!(t.load_state,
                 TubeLoadState::Loading { remaining, .. } | TubeLoadState::Unloading { remaining, .. } if remaining <= 0.0);
             let unloading_total = match t.load_state {
@@ -1257,7 +1323,8 @@ impl TorpedoSystem {
         let n_tubes = self.tubes.len();
         for i in 0..n_tubes {
             let tube = &self.tubes[i];
-            if tube.target_count > 0
+            if !grouped.contains_key(&tube.id)
+                && tube.target_count > 0
                 && !matches!(
                     tube.load_state,
                     TubeLoadState::Loading { .. } | TubeLoadState::Unloading { .. }

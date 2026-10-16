@@ -887,6 +887,8 @@ pub struct WeaponState {
 /// One torpedo tube's runtime state.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TubeState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub load_priority: Option<u16>,
     pub id: String,
     /// `TubeLoadState` as `0` = `Unloaded`, `1` = `Loading`, `2` = `Loaded`,
     /// `3` = `Unloading`. Anything else restores as `Unloaded` rather than

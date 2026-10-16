@@ -1,3 +1,5 @@
+import {mountSharedLoaders} from './workshop-shared-loaders.js';
+import {applySharedLoaders} from '../editor/workshop-shared-loaders.js';
 import { mountGuidedProfile } from './workshop-guided-profile.js';
 import { applyGuidedProfileOperation } from '../editor/workshop-guided-profile.js';
 import { WEAPON_TARGET_TAGS } from '../editor/workshop-weapon-model.js';
@@ -40,6 +42,15 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
       success:()=>{changed(operation.path);inspect(true);status.textContent=t('workshop.changed');},
       error:error=>{status.textContent=t('workshop.weapon.refused',{reason:error.report?.findings?.[0]?.message||error.message});},release:controls});
   }});
+  const sharedLoaders=mountSharedLoaders({root:node,apply: async operation=>{
+    if(busy()||loading||!inspection)return;
+    if(getDraft()!==observedDraft){inspect(true);return;}
+    const token=++generation,draft=getDraft();
+    return runWorkshopMutation({setBusy,current:()=>!disposed&&token===generation&&getDraft()===draft,start:controls,
+      invoke:()=>applySharedLoaders({draft,provider,runtime,dependencies,operation,current:()=>!disposed&&token===generation&&getDraft()===draft}),
+      success:()=>{changed(operation.path);inspect(true);status.textContent=t('workshop.changed');},
+      error:error=>{status.textContent=t('workshop.weapon.refused',{reason:error.report?.findings?.[0]?.message||error.message});},release:controls});
+  }});
   const option = (select, value, text) => { const item = el('option'); item.value = value; item.textContent = text; select.append(item); };
   for (const value of ['legacy','explicit']) option(targetMode, value, t('workshop.weapon.targets.' + value));
   for (const tag of WEAPON_TARGET_TAGS) option(targetTags, tag, tag);
@@ -72,6 +83,7 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
     pattern.hidden = kind.value === 'beam';
     for (const control of [console, group, compartment]) control.disabled ||= !!selected;
     sharedProfile.refresh(inspection,disabled,getDraft());
+    sharedLoaders.refresh(inspection,disabled,getDraft());
   }
   function addPatternStep(value = { offset_secs: 0, barrels: [0] }) {
     const index = stepSerial++, row = el('div'), offset = input('step-offset-' + index, 'number'), indices = input('step-barrels-' + index);
@@ -182,5 +194,5 @@ export function mountWorkshopWeapons({ root, provider, runtime, draft: getDraft,
   template.addEventListener('change', () => { selected = null; inspect(true); }); existing.addEventListener('change', select);
   addStep.addEventListener('click', () => addPatternStep());
   inspect(); void load();
-  return { node, refresh() { inspect(); void load(); }, dispose() { disposed = true; generation += 1; sharedProfile.dispose(); node.remove(); } };
+  return { node, refresh() { inspect(); void load(); }, dispose() { disposed = true; generation += 1; sharedProfile.dispose(); sharedLoaders.dispose(); node.remove(); } };
 }

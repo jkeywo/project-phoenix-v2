@@ -78,6 +78,7 @@ describe('ACTION_MAP', () => {
       'set_station_stance',
       'set_strike_boost',
       'set_target',
+      'set_torpedo_load_priority',
       'set_torpedo_volley_target',
       'set_transfer_direction',
       'set_transfer_resource',

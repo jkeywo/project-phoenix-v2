@@ -45,7 +45,7 @@ describe('Tactical semantic actions', () => {
     expect(sendAction).toHaveBeenCalledTimes(1);
   });
   it('publishes every visible Tactical intent with a stable context and two device slots', () => {
-    expect(TACTICAL_ACTIONS).toHaveLength(12);
+    expect(TACTICAL_ACTIONS).toHaveLength(13);
     for (const action of TACTICAL_ACTIONS) {
       expect(action.contexts).toEqual([TACTICAL_ACTION_CONTEXT]);
       expect(action.bindings).toHaveLength(2);

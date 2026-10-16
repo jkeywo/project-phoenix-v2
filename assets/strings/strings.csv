@@ -6495,3 +6495,17 @@ workshop.emission.unavailable,Workshop state,This template has no supported Comm
 workshop.emission.refused,Workshop refusal,Profile refused: {reason},,,
 entity.battery_decoy.name,Optional finite physical identity decoy,Battery Identity Decoy,Battery Identity Decoy,Battery Identity Decoy,source
 entity.battery_decoy.description,Physical decoy target description,A fixed battery-powered identity emitter,A fixed battery-powered identity emitter,A fixed battery-powered identity emitter,source
+loader.priority,Reload priority,Reload priority,,,
+loader.summary,{group}: {rate} shared load-work/s,{group}: {rate} shared load-work/s,,,
+loader.wait.shared_handling,Waiting for shared handling,Waiting for shared handling,,,
+loader.wait.tube_work,Waiting for tube power or machinery,Waiting for tube power or machinery,,,
+loader.wait.magazine_unavailable,Waiting for magazine service,Waiting for magazine service,,,
+loader.wait.stock,Waiting for ammunition,Waiting for ammunition,,,
+workshop.weapon.parameter.load_priority,Initial reload priority,Initial reload priority,,,
+workshop.loader.title,Shared guided loaders,Shared guided loaders,,,
+workshop.loader.id,Group ID,Group ID,,,
+workshop.loader.rate,Shared load-work/s,Shared load-work/s,,,
+workshop.loader.members,Member tubes,Member tubes,,,
+workshop.loader.save,Save loader group,Save loader group,,,
+workshop.loader.remove,Remove loader group,Remove loader group,,,
+entity.shared_loader_cruiser.name,Optional shared handling reference,Shared Loader Cruiser,,,

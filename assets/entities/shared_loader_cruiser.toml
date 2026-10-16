@@ -1,0 +1,8 @@
+# Optional finite handling reference; independent base hardware remains intact.
+includes = ["alliance_cruiser.toml"]
+name = "entity.shared_loader_cruiser.name"
+
+[[torpedoes.loader_groups]]
+id = "forward"
+tubes = ["fore_port", "fore_starboard"]
+work_rate = 1.0

@@ -2467,6 +2467,7 @@ pub(super) fn apply_torpedo_inventory(
     system: &mut crate::weapons::torpedo::TorpedoSystem,
     stored: &WeaponState,
 ) {
+    system.loader_wait.clear();
     system.burst_states = stored
         .bursts
         .iter()
@@ -2519,6 +2520,9 @@ pub(super) fn apply_torpedo_inventory(
         };
         tube.loaded_count = row.loaded_count;
         tube.target_count = row.target_count;
+        if let Some(priority) = row.load_priority {
+            tube.load_priority = priority;
+        }
         tube.active_barrels = row.active_barrels.clone();
         tube.pattern_step = row.pattern_step;
     }

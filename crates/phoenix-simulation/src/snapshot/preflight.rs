@@ -745,6 +745,8 @@ pub(super) fn validate_entity_resources(
                             live.id == tube.id
                                 && tube.loaded_count <= live.volley_max
                                 && tube.target_count <= live.volley_max
+                                && tube.load_priority.is_some()
+                                    == candidate.loader_group(&tube.id).is_some()
                         })
                         || tube.load_phase > 3
                         || tube.load_timer.iter().any(|t| !t.is_finite() || *t < 0.0)

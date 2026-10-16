@@ -70,6 +70,8 @@ pub enum WeaponDeliveryConfig {
     },
     /// Guided payload and flight tuning remain shared in `[torpedoes]`.
     Guided {
+        #[serde(default = "super::weapons::default_load_priority")]
+        load_priority: u16,
         #[serde(default)]
         load_time: Option<f32>,
         #[serde(default = "one_round")]
@@ -210,6 +212,7 @@ impl WeaponDefinition {
                 load_time,
                 volley_max,
                 ai_target_count,
+                load_priority: _,
             } => {
                 let tuning = torpedoes
                     .ok_or("guided delivery requires [torpedoes] payload/flight tuning")?;
@@ -323,11 +326,13 @@ impl WeaponDefinition {
                 )
             }
             WeaponDeliveryConfig::Guided {
+                load_priority,
                 load_time,
                 volley_max,
                 ai_target_count,
             } => {
                 let tube = TorpedoTubeConfig {
+                    load_priority,
                     targets: self.targets,
                     impact: self.impact,
                     id,

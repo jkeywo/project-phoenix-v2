@@ -2990,6 +2990,10 @@ fn fold_resource_stocks_namespace(world: &World, acc: u64) -> u64 {
                 acc = fold_str(acc, &tube.id);
                 acc = fold_u64(acc, tube.loaded_count as u64);
                 acc = fold_u64(acc, tube.target_count as u64);
+                if system.loader_group(&tube.id).is_some() {
+                    acc = fold_str(acc, "shared-loader-priority");
+                    acc = fold_u64(acc, u64::from(tube.load_priority));
+                }
                 let (phase, remaining, total) = match tube.load_state {
                     crate::weapons::torpedo::TubeLoadState::Unloaded => (0, 0.0, 0.0),
                     crate::weapons::torpedo::TubeLoadState::Loading { remaining, total } => {

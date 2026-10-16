@@ -69,3 +69,5 @@ pub mod weapon_targets_view;
 pub mod concealment_ui;
 pub mod identity_ui;
 pub mod protection_ui;
+
+pub mod shared_loader;

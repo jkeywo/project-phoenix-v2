@@ -11306,6 +11306,7 @@ fn handle_fire_torpedo_patterned_launch_resolves_barrel_origin() {
 
     // Alternating two-barrel pattern on a fresh tube.
     let tube_cfg = crate::entities::config::TorpedoTubeConfig {
+        load_priority: 100,
         targets: None,
         impact: phoenix_model::damage::DamageProfile::default(),
         id: "fore-centre".into(),
@@ -14345,6 +14346,7 @@ fn magazine_claim_routes_to_shooter_ship_when_multiple_ships_have_magazines() {
     );
     let npc_torpedo_sys = TorpedoSystem::from_configs(
         &[crate::entities::config::TorpedoTubeConfig {
+            load_priority: 100,
             targets: None,
             impact: phoenix_model::damage::DamageProfile::default(),
             id: "fore_port".into(),

@@ -736,11 +736,12 @@ fn install_torpedoes(config: &EntityConfig, cmds: &mut EntityCommands) {
     // An authored torpedo block owns both runtime state and its policies.
     if let Some(tc) = &config.torpedoes {
         let runtime_config = tc.to_runtime();
-        let torpedo_system = if !tc.tubes.is_empty() {
+        let mut torpedo_system = if !tc.tubes.is_empty() {
             crate::weapons::torpedo::TorpedoSystem::from_configs(&tc.tubes, runtime_config)
         } else {
             crate::weapons::torpedo::TorpedoSystem::new(runtime_config)
         };
+        torpedo_system.loader_groups = tc.loader_groups.clone();
         cmds.insert(crate::console::weapons::TorpedoSystemResource(
             torpedo_system,
         ));

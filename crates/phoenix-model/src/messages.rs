@@ -2448,6 +2448,10 @@ pub enum SystemControlPayload {
     /// Set the volley target count for the torpedo tube addressed by the
     /// `ControlSystem` target SystemId (issue #632). `count` is clamped to
     /// `[0, tube.volley_max]` server-side.
+    /// Change the actual shared-loader member priority; lower numbers first.
+    SetTorpedoLoadPriority {
+        priority: u16,
+    },
     SetTorpedoVolleyTarget {
         count: u32,
     },
@@ -4588,6 +4592,8 @@ pub struct PhaserBankBlackboard {
 /// into the ship blackboard (issue #512).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct TorpedoTubeBlackboard {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loader: Option<crate::shared_loader::LoaderView>,
     /// True when the tube is operational (not disabled or destroyed by hull damage).
     pub is_online: bool,
     /// True when the tube has at least one torpedo loaded and ready to fire.

@@ -35,22 +35,30 @@ use crate::weapons::torpedo::TorpedoSystem;
 /// commands, so AI load orders are not silently dropped.
 pub(crate) fn handle_load_tube(
     mut ship_query: Query<
-        (Entity, &ShipSystemControlSources, &AdmittedCommands),
+        (
+            Entity,
+            &ShipSystemControlSources,
+            &AdmittedCommands,
+            &TorpedoSystemResource,
+        ),
         (With<crate::server_app::Ship>, With<TorpedoSystemResource>),
     >,
     mut inter_system: ResMut<InterSystemQueue>,
 ) {
-    for (ship_entity, control_sources, admitted) in ship_query.iter_mut() {
+    for (ship_entity, control_sources, admitted, torpedoes) in ship_query.iter_mut() {
         for cmd in admitted.0.iter() {
             let SystemControlPayload::LoadTube = &cmd.payload else {
                 continue;
             };
-            // The target SystemId must be a known torpedo-tube-* id.
-            // Resolve by stripping the prefix — the tube id is the suffix.
-            let tube_id = cmd.target.0.strip_prefix("torpedo-tube-").map(|s| {
-                // Restore underscores that were folded to hyphens.
-                s.replace('-', "_")
-            });
+            let tube_id = torpedoes
+                .0
+                .tubes
+                .iter()
+                .find(|tube| {
+                    crate::ship::system_registry::torpedo_tube_system_id(&tube.id).as_ref()
+                        == Some(&cmd.target)
+                })
+                .map(|tube| tube.id.clone());
             let Some(tube_id) = tube_id else {
                 continue;
             };
@@ -192,6 +200,7 @@ pub(crate) fn handle_set_torpedo_volley_target(
                 matches!(
                     cmd.payload,
                     SystemControlPayload::SetTorpedoVolleyTarget { .. }
+                        | SystemControlPayload::SetTorpedoLoadPriority { .. }
                 )
             }) {
                 super::finish_action_feedback(
@@ -204,8 +213,12 @@ pub(crate) fn handle_set_torpedo_volley_target(
         };
         let torpedo_sys: &mut TorpedoSystem = torpedo_sys;
         for cmd in admitted.0.iter() {
-            let SystemControlPayload::SetTorpedoVolleyTarget { count } = &cmd.payload else {
-                continue;
+            let (count, priority) = match &cmd.payload {
+                SystemControlPayload::SetTorpedoVolleyTarget { count } => (Some(*count), None),
+                SystemControlPayload::SetTorpedoLoadPriority { priority } => {
+                    (None, Some(*priority))
+                }
+                _ => continue,
             };
             // Resolve the command's target back to one of THIS ship's tubes by
             // running the canonical forward mapping
@@ -259,7 +272,10 @@ pub(crate) fn handle_set_torpedo_volley_target(
             super::finish_action_feedback(
                 cmd,
                 &mut outbound,
-                if torpedo_sys.set_volley_target(&tube_id, *count) {
+                if match priority {
+                    Some(value) => torpedo_sys.set_load_priority(&tube_id, value),
+                    None => torpedo_sys.set_volley_target(&tube_id, count.expect("volley request")),
+                } {
                     WeaponActionResult::Applied
                 } else {
                     WeaponActionResult::Refused(WeaponActionRefusal::UnknownMount)
@@ -873,7 +889,7 @@ pub fn handle_torpedo_magazine_inter_system(
     let magazine_id = crate::ship::system_registry::torpedo_magazine_system_id();
     // Collect targeted claims: (source_entity, tube_id). Only claims for the
     // magazine system are relevant here — everything else is ignored.
-    let claims: Vec<(Option<Entity>, String)> = queue
+    let mut claims: Vec<(Option<Entity>, String)> = queue
         .0
         .iter()
         .filter(|m| m.target == magazine_id)
@@ -882,16 +898,73 @@ pub fn handle_torpedo_magazine_inter_system(
             _ => None,
         })
         .collect();
+    for (entity, sources, torpedoes, _, _, _) in &ship_q {
+        for index in torpedoes.0.loader_order() {
+            let tube = &torpedoes.0.tubes[index];
+            if torpedoes.0.loader_group(&tube.id).is_some()
+                && tube.loaded_count < tube.target_count
+                && tube.loaded_count < tube.volley_max
+                && !matches!(
+                    tube.load_state,
+                    crate::weapons::torpedo::TubeLoadState::Loading { .. }
+                        | crate::weapons::torpedo::TubeLoadState::Unloading { .. }
+                )
+                && crate::ship::system_registry::torpedo_tube_system_id(&tube.id)
+                    .is_some_and(|id| !sources.0.is_offline(&id))
+                && !claims
+                    .iter()
+                    .any(|(source, id)| *source == Some(entity) && id == &tube.id)
+            {
+                claims.push((Some(entity), tube.id.clone()));
+            }
+        }
+    }
     if claims.is_empty() {
         return;
     }
-
     // Snapshot the LocalShip entity once so `source_entity: None` (legacy
     // path) resolves to the player ship consistently across the loop.
     let local_ship_entity: Option<Entity> =
         ship_q
             .iter()
             .find_map(|(e, _, _, _, is_local, _)| if is_local { Some(e) } else { None });
+
+    // Resolve the legacy local spelling before group priority arbitration too.
+    for (source, _) in &mut claims {
+        *source = source.or(local_ship_entity);
+    }
+    // Only optional grouped members acquire a different order. Independent
+    // requests retain their relative order and ordinary grant behavior.
+    let grouped_keys: std::collections::BTreeMap<_, _> = ship_q
+        .iter()
+        .flat_map(|(entity, _, system, _, _, _)| {
+            system
+                .0
+                .loader_order()
+                .into_iter()
+                .filter_map(move |index| {
+                    let tube = &system.0.tubes[index];
+                    system.0.loader_group(&tube.id).map(|group| {
+                        (
+                            (entity, tube.id.clone()),
+                            (
+                                group.id.clone(),
+                                tube.load_priority,
+                                format!("torpedo-tube-{}", tube.id.replace('_', "-")),
+                            ),
+                        )
+                    })
+                })
+        })
+        .collect();
+    if !grouped_keys.is_empty() {
+        claims.sort_by_key(|(source, id)| {
+            source
+                .and_then(|entity| grouped_keys.get(&(entity, id.clone())))
+                .map(|key| (true, key.clone()))
+                .unwrap_or((false, Default::default()))
+        });
+    }
 
     for (source_entity, tube_id) in claims {
         let target_entity = source_entity.or(local_ship_entity);
@@ -948,6 +1021,23 @@ pub fn handle_torpedo_magazine_inter_system(
                 if !torpedo_magazine_grant_policy_fires(mag_policy, &facts, &flag_chain) {
                     continue; // authored policy refuses this claim.
                 }
+                // A grouped readiness request may follow a loaded volley.
+                // Keep its old phase unless the exact paid claim succeeds.
+                let grouped = torpedo_sys.0.loader_group(&tube_id).is_some();
+                let previous = torpedo_sys
+                    .0
+                    .tube(&tube_id)
+                    .map(|tube| tube.load_state.clone());
+                if grouped {
+                    if let Some(tube) = torpedo_sys.0.tube_mut(&tube_id) {
+                        if matches!(
+                            tube.load_state,
+                            crate::weapons::torpedo::TubeLoadState::Loaded
+                        ) {
+                            tube.load_state = crate::weapons::torpedo::TubeLoadState::Unloaded;
+                        }
+                    }
+                }
                 if !torpedo_sys
                     .0
                     .claim_magazine_round_with_work(&tube_id, &mut || {
@@ -956,6 +1046,13 @@ pub fn handle_torpedo_magazine_inter_system(
                         })
                     })
                 {
+                    if grouped {
+                        if let (Some(tube), Some(previous)) =
+                            (torpedo_sys.0.tube_mut(&tube_id), previous)
+                        {
+                            tube.load_state = previous;
+                        }
+                    }
                     continue; // magazine empty — refuse this claim.
                 }
                 if !torpedo_sys.0.start_load_reserved(&tube_id) {

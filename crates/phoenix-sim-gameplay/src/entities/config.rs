@@ -1943,6 +1943,19 @@ impl EntityConfig {
         // before any live tick — mirroring the weapon-bank validation above.
         if let Some(tc) = config.torpedoes.as_ref() {
             tc.validate_initial_stock().map_err(SerdeError::custom)?;
+            if !tc.loader_groups.is_empty()
+                && config.ship_config.as_ref().is_none_or(|ship| {
+                    ship.system(&crate::ship::system_registry::torpedo_magazine_system_id())
+                        .is_none_or(|system| {
+                            system.kind != crate::ship::system_registry::TORPEDO_MAGAZINE_KIND
+                                || ship.console_for_system(&system.id).is_none()
+                        })
+                })
+            {
+                return Err(SerdeError::custom(
+                    "shared loader groups require the actual fitted torpedo-magazine System",
+                ));
+            }
             for tube in &tc.tubes {
                 if let Some(ai) = tube.ai.as_ref() {
                     validate_fine_system_ai_policy_for(

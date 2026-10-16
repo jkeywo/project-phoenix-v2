@@ -776,6 +776,7 @@ pub(super) fn weapon_state(
                             }
                         };
                         TubeState {
+                            load_priority: s.loader_group(&tube.id).map(|_| tube.load_priority),
                             id: tube.id.clone(),
                             load_phase,
                             load_timer,

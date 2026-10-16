@@ -888,3 +888,6 @@ mod emission_profile_tests;
 mod tests;
 
 use crate::entities::include_resolve::ParseEntityTemplate as _;
+
+#[cfg(test)]
+mod shared_loader_tests;

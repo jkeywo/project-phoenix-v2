@@ -281,6 +281,9 @@ pub struct TorpedoTubeConfig {
     /// global `[torpedoes] load_time` when absent.
     #[serde(default)]
     pub load_time: Option<f32>,
+    /// Initial shared-loader priority; lower numbers receive handling first.
+    #[serde(default = "default_load_priority")]
+    pub load_priority: u16,
     /// Optional rig-marker name linking this tube to a mount point in the
     /// model's rig sidecar (`[markers.<name>]`). When absent or unresolved,
     /// callers fall back to the ship-centre launch origin. In the single-barrel
@@ -329,6 +332,10 @@ pub struct TorpedoTubeConfig {
     /// `idle = true` is the per-tube opt-out (AC1).
     #[serde(default)]
     pub ai: Option<FineSystemAiConfigToml>,
+}
+
+pub(super) fn default_load_priority() -> u16 {
+    100
 }
 
 fn default_tube_volley_max() -> u32 {
@@ -726,6 +733,8 @@ pub struct TorpedoesConfig {
     /// per-tube loadout.
     #[serde(default)]
     pub tubes: Vec<TorpedoTubeConfig>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub loader_groups: Vec<crate::weapons::shared_loaders::LoaderGroupConfig>,
     /// Interval in seconds between successive torpedo launches in a burst
     /// volley. Applies to all tubes on the ship. Default `0.3s`.
     #[serde(default = "default_burst_interval_secs")]
@@ -796,6 +805,7 @@ impl Default for TorpedoesConfig {
             detonation_radius: default_torpedo_detonation_radius(),
             shield_pierce: 0.0,
             tubes: Vec::new(),
+            loader_groups: Vec::new(),
             burst_interval_secs: default_burst_interval_secs(),
             ai_volley_target: None,
             ai: None,
@@ -805,6 +815,7 @@ impl Default for TorpedoesConfig {
 
 impl TorpedoesConfig {
     pub fn validate_initial_stock(&self) -> Result<(), String> {
+        crate::weapons::shared_loaders::validate_groups(&self.loader_groups, &self.tubes)?;
         // Reject unsupported physics at the accepted source boundary, before
         // any actual launch can create an uncontinuable frozen profile.
         let runtime = self.to_runtime();

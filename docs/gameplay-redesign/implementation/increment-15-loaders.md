@@ -187,3 +187,36 @@ Required targeted proofs:
 - Compare salvo preparation and station decisions with independent hardware.
   Human workload, matching browser/native devices and broader combat balance
   remain separate acceptance; this bounded slice alone does not close15.
+
+## Implementation checkpoint and evidence boundary
+
+The isolated source packet extends the existing guided consumer, including
+accepted immutable groups, per-tube priority, shared work limits and ordered
+magazine claims. The original magazine grant policy/transactions and ordinary
+load AI remain. Existing LoadTube one-shot requests now receive correlated
+terminal outcomes after the actual magazine claim frontier. Standing readiness
+continues without further clicks. Derived own-tube waiting receipts are
+presentation only and clear on restore. Independent tubes retain their existing
+progression/auto-load path and do not gain priority state in capture or digest.
+
+The common guided authoring form carries initial priority; the group editor
+uses native `put` of only `torpedoes.loader_groups`, preserving inherited
+machinery and rejecting missing/duplicate membership before acceptance. New
+ordinary joined-host and Backfill proof source is
+`tests/shared_loader_continuation.rs`; actual native execution is pending. Pure
+owner tests cover rate conservation, actual granted fractions, priority changes,
+retained claims, magazine unavailability and unload contention. Native document
+source preservation has its separate owner test. No Rust test has run in this
+lane. Compatibility versions remain the integrator's responsibility.
+
+Eight focused JavaScript files pass 599 tests after adding the optional semantic
+action to the exact inventory and correcting new panel labels. This includes
+current-owner projection/action refusal, actual mounted tube controls and
+retirement, accepted Workshop transaction/history and existing weapon controls.
+Layer rules, strict strings (6499 entries), pure client build and owned Rust
+formatting pass. These receipts do not establish a full integrated gate, native
+continuation, actual Workshop Preview/Test, device/workload acceptance or an increment 15 exit.
+
+Independent source review is queued behind the integrator's active native
+bootstrap repairs. This initial source checkpoint is unreviewed and uncompiled;
+it is not a merge-ready donor or a passing increment exit.

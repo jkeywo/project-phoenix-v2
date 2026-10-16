@@ -17,6 +17,7 @@ pub(crate) mod guided_advance;
 pub mod illumination;
 pub(crate) mod pdc;
 mod round_work;
+mod shared_loaders;
 pub(crate) use guided_advance::advance_torpedo_flights;
 pub mod server;
 pub mod shared;

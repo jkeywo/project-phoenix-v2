@@ -100,6 +100,7 @@ impl Plugin for WeaponsPlugin {
             app.add_plugins(crate::weapons::mounts::MountsPlugin);
         }
         super::assignments::register(app);
+        super::shared_loaders::register(app);
         use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
         // Weapons owns its delta cache and ownership-filtered reconnect
         // projection beside the live publisher in `blackboard.rs`. The generic
@@ -154,6 +155,8 @@ impl Plugin for WeaponsPlugin {
                     Payload::RetargetGuidedRound,
                     Payload::StopGuidedRoundGuidance,
                     Payload::SetTorpedoVolleyTarget,
+                    Payload::SetTorpedoLoadPriority,
+                    Payload::LoadTube,
                     Payload::SetWeaponTarget,
                     Payload::SetWeaponGroupTarget,
                     Payload::FollowWeaponGroup,

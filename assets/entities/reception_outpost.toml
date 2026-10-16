@@ -169,6 +169,12 @@ max_hp=50
 recovery_fraction=0.2
 structural_remedy="structural"
 
+[[interior.connection]]
+id="core-reception"
+from="probe-core"
+to="receiving-room"
+travel_secs=2.5
+
 # Complete local energy table for strict leaf decoding; unchanged inherited zero source.
 [energy.reactor]
 sustainable_output_per_sec = 0

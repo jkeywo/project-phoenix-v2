@@ -1260,7 +1260,9 @@ export function buildHelmConsoleState(state, systemIds = []) {
       Array.isArray(entry.data.tracks) ? entry.data.tracks : []),
   ] : [];
   const observed = trackMode ? projectSensorTracks(delivered, {
-    x: shipX, z: shipZ, yaw: shipYaw, range, tick: state.observationTick,
+    // The local scope scale is not a detection boundary for shared contacts.
+    // Keep distant permitted returns visible at the marked rim.
+    x: shipX, z: shipZ, yaw: shipYaw, range, tick: state.observationTick, edgeClamp: true,
   }) : null;
   const blips = trackMode ? observed.blips : buildBlips(helmEntities, shipX, shipZ, shipYaw, range, { rotate: true });
   const waypoint = buildWaypointBlip(

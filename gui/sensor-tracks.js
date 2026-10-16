@@ -25,7 +25,7 @@ export function observedShieldCoverText(value) {
 }
 
 /** Project only delivered measurements. Entity snapshots are deliberately not an input. */
-export function projectSensorTracks(tracks, { x = 0, z = 0, yaw = 0, range = 0, selected = null, tick = null } = {}) {
+export function projectSensorTracks(tracks, { x = 0, z = 0, yaw = 0, range = 0, selected = null, tick = null, edgeClamp = false } = {}) {
   const validRange = Number.isFinite(range) && range > 0;
   const cos = Math.cos(yaw), sin = Math.sin(yaw);
   const rows = [], blips = [], records = new Map();
@@ -38,7 +38,7 @@ export function projectSensorTracks(tracks, { x = 0, z = 0, yaw = 0, range = 0, 
     const name = track.stage !== 'return' && track.identity?.name ? wireText(track.identity.name) : t('console.sensors.basic_contact');
     const age = Number.isSafeInteger(tick) && tick >= track.observed_tick ? tick - track.observed_tick : null;
     const reported = track.observation?.provenance?.kind === 'sensors_report';
-    const visible = validRange && (reported || Math.hypot(dx, dz) <= range);
+    const visible = validRange && (reported || edgeClamp || Math.hypot(dx, dz) <= range);
     const samples = Array.isArray(track.samples) ? track.samples.filter(sample => sample?.origin && typeof sample.sample_id === 'string') : [];
     const independent = new Set(samples.map(sample => JSON.stringify([sample.origin.source,sample.origin.system])));
     const row = { id: track.contact_id, name, stage: track.stage, predicted: track.predicted === true,
@@ -48,7 +48,7 @@ export function projectSensorTracks(tracks, { x = 0, z = 0, yaw = 0, range = 0, 
       error: track.position_error, age, selectable: track.selectable === true && track.predicted === false && visible };
     rows.push(row);
     if (visible) blips.push({
-      uuid: row.id, ...clampRadarEdge((dx * cos + dz * sin) / range, (dx * sin - dz * cos) / range, reported),
+      uuid: row.id, ...clampRadarEdge((dx * cos + dz * sin) / range, (dx * sin - dz * cos) / range, reported || edgeClamp),
       scaled_radius: 0, uncertainty_radius: row.error / range, track: true, predicted: row.predicted,
       icon: null, kind: 'contact', name, label: name, selectable: row.selectable,
     });

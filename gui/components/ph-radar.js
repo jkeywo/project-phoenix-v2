@@ -235,7 +235,7 @@ export class PhRadar extends PhElement {
       const dotR = Math.max(6 * px, (b.scaled_radius || 0) * R * 0.6);
       const color = b.color || 'var(--ink-dim)';
 
-      if (b.track && Number.isFinite(b.uncertainty_radius) && b.uncertainty_radius > 0) {
+      if (b.track && !b.edge && Number.isFinite(b.uncertainty_radius) && b.uncertainty_radius > 0) {
         octx.save();
         octx.beginPath(); octx.arc(cx, cy, R, 0, Math.PI * 2); octx.clip();
         if (b.predicted) octx.setLineDash([4 * px, 3 * px]);
@@ -247,8 +247,15 @@ export class PhRadar extends PhElement {
         // A measured return has no known hull silhouette or physical size.
         octx.save();
         if (b.predicted) octx.setLineDash([3 * px, 2 * px]);
-        octx.beginPath(); octx.moveTo(bx, by - dotR); octx.lineTo(bx + dotR, by);
-        octx.lineTo(bx, by + dotR); octx.lineTo(bx - dotR, by); octx.closePath();
+        if (b.edge) {
+          // A bearing beyond this display scale, not a position on its rim.
+          octx.translate(bx, by); octx.rotate(Math.atan2(by - cy, bx - cx));
+          octx.beginPath(); octx.moveTo(-dotR, -dotR);
+          octx.lineTo(dotR, 0); octx.lineTo(-dotR, dotR);
+        } else {
+          octx.beginPath(); octx.moveTo(bx, by - dotR); octx.lineTo(bx + dotR, by);
+          octx.lineTo(bx, by + dotR); octx.lineTo(bx - dotR, by); octx.closePath();
+        }
         octx.strokeStyle = phColor(this, forced ? 'CanvasText' : 'var(--science)');
         octx.lineWidth = 1.5 * px; octx.stroke(); octx.restore();
       } else if (b.kind === 'waypoint') {

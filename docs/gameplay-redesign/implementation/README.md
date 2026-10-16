@@ -9,7 +9,9 @@ complete [migration ledger](./migration-ledger.json). The
 
 The subsequent [balance and headless profiling report](./balance-headless-profile-2026-10-16.html) records the requested diagnosis, 18 valid named-system/control captures and source-backed optimisation experiments. It changes no balance values or increment exit status. Implementation of 13–24 remains parked.
 
-The follow-up [combat correction report](./combat-balance-corrections-2026-10-16.html) records the isolated fixes and unchanged 20-duel rerun at `387777cc`: missing-fact policy handling, authored focus capability, fixed fore beam and neutralization-based CLI victory. All runs execute, but all end as draws and 12/16 balance checks remain unmet. No damage values or thresholds changed. This candidate uses protocol 46, snapshot 89 and rules 0.76; it is separate from the integrated baseline below and from concurrent optimisation.
+The follow-up [combat correction report](./combat-balance-corrections-2026-10-16.html) records the isolated fixes and unchanged 20-duel rerun at `387777cc`: missing-fact policy handling, authored focus capability, fixed fore beam and neutralization-based CLI victory. All runs execute, but all end as draws and 12/16 balance checks remain unmet. No damage values or thresholds changed. These fixes were merged into local main at `aff0fad9`, preserving concurrent optimisation. They use protocol 46, snapshot 89 and rules 0.76.
+
+The subsequent [Cruiser balance pass](./cruiser-balance-followup-2026-10-16.html) extends Tactical detection, retains distant shared Helm contacts on screen, and reduces standard beam penetration for greater local deposition. The unchanged original and fresh-seed matrices each produce five neutralization victories in twenty trials. This remains below the unchanged balance thresholds; see the report for integrated-build evidence and remaining engagement problems. Tuning was merged into local main at `25ccf11e`.
 
 ## Per-increment progress — 16 October 2026
 
@@ -22,8 +24,8 @@ Only increment 0 is formally closed. Increments 1–7 have recorded automated
 exits; physical-device and human-workload acceptance remain open. Later initial
 commits are implementation checkpoints, not verified increment exits.
 
-Current integrated compatibility is **protocol 45, snapshot 88 and simulation
-rules 0.75**, at runtime source `e027e568`. These versions identify supported
+Current integrated compatibility is **protocol 46, snapshot 89 and simulation
+rules 0.76**, after the combat fixes merged at `aff0fad9`. These versions identify supported
 state; they do not establish a verified gameplay exit.
 
 The selected four-owner union at `8ac62cce` / rules 0.74 passes **1618/1618**

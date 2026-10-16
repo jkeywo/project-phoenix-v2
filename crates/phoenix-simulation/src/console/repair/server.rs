@@ -959,33 +959,36 @@ pub(crate) fn publish_repair_blackboard(
         });
         let team_slots: Vec<TeamSlot> = teams.0.slots().to_vec();
 
-        // Build the SystemHullStatus list from the authoritative `SystemHull`
-        // iteration.
-        let mut system_hull: Vec<SystemHullStatus> = hull_opt
-            .map(|h| {
-                h.0.iter()
-                    .map(|(sid, entry)| SystemHullStatus {
-                        physical: None,
-                        system_id: sid.clone(),
-                        display_name: entry.display_name.clone(),
-                        current: entry.current,
-                        max_hp: entry.max,
-                        tier: h.0.tier_for(sid),
-                        debuff_magnitude: h.0.debuff_magnitude_for(sid),
+        // Physical machinery replaces the legacy HP projection completely.
+        // Select that source before building rows rather than discarding a
+        // fully cloned legacy projection on every physical ship.
+        let system_hull: Vec<SystemHullStatus> =
+            if let (Some(damage), Some(config)) = (physical, config_opt) {
+                config
+                    .0
+                    .systems
+                    .iter()
+                    .filter_map(|system| {
+                        super::visibility::physical_system_status(damage, &system.id, &config.0)
                     })
                     .collect()
-            })
-            .unwrap_or_default();
-        if let (Some(damage), Some(config)) = (physical, config_opt) {
-            system_hull = config
-                .0
-                .systems
-                .iter()
-                .filter_map(|system| {
-                    super::visibility::physical_system_status(damage, &system.id, &config.0)
-                })
-                .collect();
-        }
+            } else {
+                hull_opt
+                    .map(|h| {
+                        h.0.iter()
+                            .map(|(sid, entry)| SystemHullStatus {
+                                physical: None,
+                                system_id: sid.clone(),
+                                display_name: entry.display_name.clone(),
+                                current: entry.current,
+                                max_hp: entry.max,
+                                tier: h.0.tier_for(sid),
+                                debuff_magnitude: h.0.debuff_magnitude_for(sid),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
 
         let damageable_systems: Vec<SystemId> =
             system_hull.iter().map(|s| s.system_id.clone()).collect();
@@ -1003,7 +1006,7 @@ pub(crate) fn publish_repair_blackboard(
 
         let queue_depth: Vec<QueueEntryPreview> = repair_queue_ref
             .map(|rq| {
-                let mut entries = rq.entries.clone();
+                let mut entries: Vec<_> = rq.entries.iter().collect();
                 entries.sort_by(|a, b| {
                     b.tier.cmp(&a.tier).then_with(|| {
                         b.deficit

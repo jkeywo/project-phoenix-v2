@@ -305,6 +305,29 @@ fn strike_blaster_charge_and_cancel_are_free_and_emission_pays_exactly_once() {
     app.world_mut()
         .entity_mut(ship)
         .insert(BlasterSystemResource(vec![bank]));
+    // This reduced app omits ShipPlugin's live rating consumer, and its old
+    // start helper registers only beams/tubes. Admission's default Human policy
+    // does not make an unregistered blaster physically online. Apply the actual
+    // held Station's authored rating through the ordinary production consumer.
+    app.add_systems(
+        FixedUpdate,
+        crate::ship_plugin::handle_station_rating_change.in_set(crate::sim_sets::SimSet::Input),
+    );
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::SetStationRating {
+            rating_name: "Std".into(),
+        },
+    );
+    tick(&mut app);
+    let sources = app.world().get::<ShipSystemControlSources>(ship).unwrap();
+    assert!(system_is_registered(sources, &owner));
+    assert_eq!(
+        sources.0.source_for(&owner),
+        crate::ship::control_source::ControlSource::Human
+    );
+    assert!(sources.0.policy_for(&owner).accept_human_input);
     // Select through ordinary Tactical admission. Other automatic beam work
     // is outside this single-bank spending proof, so select Manual first.
     for (target, payload) in [
@@ -338,18 +361,29 @@ fn strike_blaster_charge_and_cancel_are_free_and_emission_pays_exactly_once() {
         .network()
         .consumers[&owner]
         .energy;
-    let command = |app: &mut App, payload| {
+    let command = |app: &mut App, payload, correlation: &str| {
         push(
             app,
             "weapons",
-            ClientMessage::ControlSystem {
+            ClientMessage::ControlSystemCorrelated {
+                correlation: ActionCorrelationId::new(correlation).unwrap(),
                 target: owner.clone(),
                 payload,
             },
         );
-        tick(app)
+        let out = tick(app);
+        assert_eq!(
+            feedback_for(&out, correlation),
+            Some(ActionFeedbackOutcome::Applied),
+            "the actual charge consumer must apply {correlation}"
+        );
+        out
     };
-    let first = command(&mut app, SystemControlPayload::ChargeBlasterStart);
+    let first = command(
+        &mut app,
+        SystemControlPayload::ChargeBlasterStart,
+        "strike-charge-start",
+    );
     assert_eq!(
         charge(&app, ship),
         3.0,
@@ -373,7 +407,11 @@ fn strike_blaster_charge_and_cancel_are_free_and_emission_pays_exactly_once() {
         after_charge < initial_energy,
         "actual charging still pays its local energy work"
     );
-    command(&mut app, SystemControlPayload::ChargeBlasterCancel);
+    command(
+        &mut app,
+        SystemControlPayload::ChargeBlasterCancel,
+        "strike-charge-cancel",
+    );
     assert_eq!(
         charge(&app, ship),
         3.0,
@@ -394,7 +432,11 @@ fn strike_blaster_charge_and_cancel_are_free_and_emission_pays_exactly_once() {
         after_charge,
         "the cancel command itself creates no machinery work"
     );
-    let mut emitted = command(&mut app, SystemControlPayload::ChargeBlasterStart);
+    let mut emitted = command(
+        &mut app,
+        SystemControlPayload::ChargeBlasterStart,
+        "strike-charge-restart",
+    );
     for _ in 0..5 {
         emitted.extend(tick(&mut app));
     }

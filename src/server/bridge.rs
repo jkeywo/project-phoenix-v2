@@ -59,7 +59,7 @@ use {
         GmWorkloadChanged, HudStateChanged, LobbyStateChanged,
     },
     crate::core::codec::{self, JsonCodec},
-    crate::core::messages::{self, DeliveryClass},
+    crate::core::messages::{self, ClientMessage, DeliveryClass, ServerMessage},
     crate::entities::config_cache::ConfigCachePlugin,
     crate::gm_activity::GmActivityPlugin,
     crate::gm_attention::GmAttentionPlugin,

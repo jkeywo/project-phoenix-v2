@@ -42,10 +42,10 @@ Their native execution is running; compilation does not establish a playable exi
 | 9 — Shield energy | Core implemented | Full integrated and playable acceptance. |
 | 10 — Interiors/routes | Core implemented | Full integrated and playable acceptance. |
 | 11 — Damage/restoration | Core implemented | Retained Repair adapter corrections pass targeted native checks; full integrated and playable acceptance. |
-| 12 — Logistics/production | Implemented in slices | Cross-system coverage and full acceptance. |
-| 13 — Equipment fitting | Supported beam/reactor implementation | Cross-system coverage and full acceptance. |
+| 12 — Logistics/production | Local stock targets, timed delivery, fabrication, salvage/processing and port replenishment/trade implemented | Combined production/logistics failure journeys, current authoring and full acceptance; coolant recycling remains provisional. |
+| 13 — Equipment fitting | Beam/reactor fitting, physical spares/refit/salvage and personal favourites implemented | Personal-plan disposable rehearsal and whole-fit sustained/burst/thermal/cooling forecasts remain unimplemented; full acceptance. |
 | 14 — Sensing/environment | Substantial implementation | Knowledge, presentation, balance and full acceptance. |
-| 15 — Layered combat | Substantial implementation | Broader combat/balance/workload coverage and full acceptance. |
+| 15 — Layered combat | Assignments, traversal, sustained/kinetic/broadside fire, 3D missiles/PDCs, guidance, illumination, EMP and shield enquiry implemented | Physical marking payloads and optional shared loader groups/priorities remain unimplemented; full-host illumination/link-loss/payload journeys, multiple viable engagement styles, balance/workload and full acceptance. |
 | 16 — Comms/orders | Channels, requests and relay operational | Media/decoder owner checks pass on their tested revision; typed claims source integrated; listening priorities/chatter, contextual operations and full native/playable acceptance remain. |
 | 17 — Electronic operations | Jamming/protection/identity operational | Concealment owner/snapshot checks pass; low-emission source/proofs integrated but unexecuted; bounded disruption, broader information/access and acceptance remain. |
 | 18 — Movement/transit | Local jumps verified; sector code integrated | Formation owner/restore checks pass; Helm follow source/proofs integrated but unexecuted; remaining assistance and acceptance. |

@@ -25,6 +25,14 @@
       7
     ],
     "remaining_scope": "All physical-device and human acceptance; integrated exits for 8–24; unfinished runtime and authored modes listed per increment in README.md.",
+    "independent_scope_audit_8_to_15": {
+      "source": "1c060268; read-only review, no test execution",
+      "core_8_to_12": "Selected energy, shield, interior, damage and logistics mechanisms are implemented; combined continuation, current matching Workshop/browser journeys and balance/performance/workload acceptance remain.",
+      "fitting_13": "Beam/reactor field/facility fitting, spares, intact salvage and favourites exist. Direct personal-plan disposable rehearsal and whole-fit sustained/burst/thermal/cooling forecasts remain unimplemented. Additional equipment families are not inferred as mandatory from the approved bounded adapters.",
+      "sensing_14": "Core sensing/fields/history mechanisms exist. Current knowledge/presentation/Workshop acceptance and migration of the legacy raw-UUID instant-survey proof remain.",
+      "combat_15": "Physical marking payloads and optional shared loader groups/priorities remain unimplemented. Full-host illumination/link-loss/payload and multiple viable engagement-style evidence remain unverified.",
+      "scope": "Coolant recycling stays provisional; general mines and moving craft remain increment19. No increment closure inferred."
+    },
     "integrated_since_last_host_batch": "Sector transit and Workshop routes; complete fixed-interval work receipts; shared signatures and paid concealment; bounded optional maintenance execution; physical carried-personnel escort with exact destination-request admission; measured formation Navigation. Full-host proof sources are integrated, not yet executed.",
     "content_authoring_retry": {
       "source": "ca4c4b26; no subsequent content fixture change",

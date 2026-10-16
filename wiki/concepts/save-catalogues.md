@@ -20,6 +20,13 @@ state adapters. A per-capture context retains the former optional-query
 registration gates and reads fixed time, tick and motion-plan resources once.
 Absent and explicit default continuations keep their existing serialized forms.
 
+The retained Helm motion-plan map restores as a complete UUID-keyed frontier.
+An absent per-actor plan remains absent; when every captured plan is absent,
+restore clears earlier bootstrap plans rather than leaving stale avoidance
+motion behind. Mixed maps rebind only their saved entries to receiving ECS
+handles. This preserves the last planner output without running the planner
+against positions that have already advanced.
+
 Mission age uses integer `Duration` arithmetic. Capture stores the exact age,
 then restore rebases it against the receiving process's fixed clock. Authored
 timers, delayed work and Comms project seconds from that same age, so a younger

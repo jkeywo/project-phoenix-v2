@@ -160,3 +160,107 @@ fn capture_projects_ship_fidelity_and_resource_motion_on_the_fixed_clock() {
         })
     );
 }
+
+fn motion_plan_restore_world(reversed_bootstrap: bool) -> (World, Entity, Entity) {
+    let mut world = sparse_capture_world(None);
+    // Change both raw handles, not the stable captured identities. These
+    // unrelated bootstrap entities have no UUID and are not snapshot actors.
+    if reversed_bootstrap {
+        for _ in 0..3 {
+            world.spawn_empty();
+        }
+    }
+    let (human, ai) = if reversed_bootstrap {
+        let ai = world.spawn(EntityUuid("b-ai".into())).id();
+        let human = world.spawn(EntityUuid("a-human".into())).id();
+        (human, ai)
+    } else {
+        let human = world.spawn(EntityUuid("a-human".into())).id();
+        let ai = world.spawn(EntityUuid("b-ai".into())).id();
+        (human, ai)
+    };
+    world.init_resource::<crate::ship::helm_planner::HelmMotionPlan>();
+    (world, human, ai)
+}
+
+#[test]
+fn full_restore_clears_bootstrap_motion_when_every_captured_plan_is_absent() {
+    use crate::ship::helm_planner::{DesiredMotion, HelmMotionPlan, ShipMotionPlan};
+    let (live, human, _) = motion_plan_restore_world(false);
+    let saved: PhoenixSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&capture(&live)).unwrap()).unwrap();
+    assert_eq!(saved.entities.len(), 2);
+    assert!(saved.entities.iter().all(|row| row.motion_plan.is_none()));
+    let (mut resumed, receiving_human, receiving_ai) = motion_plan_restore_world(true);
+    assert_ne!(human, receiving_human);
+    for actor in [receiving_human, receiving_ai] {
+        resumed.resource_mut::<HelmMotionPlan>().ships.insert(
+            actor,
+            ShipMotionPlan {
+                motion: DesiredMotion {
+                    desired_velocity_local: Vec3::NEG_Z,
+                    desired_facing_local: Vec3::X,
+                },
+                ..Default::default()
+            },
+        );
+    }
+    assert!(capture(&resumed)
+        .entities
+        .iter()
+        .all(|row| row.motion_plan.is_some()));
+    let report = restore(&mut resumed, &saved);
+    assert!(report.is_complete(), "{report:?}");
+    assert_eq!(report.entities_restored, 2);
+    assert!(resumed.resource::<HelmMotionPlan>().ships.is_empty());
+    assert_eq!(capture(&resumed).entities, saved.entities);
+}
+
+#[test]
+fn full_restore_rebinds_mixed_motion_plans_without_reviving_absent_entries() {
+    use crate::ship::helm_planner::{
+        DesiredMotion, HazardAssessment, HelmMotionPlan, ShipMotionPlan,
+    };
+    let (mut live, _, ai) = motion_plan_restore_world(false);
+    let retained = ShipMotionPlan {
+        motion: DesiredMotion {
+            desired_velocity_local: Vec3::new(0.25, 0.0, -0.5),
+            desired_facing_local: Vec3::NEG_Z,
+        },
+        hazard: HazardAssessment {
+            hazard_forces: Vec3::new(0.125, 0.0, 0.25),
+            urgency: 0.5,
+            moving_hazard_threat: 0.25,
+            primary_hazard: None,
+        },
+        docking_active: true,
+        navigation_generation: None,
+    };
+    live.resource_mut::<HelmMotionPlan>()
+        .ships
+        .insert(ai, retained);
+    let saved: PhoenixSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&capture(&live)).unwrap()).unwrap();
+    assert!(saved.entities[0].motion_plan.is_none());
+    assert!(saved.entities[1].motion_plan.is_some());
+    let (mut resumed, receiving_human, receiving_ai) = motion_plan_restore_world(true);
+    assert_ne!(ai, receiving_ai);
+    for actor in [receiving_human, receiving_ai] {
+        resumed
+            .resource_mut::<HelmMotionPlan>()
+            .ships
+            .insert(actor, ShipMotionPlan::default());
+    }
+    let report = restore(&mut resumed, &saved);
+    assert!(report.is_complete(), "{report:?}");
+    let plans = &resumed.resource::<HelmMotionPlan>().ships;
+    assert_eq!(plans.len(), 1);
+    assert!(!plans.contains_key(&receiving_human));
+    let restored = plans
+        .get(&receiving_ai)
+        .expect("captured UUID rebinds to new handle");
+    assert_eq!(restored.motion, retained.motion);
+    assert_eq!(restored.hazard, retained.hazard);
+    assert_eq!(restored.docking_active, retained.docking_active);
+    assert_eq!(capture(&resumed).entities, saved.entities);
+}

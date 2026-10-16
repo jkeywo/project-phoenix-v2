@@ -90,6 +90,13 @@ pub(super) fn restore_motion_plans(world: &mut World, snapshot: &PhoenixSnapshot
         .filter_map(|row| Some((row.uuid.as_str(), row.motion_plan.as_ref()?)))
         .collect();
     if rows.is_empty() {
+        // Absence is captured state too: Human-held or disabled ships may have
+        // no plan at all. Never retain the fresh bootstrap's earlier AI plan.
+        if let Some(mut plan) =
+            world.get_resource_mut::<crate::ship::helm_planner::HelmMotionPlan>()
+        {
+            plan.ships.clear();
+        }
         return;
     }
     let mut by_entity: std::collections::HashMap<

@@ -2,8 +2,8 @@
 title: Broadcaster Seam
 type: concept
 tags: [broadcast, messages, networking, audience, cadence, delivery-class, snapshot, reliable]
-sources: [crates/phoenix-simulation/src/core/broadcast/, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/server_app/broadcast.rs, crates/phoenix-simulation/src/server_app/broadcast_publish.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-simulation/src/debug_overlay.rs]
-updated: 2026-10-13
+sources: [crates/phoenix-simulation/src/ship/console_publication.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/core/broadcast/, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/server_app/broadcast.rs, crates/phoenix-simulation/src/server_app/broadcast_publish.rs, crates/phoenix-simulation/src/console/weapons/blackboard.rs, crates/phoenix-simulation/src/console/weapons/server.rs, crates/phoenix-simulation/src/ship/power.rs, crates/phoenix-simulation/src/ship/shields.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/lobby/server.rs, crates/phoenix-simulation/src/debug_overlay.rs]
+updated: 2026-10-16
 ---
 
 # Broadcaster Seam
@@ -36,6 +36,15 @@ when the owning plugins register differently. The registry inserts each entry
 and its cadence timer together and refuses duplicate owners. Generic
 `Broadcaster::new().register(...)` callbacks keep insertion order; when combined
 with typed owners they follow those owners without reordering one another.
+
+Dispatch resolves every ready audience through borrowed ship topology before
+calling any producer. The scheduled Blackboard publisher retains a world-local
+query, projects each granted board once, and reuses unchanged local cache rows.
+Changed packets still carry their complete sorted scope for unordered snapshot
+delivery. Repair visibility is built only when a connected viewer may need a
+Repair projection; the raw reserved local route is unchanged. Coordination
+similarly resolves visibility lazily for actual human RepairRequest popups,
+sharing that projection within one ship's delivery pass.
 
 ## Simulation publishers
 

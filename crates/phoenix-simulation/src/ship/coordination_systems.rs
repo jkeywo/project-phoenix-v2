@@ -484,23 +484,36 @@ pub(crate) fn process_coordination_lag(
     ) in ship_components.iter_mut()
     {
         let repair_address = coordination::address_for_system(&ship_config.0, &repair_id);
-        let repair_vis = physical
-            .map(|damage| {
-                crate::console::repair::visibility::HullVisibility::from_physical(
-                    damage,
-                    &ship_config.0,
-                    entity_teams.map(|teams| &teams.0),
-                )
-            })
-            .or_else(|| {
-                entity_hull.map(|hull| {
-                    crate::console::repair::visibility::ship_hull_visibility(
-                        &hull.0,
-                        &ship_config.0,
-                        entity_teams,
-                    )
+        // Visibility affects only human RepairRequest popups. Empty/not-yet-due
+        // queues, AI deliveries and unrelated payloads need no hull projection.
+        // Share one lazy projection across all such popups for this ship/tick.
+        let repair_vis = std::cell::OnceCell::new();
+        let repair_visibility = |payload: &CoordinationPayload| {
+            if !matches!(payload, CoordinationPayload::RepairRequest { .. }) {
+                return None;
+            }
+            repair_vis
+                .get_or_init(|| {
+                    physical
+                        .map(|damage| {
+                            crate::console::repair::visibility::HullVisibility::from_physical(
+                                damage,
+                                &ship_config.0,
+                                entity_teams.map(|teams| &teams.0),
+                            )
+                        })
+                        .or_else(|| {
+                            entity_hull.map(|hull| {
+                                crate::console::repair::visibility::ship_hull_visibility(
+                                    &hull.0,
+                                    &ship_config.0,
+                                    entity_teams,
+                                )
+                            })
+                        })
                 })
-            });
+                .as_ref()
+        };
 
         for msg in queue.0.due_messages(tick.0) {
             let to_label =
@@ -529,7 +542,7 @@ pub(crate) fn process_coordination_lag(
                             address: msg.address.clone(),
                             payload: coarsen_repair_request(
                                 &msg.payload,
-                                repair_vis.as_ref(),
+                                repair_visibility(&msg.payload),
                                 Some(&seat.station),
                             ),
                             presentation: msg.presentation.clone(),
@@ -635,7 +648,7 @@ pub(crate) fn process_coordination_lag(
                                 system_id, deficit, ..
                             } = &mut payload
                             {
-                                if !repair_vis.as_ref().is_some_and(|vis| {
+                                if !repair_visibility(&msg.payload).is_some_and(|vis| {
                                     vis.console_can_see(&ship_config.0, console, system_id)
                                 }) {
                                     *deficit = None;
@@ -643,7 +656,11 @@ pub(crate) fn process_coordination_lag(
                             }
                             payload
                         } else {
-                            coarsen_repair_request(&msg.payload, repair_vis.as_ref(), station_id)
+                            coarsen_repair_request(
+                                &msg.payload,
+                                repair_visibility(&msg.payload),
+                                station_id,
+                            )
                         };
                         if repair_address.as_ref() == Some(&msg.address)
                             && matches!(&payload, CoordinationPayload::RepairRequest { .. })

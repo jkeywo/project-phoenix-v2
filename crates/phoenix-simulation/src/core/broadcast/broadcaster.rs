@@ -255,29 +255,19 @@ pub fn dispatch<M: BroadcastKind>(
     // therefore always ready. A pre-check would scan the registry every tick and
     // never once short-circuit — measured as a net loss.
     //
-    // Collect ship config before borrowing registry/sessions to avoid borrow
-    // conflicts. The `QueryState` is cached in a `Local` rather than rebuilt per
-    // tick by `World::query_filtered` — building one walks every archetype in
-    // the world, which this system was paying for on every single tick.
-    let ship_config_opt: Option<(
-        crate::ship_plugin::ShipConfigComponent,
-        Option<crate::ship::components::ConsoleHosts>,
-    )> = {
+    // Collect (target, producer) for entries that should fire this tick.
+    // Audience resolution only reads the world. Keep the ship config borrowed
+    // rather than cloning its entire authored topology on every dispatch. All
+    // targets are still resolved before any exclusive producer is invoked.
+    // The QueryState remains local to this system/world across ticks.
+    let ready: Vec<(crate::lobby::handler::Target, Producer)> = {
         let q = config_query.get_or_insert_with(|| {
             world.query_filtered::<(
                 &crate::ship_plugin::ShipConfigComponent,
                 Option<&crate::ship::components::ConsoleHosts>,
             ), With<crate::server_app::LocalShip>>()
         });
-        q.single(world)
-            .ok()
-            .map(|(config, hosts)| (config.clone(), hosts.cloned()))
-    };
-
-    // Collect (target, producer) for entries that should fire this tick.
-    // We clone Arcs so we can release the borrow on `registry` before calling
-    // into the world (producers need exclusive world access).
-    let ready: Vec<(crate::lobby::handler::Target, Producer)> = {
+        let ship_config = q.single(world).ok();
         let registry = world.resource::<BroadcastRegistry<M>>();
         let sessions = world.resource::<Sessions>();
         registry
@@ -296,10 +286,8 @@ pub fn dispatch<M: BroadcastKind>(
                 // Resolve audience → target.
                 let target = reg.audience.resolve(
                     &sessions.0,
-                    ship_config_opt.as_ref().map(|(c, _)| &c.0),
-                    ship_config_opt
-                        .as_ref()
-                        .and_then(|(_, hosts)| hosts.as_ref()),
+                    ship_config.map(|(config, _)| &config.0),
+                    ship_config.and_then(|(_, hosts)| hosts),
                 )?;
                 Some((target, reg.producer.clone()))
             })

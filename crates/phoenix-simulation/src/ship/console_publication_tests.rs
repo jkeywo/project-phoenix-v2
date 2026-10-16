@@ -67,6 +67,93 @@ fn sent(app: &mut App, generation: u64) -> Vec<ServerMessage> {
         .collect()
 }
 
+fn assert_complete_local_packet(app: &mut App, entity: Entity) {
+    let boards: BTreeMap<_, _> = app
+        .world()
+        .get::<crate::server_app::ShipSystemBlackboards>(entity)
+        .unwrap()
+        .0
+        .iter()
+        .map(|(id, board)| (id.clone(), board.clone()))
+        .collect();
+    let expected = ServerMessage::BlackboardUpdate {
+        console_scope: Some(boards.keys().cloned().collect()),
+        console_scope_tick: Some(app.world().resource::<crate::sim_tick::SimTick>().0),
+        updates: boards.into_iter().collect(),
+        presentation_generation: Some(0),
+    };
+    app.update();
+    let entries = app
+        .world_mut()
+        .resource_mut::<crate::server_app::SimOutbox>()
+        .drain();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries[0].target,
+        crate::lobby::Target::Token(crate::console_bridge::LOCAL_CONSOLE_TOKEN.into())
+    );
+    assert_eq!(
+        entries[0].delivery,
+        crate::core::messages::DeliveryClass::Snapshot
+    );
+    let codec = crate::core::codec::JsonCodec;
+    assert_eq!(
+        codec.encode_server(&entries[0].message).unwrap(),
+        codec.encode_server(&expected).unwrap()
+    );
+}
+
+#[test]
+fn local_only_cached_query_preserves_complete_packets_across_change_and_removal() {
+    let (mut app, entity) = fixture();
+    app.insert_resource(crate::lobby::Sessions(
+        crate::lobby::session::SessionManager::new(),
+    ))
+    .add_systems(Update, crate::server_app::broadcast_blackboard_updates);
+    app.world_mut()
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(entity)
+        .unwrap()
+        .0
+        .insert(
+            SystemId("repair".into()),
+            SystemBlackboard::Repair(RepairBlackboard::default()),
+        );
+    // The reserved route retains raw Repair data even with no phone viewers.
+    assert_complete_local_packet(&mut app, entity);
+    app.update();
+    publish_console_blackboards(app.world_mut(), None);
+    assert!(app
+        .world_mut()
+        .resource_mut::<crate::server_app::SimOutbox>()
+        .drain()
+        .is_empty());
+
+    // A new archetype must remain visible to the retained scheduled QueryState.
+    app.world_mut()
+        .entity_mut(entity)
+        .insert(Name::new("new archetype"));
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+    app.world_mut()
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(entity)
+        .unwrap()
+        .0
+        .insert(
+            SystemId("b".into()),
+            SystemBlackboard::Helm(HelmBlackboard {
+                x: 42.0,
+                ..Default::default()
+            }),
+        );
+    assert_complete_local_packet(&mut app, entity);
+    app.world_mut()
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(entity)
+        .unwrap()
+        .0
+        .remove(&SystemId("a".into()));
+    assert_complete_local_packet(&mut app, entity);
+    assert_eq!(app.world().resource::<LastConsolePublications>().0.len(), 1);
+}
+
 #[test]
 fn scoped_updates_are_complete_on_change_and_revoke_then_rebase() {
     let (mut app, entity) = fixture();

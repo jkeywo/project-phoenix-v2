@@ -9,6 +9,33 @@ pub struct LastConsolePublications(
     pub BTreeMap<String, (Option<u64>, BTreeMap<SystemId, SystemBlackboard>)>,
 );
 
+pub(crate) type ConsolePublicationQuery = QueryState<
+    (
+        &'static ShipConfigComponent,
+        &'static crate::server_app::ShipSystemBlackboards,
+        Option<&'static ConsoleHosts>,
+    ),
+    With<crate::server_app::LocalShip>,
+>;
+
+fn publication_is_permitted(
+    config: &crate::ship::config::ShipConfig,
+    hosts: &ConsoleHosts,
+    station: &StationId,
+    id: &SystemId,
+    board: &SystemBlackboard,
+) -> bool {
+    hosts.0.iter().any(|host| {
+        host.host.as_ref() == Some(station)
+            && config.console(&host.console).is_some_and(|console| {
+                config
+                    .system(id)
+                    .is_some_and(|system| system.console.as_ref() == Some(&console.id))
+                    || console.feeds.iter().any(|feed| feed.accepts(id, board))
+            })
+    })
+}
+
 pub fn permitted_publications(
     config: &crate::ship::config::ShipConfig,
     hosts: &ConsoleHosts,
@@ -20,17 +47,7 @@ pub fn permitted_publications(
     };
     boards
         .iter()
-        .filter(|(id, board)| {
-            hosts.0.iter().any(|host| {
-                host.host.as_ref() == Some(station)
-                    && config.console(&host.console).is_some_and(|console| {
-                        config
-                            .system(id)
-                            .is_some_and(|system| system.console.as_ref() == Some(&console.id))
-                            || console.feeds.iter().any(|feed| feed.accepts(id, board))
-                    })
-            })
-        })
+        .filter(|(id, board)| publication_is_permitted(config, hosts, station, id, board))
         .map(|(id, board)| (id.clone(), board.clone()))
         .collect()
 }
@@ -62,55 +79,106 @@ pub fn project_permitted_board(
 
 /// Publish the current permitted Console observations to each recipient.
 pub fn publish_console_blackboards(world: &mut World, generation: Option<u64>) {
+    let mut query = world.query_filtered();
+    publish_console_blackboards_with_query(world, generation, &mut query);
+}
+
+/// The scheduled publisher retains its QueryState; direct callers keep the
+/// same entry point and packet semantics without introducing an ECS owner.
+pub(crate) fn publish_console_blackboards_with_query(
+    world: &mut World,
+    generation: Option<u64>,
+    query: &mut ConsolePublicationQuery,
+) {
     let generation = Some(generation.unwrap_or(0));
     let tick = world
         .get_resource::<crate::sim_tick::SimTick>()
         .map_or(0, |tick| tick.0);
-    let vis = crate::console::repair::visibility::hull_visibility(world);
-    let mut query = world.query_filtered::<(
-        &ShipConfigComponent,
-        &crate::server_app::ShipSystemBlackboards,
-        Option<&ConsoleHosts>,
-    ), With<crate::server_app::LocalShip>>();
+    let Some((_, boards, _)) = query.iter(world).next() else {
+        return;
+    };
+    // The reserved local route carries the raw publications and never uses
+    // Repair visibility. Build that projection only when a phone may need it.
+    let needs_visibility = world
+        .resource::<crate::lobby::Sessions>()
+        .0
+        .players()
+        .iter()
+        .any(|player| player.connected)
+        && boards
+            .0
+            .values()
+            .any(|board| matches!(board, SystemBlackboard::Repair(_)));
+    let vis = needs_visibility
+        .then(|| crate::console::repair::visibility::hull_visibility(world))
+        .flatten();
+    world.init_resource::<LastConsolePublications>();
     let Some((config, boards, hosts)) = query.iter(world).next() else {
         return;
     };
     let empty_hosts = ConsoleHosts::default();
     let hosts = hosts.unwrap_or(&empty_hosts);
     let sessions = world.resource::<crate::lobby::Sessions>();
+    let previous = world.resource::<LastConsolePublications>();
+    // None retains the existing cache entry. In particular, unchanged local
+    // boards can be compared by reference without cloning every publication.
     let mut next: BTreeMap<_, _> = sessions
         .0
         .players()
         .iter()
         .filter(|p| p.connected)
         .map(|player| {
-            let mut projection =
-                permitted_publications(&config.0, hosts, player.station.as_ref(), &boards.0);
-            for (source, board) in &mut projection {
-                *board = project_permitted_board(&config.0, source, board, vis.as_ref());
-            }
-            (player.token.clone(), (generation, projection))
-        })
-        .collect();
-    next.insert(
-        crate::console_bridge::LOCAL_CONSOLE_TOKEN.to_string(),
-        (
-            generation,
-            boards
+            let projection: BTreeMap<_, _> = boards
                 .0
                 .iter()
-                .map(|(id, board)| (id.clone(), board.clone()))
-                .collect(),
-        ),
+                .filter(|(id, board)| {
+                    player.station.as_ref().is_some_and(|station| {
+                        publication_is_permitted(&config.0, hosts, station, id, board)
+                    })
+                })
+                .map(|(source, board)| {
+                    (
+                        source.clone(),
+                        project_permitted_board(&config.0, source, board, vis.as_ref()),
+                    )
+                })
+                .collect();
+            let unchanged = previous
+                .0
+                .get(&player.token)
+                .is_some_and(|(stamp, old)| *stamp == generation && *old == projection);
+            (
+                player.token.clone(),
+                (!unchanged).then_some((generation, projection)),
+            )
+        })
+        .collect();
+    let local = crate::console_bridge::LOCAL_CONSOLE_TOKEN;
+    let local_unchanged = previous.0.get(local).is_some_and(|(stamp, old)| {
+        *stamp == generation
+            && old.len() == boards.0.len()
+            && old
+                .iter()
+                .all(|(id, board)| boards.0.get(id) == Some(board))
+    });
+    next.insert(
+        local.to_string(),
+        (!local_unchanged).then(|| {
+            (
+                generation,
+                boards
+                    .0
+                    .iter()
+                    .map(|(id, board)| (id.clone(), board.clone()))
+                    .collect(),
+            )
+        }),
     );
-    world.init_resource::<LastConsolePublications>();
-    let previous = world.resource::<LastConsolePublications>();
     let mut pending = Vec::new();
-    for (token, (stamp, boards)) in &next {
-        let old = previous.0.get(token);
-        if old.is_some_and(|(old_stamp, old_boards)| old_stamp == stamp && old_boards == boards) {
+    for (token, projection) in &next {
+        let Some((_, boards)) = projection else {
             continue;
-        }
+        };
         // Scoped packets are complete projections: the unordered snapshot lane
         // may deliver a newer tick first. Rejecting an older packet must not
         // discard a board that the newer packet omitted as an unchanged delta.
@@ -128,7 +196,14 @@ pub fn publish_console_blackboards(world: &mut World, generation: Option<u64>) {
             },
         ));
     }
-    world.resource_mut::<LastConsolePublications>().0 = next;
+    let mut previous = world.resource_mut::<LastConsolePublications>();
+    previous.0.retain(|token, _| next.contains_key(token));
+    for (token, projection) in next {
+        if let Some(projection) = projection {
+            previous.0.insert(token, projection);
+        }
+    }
+    drop(previous);
     world
         .resource_mut::<crate::server_app::SimOutbox>()
         .extend_snapshot(pending);

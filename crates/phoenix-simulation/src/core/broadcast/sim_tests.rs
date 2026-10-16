@@ -58,6 +58,64 @@ fn tick_and_collect(app: &mut App) -> Vec<OutboundMessage> {
     msgs
 }
 
+#[test]
+fn all_audiences_are_resolved_before_exclusive_callbacks_change_hosts() {
+    use crate::core::messages::{ConsoleId, StationId, SystemId};
+    use crate::ship::components::{ConsoleHosts, ShipConfigComponent};
+    use phoenix_model::console::ConsoleHostSnapshot;
+    let broadcaster = SimBroadcaster::new()
+        .register(Audience::All, Cadence::OnEvent, |world| {
+            let mut query = world.query::<&mut ConsoleHosts>();
+            query.single_mut(world).unwrap().0[0].host = Some(StationId("next".into()));
+            Vec::new()
+        })
+        .register(
+            Audience::HoldingSystem(SystemId("owned".into())),
+            Cadence::OnEvent,
+            |_| vec![ServerMessage::GameStarted],
+        );
+    let mut app = dispatch_app(broadcaster);
+    {
+        let mut sessions = app.world_mut().resource_mut::<Sessions>();
+        sessions
+            .0
+            .set_station("alice", Some(StationId("first".into())));
+        sessions.0.register("bob".into(), "Bob".into()).unwrap();
+        sessions
+            .0
+            .set_station("bob", Some(StationId("next".into())));
+    }
+    let config = toml::from_str(
+        "[[console]]\nid='screen'\n[[system]]\nid='owned'\nkind='sensors'\nconsole='screen'",
+    )
+    .unwrap();
+    app.world_mut().spawn((
+        crate::server_app::LocalShip,
+        ShipConfigComponent(config),
+        ConsoleHosts(vec![ConsoleHostSnapshot {
+            console: ConsoleId("screen".into()),
+            host: Some(StationId("first".into())),
+            rating: "Std".into(),
+        }]),
+    ));
+    app.update();
+    app.update();
+    let messages = &app.world().resource::<Outbox>().0;
+    assert_eq!(messages.len(), 2);
+    assert_eq!(
+        messages[0].target,
+        crate::lobby::Target::Token("alice".into())
+    );
+    assert_eq!(
+        messages[1].target,
+        crate::lobby::Target::Token("bob".into())
+    );
+    assert!(messages.iter().all(|message| {
+        matches!(message.msg, ServerMessage::GameStarted)
+            && message.delivery == DeliveryClass::Snapshot
+    }));
+}
+
 // ── Audience::All resolution ───────────────────────────────────────────
 
 /// A producer registered with `Audience::All` and `Cadence::Once` must

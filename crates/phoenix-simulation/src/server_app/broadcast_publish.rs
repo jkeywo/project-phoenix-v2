@@ -661,11 +661,17 @@ pub(crate) fn reset_broadcast_caches_on_start(world: &mut World) {
 /// in the world to work out which ones match — per tick, for a query that
 /// resolves to a single `LocalShip` entity. Bevy asserts the state's world id on
 /// use, so a cached state cannot silently be applied to the wrong world.
-pub fn broadcast_blackboard_updates(world: &mut World) {
+pub fn broadcast_blackboard_updates(
+    world: &mut World,
+    mut query: Local<Option<crate::ship::console_publication::ConsolePublicationQuery>>,
+) {
     let generation = world
         .get_resource::<crate::audio_lifecycle::RoomAudioLifecycle>()
         .map(|owner| owner.state.generation);
-    crate::ship::console_publication::publish_console_blackboards(world, generation);
+    let query = query.get_or_insert_with(|| world.query_filtered());
+    crate::ship::console_publication::publish_console_blackboards_with_query(
+        world, generation, query,
+    );
 }
 
 /// When a player reconnects mid-game (Identify during InProgress),

@@ -17,3 +17,4 @@ spawn_on = "game_start"
 transform = { position = [0, 0, 120] }
 [entity.overrides.comms]
 hailable = true
+display_name = "formation-wing"

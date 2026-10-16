@@ -9,8 +9,10 @@ use project_phoenix::ship::helm_control::{
     AxisIntent, HelmControlState, SpeedDemand, ThrustIntent,
 };
 use project_phoenix::{
-    core::messages::{ClientMessage, SystemBlackboard, SystemControlPayload as Control, SystemId},
-    entities::spawner::{EntityName, EntityUuid},
+    core::messages::{
+        ClientMessage, GamePhase, SystemBlackboard, SystemControlPayload as Control, SystemId,
+    },
+    entities::spawner::{EntityId, EntityUuid},
     headless::{build_headless_app, HeadlessArgs},
     lobby::{server::InboundMessage, Sessions},
     server_app::{LocalShip, ShipSystemBlackboards},
@@ -80,15 +82,20 @@ fn boot_with(world_path: &str, ship_path: &str) -> (App, Entity) {
             ClientMessage::SelectStation {
                 station: station.id.0.clone(),
             },
-            ClientMessage::SetReady { ready: true },
             ClientMessage::SetStationRating {
                 rating_name: station.ratings[0].name.clone(),
             },
+            ClientMessage::SetReady { ready: true },
         ] {
             send(&mut app, &token, msg);
             steps(&mut app, 4);
         }
     }
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "ordinary headless/lobby bootstrap must reach the actual mission phase"
+    );
     (app, entity)
 }
 fn human_token(app: &App, entity: Entity, owner: &str, payload: &Control) -> Option<String> {
@@ -166,9 +173,9 @@ fn same(a: &App, b: &App, step: usize) {
 
 fn follower(app: &mut App) -> Entity {
     app.world_mut()
-        .query::<(Entity, &EntityName)>()
+        .query::<(Entity, &EntityId)>()
         .iter(app.world())
-        .find_map(|(entity, name)| (name.0 == "formation-wing").then_some(entity))
+        .find_map(|(entity, id)| (id.0 == "formation-wing").then_some(entity))
         .unwrap()
 }
 fn following(app: &App, actor: Entity) -> bool {

@@ -5,8 +5,10 @@ use bevy::prelude::*;
 use phoenix_model::emission_profile::EmissionIntent;
 use project_phoenix::{
     console::command::emission::ShipEmissionIntent,
-    core::messages::{ClientMessage, SystemBlackboard, SystemControlPayload as Control, SystemId},
-    entities::spawner::{EntityName, EntityUuid},
+    core::messages::{
+        ClientMessage, GamePhase, SystemBlackboard, SystemControlPayload as Control, SystemId,
+    },
+    entities::spawner::{EntityId, EntityUuid},
     headless::{build_headless_app, HeadlessArgs},
     lobby::{server::InboundMessage, Sessions},
     science::identity::{IdentityEmissions, ShipIdentityEmitters},
@@ -81,10 +83,10 @@ fn claim(app: &mut App, station: &str, rating: &str) {
         ClientMessage::SelectStation {
             station: station.into(),
         },
-        ClientMessage::SetReady { ready: true },
         ClientMessage::SetStationRating {
             rating_name: rating.into(),
         },
+        ClientMessage::SetReady { ready: true },
     ] {
         send(app, &token, msg);
         steps(app, 4);
@@ -126,6 +128,11 @@ fn boot(comms_human: bool) -> (App, Entity) {
             claim(&mut app, &station.id.0, &station.ratings[0].name);
         }
     }
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "ordinary headless/lobby bootstrap must reach the actual mission phase"
+    );
     (app, entity)
 }
 fn control(app: &mut App, entity: Entity, owner: &str, payload: Control) {
@@ -351,9 +358,9 @@ fn human_high_emission_remains_usable_and_intent_survives_whole_json360_and_nowr
     let uuid = live.world().get::<EntityUuid>(actor).unwrap().0.clone();
     let observer = live
         .world_mut()
-        .query::<(&EntityUuid, &EntityName)>()
+        .query::<(&EntityUuid, &EntityId)>()
         .iter(live.world())
-        .find(|(_, name)| name.0 == "ordinary-observer")
+        .find(|(_, id)| id.0 == "ordinary-observer")
         .unwrap()
         .0
          .0

@@ -291,8 +291,9 @@ export function createNativeWorkshopProvider({ request, previewFrame = createWor
       },
       async start(files, selection) {
         const generation = ++testGeneration;
-        const { breakpoint = null, ...runtimeSelection } = selection;
+        const { breakpoint = null, rehearsal = null, run_generation = 0, ...runtimeSelection } = selection;
         const response = await call({ op: 'test-start', files, selection: runtimeSelection,
+          ...(rehearsal ? { rehearsal, run_generation } : {}),
           ...(breakpoint ? { breakpoint } : {}) });
         if (response?.status !== 'test' || !response.run) throw new Error('Invalid native Test start');
         presentTest(response.run, generation);

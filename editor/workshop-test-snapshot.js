@@ -26,15 +26,15 @@ export function createWorkshopTestPreparation({ runtime, dependencies }) {
       return runtime.testCatalog(textFiles(merge(source, files)));
     },
     async prepare(files, selection) {
-      const { breakpoint = null, ...runtimeSelection } = selection;
+      const { breakpoint = null, rehearsal = null, run_generation = 0, ...runtimeSelection } = selection;
       const snapshot = await capture(files, runtimeSelection, async captured => {
         const text = textFiles(captured);
-        const selected = await runtime.checkTestSelection(text, runtimeSelection);
+        const selected = await runtime.checkTestSelection(text, runtimeSelection, ...(rehearsal ? [{ rehearsal, run_generation }] : []));
         if (!selected.accepted) refused(selected);
         const catalog = await runtime.testCatalog(text);
         validateTestBreakpoint(breakpoint, catalog.layers?.[runtimeSelection.world] || []);
       });
-      return { ...snapshot, breakpoint };
+      return { ...snapshot, breakpoint, ...(rehearsal ? { rehearsal: structuredClone(rehearsal), run_generation } : {}) };
     },
     /** The same capture, for a surface whose selection is not a Test launch.
      *

@@ -2,15 +2,16 @@ import { t, wireText } from '../strings.js';
 import { compareFittingPlan, composeFittingPlans, defaultFittingPlan, fittingPlanStorageKey, stationFittingPlan, validateFittingPlan } from '../fitting-plans.js';
 import { FITTING_ACTION_IDS } from '../stations/fitting-actions.js';
 
-export function mountFittingPlans(doc, { prelaunch = false } = {}) {
+export function mountFittingPlans(doc, { prelaunch = false, onRehearse = null, onPlanChanged = () => {} } = {}) {
   const node = doc.createElement('details'), heading = doc.createElement('summary'); heading.textContent = t('fitting.plan.title'); node.append(heading);
   node.className = 'fitting-plan-controls'; const el = tag => doc.createElement(tag);
   const label = (control, key) => { const label = el('label'); label.textContent = t('fitting.plan.' + key); label.append(control); return label; };
-  const button = (key, action) => { const button = el('button'); button.type = 'button'; button.textContent = t('fitting.plan.' + key); button.dataset.planAction = key; button.addEventListener('click', () => { try { action(); } catch (error) { status.textContent = t(error.message); } }); return button; };
+  const button = (key, action) => { const button = el('button'); button.type = 'button'; button.textContent = t('fitting.plan.' + key); button.dataset.planAction = key; button.addEventListener('click', () => { try { Promise.resolve(action()).catch(error => { status.textContent = t(error.message); }); } catch (error) { status.textContent = t(error.message); } }); return button; };
   const scope = el('select'), name = el('input'), favourites = el('select'), transfer = el('textarea'), comparison = el('div'), status = el('p'); status.setAttribute('role', 'status');
   let context = null, identity = null, plan = null, rows = [], station = null, choices = new Map(), saved = [], lastDraft = null;
   const draftKey = () => fittingPlanStorageKey(context) + '/draft';
   function rememberPlan() {
+    onPlanChanged();
     try { lastDraft = JSON.stringify(plan); doc.defaultView.sessionStorage.setItem(draftKey(), lastDraft); } catch { status.textContent = t('fitting.plan.storage-unavailable'); }
   }
   function restoreDraft() {
@@ -73,10 +74,13 @@ export function mountFittingPlans(doc, { prelaunch = false } = {}) {
     }
     status.textContent = t('fitting.plan.queued', { count: sent });
   });
-  scope.addEventListener('change', paintComparison);
+  scope.addEventListener('change', () => { onPlanChanged(); paintComparison(); });
   node.append(el('p'), label(scope, 'scope'), label(name, 'name'), save, label(favourites, 'favourites'), load, label(transfer, 'transfer'), exportPlan, importPlan, comparison, queue, status);
   node.querySelector('p').textContent = t(prelaunch ? 'fitting.plan.prelaunch-hint' : 'fitting.plan.hint');
   queue.hidden = prelaunch;
+  const rehearse = onRehearse ? button('rehearse', () => onRehearse(selected(), structuredClone(context))) : null;
+  if (rehearse) node.append(rehearse);
+  const priorDisabled = new Map();
   return { node, update(nextRows = [], nextStation = null) {
     const nextContext = nextRows.find(row => row.fitting_planner)?.fitting_planner; rows = nextRows; station = nextStation;
     if (!nextContext) { node.hidden = true; return; }
@@ -89,5 +93,11 @@ export function mountFittingPlans(doc, { prelaunch = false } = {}) {
     const scopes = ['*', ...(context.slots.some(slot => slot.home_station === station) ? [station] : [])];
     if (scope.dataset.options !== JSON.stringify(scopes)) { scope.dataset.options = JSON.stringify(scopes); scope.replaceChildren(); for (const id of scopes) { const option = el('option'); option.value = id; option.textContent = id === '*' ? t('fitting.plan.whole-ship') : wireText(id); scope.append(option); } }
     node.hidden = false; paintComparison();
-  }, dispose() { choices.clear(); node.remove(); } };
+  }, setRehearsalEnabled(enabled) { if (rehearse) rehearse.disabled = !enabled; },
+  setRehearsalBusy(busy) {
+    if (busy) for (const control of node.querySelectorAll('input,select,textarea,button')) {
+      if (!priorDisabled.has(control)) priorDisabled.set(control, control.disabled); control.disabled = true;
+    } else { for (const [control, disabled] of priorDisabled) control.disabled = disabled; priorDisabled.clear(); }
+  },
+  dispose() { choices.clear(); node.remove(); } };
 }

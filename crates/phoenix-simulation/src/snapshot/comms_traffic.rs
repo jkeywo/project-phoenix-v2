@@ -73,9 +73,11 @@ fn validate_row(
                 let sampled = observation
                     .observed_tick
                     .ok_or("dated alert sample has no producer clock")?;
+                // A genuine held observation can predate the latest actuator
+                // change. Validate its retained provenance/clock, not equality
+                // with private current machinery or an erased historical value.
                 if source != &publisher.0
                     || board.red_alert_system_id != alert
-                    || row.red_alert != Some(board.red_alert)
                     || observation != &crate::comms::traffic::alert_observation(sampled, &alert)
                     || sampled > now
                 {
@@ -131,6 +133,10 @@ fn validate_row(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "comms_traffic_tests.rs"]
+mod tests;
 
 pub(super) fn validate_entity(
     world: &World,

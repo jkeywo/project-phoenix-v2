@@ -657,7 +657,7 @@ fn most_recent(a: Option<f32>, b: Option<f32>) -> Option<f32> {
 /// / `CaptainPriorityBoost`) — are gated on `Has<LocalShip>`; NPCs get the
 /// empty/default equivalents (nothing reads an NPC captain blackboard, and the
 /// wire broadcaster is `LocalShip`-filtered).
-fn publish_captain_blackboard(
+pub(crate) fn publish_captain_blackboard(
     objectives: Option<Res<ObjectiveManagerRes>>,
     objective_instances: Option<Res<crate::world::server::ObjectiveInstanceManagerRes>>,
     // The named-deadline readout (issue #1024). Both `Option` so a bare-`App`

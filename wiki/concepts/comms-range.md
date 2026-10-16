@@ -53,6 +53,10 @@ Console reports capability, not a guarantee of readiness or remote delivery.
 `snapshot/comms_traffic.rs` validates the accepted recipe, canonical intent and
 retained publication clocks before restore writes. `gui/comms-traffic.js` and
 the existing Workshop Radio editor expose the same closed choices.
+Retained dated alert knowledge is allowed to differ from the current private
+Alert. Its original value/timestamp survive restore; age determines whether
+Radio can still consume it. Validation checks source/owner/shape/clocks rather
+than authenticating an erased historical value or rewriting it from machinery.
 
 Equipped non-roster actors build their own contact rows in
 `comms/radio_contacts.rs` from the same current paid endpoint pass. Only actual

@@ -175,6 +175,16 @@ and last successful report tuple. Its paid coverage is derived, omitted from
 snapshots/digests and cleared on restore. Candidate recipe, publication, owner,
 order and original-clock guards run before restore writes. These guards validate
 retained consistency, not the authenticity of an erased historical emission.
+In particular a retained dated Captain value need not equal the current private
+Alert: a real admitted Alert change can precede its next publication. Lifecycle
+saves currently run at the completed FixedLast boundary after Publish, but that
+does not prove every retained knowledge/restore frontier is current. Preserve the
+original supported value, source and nonfuture timestamp; Radio applies the
+current/previous age gate and treats an older held sample as unknown. Never
+repair a retained view from the private flag or refresh its timestamp. The
+owner regression uses the actual accepted spawner, Captain publisher and admitted
+Alert handler to construct this held frontier; it does not claim a lifecycle
+save taken in the middle of a FixedUpdate.
 
 Independent read-only reviews cover the runtime/payment/AI consumer, canonical
 continuation and UI/Workshop joins. Six focused JavaScript files pass 42 tests;

@@ -402,3 +402,18 @@ undo/redo equivalence. Independent source review passed, and strict strings pass
 with 6387 identifiers. Cargo/native and mounted Preview/Test have not been run for
 this source checkpoint. Whole-host paid acquisition/firing/recovery/JSON witnesses
 are the next evidence slice; this checkpoint does not close increment19.
+
+
+The next turret evidence donor authors actual headless host witnesses through
+normal Human admission and an ordinary positive Bay tree. Three independently
+fresh whole-JSON360 checkpoints cover partial paid launch, an actual acquired
+paid beam cycle, and inactive stored custody. The proof checks finite bank work,
+physical hostile damage with a closer friendly untouched, measured recovery
+alias, same entity/body removal, continued passive reserve loss and no new stored
+observations/weapon work. Three malformed whole candidates retain full no-write
+checks. Independent source review passed; literal TOML syntax and owned Rust
+format/diff checks passed. These host witnesses have not been executed yet.
+The optional turret has no radio equipment: autonomy without a command link is
+covered, while an actual installed-radio link-loss journey remains open. Mounted
+Workshop Preview/Test, browser/native visuals and full increment19 acceptance
+remain open; source undo/redo equivalence is not a mounted history claim.

@@ -1,0 +1,49 @@
+# Actual fixed beam turret, one closer friendly and one farther hostile prop.
+# Ordinary radar acquisition/AI firing; no scripted locks/damage or resource grants.
+[global]
+seed=191919
+[player_spawn]
+position=[0,0,0]
+[[ship_slot]]
+id="crew"
+label="Crew"
+default_ship="tests/fixtures/turret-auto-carrier.toml"
+[[ship_slot.ships]]
+template_path="tests/fixtures/turret-auto-carrier.toml"
+[[entity]]
+template_path="tests/fixtures/turret-auto-carrier.toml"
+id="player-ship"
+name="player-ship"
+spawn_on="game_start"
+[[entity]]
+template_path="assets/entities/battery_turret.toml"
+id="battery-turret"
+name="battery-turret"
+spawn_on="game_start"
+carried_by={parent="player-ship",bay="probe-bay"}
+[entity.overrides]
+faction="aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+[[entity]]
+template_path="assets/entities/depot_transfer.toml"
+id="hostile-depot"
+name="hostile-depot"
+transform={position=[0,0,-45]}
+[entity.overrides]
+name="Hostile depot"
+faction="cccccccc-3333-4333-8333-cccccccccccc"
+[[entity]]
+template_path="assets/entities/depot_transfer.toml"
+id="friendly-depot"
+name="friendly-depot"
+transform={position=[15,0,-18]}
+[entity.overrides]
+name="Friendly depot"
+faction="aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+[script]
+setup="""
+on_world_loaded("opposed");
+fn opposed(ctx) {
+    ctx.effects.add_faction_enemy("Harrow", "Alliance");
+    ctx.effects.add_faction_enemy("Alliance", "Harrow");
+}
+"""

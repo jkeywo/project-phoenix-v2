@@ -1,0 +1,19 @@
+# Same actual carrier; only its ordinary Bay state tree decides to launch.
+includes=["../../assets/entities/probe_carrier.toml"]
+[[system]]
+id="probe-bay"
+[system.config.ai]
+root="bay"
+[[system.config.ai.tree]]
+id="bay"
+initial="deploy"
+[[system.config.ai.tree.state]]
+id="deploy"
+[[system.config.ai.tree.state.task]]
+id="launch-own"
+when=[
+ {value={source="fact",name="can_operate"},equals=true},
+ {value={source="fact",name="has_stored"},equals=true},
+ {value={source="fact",name="active"},equals=false},
+]
+action={kind="write",channel="launch",value={source="literal",value=true}}

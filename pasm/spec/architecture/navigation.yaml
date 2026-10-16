@@ -4,12 +4,13 @@ entities:
       status: implemented
       confidence: confirmed
       title: Navigation Waypoint Controller
-      summary: Owns each ship's free or entity-anchored navigation waypoint, applying admitted set and clear commands — from a human console OR the Navigation AI operator, symmetrically — returning terminal feedback for correlated human inputs, and driving the same Channel-3 NavigateTo clearance to the Helm station.
+      summary: Owns each ship's free, entity-anchored or original charted XYZ waypoint, applying admitted set and clear commands from human and ordinary Navigation AI through the same controller, terminal feedback and generation-addressed NavigateTo clearance.
       rationale:
         - "A waypoint reaches the AI Helm identically no matter who set it (AGENTS.md rule 6): the single admitted applier (`handle_navigation_waypoint`) writes the shared component for BOTH sources — the human `SetNavigationWaypoint` and the Navigation AI's admitted emission (issue #830) — and the shared issuer enqueues the clearance, so the message, the delivery lag, and the HelmWaypointClearance latch are the same. Previously the AI wrote the waypoint component directly, bypassing admission."
         - "Issue #830 moved the applier from Input into Physics `.after(operate_navigation_ai)`: admission clears AdmittedCommands once per tick before Input, so the AI operator's same-tick emission must be applied after it in Physics. The clearance issuer is pinned `.after(handle_navigation_waypoint)` so a waypoint set this tick — by either writer — gets its clearance this tick (the #702 shared-issuer invariant)."
         - The sender origin is derived from the navigation system's resolved control source, like every other post-admission enqueuer, not assumed from the wire path. Clearing needs no clearance message because a cleared waypoint leaves the Helm nothing to follow.
         - "Issue #1286 leaves waypoint and Coordination ownership unchanged while making input completion truthful: the owning consumer emits correlated Applied only after a finite set or clear has run, and Refused for a non-finite placement. The browser remains pending until that reply and never projects an unaccepted waypoint."
+        - "The bounded Full3D consumer resolves a source reference only through the actual current permitted charted Picture, copies its offered XYZ into the existing waypoint and retains the original owner, selection clock and generation. It ignores caller coordinates for that reference. Chart withdrawal does not convert this legitimate fixed point into live tracking or refresh its clock. Capital planar anchoring remains unchanged; ordinary shared Helm and its paid vertical axis consume the existing cleared course."
     architecture:
       kind: control-handler
       authority: authoritative
@@ -30,7 +31,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Navigation Waypoint State
-      summary: "Per-ship current waypoint: a fixed X/Z position or an entity UUID whose live position is followed until that entity despawns. Snapshot format 14 carries the stable UUID/scalar projection and exact monotonic generation, including a present default component."
+      summary: "Per-ship current waypoint: free X/Z, live entity-anchored, or an original charted XYZ course on actual Full3D equipment. The retained charted value belongs to this same owner, preserves original identity/selection clock/generation and is folded separately when present; snapshot format 87 validates canonical and held-publication correspondence before writes."
     architecture:
       classification: authoritative
       owner: navigation-waypoint-controller
@@ -41,8 +42,8 @@ entities:
       replicas: [ship-system-blackboards-state]
     implementation:
       status: declared
-      paths: [crates/phoenix-simulation/src/console/navigation/mod.rs, crates/phoenix-model/src/messages.rs]
-      symbols: [NavigationWaypoint, WaypointMode]
+      paths: [crates/phoenix-simulation/src/console/navigation/mod.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-model/src/navigation_point.rs, crates/phoenix-simulation/src/snapshot/navigation_charted.rs, crates/phoenix-simulation/src/sim_digest.rs]
+      symbols: [NavigationWaypoint, WaypointMode, ChartedNavigationCourse]
 
       tests: [crates/phoenix-model/src/messages_view_mode_tests.rs]
   - state: navigation-clearance-issue-state

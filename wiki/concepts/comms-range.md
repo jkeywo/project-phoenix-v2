@@ -3,7 +3,7 @@ title: Comms Range
 type: concept
 tags: [comms, range, hail, authority, contacts]
 sources: [crates/phoenix-simulation/src/comms/request_returns.rs, crates/phoenix-simulation/src/comms/requests.rs, crates/phoenix-simulation/src/snapshot/comms_requests.rs, crates/phoenix-model/src/comms_channel.rs, crates/phoenix-simulation/src/comms/radio.rs, crates/phoenix-sim-gameplay/src/entities/config/comms.rs, crates/phoenix-model/src/comms_history.rs, crates/phoenix-simulation/src/comms/mod.rs, crates/phoenix-simulation/src/comms/range.rs, crates/phoenix-simulation/src/comms/component.rs, crates/phoenix-simulation/src/comms/roster.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs, gui/comms-state.js, assets/entities/alliance_destroyer.toml]
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # Comms Range
@@ -35,6 +35,15 @@ identity and tick. Both remain in the existing recipient-scoped inbox. The
 source's next message identity is independent of conditional receiver count.
 Model `comms_channel::validate_transmissions` preflights the entire saved inbox
 before restore writes, and `sim_digest.rs` folds transmission metadata.
+
+Equipped non-roster actors build their own contact rows in
+`comms/radio_contacts.rs` from the same current paid endpoint pass. Only actual
+public Hailable equipment with a compatible unkeyed route is discovered. Loss
+of either endpoint's payment, operation or physical path withdraws that row.
+The regular Comms publisher preserves these own measurements under the actual
+Radio System identity; it still withholds crew-only legacy plot and objectives.
+An NPC's planned request therefore requires an independently permitted recipient
+before its ordinary controller can send through the normal paid radio service.
 
 Structured requests and returned outcomes use the same radio and inbox. Original
 requests are deliberate one-shot transmissions. A local returned Outcome pays

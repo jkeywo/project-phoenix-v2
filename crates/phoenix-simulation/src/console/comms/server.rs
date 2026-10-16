@@ -112,7 +112,6 @@ pub(crate) fn publish_comms_blackboard(
     base: Option<Res<crate::world::config::WorldConfig>>,
     tick: Option<Res<crate::sim_tick::SimTick>>,
 ) {
-    let key = crate::ship::system_registry::comms_system_id();
     for (
         is_local,
         slot,
@@ -130,7 +129,17 @@ pub(crate) fn publish_comms_blackboard(
         config,
     ) in &mut ships
     {
+        let key = radio.map_or_else(crate::ship::system_registry::comms_system_id, |radio| {
+            radio.0.system.clone()
+        });
         let mut bb = CommsBlackboard::default();
+        if !is_local && slot.is_none() && radio.is_some() {
+            // Same actor's current paid public endpoint measurement, not the
+            // LocalShip roster/range projection or crew-only plot context.
+            if let Some(SystemBlackboard::Comms(previous)) = boards.0.get(&key) {
+                bb.contacts = previous.contacts.clone();
+            }
+        }
         if let Some(config) = config {
             let permitted = config.0.observations_for_system(&key, &boards.0);
             let mut stored = std::collections::BTreeMap::new();

@@ -33,3 +33,19 @@ proof. Keep its finite-work, no early disclosure, non-participation, fresh
 JSON360/digest and malformed no-write assertions. Assert genuine InProgress and
 actual GameStart actors; use diagnostic reads, never forced state/spawns or
 private recipient injection. No epochs, transport or new saved schema is needed.
+
+## Implementation evidence
+
+The radio endpoint pass now writes these rows into its actual System's existing
+Comms publication, and the regular publisher preserves them for equipped
+non-roster actors. Targeted owner tests cover public opt-in, own near/far reach,
+either endpoint's reserve loss, incompatible public channel and disabled
+equipment. A seen-to-unfunded regression exercises withdrawal through both
+publication phases. Crew-only narrative and objectives remain withheld. The
+capture host proof additionally asserts genuine InProgress and real GameStart
+actors without changing its paid emission, work or continuation bounds.
+
+Independent read-only source review passed after correcting the mutable
+blackboard borrow at planned-request validation. Formatting and diff whitespace
+checks passed. Native owner tests and the actual capture host proof await the
+integrator; this is not a playable-exit or runtime-test claim.

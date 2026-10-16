@@ -54,7 +54,7 @@ pub(crate) type Sources<'w, 's> = Query<
         &'static ShipSystemControlSources,
         &'static AdmittedCommands,
         &'static mut ShipPowerSystem,
-        &'static crate::server_app::ShipSystemBlackboards,
+        &'static mut crate::server_app::ShipSystemBlackboards,
         (
             Option<&'static ShipDamage>,
             Option<&'static EntitySystemHull>,
@@ -171,6 +171,7 @@ pub(crate) fn tick_radio(
     base: Option<Res<crate::world::config::WorldConfig>>,
     intents: Query<&super::media_control::ShipCommsMediaIntent>,
     mut media: Option<ResMut<super::media_control::PaidMediaCarriers>>,
+    hailable: Query<&crate::comms::CommsHailable>,
 ) {
     super::capture::refuse_unsupported(&capture_commands, outbox.as_deref_mut());
     let mut ordered: Vec<_> = sources
@@ -230,6 +231,7 @@ pub(crate) fn tick_radio(
             faction: faction.map(|value| value.0.to_string()),
         });
     }
+    own_contacts::publish(&endpoints, &mut sources, &hailable, &paths);
     for source in &endpoints {
         let Ok((_, _, _, _, _, config, _, commands, mut power, boards, _, _)) =
             sources.get_mut(source.entity)
@@ -291,7 +293,7 @@ pub(crate) fn tick_radio(
                 phoenix_model::comms_request::CommsRadioContent::Request { request } => {
                     super::planned::matches(
                         config,
-                        boards,
+                        &boards,
                         &source.radio.system,
                         instance,
                         audience,
@@ -484,6 +486,9 @@ pub(crate) fn tick_radio(
 
 #[path = "request_delivery.rs"]
 mod request_delivery;
+
+#[path = "radio_contacts.rs"]
+mod own_contacts;
 
 #[path = "radio_route.rs"]
 mod route;

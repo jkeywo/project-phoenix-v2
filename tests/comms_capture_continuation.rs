@@ -8,8 +8,8 @@ use phoenix_model::{
 use project_phoenix::{
     comms::{capture::ShipCommsCapture, server::CommsInboxRes},
     core::messages::{
-        AdmittedCommands, ClientMessage, SystemBlackboard, SystemControlPayload as Control,
-        SystemId,
+        AdmittedCommands, ClientMessage, GamePhase, SystemBlackboard,
+        SystemControlPayload as Control, SystemId,
     },
     entities::spawner::EntityUuid,
     headless::{build_headless_app, HeadlessArgs},
@@ -106,6 +106,21 @@ fn boot() -> (App, Entity, CommsCaptureConfig) {
     for _ in 0..10 {
         app.update();
     }
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "ordinary supported headless AI launch must enter the real mission"
+    );
+    for declared in ["emitter", "status-reporter"] {
+        let uuid = app.world().resource::<WorldContentRuntime>().name_to_uuid[declared].clone();
+        assert!(
+            app.world_mut()
+                .query::<&EntityUuid>()
+                .iter(app.world())
+                .any(|id| id.0 == uuid),
+            "actual GameStart actor {declared} must exist"
+        );
+    }
     let actor = app
         .world_mut()
         .query_filtered::<Entity, With<LocalShip>>()
@@ -167,16 +182,21 @@ fn claim(app: &mut App, actor: Entity) {
         ClientMessage::SelectStation {
             station: "comms".into(),
         },
-        ClientMessage::SetReady { ready: true },
         ClientMessage::SetStationRating {
             rating_name: rating,
         },
+        ClientMessage::SetReady { ready: true },
     ] {
         send(app, msg);
         for _ in 0..4 {
             app.update();
         }
     }
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "normal joined Comms operation must remain inside the actual mission"
+    );
 }
 fn assert_not_participating(app: &App, actor: Entity) {
     let uuid = &app.world().get::<EntityUuid>(actor).unwrap().0;

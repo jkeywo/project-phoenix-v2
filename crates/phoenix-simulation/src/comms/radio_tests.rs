@@ -101,6 +101,168 @@ fn messages(app: &App, recipient: &str) -> Vec<CommsMessage> {
 }
 
 #[test]
+fn non_roster_own_contacts_require_real_paid_public_hailable_endpoints() {
+    use crate::core::messages::CommsPriority;
+    for fault in 0..7 {
+        let (mut app, source, receiver) = fixture(if fault == 1 { 10000.0 } else { 20.0 });
+        // The sparse owner fixture represents a genuine authored public beacon.
+        // It never inserts a recipient into anyone else's contact publication.
+        if fault != 2 {
+            app.world_mut()
+                .entity_mut(receiver)
+                .insert(crate::comms::CommsHailable {
+                    display_name: Some("Public receiver".into()),
+                });
+        }
+        if fault == 3 || fault == 4 {
+            let unfunded = if fault == 3 { source } else { receiver };
+            app.world_mut()
+                .get_mut::<ShipPowerSystem>(unfunded)
+                .unwrap()
+                .0
+                .network_mut()
+                .consumers
+                .get_mut(&SystemId("comms".into()))
+                .unwrap()
+                .energy = 0.0;
+        }
+        if fault == 5 {
+            app.world_mut()
+                .get_mut::<RadioProfile>(receiver)
+                .unwrap()
+                .0
+                .channels
+                .retain(|channel| channel.key.is_some());
+        }
+        if fault == 6 {
+            app.world_mut()
+                .get_mut::<ShipSystemControlSources>(receiver)
+                .unwrap()
+                .0
+                .set_gm_disabled(SystemId("comms".into()), true);
+        }
+        // A crew-only synthetic narrative must not leak into the NPC's view.
+        app.world_mut()
+            .resource_mut::<CommsInboxRes>()
+            .0
+            .inject(CommsMessage::injected(
+                "crew-plot".into(),
+                "_self".into(),
+                "Private".into(),
+                "Crew-only narrative".into(),
+                Default::default(),
+                Vec::new(),
+                "plot".into(),
+                true,
+                CommsPriority::Routine,
+            ));
+        app.world_mut().run_system_once(tick_radio).unwrap();
+        let source_boards = app
+            .world()
+            .get::<crate::server_app::ShipSystemBlackboards>(source)
+            .unwrap();
+        let SystemBlackboard::Comms(board) = &source_boards.0[&SystemId("comms".into())] else {
+            panic!("actual own Comms");
+        };
+        assert_eq!(
+            board
+                .contacts
+                .iter()
+                .any(|contact| contact.uuid == "receiver"),
+            fault == 0,
+            "physical discovery fault {fault}"
+        );
+        assert!(board
+            .contacts
+            .iter()
+            .all(|contact| contact.uuid != "source"));
+        // Execute the real publisher: it preserves own measured contacts but
+        // retains its previous legacy plot/objective isolation for non-roster.
+        app.world_mut()
+            .run_system_once(crate::console::comms::server::publish_comms_blackboard)
+            .unwrap();
+        let source_boards = app
+            .world()
+            .get::<crate::server_app::ShipSystemBlackboards>(source)
+            .unwrap();
+        let SystemBlackboard::Comms(board) = &source_boards.0[&SystemId("comms".into())] else {
+            panic!("own published Comms");
+        };
+        assert_eq!(
+            board
+                .contacts
+                .iter()
+                .any(|contact| contact.uuid == "receiver"),
+            fault == 0
+        );
+        assert!(board.objectives.is_empty());
+        assert!(board
+            .messages
+            .iter()
+            .all(|message| message.id != "crew-plot"));
+        let config = app.world().get::<ShipConfigComponent>(source).unwrap();
+        assert!(matches!(
+            config
+                .0
+                .observations_for_system(&SystemId("comms".into()), &source_boards.0)
+                .get(&SystemId("comms".into())),
+            Some(SystemBlackboard::Comms(_))
+        ));
+    }
+}
+
+#[test]
+fn non_roster_measured_contact_withdraws_when_either_real_endpoint_loses_power() {
+    for lose_source in [false, true] {
+        let (mut app, source, receiver) = fixture(20.0);
+        app.world_mut()
+            .entity_mut(receiver)
+            .insert(crate::comms::CommsHailable {
+                display_name: Some("Public receiver".into()),
+            });
+        let has_contact = |app: &App| {
+            let boards = app
+                .world()
+                .get::<crate::server_app::ShipSystemBlackboards>(source)
+                .unwrap();
+            matches!(
+                boards.0.get(&SystemId("comms".into())),
+                Some(SystemBlackboard::Comms(board))
+                    if board.contacts.iter().any(|contact| contact.uuid == "receiver")
+            )
+        };
+        app.world_mut().run_system_once(tick_radio).unwrap();
+        app.world_mut()
+            .run_system_once(crate::console::comms::server::publish_comms_blackboard)
+            .unwrap();
+        assert!(has_contact(&app), "the actual paid endpoint was learned");
+
+        // Exercise withdrawal through both real phases, rather than merely
+        // constructing an initially empty/unsupported contact publication.
+        let unfunded = if lose_source { source } else { receiver };
+        app.world_mut()
+            .get_mut::<ShipPowerSystem>(unfunded)
+            .unwrap()
+            .0
+            .network_mut()
+            .consumers
+            .get_mut(&SystemId("comms".into()))
+            .unwrap()
+            .energy = 0.0;
+        app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+        app.world_mut().run_system_once(tick_radio).unwrap();
+        assert!(!has_contact(&app), "unpaid endpoints withdraw the contact");
+        app.world_mut()
+            .run_system_once(crate::console::comms::server::publish_comms_blackboard)
+            .unwrap();
+        assert!(
+            !has_contact(&app),
+            "the regular publisher must not resurrect the withdrawn contact"
+        );
+    }
+}
+
+#[test]
 fn actual_paid_radio_emission_has_the_same_local_fact_whether_any_receiver_hears() {
     let mut local_facts = Vec::new();
     for distance in [10.0, 10000.0] {

@@ -6519,3 +6519,4 @@ workshop.security.acquire,Workshop explicit Board effect toggle,Acquire vessel o
 workshop.security.doctrine,Workshop accepted post-acquisition palette ID,Post-acquisition hold doctrine,Post-acquisition hold doctrine,Post-acquisition hold doctrine,source
 workshop.security.save_target,Workshop target effect save button,Save target effect,Save target effect,Save target effect,source
 entity.utility_shuttle.name,Ordinary optional unarmed Full3D utility equipment,Utility Shuttle,,,
+entity.marking_beacon.name,Finite weapon-delivered sensor equipment,Marking beacon,,,

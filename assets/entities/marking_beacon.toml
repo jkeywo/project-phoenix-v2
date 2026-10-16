@@ -1,0 +1,187 @@
+# Opt-in finite marker equipment; actual accepted-loader proof accompanies this recipe.
+includes = ["battery_probe.toml"]
+name = "entity.marking_beacon.name"
+mass = 1
+
+[marking_beacon]
+sensor = "sensor-radar"
+radio = "comms"
+channel = "public"
+
+[collider]
+shape = "Ball"
+radius = 0.15
+length = 0
+movable = false
+
+[mesh]
+shape = "sphere"
+colour = [0.9, 0.65, 0.15]
+radius = 0.15
+
+[[system]]
+id = "comms"
+kind = "comms"
+console = "marker-radio"
+ai_only = true
+power_group = "probe"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+
+[[console]]
+id = "marker-radio"
+name = "entity.marking_beacon.name"
+[[console.feed]]
+source = "comms"
+kind = "Comms"
+
+[comms]
+range = 500
+[comms.radio]
+system = "comms"
+request_reading_ticks = 30
+[[comms.radio.channel]]
+id = "public"
+range = 500
+work_units = 1
+
+# Energy is an atomic profile: restate complete reactor, groups and consumers.
+[energy.reactor]
+sustainable_output_per_sec = 0
+max_output_per_sec = 0
+ramp_per_sec = 7.925
+initial_output_per_sec = 0
+initial_energy = 0
+initial_heat = 0
+max_cooling_per_sec = 0
+default_cooling_per_sec = 0
+
+[energy.reactor.reserve]
+capacity = 1
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.951
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.reactor.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "sensor-radar"
+initial_energy = 12
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 12
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "comms"
+initial_energy = 24
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 1
+
+[energy.consumer.reserve]
+capacity = 24
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+
+[[energy.group]]
+id = "probe"
+max_flow_per_sec = 0
+default_flow_per_sec = 0
+max_cooling_per_sec = 0
+default_cooling_per_sec = 0
+priority = 15
+restore_delay_secs = 0.5
+
+
+# Interior is also atomic: preserve the full actual damage/layout owner.
+[interior]
+team_homes = []
+
+[[interior.deck]]
+id = "probe"
+label = "entity.battery_probe.room"
+damage_weight = 1
+
+[[interior.compartment]]
+id = "probe-core"
+deck = "probe"
+label = "entity.battery_probe.room"
+x = -0.5
+z = -0.5
+width = 1
+depth = 1
+material = "bulkhead"
+max_hp = 12
+recovery_fraction = 0.2
+structural_remedy = "structural"
+
+[interior.placements]
+sensor-radar = "probe-core"
+comms = "probe-core"

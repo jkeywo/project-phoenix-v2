@@ -30,10 +30,11 @@ fn authored() -> crate::entities::config::EntityConfig {
         .as_array_mut()
         .unwrap()
         .push(toml::from_str("source='captain'\nkind='Captain'").unwrap());
-    raw["comms"]["radio"]["traffic"] = toml::from_str(
+    let radio = raw["comms"]["radio"].as_table_mut().unwrap();
+    radio.insert("traffic".into(), toml::from_str(
         "listening={simultaneous_channels=1, priority=['public','fleet']}\nalert={source='captain', channel='public', minimum_spacing_ticks=10, routine_text='We have selected routine alert.', red_alert_text='We have selected red alert.'}"
-    ).unwrap();
-    raw["comms"]["radio"]["capture"] = toml::from_str("max_level=1\nticks_per_level=2").unwrap();
+    ).unwrap());
+    radio.insert("capture".into(), toml::from_str("max_level=1\nticks_per_level=2").unwrap());
     crate::entities::config::EntityConfig::from_toml(&toml::to_string(&raw).unwrap()).unwrap()
 }
 

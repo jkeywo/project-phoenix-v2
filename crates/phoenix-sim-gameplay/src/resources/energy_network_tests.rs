@@ -749,3 +749,277 @@ fn battery_only_work_exhausts_real_reserves_and_json_never_replenishes_them() {
         );
     }
 }
+
+#[test]
+fn compiled_definition_matches_raw_results_state_and_rng_across_changing_allocation() {
+    // Authored order intentionally disagrees with identity order at every level.
+    let (mut cfg, ship, bindings, _) = fixture(vec![
+        group("z-root", None, 28.0, 1),
+        group("z-child", Some("z-root"), 12.0, 1),
+        group("a-root", None, 8.0, 0),
+        group("a-child", Some("z-root"), 8.0, 0),
+        group("grandchild", Some("z-child"), 6.0, 0),
+    ]);
+    cfg.reactor.reserve.charge_heat_per_unit = 0.05;
+    for consumer in &mut cfg.consumers {
+        consumer.initial_energy = 13.0;
+        consumer.initial_heat = 8.0;
+        consumer.reserve.charge_heat_per_unit = 0.2;
+        consumer.reserve.trip_heat = 20.0;
+        consumer.reserve.recover_heat = 4.0;
+    }
+    let mut raw = EnergyNetworkState::new(&cfg, &ship).unwrap();
+    let mut definition =
+        CompiledEnergyDefinition::compile(cfg.clone(), ship.clone(), &raw).unwrap();
+    let mut indexed = raw.clone();
+    let mut raw_trace = Vec::new();
+    let mut indexed_trace = Vec::new();
+    let mut saw_cut = false;
+    let mut saw_restore = false;
+    let mut saw_delivery = false;
+    for step in 0..240 {
+        let output = if step % 80 < 20 { 4.0 } else { 40.0 };
+        let mode = if step % 80 < 60 {
+            EnergyAllocationMode::Manual
+        } else {
+            EnergyAllocationMode::Minimal
+        };
+        for state in [&mut raw, &mut indexed] {
+            state.set_output(&cfg, output).unwrap();
+            state.mode = mode;
+            state.cooling_usage = if step % 2 == 0 {
+                CoolingUsage::Low
+            } else {
+                CoolingUsage::High
+            };
+            state
+                .set_priority(&cfg.groups[0].id, (step % 3) as u16)
+                .unwrap();
+            let fine = if step % 5 == 0 { Some(1.25) } else { None };
+            state
+                .set_fine_flow(&cfg, &ship, &cfg.consumers[1].system, fine)
+                .unwrap();
+            for consumer in &cfg.consumers {
+                state.spend_continuous(&cfg, &consumer.system, 0.7).unwrap();
+            }
+        }
+        let effects = EnergyHardwareEffects {
+            reactor_operation: if step % 37 == 0 { 0.0 } else { 1.0 },
+            consumers: BTreeMap::from([(
+                cfg.consumers[2].system.clone(),
+                EnergyLinkEffects {
+                    intake: 0.25,
+                    cooling: 0.5,
+                },
+            )]),
+            ..Default::default()
+        };
+        let dt = if step % 19 == 0 {
+            0.0
+        } else if step % 3 == 0 {
+            0.25
+        } else {
+            0.125
+        };
+        let coolant = BTreeMap::from([("coolant".into(), if step % 4 == 0 { 0.0 } else { 0.03 })]);
+        let raw_result = raw
+            .tick_with_effects(&cfg, &ship, dt, &bindings, &coolant, &effects, &mut |len| {
+                let selected = (raw_trace.len() * 7 + 1) % len;
+                raw_trace.push((len, selected));
+                selected
+            })
+            .unwrap();
+        // Match the Power owner's sole outer transaction, not an unchecked
+        // public entrypoint: the candidate is committed only after success.
+        let mut candidate = indexed.clone();
+        let indexed_result = candidate
+            .tick_with_definition_in_place(
+                &definition,
+                dt,
+                &bindings,
+                &coolant,
+                &effects,
+                &mut |len| {
+                    let selected = (indexed_trace.len() * 7 + 1) % len;
+                    indexed_trace.push((len, selected));
+                    selected
+                },
+            )
+            .unwrap();
+        indexed = candidate;
+        assert_eq!(raw_result, indexed_result, "result at step {step}");
+        assert_eq!(raw, indexed, "state at step {step}");
+        assert_eq!(raw_trace, indexed_trace, "RNG at step {step}");
+        saw_cut |= !raw_result.cut_groups.is_empty();
+        saw_restore |= !raw_result.restored_groups.is_empty();
+        saw_delivery |= raw_result.delivered_energy > 0.0;
+        // An independently reconstructed definition and JSON state must resume
+        // the same historical allocations, never seed fresh physical reserves.
+        if step == 120 {
+            indexed = serde_json::from_str(&serde_json::to_string(&indexed).unwrap()).unwrap();
+            definition =
+                CompiledEnergyDefinition::compile(cfg.clone(), ship.clone(), &indexed).unwrap();
+            assert_eq!(raw, indexed);
+        }
+    }
+    assert!(saw_cut && saw_restore && saw_delivery);
+    assert!(!raw_trace.is_empty());
+}
+
+#[test]
+fn indexed_lookup_preserves_first_system_priority_and_any_system_routing() {
+    let (cfg, mut ship, bindings, coolant) =
+        fixture(vec![group("z", None, 8.0, 1), group("a", None, 4.0, 0)]);
+    let mut duplicate = ship.systems[0].clone();
+    duplicate.power_group = Some(cfg.groups[1].id.clone());
+    ship.systems.push(duplicate);
+    let mut raw = EnergyNetworkState::new(&cfg, &ship).unwrap();
+    let definition = CompiledEnergyDefinition::compile(cfg.clone(), ship.clone(), &raw).unwrap();
+    let mut indexed = raw.clone();
+    for _ in 0..8 {
+        let result = raw
+            .tick(&cfg, &ship, 0.125, &bindings, &coolant, &mut |_| 0)
+            .unwrap();
+        let actual = indexed
+            .tick_with_definition_in_place(
+                &definition,
+                0.125,
+                &bindings,
+                &coolant,
+                &EnergyHardwareEffects::default(),
+                &mut |_| 0,
+            )
+            .unwrap();
+        assert_eq!(result, actual);
+        assert_eq!(raw, indexed);
+    }
+}
+
+#[test]
+fn indexed_state_validation_retains_every_mutable_network_constraint() {
+    let (cfg, ship, _, _) = fixture(vec![
+        group("root", None, 10.0, 0),
+        group("child", Some("root"), 6.0, 0),
+    ]);
+    let state = EnergyNetworkState::new(&cfg, &ship).unwrap();
+    let definition = CompiledEnergyDefinition::compile(cfg.clone(), ship.clone(), &state).unwrap();
+    let mut cases = Vec::new();
+    macro_rules! invalid {
+        ($change:expr) => {{
+            let mut bad = state.clone();
+            ($change)(&mut bad);
+            cases.push(bad);
+        }};
+    }
+    invalid!(|bad: &mut EnergyNetworkState| {
+        bad.groups.remove(&cfg.groups[0].id);
+    });
+    invalid!(|bad: &mut EnergyNetworkState| {
+        bad.groups.insert(
+            PowerGroupId("extra".into()),
+            bad.groups[&cfg.groups[0].id].clone(),
+        );
+    });
+    invalid!(|bad: &mut EnergyNetworkState| {
+        bad.consumers.remove(&cfg.consumers[0].system);
+    });
+    invalid!(|bad: &mut EnergyNetworkState| {
+        bad.consumers
+            .insert(SystemId("extra".into()), EnergyState::default());
+    });
+    invalid!(|bad: &mut EnergyNetworkState| {
+        bad.output_target_per_sec = f32::NAN;
+    });
+    invalid!(|bad: &mut EnergyNetworkState| {
+        bad.output_actual_per_sec = f32::INFINITY;
+    });
+    invalid!(|bad: &mut EnergyNetworkState| {
+        bad.reactor_cooling_per_sec = -1.0;
+    });
+    invalid!(|bad: &mut EnergyNetworkState| {
+        bad.reactor.thermal_stopped = true;
+    });
+    invalid!(|bad: &mut EnergyNetworkState| {
+        bad.reactor.energy = cfg.reactor.reserve.capacity + 1.0;
+    });
+    invalid!(|bad: &mut EnergyNetworkState| {
+        bad.reactor.heat = f32::INFINITY;
+    });
+    invalid!(|bad: &mut EnergyNetworkState| {
+        bad.consumers
+            .get_mut(&cfg.consumers[0].system)
+            .unwrap()
+            .heat = cfg.consumers[0].reserve.trip_heat;
+    });
+    invalid!(|bad: &mut EnergyNetworkState| {
+        bad.fine_flows.insert(SystemId("absent".into()), 1.0);
+    });
+    invalid!(|bad: &mut EnergyNetworkState| {
+        bad.fine_flows.insert(cfg.consumers[0].system.clone(), 41.0);
+    });
+    for field in 0..8 {
+        invalid!(|bad: &mut EnergyNetworkState| {
+            let group = bad.groups.get_mut(&cfg.groups[1].id).unwrap();
+            match field {
+                0 => group.desired_flow_per_sec = 41.0,
+                1 => group.effective_flow_per_sec = 41.0,
+                2 => group.desired_cooling_per_sec = 11.0,
+                3 => group.effective_cooling_per_sec = 11.0,
+                4 => group.restore_ready_secs = 1.0,
+                5 => {
+                    group.cut = true;
+                    group.effective_flow_per_sec = 1.0;
+                }
+                6 => group.effective_flow_per_sec = 1.0, // exceeds parent's actual allocation
+                _ => group.effective_cooling_per_sec = 1.0,
+            }
+        });
+    }
+    for (index, bad) in cases.iter().enumerate() {
+        assert!(
+            bad.validate_against(&cfg, &ship).is_err(),
+            "raw case {index}"
+        );
+        assert_eq!(
+            bad.validate_against(&cfg, &ship),
+            definition.validate_state(bad),
+            "indexed case {index}"
+        );
+    }
+    assert_eq!(
+        state.validate_against(&cfg, &ship),
+        definition.validate_state(&state)
+    );
+}
+
+#[test]
+fn malformed_raw_definitions_cannot_enter_a_compiled_power_definition_or_mutate_network() {
+    let (cfg, ship, bindings, coolant) = fixture(vec![
+        group("root", None, 10.0, 0),
+        group("child", Some("root"), 6.0, 0),
+    ]);
+    let state = EnergyNetworkState::new(&cfg, &ship).unwrap();
+    for case in 0..7 {
+        let mut invalid = cfg.clone();
+        match case {
+            0 => invalid.groups[0].parent = Some(invalid.groups[1].id.clone()),
+            1 => invalid.groups[1].parent = Some(PowerGroupId("absent".into())),
+            2 => invalid.groups.push(invalid.groups[0].clone()),
+            3 => invalid.consumers.push(invalid.consumers[0].clone()),
+            4 => invalid.consumers[0].continuous_cost_per_sec = f32::NAN,
+            5 => invalid.consumers[0].reserve.capacity = -1.0,
+            _ => invalid.reactor.ramp_per_sec = 0.0,
+        }
+        assert!(CompiledEnergyDefinition::compile(invalid.clone(), ship.clone(), &state).is_err());
+        let mut actual = state.clone();
+        let mut draws = 0;
+        assert!(actual
+            .tick(&invalid, &ship, 0.125, &bindings, &coolant, &mut |_| {
+                draws += 1;
+                0
+            })
+            .is_err());
+        assert_eq!(actual, state);
+        assert_eq!(draws, 0);
+    }
+}

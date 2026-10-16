@@ -533,3 +533,63 @@ fn recovered_charge_shares_the_damaged_intake_budget_with_actual_prior_delivery(
         .is_err());
     assert_eq!(power.capture_continuation(), before);
 }
+
+#[test]
+fn compiled_definition_is_replaced_by_refit_and_rederived_before_saved_work_resumes() {
+    let mut power = PowerSystem::default();
+    tick(&mut power, 10);
+    let before = power.capture_continuation();
+    let previous = power.clone();
+    assert!(std::sync::Arc::ptr_eq(
+        &power.definition,
+        &previous.definition
+    ));
+    let mut hardware = power.config().clone();
+    hardware.reactor.sustainable_output_per_sec *= 0.5;
+    hardware.reactor.reserve.charge_heat_per_unit += 0.1;
+    for consumer in &mut hardware.consumers {
+        consumer.continuous_cost_per_sec *= 0.5;
+    }
+    power.reconfigure_energy(hardware.clone()).unwrap();
+    assert!(!std::sync::Arc::ptr_eq(
+        &power.definition,
+        &previous.definition
+    ));
+    assert_ne!(power.config(), previous.config());
+    assert_eq!(power.capture_continuation(), before);
+    let saved: PowerState = serde_json::from_str(&serde_json::to_string(&before).unwrap()).unwrap();
+    let mut fresh = PowerSystem::from_energy(hardware, power.ship_config().clone()).unwrap();
+    assert!(!std::sync::Arc::ptr_eq(
+        &power.definition,
+        &fresh.definition
+    ));
+    fresh.restore_continuation(&saved).unwrap();
+    for step in 0..60 {
+        assert_eq!(tick(&mut power, 10), tick(&mut fresh, 10), "result {step}");
+        assert_eq!(
+            power.capture_continuation(),
+            fresh.capture_continuation(),
+            "state {step}"
+        );
+    }
+    let original = power.clone();
+    let removed = power.config().consumers[0].system.clone();
+    power.network_mut().consumers.remove(&removed);
+    let malformed = power.clone();
+    assert!(power
+        .tick_energy(
+            0.125,
+            &bindings(&power),
+            &BTreeMap::from([("fixture-coolant".into(), 10)]),
+            &mut |_| 0
+        )
+        .is_err());
+    assert_eq!(
+        power, malformed,
+        "public Power transaction must retain mutable-key refusal"
+    );
+    assert_ne!(
+        power.capture_continuation(),
+        original.capture_continuation()
+    );
+}

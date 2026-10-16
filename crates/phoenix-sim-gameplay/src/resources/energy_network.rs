@@ -8,7 +8,12 @@ use crate::core::messages::{PowerGroupId, SystemId};
 use crate::entities::config::{EnergyConfigSection, EnergyConsumerConfig};
 use crate::ship::config::ShipConfig;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
+
+#[path = "energy_topology.rs"]
+mod topology;
+pub(crate) use topology::CompiledEnergyDefinition;
 
 pub use phoenix_model::energy::{CoolingUsage, EnergyAllocationMode};
 
@@ -80,7 +85,11 @@ impl Default for EnergyHardwareEffects {
     }
 }
 impl EnergyHardwareEffects {
-    fn validate(&self, config: &EnergyConfigSection) -> Result<(), String> {
+    fn validate(
+        &self,
+        config: &EnergyConfigSection,
+        definition: Option<&CompiledEnergyDefinition>,
+    ) -> Result<(), String> {
         for value in std::iter::once(self.reactor_operation)
             .chain([self.reactor.intake, self.reactor.cooling])
             .chain(
@@ -92,10 +101,15 @@ impl EnergyHardwareEffects {
             bounded("hardware effectiveness", value, 1.0)?;
         }
         if self.consumers.keys().any(|id| {
-            !config
-                .consumers
-                .iter()
-                .any(|consumer| &consumer.system == id)
+            definition.map_or_else(
+                || {
+                    !config
+                        .consumers
+                        .iter()
+                        .any(|consumer| &consumer.system == id)
+                },
+                |definition| !definition.consumer_indices.contains_key(id),
+            )
         }) {
             return Err("hardware effects name an uninstalled energy consumer".into());
         }
@@ -524,8 +538,50 @@ impl EnergyNetworkState {
         effects: &EnergyHardwareEffects,
         choose: &mut impl FnMut(usize) -> usize,
     ) -> Result<EnergyNetworkResult, String> {
-        effects.validate(config)?;
-        self.validate_against(config, ship)?;
+        self.tick_inner(config, ship, None, dt, bindings, coolant, effects, choose)
+    }
+
+    /// Only Power can retain an immutable definition; the supplied definition
+    /// itself owns the exact config/ship used for every index in this call.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn tick_with_definition_in_place(
+        &mut self,
+        definition: &CompiledEnergyDefinition,
+        dt: f32,
+        bindings: &EnergyCoolantBindings,
+        coolant: &BTreeMap<String, f32>,
+        effects: &EnergyHardwareEffects,
+        choose: &mut impl FnMut(usize) -> usize,
+    ) -> Result<EnergyNetworkResult, String> {
+        self.tick_inner(
+            definition.config(),
+            definition.ship(),
+            Some(definition),
+            dt,
+            bindings,
+            coolant,
+            effects,
+            choose,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn tick_inner(
+        &mut self,
+        config: &EnergyConfigSection,
+        ship: &ShipConfig,
+        definition: Option<&CompiledEnergyDefinition>,
+        dt: f32,
+        bindings: &EnergyCoolantBindings,
+        coolant: &BTreeMap<String, f32>,
+        effects: &EnergyHardwareEffects,
+        choose: &mut impl FnMut(usize) -> usize,
+    ) -> Result<EnergyNetworkResult, String> {
+        effects.validate(config, definition)?;
+        match definition {
+            Some(definition) => definition.validate_state(self)?,
+            None => self.validate_against(config, ship)?,
+        }
         nonnegative("dt", dt)?;
         if bindings.reactor.trim().is_empty()
             || bindings.consumers.keys().ne(self.consumers.keys())
@@ -593,11 +649,18 @@ impl EnergyNetworkState {
                 (supply_preview.energy as f64 / dt as f64).min(self.output_actual_per_sec as f64),
             )
         };
-        self.route_groups(config, available_rate, dt, choose, &mut result)?;
+        self.route_groups(config, definition, available_rate, dt, choose, &mut result)?;
         let mut routed = BTreeMap::new();
         let mut cooling_rates = BTreeMap::new();
         for group in config.groups.iter().filter(|group| group.parent.is_none()) {
-            self.route_consumers(config, ship, &group.id, &mut routed, &mut cooling_rates)?;
+            self.route_consumers(
+                config,
+                ship,
+                definition,
+                &group.id,
+                &mut routed,
+                &mut cooling_rates,
+            )?;
         }
         let mut remaining_coolant: BTreeMap<_, _> = coolant
             .iter()
@@ -612,7 +675,7 @@ impl EnergyNetworkState {
             .iter()
             .map(|consumer| {
                 (
-                    consumer_priority(config, ship, &self.groups, consumer),
+                    consumer_priority(config, ship, definition, &self.groups, consumer),
                     consumer,
                 )
             })
@@ -710,48 +773,63 @@ impl EnergyNetworkState {
         if self.reactor.thermal_stopped {
             self.output_actual_per_sec = 0.0;
         }
-        self.validate_against(config, ship)?;
+        match definition {
+            Some(definition) => definition.validate_state(self)?,
+            None => self.validate_against(config, ship)?,
+        }
         Ok(result)
     }
 
     fn route_groups(
         &mut self,
         config: &EnergyConfigSection,
+        definition: Option<&CompiledEnergyDefinition>,
         available_rate: f32,
         dt: f32,
         choose: &mut impl FnMut(usize) -> usize,
         result: &mut EnergyNetworkResult,
     ) -> Result<(), String> {
-        let roots: Vec<_> = config
-            .groups
-            .iter()
-            .filter(|group| group.parent.is_none())
-            .map(|group| group.id.clone())
-            .collect();
-        self.route_siblings(config, &roots, available_rate, dt, choose, result)?;
-        for root in roots {
-            self.route_children(config, &root, dt, choose, result)?;
+        let roots = definition.map_or_else(
+            || {
+                Cow::Owned(
+                    config
+                        .groups
+                        .iter()
+                        .filter(|group| group.parent.is_none())
+                        .map(|group| group.id.clone())
+                        .collect(),
+                )
+            },
+            |definition| Cow::Borrowed(definition.roots.as_slice()),
+        );
+        self.route_siblings(
+            config,
+            definition,
+            &roots,
+            available_rate,
+            dt,
+            choose,
+            result,
+        )?;
+        for root in roots.iter() {
+            self.route_children(config, definition, root, dt, choose, result)?;
         }
         Ok(())
     }
     fn route_children(
         &mut self,
         config: &EnergyConfigSection,
+        definition: Option<&CompiledEnergyDefinition>,
         parent: &PowerGroupId,
         dt: f32,
         choose: &mut impl FnMut(usize) -> usize,
         result: &mut EnergyNetworkResult,
     ) -> Result<(), String> {
-        let children: Vec<_> = config
-            .groups
-            .iter()
-            .filter(|group| group.parent.as_ref() == Some(parent))
-            .map(|group| group.id.clone())
-            .collect();
+        let children = child_ids(config, parent, definition);
         let available = self.groups[parent].effective_flow_per_sec;
-        self.route_siblings(config, &children, available, dt, choose, result)?;
+        self.route_siblings(config, definition, &children, available, dt, choose, result)?;
         let mut cooling_left = self.groups[parent].effective_cooling_per_sec as f64;
-        let mut ordered = children.clone();
+        let mut ordered = children.to_vec();
         ordered.sort_by(|a, b| {
             self.groups[a]
                 .priority
@@ -764,14 +842,16 @@ impl EnergyNetworkState {
                 budget((state.effective_cooling_per_sec as f64).min(cooling_left));
             cooling_left -= state.effective_cooling_per_sec as f64;
         }
-        for child in children {
-            self.route_children(config, &child, dt, choose, result)?;
+        for child in children.iter() {
+            self.route_children(config, definition, child, dt, choose, result)?;
         }
         Ok(())
     }
+    #[allow(clippy::too_many_arguments)]
     fn route_siblings(
         &mut self,
         config: &EnergyConfigSection,
+        definition: Option<&CompiledEnergyDefinition>,
         ids: &[PowerGroupId],
         available: f32,
         dt: f32,
@@ -824,12 +904,7 @@ impl EnergyNetworkState {
             for id in ids {
                 let state = self.groups.get_mut(id).expect("validated group");
                 if state.cut {
-                    let delay = config
-                        .groups
-                        .iter()
-                        .find(|group| &group.id == id)
-                        .expect("validated group")
-                        .restore_delay_secs;
+                    let delay = group_definition(config, id, definition).restore_delay_secs;
                     state.restore_ready_secs = if served + requested(state) <= available as f64 {
                         (state.restore_ready_secs as f64 + dt as f64).min(delay as f64) as f32
                     } else {
@@ -842,12 +917,7 @@ impl EnergyNetworkState {
                     .iter()
                     .filter(|id| {
                         let state = &self.groups[*id];
-                        let delay = config
-                            .groups
-                            .iter()
-                            .find(|group| &group.id == *id)
-                            .expect("validated group")
-                            .restore_delay_secs;
+                        let delay = group_definition(config, id, definition).restore_delay_secs;
                         state.cut
                             && state.restore_ready_secs >= delay
                             && served + requested(state) <= available as f64
@@ -878,11 +948,7 @@ impl EnergyNetworkState {
             }
         }
         for id in ids {
-            let group = config
-                .groups
-                .iter()
-                .find(|group| &group.id == id)
-                .expect("validated group");
+            let group = group_definition(config, id, definition);
             let state = self.groups.get_mut(id).expect("validated group");
             state.effective_cooling_per_sec = match self.mode {
                 EnergyAllocationMode::Manual => state.desired_cooling_per_sec,
@@ -900,37 +966,42 @@ impl EnergyNetworkState {
         &self,
         config: &EnergyConfigSection,
         ship: &ShipConfig,
+        definition: Option<&CompiledEnergyDefinition>,
         group: &PowerGroupId,
         flows: &mut BTreeMap<SystemId, f32>,
         cooling: &mut BTreeMap<SystemId, f32>,
     ) -> Result<(), String> {
-        let children: Vec<_> = config
-            .groups
-            .iter()
-            .filter(|candidate| candidate.parent.as_ref() == Some(group))
-            .collect();
+        let children = child_ids(config, group, definition);
         let mut flow_left = (self.groups[group].effective_flow_per_sec as f64
             - children
                 .iter()
-                .map(|child| self.groups[&child.id].effective_flow_per_sec as f64)
+                .map(|child| self.groups[child].effective_flow_per_sec as f64)
                 .sum::<f64>())
         .max(0.0);
         let mut cooling_left = (self.groups[group].effective_cooling_per_sec as f64
             - children
                 .iter()
-                .map(|child| self.groups[&child.id].effective_cooling_per_sec as f64)
+                .map(|child| self.groups[child].effective_cooling_per_sec as f64)
                 .sum::<f64>())
         .max(0.0);
-        let mut consumers: Vec<_> = config
-            .consumers
-            .iter()
-            .filter(|consumer| {
-                ship.systems.iter().any(|system| {
-                    system.id == consumer.system && system.power_group.as_ref() == Some(group)
+        let consumers: Vec<_> = if let Some(definition) = definition {
+            definition.group_consumers[definition.group_indices[group]]
+                .iter()
+                .map(|index| &config.consumers[*index])
+                .collect()
+        } else {
+            let mut consumers: Vec<_> = config
+                .consumers
+                .iter()
+                .filter(|consumer| {
+                    ship.systems.iter().any(|system| {
+                        system.id == consumer.system && system.power_group.as_ref() == Some(group)
+                    })
                 })
-            })
-            .collect();
-        consumers.sort_by(|a, b| a.system.cmp(&b.system));
+                .collect();
+            consumers.sort_by(|a, b| a.system.cmp(&b.system));
+            consumers
+        };
         // Explicit fine requests reserve first; unavailable acceptance is not
         // reassigned after routing. Coarse adaptive weights reflect stored
         // reserve deficit and authored supported operating demand.
@@ -990,10 +1061,47 @@ impl EnergyNetworkState {
             cooling.insert(consumer.system.clone(), grant);
             cooling_left -= grant as f64;
         }
-        for child in children {
-            self.route_consumers(config, ship, &child.id, flows, cooling)?;
+        for child in children.iter() {
+            self.route_consumers(config, ship, definition, child, flows, cooling)?;
         }
         Ok(())
+    }
+}
+
+fn child_ids<'a>(
+    config: &'a EnergyConfigSection,
+    parent: &PowerGroupId,
+    definition: Option<&'a CompiledEnergyDefinition>,
+) -> Cow<'a, [PowerGroupId]> {
+    definition.map_or_else(
+        || {
+            Cow::Owned(
+                config
+                    .groups
+                    .iter()
+                    .filter(|group| group.parent.as_ref() == Some(parent))
+                    .map(|group| group.id.clone())
+                    .collect(),
+            )
+        },
+        |definition| {
+            Cow::Borrowed(definition.children[definition.group_indices[parent]].as_slice())
+        },
+    )
+}
+
+fn group_definition<'a>(
+    config: &'a EnergyConfigSection,
+    id: &PowerGroupId,
+    definition: Option<&CompiledEnergyDefinition>,
+) -> &'a crate::entities::config::EnergyGroupConfig {
+    match definition {
+        Some(definition) => &config.groups[definition.group_indices[id]],
+        None => config
+            .groups
+            .iter()
+            .find(|group| &group.id == id)
+            .expect("validated group"),
     }
 }
 
@@ -1004,9 +1112,19 @@ impl EnergyNetworkState {
 fn consumer_priority<'a>(
     config: &'a EnergyConfigSection,
     ship: &ShipConfig,
+    definition: Option<&'a CompiledEnergyDefinition>,
     groups: &BTreeMap<PowerGroupId, EnergyGroupState>,
     consumer: &EnergyConsumerConfig,
 ) -> Vec<(u16, &'a PowerGroupId)> {
+    if let Some(definition) = definition {
+        return definition.consumer_paths[definition.consumer_indices[&consumer.system]]
+            .iter()
+            .map(|index| {
+                let id = &config.groups[*index].id;
+                (groups[id].priority, id)
+            })
+            .collect();
+    }
     let mut current = ship
         .systems
         .iter()

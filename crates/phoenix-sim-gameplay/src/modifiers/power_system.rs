@@ -9,8 +9,8 @@ use crate::entities::config::{
 };
 use crate::resources::energy::EnergyConfig;
 use crate::resources::energy_network::{
-    CoolingUsage, EnergyAllocationMode, EnergyCoolantBindings, EnergyNetworkResult,
-    EnergyNetworkState,
+    CompiledEnergyDefinition, CoolingUsage, EnergyAllocationMode, EnergyCoolantBindings,
+    EnergyNetworkResult, EnergyNetworkState,
 };
 use crate::resources::service::{ResourceEndpoint, ResourceLink};
 use crate::ship::config::{PowerGroupConfig, ShipConfig, SystemInstanceConfig};
@@ -140,8 +140,7 @@ impl PowerConfig {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PowerSystem {
-    hardware: std::sync::Arc<EnergyConfigSection>,
-    ship: std::sync::Arc<ShipConfig>,
+    definition: std::sync::Arc<CompiledEnergyDefinition>,
     network: EnergyNetworkState,
     coolant_credit: BTreeMap<String, f64>,
     weapons_restrained: bool,
@@ -176,8 +175,9 @@ impl PowerSystem {
             .map(|id| (id.clone(), 0.0))
             .collect();
         Ok(Self {
-            hardware: std::sync::Arc::new(hardware),
-            ship: std::sync::Arc::new(ship),
+            definition: std::sync::Arc::new(CompiledEnergyDefinition::compile(
+                hardware, ship, &network,
+            )?),
             network,
             coolant_credit: BTreeMap::new(),
             weapons_restrained: false,
@@ -190,7 +190,7 @@ impl PowerSystem {
         })
     }
     pub fn config(&self) -> &EnergyConfigSection {
-        &self.hardware
+        self.definition.config()
     }
     /// Replace supported hardware tuning without re-seeding any physical state.
     /// Slot topology, buffers and service links belong to the hull. Fitting can
@@ -215,23 +215,33 @@ impl PowerSystem {
             return Err("refit operating coefficients must be finite and physically valid".into());
         }
         let mut fixed = hardware.clone();
-        fixed.reactor.sustainable_output_per_sec = self.hardware.reactor.sustainable_output_per_sec;
-        fixed.reactor.max_output_per_sec = self.hardware.reactor.max_output_per_sec;
-        fixed.reactor.ramp_per_sec = self.hardware.reactor.ramp_per_sec;
-        fixed.reactor.reserve.charge_heat_per_unit =
-            self.hardware.reactor.reserve.charge_heat_per_unit;
-        fixed.reactor.reserve.discharge_heat_per_unit =
-            self.hardware.reactor.reserve.discharge_heat_per_unit;
+        fixed.reactor.sustainable_output_per_sec =
+            self.definition.config().reactor.sustainable_output_per_sec;
+        fixed.reactor.max_output_per_sec = self.definition.config().reactor.max_output_per_sec;
+        fixed.reactor.ramp_per_sec = self.definition.config().reactor.ramp_per_sec;
+        fixed.reactor.reserve.charge_heat_per_unit = self
+            .definition
+            .config()
+            .reactor
+            .reserve
+            .charge_heat_per_unit;
+        fixed.reactor.reserve.discharge_heat_per_unit = self
+            .definition
+            .config()
+            .reactor
+            .reserve
+            .discharge_heat_per_unit;
         for consumer in &mut fixed.consumers {
             let old = self
-                .hardware
+                .definition
+                .config()
                 .consumers
                 .iter()
                 .find(|old| old.system == consumer.system)
                 .ok_or("refit cannot add an energy consumer")?;
             consumer.continuous_cost_per_sec = old.continuous_cost_per_sec;
         }
-        if &fixed != self.hardware.as_ref() {
+        if &fixed != self.definition.config() {
             return Err(
                 "refit cannot change fixed buffers, links, initial state or allocation topology"
                     .into(),
@@ -239,13 +249,17 @@ impl PowerSystem {
         }
         let saved = self.capture_continuation();
         let mut candidate = self.clone();
-        candidate.hardware = std::sync::Arc::new(hardware);
+        candidate.definition = std::sync::Arc::new(CompiledEnergyDefinition::compile(
+            hardware,
+            self.definition.ship().clone(),
+            &candidate.network,
+        )?);
         candidate.validate_saved(&saved)?;
         *self = candidate;
         Ok(())
     }
     pub fn ship_config(&self) -> &ShipConfig {
-        &self.ship
+        self.definition.ship()
     }
     pub fn network(&self) -> &EnergyNetworkState {
         &self.network
@@ -260,7 +274,7 @@ impl PowerSystem {
         self.network.reactor.energy
     }
     pub fn capacity(&self) -> f32 {
-        self.hardware.reactor.reserve.capacity
+        self.definition.config().reactor.reserve.capacity
     }
     pub fn coolant_credit(&self) -> &BTreeMap<String, f64> {
         &self.coolant_credit
@@ -278,7 +292,8 @@ impl PowerSystem {
             .get(group)
             .ok_or("unknown allocation group")?
             .desired_cooling_per_sec;
-        self.network.set_group(&self.hardware, group, flow, cooling)
+        self.network
+            .set_group(self.definition.config(), group, flow, cooling)
     }
     pub fn flow_for(&self, group: &PowerGroupId) -> Option<f32> {
         self.network
@@ -294,13 +309,15 @@ impl PowerSystem {
     }
     pub fn set_cooling(&mut self, group: &PowerGroupId, cooling: f32) -> Result<(), String> {
         let flow = self.flow_for(group).ok_or("unknown allocation group")?;
-        self.network.set_group(&self.hardware, group, flow, cooling)
+        self.network
+            .set_group(self.definition.config(), group, flow, cooling)
     }
     pub fn set_output(&mut self, output: f32) -> Result<(), String> {
-        self.network.set_output(&self.hardware, output)
+        self.network.set_output(self.definition.config(), output)
     }
     pub fn set_reactor_cooling(&mut self, cooling: f32) -> Result<(), String> {
-        self.network.set_reactor_cooling(&self.hardware, cooling)
+        self.network
+            .set_reactor_cooling(self.definition.config(), cooling)
     }
     pub fn set_priority(&mut self, group: &PowerGroupId, priority: u16) -> Result<(), String> {
         self.network.set_priority(group, priority)
@@ -312,8 +329,12 @@ impl PowerSystem {
         self.network.cooling_usage = usage;
     }
     pub fn set_fine_flow(&mut self, system: &SystemId, flow: Option<f32>) -> Result<(), String> {
-        self.network
-            .set_fine_flow(&self.hardware, &self.ship, system, flow)
+        self.network.set_fine_flow(
+            self.definition.config(),
+            self.definition.ship(),
+            system,
+            flow,
+        )
     }
     pub fn spend_continuous(
         &mut self,
@@ -322,7 +343,7 @@ impl PowerSystem {
     ) -> Result<crate::resources::energy::EnergyGrant, String> {
         let grant = self
             .network
-            .spend_continuous(&self.hardware, system, energy)?;
+            .spend_continuous(self.definition.config(), system, energy)?;
         *self.work_emissions.entry(system.clone()).or_default() += f64::from(grant.granted);
         Ok(grant)
     }
@@ -341,7 +362,8 @@ impl PowerSystem {
             return Err("energy work requires finite nonnegative time and activity".into());
         }
         let rate = self
-            .hardware
+            .definition
+            .config()
             .consumers
             .iter()
             .find(|consumer| &consumer.system == system)
@@ -362,7 +384,8 @@ impl PowerSystem {
         count: usize,
     ) -> Result<bool, String> {
         let consumer = self
-            .hardware
+            .definition
+            .config()
             .consumers
             .iter()
             .find(|consumer| &consumer.system == system)
@@ -382,7 +405,8 @@ impl PowerSystem {
             return Err("discrete work requires a finite nonnegative amount".into());
         }
         let consumer = self
-            .hardware
+            .definition
+            .config()
             .consumers
             .iter()
             .find(|consumer| &consumer.system == system)
@@ -445,7 +469,8 @@ impl PowerSystem {
             );
         }
         let consumer = self
-            .hardware
+            .definition
+            .config()
             .consumers
             .iter()
             .find(|consumer| &consumer.system == system)
@@ -491,7 +516,9 @@ impl PowerSystem {
         }
     }
     fn validate_saved(&self, saved: &PowerState) -> Result<(), String> {
-        saved.network.validate_against(&self.hardware, &self.ship)?;
+        saved
+            .network
+            .validate_against(self.definition.config(), self.definition.ship())?;
         self.validate_observations(
             saved.last_reactor_energy_delta_per_sec,
             &saved.last_intake_per_sec,
@@ -600,8 +627,8 @@ impl PowerSystem {
         };
         next.network
             .reactor
-            .step(&next.hardware.reactor.reserve, passive())?;
-        for consumer in &next.hardware.consumers {
+            .step(&next.definition.config().reactor.reserve, passive())?;
+        for consumer in &next.definition.config().consumers {
             next.network
                 .consumers
                 .get_mut(&consumer.system)
@@ -623,7 +650,8 @@ impl PowerSystem {
         if dt > 0.0 {
             next.last_reactor_energy_delta_per_sec = (next.battery_charge() - before) / dt;
         }
-        next.network.validate_against(&next.hardware, &next.ship)?;
+        next.network
+            .validate_against(next.definition.config(), next.definition.ship())?;
         next.validate_current_observations()?;
         *self = next;
         Ok(())
@@ -677,9 +705,8 @@ impl PowerSystem {
         }
         let mut next = self.clone();
         let before = next.battery_charge();
-        let energy = next.network.tick_with_effects_in_place(
-            &next.hardware,
-            &next.ship,
+        let energy = next.network.tick_with_definition_in_place(
+            &next.definition,
             dt,
             bindings,
             &budgets,
@@ -778,7 +805,7 @@ impl PowerSystem {
         if !matches!(
             self.network
                 .reactor
-                .try_spend_discrete(&self.hardware.reactor.reserve, weapon.cost),
+                .try_spend_discrete(&self.definition.config().reactor.reserve, weapon.cost),
             Ok(true)
         ) {
             if let Some(boost) = self.strike_boost.as_mut() {
@@ -810,7 +837,13 @@ impl PowerSystem {
     // Temporary payload/screen translations, removed with the old rung UI at
     // this increment's exit. They never limit supply or amplify System work.
     pub fn level_for(&self, id: &PowerGroupId) -> u8 {
-        let Some(group) = self.hardware.groups.iter().find(|group| &group.id == id) else {
+        let Some(group) = self
+            .definition
+            .config()
+            .groups
+            .iter()
+            .find(|group| &group.id == id)
+        else {
             return 0;
         };
         let flow = self.flow_for(id).unwrap_or(0.0);
@@ -827,7 +860,8 @@ impl PowerSystem {
         self.network.groups.contains_key(id)
     }
     pub fn floor_for(&self, id: &PowerGroupId) -> u8 {
-        self.ship
+        self.definition
+            .ship()
             .power_groups
             .get(id)
             .map_or(GROUP_LEVEL_MIN, |group| {
@@ -838,7 +872,8 @@ impl PowerSystem {
         self.flow_for(id) == Some(0.0)
     }
     pub fn iter(&self) -> impl Iterator<Item = (&PowerGroupId, u8)> {
-        self.hardware
+        self.definition
+            .config()
             .groups
             .iter()
             .map(|group| (&group.id, self.level_for(&group.id)))
@@ -863,7 +898,8 @@ impl PowerSystem {
         level: u8,
     ) -> Result<(), PowerAllocationError> {
         let maximum = self
-            .hardware
+            .definition
+            .config()
             .groups
             .iter()
             .find(|group| &group.id == id)

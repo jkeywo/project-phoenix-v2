@@ -78,8 +78,13 @@ fn contradictory_declared_execution_order_is_a_schedule_error() {
     schedule.add_build_pass(declaration());
     let mut world = World::new();
     world.init_resource::<Observations>();
+    let error = schedule.initialize(&mut world).unwrap_err();
     assert!(matches!(
-        schedule.initialize(&mut world),
-        Err(ScheduleBuildError::FlatDependencySort(_))
+        &error,
+        ScheduleBuildError::FlatDependencySort(DiGraphToposortError::Cycle(cycles))
+            if cycles.len() == 1 && cycles[0].len() == 2
     ));
+    let message = error.to_string(schedule.graph(), &world);
+    assert!(message.contains("publish"), "{message}");
+    assert!(message.contains("observe"), "{message}");
 }

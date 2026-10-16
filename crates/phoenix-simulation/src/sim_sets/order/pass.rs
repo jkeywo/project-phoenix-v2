@@ -4,11 +4,14 @@
 use super::FixedStep;
 use bevy::{
     ecs::schedule::{
-        graph::{Dag, DiGraph},
+        graph::{Dag, DiGraph, DiGraphToposortError},
         InternedSystemSet, NodeId, ScheduleBuildError, ScheduleBuildPass, ScheduleGraph, SystemKey,
         SystemSetKey,
     },
-    platform::{collections::HashSet, hash::FixedHasher},
+    platform::{
+        collections::{HashMap, HashSet},
+        hash::FixedHasher,
+    },
     prelude::*,
 };
 
@@ -96,6 +99,40 @@ fn members(graph: &ScheduleGraph, endpoint: Endpoint) -> Vec<SystemKey> {
     systems
 }
 
+/// Recover a concrete existing path before inserting the edge that closes it.
+/// Bevy's cycle formatter can receive an empty elementary-cycle list even when
+/// its SCC analysis found a cycle. This retains the ordinary build error while
+/// making the conflicting declared edge and real system path visible.
+fn dependency_path(
+    graph: &DiGraph<SystemKey>,
+    start: SystemKey,
+    goal: SystemKey,
+) -> Option<Vec<SystemKey>> {
+    let mut parents = HashMap::default();
+    parents.insert(start, None);
+    let mut pending = std::collections::VecDeque::from([start]);
+    while let Some(node) = pending.pop_front() {
+        if node == goal {
+            let mut path = vec![node];
+            let mut current = node;
+            while let Some(parent) = parents[&current] {
+                path.push(parent);
+                current = parent;
+            }
+            path.reverse();
+            return Some(path);
+        }
+        for next in graph.neighbors(node) {
+            if let bevy::platform::collections::hash_map::Entry::Vacant(entry) = parents.entry(next)
+            {
+                entry.insert(Some(node));
+                pending.push_back(next);
+            }
+        }
+    }
+    None
+}
+
 impl ScheduleBuildPass for DeclaredOrder {
     type EdgeOptions = ();
 
@@ -122,6 +159,19 @@ impl ScheduleBuildPass for DeclaredOrder {
             for &a in &before {
                 for &b in &after {
                     assert_ne!(a, b, "overlapping fixed-order endpoints: {from:?}, {to:?}");
+                    if let Some(path) = dependency_path(flattened.graph(), b, a) {
+                        let names: Vec<_> = path
+                            .iter()
+                            .map(|key| graph.get_node_name(&NodeId::System(*key)))
+                            .collect();
+                        eprintln!(
+                            "fixed-order edge {from:?} -> {to:?} closes existing path: {}",
+                            names.join(" -> ")
+                        );
+                        return Err(ScheduleBuildError::FlatDependencySort(
+                            DiGraphToposortError::Cycle(vec![path]),
+                        ));
+                    }
                     flattened.graph_mut().add_edge(a, b);
                 }
             }

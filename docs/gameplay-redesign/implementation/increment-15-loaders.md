@@ -217,6 +217,11 @@ Layer rules, strict strings (6499 entries), pure client build and owned Rust
 formatting pass. These receipts do not establish a full integrated gate, native
 continuation, actual Workshop Preview/Test, device/workload acceptance or an increment 15 exit.
 
-Independent source review is queued behind the integrator's active native
-bootstrap repairs. This initial source checkpoint is unreviewed and uncompiled;
-it is not a merge-ready donor or a passing increment exit.
+Independent read-only source review passes for the physical owner/continuation
+core (Craft) and the GUI/Workshop subset (Personnel), against the frozen
+`b7c81e29` to `4bc4a91e` packet. Their reviews do not claim compilation or test
+execution. The subsequent `6a4875d8` and `baa0bdbe` changes correct the host
+proof's snapshot-readiness API and assert ordinary running bootstrap; they do
+not change runtime behavior. The bounded actual-host proof source review is
+still pending. This packet remains uncompiled; native owner and host results,
+integrated compatibility and acceptance must be established separately.

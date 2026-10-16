@@ -86,3 +86,15 @@ Owner witnesses cover genuine received coordination, paid observation and
 selection, fresh-host candidate validation, and the new paid movement/freshness
 and manual-breakaway continuation. The new Helm following Rust witnesses await
 native execution; browser/physical fleet acceptance remains separate.
+
+
+A legitimately selected `ChartedXYZ` Navigation course supplies its fixed known
+point through that same explicit feed and generation/clearance boundary. Only
+actual Full3D equipment uses its published height. The shared planner computes a
+finite demand from actual vertical speed/acceleration tuning; the ordinary
+individual vertical AI emits its normal admitted input, and the existing paid
+integrator remains the sole motion owner. Planar/Bounded behavior and hazard,
+docking and maneuver precedence remain unchanged. This simple own course creates
+no voyage Job, launch association or remote arrival receipt; moving return needs
+its separately earned dated elevation. Native execution of this first charted
+course checkpoint is pending integration.

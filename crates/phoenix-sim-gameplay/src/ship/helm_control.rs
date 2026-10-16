@@ -97,6 +97,31 @@ impl NavigationMotion {
     }
 }
 
+/// Fixed known height through the same finite stopping-speed rule as planar
+/// Navigation. This returns a demand for the ordinary paid vertical actuator;
+/// no pose, speed, energy or inertia is written here.
+pub fn charted_vertical_input(
+    height: f32,
+    actual_height: f32,
+    config: &ShipPhysicsConfig,
+) -> Option<f32> {
+    if !height.is_finite()
+        || !actual_height.is_finite()
+        || !config.max_vertical_speed.is_finite()
+        || config.max_vertical_speed <= 0.0
+        || !config.vertical_acceleration.is_finite()
+        || config.vertical_acceleration <= 0.0
+    {
+        return None;
+    }
+    let error = f64::from(height) - f64::from(actual_height);
+    let speed = (2.0 * f64::from(config.vertical_acceleration) * error.abs())
+        .sqrt()
+        .min(f64::from(config.max_vertical_speed));
+    let input = error.signum() * speed / f64::from(config.max_vertical_speed);
+    input.is_finite().then_some(input as f32)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ResolvedHelmControl {
     pub thrust: f32,

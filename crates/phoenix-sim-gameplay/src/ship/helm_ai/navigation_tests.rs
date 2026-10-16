@@ -100,3 +100,67 @@ fn only_ordinary_travel_verbs_admit_follow_and_existing_bearing_docking_decision
         Some(SystemControlPayload::SetThrust { .. })
     ));
 }
+
+#[test]
+fn ordinary_vertical_axis_uses_only_cleared_full3d_chart_plan_and_keeps_bounded_hazard_behavior() {
+    use crate::entities::{
+        config::{HelmCapabilityConfig, VerticalMovementMode},
+        spawner::HelmCapabilitySection,
+    };
+    let physics = ShipPhysics {
+        y: 4.0,
+        ..Default::default()
+    };
+    let frame = HelmAiShipFrame {
+        nav_waypoint_xyz: Some([10.25, 18.5, -23.75]),
+        ..Default::default()
+    };
+    let mut plan = ShipMotionPlan {
+        navigation_generation: Some(7),
+        ..Default::default()
+    };
+    plan.motion.desired_velocity_local.y = 0.75;
+    let mut capability = HelmCapabilitySection(HelmCapabilityConfig {
+        vertical_movement_mode: VerticalMovementMode::Full3D,
+        ..Default::default()
+    });
+    let anchors = Default::default();
+    let mut cx = HelmAxisCtx {
+        movement: None,
+        physics: Some(&physics),
+        max_speed: 0.0,
+        plan: Some(&plan),
+        frame: Some(&frame),
+        anchors: &anchors,
+        impulse: None,
+        impulse_cfg: None,
+        boost_cfg: None,
+        boost: None,
+        behaviour: None,
+        capability: Some(&capability),
+        cursors: None,
+    };
+    let mut io = HelmAxisIo {
+        policy: None,
+        state: None,
+        pending: None,
+    };
+    let verb = AiPolicyVerb::ActuateVerticalThrust;
+    assert!(
+        matches!(VerticalAxis::act(HostOutcome::Act(&verb),&cx,&mut io),Some(SystemControlPayload::VerticalThrustInput{vertical}) if vertical==0.75)
+    );
+    cx.plan = None;
+    assert!(
+        matches!(VerticalAxis::act(HostOutcome::Act(&verb),&cx,&mut io),Some(SystemControlPayload::VerticalThrustInput{vertical}) if vertical==0.0)
+    );
+    cx.plan = Some(&plan);
+    cx.capability = None;
+    assert!(
+        matches!(VerticalAxis::act(HostOutcome::Act(&verb),&cx,&mut io),Some(SystemControlPayload::VerticalThrustInput{vertical}) if vertical==0.0)
+    );
+    capability.0.vertical_movement_mode = VerticalMovementMode::Bounded;
+    cx.capability = Some(&capability);
+    assert!(
+        matches!(VerticalAxis::act(HostOutcome::Act(&verb),&cx,&mut io),Some(SystemControlPayload::VerticalThrustInput{vertical}) if vertical<0.0)
+    );
+}

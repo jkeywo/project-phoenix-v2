@@ -496,6 +496,10 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("broad-tracks", fold_broad_tracks_namespace),
     ("navigation-sharing", fold_navigation_sharing_namespace),
     ("navigation-request", fold_navigation_request_namespace),
+    (
+        "navigation-charted-course",
+        fold_navigation_charted_namespace,
+    ),
     ("helm-navigation-plan", fold_helm_navigation_plan_namespace),
 ];
 
@@ -3022,6 +3026,21 @@ fn fold_resource_stocks_namespace(world: &World, acc: u64) -> u64 {
             }
             acc
         },
+    )
+}
+
+fn fold_navigation_charted_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "navigation-charted-course",
+        |owner: &crate::console::navigation::NavigationWaypoint| match owner.mode() {
+            Some(crate::console::navigation::WaypointMode::ChartedXYZ { course }) => {
+                Some(course.clone())
+            }
+            _ => None,
+        },
+        |acc, course| fold_serde(acc, &course),
     )
 }
 

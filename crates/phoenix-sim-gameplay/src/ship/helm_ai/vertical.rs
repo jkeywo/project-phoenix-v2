@@ -119,6 +119,16 @@ impl HelmAxisHost for VerticalAxis {
                                 .unwrap_or(crate::ai::VERTICAL_RETURN_RATE);
                             (-physics.y * return_rate).clamp(-1.0, 1.0)
                         }
+                        VerticalMovementMode::Full3D => cx
+                            .plan
+                            .filter(|plan| plan.navigation_generation.is_some())
+                            .filter(|_| {
+                                cx.frame
+                                    .is_some_and(|frame| frame.nav_waypoint_xyz.is_some())
+                            })
+                            .map_or(0.0, |plan| {
+                                plan.motion.desired_velocity_local.y.clamp(-1.0, 1.0)
+                            }),
                         _ => 0.0,
                     }
                 }

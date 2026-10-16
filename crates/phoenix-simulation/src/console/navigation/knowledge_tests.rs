@@ -1573,3 +1573,191 @@ fn exercise_formation_publication_frontier(app: &mut App, observer: Entity) {
         .axes
         .is_empty());
 }
+
+#[test]
+fn actual_utility_charted_xyz_admission_preserves_fractional_height_and_fixed_course_on_withdrawal()
+{
+    let (mut app, observer, _) = rig_for("assets/entities/utility_shuttle.toml", true);
+    let accepted = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/utility_shuttle.toml",
+    )
+    .unwrap();
+    app.insert_resource(crate::lobby::server::ShipClientConfigResource(
+        crate::lobby::server::project_ship_client_config(&accepted),
+    ));
+    app.insert_resource(crate::lobby::WorldResource(
+        crate::core::messages::WorldData {
+            entities: vec![
+                crate::core::messages::EntitySnapshot {
+                    uuid: "public-station".into(),
+                    name: Some("public.station".into()),
+                    tags: vec![
+                        "station".into(),
+                        crate::console_delivery::CHARTED_TAG.into(),
+                    ],
+                    position: Some([10.25, 18.5, -23.75]),
+                    ..Default::default()
+                },
+                crate::core::messages::EntitySnapshot {
+                    uuid: "secret-station".into(),
+                    tags: vec!["station".into()],
+                    position: Some([5.0, 90.0, 1.0]),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        },
+    ));
+    let nav = SystemId("navigation".into());
+    let before = reserve(app.world(), observer);
+    let select = |app: &mut App, id: &str| {
+        app.world_mut()
+            .get_mut::<AdmittedCommands>(observer)
+            .unwrap()
+            .0 = vec![crate::core::messages::AdmittedCommand {
+            target: nav.clone(),
+            payload: SystemControlPayload::SetNavigationWaypoint {
+                x: 999.0,
+                z: 888.0,
+                source_uuid: Some(id.into()),
+            },
+            response_token: None,
+            feedback_correlation: None,
+        }];
+        app.world_mut()
+            .run_system_once(handle_navigation_waypoint)
+            .unwrap();
+    };
+    select(&mut app, "secret-station");
+    assert!(app
+        .world()
+        .get::<NavigationWaypoint>(observer)
+        .unwrap()
+        .mode()
+        .is_none());
+    assert_eq!(reserve(app.world(), observer), before);
+    select(&mut app, "public-station");
+    let waypoint = app.world().get::<NavigationWaypoint>(observer).unwrap();
+    let WaypointMode::ChartedXYZ { course } = waypoint.mode().unwrap() else {
+        panic!("actual Full3D owner must select the offered XYZ point")
+    };
+    assert_eq!(course.destination.point, [10.25, 18.5, -23.75]);
+    let course = course.clone();
+    let generation = waypoint.generation();
+    assert!(reserve(app.world(), observer) < before);
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(observer)
+        .unwrap()
+        .0
+        .clear();
+    app.world_mut()
+        .run_system_once(publish_navigation_blackboard)
+        .unwrap();
+    let config = app
+        .world()
+        .get::<crate::ship_plugin::ShipConfigComponent>(observer)
+        .unwrap();
+    let boards = app
+        .world()
+        .get::<crate::server_app::ShipSystemBlackboards>(observer)
+        .unwrap();
+    let points = super::super::known::charted(config, boards, &nav, &nav);
+    assert_eq!(points.len(), 1);
+    assert_eq!(points[0], course.destination);
+    assert!(
+        super::super::known::charted(config, boards, &SystemId("comms".into()), &nav).is_empty(),
+        "other Consoles do not pool chart knowledge"
+    );
+    let SystemBlackboard::Navigation(board) = &boards.0[&nav] else {
+        unreachable!()
+    };
+    assert_eq!(board.charted_course.as_ref(), Some(&course));
+    assert_eq!(
+        board
+            .navigation_waypoint
+            .as_ref()
+            .unwrap()
+            .source_uuid
+            .as_deref(),
+        Some("public-station")
+    );
+    // The same explicit Navigation publication supplies the ordinary Helm
+    // controls. Removing that feed from a cloned reader scope grants nothing,
+    // even though the canonical selected course still exists on this ship.
+    let mut reader_config = config.clone();
+    let reader_boards = boards.clone();
+    let reader_waypoint = app
+        .world()
+        .get::<NavigationWaypoint>(observer)
+        .unwrap()
+        .clone();
+    let control = app
+        .world()
+        .get::<phoenix_sim_gameplay::ship::helm_control::CompiledHelmControl>(observer)
+        .unwrap()
+        .0
+        .clone();
+    let available = |world: &mut World, config: &crate::ship_plugin::ShipConfigComponent| {
+        let mut state = SystemState::<super::super::knowledge::Environment>::new(world);
+        crate::console::helm::navigation::availability_at(
+            &state.get(world),
+            observer,
+            config,
+            &reader_boards,
+            &control,
+            Some(&reader_waypoint),
+            0,
+        )
+    };
+    assert_eq!(
+        available(app.world_mut(), &reader_config).0,
+        Some(generation)
+    );
+    let flight = reader_config
+        .0
+        .console_for_system(&control.thrust)
+        .unwrap()
+        .id
+        .clone();
+    reader_config
+        .0
+        .consoles
+        .iter_mut()
+        .find(|console| console.id == flight)
+        .unwrap()
+        .feeds
+        .retain(|feed| feed.source != nav);
+    assert_eq!(
+        available(app.world_mut(), &reader_config),
+        (None, Vec::new())
+    );
+    app.world_mut()
+        .resource_mut::<crate::lobby::WorldResource>()
+        .0
+        .entities
+        .clear();
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+    app.world_mut()
+        .run_system_once(refresh_anchored_waypoint)
+        .unwrap();
+    app.world_mut()
+        .run_system_once(publish_navigation_blackboard)
+        .unwrap();
+    let held = app.world().get::<NavigationWaypoint>(observer).unwrap();
+    assert_eq!(held.generation(), generation);
+    assert_eq!(
+        held.mode(),
+        Some(&WaypointMode::ChartedXYZ {
+            course: course.clone()
+        })
+    );
+    let boards = app
+        .world()
+        .get::<crate::server_app::ShipSystemBlackboards>(observer)
+        .unwrap();
+    let SystemBlackboard::Navigation(board) = &boards.0[&nav] else {
+        unreachable!()
+    };
+    assert!(board.charted_points.is_empty());
+    assert_eq!(board.charted_course.as_ref(), Some(&course));
+}

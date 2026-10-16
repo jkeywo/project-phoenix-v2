@@ -517,6 +517,8 @@ pub struct EntityState {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct NavigationWaypointState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub charted: Option<phoenix_model::navigation_point::ChartedNavigationCourse>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub formation: Option<phoenix_model::formation::FormationCourse>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub accepted_requests: std::collections::BTreeMap<

@@ -1278,6 +1278,12 @@ pub(super) fn capture_navigation_continuation(
     let waypoint = waypoint.map(|waypoint| {
         let snapshot = waypoint.canonical_snapshot();
         NavigationWaypointState {
+            charted: match waypoint.mode() {
+                Some(crate::console::navigation::WaypointMode::ChartedXYZ { course }) => {
+                    Some(course.clone())
+                }
+                _ => None,
+            },
             formation: match waypoint.mode() {
                 Some(crate::console::navigation::WaypointMode::Formation { course }) => {
                     Some(course.clone())

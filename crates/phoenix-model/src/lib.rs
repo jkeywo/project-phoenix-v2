@@ -40,6 +40,7 @@ pub mod helm_control;
 pub mod interior;
 pub mod job;
 pub mod logistics;
+pub mod navigation_point;
 pub mod navigation_sharing;
 pub mod personnel;
 pub mod ports;

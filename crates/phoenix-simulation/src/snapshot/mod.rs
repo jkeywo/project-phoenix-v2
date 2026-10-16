@@ -381,6 +381,7 @@ mod helm_movement;
 mod mission_clock_tests;
 mod mounts;
 mod navigation_formation;
+mod navigation_charted;
 #[cfg(test)]
 mod navigation_sharing_tests;
 mod personnel;

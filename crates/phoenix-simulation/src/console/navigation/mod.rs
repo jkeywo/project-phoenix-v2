@@ -6,6 +6,7 @@
 
 pub(crate) mod formation;
 pub mod knowledge;
+pub mod known;
 pub mod server;
 pub mod sharing;
 

@@ -5967,6 +5967,12 @@ pub struct NavigationBlackboard {
     pub course_generation: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub formation: Option<crate::formation::FormationNavigationView>,
+    /// Current-World chart contacts offered by this Navigation's actual picture.
+    /// Never unioned with foreign World arrival routes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub charted_points: Vec<crate::navigation_point::NavigationPointView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub charted_course: Option<crate::navigation_point::ChartedNavigationCourse>,
     /// Deliberate own-faction sharing intent for this actual Navigation owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sharing: Option<crate::sensing_sharing::RadarSharingView>,
@@ -6067,6 +6073,8 @@ impl Default for NavigationBlackboard {
         Self {
             course_generation: 0,
             formation: None,
+            charted_points: Vec::new(),
+            charted_course: None,
             sharing: None,
             received_chart: Vec::new(),
             nav_chart_range: default_nav_chart_range(),

@@ -405,3 +405,44 @@ legacy planar Picture currently substitutes observer height; that value must nev
 be used as target elevation. The later return join must preserve the original
 sample tick/error and refuse absent/stale height or measured velocity without a
 private home-pose lookup.
+
+
+### Chart-first runtime checkpoint (source; native execution pending)
+
+The existing admitted `SetNavigationWaypoint` now resolves an offered current-World
+charted contact into a fixed `ChartedXYZ` course only on actual Full3D equipment.
+The course retains its original Navigation owner, complete fractional XYZ point,
+selection tick and existing generation. The normal selector uses the same mode;
+withdrawal of the offer preserves that legitimate fixed point, without following
+an actor or inventing a new observation. Planar/Bounded and free XZ orders retain
+their existing behavior.
+
+`NavigationPointView` extracts the existing `TransitRouteView` value shape; the old
+Rust name, fields, validation bounds and JSON are preserved. Actual chart choices
+are published separately as `NavigationBlackboard.charted_points`; selected fixed
+intent is `charted_course`. `navigation::known::charted` reads only the explicitly
+permitted actual Navigation source and never unions foreign Transit arrivals or
+civilian lanes. Simple own course selection creates no Job or launch provenance.
+
+The normal clearance, explicit Navigation feed and shared Helm planner supply the
+existing admitted per-axis controls. Full3D vertical travel uses actual vertical
+speed/acceleration tuning and the ordinary paid vertical operator/integrator;
+hazard, docking and authored maneuver priorities remain in the existing planner.
+No body pose writer, special pilot or player-facing vertical control is added.
+
+The same canonical waypoint captures/restores the original selected point and
+clock, with a Some-only digest contribution. Candidate validation checks actual
+Navigation/movement equipment, finite point and clocks, generation, exclusive
+mode, exact retained own publication and available original candidate chart point
+before writes. A current chart withdrawal
+does not reconstruct erased history or refresh knowledge.
+
+Source tests cover actual accepted utility chart admission/payment, denied private
+chart selection, explicit-feed isolation, fractional height and withdrawal; the
+ordinary vertical axis and finite physical integrator; original JSON/application
+continuation and ten malformed whole-candidate no-write cases (including missing
+canonical/published course mismatches). These are owner/source
+checks, not a full-host flight/360-step or browser acceptance result. Actual
+native execution is queued through the integration owner. Mode-aware Bay custody,
+launch association/history, transmitted voyage orders, shared Job lifecycle,
+measured return and moving recovery remain separate required joins.

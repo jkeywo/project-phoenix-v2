@@ -1474,6 +1474,7 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                     comms_media: entity.get::<crate::comms::media_control::ShipCommsMediaIntent>().cloned(),
                     emission_intent: entity.get::<crate::console::command::emission::ShipEmissionIntent>().map(|state| state.0.clone()),
                     comms_capture: entity.get::<crate::comms::capture::ShipCommsCapture>().cloned(),
+                    comms_traffic: entity.get::<crate::comms::traffic::ShipCommsTraffic>().map(|owner| owner.state.clone()),
                     identity_emitters: entity.get::<crate::science::identity::ShipIdentityEmitters>().cloned(),
                     concealment_emitters: entity.get::<crate::science::concealment::ShipConcealmentEmitters>().cloned(),
                     weapon_targets: entity

@@ -700,14 +700,34 @@ fn publish_captain_blackboard(
     ) in ship_query.iter_mut()
     {
         let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
+        let captain_owner = ship_config.and_then(|config| {
+            crate::comms::traffic::unique_system(
+                &config.0,
+                crate::ship::system_registry::CAPTAIN_KIND,
+            )
+        });
+        let alert_owner = ship_config.and_then(|config| {
+            crate::comms::traffic::unique_system(
+                &config.0,
+                crate::ship::system_registry::RED_ALERT_KIND,
+            )
+        });
+        let red_alert_system_id = alert_owner
+            .clone()
+            .unwrap_or_else(crate::ship::system_registry::red_alert_system_id);
+        let alert_observation = red_alert_comp.and_then(|_| {
+            captain_owner.as_ref()?;
+            Some(crate::comms::traffic::alert_observation(
+                sim_tick.as_ref()?.0,
+                alert_owner.as_ref()?,
+            ))
+        });
 
         let hull_fraction =
             crate::ship::compartment_damage::structural_fraction(damage, hull_opt).unwrap_or(1.0);
         let hull_integrity_pct = (hull_fraction * 100.0).clamp(0.0, 100.0);
-        let red_alert_auto = control_sources
-            .0
-            .source_for(&crate::ship::system_registry::red_alert_system_id())
-            == ControlSource::Ai;
+        let red_alert_auto =
+            control_sources.0.source_for(&red_alert_system_id) == ControlSource::Ai;
         let viewscreen_system_id = ship_config
             .and_then(|config| {
                 config
@@ -826,7 +846,8 @@ fn publish_captain_blackboard(
 
         let bb = CaptainBlackboard {
             red_alert,
-            red_alert_system_id: crate::ship::system_registry::red_alert_system_id(),
+            alert_observation,
+            red_alert_system_id,
             red_alert_auto,
             viewscreen_system_id,
             viewscreen_auto,
@@ -841,7 +862,9 @@ fn publish_captain_blackboard(
         };
 
         bbs.0.insert(
-            SystemId(crate::ship::system_registry::CAPTAIN_SYSTEM_ID.to_string()),
+            captain_owner.unwrap_or_else(|| {
+                SystemId(crate::ship::system_registry::CAPTAIN_SYSTEM_ID.to_string())
+            }),
             SystemBlackboard::Captain(bb),
         );
     }

@@ -11,6 +11,23 @@ const profile = () => ({ system: 'comms', request_reading_ticks: 45, keys: ['cre
   { id: 'open', range: 100, work_units: 1 }, { id: 'operations', range: 50, work_units: 2, key: 'crew-key' },
 ] });
 const make = source => new WorkshopDocument(createStoreZip([{ path: 'scenarios.toml', text: '[pack]\nformat=1\nid="radio"\nname="Radio"\nversion="1"\n' }, { path, text: source }]));
+it('authors finite coverage and explicit contextual intent through accepted history without editing hardware', async () => {
+  const endpoint=entity(); endpoint.console[0].feed=[{source:'captain',kind:'Captain'}];
+  endpoint.system.push({id:'captain',kind:'captain',console:'radio-room'},{id:'alert',kind:'red_alert',console:'radio-room'});
+  const value=profile();value.traffic={listening:{simultaneous_channels:1,priority:['operations','open']},
+    alert:{source:'captain',channel:'open',minimum_spacing_ticks:90,routine_text:'We selected routine alert.',red_alert_text:'We selected red alert.'}};
+  const source='# keep endpoint\n'+stringify(endpoint),draft=make(source);
+  await applyCommsRadioOperation({draft,runtime:{validate:async()=>({accepted:true})},dependencies:deps,operation:{path,value}});
+  expect(inspectCommsRadio(new WorkshopDocument(draft.archive()),deps,path).radio.traffic).toEqual(value.traffic);
+  expect(inspectCommsRadio(draft,deps,path).resolved.value.system).toEqual(endpoint.system);
+  draft.undo();expect(draft.read(path)).toBe(source);draft.redo();
+  for(const mutate of [p=>p.traffic.listening.priority=['open','open'],p=>p.traffic.listening.simultaneous_channels=3,
+    p=>p.traffic.alert.channel='operations',p=>p.traffic.alert.minimum_spacing_ticks=0,p=>p.traffic.alert.routine_text=p.traffic.alert.red_alert_text,
+    p=>p.traffic.alert.source='private',p=>p.traffic.alert.private_actor='secret']) {
+    const bad=structuredClone(value);mutate(bad);expect(()=>validateCommsRadio(bad,endpoint)).toThrow();
+  }
+  const withdrawn=structuredClone(endpoint);withdrawn.console[0].feed=[];expect(()=>validateCommsRadio(value,withdrawn)).toThrow();
+});
 it('accepts closed capture capability and protected levels through existing history without changing keys', async () => {
   const draft = make(stringify(entity())), value = profile();
   value.capture = { max_level: 1, ticks_per_level: 90, held_key_ticks: 2 }; value.channel[1].protection_level = 3;

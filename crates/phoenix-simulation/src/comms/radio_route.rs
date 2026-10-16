@@ -15,6 +15,15 @@ fn channel<'a>(endpoint: &'a Endpoint, id: &str) -> Option<&'a CommsChannelConfi
     .then_some(selected)
 }
 
+fn receive_channel<'a>(endpoint: &'a Endpoint, id: &str) -> Option<&'a CommsChannelConfig> {
+    endpoint
+        .monitored
+        .iter()
+        .any(|monitored| monitored == id)
+        .then_some(())?;
+    channel(endpoint, id)
+}
+
 /// The shortest viable path, direct first, then lexicographic endpoint identity.
 /// Kept private: neither the source nor recipient learns relay membership.
 fn select<'a>(
@@ -25,7 +34,7 @@ fn select<'a>(
     mut reachable: impl FnMut(&Endpoint, &CommsChannelConfig, &Endpoint, &CommsChannelConfig) -> bool,
 ) -> Option<Vec<&'a Endpoint>> {
     let transmitting = channel(source, id)?;
-    let receiving = channel(receiver, id)?;
+    let receiving = receive_channel(receiver, id)?;
     if source.uuid == receiver.uuid || transmitting.key != receiving.key {
         return None;
     }
@@ -33,7 +42,7 @@ fn select<'a>(
         .iter()
         .filter(|endpoint| endpoint.uuid != source.uuid && endpoint.uuid != receiver.uuid)
         .filter_map(|endpoint| {
-            channel(endpoint, id)
+            receive_channel(endpoint, id)
                 .filter(|profile| profile.relay && profile.key == transmitting.key)
                 .map(|profile| (endpoint, profile))
         })
@@ -102,6 +111,7 @@ mod tests {
             radio: CommsRadioConfig {
                 media: None,
                 capture: None,
+                traffic: None,
                 system: SystemId("comms".into()),
                 request_reading_ticks: 30,
                 keys: vec!["fleet-key".into()],
@@ -115,6 +125,7 @@ mod tests {
                 }],
             },
             listening: 1.0,
+            monitored: vec!["fleet".into()],
             fleet: false,
             faction: None,
         }
@@ -164,5 +175,24 @@ mod tests {
                 "fault{fault}"
             );
         }
+    }
+
+    #[test]
+    fn coverage_gates_each_receiver_without_changing_the_source_transmit_channel() {
+        let mut source = endpoint("source", false);
+        source.monitored.clear();
+        let mut receiver = endpoint("receiver", false);
+        assert!(select(&[], &source, &receiver, "fleet", |_, _, _, _| true).is_some());
+        receiver.monitored.clear();
+        assert!(select(&[], &source, &receiver, "fleet", |_, _, _, _| true).is_none());
+        receiver.monitored.push("fleet".into());
+        let mut relay = endpoint("relay", true);
+        relay.monitored.clear();
+        assert!(
+            select(&[relay], &source, &receiver, "fleet", |a, _, b, _| a.uuid
+                != "source"
+                || b.uuid != "receiver")
+            .is_none()
+        );
     }
 }

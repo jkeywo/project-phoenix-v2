@@ -234,6 +234,13 @@ pub(crate) fn derive_paid_carriers(
             continue;
         };
         if !source
+            .monitored
+            .iter()
+            .any(|channel| channel == &call.channel)
+        {
+            continue;
+        }
+        if !source
             .radio
             .media
             .is_some_and(|capability| capability.supports(call.mode))

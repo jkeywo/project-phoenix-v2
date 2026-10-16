@@ -36,6 +36,7 @@ pub(crate) mod requests;
 pub mod roster;
 pub mod scripted;
 pub mod server;
+pub mod traffic;
 
 pub use component::{CommsHailable, CommsRange};
 pub use range::in_range;

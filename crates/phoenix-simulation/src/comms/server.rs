@@ -423,6 +423,8 @@ pub(crate) fn register_comms_consumer(app: &mut App) {
                 Payload::SendCommsRequest,
                 Payload::SetCommsMediaCall,
                 Payload::SelectCommsCapture,
+                Payload::SetCommsListeningOrder,
+                Payload::ReportCommsAlert,
                 Payload::MarkCommsRead,
                 Payload::RespondToMessage,
                 Payload::ClearComms,
@@ -440,6 +442,10 @@ impl Plugin for CommsWorldPlugin {
         app.declare_state::<crate::comms::capture::ShipCommsCapture>(
             crate::authoritative::StateClass::Folded,
             "ship-comms-capture",
+        );
+        app.declare_state::<crate::comms::traffic::ShipCommsTraffic>(
+            crate::authoritative::StateClass::Folded,
+            "ship-comms-traffic",
         );
         crate::comms::requests::register(app);
         crate::comms::jamming::register(app);

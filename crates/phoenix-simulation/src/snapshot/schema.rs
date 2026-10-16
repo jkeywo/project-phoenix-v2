@@ -11,6 +11,8 @@ pub struct EntityState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub emission_intent: Option<phoenix_sim_gameplay::ship::emission_profile::EmissionIntentState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comms_traffic: Option<phoenix_sim_gameplay::electronic::traffic::CommsTrafficState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comms_capture: Option<crate::comms::capture::ShipCommsCapture>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comms_media: Option<crate::comms::media_control::ShipCommsMediaIntent>,

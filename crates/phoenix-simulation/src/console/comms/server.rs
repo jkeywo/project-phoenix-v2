@@ -97,6 +97,7 @@ pub(crate) fn publish_comms_blackboard(
             Option<&crate::ship::components::HumanSeekingHosts>,
             Option<&crate::comms::radio::RadioProfile>,
             Option<&crate::comms::capture::ShipCommsCapture>,
+            Option<&crate::comms::traffic::ShipCommsTraffic>,
             Option<&crate::ship::state::ShipPhysics>,
             Option<&Transform>,
             Option<&crate::modifiers::ShipModifiers>,
@@ -123,6 +124,7 @@ pub(crate) fn publish_comms_blackboard(
         hosts,
         radio,
         captured,
+        traffic,
         physics,
         transform,
         modifiers,
@@ -153,6 +155,13 @@ pub(crate) fn publish_comms_blackboard(
             bb.reception_craft = stored.into_values().collect();
         }
         bb.media_capability = radio.and_then(|profile| profile.0.media);
+        bb.traffic =
+            traffic
+                .zip(radio)
+                .zip(tick.as_deref())
+                .and_then(|((traffic, radio), tick)| {
+                    crate::comms::traffic::view(traffic, &radio.0, tick.0)
+                });
         bb.captured = captured
             .zip(radio)
             .and_then(|(captured, radio)| crate::comms::capture::views(captured, &radio.0));
@@ -2395,6 +2404,7 @@ pub fn operate_comms_response_ai(
         Option<&CommsTargetSelector>,
         Option<&crate::comms::radio::RadioProfile>,
         Option<&crate::server_app::ShipSystemBlackboards>,
+        Option<&crate::comms::traffic::ShipCommsTraffic>,
     )>,
 ) {
     // Restore the pre-#1185 locals so the policy body below reads as it did.
@@ -2450,6 +2460,7 @@ pub fn operate_comms_response_ai(
     let mut answers: Vec<(Entity, String, usize)> = Vec::new();
     let mut planned_requests = Vec::new();
     let mut decode_choices = Vec::new();
+    let mut public_reports = Vec::new();
 
     // ── Pass one: every fleet hull decides, in ROSTER ORDER ──────────────────
     //
@@ -2485,6 +2496,7 @@ pub fn operate_comms_response_ai(
         selector_comp,
         radio,
         boards,
+        traffic,
     ) in fleet
     {
         let Some(operator_uuid) = _entity_uuid else {
@@ -2538,6 +2550,19 @@ pub fn operate_comms_response_ai(
         let comms_available = comms_system_available(hull, damage);
         let power_rating = selector_comp.and_then(|s| s.power_rating);
         if let (Some(config), Some(boards), Some(radio)) = (_ship_config, boards, radio) {
+            if crate::comms::traffic::decision(
+                config,
+                boards,
+                sources,
+                radio,
+                policy,
+                &flag_chain,
+                comms_available,
+                traffic,
+                tick,
+            ) {
+                public_reports.push((entity, radio.0.system.clone()));
+            }
             if let Some(capture) = crate::comms::capture_ai::decision(
                 config,
                 boards,
@@ -2803,6 +2828,21 @@ pub fn operate_comms_response_ai(
     }
 
     // Same existing owner and cadence; no additional controller or private latch.
+    for (entity, owner) in public_reports {
+        let Ok((_, uuid, _, sources, config, mut admitted, ..)) = ships.get_mut(entity) else {
+            continue;
+        };
+        crate::command_admission::ai_emit::emit_ai_command(
+            uuid,
+            owner,
+            crate::core::messages::SystemControlPayload::ReportCommsAlert,
+            sources,
+            &sessions,
+            config,
+            &mut admitted,
+        );
+    }
+
     for (entity, owner, request) in planned_requests {
         let Ok((_, uuid, _, sources, config, mut admitted, ..)) = ships.get_mut(entity) else {
             continue;

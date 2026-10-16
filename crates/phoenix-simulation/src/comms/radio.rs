@@ -27,6 +27,7 @@ pub(crate) fn install(
         ));
     }
     super::capture::install(config, commands);
+    super::traffic::install(config, commands);
 }
 
 #[derive(Clone)]
@@ -37,6 +38,7 @@ pub(crate) struct Endpoint {
     pub(crate) point: Vec3,
     pub(crate) radio: CommsRadioConfig,
     pub(crate) listening: f32,
+    pub(crate) monitored: Vec<String>,
     pub(crate) fleet: bool,
     pub(crate) faction: Option<String>,
 }
@@ -159,6 +161,7 @@ pub(crate) fn tick_radio(
         &crate::core::messages::AdmittedCommands,
         Option<&RadioProfile>,
         Has<super::capture::ShipCommsCapture>,
+        Has<super::traffic::ShipCommsTraffic>,
     )>,
     mut inbox: ResMut<CommsInboxRes>,
     mut runtime: ResMut<CommsRuntime>,
@@ -172,8 +175,10 @@ pub(crate) fn tick_radio(
     intents: Query<&super::media_control::ShipCommsMediaIntent>,
     mut media: Option<ResMut<super::media_control::PaidMediaCarriers>>,
     hailable: Query<&crate::comms::CommsHailable>,
+    mut traffic: Query<&mut super::traffic::ShipCommsTraffic>,
 ) {
     super::capture::refuse_unsupported(&capture_commands, outbox.as_deref_mut());
+    super::traffic::refuse_unsupported(&capture_commands, outbox.as_deref_mut());
     let mut ordered: Vec<_> = sources
         .iter()
         .map(|row| (row.1 .0.clone(), row.0))
@@ -189,7 +194,7 @@ pub(crate) fn tick_radio(
             transform,
             config,
             controls,
-            _,
+            admitted,
             mut power,
             _,
             (damage, hull, modifiers),
@@ -197,6 +202,29 @@ pub(crate) fn tick_radio(
         )) = sources.get_mut(*entity)
         else {
             continue;
+        };
+        let configured = super::traffic::channels(&profile.0);
+        let mut traffic_state = traffic.get_mut(entity).ok();
+        super::traffic::apply_order(
+            admitted,
+            &profile.0,
+            traffic_state.as_deref_mut(),
+            outbox.as_deref_mut(),
+        );
+        let monitored = match &profile.0.traffic {
+            None => configured,
+            Some(traffic_profile) => traffic_state
+                .as_ref()
+                .filter(|state| state.state.owner == profile.0.system)
+                .and_then(|state| {
+                    state
+                        .state
+                        .configured_receive_channels(traffic_profile, &configured)
+                        .ok()
+                })
+                .map_or_else(Vec::new, |channels| {
+                    channels.into_iter().map(str::to_owned).collect()
+                }),
         };
         let available = super::server::information_endpoint_available(config, controls, modifiers)
             && !crate::ship::compartment_damage::operation_disabled(
@@ -218,6 +246,16 @@ pub(crate) fn tick_radio(
         } else {
             0.0
         } * operation.clamp(0.0, 1.0);
+        if let Some(mut state) = traffic_state {
+            state.coverage = Some((
+                tick.0,
+                if listening > 0.0 {
+                    monitored.clone()
+                } else {
+                    Vec::new()
+                },
+            ));
+        }
         endpoints.push(Endpoint {
             entity,
             uuid: uuid.0.clone(),
@@ -227,6 +265,7 @@ pub(crate) fn tick_radio(
             }),
             radio: profile.0.clone(),
             listening,
+            monitored,
             fleet: slot.is_some(),
             faction: faction.map(|value| value.0.to_string()),
         });
@@ -239,6 +278,43 @@ pub(crate) fn tick_radio(
             continue;
         };
         for command in commands.for_target(source.radio.system.0.as_str()) {
+            let report_attempt = matches!(command.payload, SystemControlPayload::ReportCommsAlert);
+            let mut traffic_state = traffic.get_mut(source.entity).ok();
+            let prepared_report = if report_attempt {
+                let Some(state) = traffic_state.as_deref_mut() else {
+                    continue;
+                };
+                source
+                    .radio
+                    .traffic
+                    .as_ref()
+                    .filter(|_| state.state.owner == source.radio.system)
+                    .and_then(|profile| {
+                        state
+                            .state
+                            .prepare_report(
+                                profile,
+                                &super::traffic::channels(&source.radio),
+                                super::traffic::sample(config, &boards, &source.radio, tick.0),
+                                tick.0,
+                            )
+                            .ok()
+                            .flatten()
+                    })
+            } else {
+                None
+            };
+            if report_attempt && prepared_report.is_none() {
+                if let Some(outbox) = outbox.as_deref_mut() {
+                    crate::command_admission::feedback::finish_outbox_action_feedback(
+                        command,
+                        outbox,
+                        crate::core::messages::ActionFeedbackOutcome::Refused,
+                    );
+                }
+                continue;
+            }
+            let public_audience = CommsAudience::All;
             let (channel, audience, body, content, planned_context) = match &command.payload {
                 SystemControlPayload::SendCommsText {
                     channel,
@@ -264,6 +340,21 @@ pub(crate) fn tick_radio(
                         request: request.clone(),
                     },
                     planned_request.as_deref(),
+                ),
+                SystemControlPayload::ReportCommsAlert => (
+                    &source
+                        .radio
+                        .traffic
+                        .as_ref()
+                        .expect("prepared report equipment")
+                        .alert
+                        .as_ref()
+                        .expect("prepared alert profile")
+                        .channel,
+                    &public_audience,
+                    prepared_report.as_ref().expect("validated report").body(),
+                    phoenix_model::comms_request::CommsRadioContent::Text,
+                    None,
                 ),
                 _ => continue,
             };
@@ -445,6 +536,9 @@ pub(crate) fn tick_radio(
                     .inject(copy_message(copy_id, source, &receiver.uuid, body, heard));
             }
             runtime.needs_broadcast = true;
+            if let Some(report) = prepared_report {
+                report.commit();
+            }
         }
     }
     request_delivery::settle(&endpoints, &mut inbox, &mut runtime, &paths, tick.0);

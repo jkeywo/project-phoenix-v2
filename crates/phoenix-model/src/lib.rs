@@ -5,6 +5,7 @@ pub mod comms_channel;
 pub mod comms_history;
 pub mod comms_media;
 pub mod comms_request;
+pub mod comms_traffic;
 pub mod console;
 pub mod debug_surface;
 pub mod emission_profile;

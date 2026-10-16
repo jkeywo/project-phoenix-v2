@@ -1,7 +1,7 @@
 # Increment 16 — Finite listening and ordinary public chatter
 
-**Adopted contract, 16 October 2026; no runtime or acceptance claim.**
-This prepares the next bounded S066 consumer after the reviewed S021 source
+**Adopted contract and source implementation, 16 October 2026; native and player acceptance pending.**
+This records the bounded S066 consumer after the reviewed S021 source
 packet. It does not change networking, create message capacity, expand crypto
 acquisition, or claim a complete increment 16 exit.
 
@@ -116,6 +116,17 @@ Human free text remains unchanged; Human ownership stands this ordinary
 controller down. No AI voice, audio synthesis, fabricated speaker or direct inbox
 injection is used.
 
+Keep the established Comms-before-Captain publication order. The ordinary Comms
+decision reads the existing dated held Captain publication at its supported
+current/previous frontier and its own canonical successful-report tuple; Radio
+rechecks them before payment. The Comms control view exposes only
+`report_supported`, an accepted equipment capability, rather than caching a
+semantic readiness verdict that can become stale within the publication phase.
+The Human action requests the same verb and can receive a correlated refusal for
+unknown/stale context, unchanged intent, spacing or unavailable work. Its label
+does not promise readiness or delivery. No copied alert sample, extra history,
+timestamp refresh or schedule reversal is needed.
+
 Retain only the latest successfully reported semantic state and actual
 successful emission tick in the actual Comms owner's canonical
 continuation state, alongside the listening intent. The first genuinely known
@@ -157,8 +168,34 @@ Derived route/capture/media caches retain their current recovery boundaries.
 
 ## Evidence and remaining scope
 
-The reviewed contract is adopted in PASM; pin the actual owner/API joins before
-runtime. Then prove Human reorder and ordinary AI policy through normal admission;
+The source packet joins the actual Radio endpoint, ordinary Comms AI/admission,
+permitted dated Captain publication, own Console controls and existing Radio
+Workshop editor. `ShipCommsTraffic` retains only the canonical owner, priority
+and last successful report tuple. Its paid coverage is derived, omitted from
+snapshots/digests and cleared on restore. Candidate recipe, publication, owner,
+order and original-clock guards run before restore writes. These guards validate
+retained consistency, not the authenticity of an erased historical emission.
+
+Independent read-only reviews cover the runtime/payment/AI consumer, canonical
+continuation and UI/Workshop joins. Six focused JavaScript files pass 42 tests;
+strict strings pass with 6,479 entries and no findings. No Cargo or native result
+is claimed by this lane. Owner source tests exercise actual Radio missed
+one-shot/coverage selection, original-event capture, no archive catch-up and
+missing/stale/unfunded/unchanged public-context refusal. The actual accepted-loader
+regression checks the optional fixture against the base Cruiser's six seats,
+Systems, other Consoles, energy and interior.
+
+`tests/comms_traffic_continuation.rs` supplies two unexecuted full-host proofs:
+normal Human reorder/report with finite additional work, supported transmission
+outside its own receive selection, spacing, whole-JSON 360-step capture/digest
+comparison and six malformed no-write candidates; and ordinary Backfill retaining
+operator priorities while reporting only a meaningful own alert change. These
+use only a test fixture, not an additional global catalogue hull. The integrator
+must first run the actual accepted-loader regression, then these native proofs
+and the required state-census/schedule checks. Advance protocol/snapshot/rules
+compatibility centrally with the integrated state and wire definitions.
+
+Further acceptance must prove Human reorder and ordinary AI policy through normal admission;
 an actual public emission heard while covered and missed while uncovered; paid
 capture only in a genuinely covered emission interval; priority changes during
 an actual pending response; and real relay/media channel withdrawal without

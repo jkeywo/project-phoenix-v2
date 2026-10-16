@@ -991,6 +991,22 @@ export const ACTION_MAP = Object.freeze({
       payload: {type: 'SelectCommsCapture', data: {capture: a.capture}},
     });
   },
+  set_comms_listening_order: (a, send) => {
+    if (typeof a.control_system_id !== 'string' || !a.control_system_id || !Array.isArray(a.priority)
+      || !a.priority.length || a.priority.length > 65535 || new Set(a.priority).size !== a.priority.length
+      || !a.priority.every(channel => typeof channel === 'string' && /^[a-z0-9-]{1,128}$/.test(channel))) return;
+    send(a.correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(a.correlation ? {correlation:a.correlation} : {}), target:a.control_system_id,
+      payload:{type:'SetCommsListeningOrder',data:{priority:[...a.priority]}},
+    });
+  },
+  report_comms_alert: (a, send) => {
+    if (typeof a.control_system_id !== 'string' || !a.control_system_id) return;
+    send(a.correlation ? 'ControlSystemCorrelated' : 'ControlSystem', {
+      ...(a.correlation ? {correlation:a.correlation} : {}), target:a.control_system_id,
+      payload:{type:'ReportCommsAlert'},
+    });
+  },
   set_comms_media_call: (a, send) => {
     if (a.origin_id !== null && typeof a.origin_id !== 'string') return;
     const correlated = typeof a.correlation === 'string' && a.correlation;

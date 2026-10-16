@@ -1,5 +1,6 @@
 import { emissionIntentPayload } from './emission-profile.js';
 import { capturedPayload } from './comms-capture.js';
+import { trafficPayload } from './comms-traffic.js';
 import { formationNavigation } from './formation.js';
 import {plannedRequests,plannedRepairIntents} from './planned-requests.js';
 import { personnelPayload } from './personnel.js';
@@ -2315,6 +2316,7 @@ export function buildCommsConsoleState(state, systemIds = []) {
         && state.controlSources?.[entry.systemId] === 'Human',
       planned_requests: bb.planned_requests ?? [],
       comms_capture: capturedPayload(bb.captured, entry.systemId, systemIds.includes(entry.systemId) && state.controlSources?.[entry.systemId] === 'Human'),
+      comms_traffic: trafficPayload(bb.traffic, entry.systemId, systemIds.includes(entry.systemId) && state.controlSources?.[entry.systemId] === 'Human'),
       receiver_interference: bb.receiver_interference ?? null,
       on_screen:  state.currentView === 'Comms',
       own_hull:   aggregateStationHull('comms', state.consoleHull, state.stationSystems),

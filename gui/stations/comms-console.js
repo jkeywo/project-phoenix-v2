@@ -48,6 +48,7 @@
 import {visibleCommsMessages, mediaCallOrigin} from '../comms-requests.js';
 import {mountCommsMediaControls} from '../comms-media-client.js';
 import {mountCommsCaptureControls} from '../components/comms-capture-controls.js';
+import {mountCommsTrafficControls} from '../components/comms-traffic-controls.js';
 import {COMMS_SELECT_MEDIA_ACTION_ID} from './comms-actions.js';
 import { t } from '../strings.js';
 import { setAutoState } from '../console-ui.js';
@@ -86,6 +87,7 @@ export function makeCommsRender(variant) {
   let lastState = null;
   let mediaControls = null;
   let captureControls = null;
+  let trafficControls = null;
 
   const commsView = (s) => (variant.commsView ? variant.commsView(s) : s);
 
@@ -210,6 +212,15 @@ export function makeCommsRender(variant) {
       });
     }
     if (composer) composer.state = view;
+    const trafficHost = doc.getElementById('comms-traffic-host');
+    if (trafficHost) {
+      trafficHost.hidden = !view.comms_traffic;
+      if (!trafficControls) {
+        trafficControls = mountCommsTrafficControls(doc); trafficHost.append(trafficControls.node);
+        doc.defaultView?.addEventListener('pagehide', () => trafficControls?.dispose(), {once:true});
+      }
+      trafficControls.update(view.comms_traffic);
+    }
     // Interception need not create an addressed thread. Keep its independent
     // controls reachable even when the ordinary inbox/overlay is empty.
     const captureHost = doc.getElementById('comms-capture-host');

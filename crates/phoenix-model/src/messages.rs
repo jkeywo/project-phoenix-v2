@@ -2365,6 +2365,10 @@ pub enum SystemControlPayload {
     SelectCommsCapture {
         capture: Option<u64>,
     },
+    SetCommsListeningOrder {
+        priority: Vec<String>,
+    },
+    ReportCommsAlert,
     /// Select an actually accepted/heard call; device consent remains local.
     SetCommsMediaCall {
         origin_id: Option<String>,
@@ -4319,6 +4323,8 @@ pub struct DeadlineSnapshot {
 pub struct CaptainBlackboard {
     /// Whether the ship is at red alert.
     pub red_alert: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alert_observation: Option<crate::observation::ObservationMetadata>,
     /// Stable system id for the Red Alert coarse system fragment.
     #[serde(default = "default_red_alert_system_id")]
     pub red_alert_system_id: SystemId,
@@ -4373,6 +4379,7 @@ impl Default for CaptainBlackboard {
     fn default() -> Self {
         Self {
             red_alert: false,
+            alert_observation: None,
             red_alert_system_id: default_red_alert_system_id(),
             red_alert_auto: false,
             viewscreen_system_id: default_viewscreen_system_id(),
@@ -5835,6 +5842,8 @@ pub struct RepairBlackboard {
 /// blackboard (issue #565).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct CommsBlackboard {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub traffic: Option<crate::comms_traffic::CommsTrafficView>,
     /// Current own stored craft from explicitly bound Bay publications only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reception_craft: Vec<crate::craft::StoredCraftView>,

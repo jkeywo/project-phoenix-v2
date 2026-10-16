@@ -26,6 +26,8 @@ pub struct CommsRadioConfig {
     pub media: Option<crate::comms_media::MediaMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture: Option<crate::comms_capture::CommsCaptureConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub traffic: Option<crate::comms_traffic::CommsTrafficConfig>,
     #[serde(default = "default_request_reading_ticks")]
     pub request_reading_ticks: u32,
     #[serde(default)]
@@ -163,6 +165,23 @@ impl CommsRadioConfig {
         use std::collections::BTreeSet;
         if let Some(capture) = &self.capture {
             capture.validate()?;
+        }
+        if let Some(traffic) = &self.traffic {
+            traffic.validate(
+                &self
+                    .channels
+                    .iter()
+                    .map(|row| row.id.clone())
+                    .collect::<Vec<_>>(),
+            )?;
+            if traffic.alert.as_ref().is_some_and(|alert| {
+                !self
+                    .channels
+                    .iter()
+                    .any(|channel| channel.id == alert.channel && channel.key.is_none())
+            }) {
+                return Err("contextual alert reports require an actual unkeyed public channel");
+            }
         }
         let mut channels = BTreeSet::new();
         let mut keys = BTreeSet::new();

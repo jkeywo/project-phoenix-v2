@@ -393,6 +393,7 @@ mod vessel_ownership;
 
 mod comms_capture;
 mod comms_media;
+mod comms_traffic;
 mod concealment;
 mod emission_intent;
 mod guided_source;

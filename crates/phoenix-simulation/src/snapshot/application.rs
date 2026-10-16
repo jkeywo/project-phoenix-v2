@@ -1312,6 +1312,10 @@ pub(crate) fn apply_entity_state(world: &mut World, entity: Entity, row: &Entity
         );
         return;
     }
+    if let Err(reason) = super::comms_traffic::validate_entity(world, entity, row, tick) {
+        bevy::log::error!("refused traffic continuation for {}: {}", row.uuid, reason);
+        return;
+    }
     if let Err(reason) = super::preflight::validate_entity_resources(world, entity, row) {
         bevy::log::error!("refused resource restore for {}: {}", row.uuid, reason);
         return;
@@ -1717,6 +1721,14 @@ pub(super) fn apply_entity_state_with(
         entity_mut.insert(saved.clone());
     } else {
         entity_mut.remove::<crate::comms::media_control::ShipCommsMediaIntent>();
+    }
+    if let Some(saved) = &row.comms_traffic {
+        entity_mut.insert(crate::comms::traffic::ShipCommsTraffic {
+            state: saved.clone(),
+            coverage: None,
+        });
+    } else {
+        entity_mut.remove::<crate::comms::traffic::ShipCommsTraffic>();
     }
     if let Some(saved) = &row.identity_emitters {
         entity_mut.insert((

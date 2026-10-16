@@ -2,7 +2,7 @@
 title: Comms Range
 type: concept
 tags: [comms, range, hail, authority, contacts]
-sources: [crates/phoenix-simulation/src/comms/request_returns.rs, crates/phoenix-simulation/src/comms/requests.rs, crates/phoenix-simulation/src/snapshot/comms_requests.rs, crates/phoenix-model/src/comms_channel.rs, crates/phoenix-simulation/src/comms/radio.rs, crates/phoenix-sim-gameplay/src/entities/config/comms.rs, crates/phoenix-model/src/comms_history.rs, crates/phoenix-simulation/src/comms/mod.rs, crates/phoenix-simulation/src/comms/range.rs, crates/phoenix-simulation/src/comms/component.rs, crates/phoenix-simulation/src/comms/roster.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs, gui/comms-state.js, assets/entities/alliance_destroyer.toml]
+sources: [crates/phoenix-simulation/src/comms/traffic.rs, crates/phoenix-simulation/src/snapshot/comms_traffic.rs, crates/phoenix-sim-gameplay/src/electronic/traffic.rs, gui/comms-traffic.js, crates/phoenix-simulation/src/comms/request_returns.rs, crates/phoenix-simulation/src/comms/requests.rs, crates/phoenix-simulation/src/snapshot/comms_requests.rs, crates/phoenix-model/src/comms_channel.rs, crates/phoenix-simulation/src/comms/radio.rs, crates/phoenix-sim-gameplay/src/entities/config/comms.rs, crates/phoenix-model/src/comms_history.rs, crates/phoenix-simulation/src/comms/mod.rs, crates/phoenix-simulation/src/comms/range.rs, crates/phoenix-simulation/src/comms/component.rs, crates/phoenix-simulation/src/comms/roster.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/entities/spawner.rs, gui/comms-state.js, assets/entities/alliance_destroyer.toml]
 updated: 2026-10-16
 ---
 
@@ -35,6 +35,24 @@ identity and tick. Both remain in the existing recipient-scoped inbox. The
 source's next message identity is independent of conditional receiver count.
 Model `comms_channel::validate_transmissions` preflights the entire saved inbox
 before restore writes, and `sim_digest.rs` folds transmission metadata.
+
+Optional Radio `traffic.listening` equipment bounds simultaneous receive
+channels; the retained own priority order selects them. `comms/traffic.rs`
+applies admitted order changes and derives coverage from the same actual paid
+endpoint interval. Receivers, relay hops, original-event capture and media
+carriers use that coverage; transmission can use any supported source channel.
+Absent this equipment, the existing all-channel behavior remains. Derived paid
+coverage is neither saved nor folded and is cleared on restore.
+
+Optional alert traffic consumes the exact explicit own Captain feed and its
+original dated Alert observation. The ordinary Comms controller can request the
+same `ReportCommsAlert` verb as a Human; Radio rechecks freshness, changed semantic
+intent, spacing and actual payment before emitting and recording its last
+successful tuple. The established publication order remains unchanged. The
+Console reports capability, not a guarantee of readiness or remote delivery.
+`snapshot/comms_traffic.rs` validates the accepted recipe, canonical intent and
+retained publication clocks before restore writes. `gui/comms-traffic.js` and
+the existing Workshop Radio editor expose the same closed choices.
 
 Equipped non-roster actors build their own contact rows in
 `comms/radio_contacts.rs` from the same current paid endpoint pass. Only actual

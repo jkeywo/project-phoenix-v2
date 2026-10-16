@@ -79,6 +79,9 @@ impl CommsTrafficConfig {
     /// Native equipment validation additionally checks the actual unkeyed
     /// channel and exact permitted typed feed against its accepted ship recipe.
     pub fn validate(&self, channels: &[String]) -> Result<(), &'static str> {
+        if channels.len() > usize::from(u16::MAX) {
+            return Err("traffic channel count exceeds the supported equipment bound");
+        }
         if self.listening.is_none() && self.alert.is_none() {
             return Err("traffic profile requires a supported listening or alert consumer");
         }
@@ -114,6 +117,22 @@ impl From<bool> for ReportedAlert {
 pub struct SuccessfulAlertReport {
     pub semantic: ReportedAlert,
     pub emitted_tick: u64,
+}
+
+/// Permitted own intent and the latest actual Radio coverage, never traffic
+/// activity, held keys or evidence about another endpoint.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommsTrafficView {
+    pub channels: Vec<String>,
+    pub priority: Vec<String>,
+    pub simultaneous_channels: u16,
+    pub monitored: Vec<String>,
+    pub observed_tick: Option<u64>,
+    /// Supported verb, not a guarantee of fresh context, funding or readiness.
+    pub report_supported: bool,
+    pub last_report: Option<SuccessfulAlertReport>,
+    pub controllable: bool,
 }
 
 #[cfg(test)]

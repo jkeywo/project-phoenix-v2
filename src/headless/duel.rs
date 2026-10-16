@@ -111,8 +111,8 @@
 //! which spawns each can see.
 //!
 //! VICTORY is `on_all_neutralized group = "side_b"` → `game_over` victory. The
-//! transform simply DOES NOT EMIT that registration when `side_b` is empty, so a
-//! degenerate `--side-b` can't instant-fire a false victory off an empty group.
+//! transform emits that registration only when `side_b` is non-empty, so an
+//! empty opponent roster does not register an inapplicable victory condition.
 //! (Declaratively this was a deletion; generating the roster makes it an
 //! omission, which is the same guard stated the other way round.)
 
@@ -447,7 +447,7 @@ fn render_drivers(slots: &[Slot], side_b_filled: bool) -> String {
 /// - `side_b[..]` fill side-B slots.
 /// - Slots the lists do not reach are simply not generated.
 /// - The side-B victory `on_all_neutralized` is emitted only when side B has at
-///   least one ship, so an empty side never instant-fires.
+///   least one ship, omitting the inapplicable condition for an empty side.
 /// - Rejects either side longer than [`MAX_SIDE`]; a world with no
 ///   [`SLOT_MARKER`] line, with two of them, or without the `spawn_slot` /
 ///   `on_side_b_destroyed` bodies the generated roster calls; a slot whose

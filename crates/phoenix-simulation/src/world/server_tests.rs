@@ -5406,17 +5406,16 @@ fn spawn_immediate_entities_wires_behaviour_for_npc_with_anchor() {
     use crate::world::config::WorldEntity;
     use std::collections::HashMap;
 
-    let raider_toml = r#"
-tags = ["ship","npc","enemy"]
-
-[behaviour]
-
-[[behaviour.doctrine]]
-id = "destroy-hostiles"
-text = "Destroy hostiles"
-directive_kind = "Destroy"
-base_priority = 35.0
-"#;
+    // Use accepted NPC equipment, including its required physical layout,
+    // rather than relying on the retired implicit System/interior conversion.
+    let raider = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/ship_harrow_patrol.toml",
+    )
+    .unwrap();
+    assert!(
+        raider.behaviour.is_some(),
+        "the real NPC authors its behaviour"
+    );
     let mut world_cfg = UnifiedWorldConfig::default();
     world_cfg
         .anchors
@@ -5435,14 +5434,7 @@ base_priority = 35.0
         .insert("raider_alpha".into(), "raider-uuid-002".into());
 
     let mut m: HashMap<String, EntityConfig> = HashMap::new();
-    m.insert(
-        "fixture/raider.toml".into(),
-        EntityConfig::from_toml_in_mode(
-            raider_toml,
-            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
-        )
-        .unwrap(),
-    );
+    m.insert("fixture/raider.toml".into(), raider);
     let cache = crate::entities::config_cache::ConfigCache::from(m);
 
     let mut app = App::new();

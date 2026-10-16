@@ -334,6 +334,48 @@ fn losing_a_selected_publication_withholds_aim_without_forgetting_own_assignment
 }
 
 #[test]
+fn active_cycle_keeps_its_known_route_after_selection_changes_but_not_after_feed_loss() {
+    use bevy::ecs::system::SystemState;
+    let (mut app, ship, contact) = fixture();
+    let owner = SystemId("phaser-fore".into());
+    command(
+        &mut app,
+        ship,
+        &owner.0,
+        Payload::SetWeaponTarget {
+            uuid: Some(contact),
+        },
+    );
+    // Changing the next-shot order does not revoke a running cycle's target.
+    command(
+        &mut app,
+        ship,
+        &owner.0,
+        Payload::SetWeaponTarget { uuid: None },
+    );
+    let read = |world: &mut World, route: &str| {
+        let mut state = SystemState::<WeaponAimInputs>::new(world);
+        state
+            .get(world)
+            .active(ship, &owner, route, |_| {
+                panic!("active measured aim read private geometry")
+            })
+            .map(|aim| (aim.route, aim.position, aim.measured))
+    };
+    assert_eq!(
+        read(app.world_mut(), "private-actor"),
+        Some(("private-actor".into(), [20.0, 30.0], true))
+    );
+    assert!(read(app.world_mut(), "never-observed-actor").is_none());
+    app.world_mut()
+        .get_mut::<ShipSystemBlackboards>(ship)
+        .unwrap()
+        .0
+        .clear();
+    assert!(read(app.world_mut(), "private-actor").is_none());
+}
+
+#[test]
 fn fitted_observations_without_their_console_scope_never_fall_back_to_scene_truth() {
     use bevy::ecs::system::SystemState;
     let (mut app, ship, contact) = fixture();

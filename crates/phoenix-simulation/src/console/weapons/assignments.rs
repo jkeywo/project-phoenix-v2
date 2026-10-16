@@ -368,7 +368,20 @@ impl WeaponAimInputs<'_, '_> {
     ) -> Option<WeaponAim> {
         let row = self.scopes.get(entity).ok();
         if row.is_some_and(|row| row.1.is_some()) {
-            self.resolve(entity, owner, legacy)
+            let context = self.context(entity)?;
+            // A running cycle owns its captured route, not the next-shot
+            // selection. Reacquire only an alias still permitted to this
+            // Console; a frozen private route grants no target knowledge.
+            let contact = crate::science::contact_routing::machinery_alias(
+                context.config.map(|config| &config.0),
+                Some(context.boards),
+                context.broad,
+                context.controls,
+                owner,
+                frozen,
+            )?;
+            context
+                .resolve_reference(owner, &contact, legacy, &|route| self.ordinary_route(route))
                 .filter(|aim| aim.route == frozen)
         } else {
             if self

@@ -80,6 +80,14 @@ fn fixture() -> (World, Entity) {
             magazine,
         ))
         .id();
+    // A Recovery tool also installs the idle equipment-recovery owner, even
+    // when this focused test exercises only fractional resource processing.
+    content.recovery = Some(world.get::<CompiledShipRecovery>(entity).unwrap().0.clone());
+    crate::resources::equipment_recovery_server::install(
+        &content,
+        &mut world.commands().entity(entity),
+    );
+    world.flush();
     (world, entity)
 }
 

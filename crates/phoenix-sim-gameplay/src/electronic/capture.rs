@@ -17,6 +17,7 @@ fn request_claim(request: &GenericCommsRequest) -> DecodedRequestClaim {
         GenericCommsRequest::ReportStatus => DecodedRequestClaim::ReportStatus,
         GenericCommsRequest::FormUp { slot } => DecodedRequestClaim::FormUp { slot: *slot },
         GenericCommsRequest::MediaCall { mode } => DecodedRequestClaim::MediaCall { mode: *mode },
+        GenericCommsRequest::ReceiveCraft { .. } => DecodedRequestClaim::ReceiveCraft,
     }
 }
 

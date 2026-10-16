@@ -241,36 +241,51 @@ fn typed_claims_reveal_supported_parameters_only_after_the_same_paid_frontier() 
     };
     let config = config();
     let contents = [
-        CommsRadioContent::Request {
-            request: GenericCommsRequest::FormUp { slot: [-20, 37] },
-        },
-        CommsRadioContent::Outcome {
-            outcome: CommsRequestOutcome {
-                request: CommsRequestReference {
-                    formation_sequence: None,
-                    origin_id: "private-original".into(),
-                    source_ship: "private-requester".into(),
-                    recipient_ship: "private-reporter".into(),
-                    emitted_tick: 2,
-                    heard_tick: 3,
-                    request: GenericCommsRequest::ReportStatus,
-                },
-                facts: CommsRequestFacts {
-                    read_tick: Some(4),
-                    decision: Some(DatedCommsDecision {
-                        choice: CommsRequestDecision::Report,
-                        tick: 5,
-                    }),
-                    report: Some(CommsStatusReport {
-                        system: SystemId("private-report-system".into()),
-                        available: false,
-                        observed_tick: 5,
-                    }),
+        (
+            CommsRadioContent::Request {
+                request: GenericCommsRequest::FormUp { slot: [-20, 37] },
+            },
+            Some(DecodedRequestClaim::FormUp { slot: [-20, 37] }),
+        ),
+        (
+            CommsRadioContent::Request {
+                request: GenericCommsRequest::ReceiveCraft {
+                    craft: "private-craft".into(),
                 },
             },
-        },
+            Some(DecodedRequestClaim::ReceiveCraft),
+        ),
+        (
+            CommsRadioContent::Outcome {
+                outcome: CommsRequestOutcome {
+                    request: CommsRequestReference {
+                        formation_sequence: None,
+                        origin_id: "private-original".into(),
+                        source_ship: "private-requester".into(),
+                        recipient_ship: "private-reporter".into(),
+                        emitted_tick: 2,
+                        heard_tick: 3,
+                        request: GenericCommsRequest::ReportStatus,
+                    },
+                    facts: CommsRequestFacts {
+                        reception: None,
+                        read_tick: Some(4),
+                        decision: Some(DatedCommsDecision {
+                            choice: CommsRequestDecision::Report,
+                            tick: 5,
+                        }),
+                        report: Some(CommsStatusReport {
+                            system: SystemId("private-report-system".into()),
+                            available: false,
+                            observed_tick: 5,
+                        }),
+                    },
+                },
+            },
+            None,
+        ),
     ];
-    for content in contents {
+    for (content, expected_request) in contents {
         let mut original = payload(1, 10);
         original.literal_body = false;
         original.body = match &content {
@@ -278,7 +293,12 @@ fn typed_claims_reveal_supported_parameters_only_after_the_same_paid_frontier() 
             _ => phoenix_model::comms_request::OUTCOME_BODY,
         }
         .into();
-        original.transmission.sustained = matches!(&content, CommsRadioContent::Request { .. });
+        original.transmission.sustained = matches!(
+            &content,
+            CommsRadioContent::Request {
+                request: GenericCommsRequest::FormUp { .. }
+            }
+        );
         original.transmission.formation_sequence = original.transmission.sustained.then_some(1);
         original.transmission.content = content;
         let mut state = state();
@@ -296,7 +316,7 @@ fn typed_claims_reveal_supported_parameters_only_after_the_same_paid_frontier() 
         let evidence = state.views(&config, &[])[0].evidence.clone().unwrap();
         match &evidence.claim {
             DecodedCommsClaim::Request { request } => {
-                assert_eq!(request, &DecodedRequestClaim::FormUp { slot: [-20, 37] })
+                assert_eq!(Some(request), expected_request.as_ref());
             }
             DecodedCommsClaim::Outcome { outcome } => {
                 assert_eq!(outcome.request, DecodedRequestClaim::ReportStatus);

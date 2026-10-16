@@ -4079,3 +4079,65 @@ fn station_command_missing_or_ambiguous_owner_is_refused_before_queueing() {
             .all(|entry| entry.outcome == GmActionOutcome::Refused));
     }
 }
+
+#[test]
+fn station_command_payload_owner_does_not_authorize_unrelated_machinery_commands() {
+    use crate::core::messages::{StationId, SystemControlPayload, SystemId};
+    for supported in [true, false] {
+        let ship = crate::command_admission::ShipKey("player-1".into());
+        let station = StationId("helm".into());
+        let mut puppets = crate::gm::operations::puppet::StationPuppets::default();
+        puppets.set_operator(
+            crate::gm::operations::puppet::StationPuppetTarget::new(ship.clone(), station.clone()),
+            "gm-1".into(),
+            true,
+        );
+        let payload = if supported {
+            SystemControlPayload::SetIdentityEmitterEnabled { enabled: true }
+        } else {
+            SystemControlPayload::SetRedAlert { active: true }
+        };
+        let mut app = station_apply_app(
+            20,
+            crate::ship::components::ActiveStationRatings::default(),
+            puppets,
+            [station_grant(
+                1,
+                20,
+                "exact-payload-owner",
+                GmAction::IssueStationCommand {
+                    ship,
+                    station,
+                    target: SystemId("helm-thrust".into()),
+                    payload: crate::core::codec::canonical_system_command(&payload).unwrap(),
+                },
+            )],
+        );
+        // Preserve the fixture's authored Console/Station authority, but use
+        // the actual newly commandable kind and production owner registration.
+        let mut configs = app
+            .world_mut()
+            .query::<&mut crate::ship_plugin::ShipConfigComponent>();
+        configs.single_mut(app.world_mut()).unwrap().0.systems[0].kind =
+            crate::ship::system_registry::IDENTITY_EMITTER_KIND.into();
+        crate::science::identity::register(&mut app);
+        app.update();
+        let pending = app
+            .world()
+            .resource::<crate::gm::operations::puppet::PendingGmStationCommands>();
+        if supported {
+            assert_eq!(pending.entries().len(), 1);
+            assert_eq!(pending.entries()[0].payload, payload);
+            assert_eq!(outcomes(&app), vec![(GmActionOutcome::Pending, None)]);
+        } else {
+            assert!(pending.entries().is_empty());
+            assert_eq!(
+                outcomes(&app),
+                vec![(
+                    GmActionOutcome::Refused,
+                    Some(GmActionRefusalReason::SystemUnavailable)
+                )]
+            );
+        }
+    }
+}

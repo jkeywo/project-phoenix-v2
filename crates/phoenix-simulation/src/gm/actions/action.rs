@@ -4472,7 +4472,7 @@ pub fn apply_due_actions(
                             ) {
                                 Ok(command) => {
                                     let support = consumers.as_deref().map_or(crate::command_admission::FeedbackSupport::Unsupported, |registry| registry.feedback_support(&command.target, &command.payload, &config.0));
-                                    let installed_owner = consumers.as_deref().is_some_and(|registry| config.0.system(&command.target).map_or_else(|| registry.is_routed(&command.target.0), |system| registry.is_system_routed(system)));
+                                    let installed_owner = consumers.as_deref().is_some_and(|registry| config.0.system(&command.target).map_or_else(|| registry.is_routed(&command.target.0), |system| registry.is_command_routed(system, &command.payload)));
                                     if support == crate::command_admission::FeedbackSupport::Ambiguous
                                         || (support == crate::command_admission::FeedbackSupport::Unsupported && !installed_owner) {
                                         (GmActionOutcome::Refused, Some(GmActionRefusalReason::SystemUnavailable))

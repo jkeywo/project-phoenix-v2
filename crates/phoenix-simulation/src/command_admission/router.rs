@@ -132,6 +132,7 @@ impl ConsumerMatcher {
         ConsumerRegistration {
             matcher: self,
             feedback: Some(CorrelatedFeedback { address, payloads }),
+            owns_capability: false,
         }
     }
 
@@ -203,6 +204,9 @@ impl CorrelatedFeedback {
 pub struct ConsumerRegistration {
     matcher: ConsumerMatcher,
     feedback: Option<CorrelatedFeedback>,
+    /// The actual owning module can establish machinery coverage while its
+    /// command and feedback address domains remain payload-specific.
+    owns_capability: bool,
 }
 
 impl From<ConsumerMatcher> for ConsumerRegistration {
@@ -210,11 +214,32 @@ impl From<ConsumerMatcher> for ConsumerRegistration {
         Self {
             matcher,
             feedback: None,
+            owns_capability: false,
         }
     }
 }
 
 impl ConsumerRegistration {
+    /// Declare that this payload consumer belongs to the complete machinery
+    /// owner for its kind. Supplementary cross-capability handlers must not
+    /// make this promise. This changes capability coverage only: dispatch,
+    /// feedback and authority still require their original payload checks.
+    pub fn with_capability_ownership(mut self) -> Self {
+        assert!(
+            matches!(&self.matcher, ConsumerMatcher::KindPayload { .. }) && self.feedback.is_some(),
+            "capability ownership requires an exact payload consumer with feedback"
+        );
+        self.owns_capability = true;
+        self
+    }
+
+    fn owned_payload_kind(&self) -> Option<&str> {
+        match &self.matcher {
+            ConsumerMatcher::KindPayload { kind, .. } if self.owns_capability => Some(kind),
+            _ => None,
+        }
+    }
+
     fn supports_feedback(
         &self,
         target: &SystemId,
@@ -285,8 +310,9 @@ pub enum FeedbackSupport {
 /// Populated at app build: each consumer plugin registers the System kind and
 /// address domain its applier reads. A declared command target is
 /// *routed* iff its resolved [`crate::ship::config::SystemInstanceConfig`]
-/// matches a registered matcher. Undeclared host capabilities use exact target
-/// matching instead.
+/// matches a registered matcher or an explicit owning-capability declaration.
+/// Payload-specific owners still route only their registered commands.
+/// Undeclared host capabilities use exact target matching instead.
 #[derive(Resource, Default, Debug)]
 pub struct AdmittedConsumerRegistry {
     registrations: Vec<ConsumerRegistration>,
@@ -311,6 +337,11 @@ impl AdmittedConsumerRegistry {
             assert!(
                 identical,
                 "contradictory feedback metadata for consumer {:?}",
+                registration.matcher
+            );
+            assert!(
+                existing.owns_capability == registration.owns_capability,
+                "contradictory capability ownership metadata for consumer {:?}",
                 registration.matcher
             );
             return;
@@ -368,12 +399,14 @@ impl AdmittedConsumerRegistry {
 
     /// Does any registered consumer claim this authored System instance?
     pub fn is_system_routed(&self, system: &crate::ship::config::SystemInstanceConfig) -> bool {
-        self.registrations
-            .iter()
-            .any(|entry| entry.matcher.matches_system(system))
+        self.registrations.iter().any(|entry| {
+            entry.matcher.matches_system(system)
+                || entry.owned_payload_kind() == Some(system.kind.as_str())
+        })
     }
 
-    /// A shared payload handler proves only that command, never machinery coverage.
+    /// Match the actual command domain, independently of machinery coverage.
+    /// An owning payload consumer still proves only its registered payload.
     pub fn is_command_routed(
         &self,
         system: &crate::ship::config::SystemInstanceConfig,
@@ -393,9 +426,9 @@ impl AdmittedConsumerRegistry {
 
     /// Does production declare any consumer address domain for this System kind?
     pub fn claims_kind(&self, kind: &str) -> bool {
-        self.registrations
-            .iter()
-            .any(|entry| entry.matcher.claims_kind(kind))
+        self.registrations.iter().any(|entry| {
+            entry.matcher.claims_kind(kind) || entry.owned_payload_kind() == Some(kind)
+        })
     }
 
     /// Number of distinct registered matchers (for coverage assertions).

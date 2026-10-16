@@ -238,7 +238,8 @@ pub(crate) fn register(app: &mut App) {
                 crate::ship::system_registry::SIGNAL_PROTECTION_KIND,
                 payload,
             )
-            .with_feedback(FeedbackAddress::DeclaredKindOnly, feedback),
+            .with_feedback(FeedbackAddress::DeclaredKindOnly, feedback)
+            .with_capability_ownership(),
         );
     }
     app.add_systems(

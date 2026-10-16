@@ -45,7 +45,8 @@ pub(crate) fn register(app: &mut App) {
                 crate::ship::system_registry::TRANSIT_DRIVE_KIND,
                 payload,
             )
-            .with_feedback(FeedbackAddress::DeclaredKindOnly, feedback),
+            .with_feedback(FeedbackAddress::DeclaredKindOnly, feedback)
+            .with_capability_ownership(),
         );
     }
     app.declare_state::<ShipTransitDrives>(StateClass::Folded, "transit-drive-orders")

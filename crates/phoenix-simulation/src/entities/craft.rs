@@ -64,7 +64,8 @@ pub(crate) fn register(app: &mut App) {
     ] {
         app.register_admitted_consumer(
             ConsumerMatcher::kind_payload(crate::ship::system_registry::CRAFT_BAY_KIND, payload)
-                .with_feedback(FeedbackAddress::DeclaredKindOnly, feedback),
+                .with_feedback(FeedbackAddress::DeclaredKindOnly, feedback)
+                .with_capability_ownership(),
         );
     }
     app.add_systems(

@@ -262,7 +262,8 @@ pub(crate) fn register(app: &mut App) {
         .with_feedback(
             FeedbackAddress::DeclaredKindOnly,
             &[Payload::SetConcealmentEnabled],
-        ),
+        )
+        .with_capability_ownership(),
     );
     crate::ai::cadence::register_ai_cadence(app);
     app.add_systems(

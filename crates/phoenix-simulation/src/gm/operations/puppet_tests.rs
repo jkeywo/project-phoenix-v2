@@ -441,6 +441,87 @@ fn gm_commands_follow_human_admission_in_canonical_order_and_keep_attribution_si
 }
 
 #[test]
+fn queued_gm_commands_recheck_payload_routes_for_an_owned_capability() {
+    use crate::core::messages::{AdmittedCommands, SystemControlPayload, SystemId};
+    let mut config = control_test_config();
+    let target = SystemId("helm-thrust".into());
+    config
+        .systems
+        .iter_mut()
+        .find(|system| system.id == target)
+        .unwrap()
+        .kind = crate::ship::system_registry::IDENTITY_EMITTER_KIND.into();
+    let mut app = App::new();
+    crate::science::identity::register(&mut app);
+    app.insert_resource(crate::sim_tick::SimTick(12))
+        .init_resource::<PendingGmStationCommands>()
+        .init_resource::<PendingGmStationFeedbackRoutes>()
+        .init_resource::<StationPuppetActivity>()
+        .add_systems(Update, admit_station_puppet_commands);
+    let entity = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            EntityUuid("player-1".into()),
+            ShipConfigComponent(config),
+            AdmittedCommands::default(),
+        ))
+        .id();
+    for (sequence, payload) in [
+        (
+            1,
+            SystemControlPayload::SetIdentityEmitterEnabled { enabled: true },
+        ),
+        (2, SystemControlPayload::SetRedAlert { active: true }),
+    ] {
+        app.world_mut()
+            .resource_mut::<PendingGmStationCommands>()
+            .push(PendingGmStationCommand {
+                tick: 12,
+                order: crate::gm::actions::action::GmActionOrder::new(
+                    crate::command_admission::HostSlot(1),
+                    sequence,
+                ),
+                operator_id: "gm-1".into(),
+                correlation: crate::gm::actions::action::GmActionId::new(format!(
+                    "payload-{sequence}"
+                ))
+                .unwrap(),
+                ship: ShipKey("player-1".into()),
+                station: StationId("helm".into()),
+                target: target.clone(),
+                payload,
+            });
+    }
+    app.update();
+    let admitted = app.world().get::<AdmittedCommands>(entity).unwrap();
+    assert_eq!(admitted.0.len(), 1);
+    assert!(matches!(
+        admitted.0[0].payload,
+        SystemControlPayload::SetIdentityEmitterEnabled { enabled: true }
+    ));
+    assert!(admitted.0[0].feedback_correlation.is_some());
+    assert_eq!(
+        app.world()
+            .resource::<StationPuppetActivity>()
+            .entries()
+            .len(),
+        1
+    );
+    assert_eq!(
+        app.world()
+            .resource::<PendingGmStationFeedbackRoutes>()
+            .len(),
+        1
+    );
+    assert!(app
+        .world()
+        .resource::<PendingGmStationCommands>()
+        .entries()
+        .is_empty());
+}
+
+#[test]
 fn authentic_helm_consumer_settles_gm_correlation_applied_or_refused_exactly_once() {
     use crate::core::messages::{AdmittedCommands, SystemControlPayload, SystemId};
     use crate::gm::actions::action::{

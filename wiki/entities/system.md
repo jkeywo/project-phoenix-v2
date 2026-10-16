@@ -41,6 +41,11 @@ the System kind plus the address domain their reader accepts. Fixed-id readers
 claim an exact id, generated banks/tubes/arcs claim a prefix, and readers such
 as Dock that carry the authored id claim any instance of their kind. Undeclared
 host capabilities such as God Mode retain a separate exact-target claim.
+An owner using payload-specific registrations explicitly marks capability
+ownership beside its real consumers. This establishes machinery coverage and
+GM availability for that kind without widening command or feedback payloads.
+Supplementary stock, fitting and reference handlers do not establish this
+coverage merely by handling one shared command.
 
 The production coverage guard composes the real simulation and World plugins,
 then derives required coverage from commandable descriptors and every resolved

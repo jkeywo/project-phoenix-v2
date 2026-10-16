@@ -848,7 +848,7 @@ pub fn admit_station_puppet_commands(
         let installed_owner = consumers.as_deref().is_some_and(|registry| {
             config.0.system(&command.target).map_or_else(
                 || registry.is_routed(&command.target.0),
-                |system| registry.is_system_routed(system),
+                |system| registry.is_command_routed(system, &command.payload),
             )
         });
         if support == crate::command_admission::FeedbackSupport::Ambiguous

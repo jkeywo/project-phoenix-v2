@@ -492,3 +492,125 @@ fn a_shared_stock_handler_does_not_claim_missing_machinery() {
     assert!(registry.is_system_routed(&factory));
     assert!(registry.claims_kind("fabrication"));
 }
+
+#[test]
+fn owning_payload_consumer_claims_machinery_without_widening_commands_or_feedback() {
+    use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
+    let mut registry = AdmittedConsumerRegistry::default();
+    let emitter = system("fitted-emitter", "identity-emitter");
+    let config = ship_config(vec![emitter.clone()]);
+    let owner =
+        ConsumerMatcher::kind_payload("identity-emitter", Payload::SetIdentityEmitterEnabled)
+            .with_feedback(
+                FeedbackAddress::DeclaredKindOnly,
+                &[Payload::SetIdentityEmitterEnabled],
+            )
+            .with_capability_ownership();
+    registry.register(owner.clone());
+    registry.register(owner);
+    assert_eq!(
+        registry.len(),
+        1,
+        "equal ownership metadata stays idempotent"
+    );
+    assert!(registry.claims_kind("identity-emitter"));
+    assert!(registry.is_system_routed(&emitter));
+    assert!(!registry.is_routed("fitted-emitter"));
+    assert!(!registry.is_system_routed(&system("fitted-emitter", "fabrication")));
+    let supported = SystemControlPayload::SetIdentityEmitterEnabled { enabled: true };
+    let unrelated = SystemControlPayload::SetRedAlert { active: true };
+    assert!(registry.is_command_routed(&emitter, &supported));
+    assert!(!registry.is_command_routed(&emitter, &unrelated));
+    assert_eq!(
+        registry.feedback_support(&emitter.id, &supported, &config),
+        FeedbackSupport::Supported
+    );
+    assert_eq!(
+        registry.feedback_support(&emitter.id, &unrelated, &config),
+        FeedbackSupport::Unsupported
+    );
+    let admitted = AdmittedCommands(vec![AdmittedCommand {
+        target: emitter.id.clone(),
+        payload: unrelated,
+        response_token: None,
+        feedback_correlation: None,
+    }]);
+    assert_eq!(
+        unrouted_command_targets(&admitted, Some(&config), &registry),
+        vec!["fitted-emitter"],
+        "machinery availability must not hide an unconsumed payload"
+    );
+}
+
+#[test]
+#[should_panic(expected = "contradictory capability ownership metadata")]
+fn conflicting_consumer_capability_ownership_is_a_build_error() {
+    use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
+    let mut registry = AdmittedConsumerRegistry::default();
+    let payload =
+        ConsumerMatcher::kind_payload("identity-emitter", Payload::SetIdentityEmitterEnabled)
+            .with_feedback(
+                FeedbackAddress::DeclaredKindOnly,
+                &[Payload::SetIdentityEmitterEnabled],
+            );
+    registry.register(payload.clone());
+    registry.register(payload.with_capability_ownership());
+}
+
+#[test]
+fn production_payload_owners_cover_authored_instances_but_only_their_commands() {
+    use crate::ship::system_registry as sr;
+    let app = production_consumer_registry_app();
+    let registry = app.world().resource::<AdmittedConsumerRegistry>();
+    let cases = [
+        (
+            sr::CONCEALMENT_KIND,
+            SystemControlPayload::SetConcealmentEnabled { enabled: true },
+        ),
+        (sr::TRANSIT_DRIVE_KIND, SystemControlPayload::CancelTransit),
+        (
+            sr::JAMMING_KIND,
+            SystemControlPayload::SetJammingEnabled { enabled: true },
+        ),
+        (
+            sr::ILLUMINATION_KIND,
+            SystemControlPayload::SetIlluminationEnabled { enabled: true },
+        ),
+        (
+            sr::CRAFT_BAY_KIND,
+            SystemControlPayload::CancelCraftHandling,
+        ),
+        (
+            sr::IDENTITY_EMITTER_KIND,
+            SystemControlPayload::SetIdentityEmitterEnabled { enabled: true },
+        ),
+        (
+            sr::SIGNAL_PROTECTION_KIND,
+            SystemControlPayload::SetSignalProtectionEnabled { enabled: true },
+        ),
+    ];
+    for (kind, payload) in cases {
+        let installed = system(&format!("authored-{kind}"), kind);
+        let config = ship_config(vec![installed.clone()]);
+        assert!(registry.claims_kind(kind), "production owner for {kind}");
+        assert!(
+            registry.is_system_routed(&installed),
+            "GM machinery coverage for {kind}"
+        );
+        assert!(registry.is_command_routed(&installed, &payload));
+        assert_eq!(
+            registry.feedback_support(&installed.id, &payload, &config),
+            FeedbackSupport::Supported,
+            "production terminal owner for {kind}"
+        );
+        let unrelated = SystemControlPayload::SetRedAlert { active: true };
+        assert!(
+            !registry.is_command_routed(&installed, &unrelated),
+            "capability ownership must not widen {kind} payload routing"
+        );
+        assert_eq!(
+            registry.feedback_support(&installed.id, &unrelated, &config),
+            FeedbackSupport::Unsupported
+        );
+    }
+}

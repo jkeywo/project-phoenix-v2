@@ -555,7 +555,8 @@ pub(crate) fn register(app: &mut App) {
                 .with_feedback(
                     crate::command_admission::FeedbackAddress::DeclaredKindOnly,
                     feedback,
-                ),
+                )
+                .with_capability_ownership(),
         );
     }
     app.add_systems(

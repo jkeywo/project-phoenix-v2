@@ -293,7 +293,7 @@ fn prepared() -> (App, Entity, [i64; 3], i64) {
             priority: 0,
         },
     );
-    supplied(&app, entity);
+    supplied(&app, entity, true);
     assert!(app.world().get::<ShipLogistics>(entity).unwrap().0.enabled);
     assert!(state(&app, entity).active.is_none());
     assert_eq!(state(&app, entity).next_id, 1);
@@ -356,7 +356,7 @@ fn fabrication_group(app: &App, entity: Entity) -> PowerGroupId {
         .clone()
         .unwrap()
 }
-fn supplied(app: &App, entity: Entity) {
+fn supplied(app: &App, entity: Entity, current_interval: bool) {
     let power = &app.world().get::<ShipPowerSystem>(entity).unwrap().0;
     let group = &power.network().groups[&fabrication_group(app, entity)];
     assert_eq!(
@@ -375,10 +375,20 @@ fn supplied(app: &App, entity: Entity) {
     );
     if state(app, entity).active.is_some() {
         assert!(
-            power.emitted_work(&id("fabrication")) > 0.0,
-            "an active batch must keep receiving actual paid work: {}",
+            power.last_work_fraction(&id("fabrication")).unwrap() > 0.0,
+            "active saved work must retain its paid fraction: {}",
             diagnostic(app, entity)
         );
+        // Emissions are derived within one actual interval and cleared by
+        // restore_continuation. Saved allocation, paid fraction and progress
+        // remain canonical; the next real update must produce fresh work.
+        if current_interval {
+            assert!(
+                power.emitted_work(&id("fabrication")) > 0.0,
+                "an active batch must keep receiving actual paid work: {}",
+                diagnostic(app, entity)
+            );
+        }
     }
 }
 fn diagnostic(app: &App, entity: Entity) -> String {
@@ -426,7 +436,7 @@ fn checkpoint() -> (App, Entity, [i64; 3], i64) {
                     .policy_for(&id("fabrication"))
                     .operate_ai
             );
-            supplied(&app, entity);
+            supplied(&app, entity, true);
             return (app, entity, initial, target);
         }
     }
@@ -457,8 +467,8 @@ fn paid_second_fabrication_batch_and_exact_claims_continue_through_full_json360(
         );
         conserved(&live, entity, initial);
         conserved(&resumed, restored, initial);
-        supplied(&live, entity);
-        supplied(&resumed, restored);
+        supplied(&live, entity, true);
+        supplied(&resumed, restored, step > 0);
         if step < 360 {
             let tick = live.world().resource::<SimTick>().0;
             live.update();

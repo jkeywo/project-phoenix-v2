@@ -26,6 +26,15 @@ fn fixture_with(stored: bool, parent: EntityConfig) -> (App, Entity, Entity) {
     app.insert_resource(Time::<Fixed>::from_seconds(1.0 / 60.0));
     app.init_resource::<Time>();
     app.init_resource::<crate::world::server::WorldContentRuntime>();
+    // The real TacticalRadar publisher requires the accepted host projection
+    // and current public chart even in this sparse physical-owner fixture.
+    // These are read-model inputs, not injected observations or paid work.
+    app.insert_resource(crate::lobby::server::ShipClientConfigResource(
+        crate::lobby::server::project_ship_client_config(&parent),
+    ));
+    app.insert_resource(crate::lobby::WorldResource(
+        crate::core::messages::WorldData::default(),
+    ));
     app.add_message::<crate::ai::server::AiEntityDestroyed>();
     let probe =
         super::super::include_resolve::load_entity_config("assets/entities/physical_probe.toml")

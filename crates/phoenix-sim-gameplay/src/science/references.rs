@@ -99,9 +99,18 @@ pub fn project(
     dossiers: &DossierBlackboard,
     routine_name_is_unique: bool,
 ) -> Vec<AttachedSensorReference> {
-    held_references(dossiers)
-        .into_values()
-        .filter_map(|mut reference| {
+    project_from_held(track, &held_references(dossiers), routine_name_is_unique)
+}
+
+/// Reuse one catalogue built from the caller's exact permitted dossier view.
+/// This is call-local derived data, never another owner of held findings.
+pub fn project_from_held(
+    track: &BroadTrack,
+    held: &BTreeMap<String, AttachedSensorReference>,
+    routine_name_is_unique: bool,
+) -> Vec<AttachedSensorReference> {
+    held.values()
+        .filter_map(|reference| {
             let deliberate = track
                 .attached_references
                 .get(&reference.reference.id)
@@ -111,7 +120,7 @@ pub fn project(
                 && track.identity.as_ref().is_some_and(|identity| {
                     !reference.source_name.is_empty() && identity.name == reference.source_name
                 });
-            reference.attached_at_tick = deliberate.or_else(|| {
+            let attached_at_tick = deliberate.or_else(|| {
                 routine.then_some(
                     track.observed_tick.max(reference.gathered_at_tick).max(
                         track
@@ -122,6 +131,8 @@ pub fn project(
                     ),
                 )
             })?;
+            let mut reference = reference.clone();
+            reference.attached_at_tick = attached_at_tick;
             Some(reference)
         })
         .collect()

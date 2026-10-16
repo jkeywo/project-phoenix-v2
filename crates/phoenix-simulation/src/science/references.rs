@@ -6,7 +6,11 @@ use crate::{
     ship_plugin::ShipConfigComponent,
 };
 use bevy::prelude::*;
+use phoenix_model::{
+    sensing_references::AttachedSensorReference, sensing_tracks::SensorTrackSnapshot,
+};
 pub use phoenix_sim_gameplay::science::references::{held_references, project};
+use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) fn register(app: &mut App) {
     use crate::command_admission::{ConsumerMatcher, FeedbackAddress, RegisterAdmittedConsumer};
@@ -115,25 +119,51 @@ pub fn attach_views(
     state: &phoenix_sim_gameplay::science::tracks::BroadTrackState,
     records: &mut [phoenix_model::sensing_tracks::SensorTrackSnapshot],
 ) {
-    let permitted = config.observations_for_system(owner, &boards.0);
-    let dossiers = match permitted.get(&crate::dossier::dossier_blackboard_key()) {
-        Some(SystemBlackboard::Dossiers(dossiers)) => Some(dossiers),
-        _ => None,
+    let held = permitted_references(config, boards, owner);
+    let routine_names = if held.is_empty() {
+        BTreeSet::new()
+    } else {
+        phoenix_sim_gameplay::science::references::routine_names(records)
     };
-    let routine_names = phoenix_sim_gameplay::science::references::routine_names(records);
     for record in records {
-        record.references = match (state.tracks.get(&record.contact_id), dossiers) {
-            (Some(track), Some(dossiers)) => project(
+        record.references = projected_references(state, record, &held, &routine_names);
+    }
+}
+
+fn permitted_references(
+    config: &crate::ship::config::ShipConfig,
+    boards: &ShipSystemBlackboards,
+    owner: &crate::core::messages::SystemId,
+) -> BTreeMap<String, AttachedSensorReference> {
+    let permitted = config.observations_for_system(owner, &boards.0);
+    match permitted.get(&crate::dossier::dossier_blackboard_key()) {
+        Some(SystemBlackboard::Dossiers(dossiers)) => held_references(dossiers),
+        _ => BTreeMap::new(),
+    }
+}
+
+fn projected_references(
+    state: &phoenix_sim_gameplay::science::tracks::BroadTrackState,
+    record: &SensorTrackSnapshot,
+    held: &BTreeMap<String, AttachedSensorReference>,
+    routine_names: &BTreeSet<String>,
+) -> Vec<AttachedSensorReference> {
+    if held.is_empty() {
+        return Vec::new();
+    }
+    state
+        .tracks
+        .get(&record.contact_id)
+        .map_or_else(Vec::new, |track| {
+            phoenix_sim_gameplay::science::references::project_from_held(
                 track,
-                dossiers,
+                held,
                 record
                     .identity
                     .as_ref()
                     .is_some_and(|identity| routine_names.contains(&identity.name)),
-            ),
-            _ => Vec::new(),
-        };
-    }
+            )
+        })
 }
 
 pub(crate) fn publish(
@@ -149,22 +179,45 @@ pub(crate) fn publish(
             let Some(board) = boards.0.get(owner) else {
                 continue;
             };
-            let mut board = board.clone();
-            let rows = match &mut board {
-                SystemBlackboard::SensorRadar(board) => board.tracks.as_mut(),
-                SystemBlackboard::TacticalRadar(board) => board.tracks.as_mut(),
-                SystemBlackboard::Helm(board) => board.tracks.as_mut(),
+            let Some(rows) = super::contact_routing::observations(board) else {
+                continue;
+            };
+            let held = permitted_references(&config.0, &boards, owner);
+            let routine_names = if held.is_empty() {
+                BTreeSet::new()
+            } else {
+                phoenix_sim_gameplay::science::references::routine_names(rows)
+            };
+            let changes: Vec<_> = rows
+                .iter()
+                .enumerate()
+                .filter_map(|(index, record)| {
+                    let references = projected_references(state, record, &held, &routine_names);
+                    (references != record.references).then_some((index, references))
+                })
+                .collect();
+            if !changes.is_empty() {
+                next.push((owner.clone(), changes));
+            }
+        }
+        // Keep every instrument's permission read on the same original boards,
+        // then update only annotations. No track/DTO or unrelated board clone.
+        for (owner, changes) in next {
+            let rows = match boards.0.get_mut(&owner) {
+                Some(SystemBlackboard::SensorRadar(board)) => board.tracks.as_mut(),
+                Some(SystemBlackboard::TacticalRadar(board)) => board.tracks.as_mut(),
+                Some(SystemBlackboard::Helm(board)) => board.tracks.as_mut(),
                 _ => None,
             };
             if let Some(rows) = rows {
-                attach_views(&config.0, &boards, owner, state, rows);
-            }
-            next.push((owner.clone(), board));
-        }
-        for (owner, board) in next {
-            if boards.0.get(&owner) != Some(&board) {
-                boards.0.insert(owner, board);
+                for (index, references) in changes {
+                    rows[index].references = references;
+                }
             }
         }
     }
 }
+
+#[cfg(test)]
+#[path = "references_tests.rs"]
+mod tests;

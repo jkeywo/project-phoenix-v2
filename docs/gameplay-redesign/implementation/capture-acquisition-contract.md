@@ -1,7 +1,7 @@
 # First whole-vessel acquisition contract
 
-Proposed for review, 16 October 2026. Source audit: `7f99ab79`. This document
-does not adopt a PASM change or authorize runtime implementation. It narrows the
+Adopted, 16 October 2026, with the acquisition-time and doctrine clarifications
+below. Source audit: `7f99ab79`; implementation starts from `b243bcc6`. It narrows the
 next physical consumer needed by [increment 20](increment-20.md) and
 [increment 23](increment-23.md); it does not close either increment.
 
@@ -71,7 +71,9 @@ Before the useful-work success transition, prepare all of these without writes:
 4. The actual acquiring actor has a supported registered faction, and the target
    still meets its accepted empty-personnel restriction. Its existing owner is
    absent. Any compatibility or required ordinary controller transition has been
-   checked before mutation.
+   checked before mutation. These are acquisition-time checks. Later legitimate
+   GM puppeting, crew presence, System control-source or actor faction changes
+   cannot retroactively invalidate the recorded acquisition.
 
 Commit the prepared Session owner, its effective faction, the Security achieved
 cause and the same Job's ordinary withdrawal together. The existing Security
@@ -100,12 +102,13 @@ already emitted projectiles and other physical consequences; changing ownership
 does not erase hazards, clear all work, open doors or refresh observations. Capture
 does not make private compartments or enemy Console records universally visible.
 
-Do not let the original hostile doctrine continue unnoticed, or suppress all AI
-with a new blanket latch. A compatible post-acquisition doctrine may be explicitly
-authored and applied through the existing `NpcDoctrineControl` owner only when the
-actual operability and crew contracts permit it. Validate that transition in the
-same prepared transaction if required by the selected first target. It replaces no
-individual System controller. Unsupported operation stays explicitly unavailable.
+The chosen first autonomous target must explicitly bind a compatible
+post-acquisition doctrine, such as an actually supported hold directive. Prepare
+and apply it through the existing `NpcDoctrineControl` transaction together with
+acquisition, so power recovery cannot revive its original hostile objectives.
+Actual hardware/configuration still determines operation. Do not introduce a
+non-operational latch, blanket AI-off state or second controller. Originally
+populated personnel profiles remain unsupported by this first effect.
 
 Loss of the acquiring actor leaves the recorded acquisition and frozen faction
 intact. It does not revert the asset, destroy its crew or transfer it to a new
@@ -126,7 +129,9 @@ Whole-candidate preflight checks the accepted target capability and empty-person
 recipe, registered frozen faction, exact actor/target/owner/Job/team tuple and
 causal clocks. When the original Job remains retained, it must agree with the
 cause; one physical Job cannot name conflicting acquisitions. Actor removal after
-the recorded event does not invalidate history. These are consistency and
+the recorded event does not invalidate history. Current crew, GM puppeting,
+control sources, actual disablement and current faction equality are not replayed
+as historical eligibility checks. These are consistency and
 provenance checks, not a claim that arbitrary coordinated rewriting of every
 historical fact can be authenticated without an action ledger.
 

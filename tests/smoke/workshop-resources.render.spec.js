@@ -268,7 +268,8 @@ test('Workshop edits inherited stores and service links, then reloads and exerci
       await page.locator(`#workshop-${family}-${selection}`).selectOption(binding.id);
       await expect(page.locator(`#workshop-${family}-${field}`)).toHaveValue(String(binding.value));
     }
-    await resourceForm(page); await expect(byId(page, 'count')).toHaveValue('32');
+    await resourceForm(page); await byId(page, 'capacities').selectOption('ammo');
+    await expect(byId(page, 'count')).toHaveValue('32');
     await expect(byId(page, 'amount')).toHaveValue('6'); await expect(byId(page, 'ceiling')).toHaveValue('24');
     await expect(byId(page, 'link-service')).toHaveValue('torpedoes');
 

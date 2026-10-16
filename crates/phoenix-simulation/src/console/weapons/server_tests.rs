@@ -3910,11 +3910,11 @@ fn phaser_beam_on_an_asteroid_is_tagged_and_kept_out_of_the_ledger() {
     );
 }
 
-/// A shooter with no `EntityUuid` is *unknown*, not a ship named `""`. Every
-/// other chokepoint models that as `None`; an empty string here would key a
-/// junk `""` row in the ledger and print `"attacker":""` in the timeline.
+/// Required owner loss withholds further aim under the actual knowledge gate.
+/// It must neither manufacture an empty attacker nor refund a genuine paid hit.
+/// The neighboring unowned physical blaster-effect test covers None attribution.
 #[test]
-fn phaser_beam_from_an_unidentified_shooter_reports_no_attacker() {
+fn phaser_beam_owner_identity_loss_withholds_damage_without_empty_attribution() {
     use crate::core::balance::BalanceEvent;
     use bevy::ecs::message::Messages;
 
@@ -3922,7 +3922,7 @@ fn phaser_beam_from_an_unidentified_shooter_reports_no_attacker() {
     setup_npc_world(&mut app, 0.0, -20.0);
     start_game_with_weapons(&mut app);
 
-    spawn_shielded_npc_entity(&mut app, 0.0, -20.0, 30.0, 10.0, 0.0);
+    let victim = spawn_shielded_npc_entity(&mut app, 0.0, -20.0, 30.0, 10.0, 0.0);
 
     push(
         &mut app,
@@ -3945,8 +3945,6 @@ fn phaser_beam_from_an_unidentified_shooter_reports_no_attacker() {
     );
     tick(&mut app);
 
-    // Strip the shooter's identity mid-run — the cheapest way to reach the
-    // `shooter_uuid_opt == None` branch of the beam snapshot.
     let shooter = {
         let mut q = app
             .world_mut()
@@ -3954,29 +3952,104 @@ fn phaser_beam_from_an_unidentified_shooter_reports_no_attacker() {
         q.single(app.world()).expect("fixture has a local ship")
     };
     app.world_mut()
+        .resource_mut::<Messages<BalanceEvent>>()
+        .clear();
+    let before = (shield_hp(&app, victim), hull_hp(&app, victim));
+    let bank = SystemId("phaser-port".into());
+    let reserve = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(shooter)
+        .unwrap()
+        .0
+        .network()
+        .consumers[&bank]
+        .energy;
+    tick(&mut app);
+    let after = (shield_hp(&app, victim), hull_hp(&app, victim));
+    assert!(
+        after.0 < before.0 || after.1 < before.1,
+        "the genuine known-owner beam must land first"
+    );
+    assert!(
+        app.world()
+            .get::<crate::ship::power::ShipPowerSystem>(shooter)
+            .unwrap()
+            .0
+            .network()
+            .consumers[&bank]
+            .energy
+            < reserve,
+        "the hit requires actual finite bank work"
+    );
+    let messages = app.world().resource::<Messages<BalanceEvent>>();
+    let mut cursor = messages.get_cursor();
+    let mut reported = (0.0, 0.0);
+    for hit in cursor.read(messages) {
+        if let BalanceEvent::DamageApplied {
+            attacker,
+            victim,
+            shield_absorbed,
+            hull_damage,
+            ..
+        } = hit
+        {
+            assert_eq!(attacker.as_deref(), Some("test-local-ship"));
+            assert_eq!(victim, "npc-1");
+            reported.0 += shield_absorbed;
+            reported.1 += hull_damage;
+        }
+    }
+    assert_eq!(
+        reported,
+        (before.0 - after.0, before.1 - after.1),
+        "actual paid losses and balance trace agree"
+    );
+    let paid_reserve = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(shooter)
+        .unwrap()
+        .0
+        .network()
+        .consumers[&bank]
+        .energy;
+    // Identity is required by the real GM/knowledge context. Its removal is
+    // deliberately not repaired by dropping that context or a legacy fallback.
+    app.world_mut()
         .entity_mut(shooter)
         .remove::<crate::entities::spawner::EntityUuid>();
 
     app.world_mut()
         .resource_mut::<Messages<BalanceEvent>>()
         .clear();
-    set_active_beam_damage_accumulator(&mut app, 15.0);
-    set_active_beam_remaining_secs(&mut app, 5.0);
     tick(&mut app);
 
     let messages = app.world().resource::<Messages<BalanceEvent>>();
     let mut cursor = messages.get_cursor();
     let hits: Vec<&BalanceEvent> = cursor.read(messages).collect();
-    assert!(!hits.is_empty(), "the beam must still land and be traced");
+    assert_eq!(
+        (shield_hp(&app, victim), hull_hp(&app, victim)),
+        after,
+        "unknown ownership cannot continue damage or refund the previous paid hit"
+    );
+    assert_eq!(app.world().get::<crate::ship::power::ShipPowerSystem>(shooter).unwrap()
+        .0.network().consumers[&bank].energy, paid_reserve,
+        "with no physical refill in this owner harness, required owner loss cannot refund paid work");
     for hit in &hits {
         let BalanceEvent::DamageApplied { attacker, .. } = hit else {
             continue;
         };
-        assert_eq!(
-            *attacker, None,
-            "an unidentified shooter is None, never Some(\"\")"
+        assert_ne!(
+            attacker.as_deref(),
+            Some(""),
+            "no phantom empty attacker is ever reported"
         );
     }
+    assert!(
+        !hits
+            .iter()
+            .any(|hit| matches!(hit, BalanceEvent::DamageApplied { .. })),
+        "there is no new hit after the required owner identity is removed"
+    );
 }
 
 #[test]
@@ -5088,7 +5161,7 @@ fn crew_spectator_blaster_kill_retains_remote_and_local_crew_once_without_ending
     }
 }
 
-/// The blaster's twin of `phaser_beam_from_an_unidentified_shooter_...`.
+/// The physical unowned-effect half of the beam owner-loss test above.
 ///
 /// `BlasterProjectile::source_uuid` is a plain `String` and carries `""` for a
 /// shooter with no `EntityUuid` — so the detonation has to narrow it to

@@ -6,6 +6,7 @@ pub mod server;
 
 pub mod equipment_recovery_server;
 pub mod fitting_server;
+mod logistics_mission;
 pub mod logistics_server;
 pub mod production_server;
 pub mod recovery_server;

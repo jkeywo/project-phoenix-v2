@@ -207,11 +207,14 @@ pub(crate) fn replace_endpoints(
 /// Execute a maintained/local order against the current real deficit. Both
 /// direct requests and controller-maintained requests use this same boundary;
 /// a stale report or another request this tick cannot reserve the deficit twice.
-fn dispatch_order(
+#[allow(clippy::too_many_arguments)]
+pub(super) fn dispatch_order(
     profile: &CompiledLogistics,
     state: &mut LogisticsState,
     tick: u64,
     request: &DeliveryRequest,
+    mission_requests: &[phoenix_model::activity::PlannedDeliveryRequest],
+    blocked: &std::collections::BTreeSet<String>,
     mut inventory: Option<&mut InfrastructureCondition>,
     mut torpedoes: Option<&mut TorpedoSystemResource>,
     flags: &mut Vec<FlagChange>,
@@ -226,7 +229,15 @@ fn dispatch_order(
         .and_then(|amount| amount.checked_add(current.held))
         .ok_or("local occupancy overflows")?;
     let deficit = state.goals[&destination.id].saturating_sub(occupied).max(0);
-    let amount = request.amount.min(deficit);
+    let amount = super::logistics_mission::dispatch_amount(
+        profile,
+        state,
+        &stocks,
+        blocked,
+        request,
+        mission_requests,
+    )
+    .unwrap_or_else(|| request.amount.min(deficit));
     if amount <= 0 {
         return Err("local stock target has no remaining deficit".into());
     }
@@ -433,6 +444,15 @@ pub(crate) fn tick(
                 |binding| crate::world::activities::delivery_binding_supported(binding, &profile.0),
             );
         }
+        let mut mission_requests = super::logistics_mission::permitted_current(
+            runtime.as_deref(),
+            base_world.as_deref(),
+            &uuid,
+            &owner.0.owner,
+            config,
+            boards,
+            tick.0,
+        );
         let mut accepted = Vec::new();
         let mut next = owner.0.clone();
         let prior_batches = next.batches.clone();
@@ -551,11 +571,18 @@ pub(crate) fn tick(
                                 destination: destination.clone(),
                                 amount: *amount,
                             },
+                            &mission_requests,
+                            &blocked,
                             next_inventory.as_mut(),
                             next_torpedoes.as_mut(),
                             &mut flags,
                         )
                         .map(|job| {
+                            mission_requests.retain(|row| {
+                                row.source != *source
+                                    || row.destination != *destination
+                                    || row.amount != *amount
+                            });
                             accepted.push(job);
                         })
                     }
@@ -594,6 +621,8 @@ pub(crate) fn tick(
                         &mut next,
                         tick.0,
                         request,
+                        &mission_requests,
+                        &blocked,
                         next_inventory.as_mut(),
                         next_torpedoes.as_mut(),
                         &mut flags,
@@ -747,48 +776,76 @@ pub(crate) fn publish(
                 compartment: binding.compartment.clone(),
             });
         }
-        let next_delivery = if state.0.enabled
-            && state.0.batches.len() < usize::from(profile.0.handling().max_active)
-        {
-            let observations = stores
+        let planned_requests = actor
+            .map(|actor| {
+                crate::world::planning::delivery_requests(
+                    runtime.as_deref(),
+                    base_world.as_deref(),
+                    &actor.0,
+                    &state.0.owner,
+                    tick.as_ref().map_or(0, |tick| tick.0),
+                )
+            })
+            .unwrap_or_default();
+        let current_permitted = actor
+            .map(|actor| {
+                super::logistics_mission::permitted_current(
+                    runtime.as_deref(),
+                    base_world.as_deref(),
+                    &actor.0,
+                    &state.0.owner,
+                    config,
+                    boards,
+                    tick.as_ref().map_or(0, |tick| tick.0),
+                )
+            })
+            .unwrap_or_default();
+        let mission_delivery =
+            super::logistics_mission::candidate(profile, state, &stores, &current_permitted);
+        let next_delivery = mission_delivery.or_else(|| {
+            if state.0.enabled
+                && state.0.batches.len() < usize::from(profile.0.handling().max_active)
+            {
+                let observations = stores
+                    .iter()
+                    .filter(|s| s.role == "local")
+                    .filter_map(|s| {
+                        Some(crate::resources::logistics::ReplenishmentObservation {
+                            store: s.id.clone(),
+                            occupied: s.level.checked_add(s.incoming)?.checked_add(s.held)?,
+                            target: s.target,
+                            priority: s.priority,
+                            replenishing: state.0.replenishing.contains(&s.id),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                crate::resources::logistics::ordered_replenishment_candidates(
+                    &observations,
+                    profile.0.handling(),
+                )
+                .unwrap_or_default()
                 .iter()
-                .filter(|s| s.role == "local")
-                .filter_map(|s| {
-                    Some(crate::resources::logistics::ReplenishmentObservation {
-                        store: s.id.clone(),
-                        occupied: s.level.checked_add(s.incoming)?.checked_add(s.held)?,
-                        target: s.target,
-                        priority: s.priority,
-                        replenishing: state.0.replenishing.contains(&s.id),
+                .find_map(|candidate| {
+                    let local = stores.iter().find(|store| store.id == candidate.store)?;
+                    let binding = profile.0.store(&local.id).ok()?;
+                    let source = stores
+                        .iter()
+                        .find(|source| Some(&source.id) == binding.source.as_ref())?;
+                    let amount = (candidate.target - candidate.occupied)
+                        .min(source.available)
+                        .min(local.headroom)
+                        .min(source.level.saturating_sub(source.reserve).max(0))
+                        .min(profile.0.handling().max_batch);
+                    (amount > 0).then(|| DeliveryRequest {
+                        source: source.id.clone(),
+                        destination: local.id.clone(),
+                        amount,
                     })
                 })
-                .collect::<Vec<_>>();
-            crate::resources::logistics::ordered_replenishment_candidates(
-                &observations,
-                profile.0.handling(),
-            )
-            .unwrap_or_default()
-            .iter()
-            .find_map(|candidate| {
-                let local = stores.iter().find(|store| store.id == candidate.store)?;
-                let binding = profile.0.store(&local.id).ok()?;
-                let source = stores
-                    .iter()
-                    .find(|source| Some(&source.id) == binding.source.as_ref())?;
-                let amount = (candidate.target - candidate.occupied)
-                    .min(source.available)
-                    .min(local.headroom)
-                    .min(source.level.saturating_sub(source.reserve).max(0))
-                    .min(profile.0.handling().max_batch);
-                (amount > 0).then(|| DeliveryRequest {
-                    source: source.id.clone(),
-                    destination: local.id.clone(),
-                    amount,
-                })
-            })
-        } else {
-            None
-        };
+            } else {
+                None
+            }
+        });
         let deliveries = state
             .0
             .batches
@@ -830,17 +887,7 @@ pub(crate) fn publish(
         boards.0.insert(
             state.0.owner.clone(),
             SystemBlackboard::Logistics(LogisticsBlackboard {
-                planned_requests: actor
-                    .map(|actor| {
-                        crate::world::planning::delivery_requests(
-                            runtime.as_deref(),
-                            base_world.as_deref(),
-                            &actor.0,
-                            &state.0.owner,
-                            tick.as_ref().map_or(0, |tick| tick.0),
-                        )
-                    })
-                    .unwrap_or_default(),
+                planned_requests,
                 enabled: state.0.enabled,
                 max_batch: profile.0.handling().max_batch,
                 max_active: profile.0.handling().max_active,

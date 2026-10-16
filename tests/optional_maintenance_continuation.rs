@@ -120,7 +120,7 @@ fn authorised(
             app.world().get::<HumanSeekingHosts>(entity),
         )
 }
-fn control(app: &mut App, token: &str, station: &str, target: &str, payload: Control) {
+fn enqueue_control(app: &mut App, token: &str, station: &str, target: &str, payload: Control) {
     for _ in 0..120 {
         if authorised(app, token, station, &id(target), &payload) {
             break;
@@ -139,6 +139,9 @@ fn control(app: &mut App, token: &str, station: &str, target: &str, payload: Con
             payload,
         },
     );
+}
+fn control(app: &mut App, token: &str, station: &str, target: &str, payload: Control) {
+    enqueue_control(app, token, station, target, payload);
     steps(app, 4);
 }
 
@@ -247,6 +250,28 @@ fn parts(app: &App, actor: Entity) -> i64 {
         + stock.capacity_stock("hold-structural-parts").unwrap().level
         + freight
 }
+fn assert_no_mission_topup(app: &App, actor: Entity) {
+    let logistics = &app.world().get::<ShipLogistics>(actor).unwrap().0;
+    assert_eq!(logistics.goals["repair-structural"], 0);
+    assert_eq!(
+        app.world()
+            .get::<InfrastructureCondition>(actor)
+            .unwrap()
+            .0
+            .capacity_stock("structural_parts")
+            .unwrap()
+            .level,
+        0,
+        "consuming the delivered part cannot reopen an accepted mission scope"
+    );
+    assert!(
+        logistics
+            .batches
+            .values()
+            .all(|batch| batch.original_destination != "repair-structural"),
+        "no duplicate or top-up mission batch remains after actual repair"
+    );
+}
 fn incident(app: &mut App, actor: Entity) -> f64 {
     incident_at(app, actor, "engineering")
 }
@@ -344,28 +369,23 @@ fn assert_same(live: &App, resumed: &App, step: usize) {
 
 fn establish_need(app: &mut App, actor: Entity) -> (f64, i64) {
     // Consume finite existing stock, never create a resource or a delivery.
-    // Read-only native diagnostic: keep the original one-update/zero-stock
-    // assertion so an unapplied effect cannot be mistaken for a valid need.
-    eprintln!(
-        "maintenance consumption before: tick={} phase={:?} stock={:?} queued={:?} deliveries={:?}",
-        app.world()
-            .resource::<project_phoenix::sim_tick::SimTick>()
-            .0,
-        app.world()
-            .resource::<State<project_phoenix::core::messages::GamePhase>>()
-            .get(),
-        app.world()
-            .get::<InfrastructureCondition>(actor)
-            .unwrap()
-            .0
-            .capacity_stock("structural_parts"),
-        app.world()
-            .resource::<project_phoenix::effect_queue::EffectQueue<
-                project_phoenix::infrastructure::CapacityAdjustment,
-            >>()
-            .0,
-        app.world().get::<ShipLogistics>(actor).unwrap().0.batches,
+    // Retain the player's ordinary local-stock goal through delegation. This
+    // leaves Logistics enabled (including its existing ammunition delivery),
+    // but prevents routine refilling from undoing the need before discovery.
+    assert!(runtime(app).opportunities.is_empty());
+    control(
+        app,
+        TOKEN,
+        "engineering",
+        "repair",
+        Control::SetStockTarget {
+            store: "repair-structural".into(),
+            amount: 0,
+        },
     );
+    let logistics = &app.world().get::<ShipLogistics>(actor).unwrap().0;
+    assert!(logistics.enabled);
+    assert_eq!(logistics.goals["repair-structural"], 0);
     let level = app
         .world()
         .get::<InfrastructureCondition>(actor)
@@ -387,31 +407,11 @@ fn establish_need(app: &mut App, actor: Entity) -> (f64, i64) {
         >>()
         .0
         .push(project_phoenix::infrastructure::CapacityAdjustment {
-            uuid,
+            uuid: uuid.clone(),
             capacity: "structural_parts".into(),
             delta: -level,
         });
     app.update();
-    eprintln!(
-        "maintenance consumption after: tick={} phase={:?} stock={:?} queued={:?} deliveries={:?}",
-        app.world()
-            .resource::<project_phoenix::sim_tick::SimTick>()
-            .0,
-        app.world()
-            .resource::<State<project_phoenix::core::messages::GamePhase>>()
-            .get(),
-        app.world()
-            .get::<InfrastructureCondition>(actor)
-            .unwrap()
-            .0
-            .capacity_stock("structural_parts"),
-        app.world()
-            .resource::<project_phoenix::effect_queue::EffectQueue<
-                project_phoenix::infrastructure::CapacityAdjustment,
-            >>()
-            .0,
-        app.world().get::<ShipLogistics>(actor).unwrap().0.batches,
-    );
     assert_eq!(
         app.world()
             .get::<InfrastructureCondition>(actor)
@@ -438,6 +438,10 @@ fn establish_need(app: &mut App, actor: Entity) -> (f64, i64) {
         .opportunities
         .first()
         .expect("actual finite need and ordinary own-System report produce an offer");
+    assert_eq!(
+        row.reference.actor, uuid,
+        "offer belongs to the damaged ship"
+    );
     assert!(row.input.known && row.input.report.is_some());
     assert_eq!(row.input.local_available, 0);
     assert!(row.input.hp < row.input.max_hp);
@@ -492,10 +496,43 @@ fn answer_offer(app: &mut App, index: usize) {
     }
     let (message_id, payload) =
         response.expect("actual own Comms Console publishes the immutable offered dialogue");
-    control(app, COMMS, "comms", "comms", payload);
-    for _ in 0..12 {
+    enqueue_control(app, COMMS, "comms", "comms", payload);
+    // Stop at the actual decision frontier, before the next published delivery
+    // recommendation can execute. This preserves a genuine manual dispatch or
+    // delegated origin rather than advancing machinery during a fixed sleep.
+    for _ in 0..16 {
         app.update();
+        let selected = app
+            .world()
+            .resource::<project_phoenix::comms::server::CommsInboxRes>()
+            .0
+            .iter()
+            .any(|message| message.id == message_id && message.selected_response == Some(index));
+        let decided = runtime(app).opportunities.first().is_some_and(|row| {
+            matches!(
+                row.state,
+                OpportunityState::Accepted { .. } | OpportunityState::Declined { .. }
+            )
+        });
+        if selected && decided {
+            break;
+        }
     }
+    assert!(runtime(app)
+        .opportunities
+        .first()
+        .is_some_and(|row| matches!(
+            row.state,
+            OpportunityState::Accepted { .. } | OpportunityState::Declined { .. }
+        )));
+    assert!(
+        runtime(app)
+            .situations
+            .instances
+            .values()
+            .all(|row| row.accepted.is_none()),
+        "offer decision itself creates no physical Job before controller operation"
+    );
     assert!(
         app.world()
             .resource::<project_phoenix::comms::server::CommsInboxRes>()
@@ -726,6 +763,8 @@ fn actual_scratch_delivery_enables_paid_repair_and_retains_frozen_plan_through_j
         resumed.update();
     }
     assert_same(&live, &resumed, 1200);
+    assert_no_mission_topup(&live, actor);
+    assert_no_mission_topup(&resumed, restored);
     assert_eq!(hp(&live, actor), healthy);
     assert_eq!(hp(&resumed, restored), healthy);
     assert_eq!(
@@ -820,6 +859,23 @@ fn ordinary_ai_observes_future_intent_then_executes_useful_supply_and_repair_thr
     let mut saved = None;
     for _ in 0..2400 {
         live.update();
+        assert_eq!(
+            live.world().get::<ShipLogistics>(actor).unwrap().0.goals["repair-structural"],
+            0,
+            "mission demand never rewrites the player's retained target during Backfill"
+        );
+        let sources = &live
+            .world()
+            .get::<ShipSystemControlSources>(actor)
+            .unwrap()
+            .0;
+        for owner in [id("logistics"), id("repair")] {
+            let policy = sources.policy_for(&owner);
+            assert!(
+                policy.operate_ai && !policy.accept_human_input,
+                "both actual job owners are delegated before any autonomous job originates"
+            );
+        }
         let work = &runtime(&live).situations.instances;
         for job in live
             .world()
@@ -887,6 +943,8 @@ fn ordinary_ai_observes_future_intent_then_executes_useful_supply_and_repair_thr
         resumed.update();
     }
     assert_same(&live, &resumed, 1200);
+    assert_no_mission_topup(&live, actor);
+    assert_no_mission_topup(&resumed, restored);
     assert_eq!(hp(&live, actor), healthy);
     assert_eq!(hp(&resumed, restored), healthy);
     assert_eq!(parts(&live, actor), original_parts - 1);
@@ -913,7 +971,7 @@ fn human_override_restores_future_target_without_retroactive_job_credit_and_runs
     let delivery = released_delivery(&mut live, actor);
     // A different team performs a legitimate manual order before its planned
     // peer is released. Empty local stores make it wait for real delivered parts.
-    control(
+    enqueue_control(
         &mut live,
         TOKEN,
         "engineering",
@@ -925,6 +983,19 @@ fn human_override_restores_future_target_without_retroactive_job_credit_and_runs
                     compartment: "engineering".into(),
                 },
             ),
+        },
+    );
+    // Admit both explicit controls in the same input frontier before a
+    // later maintained recommendation could originate the supply Job instead.
+    control(
+        &mut live,
+        TOKEN,
+        "engineering",
+        "logistics",
+        Control::DispatchDelivery {
+            source: delivery.source,
+            destination: delivery.destination,
+            amount: delivery.amount,
         },
     );
     let override_job = live
@@ -942,17 +1013,6 @@ fn human_override_restores_future_target_without_retroactive_job_credit_and_runs
         .instances
         .values()
         .all(|row| row.request.owner() != &id("repair") || row.accepted.is_none()));
-    control(
-        &mut live,
-        TOKEN,
-        "engineering",
-        "logistics",
-        Control::DispatchDelivery {
-            source: delivery.source,
-            destination: delivery.destination,
-            amount: delivery.amount,
-        },
-    );
     let mut saved = None;
     for _ in 0..2400 {
         live.update();
@@ -1009,6 +1069,8 @@ fn human_override_restores_future_target_without_retroactive_job_credit_and_runs
         resumed.update();
     }
     assert_same(&live, &resumed, 1200);
+    assert_no_mission_topup(&live, actor);
+    assert_no_mission_topup(&resumed, restored);
     assert_eq!(hp(&live, actor), healthy);
     assert_eq!(hp(&resumed, restored), healthy);
     assert_eq!(parts(&live, actor), original_parts - 1);

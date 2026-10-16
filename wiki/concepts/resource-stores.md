@@ -2,8 +2,8 @@
 title: Resource Stores and Service Links
 type: concept
 tags: [resources, inventory, torpedoes, infrastructure, umbilical, workshop, continuation]
-sources: [crates/phoenix-simulation/src/resources/ports_equipment.rs, crates/phoenix-sim-gameplay/src/resources/stock.rs, crates/phoenix-sim-gameplay/src/resources/service.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-sim-gameplay/src/infrastructure/condition.rs, crates/phoenix-simulation/src/resources/server.rs, crates/phoenix-simulation/src/umbilical/server.rs, crates/phoenix-simulation/src/infrastructure/server.rs, crates/phoenix-simulation/src/snapshot/preflight.rs, crates/phoenix-simulation/src/sim_digest.rs, editor/workshop-resources.js, gui/workshop-resource-panel.js, crates/phoenix-model/src/logistics.rs, crates/phoenix-sim-gameplay/src/resources/logistics.rs, crates/phoenix-sim-gameplay/src/resources/logistics_state.rs, crates/phoenix-simulation/src/resources/logistics_server.rs, editor/workshop-logistics.js, gui/components/ph-logistics-controls.js, crates/phoenix-model/src/production.rs, crates/phoenix-model/src/recovery.rs, crates/phoenix-sim-gameplay/src/resources/production.rs, crates/phoenix-sim-gameplay/src/resources/recovery.rs, crates/phoenix-simulation/src/resources/production_server.rs, crates/phoenix-simulation/src/resources/recovery_server.rs, editor/workshop-production.js, editor/workshop-resource-recovery.js, crates/phoenix-model/src/ports.rs, crates/phoenix-sim-gameplay/src/resources/ports.rs, crates/phoenix-simulation/src/resources/ports_server.rs, crates/phoenix-simulation/src/snapshot/ports.rs, editor/workshop-ports.js]
-updated: 2026-10-15
+sources: [crates/phoenix-simulation/src/resources/ports_equipment.rs, crates/phoenix-sim-gameplay/src/resources/stock.rs, crates/phoenix-sim-gameplay/src/resources/service.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-sim-gameplay/src/infrastructure/condition.rs, crates/phoenix-simulation/src/resources/server.rs, crates/phoenix-simulation/src/umbilical/server.rs, crates/phoenix-simulation/src/infrastructure/server.rs, crates/phoenix-simulation/src/snapshot/preflight.rs, crates/phoenix-simulation/src/sim_digest.rs, editor/workshop-resources.js, gui/workshop-resource-panel.js, crates/phoenix-model/src/logistics.rs, crates/phoenix-sim-gameplay/src/resources/logistics.rs, crates/phoenix-sim-gameplay/src/resources/logistics_state.rs, crates/phoenix-simulation/src/resources/logistics_server.rs, crates/phoenix-simulation/src/resources/logistics_mission.rs, editor/workshop-logistics.js, gui/components/ph-logistics-controls.js, crates/phoenix-model/src/production.rs, crates/phoenix-model/src/recovery.rs, crates/phoenix-sim-gameplay/src/resources/production.rs, crates/phoenix-sim-gameplay/src/resources/recovery.rs, crates/phoenix-simulation/src/resources/production_server.rs, crates/phoenix-simulation/src/resources/recovery_server.rs, editor/workshop-production.js, editor/workshop-resource-recovery.js, crates/phoenix-model/src/ports.rs, crates/phoenix-sim-gameplay/src/resources/ports.rs, crates/phoenix-simulation/src/resources/ports_server.rs, crates/phoenix-simulation/src/snapshot/ports.rs, editor/workshop-ports.js]
+updated: 2026-10-16
 ---
 
 # Resource Stores and Service Links
@@ -73,6 +73,15 @@ validation. Main floors and waiting priorities belong to Inventory. A latched
 reorder cycle continues successive bounded batches after stock falls low; it
 reserves no absent supply. Human enabled targets are standing orders; an AI
 controller uses its ordinary tree and the same physical dispatch boundary.
+
+Released mission Delivery requests can add exact finite immediate demand through
+`logistics_mission`. The current World frontier must match the original request
+visible to that actor's controlling Logistics Console. The same next-delivery
+view prioritizes a feasible whole mission batch; the existing dispatcher repeats
+real stock, floor, space, route and current-job checks before committing it.
+Stored stock goals remain unchanged, and accepted/terminal scopes or existing
+incoming cargo cannot repeatedly create mission demand. Ordinary deliveries
+continue to obey their current stock-target deficit.
 
 `resources/production` owns finite recipe work over those actual stores. Inputs
 are consumed at the first paid step with all output space secured; interruptions

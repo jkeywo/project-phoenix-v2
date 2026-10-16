@@ -419,3 +419,22 @@ then requires ordinary delegated AI to originate the actual supply and repair
 jobs. Preserve finite stocks, paid partial work, prerequisite and override checks,
 full JSON continuation and complete state/digest comparisons. Native results are
 pending the integration owner; this contract does not close increment 24.
+
+
+The bounded runtime consumer now intersects exact original mission rows from the
+current World frontier with the own Console's permitted publication, then uses
+the existing next-delivery recommendation and dispatch transaction. The scope
+exception checks a feasible whole batch against real physical endpoints and
+current route/access and refuses existing destination work/incoming cargo.
+Ordinary demand still uses the target deficit. No canonical field, payload,
+controller or physical executor was added. Pure owner probes and the four real
+maintenance continuation cases are authored; Cargo/native execution remains with
+the integration owner. Rustfmt and exact diff checks have passed.
+
+The Comms response helper now stops at the first actual paid selected response
+and accepted/declined frontier within its original 16-update budget. It asserts
+that acceptance itself has not originated a physical Job. The Human path then
+issues its normal delivery command, while the delegated path releases the Station
+before either Job originates and asserts both actual owners are on ordinary AI.
+The stored local goal remains zero through that work. No physical work or JSON
+continuation bound was extended.

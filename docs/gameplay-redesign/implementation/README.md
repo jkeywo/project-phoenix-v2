@@ -7,6 +7,8 @@ complete [migration ledger](./migration-ledger.json). The
 [mechanism reconciliation](../architecture/feature-reconciliation.html) and
 [architecture decisions](../architecture/README.md) constrain implementation.
 
+The subsequent [balance and headless profiling report](./balance-headless-profile-2026-10-16.html) records the requested diagnosis, 18 valid named-system/control captures and source-backed optimisation experiments. It changes no balance values or increment exit status. Implementation of 13–24 remains parked.
+
 ## Per-increment progress — 16 October 2026
 
 The user requested a pause after finishing increments 8–12 on 16 October.

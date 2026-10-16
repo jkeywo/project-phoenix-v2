@@ -1,0 +1,2970 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-16",
+  "scope": "Balance and headless diagnosis only. Runtime/authoring balance unchanged; increments 13-24 implementation remains parked.",
+  "sources": {
+    "baseline_revision": "8d8143e9899747591cde4ee6c292e3c89859bf8d",
+    "balance_revision": "9bd7bab63230f1e653802cc995d15a3353d5076c",
+    "profile_revision": "9f4c344a3cef27a8a2c980e9f2e921294b7347b6",
+    "runtime_source_sha256": "66b54ee0734a6f19822c6e51912d310658d3b341c73238303e085872fc4b5cb4",
+    "profile_binary_sha256": "474a4af8232ab0a0afa4a203c82fec4e4aa7f8265020a43165ee56e54f58c303",
+    "profile_features": [
+      "default",
+      "headless",
+      "host",
+      "perf",
+      "server"
+    ],
+    "profile": "measure",
+    "runtime_source_clean": true,
+    "repository_dirty": true
+  },
+  "balance": {
+    "configuration_unchanged": true,
+    "configuration_sha256": "c6946bde4e6bfb9b702a9bb2dd1da38a59297ec5c1ef2a3eaf25bf89177be5ae",
+    "runs": 20,
+    "outcomes": {
+      "wins": 0,
+      "losses": 0,
+      "draws": 7,
+      "timeouts": 13
+    },
+    "failed_checks": 11,
+    "total_checks": 16,
+    "rows": [
+      {
+        "opponent": "destroyer",
+        "baseline": {
+          "wins": 5,
+          "draws": 0,
+          "timeouts": 0,
+          "ttk_median_seconds": 4.7833,
+          "ttk_samples": 5,
+          "damage_margin": 163,
+          "mean_encounter_seconds": 4.7833,
+          "mean_damage_dealt": 235,
+          "mean_effective_damage_per_second": 49.12926222482387,
+          "mean_own_hull_fraction": 0.9817,
+          "mean_enemy_hull_fraction": 0,
+          "mean_repair_hp": 0,
+          "shadow_percent": 3.4913135283172716,
+          "torpedo_run_percent": 6.2718207095519825
+        },
+        "current": {
+          "wins": 0,
+          "draws": 1,
+          "timeouts": 4,
+          "ttk_median_seconds": null,
+          "ttk_samples": 0,
+          "damage_margin": 111.329,
+          "mean_encounter_seconds": 120,
+          "mean_damage_dealt": 310,
+          "mean_effective_damage_per_second": 2.583333333333333,
+          "mean_own_hull_fraction": 0.9700399999999998,
+          "mean_enemy_hull_fraction": 1,
+          "mean_repair_hp": 10.1968,
+          "shadow_percent": 20.830666666666666,
+          "torpedo_run_percent": 0
+        }
+      },
+      {
+        "opponent": "cruiser",
+        "baseline": {
+          "wins": 5,
+          "draws": 0,
+          "timeouts": 0,
+          "ttk_median_seconds": 13.8167,
+          "ttk_samples": 5,
+          "damage_margin": 283.8,
+          "mean_encounter_seconds": 12.826659999999999,
+          "mean_damage_dealt": 394.2,
+          "mean_effective_damage_per_second": 31.163260534831828,
+          "mean_own_hull_fraction": 0.9813000000000001,
+          "mean_enemy_hull_fraction": 0,
+          "mean_repair_hp": 0,
+          "shadow_percent": 1.3202795168010484,
+          "torpedo_run_percent": 25.250506476221183
+        },
+        "current": {
+          "wins": 0,
+          "draws": 1,
+          "timeouts": 4,
+          "ttk_median_seconds": null,
+          "ttk_samples": 0,
+          "damage_margin": 186.52180000000004,
+          "mean_encounter_seconds": 120,
+          "mean_damage_dealt": 258.9964,
+          "mean_effective_damage_per_second": 2.1583033333333335,
+          "mean_own_hull_fraction": 0.99594,
+          "mean_enemy_hull_fraction": 0.868,
+          "mean_repair_hp": 3.4856000000000003,
+          "shadow_percent": 59.836333333333336,
+          "torpedo_run_percent": 0
+        }
+      },
+      {
+        "opponent": "patrol",
+        "baseline": {
+          "wins": 5,
+          "draws": 0,
+          "timeouts": 0,
+          "ttk_median_seconds": 8.5833,
+          "ttk_samples": 5,
+          "damage_margin": 310.2,
+          "mean_encounter_seconds": 9.16,
+          "mean_damage_dealt": 361,
+          "mean_effective_damage_per_second": 40.2263170559824,
+          "mean_own_hull_fraction": 0.9914,
+          "mean_enemy_hull_fraction": 0,
+          "mean_repair_hp": 0,
+          "shadow_percent": 1.8608850272435074,
+          "torpedo_run_percent": 35.55989154162155
+        },
+        "current": {
+          "wins": 0,
+          "draws": 5,
+          "timeouts": 0,
+          "ttk_median_seconds": null,
+          "ttk_samples": 0,
+          "damage_margin": 97.50280000000001,
+          "mean_encounter_seconds": 120,
+          "mean_damage_dealt": 130.97660000000002,
+          "mean_effective_damage_per_second": 1.0914716666666666,
+          "mean_own_hull_fraction": 0.9987199999999999,
+          "mean_enemy_hull_fraction": 0.8834,
+          "mean_repair_hp": 1.7137999999999998,
+          "shadow_percent": 64.70833333333333,
+          "torpedo_run_percent": 0
+        }
+      },
+      {
+        "opponent": "warhawk",
+        "baseline": {
+          "wins": 5,
+          "draws": 0,
+          "timeouts": 0,
+          "ttk_median_seconds": 15.7,
+          "ttk_samples": 5,
+          "damage_margin": 47.241599999999984,
+          "mean_encounter_seconds": 16.533340000000003,
+          "mean_damage_dealt": 524.6,
+          "mean_effective_damage_per_second": 32.058145086718234,
+          "mean_own_hull_fraction": 0.52024,
+          "mean_enemy_hull_fraction": 0,
+          "mean_repair_hp": 1.8232,
+          "shadow_percent": 1.0207096411521728,
+          "torpedo_run_percent": 49.915043147412575
+        },
+        "current": {
+          "wins": 0,
+          "draws": 0,
+          "timeouts": 5,
+          "ttk_median_seconds": null,
+          "ttk_samples": 0,
+          "damage_margin": -324.93600000000004,
+          "mean_encounter_seconds": 120,
+          "mean_damage_dealt": 379.48320000000007,
+          "mean_effective_damage_per_second": 3.16236,
+          "mean_own_hull_fraction": 0.83474,
+          "mean_enemy_hull_fraction": 0.4468,
+          "mean_repair_hp": 89.90740000000001,
+          "shadow_percent": 22.2225,
+          "torpedo_run_percent": 0
+        }
+      }
+    ],
+    "limits": "Every current run reaches 120 seconds without a kill; 120 is not a measured TTK. Damage totals span unequal exposure times. Draws are rate-based, not mutual destruction.",
+    "followups": [
+      "Add explicit beam-end reason, paid-work and physical-hit evidence to one short accepted seed-1 journey.",
+      "Run a single-variable accepted-content comparison of the new fore turret while preserving range, damage, Energy and all other content.",
+      "Trace player torpedo decisions and impacts against a Destroyer and Patrol, including the dated shield observation and readiness frontier.",
+      "Agree revised combat-duration and coordination targets only after mechanical reliability is established; do not silently relax the old thresholds."
+    ]
+  },
+  "headless": {
+    "valid": true,
+    "runs": [
+      {
+        "name": "round-0-combat_test-0-control",
+        "world": "combat_test",
+        "mode": "control",
+        "round": 0,
+        "update": {
+          "count": 3301,
+          "mean": 4.949551196607075,
+          "p50": 4.5037,
+          "p95": 7.8797999999999995,
+          "p99": 9.8329,
+          "max": 13.982700000000001,
+          "over16_67": 0
+        },
+        "continuation": {
+          "tick": 3600,
+          "digest": "b63f62905fd3b204"
+        },
+        "backgroundCpuCores": 0.16415286270900642,
+        "problems": [],
+        "artifact": {
+          "path": ".phoenix\\balance-headless-profile-20261016\\round-0-combat_test-0-control\\artifact\\systems.json",
+          "bytes": 167816,
+          "sha256": "5c554c13b953fdeabc0c0e2d224939bda24e1894283d289c913fe6a5b1135102"
+        }
+      },
+      {
+        "name": "round-0-combat_test-1-wrapped",
+        "world": "combat_test",
+        "mode": "wrapped",
+        "round": 0,
+        "update": {
+          "count": 3301,
+          "mean": 5.104145955770976,
+          "p50": 4.6004000000000005,
+          "p95": 8.1311,
+          "p99": 10.2973,
+          "max": 21.0638,
+          "over16_67": 1
+        },
+        "continuation": {
+          "tick": 3600,
+          "digest": "b63f62905fd3b204"
+        },
+        "backgroundCpuCores": 0.18713445529771056,
+        "problems": [],
+        "artifact": {
+          "path": ".phoenix\\balance-headless-profile-20261016\\round-0-combat_test-1-wrapped\\artifact\\systems.json",
+          "bytes": 199323789,
+          "sha256": "3ea0e5c5c79a308026f6d3610ca3c7c04301f66d6ca257bc39c0fe2ef3125e00"
+        }
+      },
+      {
+        "name": "round-0-combat_test-2-control",
+        "world": "combat_test",
+        "mode": "control",
+        "round": 0,
+        "update": {
+          "count": 3301,
+          "mean": 4.993261799454724,
+          "p50": 4.4860999999999995,
+          "p95": 7.9613,
+          "p99": 9.960099999999999,
+          "max": 12.518400000000002,
+          "over16_67": 0
+        },
+        "continuation": {
+          "tick": 3600,
+          "digest": "b63f62905fd3b204"
+        },
+        "backgroundCpuCores": 0.24396515592057078,
+        "problems": [],
+        "artifact": {
+          "path": ".phoenix\\balance-headless-profile-20261016\\round-0-combat_test-2-control\\artifact\\systems.json",
+          "bytes": 167796,
+          "sha256": "ed5078915ec62dc96b8041d5d4ff491965769758df0577d4c1a6a67a25e76c31"
+        }
+      },
+      {
+        "name": "round-0-falling_skyway-0-control",
+        "world": "falling_skyway",
+        "mode": "control",
+        "round": 0,
+        "update": {
+          "count": 3301,
+          "mean": 3.3410481672220453,
+          "p50": 3.2999,
+          "p95": 4.4637,
+          "p99": 5.2665999999999995,
+          "max": 8.5792,
+          "over16_67": 0
+        },
+        "continuation": {
+          "tick": 3600,
+          "digest": "2d2b7c94531ffb3c"
+        },
+        "backgroundCpuCores": 0.25661351185787085,
+        "problems": [],
+        "artifact": {
+          "path": ".phoenix\\balance-headless-profile-20261016\\round-0-falling_skyway-0-control\\artifact\\systems.json",
+          "bytes": 167897,
+          "sha256": "a0758bcb85b2a7e4f2cbb7ac5b111c183c050bf2bb4b713afcd62860a758007e"
+        }
+      },
+      {
+        "name": "round-0-falling_skyway-1-wrapped",
+        "world": "falling_skyway",
+        "mode": "wrapped",
+        "round": 0,
+        "update": {
+          "count": 3301,
+          "mean": 3.5545034232050825,
+          "p50": 3.4692,
+          "p95": 4.747000000000001,
+          "p99": 5.9425,
+          "max": 20.6892,
+          "over16_67": 1
+        },
+        "continuation": {
+          "tick": 3600,
+          "digest": "2d2b7c94531ffb3c"
+        },
+        "backgroundCpuCores": 0.265446402843186,
+        "problems": [],
+        "artifact": {
+          "path": ".phoenix\\balance-headless-profile-20261016\\round-0-falling_skyway-1-wrapped\\artifact\\systems.json",
+          "bytes": 198625919,
+          "sha256": "73affe605b6bf50a0c5351771853633bfa1e05a4b19c433d9bab1b27794ffd1c"
+        }
+      },
+      {
+        "name": "round-0-falling_skyway-2-control",
+        "world": "falling_skyway",
+        "mode": "control",
+        "round": 0,
+        "update": {
+          "count": 3301,
+          "mean": 3.3380280218115668,
+          "p50": 3.2985,
+          "p95": 4.4492,
+          "p99": 5.1511,
+          "max": 8.6875,
+          "over16_67": 0
+        },
+        "continuation": {
+          "tick": 3600,
+          "digest": "2d2b7c94531ffb3c"
+        },
+        "backgroundCpuCores": 0.2574219101477725,
+        "problems": [],
+        "artifact": {
+          "path": ".phoenix\\balance-headless-profile-20261016\\round-0-falling_skyway-2-control\\artifact\\systems.json",
+          "bytes": 168269,
+          "sha256": "8ea9a7f71e5eadb5b3fd79e2625edfcb680f83097421440e0d6e7c4e7abfbb6f"
+        }
+      },
+      {
+        "name": "round-1-falling_skyway-0-control",
+        "world": "falling_skyway",
+        "mode": "control",
+        "round": 1,
+        "update": {
+          "count": 3301,
+          "mean": 3.354235777037259,
+          "p50": 3.3154999999999997,
+          "p95": 4.4860999999999995,
+          "p99": 5.097499999999999,
+          "max": 8.6513,
+          "over16_67": 0
+        },
+        "continuation": {
+          "tick": 3600,
+          "digest": "2d2b7c94531ffb3c"
+        },
+        "backgroundCpuCores": 0.20484195843857536,
+        "problems": [],
+        "artifact": {
+          "path": ".phoenix\\balance-headless-profile-20261016\\round-1-falling_skyway-0-control\\artifact\\systems.json",
+          "bytes": 167451,
+          "sha256": "00dfd198b213bf0110b1cbe9bc4eff30fb73fb118811be7154314d20f812d070"
+        }
+      },
+      {
+        "name": "round-1-falling_skyway-1-wrapped",
+        "world": "falling_skyway",
+        "mode": "wrapped",
+        "round": 1,
+        "update": {
+          "count": 3301,
+          "mean": 3.4742151772190315,
+          "p50": 3.4118999999999997,
+          "p95": 4.6194,
+          "p99": 5.2927,
+          "max": 20.7772,
+          "over16_67": 1
+        },
+        "continuation": {
+          "tick": 3600,
+          "digest": "2d2b7c94531ffb3c"
+        },
+        "backgroundCpuCores": 0.2653557229091856,
+        "problems": [],
+        "artifact": {
+          "path": ".phoenix\\balance-headless-profile-20261016\\round-1-falling_skyway-1-wrapped\\artifact\\systems.json",
+          "bytes": 198553848,
+          "sha256": "05954fa7604f43dd9b165c6f76cd3f0d26443bffcfe6efda5f5ddc4444d8aa17"
+        }
+      },
+      {
+        "name": "round-1-falling_skyway-2-control",
+        "world": "falling_skyway",
+        "mode": "control",
+        "round": 1,
+        "update": {
+          "count": 3301,
+          "mean": 3.3982495607391767,
+          "p50": 3.3422,
+          "p95": 4.5196000000000005,
+          "p99": 5.647,
+          "max": 8.460799999999999,
+          "over16_67": 0
+        },
+        "continuation": {
+          "tick": 3600,
+          "digest": "2d2b7c94531ffb3c"
+        },
+        "backgroundCpuCores": 0.23741976017363936,
+        "problems": [],
+        "artifact": {
+          "path": ".phoenix\\balance-headless-profile-20261016\\round-1-falling_skyway-2-control\\artifact\\systems.json",
+          "bytes": 167852,
+          "sha256": "25d00ecb73f7aa63dcc71b8bbf696450ed69687a6cc4e74da8b9d0930c83b908"
+        }
+      },
+      {
+        "name": "round-1-combat_test-0-control",
+        "world": "combat_test",
+        "mode": "control",
+        "round": 1,
+        "update": {
+          "count": 3301,
+          "mean": 4.964970009088148,
+          "p50": 4.4786,
+          "p95": 7.9796,
+          "p99": 9.9054,
+          "max": 14.9137,
+          "over16_67": 0
+        },
+        "continuation": {
+          "tick": 3600,
+          "digest": "b63f62905fd3b204"
+        },
+        "backgroundCpuCores": 0.25044761975821234,
+        "problems": [],
+        "artifact": {
+          "path": ".phoenix\\balance-headless-profile-20261016\\round-1-combat_test-0-control\\artifact\\systems.json",
+          "bytes": 167729,
+          "sha256": "9cbf0c99fedd6a0145507114a0cb71cc910a0a5141ce97cd147ca0ec6ca44b80"
+        }
+      },
+      {
+        "name": "round-1-combat_test-1-wrapped",
+        "world": "combat_test",
+        "mode": "wrapped",
+        "round": 1,
+        "update": {
+          "count": 3301,
+          "mean": 5.105581611632847,
+          "p50": 4.6222,
+          "p95": 8.084900000000001,
+          "p99": 9.9647,
+          "max": 24.316399999999998,
+          "over16_67": 1
+        },
+        "continuation": {
+          "tick": 3600,
+          "digest": "b63f62905fd3b204"
+        },
+        "backgroundCpuCores": 0.17539492163770234,
+        "problems": [],
+        "artifact": {
+          "path": ".phoenix\\balance-headless-profile-20261016\\round-1-combat_test-1-wrapped\\artifact\\systems.json",
+          "bytes": 199307299,
+          "sha256": "b215e20540f3544537add057a1eebb1f43bca4157683f47a1298cb1184e2a42c"
+        }
+      },
+      {
+        "name": "round-1-combat_test-2-control",
+        "world": "combat_test",
+        "mode": "control",
+        "round": 1,
+        "update": {
+          "count": 3301,
+          "mean": 4.914931596485915,
+          "p50": 4.460999999999999,
+          "p95": 7.8514,
+          "p99": 9.654599999999999,
+          "max": 10.8567,
+          "over16_67": 0
+        },
+        "continuation": {
+          "tick": 3600,
+          "digest": "b63f62905fd3b204"
+        },
+        "backgroundCpuCores": 0.21828871212878326,
+        "problems": [],
+        "artifact": {
+          "path": ".phoenix\\balance-headless-profile-20261016\\round-1-combat_test-2-control\\artifact\\systems.json",
+          "bytes": 168549,
+          "sha256": "cb73575a79112e60f97ef4cb69ff5fd2712c5df4d54a14e17bbabd4dca22515b"
+        }
+      },
+      {
+        "name": "round-2-combat_test-0-control",
+        "world": "combat_test",
+        "mode": "control",
+        "round": 2,
+        "update": {
+          "count": 3301,
+          "mean": 4.835838049076049,
+          "p50": 4.3981,
+          "p95": 7.7129,
+          "p99": 9.5058,
+          "max": 10.6473,
+          "over16_67": 0
+        },
+        "continuation": {
+          "tick": 3600,
+          "digest": "b63f62905fd3b204"
+        },
+        "backgroundCpuCores": 0.22155976609909464,
+        "problems": [],
+        "artifact": {
+          "path": ".phoenix\\balance-headless-profile-20261016\\round-2-combat_test-0-control\\artifact\\systems.json",
+          "bytes": 167365,
+          "sha256": "3edc62c0c90447a4d2205b3682d080e26251098ff995861a78507a27272cca0b"
+        }
+      },
+      {
+        "name": "round-2-combat_test-1-wrapped",
+        "world": "combat_test",
+        "mode": "wrapped",
+        "round": 2,
+        "update": {
+          "count": 3301,
+          "mean": 5.058141017873369,
+          "p50": 4.5819,
+          "p95": 7.997000000000001,
+          "p99": 10.095,
+          "max": 22.457600000000003,
+          "over16_67": 2
+        },
+        "continuation": {
+          "tick": 3600,
+          "digest": "b63f62905fd3b204"
+        },
+        "backgroundCpuCores": 0.17878865512888834,
+        "problems": [],
+        "artifact": {
+          "path": ".phoenix\\balance-headless-profile-20261016\\round-2-combat_test-1-wrapped\\artifact\\systems.json",
+          "bytes": 199262027,
+          "sha256": "a810de2d3c8218defa8ff38667c0591c9ee0ba80de8d1f0f460604d5d2f5dd70"
+        }
+      },
+      {
+        "name": "round-2-combat_test-2-control",
+        "world": "combat_test",
+        "mode": "control",
+        "round": 2,
+        "update": {
+          "count": 3301,
+          "mean": 4.896426507119049,
+          "p50": 4.4408,
+          "p95": 7.8627,
+          "p99": 9.7026,
+          "max": 11.8184,
+          "over16_67": 0
+        },
+        "continuation": {
+          "tick": 3600,
+          "digest": "b63f62905fd3b204"
+        },
+        "backgroundCpuCores": 0.25045949562709324,
+        "problems": [],
+        "artifact": {
+          "path": ".phoenix\\balance-headless-profile-20261016\\round-2-combat_test-2-control\\artifact\\systems.json",
+          "bytes": 167768,
+          "sha256": "fa4e4b7973d937471455dd7adfe053fb32b48b227cbac628fa61ad212eb75198"
+        }
+      },
+      {
+        "name": "round-2-falling_skyway-0-control",
+        "world": "falling_skyway",
+        "mode": "control",
+        "round": 2,
+        "update": {
+          "count": 3301,
+          "mean": 3.52354840957286,
+          "p50": 3.534,
+          "p95": 4.6828,
+          "p99": 5.102200000000001,
+          "max": 5.7967,
+          "over16_67": 0
+        },
+        "continuation": {
+          "tick": 3600,
+          "digest": "2d2b7c94531ffb3c"
+        },
+        "backgroundCpuCores": 0.1875158123503323,
+        "problems": [],
+        "artifact": {
+          "path": ".phoenix\\balance-headless-profile-20261016\\round-2-falling_skyway-0-control\\artifact\\systems.json",
+          "bytes": 167713,
+          "sha256": "64771df7360ee88a74ddaa7caba76baabccd5dffc432b50dbf52a91da92a6977"
+        }
+      },
+      {
+        "name": "round-2-falling_skyway-1-wrapped",
+        "world": "falling_skyway",
+        "mode": "wrapped",
+        "round": 2,
+        "update": {
+          "count": 3301,
+          "mean": 3.4117867009996954,
+          "p50": 3.3847,
+          "p95": 4.4665,
+          "p99": 4.9193999999999996,
+          "max": 19.7961,
+          "over16_67": 1
+        },
+        "continuation": {
+          "tick": 3600,
+          "digest": "2d2b7c94531ffb3c"
+        },
+        "backgroundCpuCores": 0.24927344872520768,
+        "problems": [],
+        "artifact": {
+          "path": ".phoenix\\balance-headless-profile-20261016\\round-2-falling_skyway-1-wrapped\\artifact\\systems.json",
+          "bytes": 198464570,
+          "sha256": "6359ceef6f45f034ce97b3035d0171bf90a8e9d29a5c4e17e65ebe23618e77ab"
+        }
+      },
+      {
+        "name": "round-2-falling_skyway-2-control",
+        "world": "falling_skyway",
+        "mode": "control",
+        "round": 2,
+        "update": {
+          "count": 3301,
+          "mean": 3.3595099969706057,
+          "p50": 3.3248,
+          "p95": 4.4697000000000005,
+          "p99": 4.9769000000000005,
+          "max": 6.7311000000000005,
+          "over16_67": 0
+        },
+        "continuation": {
+          "tick": 3600,
+          "digest": "2d2b7c94531ffb3c"
+        },
+        "backgroundCpuCores": 0.267395395682606,
+        "problems": [],
+        "artifact": {
+          "path": ".phoenix\\balance-headless-profile-20261016\\round-2-falling_skyway-2-control\\artifact\\systems.json",
+          "bytes": 167912,
+          "sha256": "a4dd7131ad84d33919278cd17174987a1e04a5b0811695bbac2f3d9981fa37be"
+        }
+      }
+    ],
+    "worlds": {
+      "combat_test": {
+        "valid": true,
+        "control": {
+          "mean": 4.932241396546495,
+          "p50": 4.469799999999999,
+          "p95": 7.87125,
+          "p99": 9.76775
+        },
+        "instrumented": {
+          "mean": 5.104145955770976,
+          "p50": 4.6004000000000005,
+          "p95": 8.084900000000001,
+          "p99": 10.095
+        },
+        "overhead_mean_percent": 3.4853233125379246,
+        "expectedContinuation": {
+          "tick": 3600,
+          "digest": "b63f62905fd3b204"
+        },
+        "continuationMatches": true,
+        "top_fixed_systems": [
+          {
+            "name": "phoenix_simulation::core::broadcast::broadcaster::dispatch<phoenix_simulation::core::broadcast::sim::Sim>",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Broadcast",
+            "mean_ms_per_update": 0.7166101181460164,
+            "accumulated_ms": 2365.53,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00003226295062102393,
+            "replicate_ms_per_update": [
+              0.7166101181460164,
+              0.7213756437443198,
+              0.7099910936079976
+            ]
+          },
+          {
+            "name": "phoenix_simulation::ship::sensors::publish_sensor_radar_blackboard",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Publish",
+            "mean_ms_per_update": 0.44300999697061494,
+            "accumulated_ms": 1462.376,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00007249318388367162,
+            "replicate_ms_per_update": [
+              0.44225449863677674,
+              0.44300999697061494,
+              0.4465419569827325
+            ]
+          },
+          {
+            "name": "phoenix_simulation::ship::energy_runtime::tick_power_system",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Physics",
+            "mean_ms_per_update": 0.43285964859133597,
+            "accumulated_ms": 1428.8697,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.000051196607088760985,
+            "replicate_ms_per_update": [
+              0.43285964859133597,
+              0.43406119357770373,
+              0.42725895183277796
+            ]
+          },
+          {
+            "name": "phoenix_simulation::science::broad::tick",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Modifiers",
+            "mean_ms_per_update": 0.3830243259618297,
+            "accumulated_ms": 1264.3633,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00003065737655255983,
+            "replicate_ms_per_update": [
+              0.38457197818842775,
+              0.3830243259618297,
+              0.37931484398667076
+            ]
+          },
+          {
+            "name": "phoenix_simulation::server_app::broadcast_publish::broadcast_blackboard_updates",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::PublishAggregate",
+            "mean_ms_per_update": 0.29736495001514696,
+            "accumulated_ms": 981.6017,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00003553468645864889,
+            "replicate_ms_per_update": [
+              0.3002190851257195,
+              0.2959281429869736,
+              0.29736495001514696
+            ]
+          },
+          {
+            "name": "phoenix_simulation::science::sharing::deliver",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Modifiers",
+            "mean_ms_per_update": 0.22046903968494394,
+            "accumulated_ms": 727.7683,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.000040745228718570136,
+            "replicate_ms_per_update": [
+              0.21914504695546802,
+              0.22276622235686158,
+              0.22046903968494394
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console::repair::server::publish_repair_blackboard",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Publish",
+            "mean_ms_per_update": 0.15613659497122082,
+            "accumulated_ms": 515.4069,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00008103604968191458,
+            "replicate_ms_per_update": [
+              0.15613659497122082,
+              0.15646440472584067,
+              0.15412162980914873
+            ]
+          },
+          {
+            "name": "phoenix_simulation::ship::coordination_systems::process_coordination_lag",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Modifiers",
+            "mean_ms_per_update": 0.12527409875795215,
+            "accumulated_ms": 413.5298,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00009424416843380793,
+            "replicate_ms_per_update": [
+              0.12527409875795215,
+              0.1263678582247804,
+              0.12324937897606786
+            ]
+          },
+          {
+            "name": "phoenix_simulation::science::references::publish",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Publish",
+            "mean_ms_per_update": 0.10582750681611632,
+            "accumulated_ms": 349.3366,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00004919721296576795,
+            "replicate_ms_per_update": [
+              0.10582750681611632,
+              0.10739142684035141,
+              0.10524425931535898
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console_ai::server::ai_power_allocation",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Physics",
+            "mean_ms_per_update": 0.09783671614662223,
+            "accumulated_ms": 322.959,
+            "calls": 1650,
+            "deferred_ms_per_update": 0.000040321114813692817,
+            "replicate_ms_per_update": [
+              0.09783671614662223,
+              0.09831248106634352,
+              0.09645931535898213
+            ]
+          },
+          {
+            "name": "phoenix_simulation::resources::fitting_server::tick",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Modifiers",
+            "mean_ms_per_update": 0.09193408058164193,
+            "accumulated_ms": 303.4744,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00007043320205998183,
+            "replicate_ms_per_update": [
+              0.09205243865495304,
+              0.09193408058164193,
+              0.09020484701605574
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console::repair::external_server::apply_external_repair",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Modifiers",
+            "mean_ms_per_update": 0.0712619206301121,
+            "accumulated_ms": 235.2356,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.000047167524992426536,
+            "replicate_ms_per_update": [
+              0.07175970917903667,
+              0.0712619206301121,
+              0.07073274765222659
+            ]
+          },
+          {
+            "name": "phoenix_simulation::ship::energy_publication::publish_power_blackboard",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Publish",
+            "mean_ms_per_update": 0.060965767949106325,
+            "accumulated_ms": 201.248,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00010278703423205089,
+            "replicate_ms_per_update": [
+              0.060965767949106325,
+              0.06114980308997274,
+              0.059410209027567405
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console_ai::server::shields_tree::ai_shields",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Physics",
+            "mean_ms_per_update": 0.0529130263556498,
+            "accumulated_ms": 174.6659,
+            "calls": 1650,
+            "deferred_ms_per_update": 0.000046501060284762196,
+            "replicate_ms_per_update": [
+              0.0529130263556498,
+              0.05359230536201151,
+              0.05260536201151166
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console::weapons::server::ai_target_selection",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Input",
+            "mean_ms_per_update": 0.05227691608603453,
+            "accumulated_ms": 172.5661,
+            "calls": 1650,
+            "deferred_ms_per_update": 0.000016934262344744016,
+            "replicate_ms_per_update": [
+              0.05328303544380491,
+              0.05221332929415329,
+              0.05227691608603453
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console::repair::server::tick_repair_teams",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Physics",
+            "mean_ms_per_update": 0.04871348076340503,
+            "accumulated_ms": 160.8032,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00002996061799454711,
+            "replicate_ms_per_update": [
+              0.04900327173583763,
+              0.04871348076340503,
+              0.048064222962738566
+            ]
+          },
+          {
+            "name": "phoenix_simulation::ship::damage_sync::detect_damage_tier_crossings",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Damage",
+            "mean_ms_per_update": 0.044241411693426234,
+            "accumulated_ms": 146.0409,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.000032353832172069074,
+            "replicate_ms_per_update": [
+              0.044241411693426234,
+              0.04449263859436535,
+              0.043708603453498945
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console::weapons::blaster::handle_blaster_hits",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Damage",
+            "mean_ms_per_update": 0.03212202362920327,
+            "accumulated_ms": 106.0348,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00004077552256891851,
+            "replicate_ms_per_update": [
+              0.03212202362920327,
+              0.0321505301423811,
+              0.03181417752196304
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console::weapons::torpedo::build_torpedo_target_snapshot",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Physics",
+            "mean_ms_per_update": 0.03209097243259618,
+            "accumulated_ms": 105.9323,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.000048561042108451984,
+            "replicate_ms_per_update": [
+              0.031999606179945475,
+              0.03209097243259618,
+              0.03218112693123296
+            ]
+          },
+          {
+            "name": "phoenix_simulation::ship::helm_ai::surfaces::build_helm_ai_surfaces_frame",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Physics",
+            "mean_ms_per_update": 0.03026579824295668,
+            "accumulated_ms": 99.9074,
+            "calls": 1650,
+            "deferred_ms_per_update": 0.000028082399272947593,
+            "replicate_ms_per_update": [
+              0.03136413208118752,
+              0.030106543471675247,
+              0.03026579824295668
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console::weapons::server::tick_npc_auto_match_frequency",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Input",
+            "mean_ms_per_update": 0.029270584671311727,
+            "accumulated_ms": 96.6222,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00003338382308391397,
+            "replicate_ms_per_update": [
+              0.030379945471069373,
+              0.029262738564071494,
+              0.029270584671311727
+            ]
+          },
+          {
+            "name": "phoenix_simulation::resources::recovery_server::tick",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Modifiers",
+            "mean_ms_per_update": 0.028911754013935174,
+            "accumulated_ms": 95.4377,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00003050590730081793,
+            "replicate_ms_per_update": [
+              0.029343047561345047,
+              0.028911754013935174,
+              0.02867534080581642
+            ]
+          },
+          {
+            "name": "phoenix_simulation::resources::production_server::tick",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Modifiers",
+            "mean_ms_per_update": 0.026331232959709176,
+            "accumulated_ms": 86.9194,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.000029445622538624658,
+            "replicate_ms_per_update": [
+              0.026545168130869434,
+              0.026331232959709176,
+              0.02601978188427749
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console::navigation::server::publish_navigation_blackboard",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Publish",
+            "mean_ms_per_update": 0.02550896697970312,
+            "accumulated_ms": 84.2051,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00006846410178733717,
+            "replicate_ms_per_update": [
+              0.025496364737958195,
+              0.02564450166616177,
+              0.02550896697970312
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console::weapons::blackboard::publish_weapons_core_blackboard",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Publish",
+            "mean_ms_per_update": 0.023422053923053618,
+            "accumulated_ms": 77.3162,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.0000941532868827628,
+            "replicate_ms_per_update": [
+              0.023422053923053618,
+              0.023536201151166312,
+              0.022719509239624357
+            ]
+          },
+          {
+            "name": "phoenix_simulation::asteroids::lifecycle::update_asteroid_window",
+            "schedule": "FixedUpdate",
+            "category": "Other",
+            "mean_ms_per_update": 0.023206482883974554,
+            "accumulated_ms": 76.6046,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00018800363526204182,
+            "replicate_ms_per_update": [
+              0.023206482883974554,
+              0.023364344138139957,
+              0.022930960315056044
+            ]
+          },
+          {
+            "name": "phoenix_simulation::ship::damage_sync::sync_console_damage_tiers",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Damage",
+            "mean_ms_per_update": 0.02085910330202969,
+            "accumulated_ms": 68.8559,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.000033414116934262345,
+            "replicate_ms_per_update": [
+              0.02092393214177522,
+              0.020514450166616176,
+              0.02085910330202969
+            ]
+          },
+          {
+            "name": "phoenix_simulation::resources::ports_server::prepare",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Modifiers",
+            "mean_ms_per_update": 0.02013647379581945,
+            "accumulated_ms": 66.4705,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.000031869130566495,
+            "replicate_ms_per_update": [
+              0.019548348985156012,
+              0.020450560436231446,
+              0.02013647379581945
+            ]
+          },
+          {
+            "name": "phoenix_simulation::resources::recovery_server::publish",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Publish",
+            "mean_ms_per_update": 0.01737770372614359,
+            "accumulated_ms": 57.3638,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00005667979400181763,
+            "replicate_ms_per_update": [
+              0.017283520145410482,
+              0.01748352014541048,
+              0.01737770372614359
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console::helm::server::publish_helm_blackboard",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Publish",
+            "mean_ms_per_update": 0.016186186004241137,
+            "accumulated_ms": 53.4306,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00005237806725234777,
+            "replicate_ms_per_update": [
+              0.016186186004241137,
+              0.016216782793093,
+              0.01571760072705241
+            ]
+          }
+        ],
+        "top_outside_fixed_update": [
+          {
+            "name": "phoenix_simulation::entities::model_markers::sync_authoritative_model_markers",
+            "schedule": "FixedLast",
+            "category": "Other",
+            "mean_ms_per_update": 0.11211781278400486,
+            "accumulated_ms": 370.1009,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.0000394728870039382,
+            "replicate_ms_per_update": [
+              0.11211781278400486,
+              0.11099609209330506,
+              0.11232078158133899
+            ]
+          },
+          {
+            "name": "phoenix_simulation::entities::model_markers::sync_authoritative_model_markers",
+            "schedule": "PreUpdate",
+            "category": "Other",
+            "mean_ms_per_update": 0.10925177219024539,
+            "accumulated_ms": 360.6401,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.0000679794001817631,
+            "replicate_ms_per_update": [
+              0.110363738261133,
+              0.10925177219024539,
+              0.10597340199939412
+            ]
+          },
+          {
+            "name": "bevy_ecs::message::update::message_update_system",
+            "schedule": "First",
+            "category": "Other",
+            "mean_ms_per_update": 0.054067161466222355,
+            "accumulated_ms": 178.4757,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00006131475310511966,
+            "replicate_ms_per_update": [
+              0.0532690699787943,
+              0.054067161466222355,
+              0.05437406846410179
+            ]
+          },
+          {
+            "name": "phoenix_simulation::gm::operations::comms::publish_comms_projection",
+            "schedule": "PostUpdate",
+            "category": "Other",
+            "mean_ms_per_update": 0.015287973341411694,
+            "accumulated_ms": 50.4656,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00013295970917903666,
+            "replicate_ms_per_update": [
+              0.015270584671311723,
+              0.015287973341411694,
+              0.015534110875492276
+            ]
+          },
+          {
+            "name": "phoenix_simulation::gm::operations::event::publish_mission_projection",
+            "schedule": "PostUpdate",
+            "category": "Other",
+            "mean_ms_per_update": 0.008069675855801274,
+            "accumulated_ms": 26.638,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00008345955770978492,
+            "replicate_ms_per_update": [
+              0.008245319600121176,
+              0.007907694637988488,
+              0.008069675855801274
+            ]
+          },
+          {
+            "name": "phoenix_presentation::server::viewscreen_border::push_lobby_state",
+            "schedule": "Update",
+            "category": "Other",
+            "mean_ms_per_update": 0.006889427446228416,
+            "accumulated_ms": 22.742,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00010675552862768858,
+            "replicate_ms_per_update": [
+              0.006736988791275372,
+              0.007851287488639806,
+              0.006889427446228416
+            ]
+          },
+          {
+            "name": "phoenix_simulation::gm::actions::action::publish_session_projection",
+            "schedule": "PostUpdate",
+            "category": "Other",
+            "mean_ms_per_update": 0.0036010602847621935,
+            "accumulated_ms": 11.8871,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00007906694940926992,
+            "replicate_ms_per_update": [
+              0.0036010602847621935,
+              0.0035227203877612845,
+              0.003663798848833687
+            ]
+          },
+          {
+            "name": "bevy_transform::systems::mark_dirty_trees",
+            "schedule": "PostUpdate",
+            "category": "Other",
+            "mean_ms_per_update": 0.0027295667979400184,
+            "accumulated_ms": 9.0103,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.0000915177219024538,
+            "replicate_ms_per_update": [
+              0.0025849439563768555,
+              0.0027295667979400184,
+              0.002796182974856104
+            ]
+          },
+          {
+            "name": "phoenix_simulation::gm::operations::contact::prune",
+            "schedule": "FixedLast",
+            "category": "Other",
+            "mean_ms_per_update": 0.002697031202665859,
+            "accumulated_ms": 8.9029,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.000037715843683732205,
+            "replicate_ms_per_update": [
+              0.0027128142986973646,
+              0.002697031202665859,
+              0.0024844895486216298
+            ]
+          },
+          {
+            "name": "phoenix_simulation::gm::operations::contact::prune",
+            "schedule": "PreUpdate",
+            "category": "Other",
+            "mean_ms_per_update": 0.0024104513783701907,
+            "accumulated_ms": 7.9569,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00005546803998788246,
+            "replicate_ms_per_update": [
+              0.0025470766434413815,
+              0.0024104513783701907,
+              0.0023828839745531657
+            ]
+          },
+          {
+            "name": "bevy_app::task_pool_plugin::tick_global_task_pools",
+            "schedule": "Last",
+            "category": "Other",
+            "mean_ms_per_update": 0.0023508633747349288,
+            "accumulated_ms": 7.7602,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.0000546803998788246,
+            "replicate_ms_per_update": [
+              0.002398303544380491,
+              0.0023508633747349288,
+              0.002317812784004847
+            ]
+          },
+          {
+            "name": "phoenix_simulation::comms::media_edge::process",
+            "schedule": "PostUpdate",
+            "category": "Other",
+            "mean_ms_per_update": 0.002157830960315056,
+            "accumulated_ms": 7.123,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00009403211148136929,
+            "replicate_ms_per_update": [
+              0.0021514086640411997,
+              0.002157830960315056,
+              0.002251923659497122
+            ]
+          },
+          {
+            "name": "phoenix_simulation::ship::energy_runtime::begin_work_interval",
+            "schedule": "FixedFirst",
+            "category": "Other",
+            "mean_ms_per_update": 0.0018024840957285672,
+            "accumulated_ms": 5.95,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.000058951832777946075,
+            "replicate_ms_per_update": [
+              0.001912693123295971,
+              0.0018024840957285672,
+              0.0017501969100272646
+            ]
+          },
+          {
+            "name": "phoenix_simulation::gm::continuity::restore::publish_restore_context",
+            "schedule": "PreUpdate",
+            "category": "Other",
+            "mean_ms_per_update": 0.001393062708270221,
+            "accumulated_ms": 4.5985,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00004734928809451681,
+            "replicate_ms_per_update": [
+              0.001463405028779158,
+              0.001393062708270221,
+              0.0013122084216903968
+            ]
+          },
+          {
+            "name": "phoenix_simulation::gm::operations::spawn::publish_spawn_projection",
+            "schedule": "PostUpdate",
+            "category": "Other",
+            "mean_ms_per_update": 0.0012226598000605875,
+            "accumulated_ms": 4.036,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00005301423810966374,
+            "replicate_ms_per_update": [
+              0.001235049984853075,
+              0.0011394425931535897,
+              0.0012226598000605875
+            ]
+          }
+        ],
+        "rapier": [
+          {
+            "name": "bevy_rapier3d::plugin::systems::step_simulation<phoenix_simulation::console::weapons::marking::MarkingPhysicsHooks<'_, '_>>",
+            "mean_ms_per_update": 0.011554922750681613
+          }
+        ]
+      },
+      "falling_skyway": {
+        "valid": true,
+        "control": {
+          "mean": 3.3568728870039326,
+          "p50": 3.32015,
+          "p95": 4.4779,
+          "p99": 5.12665
+        },
+        "instrumented": {
+          "mean": 3.4742151772190315,
+          "p50": 3.4118999999999997,
+          "p95": 4.6194,
+          "p99": 5.2927
+        },
+        "overhead_mean_percent": 3.4955833647853485,
+        "expectedContinuation": {
+          "tick": 3600,
+          "digest": "2d2b7c94531ffb3c"
+        },
+        "continuationMatches": true,
+        "top_fixed_systems": [
+          {
+            "name": "phoenix_simulation::ship::energy_runtime::tick_power_system",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Physics",
+            "mean_ms_per_update": 0.5035575280218116,
+            "accumulated_ms": 1662.2434,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00005671008785216601,
+            "replicate_ms_per_update": [
+              0.506917994547107,
+              0.5035575280218116,
+              0.4924830960315056
+            ]
+          },
+          {
+            "name": "phoenix_simulation::core::broadcast::broadcaster::dispatch<phoenix_simulation::core::broadcast::sim::Sim>",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Broadcast",
+            "mean_ms_per_update": 0.3651284156316268,
+            "accumulated_ms": 1205.2889,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.000027658285368070284,
+            "replicate_ms_per_update": [
+              0.37721769160860347,
+              0.3651284156316268,
+              0.35696258709481976
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console::repair::server::publish_repair_blackboard",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Publish",
+            "mean_ms_per_update": 0.21978857921841866,
+            "accumulated_ms": 725.5221,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00007658285368070282,
+            "replicate_ms_per_update": [
+              0.22618285368070282,
+              0.21967994547106937,
+              0.21978857921841866
+            ]
+          },
+          {
+            "name": "phoenix_simulation::server_app::broadcast_publish::broadcast_blackboard_updates",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::PublishAggregate",
+            "mean_ms_per_update": 0.1853045743714026,
+            "accumulated_ms": 611.6904,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00003305059073008179,
+            "replicate_ms_per_update": [
+              0.19258482278097544,
+              0.1844858527718873,
+              0.1853045743714026
+            ]
+          },
+          {
+            "name": "phoenix_simulation::ship::coordination_systems::process_coordination_lag",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Modifiers",
+            "mean_ms_per_update": 0.15190408966979704,
+            "accumulated_ms": 501.4354,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00007885489245683126,
+            "replicate_ms_per_update": [
+              0.15484807634050288,
+              0.15190408966979704,
+              0.15068358073311117
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console_ai::server::ai_power_allocation",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Physics",
+            "mean_ms_per_update": 0.13425822478036958,
+            "accumulated_ms": 443.1864,
+            "calls": 1650,
+            "deferred_ms_per_update": 0.0000412299303241442,
+            "replicate_ms_per_update": [
+              0.1367110875492275,
+              0.13425822478036958,
+              0.1297695243865495
+            ]
+          },
+          {
+            "name": "phoenix_simulation::resources::fitting_server::tick",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Modifiers",
+            "mean_ms_per_update": 0.08787434110875492,
+            "accumulated_ms": 290.0732,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.000071644956073917,
+            "replicate_ms_per_update": [
+              0.0886912450772493,
+              0.08787434110875492,
+              0.08537237200848229
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console::repair::external_server::apply_external_repair",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Modifiers",
+            "mean_ms_per_update": 0.08460124204786429,
+            "accumulated_ms": 279.2687,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00004013935171160255,
+            "replicate_ms_per_update": [
+              0.08815589215389275,
+              0.08460124204786429,
+              0.0842756437443199
+            ]
+          },
+          {
+            "name": "phoenix_simulation::ship::energy_publication::publish_power_blackboard",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Publish",
+            "mean_ms_per_update": 0.07445204483489852,
+            "accumulated_ms": 245.7662,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00009042714328991214,
+            "replicate_ms_per_update": [
+              0.0744897909724326,
+              0.07445204483489852,
+              0.0733524083611027
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console::navigation::server::operate_navigation_ai",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Physics",
+            "mean_ms_per_update": 0.05449327476522266,
+            "accumulated_ms": 179.8823,
+            "calls": 1650,
+            "deferred_ms_per_update": 0.000025295365040896698,
+            "replicate_ms_per_update": [
+              0.05449327476522266,
+              0.054902241744925785,
+              0.05104419872765829
+            ]
+          },
+          {
+            "name": "phoenix_simulation::ship::damage_sync::detect_damage_tier_crossings",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Damage",
+            "mean_ms_per_update": 0.05207443199030597,
+            "accumulated_ms": 171.8977,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00003432293244471372,
+            "replicate_ms_per_update": [
+              0.05308891245077249,
+              0.05207443199030597,
+              0.05144556195092396
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console_ai::server::shields_tree::ai_shields",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Physics",
+            "mean_ms_per_update": 0.05138845804301727,
+            "accumulated_ms": 169.6333,
+            "calls": 1650,
+            "deferred_ms_per_update": 0.00004250227203877613,
+            "replicate_ms_per_update": [
+              0.052740048470160554,
+              0.05138845804301727,
+              0.04924141169342623
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console::repair::server::tick_repair_teams",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Physics",
+            "mean_ms_per_update": 0.04519169948500454,
+            "accumulated_ms": 149.1778,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.000029415328688276282,
+            "replicate_ms_per_update": [
+              0.0461487125113602,
+              0.04519169948500454,
+              0.04487955165101484
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console::navigation::server::publish_navigation_blackboard",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Publish",
+            "mean_ms_per_update": 0.04191045137837019,
+            "accumulated_ms": 138.3464,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00007322023629203271,
+            "replicate_ms_per_update": [
+              0.04318043017267495,
+              0.04191045137837019,
+              0.041313117237200846
+            ]
+          },
+          {
+            "name": "phoenix_simulation::science::broad::tick",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Modifiers",
+            "mean_ms_per_update": 0.03197803695849742,
+            "accumulated_ms": 105.5595,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00002862768857921842,
+            "replicate_ms_per_update": [
+              0.03361066343532263,
+              0.03177470463495911,
+              0.03197803695849742
+            ]
+          },
+          {
+            "name": "phoenix_simulation::ship::helm_ai::surfaces::build_helm_ai_surfaces_frame",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Physics",
+            "mean_ms_per_update": 0.02642877915783096,
+            "accumulated_ms": 87.2414,
+            "calls": 1650,
+            "deferred_ms_per_update": 0.000029627385640714935,
+            "replicate_ms_per_update": [
+              0.027688518630717963,
+              0.02642877915783096,
+              0.02623614056346562
+            ]
+          },
+          {
+            "name": "phoenix_simulation::dossier::server::publish_dossier_blackboard",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Publish",
+            "mean_ms_per_update": 0.02637849136625265,
+            "accumulated_ms": 87.0754,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00007676461678279309,
+            "replicate_ms_per_update": [
+              0.026529809148742804,
+              0.02637849136625265,
+              0.02556222356861557
+            ]
+          },
+          {
+            "name": "phoenix_simulation::resources::production_server::tick",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Modifiers",
+            "mean_ms_per_update": 0.025902120569524387,
+            "accumulated_ms": 85.5029,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00003238412602241745,
+            "replicate_ms_per_update": [
+              0.02739887912753711,
+              0.025902120569524387,
+              0.025026295062102393
+            ]
+          },
+          {
+            "name": "phoenix_simulation::ship::damage_sync::sync_console_damage_tiers",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Damage",
+            "mean_ms_per_update": 0.02475758860951227,
+            "accumulated_ms": 81.7248,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.000039382005452893064,
+            "replicate_ms_per_update": [
+              0.024759648591335958,
+              0.024505301423810966,
+              0.02475758860951227
+            ]
+          },
+          {
+            "name": "phoenix_simulation::science::sharing::deliver",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Modifiers",
+            "mean_ms_per_update": 0.020062950621023933,
+            "accumulated_ms": 66.2278,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00002744622841563163,
+            "replicate_ms_per_update": [
+              0.02168991214783399,
+              0.01988261132990003,
+              0.020062950621023933
+            ]
+          },
+          {
+            "name": "phoenix_simulation::resources::ports_server::prepare",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Modifiers",
+            "mean_ms_per_update": 0.019339957588609513,
+            "accumulated_ms": 63.8412,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00002481066343532263,
+            "replicate_ms_per_update": [
+              0.021664950015146928,
+              0.019339957588609513,
+              0.019223962435625568
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console::helm::server::publish_helm_blackboard",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Publish",
+            "mean_ms_per_update": 0.016110905786125417,
+            "accumulated_ms": 53.1821,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.000052166010299909114,
+            "replicate_ms_per_update": [
+              0.01627943047561345,
+              0.016110905786125417,
+              0.015907361405634656
+            ]
+          },
+          {
+            "name": "phoenix_simulation::ai::server::simulate_low_lod_ships",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Physics",
+            "mean_ms_per_update": 0.015404634959103302,
+            "accumulated_ms": 50.8507,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00004825810360496819,
+            "replicate_ms_per_update": [
+              0.015843653438352014,
+              0.015404634959103302,
+              0.015067222053923053
+            ]
+          },
+          {
+            "name": "phoenix_sim_gameplay::modifiers::coordination::translate_power_modifiers",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Modifiers",
+            "mean_ms_per_update": 0.015134504695546804,
+            "accumulated_ms": 49.959,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00006846410178733717,
+            "replicate_ms_per_update": [
+              0.015134504695546804,
+              0.015540199939412299,
+              0.014509027567403817
+            ]
+          },
+          {
+            "name": "phoenix_simulation::ship::coordination_systems::resolve_human_seeking_hosts",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Input",
+            "mean_ms_per_update": 0.014904241139048773,
+            "accumulated_ms": 49.1989,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00003883671614662224,
+            "replicate_ms_per_update": [
+              0.014916722205392304,
+              0.014904241139048773,
+              0.01439533474704635
+            ]
+          },
+          {
+            "name": "phoenix_simulation::resources::logistics_server::tick",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Modifiers",
+            "mean_ms_per_update": 0.014701908512571948,
+            "accumulated_ms": 48.531,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00002893062708270221,
+            "replicate_ms_per_update": [
+              0.014891457134201758,
+              0.014701908512571948,
+              0.014435049984853076
+            ]
+          },
+          {
+            "name": "phoenix_simulation::dock::server::operate_dock_ai",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Input",
+            "mean_ms_per_update": 0.014627870342320508,
+            "accumulated_ms": 48.2866,
+            "calls": 1650,
+            "deferred_ms_per_update": 0.0013502877915783096,
+            "replicate_ms_per_update": [
+              0.014719266888821568,
+              0.014627870342320508,
+              0.014301787337170555
+            ]
+          },
+          {
+            "name": "phoenix_simulation::resources::logistics_server::publish",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Publish",
+            "mean_ms_per_update": 0.014381036049681915,
+            "accumulated_ms": 47.4718,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00004980308997273553,
+            "replicate_ms_per_update": [
+              0.015245077249318388,
+              0.014381036049681915,
+              0.013989609209330504
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console::weapons::blackboard::publish_weapons_core_blackboard",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Publish",
+            "mean_ms_per_update": 0.013956588912450774,
+            "accumulated_ms": 46.0707,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00009179036655558921,
+            "replicate_ms_per_update": [
+              0.013956588912450774,
+              0.014069372917297788,
+              0.013659588003635263
+            ]
+          },
+          {
+            "name": "phoenix_simulation::console::weapons::server::ai_target_selection",
+            "schedule": "FixedUpdate",
+            "category": "SimSet::Input",
+            "mean_ms_per_update": 0.013626385943653438,
+            "accumulated_ms": 44.9807,
+            "calls": 1650,
+            "deferred_ms_per_update": 0.000014904574371402606,
+            "replicate_ms_per_update": [
+              0.013626385943653438,
+              0.013650621023932141,
+              0.013249409269918206
+            ]
+          }
+        ],
+        "top_outside_fixed_update": [
+          {
+            "name": "phoenix_simulation::entities::model_markers::sync_authoritative_model_markers",
+            "schedule": "FixedLast",
+            "category": "Other",
+            "mean_ms_per_update": 0.048591154195698275,
+            "accumulated_ms": 160.3994,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.000041381399575886094,
+            "replicate_ms_per_update": [
+              0.04862093305059073,
+              0.048591154195698275,
+              0.046694092699182066
+            ]
+          },
+          {
+            "name": "phoenix_simulation::entities::model_markers::sync_authoritative_model_markers",
+            "schedule": "PreUpdate",
+            "category": "Other",
+            "mean_ms_per_update": 0.03996019388064223,
+            "accumulated_ms": 131.9086,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00006558618600424114,
+            "replicate_ms_per_update": [
+              0.04216482883974553,
+              0.03996019388064223,
+              0.039739260830051505
+            ]
+          },
+          {
+            "name": "bevy_ecs::message::update::message_update_system",
+            "schedule": "First",
+            "category": "Other",
+            "mean_ms_per_update": 0.026590427143289914,
+            "accumulated_ms": 87.775,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.0000594971220842169,
+            "replicate_ms_per_update": [
+              0.02684171463192972,
+              0.02623311117843078,
+              0.026590427143289914
+            ]
+          },
+          {
+            "name": "phoenix_presentation::server::viewscreen_border::push_lobby_state",
+            "schedule": "Update",
+            "category": "Other",
+            "mean_ms_per_update": 0.006076522265980005,
+            "accumulated_ms": 20.0586,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00010654347167524992,
+            "replicate_ms_per_update": [
+              0.0063522265980006055,
+              0.006076522265980005,
+              0.005736807028173281
+            ]
+          },
+          {
+            "name": "phoenix_simulation::gm::operations::comms::publish_comms_projection",
+            "schedule": "PostUpdate",
+            "category": "Other",
+            "mean_ms_per_update": 0.0043554074522871855,
+            "accumulated_ms": 14.3772,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.0001048167222053923,
+            "replicate_ms_per_update": [
+              0.004564010905786125,
+              0.004346864586488943,
+              0.0043554074522871855
+            ]
+          },
+          {
+            "name": "phoenix_simulation::gm::operations::event::publish_mission_projection",
+            "schedule": "PostUpdate",
+            "category": "Other",
+            "mean_ms_per_update": 0.003757164495607392,
+            "accumulated_ms": 12.4024,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00007449257800666464,
+            "replicate_ms_per_update": [
+              0.003960436231445016,
+              0.003757164495607392,
+              0.0036618600424113902
+            ]
+          },
+          {
+            "name": "phoenix_simulation::gm::operations::contact::prune",
+            "schedule": "FixedLast",
+            "category": "Other",
+            "mean_ms_per_update": 0.003532293244471372,
+            "accumulated_ms": 11.6601,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.000039594062405331723,
+            "replicate_ms_per_update": [
+              0.003532293244471372,
+              0.003603574674341109,
+              0.0035084216903968498
+            ]
+          },
+          {
+            "name": "phoenix_simulation::gm::operations::contact::prune",
+            "schedule": "PreUpdate",
+            "category": "Other",
+            "mean_ms_per_update": 0.003069584974250227,
+            "accumulated_ms": 10.1327,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.000045349893971523784,
+            "replicate_ms_per_update": [
+              0.003069584974250227,
+              0.0030141775219630416,
+              0.0033069069978794306
+            ]
+          },
+          {
+            "name": "phoenix_simulation::gm::actions::action::publish_session_projection",
+            "schedule": "PostUpdate",
+            "category": "Other",
+            "mean_ms_per_update": 0.0029447137231142077,
+            "accumulated_ms": 9.7205,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00007446228415631627,
+            "replicate_ms_per_update": [
+              0.003077128142986974,
+              0.0029153286882762797,
+              0.0029447137231142077
+            ]
+          },
+          {
+            "name": "bevy_app::task_pool_plugin::tick_global_task_pools",
+            "schedule": "Last",
+            "category": "Other",
+            "mean_ms_per_update": 0.002460315056043623,
+            "accumulated_ms": 8.1215,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.000048894274462284154,
+            "replicate_ms_per_update": [
+              0.0025885186307179646,
+              0.0024307179642532564,
+              0.002460315056043623
+            ]
+          },
+          {
+            "name": "phoenix_simulation::ship::energy_runtime::begin_work_interval",
+            "schedule": "FixedFirst",
+            "category": "Other",
+            "mean_ms_per_update": 0.002337291729778855,
+            "accumulated_ms": 7.7154,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00005664950015146925,
+            "replicate_ms_per_update": [
+              0.002337291729778855,
+              0.002426052711299606,
+              0.0022966676764616784
+            ]
+          },
+          {
+            "name": "bevy_transform::systems::mark_dirty_trees",
+            "schedule": "PostUpdate",
+            "category": "Other",
+            "mean_ms_per_update": 0.0019459557709784914,
+            "accumulated_ms": 6.4236,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.0000913965465010603,
+            "replicate_ms_per_update": [
+              0.0019471978188427747,
+              0.0019459557709784914,
+              0.0018159951529839442
+            ]
+          },
+          {
+            "name": "phoenix_simulation::comms::media_edge::process",
+            "schedule": "PostUpdate",
+            "category": "Other",
+            "mean_ms_per_update": 0.0019446228415631627,
+            "accumulated_ms": 6.4192,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.0000802787034232051,
+            "replicate_ms_per_update": [
+              0.002026083005149955,
+              0.0019446228415631627,
+              0.0018402302332626477
+            ]
+          },
+          {
+            "name": "phoenix_simulation::gm::continuity::restore::publish_restore_context",
+            "schedule": "PreUpdate",
+            "category": "Other",
+            "mean_ms_per_update": 0.0012062102393214178,
+            "accumulated_ms": 3.9817,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00004583459557709785,
+            "replicate_ms_per_update": [
+              0.0012556498030899727,
+              0.0012062102393214178,
+              0.0011970009088155104
+            ]
+          },
+          {
+            "name": "bevy_transform::systems::sync_simple_transforms",
+            "schedule": "PostUpdate",
+            "category": "Other",
+            "mean_ms_per_update": 0.0011718267191760073,
+            "accumulated_ms": 3.8682,
+            "calls": 3301,
+            "deferred_ms_per_update": 0.00006034534989397152,
+            "replicate_ms_per_update": [
+              0.0011798242956679794,
+              0.0011718267191760073,
+              0.0011345349893971523
+            ]
+          }
+        ],
+        "rapier": [
+          {
+            "name": "bevy_rapier3d::plugin::systems::step_simulation<phoenix_simulation::console::weapons::marking::MarkingPhysicsHooks<'_, '_>>",
+            "mean_ms_per_update": 0.008535777037261437
+          }
+        ]
+      }
+    },
+    "method": "Three control/wrapped/control sequences per world, rotating world order, seed42/Cruiser/60 simulation seconds. 300 warm-up updates excluded; 3301 retained per run. Controls use conventional median across six runs, wrapped and per-system values median across three runs. Wall spans can overlap and include waits; never sum them as exclusive CPU. Stripped measure artifact has named Bevy wrappers, not PDB/stack samples.",
+    "background_cpu_cores": {
+      "min": 0.16415286270900642,
+      "max": 0.267395395682606
+    }
+  },
+  "prior_phase_comparison": {
+    "scope": "Existing same-machine measure captures; 300 fixed invocations excluded. Phase observed intervals are wall unions, not exclusive CPU. Phase totals may overlap. Named systems require separate attribution.",
+    "worlds": {
+      "combat_test": {
+        "raw": {
+          "baseline": [
+            {
+              "path": ".phoenix/redesign-baseline/2026-10-13-measure/combat_test-perf-0.json.phases.json",
+              "count": 3300,
+              "fixed": {
+                "mean": 0.7854757575757594,
+                "p50": 0.7293999999999999,
+                "p95": 1.1399
+              },
+              "unobserved": {
+                "mean": 0.20601427272727305,
+                "p50": 0.1953,
+                "p95": 0.23729999999999998
+              },
+              "systems": 289,
+              "observed_intervals": 1101388,
+              "phases": {
+                "Membership": {
+                  "mean": 0.010822484848484694,
+                  "p50": 0.0099,
+                  "p95": 0.0129
+                },
+                "Input": {
+                  "mean": 0.07000627272727265,
+                  "p50": 0.0697,
+                  "p95": 0.1305
+                },
+                "Physics": {
+                  "mean": 0.15248439393939406,
+                  "p50": 0.1513,
+                  "p95": 0.2842
+                },
+                "Damage": {
+                  "mean": 0.02720081818181819,
+                  "p50": 0.0255,
+                  "p95": 0.0326
+                },
+                "Modifiers": {
+                  "mean": 0.0404158181818182,
+                  "p50": 0.037200000000000004,
+                  "p95": 0.045000000000000005
+                },
+                "Publish": {
+                  "mean": 0.09794557575757587,
+                  "p50": 0.0889,
+                  "p95": 0.1256
+                },
+                "PublishAggregate": {
+                  "mean": 0.033860151515151565,
+                  "p50": 0.028900000000000002,
+                  "p95": 0.0386
+                },
+                "Broadcast": {
+                  "mean": 0.05633315151515143,
+                  "p50": 0.036199999999999996,
+                  "p95": 0.1412
+                }
+              }
+            },
+            {
+              "path": ".phoenix/redesign-baseline/2026-10-13-measure/combat_test-perf-1.json.phases.json",
+              "count": 3300,
+              "fixed": {
+                "mean": 0.8257030606060618,
+                "p50": 0.7744,
+                "p95": 1.196
+              },
+              "unobserved": {
+                "mean": 0.22018596969697013,
+                "p50": 0.20929999999999999,
+                "p95": 0.2682
+              },
+              "systems": 289,
+              "observed_intervals": 1101388,
+              "phases": {
+                "Membership": {
+                  "mean": 0.011665636363636317,
+                  "p50": 0.0108,
+                  "p95": 0.0156
+                },
+                "Input": {
+                  "mean": 0.0730615757575757,
+                  "p50": 0.0699,
+                  "p95": 0.14400000000000002
+                },
+                "Physics": {
+                  "mean": 0.16233887878787867,
+                  "p50": 0.1538,
+                  "p95": 0.30729999999999996
+                },
+                "Damage": {
+                  "mean": 0.027858181818181785,
+                  "p50": 0.0261,
+                  "p95": 0.035800000000000005
+                },
+                "Modifiers": {
+                  "mean": 0.04140757575757573,
+                  "p50": 0.0389,
+                  "p95": 0.051
+                },
+                "Publish": {
+                  "mean": 0.10243893939393921,
+                  "p50": 0.0956,
+                  "p95": 0.14320000000000002
+                },
+                "PublishAggregate": {
+                  "mean": 0.032879333333333316,
+                  "p50": 0.030199999999999998,
+                  "p95": 0.044
+                },
+                "Broadcast": {
+                  "mean": 0.05871860606060589,
+                  "p50": 0.0386,
+                  "p95": 0.1595
+                }
+              }
+            },
+            {
+              "path": ".phoenix/redesign-baseline/2026-10-13-measure/combat_test-perf-2.json.phases.json",
+              "count": 3300,
+              "fixed": {
+                "mean": 0.8352093333333316,
+                "p50": 0.7767,
+                "p95": 1.2378
+              },
+              "unobserved": {
+                "mean": 0.22176012121212116,
+                "p50": 0.211,
+                "p95": 0.2702
+              },
+              "systems": 289,
+              "observed_intervals": 1101388,
+              "phases": {
+                "Membership": {
+                  "mean": 0.01129112121212117,
+                  "p50": 0.010499999999999999,
+                  "p95": 0.0159
+                },
+                "Input": {
+                  "mean": 0.07348499999999995,
+                  "p50": 0.0699,
+                  "p95": 0.14730000000000001
+                },
+                "Physics": {
+                  "mean": 0.16468563636363626,
+                  "p50": 0.1531,
+                  "p95": 0.33
+                },
+                "Damage": {
+                  "mean": 0.028965030303030305,
+                  "p50": 0.026699999999999998,
+                  "p95": 0.0369
+                },
+                "Modifiers": {
+                  "mean": 0.041590393939393955,
+                  "p50": 0.039,
+                  "p95": 0.0518
+                },
+                "Publish": {
+                  "mean": 0.10342436363636358,
+                  "p50": 0.0965,
+                  "p95": 0.1445
+                },
+                "PublishAggregate": {
+                  "mean": 0.03277809090909098,
+                  "p50": 0.0305,
+                  "p95": 0.044199999999999996
+                },
+                "Broadcast": {
+                  "mean": 0.06063839393939402,
+                  "p50": 0.039700000000000006,
+                  "p95": 0.1626
+                }
+              }
+            }
+          ],
+          "current": [
+            {
+              "path": ".phoenix/redesign-baseline/2026-10-16-verify-8-12/combat_test-perf-0.json.phases.json",
+              "count": 3300,
+              "fixed": {
+                "mean": 5.181309999999985,
+                "p50": 4.7386,
+                "p95": 8.300500000000001
+              },
+              "unobserved": {
+                "mean": 0.33397845454545433,
+                "p50": 0.3201,
+                "p95": 0.4376
+              },
+              "systems": 376,
+              "observed_intervals": 1443311,
+              "phases": {
+                "Membership": {
+                  "mean": 0.015529303030303069,
+                  "p50": 0.0144,
+                  "p95": 0.0223
+                },
+                "Input": {
+                  "mean": 0.2742107272727275,
+                  "p50": 0.2841,
+                  "p95": 0.5777
+                },
+                "Physics": {
+                  "mean": 0.9583768181818176,
+                  "p50": 0.9762,
+                  "p95": 1.4339000000000002
+                },
+                "Damage": {
+                  "mean": 0.11934390909090936,
+                  "p50": 0.1103,
+                  "p95": 0.16440000000000002
+                },
+                "Modifiers": {
+                  "mean": 1.152167424242425,
+                  "p50": 1.1408,
+                  "p95": 1.4763
+                },
+                "Publish": {
+                  "mean": 1.0595143636363642,
+                  "p50": 1.0631,
+                  "p95": 1.4578
+                },
+                "PublishAggregate": {
+                  "mean": 0.3416832424242431,
+                  "p50": 0.3389,
+                  "p95": 0.46190000000000003
+                },
+                "Broadcast": {
+                  "mean": 0.7923643030303029,
+                  "p50": 0.3345,
+                  "p95": 3.1549
+                }
+              }
+            },
+            {
+              "path": ".phoenix/redesign-baseline/2026-10-16-verify-8-12/combat_test-perf-1.json.phases.json",
+              "count": 3300,
+              "fixed": {
+                "mean": 4.978650212121218,
+                "p50": 4.5051,
+                "p95": 8.0304
+              },
+              "unobserved": {
+                "mean": 0.3205328484848479,
+                "p50": 0.31139999999999995,
+                "p95": 0.3911
+              },
+              "systems": 376,
+              "observed_intervals": 1443311,
+              "phases": {
+                "Membership": {
+                  "mean": 0.014340090909090915,
+                  "p50": 0.0135,
+                  "p95": 0.0185
+                },
+                "Input": {
+                  "mean": 0.26271306060606076,
+                  "p50": 0.27540000000000003,
+                  "p95": 0.5276000000000001
+                },
+                "Physics": {
+                  "mean": 0.9233168181818188,
+                  "p50": 0.9619,
+                  "p95": 1.3896
+                },
+                "Damage": {
+                  "mean": 0.11552766666666663,
+                  "p50": 0.1077,
+                  "p95": 0.1615
+                },
+                "Modifiers": {
+                  "mean": 1.114621181818183,
+                  "p50": 1.1113,
+                  "p95": 1.4107
+                },
+                "Publish": {
+                  "mean": 1.021997545454547,
+                  "p50": 1.0163,
+                  "p95": 1.4568999999999999
+                },
+                "PublishAggregate": {
+                  "mean": 0.3275656969696972,
+                  "p50": 0.3207,
+                  "p95": 0.44289999999999996
+                },
+                "Broadcast": {
+                  "mean": 0.7514769393939408,
+                  "p50": 0.3042,
+                  "p95": 3.0585
+                }
+              }
+            },
+            {
+              "path": ".phoenix/redesign-baseline/2026-10-16-verify-8-12/combat_test-perf-2.json.phases.json",
+              "count": 3300,
+              "fixed": {
+                "mean": 5.1045530303030375,
+                "p50": 4.6383,
+                "p95": 8.2096
+              },
+              "unobserved": {
+                "mean": 0.3274626666666671,
+                "p50": 0.3115,
+                "p95": 0.4299
+              },
+              "systems": 376,
+              "observed_intervals": 1443311,
+              "phases": {
+                "Membership": {
+                  "mean": 0.014963,
+                  "p50": 0.013900000000000001,
+                  "p95": 0.0219
+                },
+                "Input": {
+                  "mean": 0.2698031818181819,
+                  "p50": 0.2784,
+                  "p95": 0.5817
+                },
+                "Physics": {
+                  "mean": 0.9395130606060592,
+                  "p50": 0.9737,
+                  "p95": 1.4042
+                },
+                "Damage": {
+                  "mean": 0.1181221818181817,
+                  "p50": 0.10890000000000001,
+                  "p95": 0.1666
+                },
+                "Modifiers": {
+                  "mean": 1.1399437575757578,
+                  "p50": 1.1298000000000001,
+                  "p95": 1.4906
+                },
+                "Publish": {
+                  "mean": 1.048301848484848,
+                  "p50": 1.0556,
+                  "p95": 1.4705
+                },
+                "PublishAggregate": {
+                  "mean": 0.3372089999999996,
+                  "p50": 0.3351,
+                  "p95": 0.46
+                },
+                "Broadcast": {
+                  "mean": 0.7773217878787865,
+                  "p50": 0.31629999999999997,
+                  "p95": 3.0999
+                }
+              }
+            }
+          ]
+        },
+        "phase_median_of_three": [
+          {
+            "name": "Modifiers",
+            "baseline_mean_ms": 0.04140757575757573,
+            "current_mean_ms": 1.1399437575757578,
+            "delta_ms": 1.098536181818182,
+            "ratio": 27.529835705660677
+          },
+          {
+            "name": "Publish",
+            "baseline_mean_ms": 0.10243893939393921,
+            "current_mean_ms": 1.048301848484848,
+            "delta_ms": 0.9458629090909089,
+            "ratio": 10.233431297580095
+          },
+          {
+            "name": "Physics",
+            "baseline_mean_ms": 0.16233887878787867,
+            "current_mean_ms": 0.9395130606060592,
+            "delta_ms": 0.7771741818181805,
+            "ratio": 5.7873570867375586
+          },
+          {
+            "name": "Broadcast",
+            "baseline_mean_ms": 0.05871860606060589,
+            "current_mean_ms": 0.7773217878787865,
+            "delta_ms": 0.7186031818181806,
+            "ratio": 13.238083122689947
+          },
+          {
+            "name": "PublishAggregate",
+            "baseline_mean_ms": 0.032879333333333316,
+            "current_mean_ms": 0.3372089999999996,
+            "delta_ms": 0.3043296666666663,
+            "ratio": 10.255956122386904
+          },
+          {
+            "name": "Input",
+            "baseline_mean_ms": 0.0730615757575757,
+            "current_mean_ms": 0.2698031818181819,
+            "delta_ms": 0.1967416060606062,
+            "ratio": 3.692819091575728
+          },
+          {
+            "name": "Damage",
+            "baseline_mean_ms": 0.027858181818181785,
+            "current_mean_ms": 0.1181221818181817,
+            "delta_ms": 0.09026399999999991,
+            "ratio": 4.240125310011749
+          },
+          {
+            "name": "Membership",
+            "baseline_mean_ms": 0.01129112121212117,
+            "current_mean_ms": 0.014963,
+            "delta_ms": 0.00367187878787883,
+            "ratio": 1.3252005464202279
+          }
+        ],
+        "fixed_median_of_three": {
+          "baseline": {
+            "mean_ms": 0.8257030606060618,
+            "unobserved_mean_ms": 0.22018596969697013,
+            "registered_systems": 289
+          },
+          "current": {
+            "mean_ms": 5.1045530303030375,
+            "unobserved_mean_ms": 0.3274626666666671,
+            "registered_systems": 376
+          }
+        }
+      },
+      "falling_skyway": {
+        "raw": {
+          "baseline": [
+            {
+              "path": ".phoenix/redesign-baseline/2026-10-13-measure/falling_skyway-perf-0.json.phases.json",
+              "count": 3300,
+              "fixed": {
+                "mean": 0.8129286666666682,
+                "p50": 0.8088000000000001,
+                "p95": 1.1238000000000001
+              },
+              "unobserved": {
+                "mean": 0.2100654545454552,
+                "p50": 0.2011,
+                "p95": 0.24649999999999997
+              },
+              "systems": 289,
+              "observed_intervals": 1101387,
+              "phases": {
+                "Membership": {
+                  "mean": 0.012332787878787855,
+                  "p50": 0.0117,
+                  "p95": 0.0149
+                },
+                "Input": {
+                  "mean": 0.0866956666666665,
+                  "p50": 0.09670000000000001,
+                  "p95": 0.1497
+                },
+                "Physics": {
+                  "mean": 0.14547424242424228,
+                  "p50": 0.1906,
+                  "p95": 0.24600000000000002
+                },
+                "Damage": {
+                  "mean": 0.025218484848484917,
+                  "p50": 0.0239,
+                  "p95": 0.0282
+                },
+                "Modifiers": {
+                  "mean": 0.05749845454545459,
+                  "p50": 0.0552,
+                  "p95": 0.0639
+                },
+                "Publish": {
+                  "mean": 0.11720115151515167,
+                  "p50": 0.1119,
+                  "p95": 0.13540000000000002
+                },
+                "PublishAggregate": {
+                  "mean": 0.01885163636363637,
+                  "p50": 0.016399999999999998,
+                  "p95": 0.0281
+                },
+                "Broadcast": {
+                  "mean": 0.06864530303030295,
+                  "p50": 0.0463,
+                  "p95": 0.1792
+                }
+              }
+            },
+            {
+              "path": ".phoenix/redesign-baseline/2026-10-13-measure/falling_skyway-perf-1.json.phases.json",
+              "count": 3300,
+              "fixed": {
+                "mean": 0.8063747272727246,
+                "p50": 0.8013,
+                "p95": 1.1158
+              },
+              "unobserved": {
+                "mean": 0.20872469696969656,
+                "p50": 0.1984,
+                "p95": 0.24600000000000002
+              },
+              "systems": 289,
+              "observed_intervals": 1101387,
+              "phases": {
+                "Membership": {
+                  "mean": 0.012158969696969656,
+                  "p50": 0.011600000000000001,
+                  "p95": 0.0145
+                },
+                "Input": {
+                  "mean": 0.08742784848484852,
+                  "p50": 0.0956,
+                  "p95": 0.1485
+                },
+                "Physics": {
+                  "mean": 0.14393678787878772,
+                  "p50": 0.18939999999999999,
+                  "p95": 0.2439
+                },
+                "Damage": {
+                  "mean": 0.024676666666666746,
+                  "p50": 0.0237,
+                  "p95": 0.028
+                },
+                "Modifiers": {
+                  "mean": 0.05712915151515141,
+                  "p50": 0.05450000000000001,
+                  "p95": 0.0631
+                },
+                "Publish": {
+                  "mean": 0.11509939393939393,
+                  "p50": 0.1095,
+                  "p95": 0.1311
+                },
+                "PublishAggregate": {
+                  "mean": 0.01877203030303036,
+                  "p50": 0.0162,
+                  "p95": 0.0282
+                },
+                "Broadcast": {
+                  "mean": 0.06756409090909081,
+                  "p50": 0.045399999999999996,
+                  "p95": 0.1787
+                }
+              }
+            },
+            {
+              "path": ".phoenix/redesign-baseline/2026-10-13-measure/falling_skyway-perf-2.json.phases.json",
+              "count": 3300,
+              "fixed": {
+                "mean": 0.8065545454545432,
+                "p50": 0.8003,
+                "p95": 1.117
+              },
+              "unobserved": {
+                "mean": 0.20760569696969722,
+                "p50": 0.1973,
+                "p95": 0.2396
+              },
+              "systems": 289,
+              "observed_intervals": 1101387,
+              "phases": {
+                "Membership": {
+                  "mean": 0.012233333333333311,
+                  "p50": 0.011600000000000001,
+                  "p95": 0.0149
+                },
+                "Input": {
+                  "mean": 0.0859695757575756,
+                  "p50": 0.0953,
+                  "p95": 0.14750000000000002
+                },
+                "Physics": {
+                  "mean": 0.1453146666666667,
+                  "p50": 0.1903,
+                  "p95": 0.24429999999999996
+                },
+                "Damage": {
+                  "mean": 0.024664454545454642,
+                  "p50": 0.0236,
+                  "p95": 0.0279
+                },
+                "Modifiers": {
+                  "mean": 0.057127454545454565,
+                  "p50": 0.054599999999999996,
+                  "p95": 0.0632
+                },
+                "Publish": {
+                  "mean": 0.11557403030302997,
+                  "p50": 0.1101,
+                  "p95": 0.1327
+                },
+                "PublishAggregate": {
+                  "mean": 0.01891506060606061,
+                  "p50": 0.016399999999999998,
+                  "p95": 0.0283
+                },
+                "Broadcast": {
+                  "mean": 0.06896509090909075,
+                  "p50": 0.0455,
+                  "p95": 0.1831
+                }
+              }
+            }
+          ],
+          "current": [
+            {
+              "path": ".phoenix/redesign-baseline/2026-10-16-verify-8-12/falling_skyway-perf-0.json.phases.json",
+              "count": 3300,
+              "fixed": {
+                "mean": 3.658945181818187,
+                "p50": 3.5315,
+                "p95": 5.1597
+              },
+              "unobserved": {
+                "mean": 0.31938433333333405,
+                "p50": 0.303,
+                "p95": 0.42519999999999997
+              },
+              "systems": 376,
+              "observed_intervals": 1443308,
+              "phases": {
+                "Membership": {
+                  "mean": 0.015398393939393957,
+                  "p50": 0.0141,
+                  "p95": 0.0229
+                },
+                "Input": {
+                  "mean": 0.19720451515151535,
+                  "p50": 0.2197,
+                  "p95": 0.3528
+                },
+                "Physics": {
+                  "mean": 1.0708133939393951,
+                  "p50": 1.2004,
+                  "p95": 1.6547
+                },
+                "Damage": {
+                  "mean": 0.10580693939393944,
+                  "p50": 0.0982,
+                  "p95": 0.1409
+                },
+                "Modifiers": {
+                  "mean": 0.604004636363636,
+                  "p50": 0.5701999999999999,
+                  "p95": 0.7914
+                },
+                "Publish": {
+                  "mean": 0.5852149696969705,
+                  "p50": 0.5508000000000001,
+                  "p95": 0.7857
+                },
+                "PublishAggregate": {
+                  "mean": 0.21519639393939352,
+                  "p50": 0.2026,
+                  "p95": 0.2945
+                },
+                "Broadcast": {
+                  "mean": 0.4426294848484852,
+                  "p50": 0.2988,
+                  "p95": 1.0514000000000001
+                }
+              }
+            },
+            {
+              "path": ".phoenix/redesign-baseline/2026-10-16-verify-8-12/falling_skyway-perf-1.json.phases.json",
+              "count": 3300,
+              "fixed": {
+                "mean": 3.6154880909090825,
+                "p50": 3.5455,
+                "p95": 4.8577
+              },
+              "unobserved": {
+                "mean": 0.31140000000000057,
+                "p50": 0.3026,
+                "p95": 0.37629999999999997
+              },
+              "systems": 376,
+              "observed_intervals": 1443308,
+              "phases": {
+                "Membership": {
+                  "mean": 0.01519557575757577,
+                  "p50": 0.0145,
+                  "p95": 0.02
+                },
+                "Input": {
+                  "mean": 0.19670560606060566,
+                  "p50": 0.2235,
+                  "p95": 0.3327
+                },
+                "Physics": {
+                  "mean": 1.0619779393939364,
+                  "p50": 1.1977,
+                  "p95": 1.5893000000000002
+                },
+                "Damage": {
+                  "mean": 0.1032992424242424,
+                  "p50": 0.0984,
+                  "p95": 0.12760000000000002
+                },
+                "Modifiers": {
+                  "mean": 0.595176575757576,
+                  "p50": 0.5741999999999999,
+                  "p95": 0.7240000000000001
+                },
+                "Publish": {
+                  "mean": 0.5781740606060606,
+                  "p50": 0.5599999999999999,
+                  "p95": 0.7033999999999999
+                },
+                "PublishAggregate": {
+                  "mean": 0.21367718181818107,
+                  "p50": 0.20570000000000002,
+                  "p95": 0.262
+                },
+                "Broadcast": {
+                  "mean": 0.43958369696969535,
+                  "p50": 0.313,
+                  "p95": 1.0905
+                }
+              }
+            },
+            {
+              "path": ".phoenix/redesign-baseline/2026-10-16-verify-8-12/falling_skyway-perf-2.json.phases.json",
+              "count": 3300,
+              "fixed": {
+                "mean": 3.5417165757575777,
+                "p50": 3.4909,
+                "p95": 4.7517000000000005
+              },
+              "unobserved": {
+                "mean": 0.3045277878787878,
+                "p50": 0.2952,
+                "p95": 0.36660000000000004
+              },
+              "systems": 376,
+              "observed_intervals": 1443308,
+              "phases": {
+                "Membership": {
+                  "mean": 0.015120848484848511,
+                  "p50": 0.0141,
+                  "p95": 0.0194
+                },
+                "Input": {
+                  "mean": 0.1903187878787876,
+                  "p50": 0.22,
+                  "p95": 0.3262
+                },
+                "Physics": {
+                  "mean": 1.0403266363636379,
+                  "p50": 1.1821,
+                  "p95": 1.5524
+                },
+                "Damage": {
+                  "mean": 0.10279548484848483,
+                  "p50": 0.0982,
+                  "p95": 0.12510000000000002
+                },
+                "Modifiers": {
+                  "mean": 0.5848878181818198,
+                  "p50": 0.5659000000000001,
+                  "p95": 0.7092
+                },
+                "Publish": {
+                  "mean": 0.5714716666666677,
+                  "p50": 0.5545,
+                  "p95": 0.6828
+                },
+                "PublishAggregate": {
+                  "mean": 0.2087828787878785,
+                  "p50": 0.202,
+                  "p95": 0.25539999999999996
+                },
+                "Broadcast": {
+                  "mean": 0.42575912121212006,
+                  "p50": 0.3019,
+                  "p95": 1.0364
+                }
+              }
+            }
+          ]
+        },
+        "phase_median_of_three": [
+          {
+            "name": "Physics",
+            "baseline_mean_ms": 0.1453146666666667,
+            "current_mean_ms": 1.0619779393939364,
+            "delta_ms": 0.9166632727272697,
+            "ratio": 7.308126314806049
+          },
+          {
+            "name": "Modifiers",
+            "baseline_mean_ms": 0.05712915151515141,
+            "current_mean_ms": 0.595176575757576,
+            "delta_ms": 0.5380474242424246,
+            "ratio": 10.41808883858055
+          },
+          {
+            "name": "Publish",
+            "baseline_mean_ms": 0.11557403030302997,
+            "current_mean_ms": 0.5781740606060606,
+            "delta_ms": 0.4626000303030306,
+            "ratio": 5.002629562109359
+          },
+          {
+            "name": "Broadcast",
+            "baseline_mean_ms": 0.06864530303030295,
+            "current_mean_ms": 0.43958369696969535,
+            "delta_ms": 0.37093839393939243,
+            "ratio": 6.403696648780827
+          },
+          {
+            "name": "PublishAggregate",
+            "baseline_mean_ms": 0.01885163636363637,
+            "current_mean_ms": 0.21367718181818107,
+            "delta_ms": 0.1948255454545447,
+            "ratio": 11.334675552640674
+          },
+          {
+            "name": "Input",
+            "baseline_mean_ms": 0.0866956666666665,
+            "current_mean_ms": 0.19670560606060566,
+            "delta_ms": 0.11000993939393916,
+            "ratio": 2.268920854105811
+          },
+          {
+            "name": "Damage",
+            "baseline_mean_ms": 0.024676666666666746,
+            "current_mean_ms": 0.1032992424242424,
+            "delta_ms": 0.07862257575757566,
+            "ratio": 4.186110053663734
+          },
+          {
+            "name": "Membership",
+            "baseline_mean_ms": 0.012233333333333311,
+            "current_mean_ms": 0.01519557575757577,
+            "delta_ms": 0.0029622424242424592,
+            "ratio": 1.2421451572950244
+          }
+        ],
+        "fixed_median_of_three": {
+          "baseline": {
+            "mean_ms": 0.8065545454545432,
+            "unobserved_mean_ms": 0.20872469696969656,
+            "registered_systems": 289
+          },
+          "current": {
+            "mean_ms": 3.6154880909090825,
+            "unobserved_mean_ms": 0.31140000000000057,
+            "registered_systems": 376
+          }
+        }
+      }
+    }
+  },
+  "diagnostic": {
+    "scope": "Existing 30-second Destroyer seed1 trace, same current runtime. Physical samples lag 17-33ms; prior permitted radar and newly published radar are distinct frontiers. No authoritative beam-end reason or ray-hit trace was added.",
+    "beam_windows_seconds": [
+      0.9,
+      2.0166666666666666,
+      0.15,
+      1.65
+    ],
+    "cutoffs": [
+      {
+        "tick": 267,
+        "bank": "fore",
+        "aim_age_ms": 433,
+        "approximate_position_error": 3.63,
+        "published_uncertainty": 5.54,
+        "pointing_before_deg": 1.676,
+        "pointing_after_deg": 2.028
+      },
+      {
+        "tick": 434,
+        "bank": "aft",
+        "aim_age_ms": 217,
+        "approximate_position_error": 2.03,
+        "published_uncertainty": 3.7,
+        "range_before": 39.933,
+        "range_after": 40.467
+      },
+      {
+        "tick": 1412,
+        "bank": "fore",
+        "aim_age_ms": 17,
+        "approximate_position_error": 1.29,
+        "published_uncertainty": 2,
+        "pointing_before_deg": 0.465,
+        "pointing_after_deg": 7.212
+      },
+      {
+        "tick": 1592,
+        "bank": "aft",
+        "aim_age_ms": 17,
+        "approximate_position_error": 1.28,
+        "published_uncertainty": 2,
+        "range_before": 32.062,
+        "range_after": 40.047
+      }
+    ],
+    "interpretation": "Short firing windows with normal cooldown are observed. At sampled cutoffs, energy remains 24-30/30, heat negligible, restraint released. Mount/observation/movement interaction leads investigation, not a proven isolated Power/Shield defect or missing prediction claim."
+  },
+  "optimization_candidates": [
+    {
+      "priority": 1,
+      "title": "Remove unused visibility work and redundant publication copies",
+      "finding": "Console publication builds Repair visibility before checking recipients. The zero-session local publication does not use it. Granted boards are copied before projection and changed complete packets are copied again. Broadcast dispatch also deep-clones ship topology and hosts before callbacks.",
+      "experiment": "First measure lazy Repair visibility and one permission/projection pass; separately measure borrowed audience resolution instead of deep topology copies.",
+      "preserve": "Keep complete scoped packets, unordered-snapshot safety, withdrawal/generation, exact observation metadata and existing delivery classes. Typed local/AI publication remains necessary.",
+      "sources": [
+        "crates/phoenix-simulation/src/ship/console_publication.rs:34",
+        "crates/phoenix-simulation/src/ship/console_publication.rs:69",
+        "crates/phoenix-simulation/src/ship/console_publication.rs:114",
+        "crates/phoenix-simulation/src/core/broadcast/broadcaster.rs:262",
+        "crates/phoenix-simulation/src/server_app/broadcast.rs:189"
+      ]
+    },
+    {
+      "priority": 2,
+      "title": "Compile immutable power topology and reduce transactional copying",
+      "finding": "The ordinary Energy path contains four full network validations and several network/state copies. Routing repeatedly walks topology and consumers. Hardware definitions are already shared through Arc; deep immutable hardware copies are not the demonstrated issue.",
+      "experiment": "Add subspans/allocation counts for validation, routing and copies; cache accepted topology/service bindings with refit/restore invalidation, then consolidate atomic staging.",
+      "preserve": "Retain finite resources, dynamic budgets, failures, stock reservations, no-write refusal, flow-cut RNG order and deterministic continuation.",
+      "sources": [
+        "crates/phoenix-simulation/src/ship/energy_runtime.rs:192",
+        "crates/phoenix-sim-gameplay/src/modifiers/power_system.rs:639",
+        "crates/phoenix-sim-gameplay/src/resources/energy_network.rs:507",
+        "crates/phoenix-sim-gameplay/src/resources/energy_network.rs:693"
+      ]
+    },
+    {
+      "priority": 3,
+      "title": "Avoid rebuilding sensor work that is not yet due",
+      "finding": "Broad sensing constructs scene/projectile measurements before BroadTrackState::advance checks the authored sampling interval. Projection validates and rebuilds track snapshots each tick. Sharing stages recipient metadata and can clone/validate the canonical track state even with no incoming samples.",
+      "experiment": "Separate due-measurement preparation from continuous aging/payment. Reuse immutable track/history data in projections; skip empty sharing transactions only where there is no retained shared evidence needing aging.",
+      "preserve": "Keep paid work, prediction/age/uncertainty, expiry, source identity, knowledge limits and explicit sharing. Caching a complete time-dependent radar unchanged would be incorrect.",
+      "sources": [
+        "crates/phoenix-simulation/src/science/broad.rs:179",
+        "crates/phoenix-simulation/src/science/broad.rs:557",
+        "crates/phoenix-sim-gameplay/src/science/tracks.rs:347",
+        "crates/phoenix-sim-gameplay/src/science/tracks.rs:690",
+        "crates/phoenix-simulation/src/ship/sensors.rs:925",
+        "crates/phoenix-sim-gameplay/src/science/sharing.rs:143"
+      ]
+    },
+    {
+      "priority": 4,
+      "title": "Reuse empty/static Repair data and add a safe idle Fitting path",
+      "finding": "Repair publication creates RepairTeams::new(0) for entities without teams, compiling the default workflow. It also rebuilds physical status vectors, repair groups and cloned layouts. Fitting stages copies of several owners before checking work and reinserts them even when idle.",
+      "experiment": "Profile no-team versus real-team allocation counts; reuse an immutable empty descriptor, groups and layout. Gate idle fitting work only when there is also no unsettled actual Refit job.",
+      "preserve": "Returning/cancelled Refit teams can remain active after the fitting work entry is removed. Keep their lifecycle, live conditions, routes and Console-specific repair visibility.",
+      "sources": [
+        "crates/phoenix-simulation/src/console/repair/server.rs:918",
+        "crates/phoenix-sim-gameplay/src/jobs/repair.rs:87",
+        "crates/phoenix-simulation/src/console/repair/server.rs:1065",
+        "crates/phoenix-simulation/src/resources/fitting_server.rs:682"
+      ]
+    }
+  ],
+  "raw_artifacts": {
+    "profile_root": ".phoenix/balance-headless-profile-20261016",
+    "profile_receipt": {
+      "path": ".phoenix/balance-headless-profile-20261016/receipt.json",
+      "sha256": "ae5a2db07e54ac28b2894f4bdd0e61333383ca09f5834400ebb6f7cc9514e10e"
+    },
+    "profile_analysis": {
+      "path": ".phoenix/balance-headless-profile-analysis.json",
+      "sha256": "673f865aa18c7b44e1e0c64aaa12268fc19575ae06fe61690e297421e32c3a0f"
+    },
+    "phase_analysis": {
+      "path": ".phoenix/balance-profile-phase-comparison.json",
+      "sha256": "09343fc87aee6d6377773211604a96622e6f3188ffeff5fe6c63df0568d70ac7"
+    },
+    "build_log": ".phoenix/balance-profile-build.log",
+    "build_artifacts": ".phoenix/balance-profile-build.jsonl",
+    "capture_log": ".phoenix/balance-headless-profile-runs.log",
+    "runner": ".phoenix/run-balance-headless-profile.ps1",
+    "reduction": ".phoenix/analyze-balance-headless-profile.mjs"
+  },
+  "status": "Diagnosis complete; no balance retuning or runtime optimization implemented.",
+  "interpretation": "Longer engagements could support the redesign, but these results show curtailed firing, weaker finishing power and survival-driven stalemates. Restoring the old four-second kill time is not assumed to be the design goal."
+}

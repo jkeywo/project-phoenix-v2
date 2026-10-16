@@ -330,15 +330,13 @@ repair_rate = 0.5
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
 torpedo_arc_color = [ 1, 0.55, 0.2, 0.15 ]
 
-# Re-authored by issue #952, which retired the `sensors` power group and with it
-# the only thing that ever scaled this number. Every tactical radar range in the
-# fleet was tuned against a live horizon of `range x 0.667` — the rung those
-# hulls rested `sensors` at — so leaving the authored figures alone would have
-# widened every acquisition horizon in the fleet by half, silently, as a side
-# effect of a reactor change. The multiplier is folded into the number instead:
-# the live horizon is unchanged, and it is now simply what is written here.
+# [ai] Measured-contact balance pass: Tactical broad radar covers the 300-unit
+# torpedo envelope and the 120-unit unknown-target standoff. Helm already has
+# this explicit feed, so clear-space tracking can continue outside beam range.
+# The legacy 50-unit horizon stranded both controllers on historical
+# predictions. This changes detection reach, not weapon range or scan detail.
 [weapons_console.radar]
-range = 50
+range = 300
 shows = [ "player", "ship", "asteroid", "station", "missile", "torpedo", "region" ]
 selects = [ "ship", "station", "asteroid" ]
 
@@ -597,7 +595,8 @@ color = [ 0.25, 0.75, 1, 1 ]
 
 [weapon.impact]
 damage_type = "laser"
-penetration = 20
+# [ai] Deposit more energy locally; reduced internal reach. See the October balance report.
+penetration = 10
 [[weapon]]
 id = "phaser-aft"
 strategy_id = "aft"
@@ -641,7 +640,8 @@ color = [ 0.25, 0.75, 1, 1 ]
 
 [weapon.impact]
 damage_type = "laser"
-penetration = 20
+# [ai] Deposit more energy locally; reduced internal reach. See the October balance report.
+penetration = 10
 
 [torpedoes]
 # Frozen finite guidance equipment; physical collision does not grant tracking.

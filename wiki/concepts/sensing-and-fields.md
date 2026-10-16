@@ -23,6 +23,9 @@ sources:
   - crates/phoenix-simulation/src/console_delivery.rs
   - crates/phoenix-simulation/src/console_delivery_references.rs
   - gui/components/ph-scan-readout.js
+  - gui/console-state.js
+  - gui/sensor-tracks.js
+  - gui/components/ph-radar.js
   - gui/workshop-sensing-panel.js
   - crates/phoenix-sim-world/src/world/script/triggers_enquiry.rs
   - crates/phoenix-simulation/src/science/enquiry.rs
@@ -240,3 +243,10 @@ The Alliance base hulls declare an actual `Target` capability with ship selectio
 tags. Display tags alone do not make an entity selectable: the paid radar record
 and the receiving Console's permitted feed still govern target admission.
 Shield-frequency automation correlates different radar handles only when the weapon Console explicitly receives both current selectable observations and the acquired Scan feed. The ordinary contact resolver may establish that both handles route to the same physical actuator target; acquired reading subject, time and configuration remain unchanged. The curated Tactical/Gunnery SensorRadar feed is an explicit information grant, and losing either current route withholds fresh automatic tuning while history remains visible.
+
+Helm combines only its delivered Helm and Tactical tracks. A permitted return
+beyond the local display scale remains visible as an outward rim chevron; its
+measured position is unchanged. Predicted returns stay dashed and cannot be
+selected. Off-scale returns omit the position-error circle because its centre
+would otherwise imply a location on the rim. This changes presentation only,
+not detection range or Console feed permissions.

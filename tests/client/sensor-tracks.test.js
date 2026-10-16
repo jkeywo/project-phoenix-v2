@@ -138,6 +138,23 @@ describe('permitted broad track radar', () => {
     expect(view.target_name).toBe(t('console.sensors.basic_contact'));
     expect(view.target_hull_pct).toBeNull(); expect(view.target_shields).toBeNull();
   });
+  it('shows distant shared Helm contacts at the rim without extending local radar or permissions', () => {
+    const state = raw([]);
+    state.blackboardKinds.helm = 'Helm'; state.blackboardKinds.tactical = 'TacticalRadar';
+    state.blackboards.helm = { tracks: [], radar_range: 80 };
+    const contact = sample({ contact_id: 'distant', position: [180, 0] });
+    state.blackboards.tactical = { tracks: [contact] };
+    const view = buildHelmConsoleState(state, ['helm']);
+    expect(view.range).toBe(80);
+    expect(view.blips).toEqual([expect.objectContaining({ uuid: 'distant', radar_x: .96, radar_y: 0, edge: true })]);
+    expect(contact.position).toEqual([180, 0]);
+    expect(JSON.stringify(view)).not.toContain('SECRET');
+    const restricted = consoleReadState(state, { id: 'helm-only', systems: ['helm'], feeds: [] });
+    expect(buildHelmConsoleState(restricted, ['helm']).blips).toEqual([]);
+    state.blackboards.tactical.tracks = [{ ...contact, predicted: true }];
+    expect(buildHelmConsoleState(state, ['helm']).blips[0]).toMatchObject({ edge: true, predicted: true, selectable: false });
+    expect(projectSensorTracks([contact], { range: 80 }).blips).toEqual([]);
+  });
   it('combines only delivered Helm and Tactical records, retaining separate unresolved contact identities', () => {
     const state = raw(); state.blackboardKinds.helm = 'Helm';
     state.blackboardKinds.tactical = 'TacticalRadar';

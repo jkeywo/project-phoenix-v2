@@ -143,3 +143,9 @@ retain grouped priorities and validate required/forbidden presence; the ordinary
 resource-stock fold includes them. Derived waiting receipts clear on restore.
 The optional `shared_loader_cruiser.toml` is the reference fit. Native execution
 and device acceptance remain separately recorded integration evidence.
+
+Cruiser standard beam impact is authored in `alliance_cruiser.toml` and its
+matching default fitting in `fragments/fitting/alliance_cruiser.toml`. Both banks
+use the same penetration: lower penetration deposits more damage in the struck
+compartment, while higher penetration carries more energy through it. This is
+separate from beam DPS. The pulse fitting retains its distinct impact profile.

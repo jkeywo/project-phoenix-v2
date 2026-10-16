@@ -135,6 +135,17 @@ describe('PhRadar', () => {
       track: true, uncertainty_radius: .1, predicted: false, selectable: true }] };
     h.tickRaf(); tapCss(h, 180, 90); expect(sendAction).toHaveBeenCalledWith('set_target', { uuid: 'track-1' });
   });
+  it('draws an off-scale measured return as an outward bearing without a false position-error circle', () => {
+    const h = setup();
+    h.el.state = { range: 100, blips: [{ uuid: 'distant', radar_x: .96, radar_y: 0,
+      track: true, edge: true, uncertainty_radius: .1, predicted: true, selectable: false }] };
+    h.tickRaf();
+    expect(h.fakeCtx.translate).toHaveBeenCalledWith(588, 300);
+    expect(h.fakeCtx.rotate).toHaveBeenCalledWith(0);
+    expect(h.fakeCtx.lineTo).toHaveBeenCalledWith(12, 0);
+    expect(h.fakeCtx.arc.mock.calls.some(([x, y, radius]) => x === 588 && y === 300 && radius === 30)).toBe(false);
+    expect(h.fakeCtx.setLineDash).toHaveBeenCalledWith([6, 4]);
+  });
   // ── Registration & structure ──────────────────────────────────────
 
   it('is defined and registered as a custom element', () => {

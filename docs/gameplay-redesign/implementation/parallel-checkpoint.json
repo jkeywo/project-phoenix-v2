@@ -2,7 +2,17 @@
   "date": "2026-10-16",
   "status": "partial",
   "current_summary": {
-    "source": "300add84; rules0.67; reviewed parser, fixture, receiver and NPC own-radio corrections integrated",
+    "source": "e5d2d5b0; protocol42/snapshot85/rules0.68; shared loaders, disruption, acquisition and exact planned deliveries source-integrated",
+    "current_followup": {
+      "host": "Atbc5ada43 all5 actual decoy/capture/formation host cases PASS,28.51sbuild; .phoenix/resumed-decoy-capture-formation-native-retry.log. First efcddb08 attempt failed test-only ConsoleKnowledgeView.values compilation; bc5 uses actual permission-filtered get. Turret2 and census4 retain priorfd3 evidence; emission2/reception2 retain35f evidence, not one current integrated batch.",
+      "radio": "At300add84 non_roster_ owner2PASS; broader actual radio tests16PASS/1FAIL due sparse fixture omitting the same Command publication restore rebuilds. Source-reviewed e01556d2 adds that normal publication; retry pending. Logs .phoenix/resumed-npc-own-radio-native.log and .phoenix/resumed-npc-radio-existing-owner.log.",
+      "integrated_packets": "Planned delivery eaab88ca/4b83da63/4193b79e; shared loaders fc3e093b through4637d5d2; Comms EMP e6f976f8/61a98e60/6f68dbcc; bounded acquisition8cd58a09/17eb7c05/e6265e2b; centralepochs and real EMP owner test registration0ca0d986.",
+      "accepted_owner_batch": "At0ca0d986 selected4owner batch completed16PASS/1FAIL,2m10build: Content2PASS,Model1PASS,Session1PASS,Gameplay12PASS/1FAIL. Shared-loader full inherited recipe and handling pass; disruption hull is refused UnsupportedSimplifiedSystem(comms,Std,blaster-disruptor), requires data correction before host execution. Log .phoenix/resumed-equipment-accepted-and-acquisition-owners.log.",
+      "client": "At0ca0d986 combined7affectedfiles150PASS; .phoenix/resumed-loader-disruption-acquisition-client.log. No device/native acceptance inferred.",
+      "simulation_compile": "Initial selected Simulation owner run at0ca0d986 failed compilation on3acquisition fixture relative paths,1Logistics borrow and2exhaustive loader field inventories; no tests executed. Corrected3010e849/09fbfebc/e5d2d5b0; renderer-free lib/tests check running. Logs .phoenix/resumed-radio-delivery-acquisition-simulation-owners.log and .phoenix/resumed-integrated-simulation-owner-check.log.",
+      "pasm": "Four existing authoritative state owns mirrors correctedb093f606. Targeted clean-worktree pasm validate at donor54cf235e PASS1176entities/625informationalfindings,0errors. Earlier clean d24 validation failed4missingmirror errors. No whole-current scan/trace/finalgate claim.",
+      "remaining": "Disruption accepted-recipe correction, current Simulation and new host native verification; moving utilitycraft runtime, physical marking, fitting rehearsal/forecast, listening/chatter, Patrol/War/Sandbox, broader operations/actors/Director and all applicable acceptance. Only0closed; no push."
+    },
     "latest_host_result": {
       "source": "fd3d06de; runtime correction28bc37c8",
       "command": "cargo test -p project-phoenix --features headless,host --no-fail-fast with8explicit integration targets",
@@ -69,9 +79,9 @@
     },
     "push": "Not performed. Full integration gate and outstanding acceptance have not passed.",
     "compatibility": {
-      "protocol": 41,
-      "snapshot": 84,
-      "rules": "0.67"
+      "protocol": 42,
+      "snapshot": 85,
+      "rules": "0.68"
     },
     "current_four_owner_native": {
       "source": "3f783eec",

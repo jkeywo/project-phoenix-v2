@@ -13,18 +13,23 @@ Only increment 0 is formally closed. Increments 1–7 have recorded automated
 exits; physical-device and human-workload acceptance remain open. Later initial
 commits are implementation checkpoints, not verified increment exits.
 
-The latest eight-target host batch at `fd3d06de` passed 11 tests and failed 12.
-Both fixed-turret journeys, four personnel journeys, one emission-policy journey
-and all four authoritative-state checks pass. Decoy acceptance, capture/decoding,
-emission continuation, formation, maintenance opportunities and receiving work
-failed in that batch. After the reviewed parser, fixture identity and receiver
-addressability corrections, eight selected cases across five targets at
-`35f62881` passed five and failed three. Both emission and both reception cases
-now pass, as does ordinary AI decoy launch. Remaining failures are the decoy's
-public-name expectation, formation outside its actual sensor reach, and ordinary
-restocking invalidating the maintenance opportunity's intended setup. The three
-actual accepted-loader regressions also pass. `77b83e11` corrects the decoy name
-expectation against its actual accepted template; native retry is pending.
+The eight-target host batch at `fd3d06de` passed 11 tests and failed 12. A
+focused retry at `35f62881` passed both emission and both reception cases, plus
+ordinary AI decoy launch. After the remaining reviewed corrections, all five
+decoy, capture/decoding and formation host cases pass at `bc5ada43`, including
+whole-JSON continuation. The first attempt failed to compile a test-only
+Console-knowledge lookup; its corrected retry is the passing result. Fixed
+turrets, the original four personnel journeys and the authoritative-state checks
+retain their earlier pinned evidence; this is not one green integrated batch.
+
+Shared loaders, Comms-owned disruption, bounded uncrewed acquisition and scoped
+planned-delivery demand are now source-integrated. At `0ca0d986`, selected owner
+checks passed 16 tests and failed one: the optional disruption hull inherits an
+unsupported Console rating and is not accepted. Its data correction and native
+retry are required before further host tests. The shared-loader actual accepted
+recipe and pure handling tests pass, as do Model/Session acquisition guards and
+Content acquisition closure. Seven combined client files pass 150 tests.
+Simulation owner checks and autonomous maintenance verification remain pending.
 
 The catalogue-completeness and fixed-step ordering blockers are corrected. Those
 checks establish neither a green host batch nor the full integrated gate. Earlier
@@ -49,16 +54,16 @@ acceptance remain separate.
 | 12 — Logistics/production | Local stock targets, timed delivery, fabrication, salvage/processing and port replenishment/trade implemented | Combined production/logistics failure journeys, current authoring and full acceptance; coolant recycling remains provisional. |
 | 13 — Equipment fitting | Beam/reactor fitting, physical spares/refit/salvage and personal favourites implemented | Personal-plan disposable rehearsal and whole-fit sustained/burst/thermal/cooling forecasts remain unimplemented; full acceptance. |
 | 14 — Sensing/environment | Substantial implementation | Knowledge, presentation, balance and full acceptance. |
-| 15 — Layered combat | Assignments, traversal, sustained/kinetic/broadside fire, 3D missiles/PDCs, guidance, illumination, EMP and shield enquiry implemented | Physical marking payloads remain unimplemented; shared loaders/priorities have source-reviewed isolated code awaiting integration/native checks; full-host illumination/link-loss/payload journeys, multiple viable engagement styles, balance/workload and full acceptance. |
-| 16 — Comms/orders | Channels, requests and relay operational | Media/decoder owner checks pass on their tested revision; typed claims source integrated; listening priorities/chatter, contextual operations and full native/playable acceptance remain. |
-| 17 — Electronic operations | Jamming/protection/identity operational; both actual emission-policy/continuation host cases pass | Bounded disruption isolated source reviewed but native unverified; broader information/access and acceptance remain. |
-| 18 — Movement/transit | Local jumps verified; sector code integrated; formation owner/restore checks pass | Full-host formation fixture starts outside actual sensor reach; physical setup correction and retry pending; remaining assistance and acceptance. |
-| 19 — Craft/deployables | Physical probe, both fixed beam-turret host journeys and ordinary AI decoy launch verified | Decoy actual accepted-loader tests pass; public-name proof correction native retry, moving craft, sorties, remote operation and acceptance remain. |
-| 20 — Personnel | Officers/care/roster, four physical personnel journeys and both consent-bound reception host cases verified | Security acquisition isolated source reviewed but native unverified; broader boarding/away/rescue/capture and acceptance remain. |
+| 15 — Layered combat | Combat core implemented; shared loaders/priorities integrated and accepted-recipe/pure handling checks pass | Physical marking payloads remain unimplemented; loader host continuation, broader illumination/link-loss/payload journeys, combat styles, balance/workload and full acceptance. |
+| 16 — Comms/orders | Channels, requests and relay operational; both actual capture/decoding host journeys pass | Listening priorities/chatter, contextual operations, native media edge/device acceptance and broader playable acceptance remain. |
+| 17 — Electronic operations | Jamming/protection/identity operational; both emission host cases pass; bounded disruption source integrated | Optional disruption hull fails actual rating validation; data correction and native retry required. Broader information/access and acceptance remain. |
+| 18 — Movement/transit | Local jumps verified; sector code integrated; actual formation movement/JSON360 host case passes | Remaining assistance and broader acceptance. |
+| 19 — Craft/deployables | Physical probe, both fixed beam-turret and both decoy host journeys verified | Moving-craft implementation cleared by fixed-equipment prerequisites; sorties, remote operation and acceptance remain. |
+| 20 — Personnel | Officers/care/roster, four physical personnel and both reception host journeys verified; bounded acquisition source integrated | Model/Session and Content acquisition checks pass; Simulation/continuation verification, broader boarding/away/rescue/capture and acceptance remain. |
 | 21 — Facilities/actors | Finite ports and physical supply verified | Workforce, broader objectives/dependencies and acceptance. |
-| 22 — Authored HTN execution | Working scheduling/activity core | Scoped planned-delivery consumer, broader operator/scenario coverage and full integration. |
+| 22 — Authored HTN execution | Working scheduling/activity core; scoped planned-delivery consumer integrated | Delivery native verification, broader operator/scenario coverage and full integration. |
 | 23 — Continuing modes | Accepted-commitment foundation | Patrol, War and Sandbox are not delivered. |
-| 24 — Discovery/Director | Bounded maintenance discovery and future repair monitoring code/proofs integrated | Actual maintenance setup is invalidated by ordinary restocking; scoped autonomous planned-delivery execution is being implemented. Broader generation/pacing and final audits remain. |
+| 24 — Discovery/Director | Bounded maintenance discovery, future repair monitoring and scoped planned delivery integrated | Native autonomous execution proof after the restocking correction; broader generation/pacing and final audits remain. |
 
 Current source pins, failures and retries are recorded in
 [the integration checkpoint](parallel-checkpoint.json). Parallel worktree code is

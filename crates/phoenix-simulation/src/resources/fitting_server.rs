@@ -99,11 +99,20 @@ pub(crate) fn planner_context(
     config: &crate::entities::config::EntityConfig,
 ) -> Option<phoenix_model::system_status::FittingPlannerContext> {
     let profile = CompiledFitting::compile(config).ok()??;
+    // Accepted EntityConfig contains HashMaps. Its ordinary serde projection
+    // also skips parsed ShipConfig and shield arcs, so bind those explicitly.
+    // Sort object keys recursively, preserving all authored array order, so
+    // independent native/captured loads bind the same complete accepted hull.
+    let mut canonical = serde_json::to_value((config, &config.ship_config, &config.shield_arcs))
+        .expect("accepted hull serializes");
+    canonical.sort_all_objects();
     Some(phoenix_model::system_status::FittingPlannerContext {
         hull_path: String::new(),
         content_id: format!(
             "{:016x}",
-            vellum_digest::fnv1a(&serde_json::to_vec(config).expect("accepted hull serializes"))
+            vellum_digest::fnv1a(
+                &serde_json::to_vec(&canonical).expect("accepted hull serializes")
+            )
         ),
         slots: profile
             .config()

@@ -368,6 +368,67 @@ fn private_request_refuses_duplicate_keys_unknown_fields_and_stale_choices() {
 }
 
 #[test]
+fn reference_subject_matches_actual_accepted_utility_hardware_without_synthesized_extras() {
+    // These are accepted EntityConfig values after the real loader's generated
+    // System admission, rather than source/JavaScript composition alone.
+    let mut expected = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/utility_shuttle.toml",
+    )
+    .unwrap();
+    let subject = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/fitting_rehearsal_subject.toml",
+    )
+    .unwrap();
+    expected.name = Some("entity.fitting_rehearsal_subject.name".into());
+    expected.faction = Some("bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb".parse().unwrap());
+    expected.collider.as_mut().unwrap().movable = false;
+    let interior = expected.interior.as_mut().unwrap();
+    assert_eq!(interior.compartments.len(), 1);
+    interior.compartments[0].max_hp = 10000.0;
+    let ship = subject.ship_config.as_ref().unwrap();
+    assert_eq!(ship.systems.len(), 9);
+    let installed: std::collections::BTreeSet<_> =
+        ship.systems.iter().map(|system| &system.id).collect();
+    let placements: std::collections::BTreeSet<_> = subject
+        .interior
+        .as_ref()
+        .unwrap()
+        .placements
+        .keys()
+        .collect();
+    assert_eq!(installed, placements);
+    assert_eq!(subject, expected);
+}
+
+#[test]
+fn planner_content_id_ignores_map_insertion_order_but_binds_full_content_and_array_order() {
+    let config = crate::entities::include_resolve::load_entity_config(CRUISER).unwrap();
+    let id = |config: &crate::entities::config::EntityConfig| {
+        crate::resources::fitting_server::planner_context(config)
+            .unwrap()
+            .content_id
+    };
+    let mut reordered = config.clone();
+    let groups = &mut reordered.ship_config.as_mut().unwrap().power_groups;
+    assert!(groups.len() > 1);
+    let mut entries: Vec<_> = groups.drain().collect();
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    *groups = std::collections::HashMap::new();
+    for (key, value) in entries.into_iter().rev() {
+        groups.insert(key, value);
+    }
+    assert_eq!(config, reordered);
+    assert_eq!(id(&config), id(&reordered));
+
+    let mut changed = config.clone();
+    changed.name = Some("full-hull-content-id-regression".into());
+    assert_ne!(id(&config), id(&changed));
+    changed = config.clone();
+    changed.ship_config.as_mut().unwrap().systems.swap(0, 1);
+    assert_ne!(id(&config), id(&changed));
+}
+
+#[test]
 fn actual_captured_reference_worlds_resolve_and_compile_complete_cruiser_equipment() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut files = BTreeMap::new();
@@ -385,6 +446,16 @@ fn actual_captured_reference_worlds_resolve_and_compile_complete_cruiser_equipme
         Ok(None)
     })
     .unwrap();
+    let disk = crate::entities::include_resolve::load_entity_config(CRUISER).unwrap();
+    let captured = super::super::Sources(files.clone())
+        .load_template(CRUISER)
+        .unwrap();
+    assert_eq!(disk, captured, "independent accepted loader parity");
+    assert_eq!(
+        crate::resources::fitting_server::planner_context(&disk),
+        crate::resources::fitting_server::planner_context(&captured),
+        "equal accepted hulls must bind the same favourite"
+    );
     let (world, _) = fixture();
     for workload in [Workload::SustainedEngagement, Workload::BurstRecovery] {
         let mut request = world.resource::<PreparedRehearsal>().request.clone();

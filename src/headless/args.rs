@@ -116,6 +116,13 @@ struct Cli {
     perf_capture: Option<String>,
     #[arg(
         long,
+        requires = "perf_capture",
+        conflicts_with = "replay",
+        help = "Add diagnostic FixedStep leaf attribution from the same captured spans, in <PATH>.leaves.json (stderr for '-'). Preserves ordinary phase capture; extra aggregation has observer overhead and is not exclusive CPU time."
+    )]
+    perf_leaves: bool,
+    #[arg(
+        long,
         help = "Scenario the capture is filed under, and the baseline it is compared against, at perf/baselines/<N>.ron [default: headless-default]. A missing baseline is not an error: the capture is still written. Comparison is warnings-only and never changes the exit code."
     )]
     perf_scenario: Option<String>,
@@ -209,6 +216,8 @@ pub struct HeadlessArgs {
     /// #868). `None` leaves the harness-loop collector off entirely, so an
     /// ordinary run pays nothing for measurement it did not ask for.
     pub perf_capture_path: Option<String>,
+    /// Optional leaf diagnostic; never changes ordinary phase capture.
+    pub perf_leaves: bool,
     /// Scenario name a capture is filed under, and the baseline file it is
     /// compared against. Measurement is only meaningful between runs of the
     /// *same* scenario, so this names the setup rather than the run.
@@ -256,6 +265,7 @@ impl Default for HeadlessArgs {
             side_a: Vec::new(),
             side_b: Vec::new(),
             perf_capture_path: None,
+            perf_leaves: false,
             perf_scenario: DEFAULT_PERF_SCENARIO.to_string(),
             record_path: None,
             replay_path: None,
@@ -339,6 +349,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     }
     out.fail_on_game_over = raw.fail_on_game_over;
     out.perf_capture_path = raw.perf_capture;
+    out.perf_leaves = raw.perf_leaves;
     if let Some(v) = raw.perf_scenario {
         if v.trim().is_empty() {
             return Err("--perf-scenario expects a name".into());

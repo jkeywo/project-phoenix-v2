@@ -2,7 +2,7 @@
 title: Performance Measurement
 type: concept
 tags: [profiling, headless, renderer, performance]
-sources: [src/bin/phoenix_perf.rs, src/headless/args.rs, crates/phoenix-simulation/src/perf/mod.rs, crates/phoenix-presentation/src/perf/native_frames.rs, src/bin/phoenix_headless.rs, examples/profile_systems.rs, examples/profile_systems/timing.rs, examples/profile_systems/gpu.rs, examples/profile_gm.rs, examples/profile_player.js, scripts/profile-gm-current.ps1, scripts/profile-gm-report.mjs, scripts/profile-surface-summary.mjs, scripts/profile-provenance.mjs, scripts/profile-analysis.mjs, scripts/profile-native.ps1, scripts/profile-native-matrix.ps1, src/native_host/panes/surface_stats.rs, src/native_host/panes/render_geometry.rs, src/native_host/panes/frame_stats.rs, docs/profiling.md, pasm/spec/architecture/performance-measurement.yaml]
+sources: [crates/phoenix-simulation/src/perf/phase_trace.rs, crates/phoenix-simulation/src/perf/phase_leaves.rs, src/bin/phoenix_perf.rs, src/headless/args.rs, crates/phoenix-simulation/src/perf/mod.rs, crates/phoenix-presentation/src/perf/native_frames.rs, src/bin/phoenix_headless.rs, examples/profile_systems.rs, examples/profile_systems/timing.rs, examples/profile_systems/gpu.rs, examples/profile_gm.rs, examples/profile_player.js, scripts/profile-gm-current.ps1, scripts/profile-gm-report.mjs, scripts/profile-surface-summary.mjs, scripts/profile-provenance.mjs, scripts/profile-analysis.mjs, scripts/profile-native.ps1, scripts/profile-native-matrix.ps1, src/native_host/panes/surface_stats.rs, src/native_host/panes/render_geometry.rs, src/native_host/panes/frame_stats.rs, docs/profiling.md, pasm/spec/architecture/performance-measurement.yaml]
 updated: 2026-10-16
 ---
 
@@ -17,6 +17,12 @@ uses the same native dependency for syntax while its pure conversion validates
 simulation, duel and replay rules.
 
 `crates/phoenix-simulation/src/perf/` provides Phoenix collectors around the shared `vellum-perf` capture contract. The headless runner records update durations and can write a final tick/digest companion after timing closes. `NativeFrameCapture` observes native App cadence, completed fixed ticks, asset readiness and actual window dimensions; it buffers samples until the runner returns.
+
+The ordinary headless `--perf-capture` phase producer also offers opt-in
+`--perf-leaves` attribution in a separate `.leaves.json` sidecar. It groups the
+same intervals by actual initialized `FixedStep` membership, retaining unknown
+or ambiguous work. It adds no schedule systems or ordering edges. Diagnostic
+aggregation adds observer overhead; ordinary phase capture stays unchanged.
 
 The `profile_systems` example builds the production headless or native App and optionally wraps named systems. Deferred work has its own spans. Native GPU/pass evidence comes from Bevy's `RenderDiagnosticsPlugin` when the adapter supports it. System wall times can overlap, and nested GPU pass paths are not exclusive costs. Headless attribution accepts an optional ship path after the output directory and records the hull in its artifact; the default remains the Destroyer. Native uses that position for its explicit zero-pane profile.
 

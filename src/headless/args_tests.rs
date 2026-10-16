@@ -408,3 +408,28 @@ fn recording_and_perf_capture_together_are_refused() {
 fn digest_every_rejects_a_non_number() {
     assert!(err(&["--digest-every", "often"]).contains("--digest-every"));
 }
+
+#[test]
+fn leaf_attribution_is_explicit_and_requires_an_ordinary_capture() {
+    assert!(!HeadlessArgs::default().perf_leaves);
+    assert!(!parse(&["--perf-capture", "capture.json"]).perf_leaves);
+    assert!(parse(&["--perf-capture", "capture.json", "--perf-leaves"]).perf_leaves);
+    assert!(parse_args(["--perf-leaves".to_string()]).is_err());
+    assert!(parse_args(
+        ["--perf-leaves", "--perf-capture", "x", "--replay", "x"].map(str::to_string)
+    )
+    .is_err());
+    assert!(parse_args(
+        [
+            "--perf-leaves",
+            "--perf-capture",
+            "x",
+            "--record",
+            "x",
+            "--seed",
+            "1"
+        ]
+        .map(str::to_string)
+    )
+    .is_err());
+}

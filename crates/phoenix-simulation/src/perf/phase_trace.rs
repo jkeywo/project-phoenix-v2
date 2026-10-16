@@ -21,6 +21,10 @@ use tracing_subscriber::{
 };
 use vellum_perf::Recorder;
 
+#[path = "phase_leaves.rs"]
+mod leaves;
+pub use leaves::LeafCoverage;
+
 const PHASES: [SimSet; 8] = [
     SimSet::Membership,
     SimSet::Input,
@@ -379,6 +383,7 @@ pub struct InvocationCoverage {
 pub struct PhaseProfiler {
     buffer: Arc<Mutex<Buffer>>,
     coverage: PhaseCoverage,
+    leaves: Option<LeafCoverage>,
 }
 impl PhaseProfiler {
     pub fn install(log_spec: &str) -> Result<Self, String> {
@@ -416,7 +421,18 @@ impl PhaseProfiler {
         Ok(Self {
             buffer,
             coverage: PhaseCoverage::default(),
+            leaves: None,
         })
+    }
+
+    /// Opt in before running. No extra schedule observation or aggregation is
+    /// performed by the ordinary producer when this is absent.
+    pub fn enable_leaf_attribution(&mut self) {
+        self.leaves.get_or_insert_with(LeafCoverage::default);
+    }
+
+    pub fn leaves(&self) -> Option<&LeafCoverage> {
+        self.leaves.as_ref()
     }
 
     pub fn drain_after_frame(&mut self, app: &App, recorder: &mut Recorder) -> Result<(), String> {
@@ -438,6 +454,9 @@ impl PhaseProfiler {
         };
         if raw.is_empty() {
             return Ok(());
+        }
+        if let Some(leaves) = &mut self.leaves {
+            leaves.record(app, &raw, &span_counts)?;
         }
         let snapshot = observe_schedule(app)?;
         if self

@@ -64,7 +64,12 @@ fn main() {
     let mut sampler = None;
     let mut phase_profiler = if args.perf_capture_path.is_some() && args.record_path.is_none() {
         match perf::phase_trace::PhaseProfiler::install(&args.log_spec) {
-            Ok(profiler) => Some(profiler),
+            Ok(mut profiler) => {
+                if args.perf_leaves {
+                    profiler.enable_leaf_attribution();
+                }
+                Some(profiler)
+            }
             Err(error) => {
                 eprintln!("phoenix-headless: {error}");
                 std::process::exit(1);
@@ -136,6 +141,20 @@ fn main() {
                 std::fs::write(format!("{path}.phases.json"), format!("{coverage}\n"))
             {
                 eprintln!("phoenix-headless: could not write phase coverage: {error}");
+                std::process::exit(1);
+            }
+        }
+        if let Some(leaves) = phase_profiler
+            .as_ref()
+            .and_then(|profiler| profiler.leaves())
+        {
+            let json = serde_json::to_string_pretty(leaves).expect("leaf coverage serializes");
+            if path == "-" {
+                eprintln!("leaf-coverage: {json}");
+            } else if let Err(error) =
+                std::fs::write(format!("{path}.leaves.json"), format!("{json}\n"))
+            {
+                eprintln!("phoenix-headless: could not write leaf coverage: {error}");
                 std::process::exit(1);
             }
         }

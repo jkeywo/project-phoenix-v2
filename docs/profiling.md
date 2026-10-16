@@ -47,6 +47,28 @@ This runs both worlds three times for 60 simulation seconds, seed 42/Alliance De
 
 Keep SDK binaries, copied bundles, raw captures and local hardware/profile files out of Git. Commit the repeatable commands, compact findings and limitations. Accept an optimization only when its change exceeds bracketing-control variation and correctness/input checks still pass. A documented no-change decision is a valid profiling result.
 
+## Optional headless FixedStep attribution
+
+The ordinary headless binary already enables the Bevy debug names required by
+its phase collector. Add `--perf-leaves` alongside `--perf-capture <PATH>` to
+write `<PATH>.leaves.json` (stderr with `-`). This requires no `perf` feature or
+profiling example. Existing capture metrics and `.phases.json` stay unchanged.
+
+The sidecar groups the same observed system intervals by actual typed
+`FixedStep` membership in the initialized FixedUpdate graph. It retains local
+node identities, all declared memberships, and duplicate-name, nested,
+multiple-set and unclassified work without guessing attribution. Node ids are
+local to the graph, not stable identities across builds. Each group reports
+interval union, envelope and interval count; group envelopes can overlap, so
+these are neither exclusive CPU costs nor inclusive set durations. Missing
+work is not zero. Conditions/deferred coverage follows the existing producer.
+
+This opt-in adds metadata/aggregation work after updates; use it for diagnostic
+attribution and retain matching unflagged control captures for acceptance. It
+does not disable or replace existing phase instrumentation. Recording/replay
+cannot request this diagnostic. No new simulation systems or ordering edges
+are installed.
+
 ## Named CPU and supported GPU attribution
 
 The `profile_systems` Cargo example uses the production headless/native App builders with Bevy's development-dependency debug names and an `attribution` profile retaining symbols. It wraps existing systems without adding schedule dependencies and records bounded raw wall spans, including deferred work separately. The control mode uses the same executable and workload with wrappers and GPU diagnostics disabled. This symbol-compatible example is a separate comparison group from the ordinary native/headless binaries.

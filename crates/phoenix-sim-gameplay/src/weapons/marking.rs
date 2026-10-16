@@ -157,6 +157,26 @@ pub fn validate_payload_recipe(
     validate_entity(child)
 }
 
+/// Validate authored references only against the accepted content closure.
+/// Callers own source discovery; runtime machinery cannot fetch missing data.
+pub fn validate_payload_dependencies<'a>(
+    config: &EntityConfig,
+    mut accepted: impl FnMut(&str) -> Option<&'a EntityConfig>,
+) -> Result<(), String> {
+    for payload in config
+        .torpedoes
+        .iter()
+        .flat_map(|torpedoes| &torpedoes.tubes)
+        .filter_map(|tube| tube.marking.as_ref())
+    {
+        let child = accepted(&payload.template).ok_or_else(|| format!(
+            "marking payload {:?} is missing from the accepted content closure; include the complete finite beacon recipe", payload.template))?;
+        validate_payload_recipe(payload, child)
+            .map_err(|error| format!("marking payload {:?}: {error}", payload.template))?;
+    }
+    Ok(())
+}
+
 /// The actual body owns one causal attachment relation. Its pose is a checked
 /// projection while attached, then the ordinary retained pose after detachment.
 #[derive(bevy::prelude::Component, Clone, Debug, PartialEq)]
@@ -268,5 +288,48 @@ mod tests {
                 "invalid marker equipment {fault}"
             );
         }
+    }
+
+    #[test]
+    fn actual_marking_launcher_resolves_complete_inherited_hardware_and_real_dependency() {
+        let resolved =
+            crate::test_fixtures::resolve_from_disk("assets/entities/marking_cruiser.toml")
+                .unwrap();
+        let config = EntityConfig::from_toml(&resolved.toml).unwrap();
+        let child = accepted();
+        validate_payload_dependencies(&config, |path| {
+            (path == "assets/entities/marking_beacon.toml").then_some(&child)
+        })
+        .unwrap();
+        assert!(validate_payload_dependencies(&config, |_| None)
+            .unwrap_err()
+            .contains("accepted content closure"));
+        let mut incompatible = child.clone();
+        incompatible.marking_beacon = None;
+        assert!(validate_payload_dependencies(&config, |_| Some(&incompatible)).is_err());
+        let original =
+            crate::test_fixtures::load_entity_config("assets/entities/alliance_cruiser.toml")
+                .unwrap();
+        validate_payload_dependencies(&original, |_| None).unwrap();
+        assert_eq!(config.ship_config.as_ref().unwrap().stations.len(), 6);
+        let mut compare = config.clone();
+        compare.name = original.name.clone();
+        let tubes = &mut compare.torpedoes.as_mut().unwrap().tubes;
+        assert_eq!(
+            tubes.iter().filter(|tube| tube.marking.is_some()).count(),
+            1
+        );
+        let tube = tubes
+            .iter_mut()
+            .find(|tube| tube.id == "fore_port")
+            .unwrap();
+        assert_eq!(
+            tube.marking.as_ref().unwrap().template,
+            "assets/entities/marking_beacon.toml"
+        );
+        tube.marking = None;
+        // Canonical whole-recipe equality pins actual inherited Energy,
+        // Interior, Console, finite stock, ordinary AI and independent tubes.
+        assert_eq!(compare, original);
     }
 }

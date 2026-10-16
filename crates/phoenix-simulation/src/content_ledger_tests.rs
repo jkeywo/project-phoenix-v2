@@ -105,6 +105,39 @@ fn the_eager_walk_records_unselected_available_hulls() {
 
 // ── Script-spawned templates (issue #1047) ───────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn actual_marking_recipe_joins_only_its_declared_used_content_closure() {
+    let world = crate::world::config::parse_world(
+        "[global]\nseed=1\n[[available_ships]]\ntemplate_path='assets/entities/marking_cruiser.toml'\n"
+    ).unwrap();
+    let inputs = capture_world_entity_inputs(&world, None);
+    assert!(inputs
+        .iter()
+        .any(|input| input.key == "assets/entities/marking_cruiser.toml"));
+    let beacon = inputs
+        .iter()
+        .find(|input| input.key == "assets/entities/marking_beacon.toml")
+        .unwrap();
+    let resolved =
+        crate::entities::include_resolve::resolve_from_disk("assets/entities/marking_beacon.toml")
+            .unwrap();
+    assert_eq!(
+        beacon.digest,
+        vellum_digest::fnv1a(resolved.toml.as_bytes())
+    );
+    assert_eq!(
+        inputs
+            .iter()
+            .filter(|input| input.key == beacon.key)
+            .count(),
+        1
+    );
+    assert!(!inputs
+        .iter()
+        .any(|input| input.key == "assets/entities/medical_cruiser.toml"));
+}
+
 /// The issue's exact shape: a world where ONLY a script names a template.
 ///
 /// The eager walk used to see `[[entity]]` alone, so this hull never entered

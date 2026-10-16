@@ -1,0 +1,11 @@
+# Opt-in physical marking reference. Finite rounds/loading, AI, seats, reserves,
+# colliders and the other weapons remain the complete inherited Cruiser.
+includes = ["alliance_cruiser.toml"]
+name = "entity.marking_cruiser.name"
+
+[[weapon]]
+id = "torpedo-tube-fore_port"
+[weapon.delivery]
+kind = "guided"
+load_time = 3
+marking = { template = "assets/entities/marking_beacon.toml" }

@@ -447,3 +447,25 @@ this worker. The tests separate their initial physical attachment premise from
 the still-pending whole-host flight/contact proof. Complete accepted dependency
 validation, Workshop authoring, native execution and the full physical/report
 continuation journey remain required before the vertical-slice exit.
+
+## Accepted dependency source checkpoint
+
+The optional `marking_cruiser.toml` reference changes only one inherited guided
+tube's marker recipe and the hull name. Its actual resolved accepted-loader test
+compares the complete canonical recipe with the base Cruiser after removing
+those two intended differences, including real seats, Consoles, finite stocks,
+energy, interiors, ordinary AI and the independent tubes.
+
+Native pre-init discovery follows explicit marker recipes through its existing
+parse/model-marker gate, including a child outside the initial hull directory.
+Final native and browser acceptance validate each dependency against their
+complete candidate cache. Missing or incompatible body equipment refuses before
+play and cannot be satisfied from an older native global-cache entry. Runtime
+launch/spawn remains cache-only. The existing native used-template identity walk
+already follows `nested_template_paths`, as browser preload does; the added
+ledger test checks the composed beacon digest without hashing unrelated assets.
+
+Independent source review passed. These new accepted-launcher/dependency/ledger
+tests remain unexecuted by the worker; native accepted-loader evidence must
+precede the whole-host tracer. Workshop dependency-aware authoring and physical
+native acceptance are still separate unfinished work.

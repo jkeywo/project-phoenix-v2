@@ -168,7 +168,32 @@ when = "true"
 verb = "fire_phaser"
 
 # Arrays below preserve the original sensor reserve and add only real local
-# radar/weapon reserves. Zero-generation reactor and zero inflow remain inherited.
+# radar/weapon reserves. Local reactor/group declarations repeat inherited zero generation/inflow.
+# Complete local energy section for strict leaf parsing; identical to inherited hardware.
+[energy.reactor]
+sustainable_output_per_sec = 0
+max_output_per_sec = 0
+ramp_per_sec = 7.925
+initial_output_per_sec = 0
+initial_energy = 0
+initial_heat = 0
+max_cooling_per_sec = 0
+default_cooling_per_sec = 0
+
+[energy.reactor.reserve]
+capacity = 1
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.951
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.reactor.coolant]
+service = "coolant"
+
 [[energy.consumer]]
 system = "sensor-radar"
 initial_energy = 12
@@ -232,6 +257,15 @@ recover_heat = 30
 [energy.consumer.coolant]
 service = "coolant"
 
+
+[[energy.group]]
+id = "probe"
+max_flow_per_sec = 0
+default_flow_per_sec = 0
+max_cooling_per_sec = 0
+default_cooling_per_sec = 0
+priority = 15
+restore_delay_secs = 0.5
 
 [interior.placements]
 tactical-radar = "probe-core"

@@ -1,0 +1,27 @@
+# Ordinary finite field pulse damages real raised shields, then leaves.
+# At the authored 60 Hz the rounded one-point uniform exposure reaches Fore;
+# one second cannot collapse the actual 100-HP arc or require a hull edit.
+[global]
+seed = 156209
+sim_tick_hz = 60
+[player_spawn]
+position = [0, 0, 0]
+[[available_ships]]
+template_path = "assets/entities/alliance_cruiser.toml"
+[[entity]]
+id = "shield-reference"
+template_path = "assets/entities/alliance_cruiser.toml"
+spawn_on = "game_start"
+transform = { position = [0, 0, 0] }
+[[entity]]
+id = "shield-pulse"
+name = "shield-pulse"
+template_path = "assets/entities/region_radiation_zone.toml"
+overrides = { shape = { type = "sphere", radius = 20 }, effects = { damage_zone = { damage_per_second = 60, shield_pierce = 0 } } }
+[script]
+setup = '''
+on_timer(1, "end_shield_pulse");
+fn end_shield_pulse(ctx) {
+    ctx.effects.destroy_entity("shield-pulse");
+}
+'''

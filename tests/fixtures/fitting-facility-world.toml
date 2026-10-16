@@ -11,4 +11,6 @@ transform = { position = [0.0, 0.0, 0.0] }
 [[entity]]
 template_path = "assets/entities/station_axiom.toml"
 id = "refit-facility"
-transform = { position = [80.0, 0.0, 0.0] }
+# Within the actual paid Helm Radar picture, with clear physical separation;
+# the Dock still performs the real approach/mating from this authored geometry.
+transform = { position = [35.0, 0.0, 0.0] }

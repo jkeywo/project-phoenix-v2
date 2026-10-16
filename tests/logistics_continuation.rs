@@ -117,7 +117,8 @@ fn completion_bound(app: &App, entity: Entity) -> usize {
     let profile = &app.world().get::<CompiledShipLogistics>(entity).unwrap().0;
     let handling = profile.handling();
     // Retain all 720 comparisons, then permit the authored serial loading,
-    // physical travel and unloading work for all four initially held rounds.
+    // physical travel and unloading work for all four initially held rounds,
+    // using the actual configured batch size.
     let batches = 4u64.div_ceil(handling.max_batch as u64) as f32;
     let route_bound: f32 = profile
         .graph()
@@ -155,7 +156,21 @@ fn assert_delivered(app: &App, entity: Entity) {
     let state = &app.world().get::<ShipLogistics>(entity).unwrap().0;
     let outcome = state.last_outcome.as_ref().unwrap();
     assert!(!outcome.returned && outcome.amount > 0);
-    assert!(state.next_id >= 3, "two bounded batches must have executed");
+    let handling = app
+        .world()
+        .get::<CompiledShipLogistics>(entity)
+        .unwrap()
+        .0
+        .handling();
+    let required = 4u64.div_ceil(u64::try_from(handling.max_batch).unwrap());
+    assert!(
+        state.next_id > required,
+        "the configured bounded batches must have executed"
+    );
+    assert!(
+        outcome.amount <= handling.max_batch,
+        "actual delivery respects authored batch capacity"
+    );
     assert!(app
         .world()
         .get::<TorpedoSystemResource>(entity)

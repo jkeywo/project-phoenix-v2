@@ -2,13 +2,15 @@
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 use bevy::prelude::*;
 use project_phoenix::{
-    core::messages::{ClientMessage, StationId, SystemControlPayload as Control, SystemId},
+    core::messages::{
+        ClientMessage, StationId, SystemBlackboard, SystemControlPayload as Control, SystemId,
+    },
     entities::spawner::EntityUuid,
     headless::{build_headless_app, HeadlessArgs},
     infrastructure::InfrastructureCondition,
     lobby::{server::InboundMessage, Sessions},
     resources::{equipment_recovery_server::ShipEquipmentRecovery, fitting_server::ShipFitting},
-    server_app::LocalShip,
+    server_app::{LocalShip, ShipSystemBlackboards},
     ship::{compartment_damage::ShipDamage, power::ShipPowerSystem},
     ship_plugin::{HumanSeekingHosts, ShipConfigComponent, ShipSystemControlSources},
     sim_digest::world_digest,
@@ -201,6 +203,25 @@ fn facility_ready() -> (App, Entity, String) {
     claim(&mut app, "engineering");
     claim(&mut app, "helm");
     let entity = local(&mut app);
+    // A contextual Dock command needs the same earned current picture as its
+    // GUI. Sending it before the Radar has acquired a target correctly refuses.
+    let available = |app: &App| {
+        let config = &app.world().get::<ShipConfigComponent>(entity).unwrap().0;
+        let boards = app.world().get::<ShipSystemBlackboards>(entity).unwrap();
+        let picture = config.observations_for_system(&sid("dock"), &boards.0);
+        matches!(picture.get(&sid("dock")), Some(SystemBlackboard::Dock(board))
+            if board.available && board.available_target.is_some())
+    };
+    for _ in 0..1800 {
+        if available(&app) {
+            break;
+        }
+        app.update();
+    }
+    assert!(
+        available(&app),
+        "actual own paid Dock picture offers the authored berth"
+    );
     control(&mut app, "helm", "dock", Control::Dock);
     let mut partner = None;
     for _ in 0..1800 {
@@ -381,22 +402,57 @@ fn intact_recovery_preserves_actual_condition_then_vacant_repair_fetches_and_ins
         condition.dose > 0.0 && condition.last_source.is_some(),
         "the source must carry a real physical incident frontier"
     );
+    // Choose the sole outside body from the addressed Science Console's
+    // actual paid public records. Private UUIDs are observer assertions only.
+    let science_contact = |app: &App| {
+        let config = &app.world().get::<ShipConfigComponent>(entity).unwrap().0;
+        let boards = app.world().get::<ShipSystemBlackboards>(entity).unwrap();
+        let picture = config.observations_for_system(&sid("sensors"), &boards.0);
+        project_phoenix::science::contact_routing::observations(picture.get(&sid("sensor-radar"))?)?
+            .iter()
+            .find(|row| row.selectable && !row.predicted && row.identity.is_some())
+            .map(|row| row.contact_id.clone())
+    };
+    for _ in 0..1800 {
+        if science_contact(&live).is_some() {
+            break;
+        }
+        live.update();
+    }
+    let contact = science_contact(&live).expect("actual paid own Science contact");
     control(
         &mut live,
         "science",
         "sensors",
-        Control::SetScienceTarget {
-            uuid: source.1.clone(),
-        },
+        Control::SetScienceTarget { uuid: contact },
     );
+    let offered = |app: &App| {
+        project_phoenix::resources::equipment_recovery_server::project(app.world(), entity)?
+            .options
+            .into_iter()
+            .find(|option| {
+                option.slot == "fore-beam"
+                    && option.equipment == "recovered-beam"
+                    && option.destination_locker == "support-equipment"
+                    && option.blocked_reason.is_none()
+            })
+    };
+    for _ in 0..1800 {
+        if offered(&live).is_some() {
+            break;
+        }
+        live.update();
+    }
+    let option =
+        offered(&live).expect("normal current Recovery projection offers real intact equipment");
     control(
         &mut live,
         "engineering",
         "resource-recovery",
         Control::RecoverEquipment {
-            target_uuid: source.1.clone(),
-            slot: "fore-beam".into(),
-            destination_locker: "support-equipment".into(),
+            target_uuid: option.target_uuid,
+            slot: option.slot,
+            destination_locker: option.destination_locker,
         },
     );
     assert!(live

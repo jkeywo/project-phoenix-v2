@@ -2,7 +2,7 @@
   "date": "2026-10-16",
   "status": "partial",
   "current_summary": {
-    "source": "35f62881; rules0.67; reviewed parser/fixture/receiver corrections and narrow native retry",
+    "source": "300add84; rules0.67; reviewed parser, fixture, receiver and NPC own-radio corrections integrated",
     "latest_host_result": {
       "source": "fd3d06de; runtime correction28bc37c8",
       "command": "cargo test -p project-phoenix --features headless,host --no-fail-fast with8explicit integration targets",
@@ -11,8 +11,10 @@
       "corrections": "cef7aa37 fixes actual empty-arc shield Console synthesis (guards retained);a78aa4c9 uses actual fixture EntityId and explicit public Formation label;bb29a06d opts receiving equipment into normal Hailable roster. 35f62881 adds read-only exact stock/tick diagnostic; no physical assertions weakened.",
       "rules": "49289494 advances only simulation rules0.67 for corrected observation timing/generated Console roster; protocol41/snapshot84 unchanged.",
       "accepted_loader": "At49289494,3actual resolvedsource→EntityConfig::from_toml Gameplay regressions PASS,1m19build. .phoenix/resumed-decoy-actual-loader-owner.log",
-      "running": "Five affected host targets,8selected cases,at35f62881: decoy,emission,formation,reception and one unchanged optional-maintenance physical setup with read-only diagnostic. .phoenix/resumed-five-affected-host-native.log. No outcome claimed yet.",
-      "remaining": "Real non-roster own-Comms contact publication/capture and maintenance stock frontier diagnosis; broader runtime16–24 and all acceptance/finalgates. No increment closure or push."
+      "affected_retry": "At35f62881,8selected cases across5targets completed5passed/3failed: emission2/0,reception2/0,decoy1/1,formation0/1,optionalmaintenance0/1. Decoy ordinaryAI launch passes; the Human case expects fixture ID instead of actual accepted public name. Formation begins outside its actual50-unit radar range. Maintenance diagnostic proves real local stock8→0 in one actual tick, then ordinary restocking restores8 before discovery. Log .phoenix/resumed-five-affected-host-native.log; build1m35.",
+      "reviewed_followups": "77b83e11 fixes only decoy public-name proof expectations against actual accepted content. ba9e0513 implements adopted16f347cc NPC own-radio contacts via actual paid public endpoints, preserving crew knowledge bounds. 300add84 corrects Formation fixture geometry and explicitly requires earned identity/motion. All source reviewed; native verification pending. Scoped planned-delivery demand extension is being prepared in an isolated planner lane.",
+      "running": "At300add84, renderer-free Simulation owner tests filtered non_roster_ are running; .phoenix/resumed-npc-own-radio-native.log. Root is the sole Cargo owner.",
+      "remaining": "Actual capture/decoy/Formation retries and autonomous planned-maintenance execution; broader runtime16–24 and all acceptance/finalgates. No increment closure or push."
     },
     "eight_host_native": {
       "source": "f1643e85",

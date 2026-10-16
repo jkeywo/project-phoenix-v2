@@ -50,9 +50,15 @@ fn send(app: &mut App, token: &str, msg: ClientMessage) {
     });
 }
 fn boot() -> (App, Entity, Entity) {
+    boot_with_world(
+        "tests/fixtures/personnel-carrier-world.toml",
+        "assets/entities/personnel_carrier.toml",
+    )
+}
+fn boot_with_world(world_path: &str, ship_path: &str) -> (App, Entity, Entity) {
     let mut app = build_headless_app(&HeadlessArgs {
-        world_path: "tests/fixtures/personnel-carrier-world.toml".into(),
-        ship_path: "assets/entities/personnel_carrier.toml".into(),
+        world_path: world_path.into(),
+        ship_path: ship_path.into(),
         deterministic: true,
         seed: Some(191919),
         ..Default::default()
@@ -854,3 +860,6 @@ fn retargeted_actual_escort_returns_the_same_person_physically_before_releasing_
         .free_team_indices(None)
         .contains(&0));
 }
+
+#[path = "personnel_craft/reception.rs"]
+mod reception;

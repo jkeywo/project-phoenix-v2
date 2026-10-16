@@ -712,3 +712,26 @@ save/rules version joins, actual Human/AI host reception and JSON/loss proofs,
 device/network acceptance and final integration gates remain root-owned and
 pending. These checks establish a source integration checkpoint, not an
 increment20/21/23 exit.
+
+## Actual reception host proof source
+
+A separate source-reviewed proof extends the existing personnel_craft_continuation
+integration target through tests/personnel_craft/reception.rs, using an actual
+quiet authored fixture. Normal Human source Station holders escort a real named
+PersonRef into its finite pod, request reception through paid Comms, and launch
+through the real Bay. A genuinely fixed non-Ship receiver reads and accepts with
+ordinary Comms AI, acquires its own paid sensor alias, and completes the same
+paid Bay Job before returning its factual receipt. No custody, observation,
+energy, controller or completion state is injected. Trusted World body removals
+are explicitly named inputs, not claims about GM session admission.
+
+The proof compares complete capture and digest across fresh JSON restore for360
+steps plus the final state at accepted, active/completed, historical and loss
+boundaries, checking ordinary receiver AI on both hosts. Seven malformed receipt
+candidates assert full no-write refusal. A second actual recovery retires the old
+Job and fills the receiver's finite Bay; an otherwise Model-valid copied Comms
+lineage claiming that old physical scope must then fail the exact conflicting
+receipt guard. Actual origin loss preserves offship identities through reception;
+later receiver loss removes the actual pod and resolves its occupants without
+changing factual handoff history. All native execution is still pending root;
+this source-reviewed test is not evidence of a completed gameplay or device exit.

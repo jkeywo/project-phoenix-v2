@@ -3,18 +3,20 @@
 **Draft evidence snapshot, 16 October 2026. Verification remains open.**
 
 This records the current targeted verification pass, not a release, an all-green
-suite or acceptance of all five increments. The broad native selection failed;
+suite or acceptance of all five increments. The original broad native selection failed;
 later fixture corrections and narrower passes do not replace that result.
 Browser/native-device acceptance, performance/balance comparison and station
 activity evidence are separate obligations. Root owns sequential native
 execution and the eventual combined integration gates.
 
-Latest recorded boundary: selected native owners at `37c165a4` completed
-**1616 passed, 2 failed**; the affected host batch at `dd1490ae` completed
-**8 passed, 1 failed**. Test-only corrections through `8ac62cce` are integrated,
-but their pending retries are not recorded as passes. See the final follow-up
-below. The user requested finishing verification of 8–12 and then pausing;
-implementation work for increments 13–24 is parked.
+Latest recorded boundary: the selected owner union at `8ac62cce` / rules 0.74
+passes **1618/1618**. After the empty motion-plan restore correction, the eight
+host targets at `e027e568` / rules 0.75 pass **19/19**, with the two selected energy
+resume checks also passing. Earlier failed results remain below at their tested
+revisions. Matching-host browser/Workshop, balance/performance and final
+integration acceptance remain open; these targeted native passes do not close
+all five increments. The user requested finishing verification of 8-12 and then
+pausing; implementation work for increments 13-24 remains parked.
 
 ## Tested source boundaries
 
@@ -28,7 +30,10 @@ implementation work for increments 13–24 is parked.
 | `dd1490aeeb253536f1f34f5b03dd3de5580ce6e4` | Completed affected host retry with intact-salvage failure diagnostics; before its held-Helm correction. |
 | `37c165a4df599b10316d133e402e8b3491b7cc5d` | Completed combined four-owner selection: 1616 passed, 2 failed. |
 | `2cdc979b` | Current-runtime wiki reference corrections; documentation does not change the tested runtime. |
-| `8ac62cce` | Integrates the source-reviewed unarmed-wrapper and Tactical-rating test corrections; targeted execution pending at this record's cutoff. |
+| `8ac62cce` | Integrates the unarmed-wrapper and Tactical-rating test corrections; the later selected owner union passes 1618/1618 at rules 0.74. |
+| `5180261f` | Held-Helm salvage retry reaches Recovery admission, then exposes the real empty motion-plan restore mismatch at step zero; 0/1 passed. |
+| `00cf53c3` | Rules 0.74 Repair and shield fresh-process continuation evidence; later browser-only changes do not relabel the preceding native executable. |
+| `e027e56882a0e9b808920bd55a4857ba7aba542a` | Rules 0.75 empty-plan fix, new regression/capture checks, current eight-target 19/19 host batch, selected energy resume 2/2 and pinned PASM checks. |
 | Later test-only commits listed below | Not covered by the original `34aa3e04` owner executable or the `9493bc5a` host executable. Their source reviews are not execution evidence. |
 
 The run log files cited below are local `.phoenix/` artifacts, not committed
@@ -254,3 +259,111 @@ The two owner retries and intact-salvage retry must be recorded before describin
 those corrections as verified. No all-green integrated gate, increment closure,
 push or completion through 24 is claimed. Finish the agreed 8–12 verification and
 necessary corrections, commit the evidence, then pause; later work remains parked.
+
+
+## Native follow-up at `e027e568` - targeted selections green
+
+The owner union at `8ac62cce`, runtime rules 0.74, completes **1618 passed,
+0 failed**. This executes the two fixture follow-ups that remained pending in
+the earlier `37c165a4` record, without erasing that failed result.
+
+| Native owner | Executed result |
+|---|---|
+| Content Preparation | **12 passed, 0 failed**, 3.11s. |
+| Gameplay | **521 passed, 0 failed**, 0.42s. |
+| World | **11 passed, 0 failed**, 0.01s. |
+| Simulation | **1074 passed, 0 failed**, 694.40s. |
+
+Evidence: `.phoenix/verify-8-12-green-native-owners.log`. This is the selected
+four-owner union, not the full workspace suite; it predates rules 0.75.
+
+The next intact-salvage retry at `5180261f` still **failed: 0 passed, 1 failed**,
+3.12s after a 30.89s build. Its new normal Human-held Helm setup earns the
+permitted offer and Recovery admission. The first full-state comparison then
+finds `motion_plan=null` in the live capture but a retained avoidance plan in
+the freshly restored bootstrap. No field was masked. Evidence:
+`.phoenix/verify-8-12-held-helm-salvage.log`.
+
+PASM first records authoritative absence for the complete retained motion-plan
+frontier. Runtime correction `18e99858` clears the already-installed bootstrap
+map when every captured row lacks a plan; mixed captures retain the existing
+UUID rebinding. It does not replan, change cadence, add work or widen folding.
+Compatibility commit `e027e568` advances simulation rules to **0.75**, retaining
+protocol **45** and snapshot **88**.
+
+The first regression invocation compiled but matched **zero tests**; its exit
+status is not counted as verification. The corrected `full_restore_` filter
+passes **3/3**, 0.13s: the two new empty/mixed-plan regressions and the existing
+Personnel full-restore test. The actual capture owner group subsequently passes
+**5/5**, 0.00s. Logs:
+`.phoenix/verify-8-12-motion-restore-regressions.log`,
+`.phoenix/verify-8-12-motion-restore-regressions-exact.log`, and
+`.phoenix/verify-8-12-capture-owner-current.log`.
+
+The current eight-target whole-host batch at `e027e568` / rules 0.75 completes
+**19 passed, 0 failed**, after a 3m 49s build:
+
+| Host target | Executed result |
+|---|---|
+| `activity_foundation_continuation` | **3/3 PASS**, 35.50s. |
+| `facility_supply_continuation` | **2/2 PASS**, 32.02s. |
+| `fitting_facility_continuation` | **2/2 PASS**, 125.97s, including real intact-equipment recovery, preserved condition/identity and ordinary vacant Repair fetching and installing it through full continuation. |
+| `logistics_continuation` | **3/3 PASS**, 20.79s. |
+| `physical_damage_routes` | **3/3 PASS**, 28.02s. Strict actual content corpus: 83 worlds, 277 entity instances, 119 overrides, 186 layouts and 91 zero-team layouts. |
+| `production_continuation` | **2/2 PASS**, 19.61s. |
+| `recovery_continuation` | **3/3 PASS**, 22.90s. |
+| `shield_energy_continuation` | **1/1 PASS**, 7.52s. |
+
+Evidence: `.phoenix/verify-8-12-current-hosts-rules75.log`. The two selected
+`snapshot_resume` energy/strike checks also pass **2/2**, 20.03s after a 16.40s
+build, with 89 other tests filtered out:
+`.phoenix/verify-8-12-current-energy-resume-rules75.log`. These executed results
+supersede the pending-retry status at the earlier cutoff, not the historical
+failed logs themselves.
+
+### Fresh-process continuation receipts at `00cf53c3` / rules 0.74
+
+The Repair reconnect parent check passes **1/1**, 47.00s after a 9.10s build,
+comparing two default
+and one pinned fresh child traces. Each child passes **1/1**, respectively
+14.93s, 13.56s and 12.63s. The collected log is
+`.phoenix/verify-8-12-repair-reconnect.log`; its bounded extracted receipt is
+`.phoenix/verify-8-12-repair-reconnect-summary.txt`. The intact full log has SHA-256
+`12f95ee9ae54068ef97f6724f0486214fdc23e617798a37c1ac4b4ba6d284a05`.
+This is a native fresh-process
+continuation comparison, not a browser transport-reconnect or physical-device
+acceptance result.
+
+The shield fresh-process runs also each pass **1/1**, respectively 6.60s, 4.73s
+and 4.61s. The complete TRACE payload is identical across all three runs:
+**3,971,765 bytes**, SHA-256
+`b53106db6abefc77226eb620273b2872d576b9efc81128f356e419a4ca1fcfa1`.
+The bounded receipt is `.phoenix/verify-8-12-shield-reconnect-receipt.json`, naming
+the two default logs and pinned log. These process comparisons retain their
+rules 0.74 boundary; they are not silently attributed to rules 0.75.
+
+### Pinned design and current remaining work
+
+At clean pinned `e027e568`, all three PASM commands return success:
+
+- Validation: **Status: OK**, 1202 entities, 630 non-error findings.
+- Scan: **Validation: OK**, 4157 files, 8696 observed dependencies, 18 packages.
+- Traceability: **Validation: OK**, 246 rows.
+
+Logs: `.phoenix/verify-8-12-rules75-validate.log`,
+`.phoenix/verify-8-12-rules75-scan.log`, and
+`.phoenix/verify-8-12-rules75-traceability.log`. The bounded affected-wiki lint
+also passes at `e027e568` for seven affected pages and their index/source
+references, with no issues, per the collected PDC receipt
+`.phoenix/verify-8-12-bounded-wiki-lint-e027e568.json`; this does not claim a
+repository-wide wiki or whole integration gate pass.
+
+A matching development WASM build is underway at this cutoff. Current
+matching-host browser/Workshop and actual browser reconnect evidence,
+representative balance/performance and station-workload acceptance have not yet
+passed. Native displays and Human acceptance remain separate. The old projected
+component/browser results remain pinned above, and the native passes do not
+substitute for these outstanding surfaces. No full CI pass, push, formal
+increment closure or completion through 24 is claimed. Finish the agreed 8-12
+verification and necessary corrections, commit the evidence, then pause;
+implementation work for increments 13-24 remains parked.

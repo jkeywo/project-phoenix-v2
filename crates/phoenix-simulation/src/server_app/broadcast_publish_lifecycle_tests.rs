@@ -138,7 +138,10 @@ fn live_updates_for_token(app: &mut App, token: &str) -> Vec<(SystemId, SystemBl
         .into_iter()
         .filter(|entry| entry.target == Target::Token(token.into()))
         .flat_map(|entry| match entry.message {
-            ServerMessage::BlackboardUpdate { updates, .. } => updates,
+            ServerMessage::BlackboardUpdate { updates, .. } => updates
+                .into_iter()
+                .map(|(id, board)| (id, board.as_ref().clone()))
+                .collect(),
             _ => vec![],
         })
         .collect()
@@ -148,7 +151,10 @@ fn reconnect_updates_for_token(app: &mut App, token: &str) -> Vec<(SystemId, Sys
     reconnect_registered_replication(app.world_mut(), token)
         .into_iter()
         .flat_map(|message| match message {
-            ServerMessage::BlackboardUpdate { updates, .. } => updates,
+            ServerMessage::BlackboardUpdate { updates, .. } => updates
+                .into_iter()
+                .map(|(id, board)| (id, board.as_ref().clone()))
+                .collect(),
             _ => Vec::new(),
         })
         .collect()

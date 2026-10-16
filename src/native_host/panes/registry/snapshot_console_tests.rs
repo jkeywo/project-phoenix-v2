@@ -17,6 +17,7 @@ fn packet(generation: u64, tick: u64, ids: &[&str]) -> ServerMessage {
                     }),
                 )
             })
+            .map(|(id, board)| (id, board.into()))
             .collect(),
     }
 }
@@ -58,10 +59,13 @@ fn unscoped_packet_cannot_replace_accepted_scope_even_with_newer_generation() {
             presentation_generation: generation,
             console_scope: None,
             console_scope_tick: None,
-            updates: vec![(
+            updates: ([(
                 SystemId("a".into()),
                 SystemBlackboard::Helm(HelmBlackboard::default()),
-            )],
+            )])
+            .into_iter()
+            .map(|(id, board)| (id, board.into()))
+            .collect(),
         };
         same(merge_delta(&current, &unscoped).unwrap(), &current);
     }

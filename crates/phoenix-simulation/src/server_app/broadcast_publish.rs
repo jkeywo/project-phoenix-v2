@@ -140,7 +140,7 @@ fn reconnect_blackboard_projection(
                             hull_visibility.as_ref(),
                         )
                     };
-                    (id, projected)
+                    (id, std::sync::Arc::new(projected))
                 })
                 .collect();
             vec![ServerMessage::BlackboardUpdate {

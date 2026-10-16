@@ -981,7 +981,7 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                 console_scope: None,
                 console_scope_tick: None,
                 presentation_generation: Some(17),
-                updates: vec![(
+                updates: ([(
                     SystemId("helm".into()),
                     SystemBlackboard::Helm(HelmBlackboard {
                         movement: None,
@@ -1001,7 +1001,10 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                         lateral_speed: 0.0,
                         hostile_weapon_arcs: Vec::new(),
                     }),
-                )],
+                )])
+                .into_iter()
+                .map(|(id, board)| (id, board.into()))
+                .collect(),
             },
         ),
         (
@@ -3314,10 +3317,13 @@ fn system_blackboard_tractor_round_trips_and_is_additive() {
         console_scope: None,
         console_scope_tick: None,
         presentation_generation: None,
-        updates: vec![(
+        updates: ([(
             SystemId(crate::ship::system_registry::TRACTOR_SYSTEM_ID.into()),
             held.clone(),
-        )],
+        )])
+        .into_iter()
+        .map(|(id, board)| (id, board.into()))
+        .collect(),
     });
     let json = serde_json::to_string(&held).unwrap();
     assert!(json.contains(r#""kind":"Tractor""#), "got: {json}");
@@ -3464,10 +3470,13 @@ fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() 
         console_scope: None,
         console_scope_tick: None,
         presentation_generation: None,
-        updates: vec![(
+        updates: ([(
             crate::science::scan_blackboard_key_for(&SystemId("sensors".into())),
             bb,
-        )],
+        )])
+        .into_iter()
+        .map(|(id, board)| (id, board.into()))
+        .collect(),
     };
     assert_server_roundtrip(msg.clone());
 }
@@ -3714,7 +3723,10 @@ fn system_blackboard_dossiers_round_trips_and_carries_no_field_for_a_secret() {
         console_scope: None,
         console_scope_tick: None,
         presentation_generation: None,
-        updates: vec![(SystemId(crate::dossier::DOSSIER_BLACKBOARD_KEY.into()), bb)],
+        updates: ([(SystemId(crate::dossier::DOSSIER_BLACKBOARD_KEY.into()), bb)])
+            .into_iter()
+            .map(|(id, board)| (id, board.into()))
+            .collect(),
     };
     assert_server_roundtrip(msg.clone());
 }
@@ -5531,7 +5543,10 @@ fn system_blackboard_repair_round_trips() {
         console_scope: None,
         console_scope_tick: None,
         presentation_generation: None,
-        updates: vec![(SystemId("repair".into()), bb)],
+        updates: ([(SystemId("repair".into()), bb)])
+            .into_iter()
+            .map(|(id, board)| (id, board.into()))
+            .collect(),
     };
     assert_server_roundtrip(msg.clone());
 }

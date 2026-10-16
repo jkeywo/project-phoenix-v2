@@ -79,7 +79,10 @@ fn assert_complete_local_packet(app: &mut App, entity: Entity) {
     let expected = ServerMessage::BlackboardUpdate {
         console_scope: Some(boards.keys().cloned().collect()),
         console_scope_tick: Some(app.world().resource::<crate::sim_tick::SimTick>().0),
-        updates: boards.into_iter().collect(),
+        updates: boards
+            .into_iter()
+            .map(|(id, board)| (id, board.into()))
+            .collect(),
         presentation_generation: Some(0),
     };
     app.update();
@@ -425,4 +428,116 @@ fn fixture_repair_group(id: &str) -> crate::core::messages::RepairGroup {
     } else {
         RepairGroup::Station(StationId(id.into()))
     }
+}
+
+fn shared_update(message: &ServerMessage, id: &str) -> SharedSystemBlackboard {
+    let ServerMessage::BlackboardUpdate { updates, .. } = message else {
+        panic!("scoped publication")
+    };
+    updates
+        .iter()
+        .find(|(source, _)| source.0 == id)
+        .unwrap()
+        .1
+        .clone()
+}
+
+#[test]
+fn outgoing_values_share_unchanged_sources_but_old_messages_survive_changes_and_handoff() {
+    use std::sync::Arc;
+    let (mut app, entity) = fixture();
+    let local = crate::console_bridge::LOCAL_CONSOLE_TOKEN;
+    let initial = sent(&mut app, 1).remove(0);
+    let initial_json = serde_json::to_value(&initial).unwrap();
+    let a = shared_update(&initial, "a");
+    let b = shared_update(&initial, "b");
+    {
+        let cache = app.world().resource::<LastConsolePublications>();
+        for id in ["a", "b"] {
+            let id = SystemId(id.into());
+            assert!(Arc::ptr_eq(&cache.0["crew"].1[&id], &cache.0[local].1[&id]));
+        }
+        assert!(Arc::ptr_eq(&a, &cache.0["crew"].1[&SystemId("a".into())]));
+    }
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+    let SystemBlackboard::Helm(changed) = app
+        .world_mut()
+        .get_mut::<crate::server_app::ShipSystemBlackboards>(entity)
+        .unwrap()
+        .into_inner()
+        .0
+        .get_mut(&SystemId("b".into()))
+        .unwrap()
+    else {
+        unreachable!()
+    };
+    changed.x = 42.0;
+    let changed = sent(&mut app, 1).remove(0);
+    let changed_a = shared_update(&changed, "a");
+    let changed_b = shared_update(&changed, "b");
+    assert!(Arc::ptr_eq(&a, &changed_a));
+    assert!(!Arc::ptr_eq(&b, &changed_b));
+    assert_eq!(serde_json::to_value(&initial).unwrap(), initial_json);
+    let SystemBlackboard::Helm(previous) = b.as_ref() else {
+        unreachable!()
+    };
+    assert_eq!(previous.x, 0.0);
+    let rebased = sent(&mut app, 2).remove(0);
+    assert!(Arc::ptr_eq(&changed_a, &shared_update(&rebased, "a")));
+    assert!(Arc::ptr_eq(&changed_b, &shared_update(&rebased, "b")));
+
+    // A fresh generation still sends a complete envelope; reconnect reads the
+    // actual permitted source and cannot mutate these retained cache values.
+    let mut lifecycle = crate::audio_lifecycle::RoomAudioLifecycle::default();
+    lifecycle.state.generation = 2;
+    app.insert_resource(lifecycle);
+    let reconnect =
+        crate::core::broadcast::reconnect_registered_replication(app.world_mut(), "crew");
+    assert_eq!(
+        serde_json::to_value(&reconnect[0]).unwrap(),
+        serde_json::to_value(&rebased).unwrap()
+    );
+
+    {
+        let mut sessions = app.world_mut().resource_mut::<crate::lobby::Sessions>();
+        sessions
+            .0
+            .register("visitor".into(), "Visitor".into())
+            .unwrap();
+        sessions
+            .0
+            .set_station("visitor", Some(StationId("visitor-seat".into())));
+    }
+    app.world_mut().get_mut::<ConsoleHosts>(entity).unwrap().0[0].host =
+        Some(StationId("visitor-seat".into()));
+    let revoked = sent(&mut app, 2).remove(0);
+    let ServerMessage::BlackboardUpdate {
+        updates,
+        console_scope,
+        ..
+    } = revoked
+    else {
+        unreachable!()
+    };
+    assert!(updates.is_empty());
+    assert_eq!(console_scope, Some(vec![]));
+    {
+        let cache = app.world().resource::<LastConsolePublications>();
+        assert!(cache.0["crew"].1.is_empty());
+        assert!(Arc::ptr_eq(
+            &changed_b,
+            &cache.0["visitor"].1[&SystemId("b".into())]
+        ));
+    }
+    assert_eq!(serde_json::to_value(&initial).unwrap(), initial_json);
+    app.world_mut()
+        .resource_mut::<crate::lobby::Sessions>()
+        .0
+        .disconnect("visitor");
+    assert!(sent(&mut app, 2).is_empty());
+    assert!(!app
+        .world()
+        .resource::<LastConsolePublications>()
+        .0
+        .contains_key("visitor"));
 }

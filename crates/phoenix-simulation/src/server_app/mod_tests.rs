@@ -865,7 +865,10 @@ fn reconnect_registry_routes_in_owner_order_without_mutating_shared_caches() {
     });
     let cached_projection = (
         Some(3),
-        std::collections::BTreeMap::from([(SystemId("cached".into()), cached_blackboard.clone())]),
+        std::collections::BTreeMap::from([(
+            SystemId("cached".into()),
+            std::sync::Arc::new(cached_blackboard.clone()),
+        )]),
     );
     app.world_mut()
         .resource_mut::<crate::ship::console_publication::LastConsolePublications>()
@@ -6040,7 +6043,7 @@ fn npc_weapons_blackboards_add_no_wire_traffic() {
     for m in &out {
         if let ServerMessage::BlackboardUpdate { updates, .. } = &m.msg {
             for (id, bb) in updates {
-                if let crate::core::messages::SystemBlackboard::Weapons(w) = bb {
+                if let crate::core::messages::SystemBlackboard::Weapons(w) = bb.as_ref() {
                     assert_ne!(
                         w.target_uuid.as_deref(),
                         Some("npc-only-target"),

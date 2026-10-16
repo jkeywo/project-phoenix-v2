@@ -146,7 +146,7 @@ fn power_host_numeric_command_reaches_the_owner_and_next_scoped_snapshot() {
                     console_scope: Some(scope),
                     ..
                 },
-            ) if token == "power" => updates.iter().find_map(|(id, board)| match board {
+            ) if token == "power" => updates.iter().find_map(|(id, board)| match board.as_ref() {
                 SystemBlackboard::Power(bb) if scope.contains(id) => Some((bb, message.delivery)),
                 _ => None,
             }),

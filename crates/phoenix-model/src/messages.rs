@@ -3941,7 +3941,7 @@ pub enum ServerMessage {
         console_scope: Option<Vec<SystemId>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         console_scope_tick: Option<u64>,
-        updates: Vec<(SystemId, SystemBlackboard)>,
+        updates: Vec<(SystemId, SharedSystemBlackboard)>,
         /// Current presentation continuation, outside canonical blackboards.
         /// Private cue readers silently baseline when absent or changed.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4833,6 +4833,14 @@ pub struct WeaponsBlackboard {
     #[serde(default)]
     pub blasters: Vec<BlasterBankState>,
 }
+
+/// Frozen outgoing publication value. Serde retains the exact underlying board
+/// shape; sharing never changes the mutable canonical ship/AI blackboard type.
+pub type SharedSystemBlackboard = std::sync::Arc<SystemBlackboard>;
+
+#[cfg(test)]
+#[path = "shared_publication_tests.rs"]
+mod shared_publication_tests;
 
 /// Per-system blackboard published each tick. One typed variant per system
 /// kind, mirroring the `SystemControlPayload` design. Wire-serialised as a

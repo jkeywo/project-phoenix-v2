@@ -247,6 +247,7 @@ fn board_packet(app: &mut App, sources: &[&str], target: Target) -> OutboundMess
             updates: sources
                 .iter()
                 .map(|source| (source.clone(), boards[source].clone()))
+                .map(|(id, board)| (id, board.into()))
                 .collect(),
             presentation_generation: Some(2),
         },
@@ -259,6 +260,96 @@ fn only_board(message: &ServerMessage) -> &SystemBlackboard {
     };
     assert_eq!(updates.len(), 1);
     &updates[0].1
+}
+
+fn shared_board(message: &ServerMessage) -> &crate::core::messages::SharedSystemBlackboard {
+    let ServerMessage::BlackboardUpdate { updates, .. } = message else {
+        panic!("typed publication")
+    };
+    assert_eq!(updates.len(), 1);
+    &updates[0].1
+}
+
+#[test]
+fn shared_delivery_copies_only_rewritten_boards_and_retains_original_message() {
+    use std::sync::Arc;
+    let mut app = fixture();
+    let contact = observe(&mut app, "sensor-radar", 0, 1.0);
+    let unchanged = board_packet(&mut app, &["sensor-radar"], Target::All);
+    let projection = capture(&mut app);
+    let output = projection.project(&unchanged);
+    assert!(Arc::ptr_eq(
+        shared_board(&unchanged.msg),
+        shared_board(phone(&output, "science").unwrap())
+    ));
+    assert!(Arc::ptr_eq(
+        shared_board(&unchanged.msg),
+        shared_board(phone(&output, crate::console_bridge::LOCAL_CONSOLE_TOKEN).unwrap())
+    ));
+
+    let entity = local_ship(&mut app);
+    {
+        let mut boards = app
+            .world_mut()
+            .get_mut::<crate::server_app::ShipSystemBlackboards>(entity)
+            .unwrap();
+        let SystemBlackboard::SensorRadar(board) =
+            boards.0.get_mut(&SystemId("sensor-radar".into())).unwrap()
+        else {
+            unreachable!()
+        };
+        board.selected_target = Some("hidden".into());
+        board.selected_target_alert = Some(true);
+    }
+    let original = board_packet(&mut app, &["sensor-radar"], Target::All);
+    let original_json = JsonCodec.encode_server(&original.msg).unwrap();
+    let original_copy = original.clone();
+    assert!(Arc::ptr_eq(
+        shared_board(&original.msg),
+        shared_board(&original_copy.msg)
+    ));
+    let output = projection.project(&original);
+    let phone_message = phone(&output, "science").unwrap();
+    assert!(!Arc::ptr_eq(
+        shared_board(&original.msg),
+        shared_board(phone_message)
+    ));
+    let SystemBlackboard::SensorRadar(board) = only_board(phone_message) else {
+        unreachable!()
+    };
+    assert_eq!(board.selected_target.as_deref(), Some(contact.as_str()));
+    assert_eq!(board.selected_target_alert, Some(true));
+    assert!(Arc::ptr_eq(
+        shared_board(&original.msg),
+        shared_board(phone(&output, crate::console_bridge::LOCAL_CONSOLE_TOKEN).unwrap())
+    ));
+    assert_eq!(
+        JsonCodec.encode_server(&original.msg).unwrap(),
+        original_json
+    );
+    assert_eq!(
+        JsonCodec.encode_server(&original_copy.msg).unwrap(),
+        original_json
+    );
+    assert_eq!(
+        JsonCodec.encode_server(&unchanged.msg).unwrap(),
+        JsonCodec
+            .encode_server(phone(&projection.project(&unchanged), "science").unwrap())
+            .unwrap()
+    );
+
+    // An already-sanitized retained packet is shared, rather than copied merely
+    // because its variant supports private references.
+    let sanitized = OutboundMessage {
+        target: Target::Token("science".into()),
+        msg: phone_message.clone(),
+        delivery: DeliveryClass::Snapshot,
+    };
+    let repeated = projection.project(&sanitized);
+    assert!(Arc::ptr_eq(
+        shared_board(&sanitized.msg),
+        shared_board(phone(&repeated, "science").unwrap())
+    ));
 }
 
 #[test]
@@ -1127,10 +1218,13 @@ fn existing_scoped_console_publications_and_host_class_gm_channels_are_unchanged
     let board = packet(ServerMessage::BlackboardUpdate {
         console_scope: Some(vec![SystemId("sensor-radar".into())]),
         console_scope_tick: Some(17),
-        updates: vec![(
+        updates: ([(
             SystemId("sensor-radar".into()),
             SystemBlackboard::SensorRadar(Default::default()),
-        )],
+        )])
+        .into_iter()
+        .map(|(id, board)| (id, board.into()))
+        .collect(),
         presentation_generation: Some(2),
     });
     let mut board = board;

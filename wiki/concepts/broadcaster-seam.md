@@ -46,6 +46,13 @@ Repair projection; the raw reserved local route is unchanged. Coordination
 similarly resolves visibility lazily for actual human RepairRequest popups,
 sharing that projection within one ship's delivery pass.
 
+The recipient cache and outgoing `BlackboardUpdate` values share immutable board
+copies. Unchanged source values retain their allocation even when another board
+changes. Serde keeps the existing board JSON shape; canonical ship blackboards,
+AI knowledge and saved boards keep their owned values. The last delivery
+projection copies a shared board only when its privacy fields actually change,
+so retained messages and cache entries cannot be rewritten by a phone projection.
+
 ## Simulation publishers
 
 | Producer | Authoritative output | Audience/cadence | Home |

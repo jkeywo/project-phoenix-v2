@@ -126,9 +126,16 @@ fn producer_common_and_recipient_repair_deltas_both_reach_each_pane() {
             };
             retained.extend(updates);
         }
-        assert_eq!(retained.get(&SystemId("helm".into())), Some(&helm));
+        assert_eq!(
+            retained
+                .get(&SystemId("helm".into()))
+                .map(|board| board.as_ref()),
+            Some(&helm)
+        );
         assert!(matches!(
-            retained.get(&SystemId("repair".into())),
+            retained
+                .get(&SystemId("repair".into()))
+                .map(|board| board.as_ref()),
             Some(SystemBlackboard::Repair(_))
         ));
     }
@@ -212,13 +219,16 @@ fn helm_update(x: f32) -> ServerMessage {
         console_scope: None,
         console_scope_tick: None,
         presentation_generation: None,
-        updates: vec![(
+        updates: ([(
             SystemId("helm".into()),
             SystemBlackboard::Helm(HelmBlackboard {
                 x,
                 ..Default::default()
             }),
-        )],
+        )])
+        .into_iter()
+        .map(|(id, board)| (id, board.into()))
+        .collect(),
     }
 }
 
@@ -286,13 +296,16 @@ fn delta_requeue_keeps_recipient_isolation_and_replaces_a_whole_blackboard() {
         console_scope: None,
         console_scope_tick: None,
         presentation_generation: None,
-        updates: vec![(
+        updates: ([(
             SystemId("repair".into()),
             SystemBlackboard::Repair(RepairBlackboard {
                 damageable_systems: vec![SystemId("private-detail".into())],
                 ..Default::default()
             }),
-        )],
+        )])
+        .into_iter()
+        .map(|(id, board)| (id, board.into()))
+        .collect(),
     };
     send(&bus, target.clone(), &old, DeliveryClass::Snapshot);
     let retry = bus.take_outbound(first);
@@ -306,10 +319,13 @@ fn delta_requeue_keeps_recipient_isolation_and_replaces_a_whole_blackboard() {
         console_scope: None,
         console_scope_tick: None,
         presentation_generation: None,
-        updates: vec![(
+        updates: ([(
             SystemId("repair".into()),
             SystemBlackboard::Repair(RepairBlackboard::default()),
-        )],
+        )])
+        .into_iter()
+        .map(|(id, board)| (id, board.into()))
+        .collect(),
     };
     send(&bus, target, &withheld, DeliveryClass::Snapshot);
     bus.requeue_front(first, retry);
@@ -322,8 +338,8 @@ fn delta_requeue_keeps_recipient_isolation_and_replaces_a_whole_blackboard() {
     assert_eq!(updates.len(), 2);
     let repair = updates.iter().find(|(id, _)| id.0 == "repair").unwrap();
     assert_eq!(
-        repair.1,
-        SystemBlackboard::Repair(RepairBlackboard::default())
+        repair.1.as_ref(),
+        &SystemBlackboard::Repair(RepairBlackboard::default())
     );
 }
 

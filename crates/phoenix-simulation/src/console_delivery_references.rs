@@ -5,6 +5,40 @@ use crate::ship::components::{ConsoleHosts, ShipConfigComponent};
 use crate::ship::system_registry::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+// The same privacy transforms serve owned fixtures and immutable outgoing
+// values. Mutation is requested only after the projected fields differ.
+pub(super) trait ProjectionBoard {
+    fn value(&self) -> &SystemBlackboard;
+    fn edit(&mut self) -> &mut SystemBlackboard;
+}
+impl ProjectionBoard for SystemBlackboard {
+    fn value(&self) -> &SystemBlackboard {
+        self
+    }
+    fn edit(&mut self) -> &mut SystemBlackboard {
+        self
+    }
+}
+impl ProjectionBoard for std::sync::Arc<SystemBlackboard> {
+    fn value(&self) -> &SystemBlackboard {
+        self.as_ref()
+    }
+    fn edit(&mut self) -> &mut SystemBlackboard {
+        std::sync::Arc::make_mut(self)
+    }
+}
+
+macro_rules! replace_projected_fields {
+    ($target:ident, $variant:ident, $( $field:ident = $value:expr ),+ $(,)?) => {{
+        let ($( $field, )+) = ($( $value, )+);
+        let SystemBlackboard::$variant(current) = $target.value() else { unreachable!() };
+        if $( current.$field != $field )||+ {
+            let SystemBlackboard::$variant(current) = $target.edit() else { unreachable!() };
+            $( current.$field = $field; )+
+        }
+    }};
+}
+
 #[derive(Clone)]
 pub(super) struct KnownContact {
     pub id: String,
@@ -255,32 +289,35 @@ impl ReferenceProjection {
         )
     }
 
-    pub fn board(&self, source: &SystemId, board: &mut SystemBlackboard) {
+    pub fn board(&self, source: &SystemId, board: &mut impl ProjectionBoard) {
         let alias = |reference: Option<&str>, kind: Option<&str>| {
             self.resolve(source, reference, kind)
                 .map(|contact| contact.id)
         };
-        match board {
-            SystemBlackboard::Viewscreen(board) => {
-                board.combat_lock = alias(board.combat_lock.as_deref(), Some(TACTICAL_RADAR_KIND));
-                board.science_target =
-                    alias(board.science_target.as_deref(), Some(SENSOR_RADAR_KIND));
-                board.last_attacker_uuid = alias(board.last_attacker_uuid.as_deref(), None);
+        match board.value() {
+            SystemBlackboard::Viewscreen(current) => {
+                replace_projected_fields!(
+                    board,
+                    Viewscreen,
+                    combat_lock = alias(current.combat_lock.as_deref(), Some(TACTICAL_RADAR_KIND)),
+                    science_target =
+                        alias(current.science_target.as_deref(), Some(SENSOR_RADAR_KIND)),
+                    last_attacker_uuid = alias(current.last_attacker_uuid.as_deref(), None),
+                );
             }
-            SystemBlackboard::Weapons(board) => {
+            SystemBlackboard::Weapons(current) => {
                 use phoenix_model::weapon_targets_view::WeaponTargetReference;
                 let members = self
                     .publishers
                     .get(source)
                     .and_then(|console| self.weapon_members.get(console));
-                board
-                    .assignments
+                let mut assignments = current.assignments.clone();
+                assignments
                     .retain(|owner, _| members.is_some_and(|members| members.contains(owner)));
-                for assignment in board.assignments.values_mut() {
+                for assignment in assignments.values_mut() {
                     let project = |target: &mut WeaponTargetReference| {
                         if let WeaponTargetReference::Target { contact } = target {
-                            // Explicit public handles keep provenance; a private UUID
-                            // or stale/forged handle is never silently retargeted.
+                            // Never retarget a private/stale handle implicitly.
                             *target = self
                                 .resolve(source, Some(contact), None)
                                 .filter(|known| known.id == *contact)
@@ -301,54 +338,62 @@ impl ReferenceProjection {
                 }
                 let target = self.resolve(
                     source,
-                    board.target_uuid.as_deref(),
+                    current.target_uuid.as_deref(),
                     Some(TACTICAL_RADAR_KIND),
                 );
-                board.target_uuid = target.as_ref().map(|contact| contact.id.clone());
-                board.target_name = target.and_then(|contact| contact.name);
-                board.locked_target =
-                    alias(board.locked_target.as_deref(), Some(TACTICAL_RADAR_KIND));
-            }
-            SystemBlackboard::Dock(board) => {
-                let available = self.resolve(source, board.available_target.as_deref(), None);
-                board.available_target = available.as_ref().map(|contact| contact.id.clone());
-                board.available_target_name = available.and_then(|contact| contact.name);
-                board.available &= board.available_target.is_some();
-                let coupled = self.resolve(source, board.docked_to.as_deref(), None);
-                board.docked_to = coupled.as_ref().map(|contact| contact.id.clone());
-                board.docked_to_name = coupled.and_then(|contact| contact.name);
-            }
-            SystemBlackboard::Tractor(board) => {
-                let coupled = self.resolve(source, board.coupled_target.as_deref(), None);
-                board.coupled_target = coupled.as_ref().map(|contact| contact.id.clone());
-                board.coupled_target_name = coupled.and_then(|contact| contact.name);
-            }
-            SystemBlackboard::Transporter(board) => {
-                let target = self.resolve(source, board.selected_contact.as_deref(), None);
-                // A General structure reading contains no personnel count.
-                // Neither detection nor that old reading permits a live poll.
-                board.discovered = false;
-                board.civilians_remaining = 0;
-                board.selected_contact = target.as_ref().map(|contact| contact.id.clone());
-                board.selected_contact_name = target.and_then(|contact| contact.name);
-            }
-            SystemBlackboard::Sensors(board) => {
-                board.science_target_uuid = alias(
-                    board.science_target_uuid.as_deref(),
-                    Some(SENSOR_RADAR_KIND),
+                replace_projected_fields!(
+                    board,
+                    Weapons,
+                    assignments = assignments,
+                    target_uuid = target.as_ref().map(|contact| contact.id.clone()),
+                    target_name = target.and_then(|contact| contact.name),
+                    locked_target =
+                        alias(current.locked_target.as_deref(), Some(TACTICAL_RADAR_KIND)),
                 );
-                // Fitted instruments already carry these reports through the
-                // ordinary track DTO. A second decoy-specific list would reveal
-                // that the evidence was synthetic. The host retains originals.
-                if self.measured {
-                    board.contact_ghosts.clear();
-                }
-                // Legacy unconfigured hosts retain explicit reported points.
-                board
+            }
+            SystemBlackboard::Dock(current) => {
+                let available = self.resolve(source, current.available_target.as_deref(), None);
+                let coupled = self.resolve(source, current.docked_to.as_deref(), None);
+                replace_projected_fields!(
+                    board,
+                    Dock,
+                    available = current.available && available.is_some(),
+                    available_target = available.as_ref().map(|contact| contact.id.clone()),
+                    available_target_name = available.and_then(|contact| contact.name),
+                    docked_to = coupled.as_ref().map(|contact| contact.id.clone()),
+                    docked_to_name = coupled.and_then(|contact| contact.name),
+                );
+            }
+            SystemBlackboard::Tractor(current) => {
+                let coupled = self.resolve(source, current.coupled_target.as_deref(), None);
+                replace_projected_fields!(
+                    board,
+                    Tractor,
+                    coupled_target = coupled.as_ref().map(|contact| contact.id.clone()),
+                    coupled_target_name = coupled.and_then(|contact| contact.name),
+                );
+            }
+            SystemBlackboard::Transporter(current) => {
+                let target = self.resolve(source, current.selected_contact.as_deref(), None);
+                // A General structure reading never grants live personnel counts.
+                replace_projected_fields!(
+                    board,
+                    Transporter,
+                    discovered = false,
+                    civilians_remaining = 0,
+                    selected_contact = target.as_ref().map(|contact| contact.id.clone()),
+                    selected_contact_name = target.and_then(|contact| contact.name),
+                );
+            }
+            SystemBlackboard::Sensors(current) => {
+                // Fitted instruments already carry reports in ordinary tracks.
+                let contact_ghosts: Vec<_> = current
                     .contact_ghosts
-                    .retain(|ghost| !self.concealed.contains(&ghost.uuid));
-                let ghosts: BTreeSet<_> = board
-                    .contact_ghosts
+                    .iter()
+                    .filter(|ghost| !self.measured && !self.concealed.contains(&ghost.uuid))
+                    .cloned()
+                    .collect();
+                let ghosts: BTreeSet<_> = contact_ghosts
                     .iter()
                     .map(|ghost| ghost.uuid.clone())
                     .collect();
@@ -356,18 +401,22 @@ impl ReferenceProjection {
                     alias(Some(reference), Some(SENSOR_RADAR_KIND))
                         .or_else(|| ghosts.contains(reference).then(|| reference.to_owned()))
                 };
-                board.contact_overrides = std::mem::take(&mut board.contact_overrides)
-                    .into_iter()
-                    .filter_map(|(source, value)| key(&source).map(|id| (id, value)))
+                let contact_overrides = current
+                    .contact_overrides
+                    .iter()
+                    .filter_map(|(source, value)| key(source).map(|id| (id, *value)))
                     .collect();
-                board.contact_classifications = std::mem::take(&mut board.contact_classifications)
-                    .into_iter()
-                    .filter_map(|(source, value)| key(&source).map(|id| (id, value)))
+                let contact_classifications = current
+                    .contact_classifications
+                    .iter()
+                    .filter_map(|(source, value)| key(source).map(|id| (id, value.clone())))
                     .collect();
-                board.contact_reports = std::mem::take(&mut board.contact_reports)
-                    .into_iter()
-                    .filter_map(|(source, mut value)| {
-                        key(&source).map(|id| {
+                let contact_reports = current
+                    .contact_reports
+                    .iter()
+                    .filter_map(|(source, value)| {
+                        key(source).map(|id| {
+                            let mut value = value.clone();
                             if let Some(report) = &mut value {
                                 if let Some(observation) = &mut report.observation {
                                     observation.subject =
@@ -380,24 +429,59 @@ impl ReferenceProjection {
                         })
                     })
                     .collect();
+                replace_projected_fields!(
+                    board,
+                    Sensors,
+                    science_target_uuid = alias(
+                        current.science_target_uuid.as_deref(),
+                        Some(SENSOR_RADAR_KIND)
+                    ),
+                    contact_ghosts = contact_ghosts,
+                    contact_overrides = contact_overrides,
+                    contact_classifications = contact_classifications,
+                    contact_reports = contact_reports,
+                );
             }
-            SystemBlackboard::SensorRadar(board) => {
-                board.selected_target =
-                    alias(board.selected_target.as_deref(), Some(SENSOR_RADAR_KIND));
-                if board.selected_target.is_none() {
-                    board.selected_target_alert = None;
-                    board.selected_target_relative_velocity = None;
-                    board.selected_target_weapons_cold = None;
-                }
+            SystemBlackboard::SensorRadar(current) => {
+                let selected_target =
+                    alias(current.selected_target.as_deref(), Some(SENSOR_RADAR_KIND));
+                let known = selected_target.is_some();
+                replace_projected_fields!(
+                    board,
+                    SensorRadar,
+                    selected_target = selected_target,
+                    selected_target_alert = if known {
+                        current.selected_target_alert
+                    } else {
+                        None
+                    },
+                    selected_target_relative_velocity = if known {
+                        current.selected_target_relative_velocity
+                    } else {
+                        None
+                    },
+                    selected_target_weapons_cold = if known {
+                        current.selected_target_weapons_cold
+                    } else {
+                        None
+                    },
+                );
             }
-            SystemBlackboard::TacticalRadar(board) => {
-                board.selected_target =
-                    alias(board.selected_target.as_deref(), Some(TACTICAL_RADAR_KIND));
-                // Actual broad records have their own explicitly measured DTO.
-                board.blips.clear();
-                board.regions.clear();
+            SystemBlackboard::TacticalRadar(current) => {
+                replace_projected_fields!(
+                    board,
+                    TacticalRadar,
+                    selected_target = alias(
+                        current.selected_target.as_deref(),
+                        Some(TACTICAL_RADAR_KIND)
+                    ),
+                    blips = Vec::new(),
+                    regions = Vec::new(),
+                );
             }
-            SystemBlackboard::Helm(board) => board.hostile_weapon_arcs.clear(),
+            SystemBlackboard::Helm(_) => {
+                replace_projected_fields!(board, Helm, hostile_weapon_arcs = Vec::new());
+            }
             _ => {}
         }
     }
@@ -407,13 +491,13 @@ impl ReferenceProjection {
     pub fn navigation(
         &self,
         source: &SystemId,
-        board: &mut SystemBlackboard,
+        board: &mut impl ProjectionBoard,
         charted: impl Fn(&str) -> bool,
     ) {
         if !self.measured {
             return;
         }
-        let SystemBlackboard::Navigation(board) = board else {
+        let SystemBlackboard::Navigation(current) = board.value() else {
             return;
         };
         let reference = |id: &str| {
@@ -431,10 +515,12 @@ impl ReferenceProjection {
                 .map(|contact| contact.id)
                 .or_else(|| charted(id).then(|| id.to_owned()))
         };
-        if let Some(waypoint) = &mut board.navigation_waypoint {
+        let mut navigation_waypoint = current.navigation_waypoint.clone();
+        if let Some(waypoint) = &mut navigation_waypoint {
             waypoint.source_uuid = waypoint.source_uuid.as_deref().and_then(reference);
         }
-        board.civilians.retain_mut(|row| {
+        let mut civilians = current.civilians.clone();
+        civilians.retain_mut(|row| {
             let Some(contact) = self.resolve(source, Some(&row.uuid), None) else {
                 return false;
             };
@@ -457,5 +543,11 @@ impl ReferenceProjection {
             });
             true
         });
+        replace_projected_fields!(
+            board,
+            Navigation,
+            navigation_waypoint = navigation_waypoint,
+            civilians = civilians,
+        );
     }
 }

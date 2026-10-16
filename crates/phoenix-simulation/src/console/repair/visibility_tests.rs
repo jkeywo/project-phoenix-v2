@@ -1097,7 +1097,7 @@ fn scheduled_reconnect_projects_real_repair_and_hull_for_duplicate_private_reque
                 panic!("blackboards precede hull")
             };
             if token == "eng" {
-                let SystemBlackboard::Repair(board) = &updates[0].1 else {
+                let SystemBlackboard::Repair(board) = updates[0].1.as_ref() else {
                     panic!("Repair board")
                 };
                 assert_eq!(
@@ -1179,7 +1179,7 @@ fn repair_blackboard_only_reaches_bound_consoles_on_live_publication() {
             panic!("boards")
         };
         if token == "eng" {
-            let SystemBlackboard::Repair(board) = &updates[0].1 else {
+            let SystemBlackboard::Repair(board) = updates[0].1.as_ref() else {
                 panic!("Repair")
             };
             assert_eq!(ids(&board.system_hull), vec!["core", "repair"]);

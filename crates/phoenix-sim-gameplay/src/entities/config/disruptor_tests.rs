@@ -9,12 +9,53 @@ fn comms_disruptor_preserves_base_hardware_and_uses_existing_physical_emp_bank()
     let ship = configured.ship_config.as_ref().unwrap();
     let baseline = base.ship_config.as_ref().unwrap();
     assert_eq!(ship.stations, baseline.stations);
+    for console in &baseline.consoles {
+        assert_eq!(
+            ship.consoles
+                .iter()
+                .find(|candidate| candidate.id == console.id),
+            Some(console)
+        );
+    }
     for system in &baseline.systems {
         assert_eq!(ship.system(&system.id), Some(system));
     }
     let owner = SystemId("blaster-disruptor".into());
     let console = ship.console_for_system(&owner).unwrap();
-    assert_eq!(console.home_station.as_ref().unwrap().0, "comms");
+    assert!(console.home_station.is_none(), "auxiliary equipment must not become an additional member of the inherited Comms Station rating");
+    assert!(console.human_seeking);
+    assert_eq!(
+        console.host_order,
+        vec![phoenix_model::identity::StationId("comms".into())]
+    );
+    assert_eq!(console.visiting_rating.as_deref(), Some("Std"));
+    assert_eq!(ship.console_ratings(console).len(), 1);
+    assert_eq!(ship.console_ratings(console)[0].name, "Std");
+    assert_eq!(
+        ship.console_system_depths(console, "Std")[&owner],
+        crate::ship::rating::SystemDepth::Detailed
+    );
+    for human in [false, true] {
+        let hosted = crate::ship::console_ownership::resolve_assignment(
+            ship,
+            console,
+            |candidate| human && candidate.0 == "comms",
+            &std::collections::HashMap::new(),
+            &std::collections::BTreeSet::new(),
+        );
+        assert_eq!(
+            hosted.host,
+            human.then(|| phoenix_model::identity::StationId("comms".into()))
+        );
+        assert_eq!(
+            hosted.rating,
+            if human {
+                "Std"
+            } else {
+                crate::ship::rating::BACKFILL_RATING
+            }
+        );
+    }
     assert_eq!(
         console.screen.as_deref(),
         Some("gui/destroyer/tactical.html")

@@ -1,5 +1,5 @@
 # Optional Comms-owned physical disruption through existing finite EMP bolts.
-# Home-only seeking keeps ordinary Backfill when Comms is absent or AFK.
+# Auxiliary seeking has only Comms as an eligible host; absence/AFK uses Backfill.
 # Copied atomic energy/interior roots preserve all inherited equipment.
 includes = [ "alliance_cruiser.toml" ]
 name = "entity.disruptor_cruiser.name"
@@ -89,7 +89,6 @@ laser = 1
 id = "disruption"
 name = "entity.disruptor_cruiser.console.name"
 screen = "gui/destroyer/tactical.html"
-home_station = "comms"
 human_seeking = true
 host_order = [ "comms" ]
 visiting_rating = "Std"

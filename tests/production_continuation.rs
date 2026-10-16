@@ -5,7 +5,8 @@ use bevy::prelude::*;
 use project_phoenix::{
     console::weapons::torpedo::TorpedoSystemResource,
     core::messages::{
-        ClientMessage, GamePhase, StationId, SystemControlPayload as Control, SystemId,
+        ClientMessage, GamePhase, PowerGroupId, StationId, SystemControlPayload as Control,
+        SystemId,
     },
     entities::spawner::EntityUuid,
     headless::{build_headless_app, HeadlessArgs},
@@ -271,22 +272,28 @@ fn prepared() -> (App, Entity, [i64; 3], i64) {
             .is_empty(),
         "real previously admitted delivery must settle"
     );
-    // Keep ordinary Logistics enabled; explicitly retain the actual magazine
-    // stock as its normal desired level so new products remain in the hold.
+    // Previously admitted deliveries have filled the magazine to its authored
+    // standing goal. Keep ordinary Logistics enabled and do not send an
+    // Engineering command to the Tactical-owned magazine.
     let aboard = rounds(&app, entity);
-    control(
-        &mut app,
-        entity,
-        "logistics",
-        Control::SetStockTarget {
-            store: "magazine".into(),
-            amount: aboard,
-        },
-    );
     assert_eq!(
         app.world().get::<ShipLogistics>(entity).unwrap().0.goals["magazine"],
         aboard
     );
+    // A fabrication run needs an actual allocation, not just its initial
+    // battery. Move it ahead of idle support siblings through the ordinary
+    // Engineering command; ordinary Power AI preserves this priority on handoff.
+    let fabrication_group = fabrication_group(&app, entity);
+    control(
+        &mut app,
+        entity,
+        "power-reactor",
+        Control::SetEnergyPriority {
+            group: fabrication_group,
+            priority: 0,
+        },
+    );
+    supplied(&app, entity);
     assert!(app.world().get::<ShipLogistics>(entity).unwrap().0.enabled);
     assert!(state(&app, entity).active.is_none());
     assert_eq!(state(&app, entity).next_id, 1);
@@ -316,6 +323,13 @@ fn prepared() -> (App, Entity, [i64; 3], i64) {
         .0
         .policy_for(&id("fabrication"));
     assert!(source.operate_ai && !source.accept_human_input);
+    let reactor_source = app
+        .world()
+        .get::<ShipSystemControlSources>(entity)
+        .unwrap()
+        .0
+        .policy_for(&id("power-reactor"));
+    assert!(reactor_source.operate_ai && !reactor_source.accept_human_input);
     let first = state(&app, entity).active.as_ref().unwrap();
     assert_eq!(
         first.id.0, 1,
@@ -330,6 +344,43 @@ fn prepared() -> (App, Entity, [i64; 3], i64) {
         .is_none());
     (app, entity, initial, target)
 }
+fn fabrication_group(app: &App, entity: Entity) -> PowerGroupId {
+    app.world()
+        .get::<ShipPowerSystem>(entity)
+        .unwrap()
+        .0
+        .ship_config()
+        .system(&state(app, entity).owner)
+        .unwrap()
+        .power_group
+        .clone()
+        .unwrap()
+}
+fn supplied(app: &App, entity: Entity) {
+    let power = &app.world().get::<ShipPowerSystem>(entity).unwrap().0;
+    let group = &power.network().groups[&fabrication_group(app, entity)];
+    assert_eq!(
+        group.priority, 0,
+        "ordinary AI must preserve the admitted priority"
+    );
+    assert!(
+        group.effective_flow_per_sec > 0.0,
+        "{}",
+        diagnostic(app, entity)
+    );
+    assert!(
+        power.last_intake_per_sec(&id("fabrication")).unwrap() > 0.0,
+        "{}",
+        diagnostic(app, entity)
+    );
+    if state(app, entity).active.is_some() {
+        assert!(
+            power.emitted_work(&id("fabrication")) > 0.0,
+            "an active batch must keep receiving actual paid work: {}",
+            diagnostic(app, entity)
+        );
+    }
+}
 fn diagnostic(app: &App, entity: Entity) -> String {
     let power = &app.world().get::<ShipPowerSystem>(entity).unwrap().0;
     format!(
@@ -338,7 +389,7 @@ fn diagnostic(app: &App, entity: Entity) -> String {
         period(app),
         state(app, entity),
         power.network().consumers.get(&id("fabrication")),
-        power.network().groups.get(&project_phoenix::core::messages::PowerGroupId("energy-fabrication".into())),
+        power.network().groups.get(&fabrication_group(app, entity)),
         power.last_intake_per_sec(&id("fabrication")),
         power.last_work_fraction(&id("fabrication")),
         power.emitted_work(&id("fabrication")),
@@ -375,6 +426,7 @@ fn checkpoint() -> (App, Entity, [i64; 3], i64) {
                     .policy_for(&id("fabrication"))
                     .operate_ai
             );
+            supplied(&app, entity);
             return (app, entity, initial, target);
         }
     }
@@ -405,6 +457,8 @@ fn paid_second_fabrication_batch_and_exact_claims_continue_through_full_json360(
         );
         conserved(&live, entity, initial);
         conserved(&resumed, restored, initial);
+        supplied(&live, entity);
+        supplied(&resumed, restored);
         if step < 360 {
             let tick = live.world().resource::<SimTick>().0;
             live.update();

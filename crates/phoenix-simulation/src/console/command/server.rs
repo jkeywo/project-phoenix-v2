@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use crate::core::messages::{
     AdmittedCommands, CommandBlackboard, CommandStanceOption, StationId, SystemBlackboard,
-    SystemControlPayload, SystemId,
+    SystemControlPayload,
 };
 use crate::ship::command_stance;
 use crate::ship::config::{ShipConfig, StanceKind, StationStanceConfig};

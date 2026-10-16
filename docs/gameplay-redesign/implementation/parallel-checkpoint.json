@@ -2,7 +2,7 @@
   "date": "2026-10-16",
   "status": "partial",
   "current_summary": {
-    "source": "c10a6a14",
+    "source": "b243bcc6 plus pending narrow test/import corrections",
     "per_increment_report": "README.md#per-increment-progress--16-october-2026",
     "closed_increments": [
       0
@@ -37,9 +37,9 @@
     },
     "push": "Not performed. Full integration gate and outstanding acceptance have not passed.",
     "compatibility": {
-      "protocol": 37,
-      "snapshot": 80,
-      "rules": "0.62"
+      "protocol": 41,
+      "snapshot": 84,
+      "rules": "0.66"
     },
     "current_four_owner_native": {
       "source": "3f783eec",
@@ -107,7 +107,7 @@
     },
     "funded_fixture_retry": {
       "source": "e225d662",
-      "status": "completed with one authored Power policy expectation failure; reviewed correction integrated, final native retry pending",
+      "status": "151 passed/1 failed originally; final authored Power policy test passes at9d9e8746 after44977d8e correction.",
       "log": ".phoenix/resumed-funded-fixtures-native-retry.log",
       "result": "151 passed,1 failed; all selected Repair, sparse hardware, craft capture and Comms corrections pass. The Power-only retry at26d003e2 still failed on a static passive receiver authored at0.15 rather than its0.25 hardware ceiling. 44977d8e corrects expectations to actual authored guarded targets and stable defaults.",
       "retry_log": ".phoenix/resumed-authored-power-policy-native-retry.log"
@@ -132,7 +132,7 @@
     },
     "integrated_comms": {
       "source": "c10a6a14",
-      "status": "media and paid interception/decoding source integrated; native owner and full-host evidence pending",
+      "status": "Media and paid decoding source integrated; selected owner checks pass at9d9e8746, full-host/native edge/device acceptance pending.",
       "media_merge": "5d5a59a9",
       "capture_merge": "7ce553d6",
       "actual_console_fix": "14b4b6f7",
@@ -146,9 +146,72 @@
         ".phoenix/resumed-integrated-media-capture-check.log",
         ".phoenix/resumed-integrated-media-capture-check-retry.log"
       ],
-      "remaining": "Native owner/continuation and root native-edge execution; safe original typed decoded claims, finite listening priorities/public chatter, applicable request lifecycle/contextual consumers and live two-human/two-host/device/Workshop acceptance. Dynamic keys and relay-hop/retransmission capture require separately selected future consumers, not this bounded exit. Relay optional capability deployment remains separate; unknown/old policy refuses media.",
+      "remaining": "Native full-host/native edge/live two-human/two-host/device/Workshop acceptance, finite listening priorities/public chatter and applicable request lifecycle/contextual consumers. Safe typed claims now source-integrated but native unexecuted. Dynamic keys and relay-hop/retransmission capture need separately selected future consumers. Unknown/old relay policy refuses optional media.",
       "compile": "Renderer-free Simulation including tests passes after two test-only constructor/import corrections;46.55s. Initial compile failed on those two fixture compilation errors. Native execution remains pending."
-    }
+    },
+    "integrated_native_media_capture": {
+      "source": "9d9e8746; subsequent9c3adff3 was documentation only",
+      "command": "cargo test -p phoenix-model -p phoenix-transport -p phoenix-sim-gameplay -p phoenix-simulation --lib --no-default-features --no-fail-fast -- media capture authored_power_trees_drive_actual_finite_hardware_without_legacy_policy optional_namespace_exact_fold_characterization",
+      "results": {
+        "phoenix-model": {
+          "passed": 4,
+          "failed": 0
+        },
+        "phoenix-sim-gameplay": {
+          "passed": 10,
+          "failed": 0
+        },
+        "phoenix-simulation": {
+          "passed": 76,
+          "failed": 3
+        },
+        "phoenix-transport": {
+          "passed": 0,
+          "failed": 0,
+          "note": "This selection/configuration had no transport tests; explicit native owner run below provides actual execution."
+        }
+      },
+      "build": "8m41s; Simulation tests10.78s",
+      "log": ".phoenix/resumed-integrated-media-capture-native.log",
+      "passing": "All selected actual media/capture owner, paid route/decoder, owner/kind admission, snapshot no-write/historical-source and final authored Power policy checks pass.",
+      "failures": [
+        "world::server::tests::spawn_immediate_entities_wires_behaviour_for_npc_with_anchor: fixture missing required interior",
+        "snapshot::recovery_tests::recovery_capture_json_and_restore_keep_disabled_fraction_and_receipt: fitted-tool owner validation",
+        "console::weapons::server::tests::firing_beam_retains_captured_target_when_combat_lock_changes: lost expected retained target"
+      ],
+      "correction_lane": "Reviewed corrections integrated3cebf1eb; native retry pending. Beam retention was a real machinery aim regression; the other two were missing accepted fixture setup."
+    },
+    "integrated_native_codec": {
+      "source": "same9d9e8746 freshly compiled Simulation executable",
+      "command": "phoenix_simulation-d920f9d6624e4bd2.exe core::codec::tests",
+      "result": "188 passed,0 failed",
+      "log": ".phoenix/resumed-integrated-codec-native.log"
+    },
+    "integrated_native_transport": {
+      "source": "same9d9e8746 Transport source;9c3adff3 documentation only",
+      "command": "cargo test -p phoenix-transport --lib --features native,test-support",
+      "result": "7 passed,0 failed;8.16s build, no runtime rebuild of other owners",
+      "log": ".phoenix/resumed-integrated-native-transport-owner.log"
+    },
+    "later_source_integration": {
+      "source": "b243bcc6",
+      "helm": "31f358c4 integrates permitted per-axis follow intent, retained plan provenance and actual formation JSON360 source proof. Native unexecuted.",
+      "planning": "034f3a2e integrates future repair dispositions/prerequisites, actual work-footprint monitoring and additional optional-maintenance continuation proof. Native unexecuted.",
+      "turret": "99e47c9b→4bf5033e→deef9dcf→23c434c5 integrate ordinary finite fixed beam turret acceptance, data/Workshop source tests and actual launch/fire/store JSON360 source proofs. Native unexecuted.",
+      "owner_check": "Renderer-free Simulation including tests compiles58.82s atb243bcc6; one unused Command SystemId import then removed. Earlier checks failed first on unnecessary PlanIntentRequest Eq, then one empty-pod fixture missing people; both corrected.",
+      "review": "Prepared branches and central joins independently source reviewed. String conflict resolutions preserve both additive key sets; strict strings6446 clean before turret added its one name.",
+      "reception": "627e7e37 integrates compound personnel references, actual holder checks, exact consent-bound paid Bay receipt and static receiver joins;80a80e22 adds actual Human/AI radio+physical freshJSON360/loss/forgery proof source.",
+      "emissions": "8a835f67 integrates explicit actual-owner Command intent, same permitted ordinary transponder AI and per-System actual paid-work advisory sampled in SimDispatch before FixedLast; actual host JSON360 proof source included.",
+      "decoy": "b324f27b→ba76f014→974ac64e integrate finite ordinary physical identity decoy/data/Workshop and actual Human/AI launch/acquire/recover/exhaustion JSON360 proof source.",
+      "typed_claims": "952ca599→c1860fc9→7f99ab79 integrate only safe attributed original typed content after paid decoding, including a unit ReceiveCraft claim that strips the craft identity.",
+      "owner_check_log": ".phoenix/resumed-emission-decoy-reception-owner-check.log",
+      "client": "Final19 affected client/Workshop files664 passed,0 failed;1.86s. Preceding15-file batch653 passed/1 new Helm exact-inventory failure; focused inventory retry123 passed before final green19-file batch.",
+      "client_log": ".phoenix/resumed-all-integrated-lane-client.log",
+      "static": "Strict strings6485 no errors/warnings; dependency-tree rules pass.",
+      "host_compilation": "Eight selected full-host targets attempted with root headless,host. Four targets blocked by test API/import mistakes: Formation and Emission used a non-direct Gameplay crate; Formation treated sender_uuid String as Option; Turret used nonexistent EnergyState.emitted_work and old RecoverCraft payload; Decoy used nonexistent BroadTrack.predicted and old RecoverCraft payload. Narrow corrections in progress; no host compile/execution pass claimed.",
+      "host_compilation_log": ".phoenix/resumed-eight-host-target-check.log"
+    },
+    "last_published_comment": "https://github.com/jkeywo/project-phoenix-v2/issues/1562#issuecomment-6204915653"
   },
   "scope": "Integrated communication, movement, illumination, local personnel and equipment-bound facility checkpoints; no increment exit",
   "source": "873ca2d9 plus authored illumination power-group correction ba716438; later fixture corrections are not part of this executable",

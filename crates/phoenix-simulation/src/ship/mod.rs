@@ -15,6 +15,7 @@ pub mod emp;
 mod energy_publication;
 pub mod energy_runtime;
 pub mod helm;
+pub use phoenix_sim_gameplay::ship::helm_control;
 pub mod helm_admission;
 pub mod helm_ai;
 pub mod helm_planner;

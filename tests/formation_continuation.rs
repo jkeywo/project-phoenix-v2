@@ -5,7 +5,7 @@ use phoenix_model::{
     comms_channel::CommsAudience,
     comms_request::{CommsRequestDecision, GenericCommsRequest},
 };
-use phoenix_sim_gameplay::ship::helm_control::{
+use project_phoenix::ship::helm_control::{
     AxisIntent, HelmControlState, SpeedDemand, ThrustIntent,
 };
 use project_phoenix::{
@@ -261,7 +261,7 @@ fn actual_human_form_up_drives_ordinary_backfill_motion_and_whole_json360_contin
         .into_iter()
         .find(|message| message.id == course.request.message_id)
         .unwrap();
-    assert_eq!(request.sender_uuid.as_deref(), Some(own_uuid.as_str()));
+    assert_eq!(request.sender_uuid.as_str(), own_uuid.as_str());
     assert!(request
         .request_progress
         .as_ref()

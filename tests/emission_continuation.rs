@@ -48,7 +48,7 @@ fn observe(
         } else {
             0.0
         };
-        witness.signature = phoenix_sim_gameplay::science::signatures::observed_signature(
+        witness.signature = project_phoenix::science::signatures::observed_signature(
             witness.reactor,
             config
                 .0

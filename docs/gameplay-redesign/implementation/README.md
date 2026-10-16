@@ -13,13 +13,15 @@ Only increment 0 is formally closed. Increments 1–7 have recorded automated
 exits; physical-device and human-workload acceptance remain open. Later initial
 commits are implementation checkpoints, not verified increment exits. The latest
 focused host results cover 21 tests across 13 targets after a clearance fixture
-correction; they do not replace the full integrated gate. The latest broader native run passed 771 tests and failed 23; the previously
-failing Formation, concealment, terminal personnel and exact digest checks now
-pass. The focused correction batch passed 151 tests and failed one authored Power AI
-expectation. A subsequent Power-only retry also failed; the final reviewed
-correction distinguishes actual authored policy targets from hardware ceilings
-and awaits execution. The selected Repair and sparse-fixture corrections pass. Separately, all 17 selected content/Workshop composition
-checks pass. These results do not establish a passing integrated exit.
+correction; they do not replace the full integrated gate. The earlier broader native run passed 771 tests and failed 23. The focused
+correction batch passed 151 and failed one; its final authored Power policy
+correction now passes. The latest media/capture selection passed 90 tests across
+Model, Gameplay and Simulation and exposed three older spawn, equipment-recovery
+and beam-retention regressions. Their reviewed corrections, including a real
+retained-beam routing fix, are integrated and await native retry. All selected new media and
+decoder owner tests pass. Separately, 188 codec, seven native transport and 17
+selected content/Workshop checks pass. These results do not establish a passing
+integrated exit.
 
 | Increment | Implementation state | Material remaining work |
 |---|---|---|
@@ -30,8 +32,8 @@ checks pass. These results do not establish a passing integrated exit.
 | 4 — Observations/reports | Implemented; automated exit passed | Physical-device and human acceptance. |
 | 5 — Jobs/teams | Implemented; automated exit passed | Physical-device and human acceptance. |
 | 6 — Stores/services | Implemented; automated exit passed | Physical-device and human acceptance. |
-| 7 — Configurable weapons | Implemented; automated exit passed | Physical-device and human acceptance. |
-| 8 — Energy/thermal | Core implemented | Selected energy/continuation corrections pass; final authored Power policy retry pending; full integrated, balance, performance and playable acceptance. |
+| 7 — Configurable weapons | Implemented; initial automated exit passed | Retained-beam regression fix integrated; native retry and human/device acceptance. |
+| 8 — Energy/thermal | Core implemented | Selected energy/continuation and final authored Power policy checks pass; full integrated, balance, performance and playable acceptance. |
 | 9 — Shield energy | Core implemented | Full integrated and playable acceptance. |
 | 10 — Interiors/routes | Core implemented | Full integrated and playable acceptance. |
 | 11 — Damage/restoration | Core implemented | Retained Repair adapter corrections pass targeted native checks; full integrated and playable acceptance. |
@@ -39,15 +41,15 @@ checks pass. These results do not establish a passing integrated exit.
 | 13 — Equipment fitting | Supported beam/reactor implementation | Cross-system coverage and full acceptance. |
 | 14 — Sensing/environment | Substantial implementation | Knowledge, presentation, balance and full acceptance. |
 | 15 — Layered combat | Substantial implementation | Broader combat/balance/workload coverage and full acceptance. |
-| 16 — Comms/orders | Channels, requests and relay operational | Human media and paid decoding source integrated; typed decoded claims, listening priorities/chatter, contextual operations and native/playable acceptance. |
-| 17 — Electronic operations | Jamming/protection/identity operational | Concealment owner/snapshot checks pass; full-host proof, low-emission advice and disruption remain. |
-| 18 — Movement/transit | Local jumps verified; sector code integrated | Formation owner/restore checks pass; full-host proofs, Helm follow controls, remaining assistance and acceptance. |
-| 19 — Craft/deployables | Physical probe handling verified | Other craft/deployables, sorties, remote operation and acceptance. |
-| 20 — Personnel | Officers, care and retained roster operational | Transfer code/proofs integrated but native unverified; boarding/away/rescue/capture and acceptance. |
+| 16 — Comms/orders | Channels, requests and relay operational | Media/decoder owner checks pass on their tested revision; typed claims source integrated; listening priorities/chatter, contextual operations and full native/playable acceptance remain. |
+| 17 — Electronic operations | Jamming/protection/identity operational | Concealment owner/snapshot checks pass; low-emission source/proofs integrated but unexecuted; bounded disruption, broader information/access and acceptance remain. |
+| 18 — Movement/transit | Local jumps verified; sector code integrated | Formation owner/restore checks pass; Helm follow source/proofs integrated but unexecuted; remaining assistance and acceptance. |
+| 19 — Craft/deployables | Physical probe handling verified | Fixed beam turret and finite physical decoy source/proofs integrated; host proof API corrections/native execution, other craft, sorties, remote operation and acceptance remain. |
+| 20 — Personnel | Officers, care and retained roster operational | Transfer and consent-bound reception source/proofs integrated but native unverified; broader boarding/away/rescue/capture and acceptance remain. |
 | 21 — Facilities/actors | Finite ports and physical supply verified | Workforce, broader objectives/dependencies and acceptance. |
 | 22 — Authored HTN execution | Working scheduling/activity core | Broader operator/scenario coverage and full integration. |
 | 23 — Continuing modes | Accepted-commitment foundation | Patrol, War and Sandbox are not delivered. |
-| 24 — Discovery/Director | Bounded maintenance opportunity code/proofs integrated | Native admission/physical-work proof, autonomous prerequisite handling, broader generation/pacing and final audits. |
+| 24 — Discovery/Director | Bounded maintenance opportunity code/proofs integrated | Future repair intent/prerequisite monitoring source/proofs integrated but unexecuted; broader generation/pacing and final audits. |
 
 Current source pins, failures and retries are recorded in
 [the integration checkpoint](parallel-checkpoint.json). Parallel worktree code is

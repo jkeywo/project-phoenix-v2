@@ -74,3 +74,5 @@ pub mod identity_ui;
 pub mod protection_ui;
 
 pub mod shared_loader;
+
+pub mod marking;

@@ -16,3 +16,5 @@ pub mod turret;
 pub mod illumination;
 
 pub mod shared_loaders;
+
+pub mod marking;

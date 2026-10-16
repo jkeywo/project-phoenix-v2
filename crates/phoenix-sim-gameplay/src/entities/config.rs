@@ -93,6 +93,9 @@ pub struct EntityConfig {
     /// First supported physical probe. Custody stays on the actual World actor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe: Option<phoenix_model::craft::ProbeProfile>,
+    /// Optional ordinary battery equipment delivered by a marking payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marking_beacon: Option<phoenix_model::marking::MarkingBeaconConfig>,
     /// Optional helm capability declaration (`[helm_capability]`).
     /// Describes vertical movement mode and impulse steering policy.
     #[serde(default)]
@@ -1038,6 +1041,7 @@ impl EntityConfig {
         weapon_definition::validate_round_feeds(&config).map_err(SerdeError::custom)?;
         crate::ship::transit_profile::validate_entity(&config).map_err(SerdeError::custom)?;
         crate::ship::craft_profile::validate_entity(&config).map_err(SerdeError::custom)?;
+        crate::weapons::marking::validate_entity(&config).map_err(SerdeError::custom)?;
         if let Some(ship) = &config.ship_config {
             crate::ship::emission_profile::profile(ship).map_err(SerdeError::custom)?;
         }

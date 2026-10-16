@@ -54,7 +54,8 @@ fn prepared() -> (World, Entity, PhoenixSnapshot) {
         None,
         20,
         |request| match request {
-            phoenix_sim_world::world::activities::ActivityRequest::Communication { .. } => false,
+            phoenix_sim_world::world::activities::ActivityRequest::Communication { .. }
+            | phoenix_sim_world::world::activities::ActivityRequest::AcquireVessel { .. } => false,
             phoenix_sim_world::world::activities::ActivityRequest::Repair { .. } => {
                 crate::world::activities::repair_binding_supported(
                     request, &config, &damage, &owner, count,

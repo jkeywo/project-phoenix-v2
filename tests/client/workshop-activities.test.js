@@ -130,3 +130,22 @@ describe('actual Scenario application dependency authoring',()=>{
     panel.node.querySelector('#workshop-activities-save').click();await settle();expect(parse(draft.read(path)).situation_definition).toEqual(definitions);panel.dispose();
   });
 });
+
+
+it('authors acquisition using actual external Security and a distinct opt-in base subject', async () => {
+  const dependencies=deps(),ship=profile();ship.system.push({id:'security',kind:'security',console:'engineering'});ship.security={team_count:2};
+  dependencies.base_files[hull]=stringify(ship);
+  const target='assets/entities/prize.toml';dependencies.base_files[target]=stringify({tags:['ship'],security_target:{action:[{action:'board',acquisition:{doctrine:'hold'}}]}});
+  const world=parse(source());world.entity.push({template_path:target,name:'prize'});
+  const draft=documentFor(stringify(world)),actors=inspectActivities(draft,dependencies,path).actors;
+  const rows=[{id:'acquire',definition:'work',request:{kind:'acquire_vessel',actor:'ship',owner:'security',team:1,target:'prize'}}];
+  expect(()=>validateActivities(defs(),rows,actors)).not.toThrow();
+  const runtime={validate:vi.fn(async()=>({accepted:true}))};
+  const before=draft.read(path);await applyActivities({draft,dependencies,runtime,path,definitions:defs(),situations:rows});
+  expect(parse(draft.read(path)).situation).toEqual(rows);draft.undo();expect(draft.read(path)).toBe(before);draft.redo();expect(parse(draft.read(path)).situation).toEqual(rows);
+  for(const change of [row=>row.target='ship',row=>row.target='slot:player',row=>row.target='unknown',row=>row.team=2,row=>row.owner='repair']) {
+    const bad=structuredClone(rows);change(bad[0].request);expect(()=>validateActivities(defs(),bad,actors)).toThrow();
+  }
+  const local=structuredClone(actors);local.find(row=>row.id==='ship').profiles[0].security.local={};
+  expect(()=>validateActivities(defs(),rows,local)).toThrow();
+});

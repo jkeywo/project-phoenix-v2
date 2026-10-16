@@ -15,6 +15,13 @@ pub(crate) fn supports_recipe(
     config: &crate::entities::config::EntityConfig,
 ) -> Result<bool, String> {
     Ok(match request {
+        ActivityRequest::AcquireVessel { owner, team, .. } => config
+            .ship_config
+            .as_ref()
+            .zip(config.security.as_ref())
+            .is_some_and(|(ship, security)| {
+                crate::jobs::activity_bindings::acquisition_supported(owner, *team, ship, security)
+            }),
         ActivityRequest::Communication { owner, channel, .. } => config
             .ship_config
             .as_ref()

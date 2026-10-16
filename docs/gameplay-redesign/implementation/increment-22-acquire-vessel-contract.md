@@ -1,6 +1,6 @@
 # Bind vessel acquisition to a real planned activity
 
-**Adopted implementation contract, 16 October 2026. Runtime is not implemented.**
+**Adopted implementation contract, 16 October 2026. Source implementation awaits native integration verification.**
 Root adopted the independently reviewed contract with unavailable acquisition
 remaining pending; it adds no new unaccepted-task terminal lifecycle.
 This is a bounded increment 22/23 prerequisite. It connects the existing paid
@@ -247,3 +247,28 @@ repair results, generic unaccepted changed-goal closure/replanning, safe target
 recovery, accepted remote orders, physical return,
 Dock/service reports, evacuation, negotiated surrender, crew workload/device
 acceptance and full increments 20/23/24 remain open.
+
+## Bounded source implementation and evidence
+
+The first source slice adds the closed Vessel/AcquireVessel schema, accepted
+base-subject validation, own Security intent, the normal admitted Board binding,
+and the two exact evidence frontiers. It reuses the existing pending-event,
+Situation, snapshot and digest paths. New enum variants are appended to preserve
+existing enum ordinals; the added supported payload/state still requires the
+integrator's compatibility version advance.
+
+`assets/worlds/domains/security-acquisition.toml` is a reusable primitive.
+`tests/fixtures/acquisition-htn-world.toml` exercises full Activate content closure
+before the reduced machinery proof. Content tests cover unsupported subjects,
+invalid teams and missing target-specific hold. Security owner probes
+use the existing explicit incident and measured-return fixture, real admitted
+paid Board work, exact team binding, distinct ownership/return clocks, fresh JSON
+continuation over 1200 updates and malformed-candidate no-write assertions. These
+are authored native tests, not executed evidence until the integrator runs them;
+they do not establish a lobby, encounter, paid-sensing or device acceptance.
+
+Targeted client tests passed: 31 tests across Security teams, Workshop activities
+and Workshop planning; strict strings checked 6576 keys with no errors. Personnel
+independently reviewed the actual admission/AI/ownership/settlement core on
+source. Full candidate, authoring and proof review and native verification remain
+separately reported. No full increment 22, 23 or Patrol exit is claimed.

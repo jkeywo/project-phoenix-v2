@@ -228,14 +228,17 @@ export class PhSecurityTeams extends PhElement {
       button.className = 'job';
       button.dataset.target = job.target;
       button.dataset.action = job.action;
-      button.disabled = !job.eligible || !freeTeam;
+      const planned = job.acquiresVessel && (Array.isArray(bb?.planned_acquisitions) ? bb.planned_acquisitions : []).find(row =>
+        row.target === job.target && Number.isInteger(row.team) && row.team >= 0 && row.team < teams.length);
+      const dispatchTeam = planned ? teams.find(team => team.teamIdx === planned.team && team.canDispatch) : freeTeam;
+      button.disabled = !job.eligible || !dispatchTeam;
 
       const name = document.createElement('span');
       name.className = 'name';
       name.textContent = `${job.targetName ? t(job.targetName) : job.target} · ${job.acquiresVessel ? t('component.security_teams.acquire_vessel') : PhSecurityTeams.actionLabel(job.action)}`;
       const chip = document.createElement('span');
       chip.className = `chip ${job.priority}`;
-      chip.textContent = PhSecurityTeams.priorityLabel(job.priority);
+      chip.textContent = planned ? t('component.security_teams.planned_team', {n: String(planned.team + 1)}) : PhSecurityTeams.priorityLabel(job.priority);
       const risk = document.createElement('span');
       risk.className = 'risk';
       risk.textContent = t('component.security_teams.risk', {
@@ -246,9 +249,9 @@ export class PhSecurityTeams extends PhElement {
       button.appendChild(chip);
       button.appendChild(risk);
       button.addEventListener('click', () => {
-        if (button.disabled || !freeTeam || !this.sendAction) return;
+        if (button.disabled || !dispatchTeam || !this.sendAction) return;
         this.sendAction('dispatch_security_team', {
-          team_idx: freeTeam.teamIdx,
+          team_idx: dispatchTeam.teamIdx,
           target: job.target,
           action: job.action,
         });

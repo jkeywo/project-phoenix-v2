@@ -16,7 +16,7 @@ export const activityWorlds = draft => (draft?.paths() || []).filter(path=>path.
 // replace arrays; doctrine's separate keyed merge is outside this projection.
 function equipment(base, overrides) {
   const merge = (a,b) => object(a) && object(b) ? {...a,...Object.fromEntries(Object.entries(b).map(([key,value])=>[key,merge(a[key],value)]))} : structuredClone(b);
-  const keys = ['tags','repair','interior','damage','system','console','station','shield_arc','logistics','infrastructure','comms'];
+  const keys = ['tags','repair','interior','damage','system','console','station','shield_arc','logistics','infrastructure','comms','security','security_target'];
   const take = row => Object.fromEntries(keys.filter(key=>Object.hasOwn(row || {},key)).map(key=>[key,row[key]]));
   return merge(take(base),take(overrides));
 }
@@ -30,7 +30,7 @@ export function inspectActivities(draft, dependencies, path) {
   const offered=(slot,row)=>(slot.ships || []).map(ship=>resolve(ship.template_path,row?.overrides));
   for (const {row,profile} of rows) if(id(row.name)) {
     const index=shipRows.findIndex(value=>value.row===row),slot=slots[index];
-    actors.push({id:row.name,profiles:slot?offered(slot,row):[profile]});
+    actors.push({id:row.name,launchSlot:!!slot,profiles:slot?offered(slot,row):[profile]});
   }
   for (const [index,row] of slots.entries()) actors.push({id:'slot:'+row.id,profiles:shipRows[index]?offered(row,shipRows[index].row):[]});
   return {path,world,actors,definitions:structuredClone(world.situation_definition || []),situations:structuredClone(world.situation || [])};
@@ -51,6 +51,7 @@ export function activityChoices(profile) {
 }
 function supports(request, profile) {
   const {systems,targets,deliveries,communications}=activityChoices(profile);
+  if(request.kind==='acquire_vessel') return request.owner==='security' && systems.some(row=>row.id===request.owner && row.kind==='security') && !profile.security?.local && Number.isInteger(request.team) && request.team>=0 && request.team<profile.security?.team_count;
   if(request.kind==='communication') return request.request==='report_status' && systems.some(row=>row.id===request.owner && row.kind==='comms') && communications.some(row=>row.owner===request.owner && row.channel===request.channel);
   if(request.kind==='delivery') return deliveries.some(row=>row.owner===request.owner && row.source===request.source && row.destination===request.destination && row.commodity===request.commodity && request.amount<=row.max);
   if(!profile.damage || !systems.some(row=>row.id===request.owner && row.kind==='repair') || !Number.isInteger(request.team) || request.team<0 || request.team>255 || request.team>=profile.repair?.repair_team_count
@@ -87,10 +88,10 @@ export function validateActivities(definitions,situations,actors) {
   for(let i=0;i<situations.length;i++) {
     const row=situations[i], request=row.request, actor=actors.find(actor=>actor.id===request?.actor);
     if(!closed(row,['id','definition','request']) || !definitions.some(def=>def.id===row.definition) || !actor?.profiles.length || !id(request.owner)
-      || !(request.kind==='repair' ? closed(request,['kind','actor','owner','team','request','target','goal']) : (request.kind==='delivery' && closed(request,['kind','actor','owner','source','destination','commodity','amount']) && Number.isSafeInteger(request.amount) && request.amount>0) || (request.kind==='communication' && closed(request,['kind','actor','owner','recipient','channel','request']) && !request.recipient?.startsWith('slot:') && request.recipient!==request.actor && actors.some(row=>row.id===request.recipient && row.profiles.length && row.profiles.every(profile=>profile.comms?.radio)) && request.request==='report_status'))
+      || !(request.kind==='repair' ? closed(request,['kind','actor','owner','team','request','target','goal']) : (request.kind==='acquire_vessel' && closed(request,['kind','actor','owner','team','target']) && request.target!==request.actor && !request.target?.startsWith('slot:') && actors.some(row=>row.id===request.target && !row.launchSlot && row.profiles.length && row.profiles.every(profile=>(profile.security_target?.action || profile.security_target?.actions || []).some(action=>action.action==='board' && action.acquisition)))) || (request.kind==='delivery' && closed(request,['kind','actor','owner','source','destination','commodity','amount']) && Number.isSafeInteger(request.amount) && request.amount>0) || (request.kind==='communication' && closed(request,['kind','actor','owner','recipient','channel','request']) && !request.recipient?.startsWith('slot:') && request.recipient!==request.actor && actors.some(row=>row.id===request.recipient && row.profiles.length && row.profiles.every(profile=>profile.comms?.radio)) && request.request==='report_status'))
       || !actor.profiles.every(profile=>supports(request,profile))) throw Error('Bind an actual declared actor, owning System and supported physical request/goal on every offered hull.');
     for(const previous of situations.slice(0,i)) { const a=previous.request,b=request;
-      if(a.actor===b.actor && a.owner===b.owner && a.kind===b.kind && (a.kind==='repair' ? a.team===b.team || same(a.target,b.target) : a.kind==='delivery' ? a.source===b.source && a.destination===b.destination : a.recipient===b.recipient && a.channel===b.channel && a.request===b.request)) throw Error('Activity requests must be disjoint.'); }
+      if(a.actor===b.actor && a.owner===b.owner && a.kind===b.kind && (a.kind==='repair' || a.kind==='acquire_vessel' ? a.team===b.team || same(a.target,b.target) : a.kind==='delivery' ? a.source===b.source && a.destination===b.destination : a.recipient===b.recipient && a.channel===b.channel && a.request===b.request)) throw Error('Activity requests must be disjoint.'); }
   }
 }
 function write(source,definitions,situations) {

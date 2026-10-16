@@ -234,6 +234,20 @@ fn owner(request: &ActivityRequest) -> &SystemId {
 fn same_resource(left: &ActivityRequest, right: &ActivityRequest) -> bool {
     match (left, right) {
         (
+            ActivityRequest::AcquireVessel {
+                actor: a,
+                owner: ao,
+                team: at,
+                ..
+            },
+            ActivityRequest::AcquireVessel {
+                actor: b,
+                owner: bo,
+                team: bt,
+                ..
+            },
+        ) => a == b && ao == bo && at == bt,
+        (
             ActivityRequest::Communication {
                 actor: a, owner: x, ..
             },

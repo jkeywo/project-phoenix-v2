@@ -52,6 +52,7 @@ fn planning_findings(source: &WorldSource, loader: &dyn TemplateLoader) -> Vec<W
                 instances.arm(row, definition, 0)?;
             }
             for row in selected.graph.leaves.values() {
+                activity_bindings::acquisition_subject(&row.request, source, loader)?;
                 if let phoenix_sim_world::world::activities::ActivityRequest::Communication {
                     recipient,
                     ..

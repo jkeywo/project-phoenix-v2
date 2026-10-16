@@ -2613,6 +2613,7 @@ export function buildSecurityConsoleState(state, systemIds = []) {
   return {
     system_id: entry?.systemId ?? systemIds[0] ?? null,
     range: bb.range ?? 0,
+    planned_acquisitions: Array.isArray(bb.planned_acquisitions) ? bb.planned_acquisitions : [],
     jobs: Array.isArray(bb.jobs) ? bb.jobs : [],
     navigation: Array.isArray(bb.navigation) ? bb.navigation : [],
     compartments: bb.compartments || {},

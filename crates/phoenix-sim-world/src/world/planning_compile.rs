@@ -66,6 +66,9 @@ fn text(value: &str) -> bool {
 pub(super) fn validate_value(value: &Value) -> Result<(), String> {
     let valid = match value {
         Value::Actor(value) => text(value),
+        Value::Vessel(value) => {
+            phoenix_model::comms_channel::identity(value) && !value.starts_with("slot:")
+        }
         Value::System(value) => identifier(&value.0),
         Value::Team(_) | Value::RepairGoal(_) => true,
         Value::Store(value) | Value::Commodity(value) => identifier(value),
@@ -103,6 +106,17 @@ fn validate_parameters(parameters: &[Parameter]) -> Result<(), String> {
 fn template_arguments(request: &RequestTemplate) -> Vec<(&Argument, ParameterKind)> {
     use ParameterKind as Kind;
     match request {
+        RequestTemplate::AcquireVessel {
+            actor,
+            owner,
+            team,
+            target,
+        } => vec![
+            (actor, Kind::Actor),
+            (owner, Kind::System),
+            (team, Kind::Team),
+            (target, Kind::Vessel),
+        ],
         RequestTemplate::Communication {
             actor,
             owner,
@@ -428,6 +442,7 @@ impl DomainCatalog {
                             return Err("primitive references absent Scenario definition".into());
                         }
                         let family = match request {
+                            RequestTemplate::AcquireVessel { .. } => OperatorFamily::AcquireVessel,
                             RequestTemplate::Communication { .. } => {
                                 OperatorFamily::CommunicationReportStatus
                             }

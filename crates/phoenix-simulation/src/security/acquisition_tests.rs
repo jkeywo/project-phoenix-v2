@@ -805,3 +805,6 @@ fn a_foreign_person_in_actual_custody_is_not_an_empty_vessel() {
         "an originally populated crew profile stays unsupported after loss"
     );
 }
+
+#[path = "acquisition_activity_tests.rs"]
+mod activities;

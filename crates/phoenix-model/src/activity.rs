@@ -125,6 +125,14 @@ pub enum ActivityOutcome {
         returned: bool,
         outcome: JobOutcome,
     },
+    VesselAcquired {
+        vessel: String,
+        ownership: crate::vessel_ownership::VesselOperationalOwnerData,
+    },
+    SecuritySettled {
+        vessel: String,
+        outcome: JobOutcome,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -135,6 +143,8 @@ pub enum ActivityEvidenceKey {
     Delivery,
     CommunicationRead {},
     CommunicationReturned {},
+    VesselAcquired,
+    SecuritySettled,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -148,6 +158,8 @@ pub struct ActivityFact {
 impl ActivityFact {
     pub fn key(&self) -> ActivityEvidenceKey {
         match self.outcome {
+            ActivityOutcome::VesselAcquired { .. } => ActivityEvidenceKey::VesselAcquired,
+            ActivityOutcome::SecuritySettled { .. } => ActivityEvidenceKey::SecuritySettled,
             ActivityOutcome::RepairAchieved { stage, .. } => {
                 ActivityEvidenceKey::RepairAchieved { stage }
             }
@@ -162,7 +174,9 @@ impl ActivityFact {
     pub fn is_achievement(&self) -> bool {
         matches!(
             self.outcome,
-            ActivityOutcome::RepairAchieved { .. } | ActivityOutcome::CommunicationRead { .. }
+            ActivityOutcome::RepairAchieved { .. }
+                | ActivityOutcome::CommunicationRead { .. }
+                | ActivityOutcome::VesselAcquired { .. }
         )
     }
     pub fn validate(&self, now: u64) -> Result<(), String> {
@@ -208,6 +222,25 @@ impl ActivityFact {
             ActivityOutcome::CommunicationRead { .. }
             | ActivityOutcome::CommunicationReturned { .. } => {
                 unreachable!("handled communication evidence")
+            }
+            ActivityOutcome::VesselAcquired { vessel, ownership } => {
+                if !crate::comms_channel::identity(vessel) {
+                    return Err("invalid acquired vessel source reference".into());
+                }
+                let crate::vessel_ownership::VesselAcquisitionCause::SecurityBoard {
+                    scope,
+                    target,
+                    ..
+                } = &ownership.cause;
+                ownership.validate(target, self.tick)?;
+                if self.scope != scope.clone().into() || self.tick != ownership.acquired_tick {
+                    return Err("acquisition evidence differs from actual cause/scope/clock".into());
+                }
+            }
+            ActivityOutcome::SecuritySettled { vessel, .. } => {
+                if !crate::comms_channel::identity(vessel) || self.scope.owner.0 != "security" {
+                    return Err("invalid Security settlement reference/owner".into());
+                }
             }
             ActivityOutcome::RepairAchieved {
                 stage,
@@ -380,4 +413,14 @@ pub struct PlannedRepairDisposition {
     pub tick: u64,
     /// None is pending; false is actual callback refusal, true actual application.
     pub consequence_applied: Option<bool>,
+}
+
+/// Current released instruction; target is an already-earned own Console alias.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlannedAcquisition {
+    pub id: String,
+    pub released_tick: u64,
+    pub team: u32,
+    pub target: String,
 }

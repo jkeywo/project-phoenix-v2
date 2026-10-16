@@ -216,3 +216,15 @@ describe('PhSecurityTeams', () => {
   });
 
 });
+
+
+it('uses the exact planned team through the existing Board action without inventing targets', () => {
+  const send=vi.fn(),el=setup(send);
+  el.state={teams:[{state:'available'},{state:'available'}],targets:[{uuid:'earned-contact',in_range:true,actions:[{action:'board',acquires_vessel:true}]}],planned_acquisitions:[{id:'htn/prize/acquire',released_tick:7,team:1,target:'earned-contact'}]};
+  const button=el.shadowRoot.querySelector('[data-action="board"]');
+  expect(button.textContent).toContain(t('component.security_teams.planned_team',{n:'2'}));
+  button.click();expect(send).toHaveBeenCalledWith('dispatch_security_team',{team_idx:1,target:'earned-contact',action:'board'});
+  el.state={...el.state,teams:[{state:'available'},{state:'working'}]};
+  expect(el.shadowRoot.querySelector('[data-action="board"]').disabled).toBe(true);
+  el.state={...el.state,targets:[]};expect(el.shadowRoot.querySelector('[data-action="board"]')).toBeNull();
+});

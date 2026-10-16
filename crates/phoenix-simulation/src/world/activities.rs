@@ -1,4 +1,6 @@
 //! Bridge real committed owner results into the existing pending World owner.
+#[path = "activity_acquisition.rs"]
+pub(crate) mod acquisition;
 use crate::world::server::WorldContentRuntime;
 #[path = "activity_communication.rs"]
 mod communication;
@@ -51,7 +53,8 @@ pub(crate) fn arm_for_actor(
         }
         let mut bound = config.clone();
         match &mut bound.request {
-            ActivityRequest::Repair { actor: target, .. }
+            ActivityRequest::AcquireVessel { actor: target, .. }
+            | ActivityRequest::Repair { actor: target, .. }
             | ActivityRequest::Delivery { actor: target, .. }
             | ActivityRequest::Communication { actor: target, .. } => *target = actor.into(),
         }

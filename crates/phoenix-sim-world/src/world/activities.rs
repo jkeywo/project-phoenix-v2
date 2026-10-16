@@ -39,18 +39,26 @@ pub enum ActivityRequest {
         commodity: String,
         amount: i64,
     },
+    AcquireVessel {
+        actor: String,
+        owner: SystemId,
+        team: u32,
+        target: String,
+    },
 }
 impl ActivityRequest {
     pub fn actor(&self) -> &str {
         match self {
-            Self::Repair { actor, .. }
+            Self::AcquireVessel { actor, .. }
+            | Self::Repair { actor, .. }
             | Self::Delivery { actor, .. }
             | Self::Communication { actor, .. } => actor,
         }
     }
     pub fn owner(&self) -> &SystemId {
         match self {
-            Self::Repair { owner, .. }
+            Self::AcquireVessel { owner, .. }
+            | Self::Repair { owner, .. }
             | Self::Delivery { owner, .. }
             | Self::Communication { owner, .. } => owner,
         }
@@ -60,6 +68,24 @@ impl ActivityRequest {
             return Err("activity requires actual actor/System".into());
         }
         match self {
+            Self::AcquireVessel {
+                owner,
+                team,
+                target,
+                ..
+            } => {
+                if owner.0 != "security"
+                    || u8::try_from(*team).is_err()
+                    || !phoenix_model::comms_channel::identity(target)
+                    || target.starts_with("slot:")
+                    || target == self.actor()
+                {
+                    return Err(
+                        "acquisition requires Security team and distinct declared vessel subject"
+                            .into(),
+                    );
+                }
+            }
             Self::Communication {
                 recipient,
                 channel,
@@ -140,6 +166,14 @@ impl ActivityRequest {
         }
         match (self, other) {
             (
+                Self::AcquireVessel {
+                    team: a, target: x, ..
+                },
+                Self::AcquireVessel {
+                    team: b, target: y, ..
+                },
+            ) => a == b || x == y,
+            (
                 Self::Communication {
                     recipient: a,
                     channel: b,
@@ -178,6 +212,26 @@ impl ActivityRequest {
     }
     fn matches(&self, outcome: &ActivityOutcome) -> bool {
         match (self, outcome) {
+            (
+                Self::AcquireVessel {
+                    actor,
+                    owner,
+                    team,
+                    target,
+                },
+                ActivityOutcome::VesselAcquired { vessel, ownership },
+            ) => {
+                let phoenix_model::vessel_ownership::VesselAcquisitionCause::SecurityBoard {
+                    scope,
+                    team: actual,
+                    ..
+                } = &ownership.cause;
+                target == vessel && scope.actor == *actor && scope.owner == *owner && team == actual
+            }
+            (
+                Self::AcquireVessel { target, .. },
+                ActivityOutcome::SecuritySettled { vessel, .. },
+            ) => target == vessel,
             (
                 Self::Communication { request, .. },
                 ActivityOutcome::CommunicationRead { reference, .. },
@@ -271,7 +325,7 @@ impl SituationCondition {
             Self::CommunicationDeclined {} => instance.settled.as_ref().filter(|fact| matches!(&fact.outcome, ActivityOutcome::CommunicationReturned { outcome, .. } if outcome.facts.decision.as_ref().is_some_and(|decision| decision.choice == phoenix_model::comms_request::CommsRequestDecision::Decline))).map(|fact| fact.tick),
             Self::Accepted => instance.accepted.as_ref().and(instance.accepted_tick),
             Self::Achieved => instance.achieved.as_ref().filter(|fact| fact.is_achievement()).map(|fact| fact.tick),
-            Self::Settled { outcome } => instance.settled.as_ref().filter(|fact| matches!(&fact.outcome, ActivityOutcome::RepairSettled { outcome: actual } if actual == outcome)).map(|fact| fact.tick),
+            Self::Settled { outcome } => instance.settled.as_ref().filter(|fact| matches!(&fact.outcome, ActivityOutcome::RepairSettled { outcome: actual } | ActivityOutcome::SecuritySettled { outcome: actual, .. } if actual == outcome)).map(|fact| fact.tick),
             Self::Received => instance.settled.as_ref().filter(|fact| matches!(fact.outcome, ActivityOutcome::Delivery { returned: false, .. })).map(|fact| fact.tick),
             Self::Returned => instance.settled.as_ref().filter(|fact| matches!(fact.outcome, ActivityOutcome::Delivery { returned: true, .. })).map(|fact| fact.tick),
         }
@@ -496,6 +550,17 @@ impl SituationInstances {
         instance.accepted_tick = Some(tick);
         Ok(Some(id.clone()))
     }
+    pub fn accept_acquisition(
+        &mut self,
+        actor: &str,
+        owner: &SystemId,
+        team: u32,
+        target: &str,
+        job: JobId,
+        tick: u64,
+    ) -> Result<Option<String>, String> {
+        self.accept(actor, owner, job, tick, |_, binding| matches!(binding, ActivityRequest::AcquireVessel { team: expected, target: actual, .. } if *expected == team && actual == target))
+    }
     pub fn accept_repair(
         &mut self,
         actor: &str,
@@ -554,7 +619,9 @@ impl SituationInstances {
         }
         let achieved = matches!(
             outcome,
-            ActivityOutcome::RepairAchieved { .. } | ActivityOutcome::CommunicationRead { .. }
+            ActivityOutcome::RepairAchieved { .. }
+                | ActivityOutcome::CommunicationRead { .. }
+                | ActivityOutcome::VesselAcquired { .. }
         );
         if if achieved {
             instance.achieved.is_some()
@@ -724,7 +791,9 @@ impl SituationInstances {
                             ActivityRequest::Communication { .. },
                             ActivityExecutionIdentity::Physical { .. }
                         ) | (
-                            ActivityRequest::Repair { .. } | ActivityRequest::Delivery { .. },
+                            ActivityRequest::Repair { .. }
+                                | ActivityRequest::Delivery { .. }
+                                | ActivityRequest::AcquireVessel { .. },
                             ActivityExecutionIdentity::Communication { .. }
                         )
                     )

@@ -340,6 +340,8 @@ fn operator_target_rows(
 /// here asks who sent the command (AGENTS.md rule 6).
 #[allow(clippy::type_complexity)]
 pub fn handle_security_commands(
+    mut activity_runtime: Option<ResMut<WorldContentRuntime>>,
+    activity_base: Option<Res<crate::world::config::WorldConfig>>,
     tick: Option<Res<crate::sim_tick::SimTick>>,
     knowledge: Query<(
         &crate::ship_plugin::ShipConfigComponent,
@@ -474,7 +476,8 @@ pub fn handle_security_commands(
                             } else {
                                 security.config.deploy_duration_secs
                             };
-                            if !security.teams.deploy(
+                            let mut next_teams = security.teams.clone();
+                            if !next_teams.deploy(
                                 team_idx as usize,
                                 target.clone(),
                                 action,
@@ -491,11 +494,39 @@ pub fn handle_security_commands(
                                         doctrine: acquisition.doctrine.clone(),
                                         accepted_tick: tick.as_ref().map_or(0, |tick| tick.0),
                                     };
-                                security.teams.jobs.teams[team_idx as usize]
+                                next_teams.jobs.teams[team_idx as usize]
                                     .as_mut()
                                     .expect("the just admitted Security job exists")
                                     .activity
                                     .acquisition_order = Some(order);
+                            }
+                            let job = next_teams.jobs.teams[team_idx as usize]
+                                .as_ref()
+                                .expect("prepared actual Job")
+                                .id;
+                            let next_activity = if offered.acquisition.is_some() {
+                                crate::world::activities::acquisition::prepare(
+                                    activity_runtime.as_deref(),
+                                    activity_base.as_deref(),
+                                    &operator_uuid,
+                                    &security_system_id(),
+                                    u32::from(team_idx),
+                                    &target,
+                                    job,
+                                    tick.as_ref().map_or(0, |tick| tick.0),
+                                )
+                            } else {
+                                Ok(None)
+                            };
+                            let Ok(next_activity) = next_activity else {
+                                security.last_refusal = Some(SecurityRefusal::ActionUnavailable);
+                                continue;
+                            };
+                            security.teams = next_teams;
+                            if let (Some(runtime), Some(next)) =
+                                (activity_runtime.as_deref_mut(), next_activity)
+                            {
+                                runtime.situations = next;
                             }
                             security.last_refusal = None;
                             push_lifecycle(
@@ -607,6 +638,7 @@ enum TeamTransition {
 /// * **Return.** A withdrawing team that has arrived is available again.
 #[allow(clippy::type_complexity)]
 pub fn tick_security_teams(
+    tick: Option<Res<crate::sim_tick::SimTick>>,
     physical_q: Query<&ShipDamage>,
     access_q: Query<&crate::ship::access::InteriorAccess>,
     mut power_q: Query<&mut crate::ship::power::ShipPowerSystem>,
@@ -929,6 +961,26 @@ pub fn tick_security_teams(
             if let Some(refusal) = transition.refusal {
                 security.last_refusal = Some(refusal);
             }
+            if matches!(
+                transition.next,
+                TeamTransition::Home | TeamTransition::Unavailable
+            ) {
+                if let (Some(runtime), Some(job)) = (
+                    runtime.as_deref_mut(),
+                    security.teams.jobs.teams[index].as_ref(),
+                ) {
+                    if let Some(outcome) = job.outcome {
+                        crate::world::activities::acquisition::settled(
+                            runtime,
+                            &uuid.0,
+                            &job.owner,
+                            job.id,
+                            outcome,
+                            tick.as_ref().map_or(0, |tick| tick.0),
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -1227,7 +1279,69 @@ pub fn operate_security_ai(
         let team_readout: Vec<_> = security.teams.iter().cloned().collect();
         let unassigned = unassigned_candidates(&candidates, &team_readout);
         let free = security.free_team_indices();
-        let picks = select_assignments(&unassigned, free.len());
+        // Released mission work names a real team; co-hosted tabs confer no
+        // extra feed, and the existing candidate still supplies all gates.
+        let known =
+            config.map(|config| config.0.observations_for_system(&system_id, &blackboards.0));
+        let planned = known
+            .as_ref()
+            .and_then(|known| known.get(&system_id))
+            .and_then(|board| match board {
+                SystemBlackboard::Security(board) => Some(&board.planned_acquisitions),
+                _ => None,
+            });
+        let mut assignments: Vec<(usize, usize)> = Vec::new();
+        for intent in planned.into_iter().flatten() {
+            let Ok(team) = usize::try_from(intent.team) else {
+                continue;
+            };
+            if !free.contains(&team) || assignments.iter().any(|(used, _)| *used == team) {
+                continue;
+            }
+            let Some((index, _)) = unassigned.iter().enumerate().find(|(index, candidate)| {
+                candidate.action == SecurityAction::Board
+                    && !assignments.iter().any(|(_, used)| used == index)
+                    && config.is_some_and(|config| {
+                        knowledge
+                            .get(entity)
+                            .ok()
+                            .and_then(|tracks| {
+                                super::acquisition::acquisition_alias(
+                                    &config.0,
+                                    blackboards,
+                                    tracks,
+                                    &candidate.target,
+                                )
+                            })
+                            .as_deref()
+                            == Some(intent.target.as_str())
+                    })
+            }) else {
+                continue;
+            };
+            assignments.push((team, index));
+        }
+        let remaining: Vec<_> = unassigned
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !assignments.iter().any(|(_, used)| used == index))
+            .map(|(index, candidate)| (index, candidate.clone()))
+            .collect();
+        let ordinary: Vec<_> = remaining
+            .iter()
+            .map(|(_, candidate)| candidate.clone())
+            .collect();
+        let remaining_free: Vec<_> = free
+            .iter()
+            .copied()
+            .filter(|team| !assignments.iter().any(|(used, _)| used == team))
+            .collect();
+        for (team, pick) in remaining_free.into_iter().zip(select_assignments(
+            &ordinary,
+            free.len().saturating_sub(assignments.len()),
+        )) {
+            assignments.push((team, remaining[pick].0));
+        }
 
         let mut claimed = host_dispatched.copied().unwrap_or_default();
         let mut emitted = false;
@@ -1302,10 +1416,7 @@ pub fn operate_security_ai(
             emitted = true;
         }
 
-        for (slot, pick) in picks.iter().enumerate() {
-            let Some(team_idx) = free.get(slot) else {
-                break;
-            };
+        for (team_idx, pick) in &assignments {
             let candidate = &unassigned[*pick];
             // An unreachable safety net, not a decision: `unassigned_candidates`
             // already removed every job a committed team holds, so a duplicate
@@ -1382,6 +1493,9 @@ pub fn operate_security_ai(
 /// `strings.csv` ids.
 #[allow(clippy::type_complexity)]
 pub fn publish_security_blackboard(
+    activity_runtime: Option<Res<WorldContentRuntime>>,
+    activity_base: Option<Res<crate::world::config::WorldConfig>>,
+    tick: Option<Res<crate::sim_tick::SimTick>>,
     targets: Query<(
         &EntityUuid,
         Option<&EntityName>,
@@ -1390,6 +1504,7 @@ pub fn publish_security_blackboard(
         Option<&phoenix_sim_session::vessel_ownership::VesselOperationalOwner>,
     )>,
     mut ships: Query<(
+        &EntityUuid,
         &Transform,
         Option<&crate::ship_plugin::ShipConfigComponent>,
         Option<&crate::science::broad::BroadTracks>,
@@ -1402,7 +1517,7 @@ pub fn publish_security_blackboard(
     }
     let key = security_system_id();
     let rows = target_rows(&targets);
-    for (transform, config, tracks, security, mut blackboards) in ships.iter_mut() {
+    for (uuid, transform, config, tracks, security, mut blackboards) in ships.iter_mut() {
         let mut rows = operator_target_rows(&rows, security, transform.translation);
         let alias = |source: &str| {
             config.and_then(|config| {
@@ -1508,7 +1623,28 @@ pub fn publish_security_blackboard(
                 job.target_entity = job.target_entity.as_deref().and_then(&alias);
             }
         }
+        let planned_acquisitions = crate::world::activities::acquisition::planned(
+            activity_runtime.as_deref(),
+            activity_base.as_deref(),
+            &uuid.0,
+            &key,
+            tick.as_ref().map_or(0, |tick| tick.0),
+            |target| {
+                rows.iter()
+                    .any(|row| {
+                        row.uuid == target
+                            && row
+                                .config
+                                .actions
+                                .iter()
+                                .any(|action| action.acquisition.is_some())
+                    })
+                    .then(|| alias(target))
+                    .flatten()
+            },
+        );
         let blackboard = SystemBlackboard::Security(SecurityBlackboard {
+            planned_acquisitions,
             range: security.config.range,
             teams,
             jobs,

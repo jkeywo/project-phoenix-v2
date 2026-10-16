@@ -5090,6 +5090,9 @@ pub struct SecurityBlackboard {
     /// the last command.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refusal: Option<String>,
+    /// Own released acquisition work; targets are existing permitted contact aliases.
+    #[serde(default)]
+    pub planned_acquisitions: Vec<crate::activity::PlannedAcquisition>,
 }
 
 /// One Security team's live state, as the console shows it (issue #1346).

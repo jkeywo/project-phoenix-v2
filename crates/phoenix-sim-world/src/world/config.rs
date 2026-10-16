@@ -3252,6 +3252,11 @@ impl WorldConfig {
     pub fn validate_situation_actors(&self) -> Result<(), String> {
         for instance in &self.situations {
             self.validate_situation_actor(instance.request.actor())?;
+            if let super::activities::ActivityRequest::AcquireVessel { target, .. } =
+                &instance.request
+            {
+                self.validate_situation_actor(target)?;
+            }
             if let super::activities::ActivityRequest::Communication { recipient, .. } =
                 &instance.request
             {

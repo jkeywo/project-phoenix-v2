@@ -44,6 +44,17 @@ fn instantiate(
         };
     }
     Ok(match template {
+        RequestTemplate::AcquireVessel {
+            actor,
+            owner,
+            team,
+            target,
+        } => ActivityRequest::AcquireVessel {
+            actor: get!(actor, Actor),
+            owner: get!(owner, System),
+            team: u32::from(get!(team, Team)),
+            target: get!(target, Vessel),
+        },
         RequestTemplate::Communication {
             actor,
             owner,
@@ -112,7 +123,10 @@ fn compatible(condition: &SituationCondition, request: &ActivityRequest) -> bool
         }
         SituationCondition::Accepted => true,
         SituationCondition::Achieved | SituationCondition::Settled { .. } => {
-            matches!(request, ActivityRequest::Repair { .. })
+            matches!(
+                request,
+                ActivityRequest::Repair { .. } | ActivityRequest::AcquireVessel { .. }
+            )
         }
         SituationCondition::Received | SituationCondition::Returned => {
             matches!(request, ActivityRequest::Delivery { .. })

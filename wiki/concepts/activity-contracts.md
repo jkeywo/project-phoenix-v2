@@ -2,7 +2,7 @@
 title: Activity Contracts
 type: concept
 tags: [world, activities, repair, logistics, continuation]
-sources: [crates/phoenix-sim-world/src/world/planning_dispositions.rs, crates/phoenix-simulation/src/world/planning_monitor.rs, crates/phoenix-sim-world/src/world/planning_opportunities.rs, crates/phoenix-content-preparation/src/world/opportunities.rs, crates/phoenix-simulation/src/world/opportunities.rs, crates/phoenix-simulation/src/world/opportunity_inputs.rs, crates/phoenix-model/src/activity.rs, crates/phoenix-sim-world/src/world/activities.rs, crates/phoenix-sim-world/src/world/planning.rs, crates/phoenix-sim-world/src/world/planning_compile.rs, crates/phoenix-sim-world/src/world/planning_runtime.rs, crates/phoenix-sim-world/src/world/planning_temporal.rs, crates/phoenix-simulation/src/world/planning_inputs.rs, crates/phoenix-simulation/src/lobby/crew_replication.rs, crates/phoenix-simulation/src/snapshot/crew_presence.rs, crates/phoenix-content-preparation/src/world/planning.rs, crates/phoenix-simulation/src/world/planning.rs, gui/planned-requests.js, editor/workshop-planning.js, gui/workshop-planning-panel.js, crates/phoenix-simulation/src/debug/scenario.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/activities.rs, crates/phoenix-simulation/src/world/server/triggers.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/resources/logistics_server.rs, crates/phoenix-simulation/src/snapshot/activities.rs, crates/phoenix-simulation/src/sim_digest_activities.rs, crates/phoenix-sim-gameplay/src/jobs/activity_bindings.rs, crates/phoenix-content-preparation/src/world/activity_bindings.rs, editor/workshop-activities.js, gui/workshop-activities-panel.js, crates/phoenix-simulation/src/debug/scenario.rs]
+sources: [crates/phoenix-simulation/src/world/activity_acquisition.rs, crates/phoenix-simulation/src/security/acquisition_activity_tests.rs, assets/worlds/domains/security-acquisition.toml, crates/phoenix-sim-world/src/world/planning_dispositions.rs, crates/phoenix-simulation/src/world/planning_monitor.rs, crates/phoenix-sim-world/src/world/planning_opportunities.rs, crates/phoenix-content-preparation/src/world/opportunities.rs, crates/phoenix-simulation/src/world/opportunities.rs, crates/phoenix-simulation/src/world/opportunity_inputs.rs, crates/phoenix-model/src/activity.rs, crates/phoenix-sim-world/src/world/activities.rs, crates/phoenix-sim-world/src/world/planning.rs, crates/phoenix-sim-world/src/world/planning_compile.rs, crates/phoenix-sim-world/src/world/planning_runtime.rs, crates/phoenix-sim-world/src/world/planning_temporal.rs, crates/phoenix-simulation/src/world/planning_inputs.rs, crates/phoenix-simulation/src/lobby/crew_replication.rs, crates/phoenix-simulation/src/snapshot/crew_presence.rs, crates/phoenix-content-preparation/src/world/planning.rs, crates/phoenix-simulation/src/world/planning.rs, gui/planned-requests.js, editor/workshop-planning.js, gui/workshop-planning-panel.js, crates/phoenix-simulation/src/debug/scenario.rs, crates/phoenix-sim-world/src/world/config.rs, crates/phoenix-simulation/src/world/activities.rs, crates/phoenix-simulation/src/world/server/triggers.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/resources/logistics_server.rs, crates/phoenix-simulation/src/snapshot/activities.rs, crates/phoenix-simulation/src/sim_digest_activities.rs, crates/phoenix-sim-gameplay/src/jobs/activity_bindings.rs, crates/phoenix-content-preparation/src/world/activity_bindings.rs, editor/workshop-activities.js, gui/workshop-activities-panel.js, crates/phoenix-simulation/src/debug/scenario.rs]
 updated: 2026-10-16
 ---
 
@@ -189,3 +189,22 @@ uses the existing script sandbox/budget and actual effect result/tick; it alone
 chooses any Promise consequence. Prior real assignments still settle normally.
 The new native autonomous/override probes are authored and awaiting integration
 execution; source review of projection and client tests are separate evidence.
+
+## Planned vessel acquisition
+
+`Value::Vessel` names a distinct accepted base-world subject while `Actor` remains
+the sole executing ship. The accepted content closure validates actual external
+Security capability, finite team and the target's opt-in all-None hold. The
+existing Security publication adds only a released acquisition's earned contact
+alias and exact team; the existing Human Board action and ordinary Security AI
+share that view and admission.
+
+`world/activity_acquisition.rs` stages Situation acceptance with the actual newly
+minted Security Job before either state is committed. The ownership transaction
+records `VesselAcquired` from its exact retained receipt; the team's later real
+Home/Unavailable outcome records `SecuritySettled`. Earlier independent capture
+is not credited. Unavailable unaccepted work remains pending with no new Job,
+fact or promise result. There is no acquisition-specific changed-goal lifecycle.
+Candidate validation reconstructs the original typed source and joins target,
+team, Job mint, cause, clocks and surviving physical records before writes.
+The structural owner tests are separate from encounter, lobby or Patrol evidence.

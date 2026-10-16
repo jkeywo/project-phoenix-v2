@@ -81,6 +81,8 @@ pub(super) fn fact(mut acc: u64, value: &ActivityFact) -> u64 {
     acc = scope(acc, &value.scope);
     acc = fold_u64(acc, value.tick);
     match &value.outcome {
+        ActivityOutcome::VesselAcquired { .. } => fold_serde(fold_u64(acc, 5), &value.outcome),
+        ActivityOutcome::SecuritySettled { .. } => fold_serde(fold_u64(acc, 6), &value.outcome),
         ActivityOutcome::CommunicationRead { .. } => fold_serde(fold_u64(acc, 3), &value.outcome),
         ActivityOutcome::CommunicationReturned { .. } => {
             fold_serde(fold_u64(acc, 4), &value.outcome)
@@ -135,6 +137,9 @@ pub(super) fn instances(mut acc: u64, values: &SituationInstances) -> u64 {
         acc = fold_str(acc, value.request.actor());
         acc = fold_str(acc, &value.request.owner().0);
         match &value.request {
+            ActivityRequest::AcquireVessel { .. } => {
+                acc = fold_serde(fold_u64(acc, 3), &value.request);
+            }
             ActivityRequest::Communication { .. } => {
                 acc = fold_serde(fold_u64(acc, 2), &value.request);
             }
@@ -226,6 +231,7 @@ pub(super) fn plan(mut acc: u64, value: &phoenix_sim_world::world::planning::Pla
             acc,
             match arg {
                 Value::Actor(_) => "actor",
+                Value::Vessel(_) => "vessel",
                 Value::System(_) => "system",
                 Value::Team(_) => "team",
                 Value::RepairRequest(_) => "repair_request",
@@ -237,9 +243,10 @@ pub(super) fn plan(mut acc: u64, value: &phoenix_sim_world::world::planning::Pla
             },
         );
         acc = match arg {
-            Value::Actor(value) | Value::Store(value) | Value::Commodity(value) => {
-                fold_str(acc, value)
-            }
+            Value::Actor(value)
+            | Value::Vessel(value)
+            | Value::Store(value)
+            | Value::Commodity(value) => fold_str(acc, value),
             Value::System(value) => fold_str(acc, &value.0),
             Value::Team(value) => fold_u64(acc, u64::from(*value)),
             Value::Quantity(value) => fold_u64(acc, *value as u64),

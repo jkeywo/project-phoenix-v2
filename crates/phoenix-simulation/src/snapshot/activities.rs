@@ -228,7 +228,7 @@ fn planning_frontier(
 pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), String> {
     super::activity_communication::validate_emissions(snapshot)?;
     let has_repair_intents = snapshot.entities.iter().flat_map(|row| &row.blackboards).any(|(_, board)| {
-        matches!(board, crate::core::messages::SystemBlackboard::Repair(board) if !board.planned_intents.is_empty())
+        matches!(board, crate::core::messages::SystemBlackboard::Repair(board) if !board.planned_intents.is_empty()) || matches!(board, crate::core::messages::SystemBlackboard::Security(board) if !board.planned_acquisitions.is_empty())
     });
     let Some(stored) = snapshot.scenario.as_ref() else {
         if world
@@ -310,7 +310,10 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
             || slot_source.as_ref().is_some_and(|(uuid, _)| uuid == actor);
         let mut expected = authored.request.clone();
         match &mut expected {
-            ActivityRequest::Repair {
+            ActivityRequest::AcquireVessel {
+                actor: expected, ..
+            }
+            | ActivityRequest::Repair {
                 actor: expected, ..
             }
             | ActivityRequest::Delivery {
@@ -340,6 +343,33 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
         if let (Some(scope), Some(row)) = (instance.accepted.as_ref().filter(|_| !terminal), row) {
             match &instance.request {
                 ActivityRequest::Communication { .. } => {}
+                ActivityRequest::AcquireVessel { team, target, .. } => {
+                    let job_id = scope
+                        .physical_job()
+                        .ok_or("acquisition requires physical JobId")?;
+                    let job = row
+                        .security
+                        .as_ref()
+                        .and_then(|jobs| jobs.jobs.teams.get(*team as usize))
+                        .and_then(Option::as_ref)
+                        .ok_or("unsettled acquisition lost actual Security job")?;
+                    let expected = world
+                        .get_resource::<crate::world::config::WorldConfig>()
+                        .and_then(|base| base.name_to_uuid.get(target))
+                        .ok_or("acquisition lost accepted subject identity")?;
+                    if job.id != job_id
+                        || job.owner != scope.owner
+                        || job.outcome.is_some()
+                        || job.activity.acquisition_order.as_ref().is_none_or(|order| {
+                            &order.target != expected
+                                || Some(order.accepted_tick) != instance.accepted_tick
+                        })
+                    {
+                        return Err(
+                            "unsettled acquisition disagrees with exact physical order".into()
+                        );
+                    }
+                }
                 ActivityRequest::Repair { team, .. } => {
                     let physical_job = scope
                         .physical_job()
@@ -433,6 +463,7 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
                         &config.repair,
                         &config.logistics,
                         &config.energy,
+                        &config.security,
                     ))
                 };
                 if recipe(&candidate).map_err(|error| error.to_string())?
@@ -449,6 +480,198 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
             accepted
         };
         match &instance.request {
+            ActivityRequest::AcquireVessel {
+                owner,
+                team,
+                target,
+                ..
+            } => {
+                if !config
+                    .ship_config
+                    .as_ref()
+                    .zip(config.security.as_ref())
+                    .is_some_and(|(ship, security)| {
+                        crate::jobs::activity_bindings::acquisition_supported(
+                            owner, *team, ship, security,
+                        )
+                    })
+                {
+                    return Err("acquisition has unsupported accepted Security equipment".into());
+                }
+                if let Some(scope) = &instance.accepted {
+                    if let Some(row) = row {
+                        let state = row
+                            .security
+                            .as_ref()
+                            .ok_or("accepted acquisition lost Security history owner")?;
+                        if state.jobs.owner != scope.owner
+                            || scope
+                                .physical_job()
+                                .is_none_or(|job| job.0 >= state.jobs.next_id)
+                            || *team as usize >= state.jobs.teams.len()
+                        {
+                            return Err(
+                                "acquisition scope exceeds real finite Security mint/team".into()
+                            );
+                        }
+                    }
+                }
+                let subject = accepted_recipe(world, snapshot, target)?;
+                let action = subject
+                    .security_target
+                    .as_ref()
+                    .and_then(|target| target.action(crate::security::SecurityAction::Board))
+                    .and_then(|action| action.acquisition.as_ref())
+                    .ok_or("acquisition subject lost accepted effect")?;
+                let base = world
+                    .get_resource::<crate::world::config::WorldConfig>()
+                    .ok_or("acquisition requires accepted base World")?;
+                let target_uuid = base
+                    .name_to_uuid
+                    .get(target)
+                    .ok_or("acquisition subject lost original identity")?;
+                if let Some(row) = row {
+                    let boards = crate::server_app::ShipSystemBlackboards(
+                        row.blackboards
+                            .iter()
+                            .map(|(owner, board)| {
+                                (
+                                    phoenix_model::identity::SystemId(owner.clone()),
+                                    board.clone(),
+                                )
+                            })
+                            .collect(),
+                    );
+                    let tracks = row
+                        .broad
+                        .as_ref()
+                        .map(|tracks| crate::science::broad::BroadTracks(tracks.clone()));
+                    for board in row.blackboards.iter().filter_map(|(_, board)| match board {
+                        crate::core::messages::SystemBlackboard::Security(board) => Some(board),
+                        _ => None,
+                    }) {
+                        for planned in board
+                            .planned_acquisitions
+                            .iter()
+                            .filter(|planned| planned.id == *id)
+                        {
+                            let alias = config.ship_config.as_ref().zip(tracks.as_ref()).and_then(
+                                |(ship, tracks)| {
+                                    crate::security::acquisition::acquisition_alias(
+                                        ship,
+                                        &boards,
+                                        tracks,
+                                        target_uuid,
+                                    )
+                                },
+                            );
+                            if alias.as_deref() != Some(planned.target.as_str()) {
+                                return Err("planned acquisition substitutes another permitted contact for its subject".into());
+                            }
+                        }
+                    }
+                }
+                if target.starts_with("slot:")
+                    || !base.gm_npc_doctrine_palette.iter().any(|entry| {
+                        entry.id == action.doctrine
+                            && entry.origin_layer.is_none()
+                            && entry.targets.contains(target)
+                            && !entry.doctrine.is_empty()
+                            && entry.doctrine.iter().all(|objective| {
+                                matches!(
+                                    crate::ai::core::parse_doctrine_directive(objective),
+                                    Ok(crate::core::messages::AiDirective::None)
+                                )
+                            })
+                    })
+                {
+                    return Err("unsupported acquisition subject hold binding".into());
+                }
+                for fact in instance
+                    .achieved
+                    .iter()
+                    .chain(instance.settled.iter())
+                    .chain(pending.iter().filter(|fact| fact.instance == *id))
+                {
+                    match &fact.outcome {
+                        ActivityOutcome::VesselAcquired { ownership, .. } => {
+                            let phoenix_model::vessel_ownership::VesselAcquisitionCause::SecurityBoard { scope, target, team:actual, accepted_tick, .. } = &ownership.cause;
+                            if world
+                                .get_resource::<crate::entities::config_cache::FactionRegistryResource>()
+                                .is_none_or(|registry| registry.0.get(&ownership.faction).is_none())
+                            {
+                                return Err("acquisition fact has an unregistered frozen faction".into());
+                            }
+                            if target != target_uuid
+                                || actual != team
+                                || Some(*accepted_tick) != instance.accepted_tick
+                                || ownership.doctrine != action.doctrine
+                                || Some(scope.clone().into()) != instance.accepted
+                            {
+                                return Err(
+                                    "acquisition fact lost exact original cause binding".into()
+                                );
+                            }
+                            if let Some(target) = snapshot
+                                .entities
+                                .iter()
+                                .find(|row| &row.uuid == target_uuid)
+                            {
+                                if target.operational_owner.as_ref() != Some(ownership) {
+                                    return Err(
+                                        "acquisition fact contradicts surviving target owner"
+                                            .into(),
+                                    );
+                                }
+                            }
+                            if let Some(actor) = row {
+                                if let Some(job) = actor
+                                    .security
+                                    .as_ref()
+                                    .and_then(|state| state.jobs.teams.get(*team as usize))
+                                    .and_then(Option::as_ref)
+                                    .filter(|job| job.id == scope.job)
+                                {
+                                    if job.activity.acquisition.as_ref() != Some(ownership) {
+                                        return Err("acquisition fact contradicts surviving original Security job".into());
+                                    }
+                                }
+                            }
+                        }
+                        ActivityOutcome::SecuritySettled { outcome, .. } => {
+                            if *outcome == phoenix_model::job::JobOutcome::Completed
+                                && !instance
+                                    .achieved
+                                    .iter()
+                                    .chain(pending.iter().filter(|prior| prior.instance == *id))
+                                    .any(|prior| {
+                                        matches!(
+                                            prior.outcome,
+                                            ActivityOutcome::VesselAcquired { .. }
+                                        ) && prior.scope == fact.scope
+                                            && prior.tick <= fact.tick
+                                    })
+                            {
+                                return Err("successful Security settlement lost its original acquisition evidence".into());
+                            }
+                            if let Some(actor) = row {
+                                if let Some(job) = actor
+                                    .security
+                                    .as_ref()
+                                    .and_then(|state| state.jobs.teams.get(*team as usize))
+                                    .and_then(Option::as_ref)
+                                    .filter(|job| Some(job.id) == fact.scope.physical_job())
+                                {
+                                    if job.outcome != Some(*outcome) {
+                                        return Err("Security settlement contradicts surviving physical job".into());
+                                    }
+                                }
+                            }
+                        }
+                        _ => return Err("acquisition has foreign-family evidence".into()),
+                    }
+                }
+            }
             ActivityRequest::Communication { .. } => {
                 super::activity_communication::validate_instance(
                     world, snapshot, instance, authored, &config, &pending, id,
@@ -598,6 +821,21 @@ pub(super) fn validate(world: &World, snapshot: &PhoenixSnapshot) -> Result<(), 
                     continue;
                 }
                 let supported = match &config.request {
+                    ActivityRequest::AcquireVessel { owner, team, .. } => live
+                        .and_then(|entity| {
+                            Some((
+                                world.get::<crate::ship_plugin::ShipConfigComponent>(entity)?,
+                                world.get::<crate::security::server::ShipSecurityTeams>(entity)?,
+                            ))
+                        })
+                        .is_some_and(|(ship, security)| {
+                            crate::jobs::activity_bindings::acquisition_supported(
+                                owner,
+                                *team,
+                                &ship.0,
+                                &security.config,
+                            )
+                        }),
                     ActivityRequest::Communication { owner, channel, .. } => live
                         .and_then(|entity| {
                             Some((
@@ -703,6 +941,42 @@ fn validate_plan_publications(
         for (owner, board) in &row.blackboards {
             let mut ids = std::collections::BTreeSet::new();
             match board {
+                SystemBlackboard::Security(board) => {
+                    if board.planned_acquisitions.len()
+                        > phoenix_sim_world::world::planning::MAX_LEAVES
+                    {
+                        return Err("planned acquisition publication exceeds bound".into());
+                    }
+                    for request in &board.planned_acquisitions {
+                        let Some((
+                            ActivityRequest::AcquireVessel {
+                                owner: expected,
+                                team,
+                                ..
+                            },
+                            tick,
+                            actor,
+                        )) = released.get(&request.id).copied()
+                        else {
+                            return Err("Security publication has no released acquisition".into());
+                        };
+                        if row.uuid.as_str() != actor
+                            || expected.0.as_str() != owner.as_str()
+                            || request.team != *team
+                            || request.released_tick != tick
+                            || !ids.insert(&request.id)
+                            || !board.targets.iter().any(|target| {
+                                target.uuid == request.target
+                                    && target.actions.iter().any(|action| action.acquires_vessel)
+                            })
+                        {
+                            return Err(
+                                "Security publication differs from permitted released acquisition"
+                                    .into(),
+                            );
+                        }
+                    }
+                }
                 SystemBlackboard::Repair(board) => {
                     if board.planned_intents.len()
                         > phoenix_model::activity::MAX_PLANNED_REPAIR_INTENTS

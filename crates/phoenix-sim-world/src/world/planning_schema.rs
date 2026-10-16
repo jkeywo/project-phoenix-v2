@@ -28,6 +28,7 @@ pub enum ParameterKind {
     Store,
     Commodity,
     Quantity,
+    Vessel,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -46,6 +47,7 @@ pub enum Value {
     Store(String),
     Commodity(String),
     Quantity(i64),
+    Vessel(String),
 }
 // The ordinary legacy command enum predates closed source schemas. Preserve
 // its exact type while rejecting ignored nested keys at this authoring edge.
@@ -67,6 +69,7 @@ impl Value {
     pub fn kind(&self) -> ParameterKind {
         match self {
             Self::Actor(_) => ParameterKind::Actor,
+            Self::Vessel(_) => ParameterKind::Vessel,
             Self::System(_) => ParameterKind::System,
             Self::Team(_) => ParameterKind::Team,
             Self::RepairRequest(_) => ParameterKind::RepairRequest,
@@ -117,6 +120,7 @@ pub enum OperatorFamily {
     CommunicationReportStatus,
     RepairInternal,
     DeliveryLocal,
+    AcquireVessel,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -217,6 +221,12 @@ pub enum RequestTemplate {
         destination: Argument,
         commodity: Argument,
         amount: Argument,
+    },
+    AcquireVessel {
+        actor: Argument,
+        owner: Argument,
+        team: Argument,
+        target: Argument,
     },
 }
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

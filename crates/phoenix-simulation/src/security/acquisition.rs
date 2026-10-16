@@ -17,7 +17,7 @@ pub struct AcquisitionTargetDefinition {
 
 /// A capture candidate is knowledge-limited: an independently selectable
 /// contact and its observed disabled assessment must both be held by Security.
-pub(super) fn acquisition_alias(
+pub(crate) fn acquisition_alias(
     config: &crate::ship::config::ShipConfig,
     boards: &crate::server_app::ShipSystemBlackboards,
     tracks: &crate::science::broad::BroadTracks,
@@ -279,6 +279,17 @@ pub fn commit_ready_acquisitions(world: &mut World) {
             }
         }
         // Same physical job always closes this frontier, including failed preflight.
+        if let Some(ownership) = acquired.as_ref() {
+            if let Some(mut runtime) =
+                world.get_resource_mut::<crate::world::server::WorldContentRuntime>()
+            {
+                crate::world::activities::acquisition::acquired(
+                    &mut runtime,
+                    ownership.clone(),
+                    now,
+                );
+            }
+        }
         let succeeded = acquired.is_some();
         let mut security = world
             .get_mut::<ShipSecurityTeams>(entity)

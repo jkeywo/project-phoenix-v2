@@ -3084,6 +3084,7 @@ fn security_blackboard_round_trips_and_omits_its_optional_fields_when_idle() {
     };
 
     let working = SystemBlackboard::Security(SecurityBlackboard {
+        planned_acquisitions: Vec::new(),
         jobs: Vec::new(),
         navigation: Vec::new(),
         compartments: Default::default(),
@@ -3131,6 +3132,7 @@ fn security_blackboard_round_trips_and_omits_its_optional_fields_when_idle() {
     );
 
     let idle = SystemBlackboard::Security(SecurityBlackboard {
+        planned_acquisitions: Vec::new(),
         jobs: Vec::new(),
         navigation: Vec::new(),
         compartments: Default::default(),

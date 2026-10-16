@@ -1,0 +1,35 @@
+# Structural acquisition consumer, not a Patrol return/evacuation scenario.
+[global]
+seed=1572
+title="Acquisition activity owner proof"
+description="One real Board job and distinct owner/home evidence."
+
+[[available_ships]]
+template_path="assets/entities/alliance_cruiser.toml"
+[[entity]]
+template_path="assets/entities/alliance_cruiser.toml"
+name="operator"
+spawn_on="game_start"
+transform={position=[0.0,0.0,0.0]}
+[[entity]]
+template_path="assets/entities/acquirable_harrow.toml"
+name="prize"
+transform={position=[80.0,0.0,0.0]}
+
+[[gm_npc_doctrine_palette]]
+id="acquired-hold"
+label="Hold acquired vessel"
+targets=["prize"]
+[[gm_npc_doctrine_palette.doctrine]]
+id="acquired-hold"
+directive_kind="None"
+base_priority=100.0
+
+[planning]
+id="acquire-prize"
+task="security::acquire"
+arguments={actor={kind="actor",value="operator"},target={kind="vessel",value="prize"},team={kind="team",value=1}}
+[[planning.import]]
+path="assets/worlds/domains/security-acquisition.toml"
+as="security"
+names=["acquire"]

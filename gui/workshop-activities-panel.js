@@ -37,7 +37,7 @@ export function mountWorkshopActivities({root,provider,runtime,draft:getDraft,bu
   }
   function addInstance(value={id:'',definition:'',request:{kind:'repair'}}) {
     const fieldset=el('fieldset'),name=input('instance-'+serial++,value.id),definition=input('binding-'+serial++,value.definition);
-    const actor=select('actor-'+serial++,inspection.actors.map(row=>[row.id,row.id]),value.request.actor),kind=select('kind-'+serial++,[['repair',t('workshop.activities.repair')],['delivery',t('workshop.activities.delivery')],['communication',t('workshop.activities.communication')]],value.request.kind),body=el('div');
+    const actor=select('actor-'+serial++,inspection.actors.map(row=>[row.id,row.id]),value.request.actor),kind=select('kind-'+serial++,[['acquire_vessel',t('workshop.activities.acquire_vessel')],['repair',t('workshop.activities.repair')],['delivery',t('workshop.activities.delivery')],['communication',t('workshop.activities.communication')]],value.request.kind),body=el('div');
     const row={fieldset,name,definition,actor,kind,read:()=>null};instanceRows.push(row);
     function detail(request={}) {
       body.replaceChildren();const profile=inspection.actors.find(row=>row.id===actor.value)?.profiles[0],choices=activityChoices(profile || {});
@@ -52,6 +52,12 @@ export function mountWorkshopActivities({root,provider,runtime,draft:getDraft,bu
         body.append(label(owner,'owner'),label(team,'team'),label(visit,'visit'),label(target,'target'),label(goal,'goal'));
         row.read=()=>{const work=JSON.parse(target.value);return{kind:'repair',actor:actor.value,owner:owner.value,team:team.valueAsNumber,
           request:visit.value==='exact'?{type:'Work',data:work}:JSON.parse(visit.value),target:work,goal:goal.value};};
+      } else if(kind.value==='acquire_vessel') {
+        const owner=select('owner-'+serial++,choices.systems.filter(row=>row.id==='security' && row.kind==='security').map(row=>[row.id,row.id]),request.owner);
+        const team=input('team-'+serial++,request.team ?? 0,'number');team.min='0';team.step='1';team.max=String((profile?.security?.team_count || 1)-1);
+        const target=select('target-'+serial++,inspection.actors.filter(row=>row.id!==actor.value && !row.id.startsWith('slot:') && !row.launchSlot && row.profiles.length && row.profiles.every(profile=>(profile.security_target?.action || profile.security_target?.actions || []).some(action=>action.action==='board' && action.acquisition))).map(row=>[row.id,row.id]),request.target);
+        body.append(label(owner,'owner'),label(team,'team'),label(target,'target'));
+        row.read=()=>({kind:'acquire_vessel',actor:actor.value,owner:owner.value,team:team.valueAsNumber,target:target.value});
       } else if(kind.value==='communication') {
         const owner=select('owner-'+serial++,[...new Set(choices.communications.map(row=>row.owner))].map(row=>[row,row]),request.owner);
         const channel=select('channel-'+serial++,choices.communications.map(row=>[row.channel,row.channel]),request.channel);

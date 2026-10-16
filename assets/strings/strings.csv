@@ -6584,3 +6584,5 @@ workshop.security.doctrine,Workshop accepted post-acquisition palette ID,Post-ac
 workshop.security.save_target,Workshop target effect save button,Save target effect,Save target effect,Save target effect,source
 entity.utility_shuttle.name,Ordinary optional unarmed Full3D utility equipment,Utility Shuttle,,,
 entity.marking_beacon.name,Finite weapon-delivered sensor equipment,Marking beacon,,,
+component.security_teams.planned_team,Released acquisition requests one actual Security team,Planned · Team {n},Planned · Team {n},Planned · Team {n},source
+workshop.activities.acquire_vessel,Typed Security acquisition activity authoring,Acquire vessel,Acquire vessel,Acquire vessel,source

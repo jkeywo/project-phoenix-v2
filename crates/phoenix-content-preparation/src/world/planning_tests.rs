@@ -107,3 +107,43 @@ fn unresolved_or_unexported_domain_refuses_before_activation_while_inspect_stays
     );
     assert!(run(&sources, LoadPolicy::Activate).is_err());
 }
+
+#[test]
+fn acquisition_domain_closes_over_actual_actor_and_opt_in_subject_before_activation() {
+    const WORLD: &str = "tests/fixtures/acquisition-htn-world.toml";
+    const DOMAIN: &str = "assets/worlds/domains/security-acquisition.toml";
+    let run = |text: String| {
+        let reader = MemoryReader::new([(WORLD, text), (DOMAIN, source(DOMAIN))]);
+        let loaded = load::load(
+            LoadRequest::new(WORLD, &reader, &NoSiblingScripts, LoadPolicy::Activate),
+            &crate::entities::loader::FixtureTemplates,
+            &crate::entities::include_resolve::FixtureFragments,
+        );
+        let loaded = loaded.map_err(|error| format!("{error:?}"))?;
+        let findings = findings(
+            &WorldSource::new(WORLD, &reader.0[WORLD], &loaded.config),
+            &crate::entities::loader::FixtureTemplates,
+        );
+        if findings.is_empty() {
+            Ok(())
+        } else {
+            Err(format!("{findings:?}"))
+        }
+    };
+    let original = source(WORLD);
+    run(original.clone()).expect("actual accepted acquisition source closure");
+    for text in [
+        original.replace("value=\"prize\"", "value=\"unknown\""),
+        original.replace("acquirable_harrow.toml", "ship_harrow_patrol.toml"),
+        original.replace(
+            "team={kind=\"team\",value=1}",
+            "team={kind=\"team\",value=250}",
+        ),
+        original.replace("targets=[\"prize\"]", "targets=[]"),
+    ] {
+        assert!(
+            run(text).is_err(),
+            "unsupported actual acquisition source must refuse"
+        );
+    }
+}

@@ -183,6 +183,7 @@ pub(crate) fn collect_world_events(
         Option<&crate::lobby::crew_replication::ShipCrewPresence>,
         Option<&crate::ship_plugin::HumanSeekingHosts>,
         Option<&crate::comms::radio::RadioProfile>,
+        Option<&crate::security::server::ShipSecurityTeams>,
     )>,
     opportunity_actors: Query<(
         &crate::entities::spawner::EntityUuid,
@@ -229,6 +230,7 @@ pub(crate) fn collect_world_events(
                 presence,
                 hosts,
                 radio,
+                security,
             ) in actors
             {
                 crate::world::activities::arm_for_actor(
@@ -237,7 +239,30 @@ pub(crate) fn collect_world_events(
                     &uuid.0,
                     slot.map(|id| id.0.as_str()),
                     tick.0,
-                    |request| matches!(request, phoenix_sim_world::world::activities::ActivityRequest::Communication { owner, channel, .. } if radio.is_some_and(|radio| crate::jobs::activity_bindings::communication_supported(owner, channel, &config.0, &radio.0))),
+                    |request| match request {
+                        phoenix_sim_world::world::activities::ActivityRequest::Communication {
+                            owner,
+                            channel,
+                            ..
+                        } => radio.is_some_and(|radio| {
+                            crate::jobs::activity_bindings::communication_supported(
+                                owner, channel, &config.0, &radio.0,
+                            )
+                        }),
+                        phoenix_sim_world::world::activities::ActivityRequest::AcquireVessel {
+                            owner,
+                            team,
+                            ..
+                        } => security.is_some_and(|security| {
+                            crate::jobs::activity_bindings::acquisition_supported(
+                                owner,
+                                *team,
+                                &config.0,
+                                &security.config,
+                            )
+                        }),
+                        _ => false,
+                    },
                 );
                 let forecast = sources
                     .zip(ratings)
@@ -261,6 +286,18 @@ pub(crate) fn collect_world_events(
                     tick.0,
                     forecast.as_ref(),
                     |request| match request {
+                        phoenix_sim_world::world::activities::ActivityRequest::AcquireVessel {
+                            owner,
+                            team,
+                            ..
+                        } => security.is_some_and(|security| {
+                            crate::jobs::activity_bindings::acquisition_supported(
+                                owner,
+                                *team,
+                                &config.0,
+                                &security.config,
+                            )
+                        }),
                         phoenix_sim_world::world::activities::ActivityRequest::Communication {
                             owner,
                             channel,

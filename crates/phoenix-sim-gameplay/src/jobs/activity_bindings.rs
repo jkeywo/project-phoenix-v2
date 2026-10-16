@@ -164,3 +164,18 @@ pub fn communication_supported(
             .system(owner)
             .is_some_and(|system| system.kind == crate::ship::system_registry::COMMS_KIND)
 }
+
+/// Immutable actual external Security equipment; observations remain a live gate.
+pub fn acquisition_supported(
+    owner: &SystemId,
+    team: u32,
+    ship: &ShipConfig,
+    security: &crate::security::SecurityConfig,
+) -> bool {
+    owner == &crate::ship::system_registry::security_system_id()
+        && team < u32::from(security.team_count)
+        && security.local.is_none()
+        && ship
+            .system(owner)
+            .is_some_and(|system| system.kind == crate::ship::system_registry::SECURITY_KIND)
+}

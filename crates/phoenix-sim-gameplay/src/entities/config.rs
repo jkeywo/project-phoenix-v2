@@ -600,7 +600,9 @@ impl EntityConfig {
                 .find(|s| s.kind == crate::ship::system_registry::SHIELDS_KIND);
             let mut shields_console = shields_system.and_then(|s| s.console.clone());
             let shields_ai_only = shields_system.is_none_or(|system| system.ai_only);
-            if shields_console.is_none() {
+            // Only real arc equipment needs a generated knowledge scope. An
+            // unshielded hull must retain exactly its authored Consoles.
+            if !config.shield_arcs.is_empty() && shields_console.is_none() {
                 let id = phoenix_model::identity::ConsoleId("generated-shields".into());
                 if ship_config.console(&id).is_none() {
                     ship_config

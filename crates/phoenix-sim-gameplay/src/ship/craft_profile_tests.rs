@@ -365,3 +365,74 @@ fn identity_decoy_refuses_other_capabilities_unpaid_work_and_missing_actual_owne
         assert!(validate_entity(&invalid).is_err(), "case {fault}");
     }
 }
+
+#[test]
+fn actual_accepted_unshielded_recipes_keep_only_authored_consoles() {
+    for (path, expected) in [
+        ("assets/entities/battery_decoy.toml", "decoy"),
+        ("assets/entities/physical_probe.toml", "probe"),
+    ] {
+        let resolved = crate::test_fixtures::resolve_from_disk(path).unwrap();
+        let config = EntityConfig::from_toml(&resolved.toml).unwrap();
+        assert!(config.shield_arcs.is_empty());
+        let ship = config.ship_config.as_ref().unwrap();
+        assert_eq!(ship.consoles.len(), 1, "{path}");
+        assert_eq!(ship.consoles[0].id.0, expected, "{path}");
+        assert!(ship.systems.iter().all(|system| system
+            .console
+            .as_ref()
+            .is_some_and(|console| console.0 == expected)));
+    }
+}
+
+#[test]
+fn actual_accepted_unshielded_recipe_preserves_explicit_empty_console() {
+    let resolved =
+        crate::test_fixtures::resolve_from_disk("assets/entities/physical_probe.toml").unwrap();
+    let mut source: toml::Value = toml::from_str(&resolved.toml).unwrap();
+    source
+        .get_mut("console")
+        .unwrap()
+        .as_array_mut()
+        .unwrap()
+        .push(toml::from_str::<toml::Value>("id='authored-empty'").unwrap());
+    let config = EntityConfig::from_toml(&toml::to_string(&source).unwrap()).unwrap();
+    let ship = config.ship_config.as_ref().unwrap();
+    assert_eq!(
+        ship.consoles
+            .iter()
+            .map(|console| console.id.0.as_str())
+            .collect::<Vec<_>>(),
+        ["probe", "authored-empty"]
+    );
+}
+
+#[test]
+fn actual_accepted_shielded_hull_keeps_generated_arc_scope_and_feeds() {
+    use phoenix_model::console::ConsoleObservationKind;
+    let resolved =
+        crate::test_fixtures::resolve_from_disk("assets/entities/ship_harrow_patrol.toml").unwrap();
+    let config = EntityConfig::from_toml(&resolved.toml).unwrap();
+    assert!(!config.shield_arcs.is_empty());
+    let ship = config.ship_config.as_ref().unwrap();
+    assert!(ship
+        .systems
+        .iter()
+        .all(|system| system.kind != SHIELDS_KIND));
+    let generated = ship
+        .consoles
+        .iter()
+        .filter(|console| console.id.0 == "generated-shields")
+        .collect::<Vec<_>>();
+    assert_eq!(generated.len(), 1);
+    for arc in &config.shield_arcs {
+        let id = shield_arc_system_id(&arc.id).unwrap();
+        let system = ship.system(&id).unwrap();
+        assert_eq!(system.console.as_ref(), Some(&generated[0].id));
+        assert!(system.ai_only);
+        assert!(generated[0]
+            .feeds
+            .iter()
+            .any(|feed| feed.source == id && feed.kind == ConsoleObservationKind::ShieldArc));
+    }
+}

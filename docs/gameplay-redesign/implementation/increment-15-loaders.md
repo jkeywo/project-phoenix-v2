@@ -1,7 +1,7 @@
 # Increment 15: optional shared loader groups
 
-Prepared against `32ba7bb6`; exact mechanics below await integrator review.
-No runtime code or playable exit is claimed by this specification.
+Prepared against `32ba7bb6`; adopted by the integrator after review of
+`e97960e7`, before runtime implementation. No playable exit is claimed.
 
 ## Selected scope and actual owners
 
@@ -72,10 +72,15 @@ claims use one derived arbitration pass after that tick's admitted readiness and
 manual load intents settle; they cannot claim earlier merely because their old
 message handler ran first. Do not persist another request queue: standing targets
 remain tube state, and an unserved one-shot manual request receives its ordinary
-refusal/wait outcome without reserving imaginary stock.
+correlated refusal/wait outcome without reserving imaginary stock. A positively
+accepted one-shot must either commit its actual loading claim or receive an
+explicit failure outcome; never silently drop it. Standing readiness remains
+automatic and needs no repeated per-round clicks.
 
 Allocate only up to remaining group work and the member's physical request, then
-request ordinary tube work. Debit group budget by actual progressed work, not
+request ordinary tube work. The exact paid tube delta includes the existing
+Operation/power grant once; the group gate must not multiply that same fraction
+again. Debit group budget by actual progressed work, not
 requested work. An unfunded/unavailable high-priority tube must leave capacity
 for another feasible member without paying, consuming a round or advancing a
 cooldown. Unloading competes for the same handling capacity as loading.

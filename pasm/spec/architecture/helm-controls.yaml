@@ -480,6 +480,7 @@ entities:
         - Keeping this blackboard 3D allows bounded and full-3D ships to share the same contract even while current consumer logic remains mostly planar.
         - Desired facing belongs beside desired velocity because some helm requests care more about orientation than translation.
         - "The actual HelmMotionPlan resource retains its last plan between AI cadence updates and joins existing snapshots. Its census classification is DeferredFold: only navigation_generation is newly folded in a stable actual-actor namespace. Legacy held desired-motion, hazard and docking fields remain the existing unfolded gap; no whole-resource fold is claimed. An unbound plan preserves its previous digest contribution."
+        - "[ai] A complete snapshot owns the entire retained motion-plan frontier, including absence. Restore replaces bootstrap plans with the captured UUID-keyed entries; if every captured entry is absent, it clears an existing plan map. Mixed captures restore only present entries onto the receiving entity identities. Restore never replans against newer positions or preserves an unrelated bootstrap avoidance plan for a Human-controlled or disabled ship. This changes no planner cadence, controller, input permission, state classification or fold coverage."
     architecture:
       classification: authoritative
       owner: helm-motion-planner
@@ -490,11 +491,16 @@ entities:
       status: observed
       paths:
         - crates/phoenix-sim-gameplay/src/ship/helm_planner.rs
+        - crates/phoenix-simulation/src/snapshot/capture.rs
+        - crates/phoenix-simulation/src/snapshot/application.rs
       symbols:
         - HelmMotionPlan
         - ShipMotionPlan
+        - capture_motion_plans
+        - restore_motion_plans
       tests:
         - crates/phoenix-sim-gameplay/src/ship/helm_planner_tests.rs
+        - crates/phoenix-simulation/src/snapshot/capture_tests.rs
         - cargo test
 
   - state: helm-lateral-thrust-blackboard-state

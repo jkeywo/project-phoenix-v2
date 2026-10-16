@@ -9,6 +9,13 @@ Browser/native-device acceptance, performance/balance comparison and station
 activity evidence are separate obligations. Root owns sequential native
 execution and the eventual combined integration gates.
 
+Latest recorded boundary: selected native owners at `37c165a4` completed
+**1616 passed, 2 failed**; the affected host batch at `dd1490ae` completed
+**8 passed, 1 failed**. Test-only corrections through `8ac62cce` are integrated,
+but their pending retries are not recorded as passes. See the final follow-up
+below. The user requested finishing verification of 8–12 and then pausing;
+implementation work for increments 13–24 is parked.
+
 ## Tested source boundaries
 
 | Source revision | Evidence boundary |
@@ -17,6 +24,11 @@ execution and the eventual combined integration gates.
 | `d8af35dc5d7937acae315e5bd91ce03204b6a70d` | Production panel correction: retain the edited recipe's authored position. Affected three client tests passed. |
 | `450836ac1db45893ecfce0f4fdaafe2aa5820111` | Adds the whole-host production continuation proof. This was the clean pinned PASM source. Adding a test is not a native pass. |
 | `9493bc5a605e749814d3f0759de78dffcdde095e` | Workshop mount/current authoring journey corrections, updated manifest fixture and five additional mechanism edits in the render journey. This is the compiled source for the completed seven-target host batch. |
+| `4ceb7d8ac0ac7ddb2ffd680bfca49c0ff063a529` | Logical collision-attribution rules 0.74; expanded Simulation owner retry and the later clean pinned PASM checks. |
+| `dd1490aeeb253536f1f34f5b03dd3de5580ce6e4` | Completed affected host retry with intact-salvage failure diagnostics; before its held-Helm correction. |
+| `37c165a4df599b10316d133e402e8b3491b7cc5d` | Completed combined four-owner selection: 1616 passed, 2 failed. |
+| `2cdc979b` | Current-runtime wiki reference corrections; documentation does not change the tested runtime. |
+| `8ac62cce` | Integrates the source-reviewed unarmed-wrapper and Tactical-rating test corrections; targeted execution pending at this record's cutoff. |
 | Later test-only commits listed below | Not covered by the original `34aa3e04` owner executable or the `9493bc5a` host executable. Their source reviews are not execution evidence. |
 
 The run log files cited below are local `.phoenix/` artifacts, not committed
@@ -94,10 +106,10 @@ commit pin or native pass until the integrator records one.
 | Increment | Evidence addressed in this pass | Still required before its verified exit |
 |---|---|---|
 | 8 — Power, batteries, coolant and heat | Selected finite energy/Power owners, authoring controls and actual-hardware AI pins. | Resolve owner failures and rerun affected owners; actual UI operation/delegation, continuation evidence and representative resource/balance/activity measurements. |
-| 9 — Shield energy and protection | Selected shield owners; new paid-recovery/continuation test source; shield authoring edit in the render journey. | Native retry of the corrected owners; the added shield host proof passed separately at its stated revision; actual redistribution/recovery UI and AI journeys, balance/activity evidence. |
+| 9 — Shield energy and protection | Corrected shield owner/restore tests pass in the later selected run; paid shield whole-host proof passes separately at its stated revision; shield authoring edit is in the render journey. | Current matching-host redistribution/recovery UI and AI journeys, balance/activity evidence. |
 | 10 — Decks, compartments and routes | Selected interior owners and explicit accepted physical fixture corrections; physical-route host target passed at the stated source. | Browser layout authoring, preview/Test and supported hull/team journeys. |
 | 11 — Component damage and restoration | Selected damage/repair owners; strict impact/layout schemas retained; physical route/damage/repair continuation targets selected. | Resolve relevant owner failures; prove damage plus a real restoration path, malformed-state refusal and usable Human/AI repair presentation on the integrated source. |
-| 12 — Logistics and production | Selected finite stores/deliveries/ports/production owners; production authoring retry; logistics, recovery, facility supply and new fabrication host targets selected. | Resolve the observed Logistics, recovery and final fabrication-completion failures and rerun their actual continuation/no-write targets; actual authored replenishment/production operation, preview/Test and representative workload/resource evidence. |
+| 12 — Logistics and production | Later Logistics 3/3, Recovery 3/3 and Production 2/2 host retries pass at their stated revisions, including finite goods, real work, full JSON continuation and malformed-state refusal. | Complete the outstanding intact-equipment recovery journey and current matching authoring/preview/Test operation; representative workload/resource and performance/balance evidence. |
 
 The corrected `tests/smoke/workshop-resources.render.spec.js` retains the real
 Workshop providers/WASM validator, inherited-data refusal/materialisation,
@@ -162,3 +174,83 @@ Logs:
 The coverage ledger also passes at `fee6b25e`:216 catalogue entries across25
 increments. No current all-green integration gate, increment closure or push is
 claimed.
+
+## Follow-up through `8ac62cce` — verification still open
+
+The expanded Simulation retry at `4ceb7d8a` completed **425 passed, 15 failed**
+in 507.60s. Three sparse restore fixtures still omitted the accepted Cruiser's
+physical turret owners; additional weapon-fixture failures were also exposed.
+The actual accepted mount profile/state and required clocks are now constructed
+in those fixtures (`8b4e5e72`), including a valid full restore before the deliberate
+missing-team-owner negative. Restore guards were retained. The failures remain
+recorded in `.phoenix/verify-8-12-canonical-clock-owner-retry.log`.
+
+The subsequent combined owner command at `37c165a4` completed **FAIL: 1616 passed,
+2 failed**, after a 4m 12s build. It includes the original mechanism filters plus
+the affected weapon owners; this remains targeted, renderer-free evidence,
+not a whole-workspace or pre-push gate pass.
+
+| Native owner | Executed result |
+|---|---|
+| Content Preparation | **12 passed, 0 failed**, 3.66s. |
+| Gameplay | **521 passed, 0 failed**, 0.44s. |
+| World | **11 passed, 0 failed**, 0.01s. |
+| Simulation | **1072 passed, 2 failed**, 674.68s. The shield/actor full-restore and missing-team-owner checks now pass. |
+
+Evidence: `.phoenix/verify-8-12-final-native-owners.log`. Its two actual failures
+and subsequent source corrections are:
+
+| Failure | Integrated correction; execution status at this cutoff |
+|---|---|
+| `absent_equipment_never_borrows_another_ships_or_global_weapons` incorrectly required the accepted civilian Hauler's entire WeaponsConsole declaration to be absent. | `feb5a748` checks the real AI-only wrapper separately from hardware: empty phaser/blaster lists, no weapon System kinds, no Player phaser owner, empty NPC phaser owner and absent NPC torpedo/blaster owners. Existing refusal, ammunition and inactive-beam checks remain. **Source-reviewed; targeted native retry running, result pending.** |
+| `strike_blaster_charge_and_cancel_are_free_and_emission_pays_exactly_once` failed its charging/progress assertion. | `8ac62cce` applies the actual Tactical rating before charging and checks normal Human ownership/admission while preserving finite energy, cancellation and exact emission-payment assertions. **Source-reviewed; targeted native retry running, result pending.** |
+
+The affected host batch compiled at `dd1490ae` completed **FAIL: 8 passed,
+1 failed**, after a 3m 23s build. It does not include the held-Helm correction.
+
+| Host target | Executed result |
+|---|---|
+| `fitting_facility_continuation` | **1 passed, 1 failed**, 104.78s. Actual powered allied facility refit and continuation pass; intact recovery fails before admission because the current offered equipment list is empty. |
+| `production_continuation` | **2 passed, 0 failed**, 16.61s. The second fabrication batch completes with real work and every full JSON360 state/digest comparison; malformed owner/WIP/claim refusal also passes. |
+| `recovery_continuation` | **3 passed, 0 failed**, 20.31s. Paid finite-goods continuation, finite-source competition and malformed-state no-write pass after the logical collision timestamp correction. |
+| Selected `snapshot_resume` checks | **2 passed, 0 failed**, 19.70s; 89 filtered out. Power next-tick/modifier continuation over a different bootstrap and Dynasty strike/Backfill continuation pass through the complete schedule. |
+
+Evidence: `.phoenix/verify-8-12-canonical-host-retry.log`. The separate previous
+Logistics retry remains **3/3 PASS**, 24.94s at `fee6b25e`, rather than being counted
+again in this four-target host batch.
+
+Intact salvage's actual diagnostic shows receiver position
+`[-5.1542025,0,0.05501263]` and source position `[7.364777,0,0]`: distance 12.52
+exceeds the unchanged eight-unit tool range. The source remains neutralized;
+its installed beam retains a Healthy condition with nonzero physical incident
+dose, and the Recovery Console receives the earned current Science selection.
+The failure is not evidence for granting a guessed contact or extending tool
+range. Integrated source correction `0931723a` applies the same single disabling
+incident earlier, claims Human Helm through ordinary admission, sends normal
+zero thrust/steering/lateral controls and checks physical plus permitted measured
+range until Recovery admission. Both fresh resume hosts establish matching crew
+ownership. **That correction is source-reviewed but has not executed at this
+record's cutoff; intact salvage remains open.**
+
+The latest pinned PASM checks at `4ceb7d8a` all pass:
+
+- Validation: **Status: OK**, 1202 entities, 630 non-error findings
+  (629 warnings and one concern), `.phoenix/verify-8-12-final-pasm.log`.
+- Scan: **Validation: OK**, 4157 files, 8694 observed dependencies, 18 Cargo packages,
+  `.phoenix/verify-8-12-final-scan.log`.
+- Traceability: **Validation: OK**, 246 rows,
+  `.phoenix/verify-8-12-final-traceability.log`.
+
+These pinned checks do not silently cover later changes. Current compatibility
+remains protocol 45 / snapshot 88 / rules 0.74; those version identifiers are not
+acceptance results. Wiki reference corrections at `2cdc979b` record current code
+and do not establish another runtime pass.
+
+The previously recorded client 121/121, component Chromium 43/43 and affected
+Workshop 53/53 results retain their own source/configuration boundaries. Current
+matching-host Workshop/render, reconnect/multiplayer, native-device and Human
+acceptance, representative performance/balance and station activity remain open.
+The two owner retries and intact-salvage retry must be recorded before describing
+those corrections as verified. No all-green integrated gate, increment closure,
+push or completion through 24 is claimed. Finish the agreed 8–12 verification and
+necessary corrections, commit the evidence, then pause; later work remains parked.

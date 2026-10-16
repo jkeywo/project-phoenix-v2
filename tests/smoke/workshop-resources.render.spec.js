@@ -25,9 +25,12 @@ function entitySources(directory = 'assets/entities') {
 const inherited = resolveTemplate('assets/entities/alliance_cruiser.toml', entitySources(), parse);
 if (!inherited.ok) throw new Error('Actual Cruiser fixture failed include resolution');
 const capacities = inherited.resolved.value.infrastructure.capacity;
+// The selected primary resource cannot also remain an additional choice.
+const additionalResources = inherited.resolved.value.umbilical.allowed_resources.filter(id => id !== 'torpedoes');
 const BASE_TEXT = `includes=["alliance_cruiser.toml"]
 [umbilical]
 capacity="torpedoes"
+allowed_resources=${JSON.stringify(additionalResources)}
 direction="collect"
 [resource_services.torpedoes]
 kind="capacity"

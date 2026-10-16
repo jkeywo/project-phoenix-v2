@@ -177,6 +177,7 @@ fn optional_namespaces_leave_unregistered_and_registered_empty_worlds_unchanged(
 #[test]
 fn capture_namespace_orders_actual_receivers_and_keeps_disabled_canonical_rows() {
     use crate::comms::capture::ShipCommsCapture;
+    use crate::core::messages::SystemId;
     use phoenix_sim_gameplay::electronic::capture::CaptureState;
     fn fixture(reverse: bool) -> World {
         let mut world = World::new();

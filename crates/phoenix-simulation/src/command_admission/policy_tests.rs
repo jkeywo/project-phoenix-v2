@@ -16,7 +16,7 @@ fn capture_handle_bounds_and_actual_comms_owner_apply_to_human_and_ai_admission(
         .system_home_station(config.system(&owner).unwrap())
         .unwrap()
         .clone();
-    let mut sessions = crate::lobby::Sessions::default();
+    let mut sessions = crate::lobby::Sessions(crate::lobby::session::SessionManager::new());
     sessions
         .0
         .register("decoder".into(), "Decoder".into())

@@ -280,6 +280,7 @@ pub(crate) fn tick(
             // One fixed interval of emission is staged against the real owner.
             // A partial grant cannot produce a full-quality free observation.
             if !power
+                .bypass_change_detection()
                 .0
                 .work_continuous_if(owner, dt, 1.0 / factor, |grant| {
                     Ok((grant.fraction >= 1.0 && grant.granted > 0.0).then_some(()))
@@ -288,6 +289,9 @@ pub(crate) fn tick(
             {
                 continue;
             }
+            // Match the former clone-and-assign transaction: refusals must not
+            // mark this owner, while accepted payment always does.
+            power.set_changed();
             readout.0.insert(owner.clone());
             emissions.push(Emission {
                 origin,

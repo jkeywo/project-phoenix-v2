@@ -461,7 +461,8 @@ fn ordinary_compiled_science_tree_reads_explicit_mission_then_uses_shared_admiss
 
 #[test]
 fn consumer_payment_matches_clone_emitter_with_partial_and_receiver_refusal() {
-    for case in 0..6 {
+    for (case, already_changed) in (0..6).flat_map(|case| [false, true].map(|dirty| (case, dirty)))
+    {
         let (mut actual, a, target_a) = fixture();
         let (mut expected, b, target_b) = fixture();
         prepare(&mut actual, a, &target_a);
@@ -524,11 +525,36 @@ fn consumer_payment_matches_clone_emitter_with_partial_and_receiver_refusal() {
                     .accept_external_illumination = false;
             }
         }
+        // Fixture setup must not hide accidental change detection on refusal.
+        actual.clear_trackers();
+        expected.clear_trackers();
+        if already_changed {
+            actual.get_mut::<ShipPowerSystem>(a).unwrap().set_changed();
+            expected
+                .get_mut::<ShipPowerSystem>(b)
+                .unwrap()
+                .set_changed();
+        }
         let before = actual.get::<ShipPowerSystem>(a).unwrap().0.clone();
         actual.run_system_once(tick).unwrap();
         expected
             .run_system_once(payment_reference::tick_reference)
             .unwrap();
+        let changed = actual
+            .entity(a)
+            .get_ref::<ShipPowerSystem>()
+            .unwrap()
+            .is_changed();
+        let oracle_changed = expected
+            .entity(b)
+            .get_ref::<ShipPowerSystem>()
+            .unwrap()
+            .is_changed();
+        assert_eq!(
+            changed, oracle_changed,
+            "case {case}, already changed {already_changed}"
+        );
+        assert_eq!(changed, already_changed || case == 0 || case == 5);
         let power = &actual.get::<ShipPowerSystem>(a).unwrap().0;
         let oracle = &expected.get::<ShipPowerSystem>(b).unwrap().0;
         assert_eq!(power, oracle, "case {case}");

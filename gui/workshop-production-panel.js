@@ -66,7 +66,9 @@ export function mountWorkshopProduction({ root, provider, runtime, draft: getDra
   const saveRecipe = button('save-recipe', 'save-recipe', () => {
     if (busy() || !inspection?.production) return;
     const value = profile(), recipe = readRecipe(), old = recipes.value;
-    value.recipe = value.recipe.filter(row => row.id !== old && row.id !== recipe.id); value.recipe.push(recipe);
+    const index = value.recipe.findIndex(row => row.id === old);
+    value.recipe = value.recipe.filter(row => row.id !== old && row.id !== recipe.id);
+    value.recipe.splice(index < 0 ? value.recipe.length : index, 0, recipe);
     if (value.initial_recipe === old) value.initial_recipe = recipe.id;
     void apply(value);
   });

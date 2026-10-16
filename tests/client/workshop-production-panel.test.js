@@ -18,9 +18,14 @@ function fixture() {
 describe('Workshop finite production controls', () => {
   it('edits exact recipe work and initial physical-stock target with authoritative history/export', async () => {
     const { draft, runtime, panel, source } = fixture(); await settle();
+    const recipes = parse(source).production.recipe;
+    expect(recipes.length).toBeGreaterThan(1);
     for (const input of panel.node.querySelectorAll('input,select')) expect(panel.node.querySelector(`label[for="${input.id}"]`)).not.toBeNull();
     control('work-secs').value = '12'; control('save-recipe').click(); await settle();
-    expect(parse(draft.read(path)).production.recipe[0].work_secs).toBe(12);
+    const edited = parse(draft.read(path)).production.recipe;
+    expect(edited[0].work_secs).toBe(12);
+    expect(edited.map(row => row.id)).toEqual(recipes.map(row => row.id));
+    expect(edited.slice(1)).toEqual(recipes.slice(1));
     control('initial-target').value = '6'; control('save-initial').click(); await settle();
     expect(parse(draft.read(path)).production.initial_target).toBe(6); expect(runtime.validate).toHaveBeenCalledTimes(2);
     draft.undo(); draft.undo(); expect(draft.read(path)).toBe(source); panel.dispose();
@@ -35,11 +40,15 @@ describe('Workshop finite production controls', () => {
     expect(control('status').textContent).toContain('recipe denied'); expect(draft.read(path)).toBe(source); expect(draft.snapshot().history.undo).toHaveLength(0); panel.dispose();
   });
   it('preserves authored output order when choosing the primary target product', async () => {
-    const { draft, panel } = fixture(); await settle(); control('add-output').click();
+    const { draft, panel, source } = fixture(); await settle(); control('add-output').click();
+    const recipes = parse(source).production.recipe;
     const rows = [...control('outputs').querySelectorAll('div')];
     rows[1].querySelector('select').value = 'hold-alloy';
     [...rows[1].querySelectorAll('button')].find(button => button.textContent === 'Move output earlier').click();
     control('save-recipe').click(); await settle();
-    expect(parse(draft.read(path)).production.recipe[0].outputs.map(row => row.store)).toEqual(['hold-alloy', 'hold-ammunition']); panel.dispose();
+    const edited = parse(draft.read(path)).production.recipe;
+    expect(edited[0].outputs.map(row => row.store)).toEqual(['hold-alloy', 'hold-ammunition']);
+    expect(edited.map(row => row.id)).toEqual(recipes.map(row => row.id));
+    expect(edited.slice(1)).toEqual(recipes.slice(1)); panel.dispose();
   });
 });

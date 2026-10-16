@@ -589,7 +589,7 @@ export function mountWorkshopAuthoring({ root, win = window, download = download
     helmMovementPanel?.refresh({ hidden: testing });
     transitPanel?.refresh({ hidden: testing });
     commsRadioPanel?.refresh({ hidden: testing });
-    emissionProfilePanel?.refresh({ hidden: testing });
+    emissionProfilePanel?.update({ hidden: testing });
     resourceRecoveryPanel?.refresh({ hidden: testing });
     personnelPanel?.refresh({ hidden: testing });
     securityPanel?.refresh({ hidden: testing });

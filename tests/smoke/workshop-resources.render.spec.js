@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
-import { readFileSync } from 'node:fs';
-import { parse } from 'smol-toml';
+import { readFileSync, readdirSync } from 'node:fs';
+import { parse, stringify } from 'smol-toml';
+import { resolveTemplate } from '../../editor/entity-includes.js';
 import { createStoreZip, readStoreZip } from '../../editor/mod-pack-export.js';
 import { WORKSHOP_MANIFEST } from '../fixtures/workshop-pack.js';
 import { revealWorkshopPanel } from './dock-helpers.js';
@@ -11,21 +12,29 @@ const BASE = 'assets/entities/workshop_resource_base.toml';
 const DEPOT = 'assets/entities/workshop_resource_depot.toml';
 const WORLD = 'assets/worlds/workshop.toml';
 const HULL_TEXT = 'includes=["workshop_resource_base.toml"]\n# Keep inherited ship equipment.\n';
+// Retain every real inherited finite store when adding the fixture capacity.
+// Capacity arrays replace as a whole; an old ammo-only override is not a hull.
+function entitySources(directory = 'assets/entities') {
+  return Object.fromEntries(readdirSync(directory, {withFileTypes: true}).flatMap(entry => {
+    const path = `${directory}/${entry.name}`;
+    return entry.isDirectory() ? Object.entries(entitySources(path))
+      : entry.name.endsWith('.toml') ? [[path, readFileSync(path, 'utf8')]] : [];
+  }));
+}
+const inherited = resolveTemplate('assets/entities/alliance_cruiser.toml', entitySources(), parse);
+if (!inherited.ok) throw new Error('Actual Cruiser fixture failed include resolution');
+const capacities = inherited.resolved.value.infrastructure.capacity;
 const BASE_TEXT = `includes=["alliance_cruiser.toml"]
 [umbilical]
 capacity="torpedoes"
 direction="collect"
-[[infrastructure.capacity]]
-id="ammo"
-amount=4
-ceiling=20
 [resource_services.torpedoes]
 kind="capacity"
 id="ammo"
 [umbilical.link.provider]
 kind="capacity"
 id="ammo"
-`;
+` + stringify({infrastructure: {capacity: [...capacities, {id: "ammo", amount: 4, ceiling: 20}]}});
 const DEPOT_TEXT = `includes=["umbilical_berth.toml"]
 [[infrastructure.capacity]]
 id="ammo"
@@ -117,7 +126,7 @@ test('Workshop edits inherited stores and service links, then reloads and exerci
     await byId(page, 'amount').fill('6'); await byId(page, 'ceiling').fill('24');
     await applied(page, 'capacity-apply');
     const afterStock = await sourceOf(page);
-    expect(parse(afterStock).infrastructure.capacity[0]).toEqual({ id: 'ammo', amount: 6, ceiling: 24 });
+    expect(parse(afterStock).infrastructure.capacity.find(row => row.id === 'ammo')).toEqual({ id: 'ammo', amount: 6, ceiling: 24 });
     await page.locator('#workshop-undo').click(); await expect.poll(() => sourceOf(page)).toBe(HULL_TEXT);
     await page.locator('#workshop-redo').click(); await expect.poll(() => sourceOf(page)).toBe(afterStock);
 
@@ -195,7 +204,54 @@ test('Workshop edits inherited stores and service links, then reloads and exerci
     await energy('reserve-trip_heat').fill('0'); await energy('apply').click();
     await expect(energy('status')).toContainText('refused');
     expect(await sourceOf(page)).toBe(afterEnergy);
-    const edited = afterEnergy;
+    // The same actual validator accepts the redesigned shield, layout, remedy,
+    // logistics and fabrication edits. Every accepted operation participates in
+    // history before this exact combined source is exported and run below.
+    const editedFields = [];
+    async function editMechanism(family, selection, field, save, record) {
+      await revealWorkshopPanel(page, 'composition');
+      const control = id => page.locator(`#workshop-${family}-${id}`);
+      await control('template').selectOption(HULL);
+      await expect(control(save)).toBeEnabled();
+      const selected = await control(selection).inputValue();
+      const before = await sourceOf(page);
+      await revealWorkshopPanel(page, 'composition');
+      await control('materialise').check();
+      const next = Number(await control(field).inputValue()) + 1;
+      await control(field).fill(String(next));
+      await control(save).click();
+      await expect(control('status')).toHaveText(ts('workshop.changed'));
+      const after = await sourceOf(page);
+      expect(after).not.toBe(before);
+      const binding = record(parse(after), selected);
+      expect(binding.value).toBeCloseTo(next);
+      editedFields.push({family, selection, field, save, binding});
+      await page.locator('#workshop-undo').click();
+      await expect.poll(() => sourceOf(page)).toBe(before);
+      await page.locator('#workshop-redo').click();
+      await expect.poll(() => sourceOf(page)).toBe(after);
+    }
+    await editMechanism('shield', 'existing', 'recharge_energy_per_hp', 'save', (value, id) => {
+      const arc = value.shield_arc.find(arc => arc.id === id);
+      return {id: arc.id, value: arc.energy.recharge_energy_per_hp};
+    });
+    await editMechanism('interior', 'rooms', 'max_hp', 'save', (value, id) => {
+      const room = value.interior.compartment.find(room => room.id === id);
+      return {id: room.id, value: room.max_hp};
+    });
+    await editMechanism('damage', 'remedies', 'work-secs', 'save-remedy', (value, id) => {
+      const remedy = value.damage.remedies[id];
+      return {id, value: remedy.work_secs};
+    });
+    await editMechanism('logistics', 'handling-system', 'units-per-sec', 'save-handling', (value, id) => {
+      const handling = value.logistics.handling.find(handling => handling.system === id);
+      return {id: handling.system, value: handling.units_per_sec};
+    });
+    await editMechanism('production', 'recipes', 'work-secs', 'save-recipe', (value, id) => {
+      const recipe = value.production.recipe.find(recipe => recipe.id === id);
+      return {id: recipe.id, value: recipe.work_secs};
+    });
+    const edited = await sourceOf(page);
     expect(parse(edited).torpedoes.count).toBe(32);
     expect(await sourceOf(page, BASE)).toBe(BASE_TEXT);
 
@@ -204,6 +260,14 @@ test('Workshop edits inherited stores and service links, then reloads and exerci
     expect(readStoreZip(bytes)[HULL].replace(/\r\n/g, '\n')).toBe(edited);
     expect(readStoreZip(bytes)[BASE].replace(/\r\n/g, '\n')).toBe(BASE_TEXT);
     await importPack(page, bytes); expect(await sourceOf(page)).toBe(edited);
+    // Reopened forms must read the saved coefficients, not their old DOM values.
+    for (const {family, selection, field, save, binding} of editedFields) {
+      await revealWorkshopPanel(page, 'composition');
+      await page.locator(`#workshop-${family}-template`).selectOption(HULL);
+      await expect(page.locator(`#workshop-${family}-${save}`)).toBeEnabled();
+      await page.locator(`#workshop-${family}-${selection}`).selectOption(binding.id);
+      await expect(page.locator(`#workshop-${family}-${field}`)).toHaveValue(String(binding.value));
+    }
     await resourceForm(page); await expect(byId(page, 'count')).toHaveValue('32');
     await expect(byId(page, 'amount')).toHaveValue('6'); await expect(byId(page, 'ceiling')).toHaveValue('24');
     await expect(byId(page, 'link-service')).toHaveValue('torpedoes');

@@ -468,7 +468,8 @@ use super::*;
 /// `81` retains held Helm course provenance and future repair dispositions/evidence.
 /// `82` retains actual personnel holders, compound requests and physical reception receipts.
 /// `83` validates the derived typed claims in retained decoded publications.
-pub const SNAPSHOT_FORMAT: u32 = 83;
+/// `84` retains accepted Command emission intent without restoring prepaid activity.
+pub const SNAPSHOT_FORMAT: u32 = 84;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -636,7 +637,9 @@ pub const SNAPSHOT_FORMAT: u32 = 83;
 /// "0.64" receives craft only through actual consent and paid Bay work, preserves
 /// personnel custody, and retains permitted captured beam aim across selection changes.
 /// "0.65" discloses only safe attributed typed claims after the same paid decoder frontier.
-pub const SIMULATION_RULES: &str = "0.65";
+/// "0.66" advises on actual paid emissions, lets ordinary permitted AI react to
+/// declared intent, and accepts finite physical identity decoys through ordinary craft.
+pub const SIMULATION_RULES: &str = "0.66";
 
 /// The authored data, computed rather than remembered.
 ///

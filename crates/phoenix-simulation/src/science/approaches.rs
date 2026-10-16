@@ -39,25 +39,27 @@ pub(crate) fn publish(
             if system.kind != crate::ship::system_registry::HELM_RADAR_KIND {
                 continue;
             }
-            let permitted = config.0.observations_for_system(&system.id, &boards.0);
-            let records = config
-                .0
-                .systems
-                .iter()
-                .filter_map(|source| permitted.get(&source.id))
-                .flat_map(|board| match board {
-                    SystemBlackboard::Helm(board) => board.tracks.as_deref().unwrap_or_default(),
-                    SystemBlackboard::TacticalRadar(board) => {
-                        board.tracks.as_deref().unwrap_or_default()
-                    }
-                    SystemBlackboard::SensorRadar(board) => {
-                        board.tracks.as_deref().unwrap_or_default()
-                    }
-                    _ => &[],
-                })
-                .cloned()
-                .collect::<Vec<_>>();
             let approaches = horizon.map_or_else(Vec::new, |horizon| {
+                let permitted = config.0.observations_for_system(&system.id, &boards.0);
+                let records = config
+                    .0
+                    .systems
+                    .iter()
+                    .filter_map(|source| permitted.get(&source.id))
+                    .flat_map(|board| match board {
+                        SystemBlackboard::Helm(board) => {
+                            board.tracks.as_deref().unwrap_or_default()
+                        }
+                        SystemBlackboard::TacticalRadar(board) => {
+                            board.tracks.as_deref().unwrap_or_default()
+                        }
+                        SystemBlackboard::SensorRadar(board) => {
+                            board.tracks.as_deref().unwrap_or_default()
+                        }
+                        _ => &[],
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
                 phoenix_sim_gameplay::science::approaches::derive(
                     &records,
                     [physics.x, physics.z],

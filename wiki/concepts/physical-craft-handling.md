@@ -72,6 +72,26 @@ Initial carried GameStart rows follow explicit unconditional crew slots, preserv
 ordinary ship classification and avoiding extra claimable seats.
 
 
+## Fixed weapons and identity equipment
+
+`assets/entities/battery_turret.toml` composes a fixed beam bank, actual local
+Power and ordinary targeting/control on the same carried/deployed body. Its
+explicit radar and Viewscreen feeds supply permitted aim evidence. The existing
+static-defence consumer runs its ordinary per-System weapon AI; the Bay owns
+handling and custody. Storage disables active work without replacing the entity,
+weapon state or remaining reserve.
+
+`assets/entities/battery_decoy.toml` instead fits one AI-only IdentityEmitter and
+finite local energy. Its current paid claim reaches an observer only through
+that observer's actual acquisition. Exhaustion stops the claim; it does not
+destroy the recoverable body or rewrite its real identity. Both recipes pass
+the bounded profile checks in Gameplay `ship/craft_profile.rs`, retaining the
+fixed-pose constraints. Neither adds a moving-craft controller or physics writer.
+
+Full-host witnesses live in `tests/battery_turret_continuation.rs` and
+`tests/battery_decoy_continuation.rs`. Their current targets compile; native
+execution and physical-device acceptance are recorded separately by integration.
+
 ## Finite passenger reference
 
 `personnel_pod.toml` inherits the fixed ordinary sensor craft with one berth and

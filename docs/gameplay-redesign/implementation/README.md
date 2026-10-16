@@ -9,6 +9,8 @@ complete [migration ledger](./migration-ledger.json). The
 
 The subsequent [balance and headless profiling report](./balance-headless-profile-2026-10-16.html) records the requested diagnosis, 18 valid named-system/control captures and source-backed optimisation experiments. It changes no balance values or increment exit status. Implementation of 13–24 remains parked.
 
+The follow-up [combat correction report](./combat-balance-corrections-2026-10-16.html) records the isolated fixes and unchanged 20-duel rerun at `387777cc`: missing-fact policy handling, authored focus capability, fixed fore beam and neutralization-based CLI victory. All runs execute, but all end as draws and 12/16 balance checks remain unmet. No damage values or thresholds changed. This candidate uses protocol 46, snapshot 89 and rules 0.76; it is separate from the integrated baseline below and from concurrent optimisation.
+
 ## Per-increment progress — 16 October 2026
 
 The user requested a pause after finishing increments 8–12 on 16 October.

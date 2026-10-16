@@ -473,7 +473,8 @@ use super::*;
 /// `86` retains Radio listening intent and successful contextual emission frontiers.
 /// `87` retains original charted XYZ intent under the existing Navigation owner.
 /// `88` retains actual marker relations/report frontiers and planned acquisition facts.
-pub const SNAPSHOT_FORMAT: u32 = 88;
+/// `89` includes authored shield-focus availability in retained Console observations.
+pub const SNAPSHOT_FORMAT: u32 = 89;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -653,7 +654,9 @@ pub const SNAPSHOT_FORMAT: u32 = 88;
 /// "0.72" adds finite physical marking and binds planned acquisition to actual work.
 /// "0.74" stamps collision history from the restored logical interval end.
 /// "0.75" replaces an empty saved Helm motion-plan frontier over bootstrap state.
-pub const SIMULATION_RULES: &str = "0.75";
+/// "0.76" respects authored shield-focus capability and measured Helm fallbacks,
+/// restores fixed Cruiser fore beams, and counts CLI duel neutralizations.
+pub const SIMULATION_RULES: &str = "0.76";
 
 /// The authored data, computed rather than remembered.
 ///

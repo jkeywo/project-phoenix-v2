@@ -612,6 +612,8 @@ pub const SAFE_DISTANCE_HELD: FactId = FactId("safe_distance_held");
 pub const SEPARATION_PROGRESS: FactId = FactId("separation_progress");
 pub const INSIDE_THREAT_RANGE: FactId = FactId("inside_threat_range");
 pub const TARGET_FACING_SHIELD_DOWN: FactId = FactId("target_facing_shield_down");
+pub const TORPEDO_SHIELD_REQUIREMENT_DISABLED: FactId =
+    FactId("torpedo_shield_requirement_disabled");
 pub const TORPEDOES_IN_FLIGHT: FactId = FactId("torpedoes_in_flight");
 pub const TUBES_FILLABLE: FactId = FactId("tubes_fillable");
 // The broadside's own readings (issue #929)
@@ -738,6 +740,7 @@ pub const FACT_CATALOGUE: &[FactId] = &[
     SEPARATION_PROGRESS,
     INSIDE_THREAT_RANGE,
     TARGET_FACING_SHIELD_DOWN,
+    TORPEDO_SHIELD_REQUIREMENT_DISABLED,
     TORPEDOES_IN_FLIGHT,
     TUBES_FILLABLE,
     OWN_BANK_ARC_MARGIN_DEG,
@@ -1469,6 +1472,13 @@ const HELM_FACTS: &[FactDescriptor] = &[
         "1.0 when the target's facing shield arc is down",
         "false — no target",
         "ship::helm_ai::facts::seed_torpedo_opportunity_facts",
+    ),
+    ship(
+        TORPEDO_SHIELD_REQUIREMENT_DISABLED,
+        "helm",
+        "1.0 when this policy disables the torpedo manoeuvre shield requirement",
+        "false - no authored requirement parameter",
+        "ship::helm_ai::facts::seed_torpedo_requirement_facts",
     ),
     ship(
         TORPEDOES_IN_FLIGHT,

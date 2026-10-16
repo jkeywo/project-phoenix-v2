@@ -145,3 +145,111 @@ fn unknown_enemy_reach_cannot_define_a_safe_ring_or_outside_threat_verdict() {
         );
     }
 }
+
+#[test]
+fn authored_unknown_reach_ring_does_not_invent_threat_information() {
+    let (frame, _, public) = measured();
+    let mut params = crate::world::flags::AiParams::default();
+    params.set(SAFE_RANGE_MARGIN_PARAM, 20.0);
+    params.set(UNKNOWN_TARGET_SAFE_RANGE_PARAM, 120.0);
+    params.set(SAFE_RING_TOLERANCE_PARAM, 1.0);
+    params.set(SAFE_DISTANCE_WINDOW_TICKS_PARAM, 1.0);
+    for (observed_reach, valid, expected) in [
+        (None, true, Some(120.0)),
+        (Some(40.0), true, Some(60.0)),
+        (Some(0.0), true, Some(20.0)),
+        (None, false, None),
+    ] {
+        let mut facts = crate::world::flags::AiFacts::new();
+        seed_helm_travel_facts(&mut facts, Some(&frame), &ShipPhysics::default(), 10.0);
+        facts.set(TARGET_VALID_FACT, if valid { 1.0 } else { 0.0 });
+        facts.set(RANGE_TO_TARGET_FACT, 130.0);
+        if let Some(reach) = observed_reach {
+            facts.set(TARGET_DIRECT_FIRE_RANGE_FACT, reach);
+        }
+        let mut history = HelmRecoveryHistory::default();
+        assert_eq!(
+            seed_recovery_facts(&mut facts, &params, Some(0.5), &mut history, Some(public)),
+            expected
+        );
+        assert_eq!(facts.get(TARGET_DIRECT_FIRE_RANGE_FACT), observed_reach);
+        seed_pressed_facts(&mut facts, &params, &mut history);
+        if valid && observed_reach.is_none() {
+            assert_eq!(facts.get(INSIDE_THREAT_RANGE_FACT), None);
+            assert_eq!(facts.get(SAFE_DISTANCE_HELD_FACT), Some(1.0));
+        }
+    }
+}
+
+#[test]
+fn optional_torpedo_requirement_handles_unknown_shields_on_both_axes() {
+    let authored: toml::Value = toml::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../assets/entities/fragments/ai/movement_broadside_orbit.toml"
+    )))
+    .unwrap();
+    for axis in ["engines_ai", "steering_ai"] {
+        let config: crate::entities::config::FineSystemAiConfigToml =
+            authored["helm_console"][axis].clone().try_into().unwrap();
+        for (threshold, observed, should_enter) in [
+            (0.0, None, true),
+            (0.0, Some(0.0), true),
+            (0.0, Some(1.0), true),
+            (1.0, None, false),
+            (1.0, Some(0.0), false),
+            (1.0, Some(1.0), true),
+        ] {
+            let mut policy = config.to_policy().unwrap();
+            policy.params.set("torpedo_run_shield_gap", threshold);
+            let mut facts = crate::world::flags::AiFacts::new();
+            facts.set("posture", policy.params.get("press_posture").unwrap());
+            facts.set(TARGET_VALID_FACT, 1.0);
+            facts.set(
+                RANGE_TO_TARGET_FACT,
+                policy.params.get("torpedo_run_range").unwrap(),
+            );
+            facts.set("tubes_full", 1.0);
+            facts.set("tubes_fillable", 1.0);
+            facts.set("torpedoes_in_flight", 0.0);
+            if let Some(shield) = observed {
+                facts.set(TARGET_FACING_SHIELD_DOWN_FACT, shield);
+            }
+            let mut state = crate::ai::policy::AiPolicyRuntimeState::reset(&policy, 0.0);
+            state.enter("orbit", 0.0);
+            let target = Some(uuid::Uuid::from_u128(456));
+            tick_policy_machine(
+                &policy,
+                &mut state,
+                true,
+                &facts,
+                target,
+                1.0,
+                0.0,
+                &[],
+                |_| {},
+            );
+            assert_eq!(
+                state.current == "torpedo_run",
+                should_enter,
+                "{axis}: {threshold}, {observed:?}"
+            );
+            assert_eq!(facts.get(TARGET_FACING_SHIELD_DOWN_FACT), observed);
+            if threshold == 0.0 {
+                // A loaded run with nothing in flight must not abort simply
+                // because an optional shield finding is absent or still up.
+                tick_policy_machine(
+                    &policy,
+                    &mut state,
+                    true,
+                    &facts,
+                    target,
+                    2.0,
+                    0.0,
+                    &[],
+                    |_| {},
+                );
+                assert_eq!(state.current, "torpedo_run");
+            }
+        }
+    }
+}

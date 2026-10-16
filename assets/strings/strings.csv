@@ -126,6 +126,7 @@ workshop.shield.id,Workshop shield authoring,Arc identity,Bogenkennung,Arc ident
 workshop.shield.label,Workshop shield authoring,Display label,Anzeigetext,Display label,machine
 workshop.shield.center_deg,Workshop shield authoring,Centre bearing (degrees),Mittlere Peilung (Grad),Centre bearing (degrees),machine
 workshop.shield.width_deg,Workshop shield authoring,Arc width (degrees),Bogenbreite (Grad),Arc width (degrees),machine
+workshop.shield.focus_available,Workshop shield authoring,[Focus available],,,
 workshop.shield.max_hp,Workshop shield authoring,Strength capacity (blank uses base),Schutzkapazität (leer nutzt Basiswert),Strength capacity (blank uses base),machine
 workshop.shield.regen_per_sec,Workshop shield authoring,Recharge HP per second (blank uses base),Aufladung in HP pro Sekunde (leer nutzt Basiswert),Recharge HP per second (blank uses base),machine
 workshop.shield.offline_duration,Workshop shield authoring,Damage-collapse delay (blank uses base),Verzögerung nach Schadenskollaps (leer nutzt Basiswert),Damage-collapse delay (blank uses base),machine

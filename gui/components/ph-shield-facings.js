@@ -44,6 +44,8 @@ export class PhShieldFacings extends PhElement {
        stroke the render sets, so it paints over whatever fill the arc carries. */
     .arc-path.kbd-cursor { stroke: var(--focus-ring); stroke-width: 2.5; stroke-dasharray: 4 2; }
     .arc-path.down { opacity: 0.3; cursor: default; }
+    .arc-path.focus-unavailable { cursor: default; }
+    .arc-path.focus-unavailable:hover { filter: none; }
     /* Brief acknowledgment flash on any arc press (#1009) — retriggered via the
        classList remove/reflow/add trick in #flashArc, matching the rejection
        flash in ph-comms-current-message.js. */
@@ -107,7 +109,8 @@ export class PhShieldFacings extends PhElement {
   #onKeyDown = (event) => {
     if (event.composedPath()[0] !== this) return;
     const s = this.state || {};
-    const facings = Array.isArray(s.facings) ? s.facings : [];
+    const facings = (Array.isArray(s.facings) ? s.facings : [])
+      .filter(f => f.operation?.focus_available !== false);
     if (facings.length === 0) return;
     const ids = facings.map((f) => f.arc_id);
     const key = event.key;
@@ -153,6 +156,7 @@ export class PhShieldFacings extends PhElement {
    */
   #activateArc(arcId, arcLabel, outline) {
     const cur = this.state || {};
+    if (cur.facings?.find(f => f.arc_id === arcId)?.operation?.focus_available === false) return;
     if (outline) this.#flashArc(outline);
     if (cur.auto) {
       this.#showAutoHint();
@@ -218,6 +222,7 @@ export class PhShieldFacings extends PhElement {
       const a1 = a0 + angleStep;
       const pct = f.max_hp > 0 ? Math.min(1, Math.max(0, f.hp / f.max_hp)) : 0;
       const online = f.online !== false;
+      const focusAvailable = f.operation?.focus_available !== false;
       const isFocused = focused === f.id || focused === f.label;
 
       const x0 = cx + r * Math.cos(a0), y0 = cy + r * Math.sin(a0);
@@ -254,7 +259,7 @@ export class PhShieldFacings extends PhElement {
       // A full render tick rewrites the class attribute wholesale below, which
       // would otherwise cut a still-playing press-flash short (or drop a live
       // hover) on the next state update — preserve both across the rewrite.
-      const keepHover = outline.classList.contains('hover');
+      const keepHover = focusAvailable && outline.classList.contains('hover');
       const keepFlash = outline.classList.contains('press-flash');
       outline.setAttribute('d', outer);
       outline.setAttribute('fill', phColor(this, fillColor));
@@ -265,6 +270,7 @@ export class PhShieldFacings extends PhElement {
       outline.setAttribute('class', 'arc-path'
         + (isFocused ? ' focused' : '')
         + (!online ? ' down' : '')
+        + (!focusAvailable ? ' focus-unavailable' : '')
         + (keepHover ? ' hover' : '')
         + (keepFlash ? ' press-flash' : '')
         // The keyboard cursor rides through the wholesale rewrite too, so a
@@ -291,7 +297,9 @@ export class PhShieldFacings extends PhElement {
         `M ${hx0} ${hy0} A ${hitOuterR} ${hitOuterR} 0 ${largeArc} 1 ${hx1} ${hy1} L ${hxi1} ${hyi1} A ${hitInnerR} ${hitInnerR} 0 ${largeArc} 0 ${hxi0} ${hyi0} Z`,
       );
       hitPath.setAttribute('data-facing-id', id);
-      hitPath.setAttribute('class', 'hit-path' + (!online ? ' down' : ''));
+      hitPath.setAttribute('class', 'hit-path' + (!online || !focusAvailable ? ' down' : ''));
+      hitPath.setAttribute('aria-disabled', String(!focusAvailable));
+      hitPath.style.pointerEvents = focusAvailable ? '' : 'none';
 
       // HP fill arc — fills/drains radially from the inner edge outward
       const hpFill = g.children[1];

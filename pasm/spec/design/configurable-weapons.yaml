@@ -9,6 +9,7 @@ entities:
         - "User approved the serial roadmap and authorised increments 7 through 18, committing each, on 2026-10-14. Structural weapon migration precedes the new interception, guidance, payload and shield-probing gameplay in increment 15."
         - "[ai] Keep beam fractional damage/cycle jitter, bolt lead prediction and torpedo loaded-round/burst semantics as supported strategies behind common mechanisms. A pattern must never create ammunition. Resolve geometry and schedules through real consumers rather than an unused generic framework."
         - "Increment15 adopts layered-combat-equipment-and-engagement-choice and related layered-combat decisions before adding new gameplay. Increment7's equivalent-behaviour migration is not a prohibition on selected sustained beams, finite traversal, kinetic/interception targets, guidance or payload extensions; retain old configurations explicitly and extend their existing owners."
+        - "User requested on 2026-10-16 that the Alliance Cruiser fore beams return to their authored fixed arc. Remove that bank's optional Turret component and its dedicated power input; retain the existing arc, range, damage and cycle values. Shared Turret support remains available to other configured equipment."
   - decision: configured-weapon-authoring-and-continuity
     core:
       status: accepted

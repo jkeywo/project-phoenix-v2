@@ -31,7 +31,7 @@
 //!
 //! ```rhai
 //! on_timer(0, "spawn_side_b_1");
-//! on_all_destroyed("side_b", "on_side_b_destroyed");
+//! on_all_neutralized("side_b", "on_side_b_destroyed");
 //!
 //! fn spawn_side_b_1(ctx) { spawn_slot(ctx, "side_b_1", "assets/entities/alliance_destroyer.toml", "<harrow-uuid>", "side_b"); }
 //! ```
@@ -45,7 +45,7 @@
 //! `world::script::effects`'s `a_helper_fn_shares_the_callers_effect_buffer`.
 //!
 //! Registration order below the marker mirrors the declarative file exactly —
-//! side-A escorts, then side-B, then the victory `on_all_destroyed` — so the
+//! side-A escorts, then side-B, then the victory `on_all_neutralized` — so the
 //! trigger indices, and with them the spawn order the world digest folds, are
 //! unchanged by the conversion. Rhai function definitions are position
 //! independent, so the drivers may follow their own registrations.
@@ -56,10 +56,9 @@
 //! `side_a[0]` via `--ship`/`PendingShipConfig`, **not** a spawn slot. The run
 //! ends in DEFEAT when that ship dies — the engine's built-in player-death
 //! latch (`GamePhase::GameOver`, `Outcome::Defeat`), never an
-//! `on_all_destroyed group = "side_a"` trigger. Authoring one would be wrong
-//! two ways: an empty `side_a` group (the common 1vN case, side A player-only)
-//! fires `on_all_destroyed` *immediately* (empty-group = already-destroyed),
-//! and even with escorts the player — not in the group — may still be alive.
+//! `on_all_neutralized group = "side_a"` trigger. Authoring one would be wrong
+//! because the player is not in that group: even with every escort neutralized,
+//! the player may still be alive. Empty groups do not trigger neutralization.
 //! So `duel.toml` never authors a side-A victory/defeat trigger; escort deaths
 //! don't end the run, the player's death does.
 //!
@@ -111,9 +110,9 @@
 //! the two cannot disagree about which fields are anchors; what differs is only
 //! which spawns each can see.
 //!
-//! VICTORY is `on_all_destroyed group = "side_b"` → `game_over` victory. The
-//! transform simply DOES NOT EMIT that registration when `side_b` is empty, so a
-//! degenerate `--side-b` can't instant-fire a false victory off an empty group.
+//! VICTORY is `on_all_neutralized group = "side_b"` → `game_over` victory. The
+//! transform emits that registration only when `side_b` is non-empty, so an
+//! empty opponent roster does not register an inapplicable victory condition.
 //! (Declaratively this was a deletion; generating the roster makes it an
 //! omission, which is the same guard stated the other way round.)
 
@@ -305,7 +304,7 @@ struct Slot {
     /// Faction UUID forced onto the hull, so the report buckets it on the right
     /// side regardless of the template's own faction.
     faction: &'static str,
-    /// `on_all_destroyed` group the spawn joins.
+    /// `on_all_neutralized` group the spawn joins.
     group: &'static str,
 }
 
@@ -422,7 +421,7 @@ fn render_drivers(slots: &[Slot], side_b_filled: bool) -> String {
         out.push_str(&format!("on_timer(0, \"spawn_{}\");\n", slot.name));
     }
     if side_b_filled {
-        out.push_str("on_all_destroyed(\"side_b\", \"on_side_b_destroyed\");\n");
+        out.push_str("on_all_neutralized(\"side_b\", \"on_side_b_destroyed\");\n");
     }
     if !slots.is_empty() {
         out.push('\n');
@@ -447,8 +446,8 @@ fn render_drivers(slots: &[Slot], side_b_filled: bool) -> String {
 ///   `side_a[1..]` fill escort slots.
 /// - `side_b[..]` fill side-B slots.
 /// - Slots the lists do not reach are simply not generated.
-/// - The side-B victory `on_all_destroyed` is emitted only when side B has at
-///   least one ship, so an empty side never instant-fires.
+/// - The side-B victory `on_all_neutralized` is emitted only when side B has at
+///   least one ship, omitting the inapplicable condition for an empty side.
 /// - Rejects either side longer than [`MAX_SIDE`]; a world with no
 ///   [`SLOT_MARKER`] line, with two of them, or without the `spawn_slot` /
 ///   `on_side_b_destroyed` bodies the generated roster calls; a slot whose

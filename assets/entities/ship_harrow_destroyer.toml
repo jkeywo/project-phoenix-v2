@@ -160,6 +160,7 @@ description = "entity.ship_harrow_destroyer.target.description"
 # a collapsed 40-point arc reaches the authored 75% re-entry threshold about 7.5
 # seconds after the offline delay expires.
 [[shield_arc]]
+focus_available = false
 id = "all"
 label = "shield_arc.all.label"
 center_deg = 0

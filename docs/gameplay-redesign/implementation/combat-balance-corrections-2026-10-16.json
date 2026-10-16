@@ -1,0 +1,2815 @@
+{
+  "build": {
+    "revision": "387777cc82194f7e84b19848aafb517c0390f7b9",
+    "gitStatus": "",
+    "command": "cargo build --profile measure --features headless --bin phoenix-headless",
+    "profile": "measure",
+    "features": [
+      "default",
+      "server",
+      "headless"
+    ],
+    "binary": "C:\\Users\\jkeyw\\.codex\\worktrees\\combat-balance-fixes\\increment-14-native-validation\\target\\measure\\phoenix-headless.exe",
+    "runnerBinary": "C:\\Users\\jkeyw\\.codex\\worktrees\\combat-balance-fixes\\increment-14-native-validation\\target\\release\\phoenix-headless.exe",
+    "binarySha256": "91662f5b1a147f7c12d8954d2e620ef78fc193ebbbc066cc6dc2830e62b43c39",
+    "matrixSha256": "c6946bde4e6bfb9b702a9bb2dd1da38a59297ec5c1ef2a3eaf25bf89177be5ae",
+    "dependencyRecordUsesThisWorktree": true
+  },
+  "date": "2026-10-16",
+  "revision": "387777cc82194f7e84b19848aafb517c0390f7b9",
+  "matrixSha256": "c6946bde4e6bfb9b702a9bb2dd1da38a59297ec5c1ef2a3eaf25bf89177be5ae",
+  "profile": "measure (release-derived, thin LTO, 16 codegen units)",
+  "changes": [
+    "Helm treats a zero shield-gap requirement as optional, without inventing an observation.",
+    "Unknown enemy reach uses an explicit authored manoeuvre radius; observed reach retains precedence.",
+    "Single-shield Harrows opt out of focus in data. Mixed equipment ranks eligible focus separately from protection and recovery.",
+    "Cruiser fore beam uses its existing fixed arc; damage, range and cycle values are unchanged.",
+    "CLI duel victory uses the authored neutralization trigger, retaining actual death accounting."
+  ],
+  "sets": {
+    "original": {
+      "source": "C:/Coding/project-phoenix-v2/.phoenix/redesign-baseline/2026-10-13-cruiser",
+      "mergedSha256": "e69ba808c07d76809029728ff0b309b6cf2663fe54b1e881426c51662dc5d3e5",
+      "totals": {
+        "runs": 20,
+        "wins": 20,
+        "losses": 0,
+        "draws": 0,
+        "timeouts": 0,
+        "reported": 0,
+        "failures": 0
+      },
+      "thresholds": [
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 1,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "max_ttk_median",
+          "limit": 10,
+          "actual": 4.7833,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "min_damage_margin",
+          "limit": 100,
+          "actual": 163,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 1,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "max_ttk_median",
+          "limit": 25,
+          "actual": 13.8167,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "min_damage_margin",
+          "limit": 200,
+          "actual": 283.8,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 1,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "max_ttk_median",
+          "limit": 20,
+          "actual": 8.5833,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "min_damage_margin",
+          "limit": 200,
+          "actual": 310.2,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 1,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "max_ttk_median",
+          "limit": 25,
+          "actual": 15.7,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "min_damage_margin",
+          "limit": 25,
+          "actual": 47.241599999999984,
+          "pass": true
+        }
+      ],
+      "matchups": {
+        "cruiser_vs_harrow_destroyer": {
+          "wins": 5,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 0,
+          "failures": 0,
+          "ttk": {
+            "min": 4.7833,
+            "median": 4.7833,
+            "max": 4.7833,
+            "count": 5
+          },
+          "damageMargin": 163,
+          "winDurationMedian": 4.7833,
+          "foreDamageMean": 101,
+          "foreDamagePerSecond": 21.115129722158343,
+          "forwardTorpedoes": 10,
+          "torpedoRuns": 5,
+          "shadowPercent": 3.491313528317271,
+          "enemyHullDamageMean": 200,
+          "runs": [
+            {
+              "file": "cruiser_vs_harrow_destroyer-seed1.json",
+              "sha256": "1f21b8eafb6fdc323efac05920d35dbba8291c17eb78da342dfcc101daab0477",
+              "seed": 1,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 579.2,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9817,
+                  "damage_dealt": 235,
+                  "damage_taken": 75,
+                  "closing_damage_rate": 15.6667
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 72,
+                  "damage_taken": 244,
+                  "closing_damage_rate": 4.8
+                }
+              },
+              "systemKnockouts": 1,
+              "seconds": 4.7833,
+              "foreDamage": 101,
+              "forwardTorpedoes": 2,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 0.3,
+              "enemyHullDamage": 200,
+              "deaths": 1
+            },
+            {
+              "file": "cruiser_vs_harrow_destroyer-seed2.json",
+              "sha256": "1be4c3b415ea710bfc3039b8f2f55a90ed3a119b878a68fb55daff61d28ba9f2",
+              "seed": 2,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 579.2,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9817,
+                  "damage_dealt": 235,
+                  "damage_taken": 75,
+                  "closing_damage_rate": 15.6667
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 72,
+                  "damage_taken": 244,
+                  "closing_damage_rate": 4.8
+                }
+              },
+              "systemKnockouts": 1,
+              "seconds": 4.7833,
+              "foreDamage": 101,
+              "forwardTorpedoes": 2,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 0.3,
+              "enemyHullDamage": 200,
+              "deaths": 1
+            },
+            {
+              "file": "cruiser_vs_harrow_destroyer-seed3.json",
+              "sha256": "bf5fa9873c387d393230a85cbed04305c3cf53c5eef75293b890656b20f816d3",
+              "seed": 3,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 579.2,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9817,
+                  "damage_dealt": 235,
+                  "damage_taken": 75,
+                  "closing_damage_rate": 15.6667
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 72,
+                  "damage_taken": 244,
+                  "closing_damage_rate": 4.8
+                }
+              },
+              "systemKnockouts": 1,
+              "seconds": 4.7833,
+              "foreDamage": 101,
+              "forwardTorpedoes": 2,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 0.3,
+              "enemyHullDamage": 200,
+              "deaths": 1
+            },
+            {
+              "file": "cruiser_vs_harrow_destroyer-seed4.json",
+              "sha256": "d209daa2497f8797114f56d7d802543c1c674e73a70956dc3545f55f4769ba3f",
+              "seed": 4,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 579.2,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9817,
+                  "damage_dealt": 235,
+                  "damage_taken": 75,
+                  "closing_damage_rate": 15.6667
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 72,
+                  "damage_taken": 244,
+                  "closing_damage_rate": 4.8
+                }
+              },
+              "systemKnockouts": 1,
+              "seconds": 4.7833,
+              "foreDamage": 101,
+              "forwardTorpedoes": 2,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 0.3,
+              "enemyHullDamage": 200,
+              "deaths": 1
+            },
+            {
+              "file": "cruiser_vs_harrow_destroyer-seed5.json",
+              "sha256": "350f11994c0075f091a2e2c37d88bc45e9f78a952bb51154b0164beb9cb6ef43",
+              "seed": 5,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 579.2,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9817,
+                  "damage_dealt": 235,
+                  "damage_taken": 75,
+                  "closing_damage_rate": 15.6667
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 72,
+                  "damage_taken": 244,
+                  "closing_damage_rate": 4.8
+                }
+              },
+              "systemKnockouts": 1,
+              "seconds": 4.7833,
+              "foreDamage": 101,
+              "forwardTorpedoes": 2,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 0.3,
+              "enemyHullDamage": 200,
+              "deaths": 1
+            }
+          ]
+        },
+        "cruiser_vs_harrow_cruiser": {
+          "wins": 5,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 0,
+          "failures": 0,
+          "ttk": {
+            "min": 10.9667,
+            "median": 13.8167,
+            "max": 14.1333,
+            "count": 5
+          },
+          "damageMargin": 283.8,
+          "winDurationMedian": 13.8333,
+          "foreDamageMean": 207.8,
+          "foreDamagePerSecond": 16.20063212091067,
+          "forwardTorpedoes": 23,
+          "torpedoRuns": 5,
+          "shadowPercent": 1.3019757286776141,
+          "enemyHullDamageMean": 300,
+          "runs": [
+            {
+              "file": "cruiser_vs_harrow_cruiser-seed1.json",
+              "sha256": "d9b7908e59069ce21b703c8daea1999d524c4e95fa37378086938a1188d46870",
+              "seed": 1,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 577.3,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9785,
+                  "damage_dealt": 394,
+                  "damage_taken": 127,
+                  "closing_damage_rate": 26.2667
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 127,
+                  "damage_taken": 394,
+                  "closing_damage_rate": 8.4667
+                }
+              },
+              "systemKnockouts": 1,
+              "seconds": 14.1167,
+              "foreDamage": 184,
+              "forwardTorpedoes": 5,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 3.5,
+              "enemyHullDamage": 300,
+              "deaths": 1
+            },
+            {
+              "file": "cruiser_vs_harrow_cruiser-seed2.json",
+              "sha256": "ea8c9e161dd3f4a924b0c42f12bc2d0b83cf382ff8fa0dbbe45d96d213008506",
+              "seed": 2,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 581.4,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9854,
+                  "damage_dealt": 394,
+                  "damage_taken": 86,
+                  "closing_damage_rate": 26.2667
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 86,
+                  "damage_taken": 394,
+                  "closing_damage_rate": 5.7333
+                }
+              },
+              "systemKnockouts": 1,
+              "seconds": 10.9667,
+              "foreDamage": 254,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 2.833,
+              "enemyHullDamage": 300,
+              "deaths": 1
+            },
+            {
+              "file": "cruiser_vs_harrow_cruiser-seed3.json",
+              "sha256": "66716734ce43c4716ceda7c37cca1918f6ea607e64e713b7181afb74d76c31d5",
+              "seed": 3,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 577.3,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9785,
+                  "damage_dealt": 395,
+                  "damage_taken": 127,
+                  "closing_damage_rate": 26.3333
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 127,
+                  "damage_taken": 395,
+                  "closing_damage_rate": 8.4667
+                }
+              },
+              "systemKnockouts": 1,
+              "seconds": 14.1333,
+              "foreDamage": 184,
+              "forwardTorpedoes": 5,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 3.5,
+              "enemyHullDamage": 300,
+              "deaths": 1
+            },
+            {
+              "file": "cruiser_vs_harrow_cruiser-seed4.json",
+              "sha256": "fcec72056b58da729b7f774d8317259e947fd96ddeec98f7a2ffaf9816e24c8b",
+              "seed": 4,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 581.3,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9853,
+                  "damage_dealt": 394,
+                  "damage_taken": 87,
+                  "closing_damage_rate": 26.2667
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 87,
+                  "damage_taken": 394,
+                  "closing_damage_rate": 5.8
+                }
+              },
+              "systemKnockouts": 1,
+              "seconds": 11.0833,
+              "foreDamage": 186,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 2.833,
+              "enemyHullDamage": 300,
+              "deaths": 1
+            },
+            {
+              "file": "cruiser_vs_harrow_cruiser-seed5.json",
+              "sha256": "52eb8919607db124b8b6179d29937a11bcfce2fba5bd02cb102d0b3de0c87fb9",
+              "seed": 5,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 577.5,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9788,
+                  "damage_dealt": 394,
+                  "damage_taken": 125,
+                  "closing_damage_rate": 26.2667
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 125,
+                  "damage_taken": 394,
+                  "closing_damage_rate": 8.3333
+                }
+              },
+              "systemKnockouts": 1,
+              "seconds": 13.8333,
+              "foreDamage": 231,
+              "forwardTorpedoes": 5,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 3.5,
+              "enemyHullDamage": 300,
+              "deaths": 1
+            }
+          ]
+        },
+        "cruiser_vs_harrow_patrol": {
+          "wins": 5,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 0,
+          "failures": 0,
+          "ttk": {
+            "min": 8.1833,
+            "median": 8.5833,
+            "max": 12,
+            "count": 5
+          },
+          "damageMargin": 310.2,
+          "winDurationMedian": 8.6,
+          "foreDamageMean": 207.8,
+          "foreDamagePerSecond": 22.685589519650655,
+          "forwardTorpedoes": 15,
+          "torpedoRuns": 5,
+          "shadowPercent": 1.823144104803494,
+          "enemyHullDamageMean": 300,
+          "runs": [
+            {
+              "file": "cruiser_vs_harrow_patrol-seed1.json",
+              "sha256": "b0ee79c1a0171af356427d59702c05d508731971b7a17b7bd55c38ac89f0a377",
+              "seed": 1,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 585.1,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9917,
+                  "damage_dealt": 361,
+                  "damage_taken": 49,
+                  "closing_damage_rate": 24.0667
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 49,
+                  "damage_taken": 361,
+                  "closing_damage_rate": 3.2667
+                }
+              },
+              "systemKnockouts": 1,
+              "seconds": 8.2,
+              "foreDamage": 210,
+              "forwardTorpedoes": 2,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 2.417,
+              "enemyHullDamage": 300,
+              "deaths": 1
+            },
+            {
+              "file": "cruiser_vs_harrow_patrol-seed2.json",
+              "sha256": "e8acebfe933441a2d46c54375a2fca7b65317153fbb1bff8f5faf0435828327b",
+              "seed": 2,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 585.1,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9917,
+                  "damage_dealt": 361,
+                  "damage_taken": 49,
+                  "closing_damage_rate": 24.0667
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 49,
+                  "damage_taken": 361,
+                  "closing_damage_rate": 3.2667
+                }
+              },
+              "systemKnockouts": 1,
+              "seconds": 8.2,
+              "foreDamage": 210,
+              "forwardTorpedoes": 2,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 2.417,
+              "enemyHullDamage": 300,
+              "deaths": 1
+            },
+            {
+              "file": "cruiser_vs_harrow_patrol-seed3.json",
+              "sha256": "c2a2cbd9781c668fcbbd90b4fc6d06c602ddf1e82bc256b056a251c000726c2a",
+              "seed": 3,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 585.1,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9917,
+                  "damage_dealt": 361,
+                  "damage_taken": 49,
+                  "closing_damage_rate": 24.0667
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 49,
+                  "damage_taken": 361,
+                  "closing_damage_rate": 3.2667
+                }
+              },
+              "systemKnockouts": 1,
+              "seconds": 8.6,
+              "foreDamage": 227,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 2.817,
+              "enemyHullDamage": 300,
+              "deaths": 1
+            },
+            {
+              "file": "cruiser_vs_harrow_patrol-seed4.json",
+              "sha256": "fa2d2c04eed35f0b4507381cb743162f835572283c63936dddf02597bc639f3f",
+              "seed": 4,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 585.1,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9917,
+                  "damage_dealt": 361,
+                  "damage_taken": 49,
+                  "closing_damage_rate": 24.0667
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 49,
+                  "damage_taken": 361,
+                  "closing_damage_rate": 3.2667
+                }
+              },
+              "systemKnockouts": 1,
+              "seconds": 8.8,
+              "foreDamage": 186,
+              "forwardTorpedoes": 2,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 3.017,
+              "enemyHullDamage": 300,
+              "deaths": 1
+            },
+            {
+              "file": "cruiser_vs_harrow_patrol-seed5.json",
+              "sha256": "4b6c244701d11b9afc1c8d8b809070e64816a98fd6aa4d3218912a12ce46a15b",
+              "seed": 5,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 584.2,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9902,
+                  "damage_dealt": 361,
+                  "damage_taken": 58,
+                  "closing_damage_rate": 24.0667
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 58,
+                  "damage_taken": 361,
+                  "closing_damage_rate": 3.8667
+                }
+              },
+              "systemKnockouts": 1,
+              "seconds": 12,
+              "foreDamage": 206,
+              "forwardTorpedoes": 5,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 6.217,
+              "enemyHullDamage": 300,
+              "deaths": 1
+            }
+          ]
+        },
+        "cruiser_vs_harrow_warhawk": {
+          "wins": 5,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 0,
+          "failures": 0,
+          "ttk": {
+            "min": 14.5,
+            "median": 15.7,
+            "max": 19.2833,
+            "count": 5
+          },
+          "damageMargin": 47.241599999999984,
+          "winDurationMedian": 15.7167,
+          "foreDamageMean": 287.6,
+          "foreDamagePerSecond": 17.39515427614747,
+          "forwardTorpedoes": 22,
+          "torpedoRuns": 5,
+          "shadowPercent": 1.010080237870872,
+          "enemyHullDamageMean": 400,
+          "runs": [
+            {
+              "file": "cruiser_vs_harrow_warhawk-seed1.json",
+              "sha256": "5c844a419bf72564988bede82f2505490fd272eea239b8a49c0f08f4388a14bf",
+              "seed": 1,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 386.25,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.6547,
+                  "damage_dealt": 524,
+                  "damage_taken": 391.699,
+                  "closing_damage_rate": 34.9333
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 391.699,
+                  "damage_taken": 524,
+                  "closing_damage_rate": 25.9133
+                }
+              },
+              "systemKnockouts": 2,
+              "seconds": 15.45,
+              "foreDamage": 308,
+              "forwardTorpedoes": 5,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 8.3,
+              "enemyHullDamage": 400,
+              "deaths": 1
+            },
+            {
+              "file": "cruiser_vs_harrow_warhawk-seed2.json",
+              "sha256": "d5293e9bb7ea6052857200999b57f6f4b68c88350c870c15c3bba469ae9b902d",
+              "seed": 2,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 224.683,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.3808,
+                  "damage_dealt": 524,
+                  "damage_taken": 555.398,
+                  "closing_damage_rate": 34.9333
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 555.398,
+                  "damage_taken": 524,
+                  "closing_damage_rate": 34.6266
+                }
+              },
+              "systemKnockouts": 6,
+              "seconds": 17.6833,
+              "foreDamage": 302,
+              "forwardTorpedoes": 5,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 10.533,
+              "enemyHullDamage": 400,
+              "deaths": 1
+            },
+            {
+              "file": "cruiser_vs_harrow_warhawk-seed3.json",
+              "sha256": "afe70731e31485857648070f0f3d2a410c910b282b709a7d9ffdf2a4b0e6ee48",
+              "seed": 3,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 172.134,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.2918,
+                  "damage_dealt": 527,
+                  "damage_taken": 608.297,
+                  "closing_damage_rate": 33.6667
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 608.297,
+                  "damage_taken": 527,
+                  "closing_damage_rate": 31.5533
+                }
+              },
+              "systemKnockouts": 7,
+              "seconds": 19.3,
+              "foreDamage": 314,
+              "forwardTorpedoes": 5,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 12.15,
+              "enemyHullDamage": 400,
+              "deaths": 1
+            },
+            {
+              "file": "cruiser_vs_harrow_warhawk-seed4.json",
+              "sha256": "829d04d88f202167f4e47abc5abe8625bbd4efa2b64517f893c1c15b071c5f75",
+              "seed": 4,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 316.85,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.537,
+                  "damage_dealt": 524,
+                  "damage_taken": 460.499,
+                  "closing_damage_rate": 34.9333
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 460.499,
+                  "damage_taken": 524,
+                  "closing_damage_rate": 30.2333
+                }
+              },
+              "systemKnockouts": 5,
+              "seconds": 15.7167,
+              "foreDamage": 291,
+              "forwardTorpedoes": 5,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 8.567,
+              "enemyHullDamage": 400,
+              "deaths": 1
+            },
+            {
+              "file": "cruiser_vs_harrow_warhawk-seed5.json",
+              "sha256": "4911e885a91a4983d06c11a6d1557e83e9a24dec5ab40e6276cbbd62add85c28",
+              "seed": 5,
+              "outcome": "victory",
+              "finalPhase": "GameOver",
+              "sides": {
+                "player": {
+                  "remaining_hull": 434.8,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.7369,
+                  "damage_dealt": 524,
+                  "damage_taken": 370.899,
+                  "closing_damage_rate": 34.9333
+                },
+                "enemy": {
+                  "remaining_hull": 0,
+                  "remaining_hull_max": 0,
+                  "remaining_hull_fraction": 0,
+                  "damage_dealt": 370.899,
+                  "damage_taken": 524,
+                  "closing_damage_rate": 24.7266
+                }
+              },
+              "systemKnockouts": 2,
+              "seconds": 14.5167,
+              "foreDamage": 223,
+              "forwardTorpedoes": 2,
+              "shadowSeconds": 0.167,
+              "torpedoRunSeconds": 2.733,
+              "enemyHullDamage": 400,
+              "deaths": 1
+            }
+          ]
+        }
+      }
+    },
+    "before": {
+      "source": "C:/Coding/project-phoenix-v2/.phoenix/redesign-baseline/2026-10-16-verify-8-12-cruiser",
+      "mergedSha256": "402a2c227cb7e9dd733605f5f5aa5e584f0695b4f6039033ec8c6b48d44650fc",
+      "totals": {
+        "runs": 20,
+        "wins": 0,
+        "losses": 0,
+        "draws": 7,
+        "timeouts": 13,
+        "reported": 0,
+        "failures": 0
+      },
+      "thresholds": [
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 0,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "max_ttk_median",
+          "limit": 10,
+          "actual": null,
+          "pass": null
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "min_damage_margin",
+          "limit": 100,
+          "actual": 111.329,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 0,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "max_ttk_median",
+          "limit": 25,
+          "actual": null,
+          "pass": null
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "min_damage_margin",
+          "limit": 200,
+          "actual": 186.52180000000004,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 0,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "max_ttk_median",
+          "limit": 20,
+          "actual": null,
+          "pass": null
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "min_damage_margin",
+          "limit": 200,
+          "actual": 97.50280000000001,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 0,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "max_ttk_median",
+          "limit": 25,
+          "actual": null,
+          "pass": null
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "min_damage_margin",
+          "limit": 25,
+          "actual": -324.93600000000004,
+          "pass": false
+        }
+      ],
+      "matchups": {
+        "cruiser_vs_harrow_destroyer": {
+          "wins": 0,
+          "losses": 0,
+          "draws": 1,
+          "timeouts": 4,
+          "failures": 0,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "damageMargin": 111.329,
+          "winDurationMedian": null,
+          "foreDamageMean": 69.4,
+          "foreDamagePerSecond": 0.5783333333333334,
+          "forwardTorpedoes": 0,
+          "torpedoRuns": 0,
+          "shadowPercent": 20.83066666666667,
+          "enemyHullDamageMean": 0,
+          "runs": [
+            {
+              "file": "cruiser_vs_harrow_destroyer-seed1.json",
+              "sha256": "8458db551c3755c881bbabf25200bf3189f2c1c103e8835e2de9498d63617a43",
+              "seed": 1,
+              "outcome": "timeout",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 574.661,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.974,
+                  "damage_dealt": 273,
+                  "damage_taken": 169.827,
+                  "closing_damage_rate": 1.4
+                },
+                "enemy": {
+                  "remaining_hull": 200,
+                  "remaining_hull_max": 200,
+                  "remaining_hull_fraction": 1,
+                  "damage_dealt": 164.827,
+                  "damage_taken": 280,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 61,
+              "forwardTorpedoes": 0,
+              "shadowSeconds": 34.15,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 0,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_destroyer-seed2.json",
+              "sha256": "662f4701ff4c4c1151e3094c3bc0cc395a21e6fe54a7efdfc43b645aa6e42713",
+              "seed": 2,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 573.8,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9725,
+                  "damage_dealt": 327,
+                  "damage_taken": 200.088,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 200,
+                  "remaining_hull_max": 200,
+                  "remaining_hull_fraction": 1,
+                  "damage_dealt": 190.088,
+                  "damage_taken": 341,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 78,
+              "forwardTorpedoes": 0,
+              "shadowSeconds": 26.35,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 0,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_destroyer-seed3.json",
+              "sha256": "cd8b6b82784c2b247a3baa58c0a16752e13ce787c69a9d0dd7c88be518099845",
+              "seed": 3,
+              "outcome": "timeout",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 567.631,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9621,
+                  "damage_dealt": 350,
+                  "damage_taken": 219.008,
+                  "closing_damage_rate": 5.2667
+                },
+                "enemy": {
+                  "remaining_hull": 200,
+                  "remaining_hull_max": 200,
+                  "remaining_hull_fraction": 1,
+                  "damage_dealt": 214.008,
+                  "damage_taken": 357,
+                  "closing_damage_rate": 3.2133
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 73,
+              "forwardTorpedoes": 0,
+              "shadowSeconds": 16.867,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 0,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_destroyer-seed4.json",
+              "sha256": "2b11f23aab557af89b1db190cac835900584d9059e0cef2abb2f2eb47f2972ce",
+              "seed": 4,
+              "outcome": "timeout",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 567.593,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.962,
+                  "damage_dealt": 329,
+                  "damage_taken": 241.604,
+                  "closing_damage_rate": 0.8667
+                },
+                "enemy": {
+                  "remaining_hull": 200,
+                  "remaining_hull_max": 200,
+                  "remaining_hull_fraction": 1,
+                  "damage_dealt": 236.604,
+                  "damage_taken": 336,
+                  "closing_damage_rate": 4.8533
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 73,
+              "forwardTorpedoes": 0,
+              "shadowSeconds": 16.867,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 0,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_destroyer-seed5.json",
+              "sha256": "601aeabffdff1645b2cedfe537c1a32c845677cff3fb42d3e92a36398644ccc4",
+              "seed": 5,
+              "outcome": "timeout",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 577.943,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9796,
+                  "damage_dealt": 271,
+                  "damage_taken": 192.828,
+                  "closing_damage_rate": 0.7333
+                },
+                "enemy": {
+                  "remaining_hull": 200,
+                  "remaining_hull_max": 200,
+                  "remaining_hull_fraction": 1,
+                  "damage_dealt": 187.828,
+                  "damage_taken": 278,
+                  "closing_damage_rate": 1.5733
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 62,
+              "forwardTorpedoes": 0,
+              "shadowSeconds": 30.75,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 0,
+              "deaths": 0
+            }
+          ]
+        },
+        "cruiser_vs_harrow_cruiser": {
+          "wins": 0,
+          "losses": 0,
+          "draws": 1,
+          "timeouts": 4,
+          "failures": 0,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "damageMargin": 186.52180000000004,
+          "winDurationMedian": null,
+          "foreDamageMean": 94.0404,
+          "foreDamagePerSecond": 0.78367,
+          "forwardTorpedoes": 15,
+          "torpedoRuns": 0,
+          "shadowPercent": 59.83633333333333,
+          "enemyHullDamageMean": 39.5964,
+          "runs": [
+            {
+              "file": "cruiser_vs_harrow_cruiser-seed1.json",
+              "sha256": "6b11b4b0f5dcb42a453151c5e236bb3e18b0f99cb35e82980a22bd44ddce57c0",
+              "seed": 1,
+              "outcome": "timeout",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 589.423,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.999,
+                  "damage_dealt": 188.371,
+                  "damage_taken": 48.355,
+                  "closing_damage_rate": 2.3333
+                },
+                "enemy": {
+                  "remaining_hull": 273.629,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.9121,
+                  "damage_dealt": 48.355,
+                  "damage_taken": 188.371,
+                  "closing_damage_rate": 0.496
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 100,
+              "forwardTorpedoes": 2,
+              "shadowSeconds": 82.267,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 26.371,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_cruiser-seed2.json",
+              "sha256": "47a3b6d49d859b9b5393422a7a5c758a75edf80c655cea9b3a093fee4740263f",
+              "seed": 2,
+              "outcome": "timeout",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 583.998,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9898,
+                  "damage_dealt": 412.619,
+                  "damage_taken": 102.603,
+                  "closing_damage_rate": 11.7898
+                },
+                "enemy": {
+                  "remaining_hull": 272.381,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.9079,
+                  "damage_dealt": 102.603,
+                  "damage_taken": 412.619,
+                  "closing_damage_rate": 2.6863
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 121.002,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 56.367,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 27.619,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_cruiser-seed3.json",
+              "sha256": "c16810013c659a23add6d566f0fdd96cb321476817166c72a765fe662d5c3eee",
+              "seed": 3,
+              "outcome": "timeout",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 587.897,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9964,
+                  "damage_dealt": 201.691,
+                  "damage_taken": 47.823,
+                  "closing_damage_rate": 2.3333
+                },
+                "enemy": {
+                  "remaining_hull": 260.309,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.8677,
+                  "damage_dealt": 47.823,
+                  "damage_taken": 201.691,
+                  "closing_damage_rate": 0.5116
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 100,
+              "forwardTorpedoes": 2,
+              "shadowSeconds": 82.267,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 39.691,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_cruiser-seed4.json",
+              "sha256": "5a9c45b9f9e81f18c696c583ff60831966649f680d2534076e01c914f7a25ab3",
+              "seed": 4,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 586.8,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9946,
+                  "damage_dealt": 288.6,
+                  "damage_taken": 116.865,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 236.4,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.788,
+                  "damage_dealt": 116.865,
+                  "damage_taken": 288.6,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 49.2,
+              "forwardTorpedoes": 5,
+              "shadowSeconds": 55.85,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 63.6,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_cruiser-seed5.json",
+              "sha256": "ecd2596a202b996ce48c9a58908128708d04280df3679288f6351f79a3c202b9",
+              "seed": 5,
+              "outcome": "timeout",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 589.937,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9999,
+                  "damage_dealt": 203.701,
+                  "damage_taken": 46.727,
+                  "closing_damage_rate": 2.4
+                },
+                "enemy": {
+                  "remaining_hull": 259.299,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.8643,
+                  "damage_dealt": 46.727,
+                  "damage_taken": 203.701,
+                  "closing_damage_rate": 0.4239
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 100,
+              "forwardTorpedoes": 2,
+              "shadowSeconds": 82.267,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 40.701,
+              "deaths": 0
+            }
+          ]
+        },
+        "cruiser_vs_harrow_patrol": {
+          "wins": 0,
+          "losses": 0,
+          "draws": 5,
+          "timeouts": 0,
+          "failures": 0,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "damageMargin": 97.50280000000001,
+          "winDurationMedian": null,
+          "foreDamageMean": 23.1954,
+          "foreDamagePerSecond": 0.193295,
+          "forwardTorpedoes": 20,
+          "torpedoRuns": 0,
+          "shadowPercent": 64.70833333333333,
+          "enemyHullDamageMean": 34.976600000000005,
+          "runs": [
+            {
+              "file": "cruiser_vs_harrow_patrol-seed1.json",
+              "sha256": "c713d67d5498d6e256097210a5316843ae448d1887712d4666891a2bc2337470",
+              "seed": 1,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 587,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9949,
+                  "damage_dealt": 114.366,
+                  "damage_taken": 34.177,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 281.634,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.9388,
+                  "damage_dealt": 34.177,
+                  "damage_taken": 114.366,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 15.795,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 77.65,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 18.366,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_patrol-seed2.json",
+              "sha256": "f66fdf39a6261de607affcd0ad5a6ad0f6fd5c3aaa2e32ee71574aa656321f70",
+              "seed": 2,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 589.8,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9997,
+                  "damage_dealt": 113.374,
+                  "damage_taken": 33.149,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 282.626,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.9421,
+                  "damage_dealt": 33.149,
+                  "damage_taken": 113.374,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 15.054,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 77.65,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 17.374,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_patrol-seed3.json",
+              "sha256": "cc4f8ed299ea31de245b4424004be37c9df408ae563b4721616b17e57a00062a",
+              "seed": 3,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 589.8,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9997,
+                  "damage_dealt": 136.16,
+                  "damage_taken": 33.133,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 259.84,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.8661,
+                  "damage_dealt": 33.133,
+                  "damage_taken": 136.16,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 15.701,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 77.65,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 40.16,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_patrol-seed4.json",
+              "sha256": "858c930d8760547b7d0095deb0768728c4c303ff4278c6bbe60d7b47aa15d48c",
+              "seed": 4,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 589.6,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9993,
+                  "damage_dealt": 139.856,
+                  "damage_taken": 33.854,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 256.144,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.8538,
+                  "damage_dealt": 33.854,
+                  "damage_taken": 139.856,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 37.856,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 77.65,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 43.856,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_patrol-seed5.json",
+              "sha256": "32388b1bfff47c5b7ccd66ec8e2547bbec7e3e78599dace10e046e867d6eb2e9",
+              "seed": 5,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 590,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 1,
+                  "damage_dealt": 151.127,
+                  "damage_taken": 33.056,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 244.873,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.8162,
+                  "damage_dealt": 33.056,
+                  "damage_taken": 151.127,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 31.571,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 77.65,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 55.127,
+              "deaths": 0
+            }
+          ]
+        },
+        "cruiser_vs_harrow_warhawk": {
+          "wins": 0,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 5,
+          "failures": 0,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "damageMargin": -324.93600000000004,
+          "winDurationMedian": null,
+          "foreDamageMean": 218.796,
+          "foreDamagePerSecond": 1.8233,
+          "forwardTorpedoes": 0,
+          "torpedoRuns": 0,
+          "shadowPercent": 22.2225,
+          "enemyHullDamageMean": 221.28339999999997,
+          "runs": [
+            {
+              "file": "cruiser_vs_harrow_warhawk-seed1.json",
+              "sha256": "68ac6ad2e23fc4429c2c0f8c92c834913bdb677e8d4e6e7ee6909e331de93c03",
+              "seed": 1,
+              "outcome": "timeout",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 544.428,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9228,
+                  "damage_dealt": 372.363,
+                  "damage_taken": 686.419,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 178.636,
+                  "remaining_hull_max": 400,
+                  "remaining_hull_fraction": 0.4466,
+                  "damage_dealt": 686.419,
+                  "damage_taken": 372.363,
+                  "closing_damage_rate": 4
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 225.446,
+              "forwardTorpedoes": 0,
+              "shadowSeconds": 26.667,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 221.364,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_warhawk-seed2.json",
+              "sha256": "aa3ee5ef867c3258eb52170b7914d4cb2e057decca27a491aaf9b5d21487c082",
+              "seed": 2,
+              "outcome": "timeout",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 509.469,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.8635,
+                  "damage_dealt": 384.211,
+                  "damage_taken": 685.825,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 166.79,
+                  "remaining_hull_max": 400,
+                  "remaining_hull_fraction": 0.417,
+                  "damage_dealt": 685.825,
+                  "damage_taken": 384.211,
+                  "closing_damage_rate": 4
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 224.364,
+              "forwardTorpedoes": 0,
+              "shadowSeconds": 26.667,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 233.21,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_warhawk-seed3.json",
+              "sha256": "fce2c32a55ab3b1a7e41cfbe8103b6f8633a84e6a8f6bedbe499b3dd1851b826",
+              "seed": 3,
+              "outcome": "timeout",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 420.347,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.7125,
+                  "damage_dealt": 388.369,
+                  "damage_taken": 733.706,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 163.631,
+                  "remaining_hull_max": 400,
+                  "remaining_hull_fraction": 0.4091,
+                  "damage_dealt": 733.706,
+                  "damage_taken": 388.369,
+                  "closing_damage_rate": 4
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 234.863,
+              "forwardTorpedoes": 0,
+              "shadowSeconds": 26.667,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 236.369,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_warhawk-seed4.json",
+              "sha256": "b6a3e4c0be92b7fd600029c537e7f608cc5eb433197e43c5c0893d6d9cee0ab6",
+              "seed": 4,
+              "outcome": "timeout",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 504.3,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.8547,
+                  "damage_dealt": 370.081,
+                  "damage_taken": 712.027,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 210.919,
+                  "remaining_hull_max": 400,
+                  "remaining_hull_fraction": 0.5273,
+                  "damage_dealt": 712.027,
+                  "damage_taken": 370.081,
+                  "closing_damage_rate": 4
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 185.728,
+              "forwardTorpedoes": 0,
+              "shadowSeconds": 26.667,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 189.081,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_warhawk-seed5.json",
+              "sha256": "b5421769d7ce3a3c38b7774603956a1d2b06a62a2f6aa871b6424c31f69abc08",
+              "seed": 5,
+              "outcome": "timeout",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 483.9,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.8202,
+                  "damage_dealt": 382.392,
+                  "damage_taken": 704.119,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 173.607,
+                  "remaining_hull_max": 400,
+                  "remaining_hull_fraction": 0.434,
+                  "damage_dealt": 704.119,
+                  "damage_taken": 382.392,
+                  "closing_damage_rate": 4
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 223.579,
+              "forwardTorpedoes": 0,
+              "shadowSeconds": 26.667,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 226.393,
+              "deaths": 0
+            }
+          ]
+        }
+      }
+    },
+    "after": {
+      "source": "C:\\Users\\jkeyw\\.codex\\worktrees\\combat-balance-fixes\\increment-14-native-validation\\.phoenix\\combat-balance-2026-10-16",
+      "mergedSha256": "a1d3653bdc55f74bf0b8d41a172d2df790a35ad9472f8e13d5dc53b6e0abbeaa",
+      "totals": {
+        "runs": 20,
+        "wins": 0,
+        "losses": 0,
+        "draws": 20,
+        "timeouts": 0,
+        "reported": 0,
+        "failures": 0
+      },
+      "thresholds": [
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 0,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "max_ttk_median",
+          "limit": 10,
+          "actual": null,
+          "pass": null
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "min_damage_margin",
+          "limit": 100,
+          "actual": 76.4772,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 0,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "max_ttk_median",
+          "limit": 25,
+          "actual": null,
+          "pass": null
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "min_damage_margin",
+          "limit": 200,
+          "actual": 159.0494,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 0,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "max_ttk_median",
+          "limit": 20,
+          "actual": null,
+          "pass": null
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "min_damage_margin",
+          "limit": 200,
+          "actual": 112.4952,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 0,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "max_ttk_median",
+          "limit": 25,
+          "actual": null,
+          "pass": null
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "min_damage_margin",
+          "limit": 25,
+          "actual": -62.67599999999999,
+          "pass": false
+        }
+      ],
+      "matchups": {
+        "cruiser_vs_harrow_destroyer": {
+          "wins": 0,
+          "losses": 0,
+          "draws": 5,
+          "timeouts": 0,
+          "failures": 0,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "damageMargin": 76.4772,
+          "winDurationMedian": null,
+          "foreDamageMean": 152.9304,
+          "foreDamagePerSecond": 1.2744199999999999,
+          "forwardTorpedoes": 16,
+          "torpedoRuns": 5,
+          "shadowPercent": 53.90833333333333,
+          "enemyHullDamageMean": 66.16260000000001,
+          "runs": [
+            {
+              "file": "cruiser_vs_harrow_destroyer-seed1.json",
+              "sha256": "4a2d8d5cbffc4c1db7b8ee6152f7651340d2186943d8800aa609641db4d2aa7d",
+              "seed": 1,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 580.061,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9832,
+                  "damage_dealt": 187.207,
+                  "damage_taken": 122.784,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 141.793,
+                  "remaining_hull_max": 200,
+                  "remaining_hull_fraction": 0.709,
+                  "damage_dealt": 117.784,
+                  "damage_taken": 194.207,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 146.967,
+              "forwardTorpedoes": 2,
+              "shadowSeconds": 66.05,
+              "torpedoRunSeconds": 16.5,
+              "enemyHullDamage": 58.207,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_destroyer-seed2.json",
+              "sha256": "c6d968c62d639d2d7204ea9b47e17109a690a5dd06f31ce7c656cd777cd158da",
+              "seed": 2,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 579.2,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9817,
+                  "damage_dealt": 189.896,
+                  "damage_taken": 125,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 139.104,
+                  "remaining_hull_max": 200,
+                  "remaining_hull_fraction": 0.6955,
+                  "damage_dealt": 120,
+                  "damage_taken": 196.896,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 150.504,
+              "forwardTorpedoes": 2,
+              "shadowSeconds": 66.05,
+              "torpedoRunSeconds": 16.5,
+              "enemyHullDamage": 60.896,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_destroyer-seed3.json",
+              "sha256": "b307a287cf75dc70231f3aa2a5e92875770f3e1763ecab3a236df84626de3e50",
+              "seed": 3,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 578.792,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.981,
+                  "damage_dealt": 205.658,
+                  "damage_taken": 123.608,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 122.342,
+                  "remaining_hull_max": 200,
+                  "remaining_hull_fraction": 0.6117,
+                  "damage_dealt": 118.608,
+                  "damage_taken": 212.658,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 161.66,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 62.05,
+              "torpedoRunSeconds": 20.5,
+              "enemyHullDamage": 77.658,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_destroyer-seed4.json",
+              "sha256": "dfec8570b0b51913a9c3b7d0f02543e0de30d7a7fe37fa575089a0ca39b174cd",
+              "seed": 4,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 584.6,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9908,
+                  "damage_dealt": 199.702,
+                  "damage_taken": 121.459,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 128.298,
+                  "remaining_hull_max": 200,
+                  "remaining_hull_fraction": 0.6415,
+                  "damage_dealt": 116.459,
+                  "damage_taken": 206.702,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 153.409,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 62.05,
+              "torpedoRunSeconds": 20.5,
+              "enemyHullDamage": 71.702,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_destroyer-seed5.json",
+              "sha256": "a492d936e8313221c8d8750c78e22ce26f417c53c1a2954ef93633f610ed954a",
+              "seed": 5,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 586.4,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9939,
+                  "damage_dealt": 190.35,
+                  "damage_taken": 122.576,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 137.65,
+                  "remaining_hull_max": 200,
+                  "remaining_hull_fraction": 0.6883,
+                  "damage_dealt": 117.576,
+                  "damage_taken": 197.35,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 152.112,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 67.25,
+              "torpedoRunSeconds": 15.933,
+              "enemyHullDamage": 62.35,
+              "deaths": 0
+            }
+          ]
+        },
+        "cruiser_vs_harrow_cruiser": {
+          "wins": 0,
+          "losses": 0,
+          "draws": 5,
+          "timeouts": 0,
+          "failures": 0,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "damageMargin": 159.0494,
+          "winDurationMedian": null,
+          "foreDamageMean": 147.8274,
+          "foreDamagePerSecond": 1.2318950000000002,
+          "forwardTorpedoes": 22,
+          "torpedoRuns": 0,
+          "shadowPercent": 67.85833333333333,
+          "enemyHullDamageMean": 103.2096,
+          "runs": [
+            {
+              "file": "cruiser_vs_harrow_cruiser-seed1.json",
+              "sha256": "d52680b852a959fd6dc9cffa76a4420f850f72a47f835599025d1e39cb5f991f",
+              "seed": 1,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 589.564,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9993,
+                  "damage_dealt": 198.592,
+                  "damage_taken": 35.442,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 201.408,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.6714,
+                  "damage_dealt": 35.442,
+                  "damage_taken": 198.592,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 135.301,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 92.15,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 98.592,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_cruiser-seed2.json",
+              "sha256": "7d828dfbc8fd5c28d83e2b9e40621e05d40de7a1e032d309e72cc03f060c86f4",
+              "seed": 2,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 584.191,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9902,
+                  "damage_dealt": 257.136,
+                  "damage_taken": 85.865,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 169.864,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.5662,
+                  "damage_dealt": 85.865,
+                  "damage_taken": 257.136,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 190.242,
+              "forwardTorpedoes": 5,
+              "shadowSeconds": 65.35,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 130.136,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_cruiser-seed3.json",
+              "sha256": "886c622cd7b31a58925371fab09d5e3e1b6cfcf22228500930d06d90f1caa771",
+              "seed": 3,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 588.4,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9973,
+                  "damage_dealt": 195.75,
+                  "damage_taken": 34.767,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 204.25,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.6808,
+                  "damage_dealt": 34.767,
+                  "damage_taken": 195.75,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 138.205,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 92.15,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 95.75,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_cruiser-seed4.json",
+              "sha256": "ba6be4e6146092eca5f68a5faf0579429e3338a598fc51909336e8d5be078169",
+              "seed": 4,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 589.5,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9992,
+                  "damage_dealt": 235.364,
+                  "damage_taken": 83.931,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 191.636,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.6388,
+                  "damage_dealt": 83.931,
+                  "damage_taken": 235.364,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 156.006,
+              "forwardTorpedoes": 5,
+              "shadowSeconds": 65.35,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 108.364,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_cruiser-seed5.json",
+              "sha256": "a80168ce70541f8f2af1380a1653240b75383ee350ffd57463afeed6e2e23eaa",
+              "seed": 5,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 590,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 1,
+                  "damage_dealt": 183.206,
+                  "damage_taken": 34.796,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 216.794,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.7226,
+                  "damage_dealt": 34.796,
+                  "damage_taken": 183.206,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 119.383,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 92.15,
+              "torpedoRunSeconds": 0,
+              "enemyHullDamage": 83.206,
+              "deaths": 0
+            }
+          ]
+        },
+        "cruiser_vs_harrow_patrol": {
+          "wins": 0,
+          "losses": 0,
+          "draws": 5,
+          "timeouts": 0,
+          "failures": 0,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "damageMargin": 112.4952,
+          "winDurationMedian": null,
+          "foreDamageMean": 109.0524,
+          "foreDamagePerSecond": 0.9087700000000001,
+          "forwardTorpedoes": 23,
+          "torpedoRuns": 5,
+          "shadowPercent": 58.975,
+          "enemyHullDamageMean": 102.46379999999999,
+          "runs": [
+            {
+              "file": "cruiser_vs_harrow_patrol-seed1.json",
+              "sha256": "cbd1638e7e5037fe8f8b897982445bb0c2fdfc1d15a715d02829be5b52094ce5",
+              "seed": 1,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 586.5,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9941,
+                  "damage_dealt": 146.888,
+                  "damage_taken": 36.695,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 218.112,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.727,
+                  "damage_dealt": 36.695,
+                  "damage_taken": 146.888,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 72.264,
+              "forwardTorpedoes": 5,
+              "shadowSeconds": 75.35,
+              "torpedoRunSeconds": 2.933,
+              "enemyHullDamage": 81.888,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_patrol-seed2.json",
+              "sha256": "47b7abb9671234e6466ddee27c2ae425be716f934b1ca24d496888785e89d1aa",
+              "seed": 2,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 589.7,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9995,
+                  "damage_dealt": 94.678,
+                  "damage_taken": 36.232,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 266.322,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.8877,
+                  "damage_dealt": 36.232,
+                  "damage_taken": 94.678,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 70.157,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 75.05,
+              "torpedoRunSeconds": 2.933,
+              "enemyHullDamage": 33.678,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_patrol-seed3.json",
+              "sha256": "687179cc69d8e76e0755bee74a92fa6c439136ef571d258d75ae6ead6240d2ce",
+              "seed": 3,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 588.9,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9981,
+                  "damage_dealt": 215.658,
+                  "damage_taken": 74.837,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 151.342,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.5045,
+                  "damage_dealt": 74.837,
+                  "damage_taken": 215.658,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 171.463,
+              "forwardTorpedoes": 5,
+              "shadowSeconds": 59.65,
+              "torpedoRunSeconds": 2.933,
+              "enemyHullDamage": 148.658,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_patrol-seed4.json",
+              "sha256": "8ad0eedce60499bc943e3a0a1be67eab37786bc465e32bc7af486f45952e7682",
+              "seed": 4,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 588.1,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9968,
+                  "damage_dealt": 159.188,
+                  "damage_taken": 36.582,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 201.812,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.6727,
+                  "damage_dealt": 36.582,
+                  "damage_taken": 159.188,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 97.052,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 75.05,
+              "torpedoRunSeconds": 2.933,
+              "enemyHullDamage": 98.188,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_patrol-seed5.json",
+              "sha256": "549351633170d861b438a2f3279abe3b35f3eb7801d2693f71aaef7cd0bb51e6",
+              "seed": 5,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 590,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 1,
+                  "damage_dealt": 210.907,
+                  "damage_taken": 80.497,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 150.093,
+                  "remaining_hull_max": 300,
+                  "remaining_hull_fraction": 0.5003,
+                  "damage_dealt": 80.497,
+                  "damage_taken": 210.907,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 134.326,
+              "forwardTorpedoes": 5,
+              "shadowSeconds": 68.75,
+              "torpedoRunSeconds": 2.933,
+              "enemyHullDamage": 149.907,
+              "deaths": 0
+            }
+          ]
+        },
+        "cruiser_vs_harrow_warhawk": {
+          "wins": 0,
+          "losses": 0,
+          "draws": 5,
+          "timeouts": 0,
+          "failures": 0,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "damageMargin": -62.67599999999999,
+          "winDurationMedian": null,
+          "foreDamageMean": 194.77159999999998,
+          "foreDamagePerSecond": 1.6230966666666666,
+          "forwardTorpedoes": 20,
+          "torpedoRuns": 5,
+          "shadowPercent": 64.30833333333334,
+          "enemyHullDamageMean": 118.30080000000001,
+          "runs": [
+            {
+              "file": "cruiser_vs_harrow_warhawk-seed1.json",
+              "sha256": "db51fab67df236fd2a315208aac8c2f2cb3c0213b57eca1fea90294d427d4034",
+              "seed": 1,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 578.09,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9798,
+                  "damage_dealt": 276.226,
+                  "damage_taken": 309.633,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 249.774,
+                  "remaining_hull_max": 400,
+                  "remaining_hull_fraction": 0.6244,
+                  "damage_dealt": 309.633,
+                  "damage_taken": 276.226,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 217.44,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 72.05,
+              "torpedoRunSeconds": 4.5,
+              "enemyHullDamage": 150.226,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_warhawk-seed2.json",
+              "sha256": "16fac102a86531ce3e510f293841cb982c1eace4dfc91cd19b18196035027380",
+              "seed": 2,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 576.055,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9764,
+                  "damage_dealt": 261.307,
+                  "damage_taken": 309.007,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 263.693,
+                  "remaining_hull_max": 400,
+                  "remaining_hull_fraction": 0.6592,
+                  "damage_dealt": 309.007,
+                  "damage_taken": 261.307,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 180.337,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 72.05,
+              "torpedoRunSeconds": 4.5,
+              "enemyHullDamage": 136.307,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_warhawk-seed3.json",
+              "sha256": "8fef697f486dd99b21639ffec28822bb1a12038c87ad005e1ea12d416ec929d8",
+              "seed": 3,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 575.854,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.976,
+                  "damage_dealt": 227.842,
+                  "damage_taken": 306.909,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 299.158,
+                  "remaining_hull_max": 400,
+                  "remaining_hull_fraction": 0.7479,
+                  "damage_dealt": 301.909,
+                  "damage_taken": 227.842,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 183.243,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 84.85,
+              "torpedoRunSeconds": 4.5,
+              "enemyHullDamage": 100.842,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_warhawk-seed4.json",
+              "sha256": "3be4006e652a5a05025b2df904d7785ad84439962840f974a073dffd9445888c",
+              "seed": 4,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 582.68,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 0.9876,
+                  "damage_dealt": 226.856,
+                  "damage_taken": 310.405,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 299.144,
+                  "remaining_hull_max": 400,
+                  "remaining_hull_fraction": 0.7479,
+                  "damage_dealt": 310.405,
+                  "damage_taken": 226.856,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 201.769,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 72.05,
+              "torpedoRunSeconds": 4.5,
+              "enemyHullDamage": 100.856,
+              "deaths": 0
+            },
+            {
+              "file": "cruiser_vs_harrow_warhawk-seed5.json",
+              "sha256": "5c37d8af14d5d0fc1bef87aa6b2cf1b3fb0b7d3a697820a2fe30d52801503f9d",
+              "seed": 5,
+              "outcome": "draw",
+              "finalPhase": "InProgress",
+              "sides": {
+                "player": {
+                  "remaining_hull": 590,
+                  "remaining_hull_max": 590,
+                  "remaining_hull_fraction": 1,
+                  "damage_dealt": 228.273,
+                  "damage_taken": 307.93,
+                  "closing_damage_rate": 0
+                },
+                "enemy": {
+                  "remaining_hull": 296.727,
+                  "remaining_hull_max": 400,
+                  "remaining_hull_fraction": 0.7418,
+                  "damage_dealt": 302.93,
+                  "damage_taken": 228.273,
+                  "closing_damage_rate": 0
+                }
+              },
+              "systemKnockouts": 0,
+              "seconds": 120,
+              "foreDamage": 191.069,
+              "forwardTorpedoes": 4,
+              "shadowSeconds": 84.85,
+              "torpedoRunSeconds": 4.5,
+              "enemyHullDamage": 103.273,
+              "deaths": 0
+            }
+          ]
+        }
+      }
+    }
+  },
+  "validation": {
+    "targetedRust": {
+      "helmMeasuredFacts": "6 passed",
+      "shieldMechanics": "70 passed",
+      "shieldAuthoredConfiguration": "6 passed",
+      "shieldAIAdmissionKnowledgeAndRecovery": "74 passed",
+      "neutralizationMessageBridge": "1 passed",
+      "authoredFleetPolicies": "40 passed; 6 existing assumption failures"
+    },
+    "javascript": "123 passed across six focused files; strict strings: 0 errors/warnings",
+    "specifications": "PASM validate, scan and traceability passed; affected wiki source/index lint passed",
+    "review": "Independent read-only source review passed after separating focus eligibility from protection/recovery priority; final end-to-end regression commit 387777cc also passed independent read-only review; independent report review hash-checked all 20 before/after AAR pairs and confirmed the reported activity metrics",
+    "sourceAudit": "No weapon damage/range/cycle values or balance thresholds changed; fixed fore Turret removed; four base Harrow focus flags false",
+    "existingFailures": {
+      "baseline": "48dd565815cc5aefb6afe35dabea469f5ab0c63a",
+      "method": "Read-only source/input comparison, not a baseline test execution",
+      "tests": [
+        "captain_guard_truth_table",
+        "each_policy_kind_has_one_fleet_baseline_and_exactly_the_bespoke_hulls_depart_from_it",
+        "every_hull_authors_the_same_five_selectors",
+        "a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it",
+        "weapons_fire_guard_truth_table",
+        "an_unknown_channel_resolves_to_nothing_on_every_authored_policy"
+      ],
+      "cause": "Unchanged fleet enumeration now selects acquirable_harrow as canonical baseline, includes deliberate rehearsal selectors and inherited Cruiser variants, and still asserts historical policy counts. All failing test bodies/helpers and relevant policy data are unchanged."
+    },
+    "headlessGenerator": "27 passed",
+    "headlessNeutralization": "1 passed: two-opponent generated duel ends only after last neutralization; no fabricated death",
+    "snapshotContinuation": "1 passed: fresh-host serialization/restore and 30 subsequent steps preserve shield capability, charge and individual AI tree memory",
+    "balance": {
+      "totals": {
+        "runs": 20,
+        "wins": 0,
+        "losses": 0,
+        "draws": 20,
+        "timeouts": 0,
+        "reported": 0,
+        "failures": 0
+      },
+      "passed": 4,
+      "total": 16,
+      "failed": [
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 0,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "max_ttk_median",
+          "limit": 10,
+          "actual": null,
+          "pass": null
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "min_damage_margin",
+          "limit": 100,
+          "actual": 76.4772,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 0,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "max_ttk_median",
+          "limit": 25,
+          "actual": null,
+          "pass": null
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "min_damage_margin",
+          "limit": 200,
+          "actual": 159.0494,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 0,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "max_ttk_median",
+          "limit": 20,
+          "actual": null,
+          "pass": null
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "min_damage_margin",
+          "limit": 200,
+          "actual": 112.4952,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 0,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "max_ttk_median",
+          "limit": 25,
+          "actual": null,
+          "pass": null
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "min_damage_margin",
+          "limit": 25,
+          "actual": -62.67599999999999,
+          "pass": false
+        }
+      ]
+    },
+    "limits": "Full pre-push suite and human/device acceptance are not claimed. Concurrent optimisation remains separate.",
+    "existingHeadlessCompilation": "tests/headless_runner.rs has 11 existing errors using formerly nonoptional sensor fields and removed ShipScanRecord.last/refusal. New victory regression runs in tests/combat_balance.rs; unrelated old tests left untouched.",
+    "existingSnapshotFixtures": "Two unchanged older selected fixtures fail before their intended continuation checks: early hull damage is no longer guaranteed at 400 ticks; the legacy coarse-shield inbox is not consumed by per-arc state-tree AI. No baseline execution comparison is claimed.",
+    "balanceCommand": "node scripts/balance-runs.mjs scripts/balance-runs.cruiser.toml --out .phoenix/combat-balance-2026-10-16",
+    "balanceExitCode": 1,
+    "reportPresentation": "Desktop and 390px phone rendering inspected; no page-width overflow (tables scroll horizontally)"
+  },
+  "interpretation": {
+    "observed": "All 20 corrected runs reach 120 seconds still InProgress, with zero closing damage on both sides and no recorded System knockouts. The existing classifier therefore reports draws; no neutralization victory is recorded and the condition remains pending.",
+    "activity": "Forward tube launches rise from 35 to 81; torpedo-run manoeuvres return in 15 of 20 encounters. Fore-beam delivery improves against Destroyer, Cruiser and Patrol but falls against Warhawk.",
+    "remainingQuestion": "Shadow now has a working authored standoff radius when enemy reach is unknown. Player shadow occupancy rises in three matchups; the defensive posture and re-engagement interaction needs investigation before assuming a damage-value increase is the next fix.",
+    "causalLimit": "This matrix tests the combined changes, not one-fix-at-a-time causal attribution."
+  }
+}

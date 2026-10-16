@@ -744,6 +744,7 @@ fn ship_wide() -> ShieldConfig {
 fn from_arcs_builds_one_facing_per_input() {
     let arcs = vec![
         ArcRuntimeConfig {
+            focus_available: true,
             id: "fore".into(),
             label: "Fore".into(),
             center_deg: 0.0,
@@ -755,6 +756,7 @@ fn from_arcs_builds_one_facing_per_input() {
             energy: Default::default(),
         },
         ArcRuntimeConfig {
+            focus_available: true,
             id: "port".into(),
             label: "Port".into(),
             center_deg: 270.0,
@@ -778,6 +780,7 @@ fn from_arcs_builds_one_facing_per_input() {
 #[test]
 fn from_arcs_per_arc_overrides_take_precedence() {
     let arcs = vec![ArcRuntimeConfig {
+        focus_available: true,
         id: "fore".into(),
         label: "Fore".into(),
         center_deg: 0.0,
@@ -808,6 +811,7 @@ fn from_arcs_per_arc_overrides_preserved_across_focus_recalc() {
     // arcs so any accidental fall-back to ship-wide values is visible.
     let arcs = vec![
         ArcRuntimeConfig {
+            focus_available: true,
             id: "fore".into(),
             label: "Fore".into(),
             center_deg: 0.0,
@@ -819,6 +823,7 @@ fn from_arcs_per_arc_overrides_preserved_across_focus_recalc() {
             energy: Default::default(),
         },
         ArcRuntimeConfig {
+            focus_available: true,
             id: "aft".into(),
             label: "Aft".into(),
             center_deg: 180.0,
@@ -891,6 +896,7 @@ fn from_arcs_per_arc_overrides_preserved_across_focus_recalc() {
 #[test]
 fn from_arcs_ship_wide_defaults_fill_in_when_arc_omits_field() {
     let arcs = vec![ArcRuntimeConfig {
+        focus_available: true,
         id: "all".into(),
         label: "All".into(),
         center_deg: 0.0,
@@ -916,6 +922,7 @@ fn shield_arc_facing_bearing_math_variable_widths() {
     let arcs = vec![
         // Wide fore arc — half the circle.
         ArcRuntimeConfig {
+            focus_available: true,
             id: "fore".into(),
             label: "Fore".into(),
             center_deg: 0.0,
@@ -928,6 +935,7 @@ fn shield_arc_facing_bearing_math_variable_widths() {
         },
         // Narrow port + starboard.
         ArcRuntimeConfig {
+            focus_available: true,
             id: "port".into(),
             label: "Port".into(),
             center_deg: 270.0,
@@ -939,6 +947,7 @@ fn shield_arc_facing_bearing_math_variable_widths() {
             energy: Default::default(),
         },
         ArcRuntimeConfig {
+            focus_available: true,
             id: "starboard".into(),
             label: "Starboard".into(),
             center_deg: 90.0,
@@ -974,6 +983,7 @@ fn shield_arc_facing_bearing_math_variable_widths() {
 #[test]
 fn from_arcs_snapshot_carries_id_and_geometry() {
     let arcs = vec![ArcRuntimeConfig {
+        focus_available: true,
         id: "custom".into(),
         label: "Custom".into(),
         center_deg: 45.0,
@@ -1004,6 +1014,7 @@ fn two_priority_arcs(priority_arc_offline: bool) -> ShieldSystem {
     let mut s = ShieldSystem::from_arcs(
         &[
             ArcRuntimeConfig {
+                focus_available: true,
                 id: "hi".into(),
                 label: "High".into(),
                 center_deg: 0.0,
@@ -1015,6 +1026,7 @@ fn two_priority_arcs(priority_arc_offline: bool) -> ShieldSystem {
                 energy: Default::default(),
             },
             ArcRuntimeConfig {
+                focus_available: true,
                 id: "lo".into(),
                 label: "Low".into(),
                 center_deg: 0.0,
@@ -1073,6 +1085,7 @@ fn snapshot_carries_priority() {
     let wide = ship_wide();
     let s = ShieldSystem::from_arcs(
         &[ArcRuntimeConfig {
+            focus_available: true,
             id: "fore".into(),
             label: "Fore".into(),
             center_deg: 0.0,
@@ -1218,6 +1231,7 @@ fn apply_damage_multiplier_with_no_focus_is_unity() {
 fn from_arcs_per_arc_overrides_preserve_damage_multiplier_across_focus() {
     let arcs = vec![
         ArcRuntimeConfig {
+            focus_available: true,
             id: "fore".into(),
             label: "Fore".into(),
             center_deg: 0.0,
@@ -1229,6 +1243,7 @@ fn from_arcs_per_arc_overrides_preserve_damage_multiplier_across_focus() {
             energy: Default::default(),
         },
         ArcRuntimeConfig {
+            focus_available: true,
             id: "aft".into(),
             label: "Aft".into(),
             center_deg: 180.0,
@@ -1262,4 +1277,42 @@ fn from_arcs_per_arc_overrides_preserve_damage_multiplier_across_focus() {
     s.set_focused_facing(None);
     assert!((s.facings[0].damage_multiplier - 1.0).abs() < 1e-6);
     assert!((s.facings[1].damage_multiplier - 1.0).abs() < 1e-6);
+}
+
+#[test]
+fn authored_focus_availability_controls_actuation_and_restore() {
+    let mut shield = ShieldSystem::new(&ShieldConfig::default());
+    shield.facings[0].focus_available = false;
+    let base = shield.facings[0].max_hp;
+    shield.set_focused_facing(Some(0));
+    assert_eq!(shield.focused_facing, None);
+    assert_eq!(shield.facings[0].max_hp, base);
+    shield.set_focused_facing(Some(1));
+    assert_eq!(shield.focused_facing, Some(1));
+    shield.set_focused_facing(Some(0));
+    assert_eq!(
+        shield.focused_facing,
+        Some(1),
+        "unsupported focus must not clear another arc"
+    );
+    shield.set_focused_facing(None);
+    let mut rows: Vec<_> = shield
+        .facings
+        .iter()
+        .map(|arc| {
+            (
+                arc.id.clone(),
+                arc.hp,
+                arc.hp_frac(),
+                arc.offline_remaining,
+                arc.is_focused,
+            )
+        })
+        .collect();
+    assert!(shield.validate_facings(&rows).is_ok());
+    rows[0].4 = true;
+    assert!(shield.validate_facings(&rows).is_err());
+    shield.facings[0].focus_available = true;
+    shield.set_focused_facing(Some(0));
+    assert_eq!(shield.focused_facing, Some(0));
 }

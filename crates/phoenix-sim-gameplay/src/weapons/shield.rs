@@ -145,6 +145,8 @@ impl Default for ShieldFocusConfig {
 /// A single shield facing arc.
 #[derive(Clone, Debug)]
 pub struct ShieldFacing {
+    /// Authored focus capability; unrelated to arc count.
+    pub focus_available: bool,
     /// Stable arc id from the ship TOML `[[shield_arc]]` block (e.g. `"fore"`,
     /// `"all"`). Empty when constructed via legacy `ShieldSystem::new` from
     /// a `ShieldConfig` (the evenly-spaced-facings backwards-compat path).
@@ -201,6 +203,7 @@ impl ShieldFacing {
         offline_duration: f32,
     ) -> Self {
         Self {
+            focus_available: true,
             id: String::new(),
             label: label.into(),
             hp: max_hp,
@@ -238,6 +241,7 @@ impl ShieldFacing {
         priority: u32,
     ) -> Self {
         Self {
+            focus_available: true,
             id: id.into(),
             label: label.into(),
             hp: max_hp,
@@ -455,6 +459,7 @@ fn default_arc_id(index: usize, num_facings: usize) -> String {
 /// `weapons/shield.rs` remains Bevy-free and TOML-schema-agnostic.
 #[derive(Clone, Debug)]
 pub struct ArcRuntimeConfig {
+    pub focus_available: bool,
     /// Stable arc id (from `[[shield_arc]] id`).
     pub id: String,
     /// Human-readable label.
@@ -649,6 +654,7 @@ impl ShieldSystem {
                     a.priority,
                 );
                 facing.energy_config = a.energy.clone();
+                facing.focus_available = a.focus_available;
                 facing
             })
             .collect();
@@ -670,6 +676,13 @@ impl ShieldSystem {
     /// Set the focused facing by index, or `None` to clear focus.
     /// Recalculates each facing's effective max_hp, regen, and is_focused flag.
     pub fn set_focused_facing(&mut self, facing: Option<usize>) {
+        if facing.is_some_and(|index| {
+            self.facings
+                .get(index)
+                .is_none_or(|arc| !arc.focus_available)
+        }) {
+            return;
+        }
         self.focused_facing = facing;
         self.recalculate_focus();
     }
@@ -691,7 +704,11 @@ impl ShieldSystem {
             // An arc may retain previously focused strength while it decays.
             let maximum = facing
                 .base_max_hp
-                .saturating_add(self.focus_config.bonus_max_hp.max(0));
+                .saturating_add(if facing.focus_available {
+                    self.focus_config.bonus_max_hp.max(0)
+                } else {
+                    0
+                });
             if !ids.insert(id)
                 || *hp < 0
                 || *hp > maximum
@@ -702,6 +719,7 @@ impl ShieldSystem {
                 || !offline.is_finite()
                 || *offline < 0.0
                 || *offline > facing.offline_duration
+                || (*focus && !facing.focus_available)
                 || focused > 1
             {
                 return Err("shield.error.invalid_charge".into());

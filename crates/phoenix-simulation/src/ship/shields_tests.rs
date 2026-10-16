@@ -1635,3 +1635,41 @@ fn threat_bearing_clears_when_sensors_threat_state_clears() {
         "threat_bearing must clear when SensorsThreatState clears"
     );
 }
+
+#[test]
+fn authored_focus_unavailable_refuses_command_and_publishes_capability() {
+    let mut app = test_app();
+    let se = ship_e(&mut app);
+    app.world_mut()
+        .get_mut::<ShipShields>(se)
+        .unwrap()
+        .0
+        .facings[0]
+        .focus_available = false;
+    app.world_mut()
+        .get_mut::<AdmittedCommands>(se)
+        .unwrap()
+        .0
+        .push(AdmittedCommand {
+            target: SystemId("shield-arc-fore".into()),
+            payload: SystemControlPayload::SetShieldArcFocus { focused: true },
+            response_token: Some("science".into()),
+            feedback_correlation: Some(ActionCorrelationId::new("focus-unavailable").unwrap()),
+        });
+    let messages = tick(&mut app);
+    assert!(has_feedback(
+        &messages,
+        "science",
+        "focus-unavailable",
+        ActionFeedbackOutcome::Refused
+    ));
+    assert_eq!(
+        app.world().get::<ShipShields>(se).unwrap().0.focused_facing,
+        None
+    );
+    let boards = app.world().get::<ShipSystemBlackboards>(se).unwrap();
+    let SystemBlackboard::ShieldArc(arc) = &boards.0[&SystemId("shield-arc-fore".into())] else {
+        panic!("shield reading");
+    };
+    assert!(!arc.operation.as_ref().unwrap().focus_available);
+}

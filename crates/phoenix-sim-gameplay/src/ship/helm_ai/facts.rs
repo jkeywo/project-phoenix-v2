@@ -194,12 +194,13 @@ pub const SHIELD_FRACTION_FACT: &str = "shield_fraction";
 /// target.
 pub const TARGET_DIRECT_FIRE_RANGE_FACT: &str = "target_direct_fire_range";
 /// The derived safe-ring radius: [`TARGET_DIRECT_FIRE_RANGE_FACT`] plus this
-/// hull's authored [`SAFE_RANGE_MARGIN_PARAM`].
+/// hull's authored [`SAFE_RANGE_MARGIN_PARAM`], or the explicit
+/// [`UNKNOWN_TARGET_SAFE_RANGE_PARAM`] manoeuvre radius when reach is unknown.
 ///
 /// DERIVED host-side for the same reason [`RANGE_ABOVE_MIN_SEEN_FACT`] is: the
 /// predicate grammar compares one atom to a literal or a `param(...)`, so a sum
-/// of a fact and a param is the host's job. Seeded only when the hull authors
-/// the margin — a hull with no recovery doctrine gets no ring.
+/// of a fact and a param is the host's job. Neither branch synthesises a
+/// target capability; a hull with no applicable authored radius gets no ring.
 pub const SAFE_RANGE_FACT: &str = "safe_range";
 /// `1.0` when the ship has HELD at least the safe ring across the whole
 /// authored history window (or has no live target at all), `0.0` otherwise.
@@ -313,6 +314,9 @@ pub const TRACKING_FULL_STEER_PARAM: &str = "tracking_full_steer_rad";
 
 /// World units added to the target's own direct-fire reach to get the safe ring.
 pub const SAFE_RANGE_MARGIN_PARAM: &str = "safe_range_margin";
+/// Complete authored manoeuvre radius when the target's reach is unobserved.
+/// A policy choice, never a substitute enemy capability fact.
+pub const UNKNOWN_TARGET_SAFE_RANGE_PARAM: &str = "unknown_target_safe_range";
 /// Throttle fraction flown while orbiting the ring.
 pub const ORBIT_SPEED_PARAM: &str = "orbit_speed";
 /// Radians of heading offset per unit of *fractional* radial error — how hard
@@ -1407,11 +1411,14 @@ pub fn seed_recovery_facts(
         facts.set(SHIELD_FRACTION_FACT, fraction as f64);
     }
 
-    let safe_range = params.get(SAFE_RANGE_MARGIN_PARAM).and_then(|margin| {
-        facts
-            .get(TARGET_DIRECT_FIRE_RANGE_FACT)
-            .map(|range| range + margin)
-    });
+    let safe_range = (facts.get(TARGET_VALID_FACT).unwrap_or(0.0) > 0.0)
+        .then(|| match facts.get(TARGET_DIRECT_FIRE_RANGE_FACT) {
+            Some(range) => params
+                .get(SAFE_RANGE_MARGIN_PARAM)
+                .map(|margin| range + margin),
+            None => params.get(UNKNOWN_TARGET_SAFE_RANGE_PARAM),
+        })
+        .flatten();
     if let Some(range) = safe_range {
         facts.set(SAFE_RANGE_FACT, range);
     }
@@ -1773,3 +1780,18 @@ pub use super::constants::{
     WEAK_SHIELD_FLIP_DWELL_SECS_PARAM, WEAK_SHIELD_FLIP_HP_PARAM, WEAK_SHIELD_FLIP_PARAMS,
     WEAK_SHIELD_RESTORE_HP_PARAM,
 };
+
+/// Derive the optional manoeuvre requirement from this axis's own policy.
+/// The observation remains absent when unavailable; only the authored decision
+/// to require it is exposed. This does not grant Helm any enemy shield knowledge.
+pub fn seed_torpedo_requirement_facts(
+    facts: &mut crate::world::flags::AiFacts,
+    params: &crate::world::flags::AiParams,
+) {
+    if let Some(threshold) = params.get("torpedo_run_shield_gap") {
+        facts.set(
+            "torpedo_shield_requirement_disabled",
+            if threshold <= 0.0 { 1.0 } else { 0.0 },
+        );
+    }
+}

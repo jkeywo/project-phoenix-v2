@@ -250,6 +250,9 @@ pub struct ShieldArcConfig {
     pub damage_components: Vec<phoenix_model::damage::DamageComponentConfig>,
     /// Stable arc id (kebab-case fragment used to build the fine SystemId).
     pub id: String,
+    /// Whether this arc supports focus, independently of the number of arcs.
+    #[serde(default = "default_focus_available")]
+    pub focus_available: bool,
     /// Display label shown in the JS panel (e.g. `"Fore"`, `"All"`).
     pub label: String,
     /// Arc centre bearing in degrees (0 = fore, 90 = starboard).
@@ -286,6 +289,10 @@ fn default_shield_frequency() -> f32 {
     0.5
 }
 
+fn default_focus_available() -> bool {
+    true
+}
+
 fn default_arc_priority() -> u32 {
     1
 }
@@ -296,6 +303,7 @@ impl ShieldArcConfig {
     pub fn to_runtime(&self) -> crate::weapons::shield::ArcRuntimeConfig {
         crate::weapons::shield::ArcRuntimeConfig {
             id: self.id.clone(),
+            focus_available: self.focus_available,
             label: self.label.clone(),
             center_deg: self.center_deg,
             width_deg: self.width_deg,

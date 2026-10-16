@@ -1096,6 +1096,7 @@ fn authored_shield_arc_trees_raise_focus_and_bound_physical_recovery() {
                     .map(|name| (name.clone(), false))
                     .collect();
                 facts.insert("preferred_focus".into(), preferred);
+                facts.insert("preferred_protection".into(), preferred);
                 let numbers = numeric
                     .facts
                     .iter()

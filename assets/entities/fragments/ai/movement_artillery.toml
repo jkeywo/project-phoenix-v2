@@ -368,6 +368,8 @@ tracking_full_steer_rad = 0.6
 # safe-range knob, and the counterpart of `artillery_hold_range`, which is a
 # property of the hull's own gun instead.
 safe_range_margin = 70.0
+# [ai] Provisional chosen standoff for unknown enemy reach; not a capability estimate.
+unknown_target_safe_range = 130.0
 # Throttle fraction flown on the defensive ring. Deliberately LOW — this is a hull
 # holding position at range, not patrolling one — but not zero: a ship parked
 # inside a hostile's reach is not standing off from it, it is a target.

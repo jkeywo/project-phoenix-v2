@@ -310,6 +310,8 @@ describe('Shield operation actions', () => {
     expect(sendAction).toHaveBeenLastCalledWith('set_shield_recovery', expect.objectContaining({target:null}));
     sendAction.mockClear();
     activate(registry, SCIENCE_SHIELD_RECOVERY_ACTION_ID, 'science', {system_id:facing.system_id,target:'private-battery'});
+    facing.operation.focus_available = false;
+    expect(activate(registry, SCIENCE_SHIELD_FOCUS_ACTION_ID, 'science', {arc_id:'port_aux',focused:true})).toMatchObject({handled:false});
     facing.controllable=false;
     activate(registry, SCIENCE_SHIELD_RAISED_ACTION_ID, 'science', {system_id:facing.system_id,raised:true});
     activate(registry, SCIENCE_SHIELD_FOCUS_ACTION_ID, 'science', {arc_id:'port_aux',focused:true});

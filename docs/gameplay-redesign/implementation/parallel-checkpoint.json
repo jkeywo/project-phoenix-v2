@@ -2,7 +2,7 @@
   "date": "2026-10-16",
   "status": "partial",
   "current_summary": {
-    "source": "ed6fe946; protocol42/snapshot85/rules0.69; shared loaders, disruption, acquisition and exact planned deliveries source-integrated; current follow-up evidence below",
+    "source": "256911e6; protocol43/snapshot86/rules0.70; listening/contextual reports now integrated alongside shared loaders, disruption, acquisition and exact planned deliveries; follow-up evidence below",
     "current_followup": {
       "host": "Atbc5ada43 all5 actual decoy/capture/formation host cases PASS,28.51sbuild; .phoenix/resumed-decoy-capture-formation-native-retry.log. First efcddb08 attempt failed test-only ConsoleKnowledgeView.values compilation; bc5 uses actual permission-filtered get. Turret2 and census4 retain priorfd3 evidence; emission2/reception2 retain35f evidence, not one current integrated batch.",
       "radio": "At300add84 non_roster_ owner2PASS; first broader radio16PASS/1FAIL sparse publication fixture. Corrected e01556d2; all17 radio tests including whole JSON360 PASS in the later83PASS/4FAIL Simulation owner batch. Earlier logs retained; current .phoenix/resumed-radio-delivery-acquisition-simulation-owners-retry.log.",
@@ -12,7 +12,9 @@
       "simulation_compile": "Initial selected Simulation run failed compilation; corrected3010e849/09fbfebc/e5d2d5b0. Renderer-free lib/tests cargo check PASS1m05. Actual owner retry83PASS/4FAIL: two beam cases blocked by now-fixed EMP recipe, two acquisition restore fixtures lost real Broad owners. Fixture correction3a1e7e6e integrated, retry running. Logs .phoenix/resumed-integrated-simulation-owner-check.log, .phoenix/resumed-radio-delivery-acquisition-simulation-owners-retry.log and .phoenix/resumed-acquisition-owner-fixture-retry.log.",
       "pasm": "Four existing authoritative state owns mirrors correctedb093f606. Targeted clean-worktree pasm validate at donor54cf235e PASS1176entities/625informationalfindings,0errors. Earlier clean d24 validation failed4missingmirror errors. No whole-current scan/trace/finalgate claim.",
       "accepted_recipe_retries": "EMP auxiliary Console correction27e579fa actual accepted native1PASS, .phoenix/resumed-disruptor-actual-accepted-retry.log. Ordinary unarmed Full3D utility hull accepted native1PASS atc3c3500b, .phoenix/resumed-utility-actual-accepted-owner.log. Neither is a host gameplay/flight result.",
-      "new_host_batch": "At86fc659c code/c3c3500b equipment, four targets fail before gameplay: TickSecurityTeams singleton contains team tick plus acquisition commit, not duplicate physical execution. Shared loader2, maintenance4 and disruption/census targets blocked. Source-reviewed52329c60 keeps singleton on physical tick and same-step completion before following owner; not yet integrated/native. Log .phoenix/resumed-loaders-disruption-maintenance-host.log.",
+      "new_host_batch": "At86fc659c code/c3c3500b equipment, four targets fail before gameplay: TickSecurityTeams singleton contains team tick plus acquisition commit, not duplicate physical execution. Shared loader2, maintenance4 and disruption/census targets blocked. Correction210cd6e9 keeps singleton on physical tick and same-step completion before following owner; integrated, native retry pending. Log .phoenix/resumed-loaders-disruption-maintenance-host.log.",
+      "listening": "Coherent consumer a04b3448 plus historical dated-view correction9b2f894d integrated; central epochs52a9f4b7. First native selection failed on missing test SystemId import, corrected ab501fa4; retry7PASS (Model2/Gameplay5 incl actual accepted recipe),1m07build. .phoenix/resumed-listening-accepted-and-pure-owners-retry.log. First client selection143PASS/1FAIL action inventory; corrected retry4files144PASS .phoenix/resumed-listening-client-integration-retry.log. Renderer-free Simulation lib/tests check PASS1m00 .phoenix/resumed-listening-simulation-compile.log. Actual combined Radio/traffic/Security/retained-beam owner run currently pending .phoenix/resumed-listening-security-beam-simulation-owners.log.",
+      "acquisition_followup": "At3a1e7e6e acquisition8tests7PASS/1FAIL after4m10build: real paid continuation digest differs. Source analysis finds five normal run-scope resources absent in sparse fixture but inserted by restore. Reviewed fixture-only0c1c1ff3 initializes those owners and adds immediate capture/digest diagnostics without weakening folds/restore; native retry pending in combined Simulation owner run.",
       "remaining": "Current acquisition retry, Security stage correction and new host native verification; moving utilitycraft runtime, physical marking, fitting rehearsal/forecast, listening/chatter, Patrol/War/Sandbox, broader operations/actors/Director and all applicable acceptance. Only0closed; no push."
     },
     "latest_host_result": {
@@ -81,9 +83,9 @@
     },
     "push": "Not performed. Full integration gate and outstanding acceptance have not passed.",
     "compatibility": {
-      "protocol": 42,
-      "snapshot": 85,
-      "rules": "0.69"
+      "protocol": 43,
+      "snapshot": 86,
+      "rules": "0.70"
     },
     "current_four_owner_native": {
       "source": "3f783eec",

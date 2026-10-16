@@ -54,7 +54,7 @@ fn fixture() -> (App, Entity, Entity, String) {
     time.advance_by(std::time::Duration::from_secs_f64(1.0 / 60.0));
     app.insert_resource(time);
     let mut config = crate::world::config::parse_world(include_str!(
-        "../../../../../tests/fixtures/worlds/gm_npc_doctrine.toml"
+        "../../../../tests/fixtures/worlds/gm_npc_doctrine.toml"
     ))
     .unwrap();
     let profile = crate::gm::operations::npc::NpcDoctrinePaletteEntry {
@@ -76,8 +76,8 @@ fn fixture() -> (App, Entity, Entity, String) {
     app.insert_resource(config);
     let mut factions = crate::ai::faction::FactionRegistry::new();
     for source in [
-        include_str!("../../../../../assets/factions/alliance.toml"),
-        include_str!("../../../../../assets/factions/harrow.toml"),
+        include_str!("../../../../assets/factions/alliance.toml"),
+        include_str!("../../../../assets/factions/harrow.toml"),
     ] {
         factions.insert(crate::ai::faction::parse_faction_config(source).unwrap());
     }

@@ -247,4 +247,5 @@ pub(crate) fn register(app: &mut App) {
     use crate::authoritative::{DeclareState, StateClass};
     app.declare_state::<ShipMarkingAttachment>(StateClass::Folded, "marking-attachment");
     app.declare_state::<MarkingBeaconProfile>(StateClass::Derived, "marking-accepted-equipment");
+    super::marking_reports::register(app);
 }

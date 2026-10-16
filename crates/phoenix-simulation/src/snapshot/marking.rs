@@ -214,6 +214,79 @@ fn parent(
             .clone(),
     ))
 }
+/// A successful emission retains its original own sensor token, not a copied
+/// receipt. Tracks may have aged out; the existing contact allocation frontier
+/// still bounds that historical token without creating a report ledger.
+fn validate_report_frontier(
+    row: &EntityState,
+    equipment: &phoenix_model::marking::MarkingBeaconConfig,
+) -> Result<(), String> {
+    let Some(report) = row
+        .marking_attachment
+        .as_ref()
+        .and_then(|state| state.report.as_ref())
+    else {
+        return Ok(());
+    };
+    let refuse =
+        || "marker report is not an original emitted sample of its actual sensor".to_string();
+    let state = row
+        .broad
+        .as_ref()
+        .and_then(|owners| owners.get(&equipment.sensor))
+        .ok_or_else(refuse)?;
+    if state.owner != equipment.sensor
+        || report.emitted_tick != report.observed_tick
+        || state
+            .last_sample_tick
+            .is_none_or(|last| last < report.observed_tick)
+        || state
+            .last_tick
+            .is_none_or(|last| last < report.emitted_tick)
+    {
+        return Err(refuse());
+    }
+    let source = phoenix_sim_gameplay::science::sharing::origin_handle(&row.uuid);
+    let prefix = format!(
+        "{}:{}{}:{}",
+        source.len(),
+        source,
+        equipment.sensor.0.len(),
+        equipment.sensor.0
+    );
+    let tail = report.sample.strip_prefix(&prefix).ok_or_else(refuse)?;
+    let (length, rest) = tail.split_once(':').ok_or_else(refuse)?;
+    let length = length
+        .parse::<usize>()
+        .ok()
+        .filter(|length| *length <= 512)
+        .ok_or_else(refuse)?;
+    let contact = rest.get(..length).ok_or_else(refuse)?;
+    if rest.get(length..) != Some(format!(":{}", report.observed_tick).as_str()) {
+        return Err(refuse());
+    }
+    let contact_prefix = format!(
+        "{}:{}:contact-",
+        equipment.sensor.0.len(),
+        equipment.sensor.0
+    );
+    let sequence = contact
+        .strip_prefix(&contact_prefix)
+        .and_then(|n| n.parse::<u64>().ok())
+        .filter(|n| *n > 0 && *n < state.next_contact)
+        .ok_or_else(refuse)?;
+    let origin = phoenix_model::sensing_sharing::RadarSampleOrigin {
+        source,
+        system: equipment.sensor.clone(),
+        contact: format!("{contact_prefix}{sequence}"),
+    };
+    if report.sample
+        != phoenix_sim_gameplay::science::sharing::sample_id(&origin, report.observed_tick)
+    {
+        return Err(refuse());
+    }
+    Ok(())
+}
 fn validate(
     world: &World,
     row: &EntityState,
@@ -251,9 +324,7 @@ fn validate(
     };
     let equipment = equipment.ok_or("foreign marker state has no actual accepted equipment")?;
     state.validate(&row.uuid, tick)?;
-    if state.report.is_some() {
-        return Err("marker report frontier requires the pending paid provenance consumer".into());
-    }
+    validate_report_frontier(row, equipment)?;
     let config = accepted_payload(&state.payload)?;
     if config.marking_beacon.as_ref() != Some(equipment) {
         return Err("marker state disagrees with actual accepted equipment".into());

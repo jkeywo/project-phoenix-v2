@@ -420,3 +420,30 @@ historical report provenance, complete used-template dependency acceptance,
 Workshop payload authoring and full actual-host continuation remain unfinished.
 No complete marking consumer, generic carry-capable target support, native
 physical acceptance or increment15 playable exit is claimed.
+
+## Late paid-report source checkpoint
+
+The next isolated source slice adds the adopted report consumer. Its private
+current-endpoint adapter rebuilds physical poses, exact Radio control and current
+Operation from the same-tick raw listening receipt. S066 receiver coverage and
+the existing channel/key/range/path/jamming/protection route still apply; no
+continuous payment is repeated. A fresh own bound sensor sample pays the normal
+discrete transmission cost and advances its original sample frontier even when
+no recipient can hear it. Missed samples are not queued or retried.
+
+Delivery enters only willing same-faction SensorRadar track owners, through the
+existing sample receipt mechanism after the legacy sharing batch. Private target
+routes and identity/classification/assessment/observation claims are removed.
+Original timing, uncertainty and measured motion remain the sample's existing
+evidence. Neither delivery nor receipt grants a targeting association or control.
+The retained frontier is checked against the candidate body's original sensor
+sample token, allocated contact range and observation clock; aged-out samples
+need no replacement history ledger and are never refreshed by restore.
+
+Comms independently reviewed the current paid endpoints and report producer;
+Craft reviewed the actual paid Radio/Broad/report owner tests; Personnel reviewed
+the candidate frontier consistency guard. Owner tests are authored, not run in
+this worker. The tests separate their initial physical attachment premise from
+the still-pending whole-host flight/contact proof. Complete accepted dependency
+validation, Workshop authoring, native execution and the full physical/report
+continuation journey remain required before the vertical-slice exit.

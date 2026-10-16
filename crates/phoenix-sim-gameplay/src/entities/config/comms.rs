@@ -64,6 +64,36 @@ pub(super) fn validate_radio(config: &EntityConfig) -> Result<(), String> {
     {
         return Err("radio channels require the installed Comms System, its controlling Console and real energy consumer".into());
     }
+    if let Some(alert) = radio
+        .traffic
+        .as_ref()
+        .and_then(|traffic| traffic.alert.as_ref())
+    {
+        let permitted = ship
+            .console_for_system(&radio.system)
+            .is_some_and(|console| {
+                console.feeds.iter().any(|feed| {
+                    feed.source == alert.source
+                        && feed.kind == phoenix_model::console::ConsoleObservationKind::Captain
+                })
+            });
+        let source = ship
+            .system(&alert.source)
+            .is_some_and(|system| system.kind == crate::ship::system_registry::CAPTAIN_KIND);
+        let alerts = ship
+            .systems
+            .iter()
+            .filter(|system| system.kind == crate::ship::system_registry::RED_ALERT_KIND)
+            .count();
+        let publishers = ship
+            .systems
+            .iter()
+            .filter(|system| system.kind == crate::ship::system_registry::CAPTAIN_KIND)
+            .count();
+        if !permitted || !source || alerts != 1 || publishers != 1 {
+            return Err("contextual traffic requires its exact permitted Captain feed and one actual Alert System".into());
+        }
+    }
     Ok(())
 }
 

@@ -13,6 +13,8 @@ pub struct TestSnapshot {
     pub selection: TestSelection,
     pub revision: String,
     pub breakpoint: Option<crate::workshop::test_protocol::TestBreakpoint>,
+    pub rehearsal: Option<crate::workshop::rehearsal_request::RehearsalRequest>,
+    pub run_generation: u64,
 }
 
 /// Runtime-owned render support is captured read-only. This does not widen the
@@ -23,6 +25,52 @@ pub fn runtime_support_path(path: &str) -> bool {
 
 pub fn stage_path(path: &str) -> bool {
     super::allowed_path(WorkspaceKind::Project, path) || runtime_support_path(path)
+}
+
+/// Re-admit the private child's immutable captured stage before boot. This
+/// reader has no template-cache or live dependency fallback.
+pub fn prepare_staged_rehearsal(
+    root: &std::path::Path,
+    launch: &crate::workshop::test_protocol::Launch,
+) -> Result<Option<crate::workshop::rehearsal::PreparedRehearsal>, String> {
+    if launch.rehearsal.is_none() {
+        return Ok(None);
+    }
+    let root = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
+    let mut files = Files::new();
+    crate::native_capture::walk(&root, &mut |entry| {
+        let kind = entry.file_type().map_err(super::io_error)?;
+        if kind.is_symlink() {
+            return Err("A captured Test stage cannot contain links".into());
+        }
+        if kind.is_dir() {
+            return Ok(Some(entry.path()));
+        }
+        let name = crate::native_capture::relative_name(&entry.path(), &root)?;
+        if name.ends_with(".toml") || name.ends_with(".rhai") {
+            if !stage_path(&name) {
+                return Err("Invalid captured Test source path".into());
+            }
+            crate::native_capture::insert_checked(
+                &mut files,
+                name,
+                crate::native_capture::read_bounded(&entry.path(), super::MAX_BYTES as u64)?,
+                super::MAX_FILES,
+                super::MAX_BYTES,
+                "Captured Test source exceeds its envelope",
+            )?;
+        }
+        Ok(None)
+    })?;
+    let text = files
+        .into_iter()
+        .map(|(path, bytes)| {
+            String::from_utf8(bytes)
+                .map(|text| (path, text))
+                .map_err(|e| e.to_string())
+        })
+        .collect::<Result<_, _>>()?;
+    crate::workshop::rehearsal::prepare(text, launch)
 }
 
 impl NativeWorkshopProvider {
@@ -132,6 +180,17 @@ impl NativeWorkshopProvider {
         selection: TestSelection,
         breakpoint: Option<crate::workshop::test_protocol::TestBreakpoint>,
     ) -> Result<TestSnapshot, Response> {
+        self.prepare_test_rehearsal(sources, selection, breakpoint, None, 0)
+    }
+
+    pub fn prepare_test_rehearsal(
+        &self,
+        sources: DraftSources,
+        selection: TestSelection,
+        breakpoint: Option<crate::workshop::test_protocol::TestBreakpoint>,
+        rehearsal: Option<crate::workshop::rehearsal_request::RehearsalRequest>,
+        run_generation: u64,
+    ) -> Result<TestSnapshot, Response> {
         let merged = self.prepare_runtime_capture(sources, "Runtime validation refused Test")?;
         let text = Sources(
             merged
@@ -154,6 +213,14 @@ impl NativeWorkshopProvider {
                 report: Some(report),
             });
         }
+        let launch = crate::workshop::test_protocol::Launch {
+            selection: selection.clone(),
+            revision: super::revision(&merged),
+            breakpoint: breakpoint.clone(),
+            rehearsal: rehearsal.clone(),
+            run_generation,
+        };
+        crate::workshop::rehearsal::prepare(text.0.clone(), &launch).map_err(super::refused)?;
         if let Some(candidate) = breakpoint.as_ref() {
             candidate.validate().map_err(super::refused)?;
             let layers = crate::workshop::test_source::breakpoint_layers(&text, &selection.world);
@@ -172,6 +239,8 @@ impl NativeWorkshopProvider {
             files: merged,
             selection,
             breakpoint,
+            rehearsal,
+            run_generation,
         })
     }
 }

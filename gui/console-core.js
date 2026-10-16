@@ -1,5 +1,6 @@
 import { registerEmissionProfileActions } from './stations/emission-profile-actions.js';
 import { registerCaptureActions } from './stations/comms-capture-actions.js';
+import { registerTrafficActions } from './stations/comms-traffic-actions.js';
 import {registerIdentityActions} from './stations/identity-actions.js';
 import {registerConcealmentActions} from './stations/concealment-actions.js';
 import { registerProtectionActions } from './stations/protection-actions.js';
@@ -309,6 +310,11 @@ export function initConsole({
     });
   }
   if (_actionContexts.has(COMMS_ACTION_CONTEXT)) {
+    _actionContexts.add('comms-traffic');
+    registerTrafficActions(_semanticActions, { getState: () => {
+      const projected = familyView(_latestState || {}, 'comms');
+      return Object.keys(projected).length ? projected : _latestState;
+    }, sendAction });
     _actionContexts.add('comms-capture');
     registerCaptureActions(_semanticActions, { getState: () => {
       const projected = familyView(_latestState || {}, 'comms');

@@ -44,10 +44,12 @@ impl Stage {
             selection: snapshot.selection,
             revision: snapshot.revision,
             breakpoint: snapshot.breakpoint,
+            rehearsal: snapshot.rehearsal,
+            run_generation: snapshot.run_generation,
         };
         fs::write(
             stage.path.join("workshop-test.json"),
-            crate::core::codec::to_json(&launch).map_err(|e| e.to_string())?,
+            launch.bounded_json()?,
         )
         .map_err(|e| e.to_string())?;
         Ok((stage, launch))
@@ -412,7 +414,7 @@ pub fn run_child(descriptor: &Path) -> Result<(), String> {
     if bytes.len() as u64 > MAX_RECORD_BYTES {
         return Err("Test launch descriptor is too large".into());
     }
-    let launch: Launch = crate::core::codec::from_json_bytes(&bytes).map_err(|e| e.to_string())?;
+    let launch = Launch::decode(&bytes)?;
     let result = run_launched_child(descriptor, &launch);
     if let Err(message) = &result {
         let mut status = TestStatus::starting(&launch);
@@ -431,6 +433,12 @@ fn run_launched_child(descriptor: &Path, launch: &Launch) -> Result<(), String> 
     {
         return Err("Invalid Test selection".into());
     }
+    let rehearsal = crate::workshop::provider::test_snapshot::prepare_staged_rehearsal(
+        descriptor
+            .parent()
+            .ok_or("Test content root is unavailable")?,
+        launch,
+    )?;
     if let Some(breakpoint) = launch.breakpoint.as_ref() {
         breakpoint.validate().map_err(str::to_owned)?;
         if breakpoint.layer.as_ref().is_some_and(|path| {
@@ -483,6 +491,7 @@ fn run_launched_child(descriptor: &Path, launch: &Launch) -> Result<(), String> 
         app.insert_resource(frozen);
     }
     install_test_render(&mut app)?;
+    crate::workshop::rehearsal::install(&mut app, rehearsal);
     use crate::authoritative::{DeclareState, StateClass};
     app.declare_state::<ChildPipe>(StateClass::Timer, "gm-milestone-integrated-workshop")
         .declare_state::<crate::workshop::test_trace::TestTrace>(
@@ -553,8 +562,12 @@ fn publish_status(
     trace: Res<crate::workshop::test_trace::TestTrace>,
     breakpoint: Res<crate::workshop::test_breakpoint::TestBreakpointState>,
     failure: Option<Res<super::test_frames::PresentationFailure>>,
+    rehearsal: Option<Res<crate::workshop::rehearsal::PreparedRehearsal>>,
+    measured: Option<Res<crate::workshop::rehearsal::Measurements>>,
 ) {
-    let error = failure.and_then(|failure| failure.error());
+    let error = failure
+        .and_then(|failure| failure.error())
+        .or_else(|| rehearsal.and_then(|r| r.error.clone()));
     let state = TestStatus {
         frame_url: None,
         presentation_url: None,
@@ -572,12 +585,13 @@ fn publish_status(
         trace: trace.records(),
         breakpoint: breakpoint.configured.clone(),
         breakpoint_hit: breakpoint.hit.clone(),
+        rehearsal: measured.map(|m| m.result.clone()),
     };
     write_status(&state);
 }
 
 fn write_status(state: &TestStatus) {
-    if let Ok(record) = crate::core::codec::to_json(state) {
+    if let Ok(record) = state.bounded_json() {
         // Dedicated inherited pipe, never a host channel or crew broadcast.
         let mut output = std::io::stdout().lock();
         let _ = writeln!(output, "{STATUS_PREFIX}{record}");

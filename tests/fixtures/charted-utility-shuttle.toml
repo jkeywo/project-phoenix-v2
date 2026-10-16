@@ -1,0 +1,17 @@
+# Test-only ordinary chart-selector policy; all actual utility hardware is inherited.
+includes = ["../../assets/entities/utility_shuttle.toml"]
+
+[navigation_console.system_chart]
+range = 300
+shows = ["objective_marker"]
+selects = ["objective_marker"]
+
+[navigation_console.selector]
+sources = ["chart-contacts"]
+horizon = 1000000
+switch_margin = 0
+eligibility = "candidate_fact(source_chart_contact) > 0"
+
+[[navigation_console.selector.score]]
+when = "candidate_fact(source_chart_contact) > 0"
+weight = 1

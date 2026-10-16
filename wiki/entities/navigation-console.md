@@ -2,8 +2,8 @@
 title: Navigation Console
 type: entity
 tags: [console, navigation, waypoint, map, radar, ship]
-sources: [crates/phoenix-model/src/formation.rs, crates/phoenix-simulation/src/console/navigation/formation.rs, crates/phoenix-simulation/src/console/navigation/knowledge.rs, crates/phoenix-simulation/src/snapshot/navigation_formation.rs, gui/formation.js, gui/components/formation-course-controls.js, assets/entities/formation_cruiser.toml, gui/workshop-world-routes-panel.js, editor/workshop-world-routes.js, gui/components/navigation-sharing-controls.js, gui/transit.js, gui/battleship/navigation.html, gui/cruiser/comms.html, gui/courier/captain.html, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/stations/navigation-actions.js, gui/stations/navigation-action-control.js, gui/semantic-action-registry.js, gui/gamepad-input.js, gui/console-state.js, gui/sim-state.js, gui/action-map.js, gui/hero-bar.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/navigation/mod.rs, crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-sim-gameplay/src/civilian/traffic.rs, crates/phoenix-simulation/src/civilian/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, assets/entities/alliance_battleship.toml, assets/entities/alliance_cruiser.toml, assets/entities/alliance_courier.toml, assets/entities/alliance_destroyer.toml]
-updated: 2026-10-15
+sources: [crates/phoenix-model/src/navigation_point.rs, crates/phoenix-simulation/src/console/navigation/known.rs, crates/phoenix-simulation/src/snapshot/navigation_charted.rs, crates/phoenix-model/src/formation.rs, crates/phoenix-simulation/src/console/navigation/formation.rs, crates/phoenix-simulation/src/console/navigation/knowledge.rs, crates/phoenix-simulation/src/snapshot/navigation_formation.rs, gui/formation.js, gui/components/formation-course-controls.js, assets/entities/formation_cruiser.toml, gui/workshop-world-routes-panel.js, editor/workshop-world-routes.js, gui/components/navigation-sharing-controls.js, gui/transit.js, gui/battleship/navigation.html, gui/cruiser/comms.html, gui/courier/captain.html, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/stations/navigation-actions.js, gui/stations/navigation-action-control.js, gui/semantic-action-registry.js, gui/gamepad-input.js, gui/console-state.js, gui/sim-state.js, gui/action-map.js, gui/hero-bar.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/navigation/mod.rs, crates/phoenix-simulation/src/console/navigation/server.rs, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-sim-gameplay/src/civilian/traffic.rs, crates/phoenix-simulation/src/civilian/server.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, assets/entities/alliance_battleship.toml, assets/entities/alliance_cruiser.toml, assets/entities/alliance_courier.toml, assets/entities/alliance_destroyer.toml]
+updated: 2026-10-16
 ---
 
 # Navigation Console
@@ -59,6 +59,21 @@ An Anchored mode retains its last permitted measured point; fitted Navigation
 updates it from explicit observations and holds it on information loss. Only
 unconfigured legacy consumers track a live Transform and clear on despawn.
 Non-finite coordinates are rejected.
+
+On actual Full3D equipment, selecting a permitted charted contact through that
+same paid command retains its complete fractional XYZ point as `ChartedXYZ`.
+Its original owner, point, selection tick and semantic generation survive chart
+withdrawal and restore; it remains a fixed course. Measured planar contacts do
+not supply an implied height. Planar/Bounded hulls and free XZ commands keep their
+existing behavior.
+
+The typed `charted_points` publication contains only the current Navigation
+picture's range/filter/concealment-qualified chart entries. Its explicit-feed
+accessor does not union foreign World `transit_routes` or civilian lanes.
+`charted_course` exposes the selected fixed point through the same Navigation
+scope. The extracted neutral point DTO preserves the existing Transit route
+API and JSON without making those different sources interchangeable. This
+source checkpoint has owner tests; actual native flight acceptance is separate.
 
 Formation mode retains an actual received and locally accepted Comms request,
 an earned observer-local leader handle, and dated measured position/velocity.

@@ -29,6 +29,18 @@ pub fn command_policy(
     payload: &SystemControlPayload,
 ) -> crate::ship::control_source::ControlTickPolicy {
     use crate::ship::system_registry::{HELM_STEERING_KIND, HELM_THRUST_KIND, LATERAL_THRUST_KIND};
+    if matches!(
+        payload,
+        SystemControlPayload::SetCommsListeningOrder { .. }
+            | SystemControlPayload::ReportCommsAlert
+    ) && config
+        .system(target)
+        .is_none_or(|system| system.kind != crate::ship::system_registry::COMMS_KIND)
+    {
+        return crate::ship::control_source::control_tick_policy(
+            crate::ship::control_source::ControlSource::Offline,
+        );
+    }
     if let SystemControlPayload::SelectCommsCapture { capture } = payload {
         if capture.is_some_and(|value| {
             value == 0 || value > phoenix_model::comms_capture::MAX_CAPTURE_SEQUENCE

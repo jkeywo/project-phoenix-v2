@@ -297,22 +297,6 @@ pub struct TransitWorldArrival {
     pub tick: u64,
 }
 
-/// Authored known routes on the permitted Navigation publication. No paths or actors.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TransitRouteView {
-    pub id: String,
-    pub label: String,
-    pub point: [f32; 3],
-}
-impl TransitRouteView {
-    pub fn validate(&self) -> Result<(), String> {
-        if !identity(&self.id)
-            || !identity(&self.label)
-            || !self.point.iter().all(|value| value.is_finite())
-        {
-            return Err("invalid known authored Transit route".into());
-        }
-        Ok(())
-    }
-}
+/// Authored World arrival routes on their existing permitted Navigation publication.
+/// The shared value shape does not make a foreign arrival a local chart point.
+pub use crate::navigation_point::NavigationPointView as TransitRouteView;

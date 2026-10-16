@@ -230,6 +230,18 @@ pub(crate) struct Picture {
     pub contacts: BTreeMap<String, Contact>,
 }
 
+impl Contact {
+    pub(crate) fn charted_point(
+        &self,
+    ) -> Option<phoenix_model::navigation_point::NavigationPointView> {
+        self.charted
+            .then(|| phoenix_model::navigation_point::NavigationPointView {
+                id: self.key.clone(),
+                label: self.name.clone().unwrap_or_else(|| self.key.clone()),
+                point: self.position,
+            })
+    }
+}
 impl Picture {
     #[allow(clippy::too_many_arguments)]
     pub fn capture(

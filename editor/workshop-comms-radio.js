@@ -16,7 +16,7 @@ function equipment(entity) {
 }
 export function validateCommsRadio(radio, entity) {
   if (!equipment(entity)) throw new Error('Radio needs the installed Comms System, its owning Console, finite endpoint reach and positive continuous/discrete energy costs.');
-  if (!closed(radio, ['system', 'keys', 'channel', 'request_reading_ticks', 'media', 'capture']) || radio.system !== 'comms'
+  if (!closed(radio, ['system', 'keys', 'channel', 'request_reading_ticks', 'media', 'capture', 'traffic']) || radio.system !== 'comms'
     || (radio.media !== undefined && !['audio', 'audio_video'].includes(radio.media))
     || !Array.isArray(radio.keys === undefined ? [] : radio.keys) || !Array.isArray(radio.channel) || !radio.channel.length)
     throw new Error('Configure the canonical Comms owner and at least one supported radio channel.');
@@ -41,6 +41,31 @@ export function validateCommsRadio(radio, entity) {
       || (channel.key !== undefined && (!identity(channel.key) || !keys.includes(channel.key))))
       throw new Error('Use unique channel ids, finite endpoint-bounded range, positive whole work units and actually held protection keys.');
     ids.add(channel.id);
+  }
+  if (radio.traffic !== undefined) {
+    const traffic = radio.traffic, whole = value => Number.isSafeInteger(value) && value > 0 && value <= 0xffffffff;
+    if (!closed(traffic, ['listening','alert']) || (traffic.listening === undefined && traffic.alert === undefined) || ids.size > 65535)
+      throw new Error('Traffic needs supported finite listening or contextual alert equipment.');
+    if (traffic.listening !== undefined) {
+      const listening = traffic.listening;
+      if (!closed(listening,['simultaneous_channels','priority']) || !whole(listening.simultaneous_channels)
+        || listening.simultaneous_channels > ids.size || !Array.isArray(listening.priority)
+        || listening.priority.length !== ids.size || new Set(listening.priority).size !== ids.size
+        || !listening.priority.every(id => ids.has(id))) throw new Error('Listening needs bounded positive coverage and an exact channel order.');
+    }
+    if (traffic.alert !== undefined) {
+      const alert = traffic.alert, systems = authoredAndGeneratedSystems(entity);
+      const owner = systems.find(system => system.id === radio.system), console = entity.console?.find(console => console.id === owner?.console);
+      const text = value => typeof value === 'string' && value.trim().length && bytes(value) <= 4096 && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(value);
+      if (!closed(alert,['source','channel','minimum_spacing_ticks','routine_text','red_alert_text']) || !identity(alert.source)
+        || !radio.channel.some(channel => channel.id === alert.channel && channel.key === undefined)
+        || !whole(alert.minimum_spacing_ticks) || !text(alert.routine_text) || !text(alert.red_alert_text) || alert.routine_text === alert.red_alert_text
+        || !systems.some(system => system.id === alert.source && system.kind === 'captain')
+        || systems.filter(system => system.kind === 'red_alert').length !== 1
+        || systems.filter(system => system.kind === 'captain').length !== 1
+        || !console?.feed?.some(feed => feed.source === alert.source && feed.kind === 'Captain'))
+        throw new Error('Alert traffic needs its explicit permitted Captain feed, one Alert System, public channel and distinct bounded intent templates.');
+    }
   }
 }
 export function inspectCommsRadio(draft, dependencies, path) {

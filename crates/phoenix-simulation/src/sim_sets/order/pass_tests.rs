@@ -88,3 +88,50 @@ fn contradictory_declared_execution_order_is_a_schedule_error() {
     assert!(message.contains("publish"), "{message}");
     assert!(message.contains("observe"), "{message}");
 }
+
+#[test]
+fn security_acquisition_completion_keeps_one_ordered_clock_owner() {
+    fn following_owner() {}
+
+    // Exercise the actual plugin registration, rather than reproducing its
+    // tuple: the fixed-order singleton check must accept this real schedule.
+    let mut app = App::new();
+    app.add_plugins(crate::security::server::SecurityPlugin);
+    app.add_systems(
+        FixedUpdate,
+        following_owner
+            .in_set(FixedStep::RevealCivilianContacts)
+            .in_set(crate::sim_sets::SimSet::Modifiers),
+    );
+    let mut schedule = app
+        .world_mut()
+        .resource_mut::<Schedules>()
+        .remove(FixedUpdate)
+        .unwrap();
+    let mut order = DeclaredOrder::default();
+    order.before(
+        FixedStep::TickSecurityTeams,
+        FixedStep::RevealCivilianContacts,
+    );
+    schedule.add_build_pass(order);
+    schedule.initialize(app.world_mut()).unwrap();
+
+    let names: Vec<_> = schedule
+        .systems()
+        .unwrap()
+        .map(|(_, system)| system.name().to_string())
+        .collect();
+    let position = |suffix: &str| {
+        let matches: Vec<_> = names
+            .iter()
+            .enumerate()
+            .filter_map(|(index, name)| name.ends_with(suffix).then_some(index))
+            .collect();
+        assert_eq!(matches.len(), 1, "one actual {suffix}: {names:?}");
+        matches[0]
+    };
+    let clock = position("::tick_security_teams");
+    let completion = position("::commit_ready_acquisitions");
+    let following = position("::following_owner");
+    assert!(clock < completion && completion < following, "{names:?}");
+}

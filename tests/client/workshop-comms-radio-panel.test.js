@@ -19,6 +19,21 @@ function fixture(source = stringify(entity()), dependencies = { base_files: {}, 
   return { panel, runtime, preview, test, draft: () => draft, replace: value => { draft = documentFor(value); } };
 }
 const field = (kind, name) => document.querySelector(`[id*="workshop-comms-radio-${kind}-${name}-"]`);
+it('authors explicit finite listening and contextual alert choices and retires disposed buttons', async () => {
+  const endpoint=entity();endpoint.console[0].feed=[{source:'captain',kind:'Captain'}];endpoint.system.push(
+    {id:'captain',kind:'captain',console:'comms-room'},{id:'alert',kind:'red_alert',console:'comms-room'});
+  endpoint.comms.radio={system:'comms',keys:[],channel:[{id:'open',range:60,work_units:1},{id:'fleet',range:60,work_units:1}]};
+  const f=fixture(stringify(endpoint));await settle();
+  control('listening-enabled').checked=true;control('coverage').value='1';control('priority').value='fleet\nopen';
+  control('alert-enabled').checked=true;control('alert-source').value='captain';control('alert-channel').value='open';control('alert-spacing').value='90';
+  control('routine-text').value='We selected routine alert.';control('red-text').value='We selected red alert.';
+  control('save').click();await settle();
+  const traffic=parse(f.draft().read(path)).comms.radio.traffic;expect(traffic.listening).toEqual({simultaneous_channels:1,priority:['fleet','open']});expect(traffic.alert.source).toBe('captain');
+  f.draft().undo();f.panel.refresh();expect(control('listening-enabled').checked).toBe(false);f.draft().redo();f.panel.refresh();expect(control('priority').value).toBe('fleet\nopen');
+  const before=f.draft().read(path),save=control('save'),preview=control('preview'),test=control('test');f.runtime.validate.mockClear();f.panel.dispose();
+  save.dispatchEvent(new MouseEvent('click'));preview.dispatchEvent(new MouseEvent('click'));test.dispatchEvent(new MouseEvent('click'));
+  expect(f.draft().read(path)).toBe(before);expect(f.runtime.validate).not.toHaveBeenCalled();expect(f.preview).not.toHaveBeenCalled();expect(f.test).not.toHaveBeenCalled();
+});
 it('authors optional capture and decoder equipment with normal accepted history', async () => {
   const f = fixture(); await settle(); control('add-channel').click();
   field('channel', 'id').value = 'monitor'; field('channel', 'range').value = '60'; field('channel', 'work_units').value = '1';

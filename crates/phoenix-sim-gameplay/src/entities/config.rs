@@ -2178,6 +2178,7 @@ impl EntityConfig {
                 if pair != (COMMS_RESPOND_CHANNEL, COMMS_RESPOND_VERB)
                     && pair != (COMMS_REQUEST_CHANNEL, COMMS_REQUEST_VERB)
                     && pair != (COMMS_DECODE_CHANNEL, COMMS_DECODE_VERB)
+                    && pair != (COMMS_REPORT_CHANNEL, COMMS_REPORT_VERB)
                 {
                     return Err(SerdeError::custom("Comms output channel must use its matching supported response/request verb"));
                 }

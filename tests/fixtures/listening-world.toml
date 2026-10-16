@@ -1,0 +1,10 @@
+[global]
+seed = 15621666
+[player_spawn]
+position = [0, 0, 0]
+[[entity]]
+id = "listener"
+name = "listener"
+template_path = "assets/entities/alliance_cruiser.toml"
+transform = { position = [80, 0, 0] }
+spawn_on = "game_start"

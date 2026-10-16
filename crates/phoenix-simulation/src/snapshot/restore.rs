@@ -127,6 +127,12 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
             .push(RestoreGap::ResourceStateInvalid { uuid, reason });
         return report;
     }
+    if let Err((uuid, reason)) = super::comms_traffic::validate_roster(world, snapshot) {
+        report
+            .gaps
+            .push(RestoreGap::ResourceStateInvalid { uuid, reason });
+        return report;
+    }
     if let Err((uuid, reason)) = super::comms_capture::validate_roster(world, snapshot) {
         report
             .gaps

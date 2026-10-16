@@ -2,8 +2,8 @@
 title: Equipment Fitting
 type: concept
 tags: [equipment, repair, resources, workshop, continuation]
-sources: [crates/phoenix-model/src/fitting.rs, crates/phoenix-sim-gameplay/src/resources/fitting.rs, crates/phoenix-sim-gameplay/src/resources/fitting_state.rs, crates/phoenix-sim-gameplay/src/jobs/repair_refit.rs, crates/phoenix-simulation/src/resources/fitting_server.rs, crates/phoenix-simulation/src/resources/equipment_recovery_server.rs, crates/phoenix-simulation/src/snapshot/fitting.rs, crates/phoenix-sim-contracts/src/logical_clock.rs, crates/phoenix-simulation/src/snapshot/historical_clock.rs, editor/workshop-fitting.js, gui/components/fitting-controls.js, gui/fitting-plans.js, pasm/spec/design/equipment-fitting-and-refitting.yaml]
-updated: 2026-10-15
+sources: [crates/phoenix-model/src/fitting.rs, crates/phoenix-sim-gameplay/src/resources/fitting.rs, crates/phoenix-sim-gameplay/src/resources/fitting_state.rs, crates/phoenix-sim-gameplay/src/jobs/repair_refit.rs, crates/phoenix-simulation/src/resources/fitting_server.rs, crates/phoenix-simulation/src/resources/equipment_recovery_server.rs, crates/phoenix-simulation/src/snapshot/fitting.rs, crates/phoenix-sim-contracts/src/logical_clock.rs, crates/phoenix-simulation/src/snapshot/historical_clock.rs, editor/workshop-fitting.js, gui/components/fitting-controls.js, gui/fitting-plans.js, crates/phoenix-simulation/src/workshop/rehearsal.rs, crates/phoenix-simulation/src/workshop/rehearsal_report.rs, editor/fitting-rehearsal.js, gui/workshop-test-panel.js, pasm/spec/design/equipment-fitting-and-refitting.yaml]
+updated: 2026-10-16
 ---
 
 # Equipment Fitting
@@ -37,9 +37,9 @@ refer to actual physical tasks; JobId is scoped by ship and owning System.
 
 Snapshot fitting preflight resolves candidate fitted definitions before restoring
 energy and other machinery. It checks complete-roster equipment identity, work,
-parts, receiving-space and physical claims before applying state. Snapshot 52,
-rules 0.24 and protocol 13 carry fitting/recovery and sensing state through existing
-save and transport mechanisms. Historical combat timestamps use the shared
+parts, receiving-space and physical claims before applying state. Fitting,
+recovery and sensing use the existing versioned save and transport mechanisms.
+Historical combat timestamps use the shared
 logical tick clock and retain their canonical bits rather than lossy host ages.
 
 Workshop edits the closed slot/library/locker/assembly declarations through
@@ -48,3 +48,13 @@ disposable Test. Common System details expose fitting and recovery controls.
 Personal plans store hull-definition-scoped preferences separately from actual
 equipment and queue ordinary requests; a favourite does not grant stock or
 installation authority.
+
+The private Workshop Test panel also supplies the rehearsal callback to that
+same favourite widget. Ordinary phone/lobby widgets do not receive it. Shared
+captured-source admission and a Test-only constructor stage hypothetical initial
+definitions through the original fitting profile and Power capability adapter,
+preserving actual assemblies and reserves before first machinery work. Two
+fresh serial children compare real reference workloads; a read-only FixedLast
+TestInfra report measures settled work/Stocks and validates result identity.
+This source path has independent source review and targeted JavaScript coverage;
+native accepted-loader and actual paid-trial evidence remain pending.

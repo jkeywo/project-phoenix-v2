@@ -14,13 +14,14 @@ pub(super) fn refuse_unsupported(
         &crate::core::messages::AdmittedCommands,
         Option<&super::radio::RadioProfile>,
         Has<ShipCommsCapture>,
+        Has<super::traffic::ShipCommsTraffic>,
     )>,
     mut outbox: Option<&mut crate::server_app::SimOutbox>,
 ) {
     let Some(outbox) = outbox.as_deref_mut() else {
         return;
     };
-    for (commands, radio, has_capture) in owners {
+    for (commands, radio, has_capture, _) in owners {
         for command in &commands.0 {
             if matches!(
                 command.payload,
@@ -72,6 +73,7 @@ fn direct_measurement(
     source.uuid != receiver.uuid
         && source.listening > 0.0
         && receiver.listening > 0.0
+        && receiver.monitored.iter().any(|id| id == channel)
         && super::server::signal_comms_in_range(
             paths,
             super::server::SignalEndpoint {

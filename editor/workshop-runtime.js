@@ -50,9 +50,10 @@ export function createWorkshopRuntime({
       const { runtime } = await ready();
       return JSON.parse(runtime.wasm_workshop_test_catalog(JSON.stringify(files)));
     },
-    async checkTestSelection(files, selection) {
+    async checkTestSelection(files, selection, { rehearsal = null, run_generation = 0 } = {}) {
       const { runtime } = await ready();
-      return JSON.parse(runtime.wasm_workshop_test_check_selection(JSON.stringify(files), JSON.stringify({ selection, revision: '' })));
+      return JSON.parse(runtime.wasm_workshop_test_check_selection(JSON.stringify(files), JSON.stringify({ selection, revision: 'preflight',
+        ...(rehearsal ? { rehearsal, run_generation } : {}) })));
     },
     /** Read-only dependencies for local previews. Editable candidate bytes
      * stay with WorkshopDocument; no live overlay or uncaptured HTTP fallback. */

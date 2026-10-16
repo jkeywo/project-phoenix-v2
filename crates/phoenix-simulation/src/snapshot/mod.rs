@@ -382,6 +382,7 @@ mod marking;
 mod mission_clock_tests;
 mod mounts;
 mod navigation_formation;
+mod navigation_charted;
 #[cfg(test)]
 mod navigation_sharing_tests;
 mod personnel;
@@ -394,6 +395,7 @@ mod vessel_ownership;
 
 mod comms_capture;
 mod comms_media;
+mod comms_traffic;
 mod concealment;
 mod emission_intent;
 mod guided_source;

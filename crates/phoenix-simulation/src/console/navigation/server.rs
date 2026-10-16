@@ -357,6 +357,10 @@ impl NavClearanceIssueState {
 /// Storage variant of the navigation waypoint.
 #[derive(Clone, Debug, PartialEq)]
 pub enum WaypointMode {
+    /// A legitimately selected current-World chart point. Fixed after admission.
+    ChartedXYZ {
+        course: phoenix_model::navigation_point::ChartedNavigationCourse,
+    },
     Formation {
         course: phoenix_model::formation::FormationCourse,
     },
@@ -384,6 +388,9 @@ pub enum WaypointMode {
 /// follow it.
 fn same_waypoint(a: &WaypointMode, b: &WaypointMode) -> bool {
     match (a, b) {
+        (WaypointMode::ChartedXYZ { course: a }, WaypointMode::ChartedXYZ { course: b }) => {
+            a.same_intent(b)
+        }
         (WaypointMode::Formation { course: a }, WaypointMode::Formation { course: b }) => {
             a.same_intent(b)
         }
@@ -456,6 +463,13 @@ impl NavigationWaypoint {
                 {
                     updated.selected_tick = held.selected_tick;
                 }
+                if let (
+                    WaypointMode::ChartedXYZ { course: held },
+                    WaypointMode::ChartedXYZ { course: updated },
+                ) = (&*current, &mut next)
+                {
+                    updated.selected_tick = held.selected_tick;
+                }
                 *current = next;
             }
             _ => {
@@ -484,6 +498,11 @@ impl NavigationWaypoint {
     }
     pub(crate) fn canonical_snapshot(&self) -> Option<WaypointSnapshot> {
         match &self.mode {
+            Some(WaypointMode::ChartedXYZ { course }) => Some(WaypointSnapshot {
+                x: course.destination.point[0],
+                z: course.destination.point[2],
+                source_uuid: Some(course.destination.id.clone()),
+            }),
             Some(WaypointMode::Formation { course }) => {
                 let [x, z] = course.measurement.slot_point(&course.request)?;
                 Some(WaypointSnapshot {
@@ -550,6 +569,7 @@ pub(super) fn handle_navigation_waypoint(
             Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&sharing::NavigationSharingProfile>,
             Option<&crate::server_app::ShipSystemBlackboards>,
+            Option<&crate::entities::spawner::HelmCapabilitySection>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -558,7 +578,7 @@ pub(super) fn handle_navigation_waypoint(
     >,
     knowledge: super::knowledge::Environment,
 ) {
-    for (entity, admitted, mut waypoint, mut power, config, profile, boards) in
+    for (entity, admitted, mut waypoint, mut power, config, profile, boards, capability) in
         ship_query.iter_mut()
     {
         let owner = navigation_owner(config, profile);
@@ -596,11 +616,12 @@ pub(super) fn handle_navigation_waypoint(
                                 );
                                 continue;
                             };
-                            WaypointMode::Anchored {
-                                source_uuid: contact.route.clone(),
-                                last_x: contact.position[0],
-                                last_z: contact.position[2],
-                            }
+                            charted_mode(contact, &cmd.target, capability, knowledge.now())
+                                .unwrap_or_else(|| WaypointMode::Anchored {
+                                    source_uuid: contact.route.clone(),
+                                    last_x: contact.position[0],
+                                    last_z: contact.position[2],
+                                })
                         } else {
                             WaypointMode::Free { x: *x, z: *z }
                         }
@@ -794,6 +815,27 @@ fn coordination_display_integer(value: f32) -> i64 {
     (f64::from(value) + 0.5).floor() as i64
 }
 
+fn charted_mode(
+    contact: &super::knowledge::Contact,
+    owner: &SystemId,
+    capability: Option<&crate::entities::spawner::HelmCapabilitySection>,
+    tick: Option<u64>,
+) -> Option<WaypointMode> {
+    use crate::entities::config::VerticalMovementMode;
+    if !capability.is_some_and(|capability| {
+        capability.0.vertical_movement_mode == VerticalMovementMode::Full3D
+    }) {
+        return None;
+    }
+    Some(WaypointMode::ChartedXYZ {
+        course: phoenix_model::navigation_point::ChartedNavigationCourse {
+            owner: owner.clone(),
+            destination: contact.charted_point()?,
+            selected_tick: tick?,
+        },
+    })
+}
+
 /// Build the appropriate `WaypointMode` from raw coordinates and an optional
 /// anchor UUID. An empty UUID string is treated as "no anchor" (free waypoint).
 fn make_waypoint_mode(x: f32, z: f32, source_uuid: Option<&str>) -> WaypointMode {
@@ -972,6 +1014,15 @@ pub(crate) fn publish_navigation_blackboard(
             NavigationBlackboard {
                 course_generation: waypoint.generation(),
                 formation: formation.clone(),
+                charted_points: picture
+                    .contacts
+                    .values()
+                    .filter_map(|contact| contact.charted_point())
+                    .collect(),
+                charted_course: match waypoint.mode() {
+                    Some(WaypointMode::ChartedXYZ { course }) => Some(course.clone()),
+                    _ => None,
+                },
                 transit_routes: transit
                     .as_deref()
                     .map_or_else(Vec::new, |scopes| scopes.views()),
@@ -988,6 +1039,15 @@ pub(crate) fn publish_navigation_blackboard(
             NavigationBlackboard {
                 course_generation: waypoint.generation(),
                 formation: formation.clone(),
+                charted_points: picture
+                    .contacts
+                    .values()
+                    .filter_map(|contact| contact.charted_point())
+                    .collect(),
+                charted_course: match waypoint.mode() {
+                    Some(WaypointMode::ChartedXYZ { course }) => Some(course.clone()),
+                    _ => None,
+                },
                 transit_routes: transit
                     .as_deref()
                     .map_or_else(Vec::new, |scopes| scopes.views()),
@@ -1136,6 +1196,7 @@ pub fn operate_navigation_ai(
         Option<&crate::ship_plugin::ShipConfigComponent>,
         Option<&NavigationTargetSelector>,
         Option<&sharing::NavigationSharingProfile>,
+        Option<&crate::entities::spawner::HelmCapabilitySection>,
         &mut crate::core::messages::AdmittedCommands,
     )>,
     entities: Query<(
@@ -1162,6 +1223,7 @@ pub fn operate_navigation_ai(
         ship_config,
         target_selector,
         sharing_profile,
+        capability,
         mut admitted,
     ) in ships.iter_mut()
     {
@@ -1389,13 +1451,14 @@ pub fn operate_navigation_ai(
         // author to weight into eligible destinations.
         if picture.configured {
             for contact in picture.contacts.values() {
-                modes
-                    .entry(contact.key.clone())
-                    .or_insert(WaypointMode::Anchored {
-                        source_uuid: contact.route.clone(),
-                        last_x: contact.position[0],
-                        last_z: contact.position[2],
-                    });
+                modes.entry(contact.key.clone()).or_insert_with(|| {
+                    charted_mode(contact, &navigation_owner, capability, knowledge.now())
+                        .unwrap_or_else(|| WaypointMode::Anchored {
+                            source_uuid: contact.route.clone(),
+                            last_x: contact.position[0],
+                            last_z: contact.position[2],
+                        })
+                });
                 candidates.push(chart_contact_candidate(&contact.key, contact.position));
             }
         }
@@ -1424,6 +1487,7 @@ pub fn operate_navigation_ai(
         // on its entity UUID, a `Free` waypoint on its position-derived synthetic
         // UUID — the same keys the candidates above use.
         let current_key = match waypoint.mode() {
+            Some(WaypointMode::ChartedXYZ { course }) => Some(course.destination.id.clone()),
             Some(WaypointMode::Anchored { source_uuid, .. }) => {
                 if picture.configured {
                     picture
@@ -1447,6 +1511,16 @@ pub fn operate_navigation_ai(
             .selector
             .select(&self_ctx, &candidates, current_key.as_deref(), &flag_chain)
             .and_then(|uuid| modes.get(&uuid).cloned());
+        // Objective and chart selector sources must name the same admitted
+        // mode; otherwise an XYZ admission would look like a new anchored
+        // request on every AI cadence and perpetually reset clearance.
+        if let Some(WaypointMode::Anchored { source_uuid, .. }) = desired.as_ref() {
+            if let Some(mode) = picture.routed(source_uuid).and_then(|contact| {
+                charted_mode(contact, &navigation_owner, capability, knowledge.now())
+            }) {
+                desired = Some(mode);
+            }
+        }
         if desired.is_none()
             && picture.configured
             && matches!(waypoint.mode(), Some(WaypointMode::Anchored {source_uuid,..}) if picture.routed(source_uuid).is_none())
@@ -1454,7 +1528,12 @@ pub fn operate_navigation_ai(
             desired = waypoint.mode().cloned();
         }
 
-        if desired.is_none() && matches!(waypoint.mode(), Some(WaypointMode::Formation { .. })) {
+        if desired.is_none()
+            && matches!(
+                waypoint.mode(),
+                Some(WaypointMode::Formation { .. } | WaypointMode::ChartedXYZ { .. })
+            )
+        {
             desired = waypoint.mode().cloned();
         }
 
@@ -1473,6 +1552,13 @@ pub fn operate_navigation_ai(
         }
 
         let payload = match &desired {
+            Some(WaypointMode::ChartedXYZ { course }) => {
+                SystemControlPayload::SetNavigationWaypoint {
+                    x: course.destination.point[0],
+                    z: course.destination.point[2],
+                    source_uuid: Some(course.destination.id.clone()),
+                }
+            }
             Some(WaypointMode::Formation { course }) => {
                 SystemControlPayload::SelectFormationCourse {
                     request_id: course.request.message_id.clone(),

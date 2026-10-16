@@ -1,0 +1,41 @@
+# Mechanism proof fit only; no global catalogue entry or additional crew seat.
+includes = ["../../assets/entities/alliance_cruiser.toml"]
+name = "Listening proof ship"
+
+[comms.radio.traffic.listening]
+simultaneous_channels = 1
+priority = ["public", "fleet"]
+
+[comms.radio.traffic.alert]
+source = "captain"
+channel = "public"
+minimum_spacing_ticks = 90
+routine_text = "We have selected routine alert."
+red_alert_text = "We have selected red alert."
+
+# Re-state the existing feed array, then add the explicit dated alert input.
+[[console]]
+id = "comms"
+[[console.feed]]
+source = "command"
+kind = "Command"
+[[console.feed]]
+source = "comms"
+kind = "Comms"
+[[console.feed]]
+source = "dossiers"
+kind = "Dossiers"
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+# An ordinary explicitly authored Comms policy for this dedicated proof fit.
+# It uses the same existing policy host/cadence and never resets listening order.
+[[comms_console.ai.rule]]
+priority = 0
+channel = "comms_public_report"
+when = "fact(comms_available) > 0"
+verb = "report_comms_alert"

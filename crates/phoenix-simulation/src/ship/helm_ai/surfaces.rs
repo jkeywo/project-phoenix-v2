@@ -367,7 +367,8 @@ pub(crate) fn cleared_nav_waypoint_anchor(
             uuid::Uuid::parse_str(source_uuid).ok()
         }
         crate::console::navigation::WaypointMode::Free { .. }
-        | crate::console::navigation::WaypointMode::Formation { .. } => None,
+        | crate::console::navigation::WaypointMode::Formation { .. }
+        | crate::console::navigation::WaypointMode::ChartedXYZ { .. } => None,
     }
 }
 
@@ -513,11 +514,36 @@ pub(crate) fn build_helm_ai_surfaces_frame(
             .filter(|waypoint| {
                 matches!(
                     waypoint.mode(),
-                    Some(crate::console::navigation::WaypointMode::Formation { .. })
+                    Some(
+                        crate::console::navigation::WaypointMode::Formation { .. }
+                            | crate::console::navigation::WaypointMode::ChartedXYZ { .. }
+                    )
                 )
             })
             .filter(|waypoint| cleared_nav_waypoint(Some(waypoint), surfaces.clearance).is_some())
             .map(|waypoint| waypoint.generation());
+        let nav_waypoint_xyz = waypoint.and_then(|waypoint| {
+            cleared_nav_waypoint(Some(waypoint), surfaces.clearance)?;
+            let crate::console::navigation::WaypointMode::ChartedXYZ { course } =
+                waypoint.mode()?
+            else {
+                return None;
+            };
+            let Some(crate::core::messages::SystemBlackboard::Navigation(board)) =
+                blackboards.0.get(&course.owner)
+            else {
+                return None;
+            };
+            (board.course_generation == waypoint.generation()
+                && board.charted_course.as_ref() == Some(course))
+            .then_some(course.destination.point)
+        });
+        let navigation_generation = navigation_generation.filter(|_| {
+            !matches!(
+                waypoint.and_then(|waypoint| waypoint.mode()),
+                Some(crate::console::navigation::WaypointMode::ChartedXYZ { .. })
+            ) || nav_waypoint_xyz.is_some()
+        });
         let has_objective = has_helm_objective(&scored) || navigation_generation.is_some();
         if !has_objective {
             // The axis systems still need the entry (to zero their axis /
@@ -653,6 +679,7 @@ pub(crate) fn build_helm_ai_surfaces_frame(
                 current_contact_routes,
                 observed_velocities,
                 nav_waypoint: cleared_nav_waypoint(waypoint, surfaces.clearance),
+                nav_waypoint_xyz,
                 navigation_generation,
                 nav_waypoint_anchor,
                 forward_speed: physics.forward_speed,

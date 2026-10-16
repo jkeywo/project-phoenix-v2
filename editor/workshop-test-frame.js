@@ -72,6 +72,7 @@ export function transferableTestSnapshot(snapshot) {
     if (length > 512 * 1024 * 1024) throw new Error('Workshop Test snapshot is too large');
   }
   return { snapshot: { files, selection: structuredClone(snapshot.selection), revision: snapshot.revision,
+    ...(snapshot.rehearsal ? { rehearsal: structuredClone(snapshot.rehearsal), run_generation: snapshot.run_generation } : {}),
     ...(snapshot.breakpoint ? { breakpoint: structuredClone(snapshot.breakpoint) } : {}) }, transfer };
 }
 

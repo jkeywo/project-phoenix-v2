@@ -56,7 +56,9 @@ use uuid::Uuid;
 /// Revision 40 carries safe attributed typed claims after paid decoding.
 /// Revision 41 carries explicit low-emission intent and measured per-System advice.
 /// Revision 42 carries shared-loader priorities and explicit vessel-acquisition results.
-pub const PROTOCOL_VERSION: u32 = 42;
+/// Revision 43 carries finite Radio listening priorities and dated contextual reports.
+/// Revision 44 carries explicitly known charted XYZ courses through Navigation.
+pub const PROTOCOL_VERSION: u32 = 44;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).
@@ -2365,6 +2367,10 @@ pub enum SystemControlPayload {
     SelectCommsCapture {
         capture: Option<u64>,
     },
+    SetCommsListeningOrder {
+        priority: Vec<String>,
+    },
+    ReportCommsAlert,
     /// Select an actually accepted/heard call; device consent remains local.
     SetCommsMediaCall {
         origin_id: Option<String>,
@@ -4319,6 +4325,8 @@ pub struct DeadlineSnapshot {
 pub struct CaptainBlackboard {
     /// Whether the ship is at red alert.
     pub red_alert: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alert_observation: Option<crate::observation::ObservationMetadata>,
     /// Stable system id for the Red Alert coarse system fragment.
     #[serde(default = "default_red_alert_system_id")]
     pub red_alert_system_id: SystemId,
@@ -4373,6 +4381,7 @@ impl Default for CaptainBlackboard {
     fn default() -> Self {
         Self {
             red_alert: false,
+            alert_observation: None,
             red_alert_system_id: default_red_alert_system_id(),
             red_alert_auto: false,
             viewscreen_system_id: default_viewscreen_system_id(),
@@ -5835,6 +5844,8 @@ pub struct RepairBlackboard {
 /// blackboard (issue #565).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct CommsBlackboard {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub traffic: Option<crate::comms_traffic::CommsTrafficView>,
     /// Current own stored craft from explicitly bound Bay publications only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reception_craft: Vec<crate::craft::StoredCraftView>,
@@ -5957,6 +5968,12 @@ pub struct NavigationBlackboard {
     pub course_generation: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub formation: Option<crate::formation::FormationNavigationView>,
+    /// Current-World chart contacts offered by this Navigation's actual picture.
+    /// Never unioned with foreign World arrival routes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub charted_points: Vec<crate::navigation_point::NavigationPointView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub charted_course: Option<crate::navigation_point::ChartedNavigationCourse>,
     /// Deliberate own-faction sharing intent for this actual Navigation owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sharing: Option<crate::sensing_sharing::RadarSharingView>,
@@ -6057,6 +6074,8 @@ impl Default for NavigationBlackboard {
         Self {
             course_generation: 0,
             formation: None,
+            charted_points: Vec::new(),
+            charted_course: None,
             sharing: None,
             received_chart: Vec::new(),
             nav_chart_range: default_nav_chart_range(),

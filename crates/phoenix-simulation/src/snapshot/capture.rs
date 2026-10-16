@@ -1278,6 +1278,12 @@ pub(super) fn capture_navigation_continuation(
     let waypoint = waypoint.map(|waypoint| {
         let snapshot = waypoint.canonical_snapshot();
         NavigationWaypointState {
+            charted: match waypoint.mode() {
+                Some(crate::console::navigation::WaypointMode::ChartedXYZ { course }) => {
+                    Some(course.clone())
+                }
+                _ => None,
+            },
             formation: match waypoint.mode() {
                 Some(crate::console::navigation::WaypointMode::Formation { course }) => {
                     Some(course.clone())
@@ -1475,6 +1481,7 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                     marking_attachment: entity.get::<phoenix_sim_gameplay::weapons::marking::ShipMarkingAttachment>().map(|state| state.0.clone()),
                     emission_intent: entity.get::<crate::console::command::emission::ShipEmissionIntent>().map(|state| state.0.clone()),
                     comms_capture: entity.get::<crate::comms::capture::ShipCommsCapture>().cloned(),
+                    comms_traffic: entity.get::<crate::comms::traffic::ShipCommsTraffic>().map(|owner| owner.state.clone()),
                     identity_emitters: entity.get::<crate::science::identity::ShipIdentityEmitters>().cloned(),
                     concealment_emitters: entity.get::<crate::science::concealment::ShipConcealmentEmitters>().cloned(),
                     weapon_targets: entity

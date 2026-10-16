@@ -36,6 +36,21 @@ fn motion_at(
     at: u64,
 ) -> Option<NavigationMotion> {
     let waypoint = waypoint?;
+    if let crate::console::navigation::WaypointMode::ChartedXYZ { course } = waypoint.mode()? {
+        let permitted = config.0.observations_for_system(axis, &boards.0);
+        let Some(SystemBlackboard::Navigation(board)) = permitted.get(&course.owner) else {
+            return None;
+        };
+        return (course.valid_at(at)
+            && waypoint.generation() > 0
+            && board.course_generation == waypoint.generation()
+            && board.charted_course.as_ref() == Some(course))
+        .then_some(NavigationMotion {
+            generation: waypoint.generation(),
+            position: [course.destination.point[0], course.destination.point[2]],
+            velocity: [0.0; 2],
+        });
+    }
     let canonical = match waypoint.mode()? {
         crate::console::navigation::WaypointMode::Formation { course } => course,
         _ => return None,

@@ -1296,6 +1296,14 @@ pub(crate) fn apply_entity_state(world: &mut World, entity: Entity, row: &Entity
         bevy::log::error!("refused guided source restore for {}: {}", row.uuid, reason);
         return;
     }
+    if let Err(reason) = super::navigation_charted::validate_live(world, entity, row) {
+        bevy::log::error!(
+            "refused charted XYZ course restore for {}: {}",
+            row.uuid,
+            reason
+        );
+        return;
+    }
     if let Err(reason) = super::navigation_formation::validate_live(world, entity, row) {
         bevy::log::error!(
             "refused Formation course restore for {}: {}",
@@ -1314,6 +1322,10 @@ pub(crate) fn apply_entity_state(world: &mut World, entity: Entity, row: &Entity
             row.uuid,
             reason
         );
+        return;
+    }
+    if let Err(reason) = super::comms_traffic::validate_entity(world, entity, row, tick) {
+        bevy::log::error!("refused traffic continuation for {}: {}", row.uuid, reason);
         return;
     }
     if let Err(reason) = super::preflight::validate_entity_resources(world, entity, row) {
@@ -1732,6 +1744,14 @@ pub(super) fn apply_entity_state_with(
     } else {
         entity_mut.remove::<crate::comms::media_control::ShipCommsMediaIntent>();
     }
+    if let Some(saved) = &row.comms_traffic {
+        entity_mut.insert(crate::comms::traffic::ShipCommsTraffic {
+            state: saved.clone(),
+            coverage: None,
+        });
+    } else {
+        entity_mut.remove::<crate::comms::traffic::ShipCommsTraffic>();
+    }
     if let Some(saved) = &row.identity_emitters {
         entity_mut.insert((
             saved.clone(),
@@ -1898,6 +1918,15 @@ pub(super) fn apply_navigation_waypoint(
             },
         )
     });
+    let mode = stored
+        .charted
+        .as_ref()
+        .map(
+            |course| crate::console::navigation::WaypointMode::ChartedXYZ {
+                course: course.clone(),
+            },
+        )
+        .or(mode);
     let mode = stored
         .formation
         .as_ref()

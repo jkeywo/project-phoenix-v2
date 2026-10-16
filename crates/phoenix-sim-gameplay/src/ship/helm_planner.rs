@@ -116,14 +116,23 @@ pub fn helm_motion_planner(
             // policies. Read-only here: the planner selects a decision arm from
             // it, it decides nothing itself.
             Option<&crate::ship::helm_ai::HelmPassSurface>,
+            Option<&crate::ship::components::ShipPhysicsConfigResource>,
         ),
         With<crate::ai::server::AiHighFidelity>,
     >,
 ) {
     plan.ships.clear();
 
-    for (entity, physics, behaviour_section, cursors, capability, mut docking_intent, pass) in
-        ships.iter_mut()
+    for (
+        entity,
+        physics,
+        behaviour_section,
+        cursors,
+        capability,
+        mut docking_intent,
+        pass,
+        physics_config,
+    ) in ships.iter_mut()
     {
         // Only ships some helm axis is actually flying carry a frame entry;
         // the frame is the shared decision surface built this same tick.
@@ -555,16 +564,30 @@ pub fn helm_motion_planner(
             );
         }
 
+        let navigation_generation = sf.navigation_generation.filter(|_| {
+            sf.nav_waypoint.is_some()
+                && !pass.active
+                && !docking_active
+                && hazard.urgency == 0.0
+                && hazard.hazard_forces == Vec3::ZERO
+        });
+        if vertical_mode == VerticalMovementMode::Full3D && navigation_generation.is_some() {
+            if let Some(input) =
+                sf.nav_waypoint_xyz
+                    .zip(physics_config)
+                    .and_then(|(point, config)| {
+                        crate::ship::helm_control::charted_vertical_input(
+                            point[1], physics.y, &config.0,
+                        )
+                    })
+            {
+                motion.desired_velocity_local.y = input;
+            }
+        }
         plan.ships.insert(
             entity,
             ShipMotionPlan {
-                navigation_generation: sf.navigation_generation.filter(|_| {
-                    sf.nav_waypoint.is_some()
-                        && !pass.active
-                        && !docking_active
-                        && hazard.urgency == 0.0
-                        && hazard.hazard_forces == Vec3::ZERO
-                }),
+                navigation_generation,
                 motion,
                 hazard,
                 docking_active,

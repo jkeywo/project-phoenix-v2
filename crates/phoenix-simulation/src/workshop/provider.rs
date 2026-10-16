@@ -144,6 +144,10 @@ pub enum Operation {
         selection: test_snapshot::TestSelection,
         #[serde(default)]
         breakpoint: Option<crate::workshop::test_protocol::TestBreakpoint>,
+        #[serde(default)]
+        rehearsal: Option<crate::workshop::rehearsal_request::RehearsalRequest>,
+        #[serde(default)]
+        run_generation: u64,
     },
     TestCatalog {
         files: BTreeMap<String, String>,

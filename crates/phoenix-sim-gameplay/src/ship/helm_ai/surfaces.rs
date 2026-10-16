@@ -32,6 +32,9 @@ pub struct HelmAiShipFrame {
     /// The Navigation waypoint this ship is cleared to fly
     /// (`cleared_nav_waypoint`), if any.
     pub nav_waypoint: Option<[f32; 2]>,
+    /// Exact fixed public chart point after current Navigation feed/clearance.
+    /// Measured planar contacts never imply a height.
+    pub nav_waypoint_xyz: Option<[f32; 3]>,
     /// Genuine cleared Formation revision; final axis admission independently
     /// rechecks its own permitted Navigation and measured motion.
     pub navigation_generation: Option<u64>,

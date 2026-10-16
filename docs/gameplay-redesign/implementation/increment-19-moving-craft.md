@@ -172,6 +172,72 @@ fresh authorization. Accepted work continues after expiry or link loss under its
 ordinary local constraints. An unseen Recall cannot alter it. Physical removal
 has its existing actual event semantics; silence never proves destruction.
 
+## Chart-first own XYZ consumer — approved reuse
+
+Owner audit finds no missing authored waypoint registry. World Transit
+`StaticTransitScopes::views` already publishes id/label/float-XYZ arrival points,
+but their accepted destinations can bind other Worlds. Civilian `World.routes`
+is a traffic anchor-chain owner, not a granted Navigation catalogue. Neither is
+silently converted into local flight. Existing Navigation `knowledge::Picture`
+already supplies current-World `charted` records with identity/name and full
+public XYZ, after actual chart coverage, shows and concealment. Those records
+are the first known spatial points. Existing planar shared observations do not
+supply an unobserved altitude.
+
+Extract/reuse the neutral id/label/float-XYZ point DTO shape while preserving the
+existing TransitRouteView Rust API and serialized semantics. A separate typed
+charted-points Navigation publication is derived only from those actual public
+Picture records; it is not a second authored list, World registry, route or
+history. Both capital ships and utility craft may hold this explicitly public
+information through their own Navigation owner. Comms reads it only through the
+exact explicit Navigation feed/source; no transit/civilian union, private anchor
+lookup or cached World path is a known local point.
+
+Use the existing SetNavigationWaypoint source-reference admission and
+chart-contacts selector. Re-resolve the exact current public charted reference,
+ignore injected caller coordinates and pay the normal actual Navigation
+selection. An actually Full3D hull can select the real offered XYZ through a
+charted spatial mode/cache on the existing NavigationWaypoint. Planar/Bounded
+hulls keep their existing planar anchoring and can still offer public points for
+later remote orders. Free XZ courses remain their existing separate planar
+intent; they are never described as an earned spatial target. No new command,
+selector source, authored point table, Job or pilot is created for this course.
+
+The point's current public identity is the goal identity. Preserve the same
+Navigation generation and ordinary clearance across legitimate refresh of that
+point; only a new selection or clear changes intent. Retain original selection
+and permitted publication frontier with the spatial cache. Losing a public view
+must not chase private actor pose, substitute own/zero height or renew an old
+sample. The accepted last legitimate fixed point remains known; future return
+to a moving home remains the separate dated-measurement consumer, with missing
+height/velocity pausing that work.
+
+Only the ordinary shared Helm planner and its existing individual vertical axis
+gain the cleared XYZ demand. Existing authority, AI priorities, hazard response,
+paid actuator scaling, inertia and the sole physics integrator remain in force.
+Actual own pose/tuning supplies braking; an unavailable actuator is not teleported
+or assigned free velocity. This first course neither creates a voyage nor
+fabricates launch provenance and can be proved before Bay admission exists.
+
+Capture/fold the accepted mode, complete XYZ and original source/frontiers through
+the existing waypoint owner. Both restore doors validate finite data, actual
+Navigation ownership/Full3D capability, matching generation, exact original
+accepted/public point evidence where available and consistent candidate permitted
+publications before writes. Whole restore uses candidate knowledge rather than
+the fresh host's convenient live chart. Restore rebuilds views without issuing
+selection, work, clearance or a new observation; it does not refresh the retained
+course frontier. Source replacement/removal cannot invent a fresh grant or turn
+an erased past into authenticated knowledge.
+
+Keep existing fractional World routes and public chart coordinates unchanged.
+Only the later closed voyage wire converts its actually selected offered XYZ to
+whole units within plus/minus 1,000,000, rejecting off-grid requests rather than
+rounding or narrowing the underlying Navigation/Transit authoring grammar.
+Required proof includes actual admitted own chart selection/ordinary AI, finite
+paid nonzero-altitude movement, stable generation, missing/private reference
+refusal, retained-source/no-write restoration and fresh whole JSON continuation.
+No Bay or remote-voyage claim follows from an own-chart flight proof.
+
 ## Navigation, elevation and normal AI
 
 Own admitted Navigation acceptance selects the real XYZ course and creates or
@@ -339,3 +405,44 @@ legacy planar Picture currently substitutes observer height; that value must nev
 be used as target elevation. The later return join must preserve the original
 sample tick/error and refuse absent/stale height or measured velocity without a
 private home-pose lookup.
+
+
+### Chart-first runtime checkpoint (source; native execution pending)
+
+The existing admitted `SetNavigationWaypoint` now resolves an offered current-World
+charted contact into a fixed `ChartedXYZ` course only on actual Full3D equipment.
+The course retains its original Navigation owner, complete fractional XYZ point,
+selection tick and existing generation. The normal selector uses the same mode;
+withdrawal of the offer preserves that legitimate fixed point, without following
+an actor or inventing a new observation. Planar/Bounded and free XZ orders retain
+their existing behavior.
+
+`NavigationPointView` extracts the existing `TransitRouteView` value shape; the old
+Rust name, fields, validation bounds and JSON are preserved. Actual chart choices
+are published separately as `NavigationBlackboard.charted_points`; selected fixed
+intent is `charted_course`. `navigation::known::charted` reads only the explicitly
+permitted actual Navigation source and never unions foreign Transit arrivals or
+civilian lanes. Simple own course selection creates no Job or launch provenance.
+
+The normal clearance, explicit Navigation feed and shared Helm planner supply the
+existing admitted per-axis controls. Full3D vertical travel uses actual vertical
+speed/acceleration tuning and the ordinary paid vertical operator/integrator;
+hazard, docking and authored maneuver priorities remain in the existing planner.
+No body pose writer, special pilot or player-facing vertical control is added.
+
+The same canonical waypoint captures/restores the original selected point and
+clock, with a Some-only digest contribution. Candidate validation checks actual
+Navigation/movement equipment, finite point and clocks, generation, exclusive
+mode, exact retained own publication and available original candidate chart point
+before writes. A current chart withdrawal
+does not reconstruct erased history or refresh knowledge.
+
+Source tests cover actual accepted utility chart admission/payment, denied private
+chart selection, explicit-feed isolation, fractional height and withdrawal; the
+ordinary vertical axis and finite physical integrator; original JSON/application
+continuation and ten malformed whole-candidate no-write cases (including missing
+canonical/published course mismatches). These are owner/source
+checks, not a full-host flight/360-step or browser acceptance result. Actual
+native execution is queued through the integration owner. Mode-aware Bay custody,
+launch association/history, transmitted voyage orders, shared Job lifecycle,
+measured return and moving recovery remain separate required joins.

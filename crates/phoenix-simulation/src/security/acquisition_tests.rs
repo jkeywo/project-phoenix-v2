@@ -22,6 +22,13 @@ fn fixture() -> (App, Entity, Entity, String) {
     )
     .unwrap();
     let mut app = App::new();
+    // Normal hosts own these run-scope defaults before capture. Restore writes
+    // them even when empty, and their presence is deliberately digest-visible.
+    app.init_resource::<crate::gm::actions::action::SimulationPaused>()
+        .init_resource::<crate::gm::actions::action::GmActionJournal>()
+        .init_resource::<crate::gm::operations::puppet::StationPuppets>()
+        .init_resource::<crate::gm::operations::puppet::PendingGmStationCommands>()
+        .init_resource::<crate::core::report::MissionReport>();
     // Match the ordinary snapshot machinery schema without inserting equipment
     // or progress. Sparse owner apps must not silently omit their publications.
     app.world_mut()
@@ -416,12 +423,31 @@ fn paid_board_acquires_same_vessel_then_returns_same_team_and_json_continues() {
     let (mut resumed, _, resumed_target, _) = fixture();
     let report = crate::snapshot::restore(resumed.world_mut(), &saved);
     assert!(report.is_complete(), "{:?}", report.gaps);
+    assert_eq!(
+        crate::snapshot::capture(live.world()),
+        crate::snapshot::capture(resumed.world())
+    );
+    assert_eq!(
+        crate::sim_digest::world_digest(live.world()),
+        crate::sim_digest::world_digest(resumed.world()),
+        "first divergent scope immediately after restore: {:?}",
+        crate::sim_digest::first_divergent_scope(
+            live.world(),
+            &crate::sim_digest::digest_stages(resumed.world())
+        )
+    );
     for _ in 0..1200 {
         step(&mut live);
         step(&mut resumed);
         assert_eq!(
             crate::sim_digest::world_digest(live.world()),
-            crate::sim_digest::world_digest(resumed.world())
+            crate::sim_digest::world_digest(resumed.world()),
+            "first divergent scope at continued tick {}: {:?}",
+            live.world().resource::<SimTick>().0,
+            crate::sim_digest::first_divergent_scope(
+                live.world(),
+                &crate::sim_digest::digest_stages(resumed.world())
+            )
         );
         assert_eq!(
             crate::snapshot::capture(live.world()),

@@ -364,6 +364,8 @@ pub enum AiPolicyVerb {
     SendPlannedCommsRequest,
     /// Select the current oldest feasible own captured header for paid decoding.
     DecodeCapturedComms,
+    /// Revalidate and report the current permitted own alert intent.
+    ReportCommsAlert,
 }
 
 /// One inline stateless policy rule.

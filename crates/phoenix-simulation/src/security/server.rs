@@ -210,11 +210,14 @@ impl Plugin for SecurityPlugin {
                 // moved, so a target that drifted out of reach this tick is seen
                 // to have done so this tick.
                 (
-                    tick_security_teams,
-                    super::acquisition::commit_ready_acquisitions,
+                    tick_security_teams.in_set(crate::sim_sets::FixedStep::TickSecurityTeams),
+                    // The FixedStep names the single physical clock owner.
+                    // Keep its same-step exclusive completion before the next
+                    // ordered owner without making it a second clock member.
+                    super::acquisition::commit_ready_acquisitions
+                        .before(crate::sim_sets::FixedStep::RevealCivilianContacts),
                 )
                     .chain()
-                    .in_set(crate::sim_sets::FixedStep::TickSecurityTeams)
                     .in_set(crate::sim_sets::SimSet::Modifiers),
                 publish_security_blackboard
                     .in_set(crate::sim_sets::FixedStep::PublishSecurityBlackboard)

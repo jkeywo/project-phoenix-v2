@@ -504,3 +504,42 @@ fn formation_lateral_and_heading_use_world_slot_without_hidden_heading_or_nonfin
         matches!(state.axes[&p.thrust],AxisIntent::Thrust(ThrustIntent::Assisted{demand:SpeedDemand::Absolute{speed}}) if speed==actual().forward_speed)
     );
 }
+
+#[test]
+fn charted_height_uses_actual_finite_rate_limited_vertical_integrator_and_brakes_at_goal() {
+    let config = ShipPhysicsConfig::default();
+    let mut state = actual();
+    state.forward_speed = 0.0;
+    for goal in [18.5, -7.25] {
+        let before = state.y;
+        let first = charted_vertical_input(goal, state.y, &config).unwrap();
+        assert_eq!(first.signum(), (goal - before).signum());
+        for _ in 0..1200 {
+            let demand = charted_vertical_input(goal, state.y, &config).unwrap();
+            assert!(demand.is_finite() && demand.abs() <= 1.0);
+            let next = compute_physics(
+                state,
+                ShipPhysicsInput {
+                    vertical: demand,
+                    ..input(0.0, 0.0)
+                },
+                1.0 / 60.0,
+                &config,
+            );
+            assert!(
+                (next.vertical_speed - state.vertical_speed).abs()
+                    <= config.vertical_acceleration / 60.0 + 0.00001
+            );
+            state.y = next.y;
+            state.vertical_speed = next.vertical_speed;
+        }
+        assert!((state.y - goal).abs() < 0.02);
+        assert!(state.vertical_speed.abs() < 0.3);
+    }
+    assert_eq!(charted_vertical_input(state.y, state.y, &config), Some(0.0));
+    assert!(charted_vertical_input(f32::NAN, state.y, &config).is_none());
+    assert!(charted_vertical_input(18.0, f32::INFINITY, &config).is_none());
+    let mut invalid = config;
+    invalid.max_vertical_speed = 0.0;
+    assert!(charted_vertical_input(18.0, 0.0, &invalid).is_none());
+}

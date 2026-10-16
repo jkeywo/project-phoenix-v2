@@ -1,0 +1,24 @@
+# Finite stationary reference equipment. The real probe systems, buffers,
+# collider, material and component damage remain ordinary accepted machinery.
+includes = ["battery_probe.toml"]
+name = "entity.fitting_rehearsal_subject.name"
+faction = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb"
+
+# Ordinary ship substrate makes this finite engineless subject visible to the
+# existing nearest-hostile doctrine. Empty behaviour gives it no travel order.
+[behaviour]
+
+# Arrays replace rather than append. Restate the complete one-room layout;
+# only finite structural endurance differs from the original probe room.
+[[interior.compartment]]
+id = "probe-core"
+deck = "probe"
+label = "entity.battery_probe.room"
+x = -0.5
+z = -0.5
+width = 1
+depth = 1
+material = "bulkhead"
+max_hp = 10000
+recovery_fraction = 0.2
+structural_remedy = "structural"

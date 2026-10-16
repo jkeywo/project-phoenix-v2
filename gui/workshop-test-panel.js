@@ -1,6 +1,9 @@
 import { createWorkshopTest } from '../editor/workshop-test.js';
 import { validateTestBreakpoint } from '../editor/workshop-test-breakpoint.js';
 import { applyToDom, t, wireText } from './strings.js';
+import { createFittingRehearsal, REHEARSAL_WORLDS } from '../editor/fitting-rehearsal.js';
+import { mountFittingPlans } from './components/fitting-plan-controls.js';
+import { paintFittingRehearsal } from './fitting-rehearsal-report.js';
 
 /** Shared offline controls over the native child/browser iframe capability. */
 export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: isBusy,
@@ -96,7 +99,7 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     return { world: world.value, ...(offeredSlots().length ? { slot: slot.value } : {}),
       ship: ship.value, seed: number, breakpoint: breakpoint() };
   };
-  let session;
+  let session, rehearsal, rehearsalCapture = null;
   let previousDraft, previousRevision;
   let catalogGeneration = 0, catalogTimer = null, catalogPending = false;
   let localError = null, disposed = false;
@@ -151,6 +154,23 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     node.dataset.i18n = id; node.textContent = t(id); panel.append(node, target); };
   label(world, 'workshop.test_world'); label(slot, 'workshop.test_slot');
   label(ship, 'workshop.test_ship'); label(seed, 'workshop.test_seed');
+  const reference = make('select', 'rehearsal-reference');
+  for (const id of Object.keys(REHEARSAL_WORLDS)) {
+    const option = doc.createElement('option'); option.value = id;
+    option.textContent = t('fitting.rehearsal.' + id); reference.append(option);
+  }
+  label(reference, 'fitting.rehearsal.reference');
+  const comparisonReport = make('section', 'rehearsal-report');
+  const fittingPlans = mountFittingPlans(doc, { prelaunch: true,
+    onPlanChanged: () => rehearsal?.changed(),
+    onRehearse: async (plan, context) => {
+      if (isBusy() || !choicesReady || !choices.worlds.includes(REHEARSAL_WORLDS[reference.value])) throw new Error('fitting.rehearsal.unsupported');
+      await rehearsal.start(plan, context, reference.value, Number(seed.value));
+    } });
+  reference.addEventListener('change', () => rehearsal?.changed());
+  seed.addEventListener('change', () => rehearsal?.changed());
+  const cancelRehearsal = command('rehearsal-cancel', 'fitting.rehearsal.cancel', () => rehearsal.cancel());
+  panel.append(fittingPlans.node, cancelRehearsal, comparisonReport);
   const breakpointFields = doc.createElement('fieldset'); breakpointFields.className = 'workshop-test-breakpoint';
   const breakpointLegend = doc.createElement('legend'); breakpointLegend.dataset.i18n = 'workshop.test_breakpoint';
   breakpointLegend.textContent = t('workshop.test_breakpoint');
@@ -302,7 +322,8 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
   function render() {
     if (!session) return;
     const state = session.state(), draft = getDraft();
-    const busy = isBusy() || state.busy;
+    const comparing = rehearsal?.state().busy || false;
+    const busy = isBusy() || state.busy || comparing;
     const testing = state.mode === 'test';
     const running = !!state.run;
     panel.setAttribute('aria-busy', String(busy));
@@ -331,6 +352,13 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     const cancellable = state.busy && typeof provider.test.cancelStart === 'function';
     stop.disabled = !cancellable && (busy || !running);
     speed.value = String(state.run?.multiplier || 1);
+    fittingPlans.update(choicesReady && choices.rehearsal_fitting ? [{ fitting_planner: choices.rehearsal_fitting }] : []);
+    fittingPlans.setRehearsalBusy(comparing);
+    fittingPlans.setRehearsalEnabled(!busy && choicesReady && choices.worlds.includes(REHEARSAL_WORLDS[reference.value])
+      && Number.isSafeInteger(Number(seed.value)) && seed.value.trim() !== '' && Number(seed.value) >= 0);
+    reference.disabled = busy;
+    cancelRehearsal.hidden = !comparing;
+    paintFittingRehearsal(comparisonReport, rehearsal?.state() || {});
     const lines = [t(testing ? 'workshop.test_mode' : 'workshop.test_authoring_mode')];
     if (state.starting || state.run?.starting) lines.push(t('workshop.test_starting'));
     else if (running) lines.push(t(state.run.paused ? 'workshop.test_held' : 'workshop.test_running', { tick: state.run.tick }));
@@ -342,13 +370,17 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
     status.textContent = lines.join(' '); status.setAttribute('role', error ? 'alert' : 'status');
   }
   session = createWorkshopTest({ provider: provider.test,
-    snapshot: () => provider.test.capture ? provider.test.capture(getDraft()) : getDraft().toNativeSources(),
+    snapshot: () => rehearsalCapture || (provider.test.capture ? provider.test.capture(getDraft()) : getDraft().toNativeSources()),
     onChange(state) { render(); changed(state); } });
+  rehearsal = createFittingRehearsal({ session, timer: win,
+    capture: () => provider.test.capture ? provider.test.capture(getDraft()) : getDraft().toNativeSources(),
+    useCapture: value => { rehearsalCapture = value; }, onChange: () => render() });
   function refresh() {
     const draft = getDraft();
     if (draft !== previousDraft || draft?.sourceRevision !== previousRevision) {
       if (draft !== previousDraft) { world.replaceChildren(); slot.replaceChildren(); ship.replaceChildren(); choicesReady = false; }
       previousDraft = draft; previousRevision = draft?.sourceRevision;
+      rehearsal.changed();
       session.changed();
       const generation = ++catalogGeneration;
       if (catalogTimer !== null) win.clearTimeout(catalogTimer);
@@ -390,7 +422,7 @@ export function mountWorkshopTestPanel({ root, provider, draft: getDraft, busy: 
   return { node: panel, viewNode: viewPanel, traceNode: tracePanel, refresh, enter: () => session.test(),
     refreshLanguage() { traceSignature = ''; offered = ''; paintSlotsAndShips({ retainStale: true });
       paintBreakpointLayers(); render(); applyToDom(panel); applyToDom(tracePanel); applyToDom(viewPanel); },
-    held: () => session.state().busy || session.state().mode === 'test', testing: () => session.state().mode === 'test',
+    held: () => rehearsal.state().busy || session.state().busy || session.state().mode === 'test', testing: () => session.state().mode === 'test',
     dispose() { disposed = true; win.clearInterval(timer); if (catalogTimer !== null) win.clearTimeout(catalogTimer);
-      void session.dispose().catch(() => {}); panel.remove(); viewPanel.remove(); tracePanel.remove(); } };
+      void rehearsal.dispose().catch(() => {}); void session.dispose().catch(() => {}); fittingPlans.dispose(); panel.remove(); viewPanel.remove(); tracePanel.remove(); } };
 }

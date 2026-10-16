@@ -550,3 +550,41 @@ fn actual_utility_shuttle_is_complete_ordinary_unarmed_full_spatial_equipment() 
     );
     assert!(crate::entities::ai_declaration_manifest::undeclared_keys(&config).is_empty());
 }
+
+#[test]
+fn actual_charted_utility_variant_preserves_equipment_and_uses_existing_selector() {
+    let base =
+        crate::test_fixtures::load_entity_config("assets/entities/utility_shuttle.toml").unwrap();
+    let resolved =
+        crate::test_fixtures::resolve_from_disk("tests/fixtures/charted-utility-shuttle.toml")
+            .unwrap();
+    let mut config = EntityConfig::from_toml(&resolved.toml).unwrap();
+    let navigation = config.navigation_console.as_ref().unwrap();
+    let selector = navigation.selector.as_ref().unwrap();
+    assert_eq!(selector.sources, ["chart-contacts"]);
+    assert_eq!(
+        selector.eligibility,
+        "candidate_fact(source_chart_contact) > 0"
+    );
+    assert_eq!(selector.score.len(), 1);
+    assert_eq!(selector.score[0].when, selector.eligibility);
+    assert_eq!(selector.score[0].weight, 1.0);
+    selector
+        .to_selector()
+        .expect("actual ordinary selector compiles");
+    let expected_chart: crate::radar_config::RadarConfig =
+        toml::from_str("range=300\nshows=['objective_marker']\nselects=['objective_marker']")
+            .unwrap();
+    assert_eq!(navigation.system_chart, expected_chart);
+    assert_eq!(
+        navigation.sharing,
+        base.navigation_console.as_ref().unwrap().sharing
+    );
+    assert!(crate::entities::ai_declaration_manifest::undeclared_keys(&config).is_empty());
+    config.navigation_console = base.navigation_console.clone();
+    assert_eq!(
+        serde_json::to_value(&config).unwrap(),
+        serde_json::to_value(&base).unwrap(),
+        "the derived accepted recipe changes only the existing Navigation policy/chart filter, never equipment, reserves, layout, ownership or other AI"
+    );
+}

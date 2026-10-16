@@ -4,6 +4,7 @@ fn radio() -> CommsRadioConfig {
     CommsRadioConfig {
         media: None,
         capture: None,
+        traffic: None,
         system: SystemId("comms".into()),
         request_reading_ticks: 30,
         keys: vec!["fleet".into()],

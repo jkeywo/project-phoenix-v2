@@ -125,6 +125,7 @@ impl crate::messages::SystemBlackboard {
     pub fn recorded_observations(&self) -> Vec<&ObservationMetadata> {
         use crate::messages::SystemBlackboard;
         match self {
+            SystemBlackboard::Captain(captain) => captain.alert_observation.iter().collect(),
             SystemBlackboard::Scan(scan) if !scan.history.is_empty() => scan
                 .history
                 .iter()

@@ -1,5 +1,18 @@
 import { expect, it, vi } from 'vitest';
 import { createWorkshopTestPreparation } from '../workshop-test-snapshot.js';
+
+it('keeps rehearsal correlation beside selection and sends it to actual Rust preflight', async () => {
+  const runtime = { validate: async () => ({ accepted: true }), checkTestSelection: vi.fn(async () => ({ accepted: true })),
+    testCatalog: async () => ({ layers: {} }) };
+  const preparation = createWorkshopTestPreparation({ runtime, dependencies: async () => ({ base_files: {}, packs: [] }) });
+  const rehearsal = { version: 1, plan: { version: 1 }, workload: 'burst-recovery' };
+  const selection = { world: 'assets/worlds/test.toml', ship: 'assets/entities/hull.toml', seed: 7, rehearsal, run_generation: 13 };
+  const prepared = await preparation.prepare({ [selection.world]: '[global]' }, selection);
+  expect(prepared.selection).not.toHaveProperty('rehearsal');
+  expect(prepared.rehearsal).toEqual(rehearsal);
+  expect(prepared.run_generation).toBe(13);
+  expect(runtime.checkTestSelection).toHaveBeenCalledWith(expect.anything(), prepared.selection, { rehearsal, run_generation: 13 });
+});
 import { readStoreZipArchive } from '../mod-pack-export.js';
 import { isWorkshopBinary } from '../workshop-document.js';
 

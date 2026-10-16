@@ -116,9 +116,12 @@ pub fn install(app: &mut App, prepared: Option<PreparedRehearsal>) {
         use crate::authoritative::{DeclareState, StateClass};
         app.declare_state::<PreparedRehearsal>(
             StateClass::TestInfra,
-            "equipment-fitting-and-refitting",
+            "workshop-fitting-rehearsal-preparation",
         )
-        .declare_state::<Measurements>(StateClass::TestInfra, "equipment-fitting-and-refitting")
+        .declare_state::<Measurements>(
+            StateClass::TestInfra,
+            "workshop-fitting-rehearsal-measurements",
+        )
         .insert_resource(prepared)
         .add_systems(
             FixedLast,

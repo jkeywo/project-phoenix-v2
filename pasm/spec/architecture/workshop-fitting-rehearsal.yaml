@@ -1,0 +1,52 @@
+entities:
+  - component: workshop-fitting-rehearsal
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Private Workshop Fitting Rehearsal
+      summary: "The disposable Test child validates one immutable captured fitting request, stages its initial fit through existing equipment and Power machinery before work, and samples a finite reference workload through the existing TestStatus bridge. This harness is absent from ordinary missions; it adds no authoritative resource model, save state, network command or gameplay controller. Source integration is implemented; actual loader and playable acceptance remain pending."
+      rationale:
+        - "PreparedRehearsal and Measurements use the existing StateClass::TestInfra exclusion. Only disposable browser/native Test installs them. The ordinary TestClock owns pause, step and finite-run stopping; recorded measurement ticks are observations of SimTick, not another clock."
+        - "All fallible initial fitting checks precede insertion. Measurements read actual settled work, stores, reserve, heat and damage without granting resources or applying work. Their private bounded report is neither mission snapshot state nor authoritative digest input."
+    architecture:
+      kind: test-harness
+      authority: local
+      owns: [workshop-fitting-rehearsal-preparation, workshop-fitting-rehearsal-measurements]
+      writes: [workshop-fitting-rehearsal-preparation, workshop-fitting-rehearsal-measurements]
+      coordinates: [gm-milestone-integrated-workshop, workshop-test-observer-views]
+      runs_in: [host-browser-runtime, native-host-runtime]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/workshop/rehearsal.rs, crates/phoenix-simulation/src/workshop/rehearsal_report.rs, crates/phoenix-simulation/src/workshop/rehearsal_request.rs]
+      symbols: [prepare, initialize, sample, result]
+      tests: [crates/phoenix-simulation/src/workshop/rehearsal_tests.rs, crates/phoenix-simulation/src/workshop/test_protocol_tests.rs]
+  - state: workshop-fitting-rehearsal-preparation
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Captured Fitting Rehearsal Preparation
+      summary: "Test-only immutable accepted source, normalized choices, workload identity and run correlation, plus one constructor attempt/result and its observed initialization tick. It is never installed or restored by an ordinary mission. StateClass::TestInfra excludes it from the authoritative digest and mission persistence."
+    architecture:
+      classification: test-infra
+      owner: workshop-fitting-rehearsal
+      writers: [workshop-fitting-rehearsal]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/workshop/rehearsal.rs]
+      symbols: [PreparedRehearsal]
+      tests: [crates/phoenix-simulation/src/workshop/rehearsal_tests.rs]
+  - state: workshop-fitting-rehearsal-measurements
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Read-only Fitting Rehearsal Measurements
+      summary: "Bounded Test-only aggregates and sampled charts from actual settled machinery, retained solely for the private comparison result. Initialization, warmup, duplicate and paused intervals do not invent paid activity. StateClass::TestInfra excludes these observations from mission snapshots and the authoritative digest."
+    architecture:
+      classification: test-infra
+      owner: workshop-fitting-rehearsal
+      writers: [workshop-fitting-rehearsal]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/workshop/rehearsal_report.rs]
+      symbols: [Measurements]
+      tests: [crates/phoenix-simulation/src/workshop/rehearsal_tests.rs]

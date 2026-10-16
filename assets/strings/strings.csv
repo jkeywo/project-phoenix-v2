@@ -6518,3 +6518,4 @@ workshop.security.acquisition,Workshop optional target effect,Vessel acquisition
 workshop.security.acquire,Workshop explicit Board effect toggle,Acquire vessel on completed Board work,Acquire vessel on completed Board work,Acquire vessel on completed Board work,source
 workshop.security.doctrine,Workshop accepted post-acquisition palette ID,Post-acquisition hold doctrine,Post-acquisition hold doctrine,Post-acquisition hold doctrine,source
 workshop.security.save_target,Workshop target effect save button,Save target effect,Save target effect,Save target effect,source
+entity.utility_shuttle.name,Ordinary optional unarmed Full3D utility equipment,Utility Shuttle,,,

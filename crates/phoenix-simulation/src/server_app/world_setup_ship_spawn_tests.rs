@@ -457,3 +457,95 @@ regen_per_sec = 0.0
         29.0
     );
 }
+
+#[test]
+fn actual_utility_shared_spawn_preserves_full_spatial_height_and_seeded_yaw() {
+    use crate::entities::config::VerticalMovementMode;
+    use crate::ship::helm_control::{CompiledHelmControl, HelmControlState};
+    let accepted = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/utility_shuttle.toml",
+    )
+    .unwrap();
+    for mode in [
+        VerticalMovementMode::Planar,
+        VerticalMovementMode::Bounded,
+        VerticalMovementMode::Full3D,
+    ] {
+        let mut authored = accepted.clone();
+        authored
+            .helm_capability
+            .as_mut()
+            .unwrap()
+            .vertical_movement_mode = mode;
+        let topology = topology(&authored);
+        let (resolver, ratings) = crate::ship::rating::seed_boot_ratings(&topology, |_| {
+            crate::ship::rating::BACKFILL_RATING.into()
+        });
+        let mut app = App::new();
+        let actor = spawner::spawn_entity_with_ship_seed(
+            &mut app.world_mut().commands(),
+            &authored,
+            Vec3::new(11.0, 18.0, -23.0),
+            "actual-utility".into(),
+            None,
+            Some(crate::entities::ship_spawn::ShipSpawnSeed {
+                crew_presence: Default::default(),
+                ship_config: ShipConfigComponent(topology),
+                control_sources: crate::ship_plugin::ShipSystemControlSources(resolver),
+                active_ratings: crate::ship_plugin::ActiveStationRatings(ratings),
+                initial_yaw: 0.7,
+            }),
+        );
+        app.world_mut().flush();
+        let expected_y = if mode == VerticalMovementMode::Full3D {
+            18.0
+        } else {
+            0.0
+        };
+        let pose = app.world().get::<ShipPhysicsComponent>(actor).unwrap();
+        assert_eq!(
+            (pose.x, pose.y, pose.z, pose.yaw),
+            (11.0, expected_y, -23.0, 0.7)
+        );
+        assert!(app.world().get::<Ship>(actor).is_some());
+        assert!(app
+            .world()
+            .get::<crate::entities::craft::PhysicalProbe>(actor)
+            .is_none());
+        assert!(app.world().get::<CompiledHelmControl>(actor).is_some());
+        assert!(app.world().get::<HelmControlState>(actor).is_some());
+        assert!(app
+            .world()
+            .get::<crate::ship::helm_ai::FineSystemAiPolicies>(actor)
+            .is_some());
+        let sources = &app
+            .world()
+            .get::<crate::ship_plugin::ShipSystemControlSources>(actor)
+            .unwrap()
+            .0;
+        assert!(authored
+            .ship_config
+            .as_ref()
+            .unwrap()
+            .systems
+            .iter()
+            .all(|system| sources.source_for(&system.id)
+                == crate::ship::control_source::ControlSource::Ai));
+        let power = &app
+            .world()
+            .get::<crate::ship::power::ShipPowerSystem>(actor)
+            .unwrap()
+            .0;
+        assert_eq!(power.config(), authored.energy.as_ref().unwrap());
+        assert!(
+            authored
+                .ship_config
+                .as_ref()
+                .unwrap()
+                .systems
+                .iter()
+                .all(|system| power.emitted_work(&system.id) == 0.0),
+            "spawn performs no machinery work"
+        );
+    }
+}

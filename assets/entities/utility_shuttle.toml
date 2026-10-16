@@ -1,0 +1,791 @@
+# Optional ordinary unarmed Full3D utility hull. Not Bay-loadable until the
+# moving custody/recovery slice is joined; no probe marker bypasses fixed guards.
+# All reserves and geometry are real authored equipment; zero generation.
+includes = ["battery_probe.toml"]
+name = "entity.utility_shuttle.name"
+faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+mass = 20
+
+[collider]
+shape = "Ball"
+radius = 0.5
+length = 0
+movable = true
+
+[mesh]
+shape = "sphere"
+colour = [0.4, 0.8, 1.0]
+radius = 0.5
+
+[behaviour]
+doctrine = []
+waypoint_arrival_radius = 1
+nav_handoff_speed = 0.5
+
+[helm_console]
+max_speed = 12
+max_reverse_speed = 4
+acceleration = 4
+deceleration = 6
+max_yaw_rate = 1
+max_bank_deg = 0
+
+[helm_console.lateral_thrust]
+max_lateral_speed = 4
+lateral_acceleration = 4
+
+[helm_capability]
+vertical_movement_mode = "full3_d"
+
+[helm_control]
+thrust = "helm-thrust"
+steering = "helm-steering"
+lateral = "helm-lateral-thrust"
+
+[comms]
+range = 300
+hailable = true
+
+[comms.radio]
+system = "comms"
+request_reading_ticks = 30
+
+[[comms.radio.channel]]
+id = "public"
+range = 300
+work_units = 1
+
+[[helm_console.engines_ai.rule]]
+priority = 0
+channel = "longitudinal"
+when = "true"
+verb = "actuate_desired_travel"
+
+[[helm_console.steering_ai.rule]]
+priority = 0
+channel = "yaw"
+when = "true"
+verb = "actuate_desired_facing"
+
+[[helm_console.lateral_ai.rule]]
+priority = 0
+channel = "lateral"
+when = "true"
+verb = "actuate_lateral_thrust"
+
+[[helm_console.vertical_ai.rule]]
+priority = 0
+channel = "vertical"
+when = "true"
+verb = "actuate_vertical_thrust"
+
+[helm_console.impulse_ai]
+idle = true
+[helm_console.boost_ai]
+idle = true
+[captain_console.ai]
+idle = true
+[weapons_console.ai]
+idle = true
+
+[sensors_console.selector]
+sources = ["radar-contacts"]
+horizon = 1000000
+switch_margin = 0
+eligibility = "false"
+
+[weapons_console.selector]
+sources = ["radar-contacts"]
+horizon = 1000000
+switch_margin = 0
+eligibility = "false"
+
+[navigation_console.selector]
+sources = ["navigation-objectives"]
+horizon = 1000000
+switch_margin = 0
+eligibility = "false"
+
+[repair.selector]
+sources = ["damaged-stations"]
+horizon = 1000000
+switch_margin = 0
+eligibility = "false"
+
+[comms_console.selector]
+sources = ["comms-contacts"]
+horizon = 1000000
+switch_margin = 0
+eligibility = "false"
+
+[[comms_console.ai.rule]]
+priority = 0
+channel = "comms_respond"
+when = "fact(is_read) > 0 and fact(comms_available) > 0"
+verb = "respond_to_message"
+response_index = 0
+
+[helm_console.radar]
+range = 120
+shows = ["ship", "station", "asteroid", "missile"]
+selects = ["ship", "station", "asteroid", "missile"]
+
+[navigation_console.system_chart]
+range = 300
+shows = ["ship", "station", "asteroid", "missile"]
+selects = ["ship", "station", "asteroid", "missile"]
+
+[[system]]
+id = "helm-thrust"
+kind = "helm_thrust"
+console = "flight"
+ai_only = true
+power_group = "probe"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+
+[[system]]
+id = "helm-steering"
+kind = "helm_steering"
+console = "flight"
+ai_only = true
+power_group = "probe"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+
+[[system]]
+id = "helm-lateral-thrust"
+kind = "lateral_thrust"
+console = "flight"
+ai_only = true
+power_group = "probe"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+
+[[system]]
+id = "helm-vertical-thrust"
+kind = "vertical_thrust"
+console = "flight"
+ai_only = true
+power_group = "probe"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+
+[[system]]
+id = "helm-radar"
+kind = "helm_radar"
+console = "flight"
+ai_only = true
+power_group = "probe"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+
+[[system]]
+id = "navigation"
+kind = "navigation"
+console = "navigation"
+ai_only = true
+power_group = "probe"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+
+[[system]]
+id = "comms"
+kind = "comms"
+console = "radio"
+ai_only = true
+power_group = "probe"
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+
+[[system]]
+id = "red-alert"
+kind = "red_alert"
+console = "command"
+ai_only = true
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+
+[[console]]
+id = "flight"
+name = "entity.utility_shuttle.name"
+
+[[console.feed]]
+source = "helm"
+kind = "Helm"
+
+[[console.feed]]
+source = "helm-lateral-thrust"
+kind = "HelmLateralThrust"
+
+[[console.feed]]
+source = "helm-radar"
+kind = "Helm"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console]]
+id = "navigation"
+name = "entity.utility_shuttle.name"
+
+[[console.feed]]
+source = "navigation"
+kind = "Navigation"
+
+[[console.feed]]
+source = "sensor-radar"
+kind = "SensorRadar"
+
+[[console.feed]]
+source = "comms"
+kind = "Comms"
+
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
+
+[[console]]
+id = "radio"
+name = "entity.utility_shuttle.name"
+
+[[console.feed]]
+source = "comms"
+kind = "Comms"
+
+[[console]]
+id = "command"
+name = "entity.utility_shuttle.name"
+
+[[console.feed]]
+source = "captain"
+kind = "Captain"
+
+[energy.reactor]
+sustainable_output_per_sec = 0
+max_output_per_sec = 0
+ramp_per_sec = 7.925
+initial_output_per_sec = 0
+initial_energy = 0
+initial_heat = 0
+max_cooling_per_sec = 0
+default_cooling_per_sec = 0
+
+[energy.reactor.reserve]
+capacity = 1
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.951
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.reactor.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "sensor-radar"
+initial_energy = 12
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 12
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "helm-thrust"
+initial_energy = 240
+initial_heat = 0
+continuous_cost_per_sec = 0.5
+discrete_cost = 1
+
+[energy.consumer.reserve]
+capacity = 240
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "helm-steering"
+initial_energy = 240
+initial_heat = 0
+continuous_cost_per_sec = 0.5
+discrete_cost = 1
+
+[energy.consumer.reserve]
+capacity = 240
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "helm-lateral-thrust"
+initial_energy = 240
+initial_heat = 0
+continuous_cost_per_sec = 0.5
+discrete_cost = 1
+
+[energy.consumer.reserve]
+capacity = 240
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "helm-vertical-thrust"
+initial_energy = 240
+initial_heat = 0
+continuous_cost_per_sec = 0.5
+discrete_cost = 1
+
+[energy.consumer.reserve]
+capacity = 240
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "helm-radar"
+initial_energy = 240
+initial_heat = 0
+continuous_cost_per_sec = 0.5
+discrete_cost = 1
+
+[energy.consumer.reserve]
+capacity = 240
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "navigation"
+initial_energy = 240
+initial_heat = 0
+continuous_cost_per_sec = 0.5
+discrete_cost = 1
+
+[energy.consumer.reserve]
+capacity = 240
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "comms"
+initial_energy = 240
+initial_heat = 0
+continuous_cost_per_sec = 0.5
+discrete_cost = 1
+
+[energy.consumer.reserve]
+capacity = 240
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.group]]
+id = "probe"
+max_flow_per_sec = 0
+default_flow_per_sec = 0
+max_cooling_per_sec = 0
+default_cooling_per_sec = 0
+priority = 15
+restore_delay_secs = 0.5
+
+
+[interior]
+team_homes = []
+
+[[interior.deck]]
+id = "probe"
+label = "entity.battery_probe.room"
+damage_weight = 1
+
+[[interior.compartment]]
+id = "probe-core"
+deck = "probe"
+label = "entity.battery_probe.room"
+x = -0.5
+z = -0.5
+width = 1
+depth = 1
+material = "bulkhead"
+max_hp = 12
+recovery_fraction = 0.2
+structural_remedy = "structural"
+
+[interior.placements]
+sensor-radar = "probe-core"
+
+helm-thrust = "probe-core"
+helm-steering = "probe-core"
+helm-lateral-thrust = "probe-core"
+helm-vertical-thrust = "probe-core"
+helm-radar = "probe-core"
+navigation = "probe-core"
+comms = "probe-core"
+red-alert = "probe-core"
+
+[[sensing.broad]]
+reading_ticks = 120
+system = "sensor-radar"
+sample_interval_secs = 0.5
+identity_secs = 1
+classification_secs = 3
+assessment_secs = 6
+position_error = 2
+drift_error_per_sec = 0.5
+track_retention_secs = 60
+
+
+[[sensing.broad]]
+system = "helm-radar"
+reading_ticks = 120
+sample_interval_secs = 0.5
+identity_secs = 1
+classification_secs = 3
+assessment_secs = 6
+position_error = 2
+drift_error_per_sec = 0.5
+track_retention_secs = 60

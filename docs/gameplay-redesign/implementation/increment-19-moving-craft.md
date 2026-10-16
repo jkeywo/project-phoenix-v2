@@ -237,3 +237,36 @@ scripted position change, bare API call or fake remote contact is not a flight
 playtest or full increment19 exit. Armed craft, passengers, cargo sorties,
 inter-system trips and wider 2/4/6/8-seat workload acceptance remain explicit
 later work.
+
+
+## First ordinary-equipment checkpoint — source only
+
+The optional `assets/entities/utility_shuttle.toml` defines an ordinary unarmed
+Full3D hull with nine AI-only Systems and five explicit no-screen Consoles. It
+uses the existing shared ship installer and individual Helm/Navigation/Comms
+policies, real finite local reserves, two ordinary Broad instruments and complete
+energy/interior/Operation bindings. It adds no seat, pilot, propulsion owner or
+projectile controller. Its reactor remains the inherited zero-generation source.
+
+This checkpoint intentionally has no `[probe]`: fixed carried-equipment validation
+and its existing zero-motion continuation remain unchanged until moving custody
+and relative-speed capture are joined together. It does not demonstrate Bay
+launch, a selected XYZ course, remote Travel/Recall or return. The shared ship
+installer preserves actual authored height for Full3D while retaining previous
+Planar/Bounded initialization; supplied yaw keeps the existing seed owner.
+
+A real include-resolver → EntityConfig::from_toml regression pins the complete
+accepted recipe, both scanner profiles, scope ownership, finite consumers and
+unarmed layout. A second owner regression exercises the ordinary shared installer
+at nonzero altitude/yaw, actual AI/profile installation and zero emitted work at
+spawn. They are authored and independently source-reviewed; native execution is
+pending root. Literal TOML parsing, rustfmt and diff checks are preparation only.
+No host flight tracer is authored before the actual native accepted-loader gate.
+
+The return dependency is a Navigation consumer of existing dated
+`SensorTrackSnapshot.elevation`, not another sensor. Main already has actual paid
+Broad altitude/error and sample-derived vertical velocity (81c649b2). Navigation's
+legacy planar Picture currently substitutes observer height; that value must never
+be used as target elevation. The later return join must preserve the original
+sample tick/error and refuse absent/stale height or measured velocity without a
+private home-pose lookup.

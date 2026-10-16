@@ -436,3 +436,117 @@ fn actual_accepted_shielded_hull_keeps_generated_arc_scope_and_feeds() {
             .any(|feed| feed.source == id && feed.kind == ConsoleObservationKind::ShieldArc));
     }
 }
+
+#[test]
+fn actual_utility_shuttle_is_complete_ordinary_unarmed_full_spatial_equipment() {
+    use crate::entities::config::VerticalMovementMode;
+    use phoenix_model::console::ConsoleObservationKind;
+    let base =
+        crate::test_fixtures::load_entity_config("assets/entities/battery_probe.toml").unwrap();
+    let resolved =
+        crate::test_fixtures::resolve_from_disk("assets/entities/utility_shuttle.toml").unwrap();
+    let config = EntityConfig::from_toml(&resolved.toml).unwrap();
+    assert_eq!(config.name.as_deref(), Some("entity.utility_shuttle.name"));
+    assert_eq!(
+        config
+            .helm_capability
+            .as_ref()
+            .unwrap()
+            .vertical_movement_mode,
+        VerticalMovementMode::Full3D
+    );
+    assert!(config.behaviour.as_ref().unwrap().doctrine.is_empty());
+    assert!(config.collider.as_ref().unwrap().movable);
+    assert!(
+        config.probe.is_none(),
+        "moving Bay custody is not admitted by this equipment checkpoint"
+    );
+    assert!(config.personnel.is_none());
+    assert!(config.torpedoes.is_none());
+    assert!(config.shield_arcs.is_empty());
+    assert!(config.dock.is_none());
+    assert!(config.tractor.is_none());
+    assert!(config
+        .weapons_console
+        .as_ref()
+        .is_none_or(|weapons| weapons.phaser_banks.is_empty() && weapons.blaster_banks.is_empty()));
+    let ship = config.ship_config.as_ref().unwrap();
+    assert!(ship.stations.is_empty());
+    assert_eq!(ship.systems.len(), 9);
+    assert_eq!(ship.consoles.len(), 5);
+    assert!(ship.systems.iter().all(|system| system.ai_only
+        && ship
+            .console_for_system(&system.id)
+            .is_some_and(|console| console.home_station.is_none() && console.screen.is_none())));
+    assert!(ship
+        .console_for_system(&SystemId("helm-thrust".into()))
+        .unwrap()
+        .feeds
+        .iter()
+        .any(
+            |feed| feed.source.0 == "navigation" && feed.kind == ConsoleObservationKind::Navigation
+        ));
+    assert!(ship
+        .console_for_system(&SystemId("navigation".into()))
+        .unwrap()
+        .feeds
+        .iter()
+        .any(|feed| feed.source.0 == "comms" && feed.kind == ConsoleObservationKind::Comms));
+    let energy = config.energy.as_ref().unwrap();
+    assert_eq!(energy.reactor, base.energy.as_ref().unwrap().reactor);
+    assert_eq!(energy.groups, base.energy.as_ref().unwrap().groups);
+    assert_eq!(energy.consumers.len(), 8);
+    let scanners = &config.sensing.as_ref().unwrap().broad;
+    assert_eq!(scanners.len(), 2);
+    assert_eq!(
+        scanners
+            .iter()
+            .find(|scanner| scanner.system.0 == "sensor-radar"),
+        base.sensing.as_ref().unwrap().broad.first()
+    );
+    assert!(scanners
+        .iter()
+        .any(|scanner| scanner.system.0 == "helm-radar"));
+    for system in &ship.systems {
+        assert!(config
+            .interior
+            .as_ref()
+            .unwrap()
+            .placements
+            .contains_key(&system.id));
+        assert!(system
+            .damage_components
+            .iter()
+            .any(|component| component.binding == phoenix_model::damage::DamageBinding::Operation));
+        if system.kind != RED_ALERT_KIND {
+            let consumer = energy
+                .consumers
+                .iter()
+                .find(|consumer| consumer.system == system.id)
+                .expect("every active instrument/axis owns its actual local reserve");
+            assert!(consumer.initial_energy.is_finite() && consumer.initial_energy > 0.0);
+            assert!(
+                consumer.continuous_cost_per_sec.is_finite()
+                    && consumer.continuous_cost_per_sec > 0.0
+            );
+        }
+    }
+    assert_eq!(config.damage, base.damage);
+    assert_eq!(
+        config.interior.as_ref().unwrap().compartments,
+        base.interior.as_ref().unwrap().compartments
+    );
+    assert_eq!(
+        config
+            .comms
+            .as_ref()
+            .unwrap()
+            .radio
+            .as_ref()
+            .unwrap()
+            .system
+            .0,
+        "comms"
+    );
+    assert!(crate::entities::ai_declaration_manifest::undeclared_keys(&config).is_empty());
+}

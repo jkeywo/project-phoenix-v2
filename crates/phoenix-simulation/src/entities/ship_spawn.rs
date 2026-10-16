@@ -159,6 +159,16 @@ fn insert_ship_config_and_core_bundle(
     // starts with the correct initial state rather than (0, 0).
     let ship_physics = crate::ship::state::ShipPhysics {
         x: position.x,
+        // Preserve actual authored height for a full-spatial ordinary hull.
+        // Legacy capital Planar/Bounded spawn semantics remain unchanged.
+        y: if config.helm_capability.as_ref().is_some_and(|capability| {
+            capability.vertical_movement_mode
+                == crate::entities::config::VerticalMovementMode::Full3D
+        }) {
+            position.y
+        } else {
+            0.0
+        },
         z: position.z,
         yaw: initial_yaw,
         ..Default::default()

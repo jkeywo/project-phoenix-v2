@@ -102,7 +102,22 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         let entity_states = build_sim_state_entity_states(world);
         let station_health = build_station_health_snapshots(world);
         let console_health = build_console_health_snapshots(world);
-        let (system_status, status_owners) = build_system_status(world);
+        let console_hosts = build_console_host_snapshots(world);
+        // These two fields are removed from the reserved local packet and from
+        // the unhosted All packet below. Only construct them when the existing
+        // connected-recipient branch can actually publish their projection.
+        let recipient_context = !console_hosts.is_empty()
+            && world
+                .resource::<crate::lobby::Sessions>()
+                .0
+                .players()
+                .iter()
+                .any(|player| player.connected);
+        let (system_status, status_owners) = if recipient_context {
+            build_system_status(world)
+        } else {
+            Default::default()
+        };
         // Fold this tick's host state (objectives + Red Alert) into the
         // authoritative importance projection before reading it, so the snapshot
         // reflects the same tick's events (issue #1101). The drain of visits runs
@@ -135,8 +150,12 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                     .map_or(0, |owner| owner.state.generation),
             ),
             system_status,
-            console_views: build_console_working_views(world),
-            console_hosts: build_console_host_snapshots(world),
+            console_views: if recipient_context {
+                build_console_working_views(world)
+            } else {
+                Default::default()
+            },
+            console_hosts,
             entity_states,
             station_health,
             console_health,

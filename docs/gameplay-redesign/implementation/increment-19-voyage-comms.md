@@ -1,10 +1,11 @@
 # Increment 19 — Voyage requests and returned owner events
 
-**Contract candidate, 16 October 2026. No runtime or acceptance claim.**
+**Adopted implementation contract, 16 October 2026. No runtime or acceptance claim.**
+Root adopted the coupled Comms/craft contract after independent source review.
 This pins the Comms half of [moving craft](./increment-19-moving-craft.md).
 Its real utility recipe has passed the accepted-loader gate. Genuine launch
 reports and the voyage Navigation/Helm consumers remain separately owned dependencies;
-no placeholder voyage, report or Job makes this candidate executable.
+no placeholder voyage, report or Job makes this contract executable.
 
 ## Source intent and immutable transmission
 
@@ -32,7 +33,7 @@ foreign custody to decide whether the source may attempt a send. No current
 Comms contact is invented from the report. Its historical known receiver can
 support this one best-effort request family without becoming a generic roster.
 
-The craft owner proposes this closed shared type in
+The craft owner provides this selected closed shared type in
 `phoenix_model::craft_voyage` (not yet implemented):
 
 ```rust
@@ -52,7 +53,7 @@ commit tick. This is the identical cause in the existing Bay owner's retained
 launch commit creates them together. The adopted moving-craft report bound is
 128 per Bay, newest local launch per craft; it never blocks a launch.
 
-The proposed source accessor is
+The selected source accessor is
 `entities::craft::launch_reports(config, boards, reader, bay) -> Vec<VoyageRef>`.
 Like the existing Navigation accessor, it verifies an actual Bay System and
 explicit permitted typed Bay feed, then reads only that own publication. It
@@ -167,7 +168,7 @@ by being viewed later. Accepted onboard work persists past link loss and expiry
 under its ordinary own constraints. Recall without a genuine admitted voyage
 Job cannot create an invented return history.
 
-The proposed onboard owner is one optional `Job<CraftVoyageActivity>` inside
+The selected onboard owner is one optional `Job<CraftVoyageActivity>` inside
 existing Navigation. Its activity binds `VoyageRef`, the latest locally admitted
 exact `CommsRequestReference`, existing waypoint `course_generation`, closed
 stage, positive `transition` and original `transition_tick`. First admitted
@@ -183,7 +184,7 @@ after settlement must use its actual new Job rather than reopening history.
 
 Extend closed `CommsRequestFacts` with optional `voyage` owner-event evidence
 rather than treating `CommsRequestStage::Completed` as every later stage. The
-proposed Model type is:
+selected Model type is:
 
 ```rust
 CraftVoyageEvent {
@@ -229,14 +230,14 @@ not a fresh generation minted by projection or reporting.
 Only that owner can establish these conditions; Comms cannot infer them from a
 desired course, text, silence, ReportStatus or its own Accept.
 
-The proposed read-only accessor
+The selected read-only accessor
 `navigation::voyage::events(config, boards, reader, source)` returns zero or one
-latest `CraftVoyageEvent`, from a proposed
+latest `CraftVoyageEvent`, from the selected
 `NavigationBlackboard.voyage_event: Option<CraftVoyageEvent>`. It checks the actual
 Navigation source and the reader's explicit typed feed. Comms may copy only that
 exact event into the matching actual received request facts. No private Job scan,
 foreign publisher or hardcoded Station identity can supply one. This API and
-field are proposed dependencies; current main has no voyage Job/event owner.
+field are implementation dependencies; current main has no voyage Job/event owner.
 
 First reporting honestly coalesces to the latest current Job event. It does not
 promise that every intermediate stage will be transmitted across a gap. Already

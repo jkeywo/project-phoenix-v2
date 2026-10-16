@@ -1,0 +1,18 @@
+# Actual optional Comms bank and ordinary finite physical receiver. No effects
+# inject observations, orders, projectiles, damage, EMP or payment.
+[global]
+seed=15621721
+[player_spawn]
+position=[0,0,0]
+[[entity]]
+template_path="assets/entities/disruptor_cruiser.toml"
+id="disruption-source"
+name="disruption-source"
+spawn_on="game_start"
+[[entity]]
+template_path="assets/entities/battery_probe.toml"
+id="disruption-target"
+name="disruption-target"
+transform={position=[0,0,-25]}
+[entity.overrides]
+faction="cccccccc-3333-4333-8333-cccccccccccc"

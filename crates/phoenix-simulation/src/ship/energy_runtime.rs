@@ -189,12 +189,12 @@ pub fn tick_power_system(
             .filter(|(_, group)| group.cut)
             .map(|(id, _)| id.clone())
             .collect();
-        let mut candidate = power.0.clone();
-        let mut effects = hardware_effects(&candidate, physical, sources);
+        let mut effects = hardware_effects(&power.0, physical, sources);
         if fitting_profile
             .zip(fitting_state)
             .is_some_and(|(profile, state)| {
-                candidate
+                power
+                    .0
                     .ship_config()
                     .systems
                     .iter()
@@ -209,7 +209,7 @@ pub fn tick_power_system(
             effects.reactor_operation = 0.0;
         }
         let result = crate::sim_rng::with_live_stream(rng.as_deref(), |generator| {
-            candidate.tick_energy_with_effects(
+            power.0.tick_energy_with_effects(
                 time.delta_secs(),
                 &bindings,
                 &stocks,
@@ -229,7 +229,8 @@ pub fn tick_power_system(
                 });
             }
         }
-        let after: BTreeSet<_> = candidate
+        let after: BTreeSet<_> = power
+            .0
             .network()
             .groups
             .iter()
@@ -245,7 +246,8 @@ pub fn tick_power_system(
             crate::ship::system_registry::SENSOR_RADAR_KIND,
             crate::ship::system_registry::NAVIGATION_KIND,
         ] {
-            let ids: Vec<_> = candidate
+            let ids: Vec<_> = power
+                .0
                 .ship_config()
                 .systems
                 .iter()
@@ -259,10 +261,9 @@ pub fn tick_power_system(
                 } else {
                     1.0
                 };
-                let _ = candidate.work_continuous(&id, time.delta_secs(), activity);
+                let _ = power.0.work_continuous(&id, time.delta_secs(), activity);
             }
         }
-        power.0 = candidate;
     }
 }
 

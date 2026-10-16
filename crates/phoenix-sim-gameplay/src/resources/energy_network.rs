@@ -503,6 +503,27 @@ impl EnergyNetworkState {
         effects: &EnergyHardwareEffects,
         choose: &mut impl FnMut(usize) -> usize,
     ) -> Result<EnergyNetworkResult, String> {
+        let mut next = self.clone();
+        let result =
+            next.tick_with_effects_in_place(config, ship, dt, bindings, coolant, effects, choose)?;
+        *self = next;
+        Ok(result)
+    }
+
+    /// Integrate a disposable transaction candidate owned by PowerSystem.
+    /// A failure may leave this candidate modified; callers must discard it.
+    /// Public network callers retain the atomic clone/commit wrapper above.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn tick_with_effects_in_place(
+        &mut self,
+        config: &EnergyConfigSection,
+        ship: &ShipConfig,
+        dt: f32,
+        bindings: &EnergyCoolantBindings,
+        coolant: &BTreeMap<String, f32>,
+        effects: &EnergyHardwareEffects,
+        choose: &mut impl FnMut(usize) -> usize,
+    ) -> Result<EnergyNetworkResult, String> {
         effects.validate(config)?;
         self.validate_against(config, ship)?;
         nonnegative("dt", dt)?;
@@ -529,33 +550,32 @@ impl EnergyNetworkState {
         if dt == 0.0 {
             return Ok(EnergyNetworkResult::default());
         }
-        let mut next = self.clone();
         let mut result = EnergyNetworkResult::default();
         let ramp = config.reactor.ramp_per_sec as f64 * dt as f64;
-        let actual = next.output_actual_per_sec as f64;
-        let target = next.output_target_per_sec as f64;
-        next.output_actual_per_sec = if next.reactor.thermal_stopped {
+        let actual = self.output_actual_per_sec as f64;
+        let target = self.output_target_per_sec as f64;
+        self.output_actual_per_sec = if self.reactor.thermal_stopped {
             0.0
         } else if target > actual {
             (actual + ramp).min(target) as f32
         } else {
             (actual - ramp).max(target) as f32
         };
-        next.output_actual_per_sec = next
+        self.output_actual_per_sec = self
             .output_actual_per_sec
             .min(config.reactor.max_output_per_sec * effects.reactor_operation);
-        let generation = if !next.generation_enabled || next.reactor.thermal_stopped {
+        let generation = if !self.generation_enabled || self.reactor.thermal_stopped {
             0.0
         } else {
             budget(
-                next.output_actual_per_sec
+                self.output_actual_per_sec
                     .min(config.reactor.sustainable_output_per_sec * effects.reactor_operation)
                     as f64
                     * effects.reactor.intake as f64
                     * dt as f64,
             )
         };
-        let mut supply_preview = next.reactor;
+        let mut supply_preview = self.reactor;
         supply_preview.step(
             &config.reactor.reserve,
             EnergyStep {
@@ -570,14 +590,14 @@ impl EnergyNetworkState {
             0.0
         } else {
             budget(
-                (supply_preview.energy as f64 / dt as f64).min(next.output_actual_per_sec as f64),
+                (supply_preview.energy as f64 / dt as f64).min(self.output_actual_per_sec as f64),
             )
         };
-        next.route_groups(config, available_rate, dt, choose, &mut result)?;
+        self.route_groups(config, available_rate, dt, choose, &mut result)?;
         let mut routed = BTreeMap::new();
         let mut cooling_rates = BTreeMap::new();
         for group in config.groups.iter().filter(|group| group.parent.is_none()) {
-            next.route_consumers(config, ship, &group.id, &mut routed, &mut cooling_rates)?;
+            self.route_consumers(config, ship, &group.id, &mut routed, &mut cooling_rates)?;
         }
         let mut remaining_coolant: BTreeMap<_, _> = coolant
             .iter()
@@ -592,7 +612,7 @@ impl EnergyNetworkState {
             .iter()
             .map(|consumer| {
                 (
-                    consumer_priority(config, ship, &next.groups, consumer),
+                    consumer_priority(config, ship, &self.groups, consumer),
                     consumer,
                 )
             })
@@ -606,7 +626,7 @@ impl EnergyNetworkState {
                     .min(remaining_supply),
             );
             let provider = &bindings.consumers[&consumer.system];
-            let report = next
+            let report = self
                 .consumers
                 .get_mut(&consumer.system)
                 .expect("validated consumer")
@@ -646,15 +666,15 @@ impl EnergyNetworkState {
             kind: EnergyDemandKind::Continuous,
             amount: export,
         }];
-        let reactor_cooling = match next.mode {
-            EnergyAllocationMode::Manual => next.reactor_cooling_per_sec,
-            EnergyAllocationMode::Minimal => match next.cooling_usage {
+        let reactor_cooling = match self.mode {
+            EnergyAllocationMode::Manual => self.reactor_cooling_per_sec,
+            EnergyAllocationMode::Minimal => match self.cooling_usage {
                 CoolingUsage::None => 0.0,
                 CoolingUsage::Low => config.reactor.default_cooling_per_sec,
                 CoolingUsage::High => config.reactor.max_cooling_per_sec,
             },
         };
-        let reactor_report = next.reactor.step(
+        let reactor_report = self.reactor.step(
             &config.reactor.reserve,
             EnergyStep {
                 dt,
@@ -687,11 +707,10 @@ impl EnergyNetworkState {
         result.generation_accepted = reactor_report.accepted_energy;
         result.generation_rejected = reactor_report.rejected_energy;
         result.delivered_energy = export;
-        if next.reactor.thermal_stopped {
-            next.output_actual_per_sec = 0.0;
+        if self.reactor.thermal_stopped {
+            self.output_actual_per_sec = 0.0;
         }
-        next.validate_against(config, ship)?;
-        *self = next;
+        self.validate_against(config, ship)?;
         Ok(result)
     }
 

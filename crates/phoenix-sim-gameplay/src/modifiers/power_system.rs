@@ -492,35 +492,56 @@ impl PowerSystem {
     }
     fn validate_saved(&self, saved: &PowerState) -> Result<(), String> {
         saved.network.validate_against(&self.hardware, &self.ship)?;
-        if !saved.last_reactor_energy_delta_per_sec.is_finite()
-            || saved
-                .last_intake_per_sec
-                .keys()
-                .ne(self.network.consumers.keys())
-            || saved
-                .last_intake_per_sec
+        self.validate_observations(
+            saved.last_reactor_energy_delta_per_sec,
+            &saved.last_intake_per_sec,
+            &saved.last_work_fraction,
+            &saved.coolant_credit,
+            saved.strike_boost.is_some(),
+        )
+    }
+
+    // Runtime validation borrows observations; capture is reserved for actual
+    // persistence. The network transaction validates its own pre/post state.
+    fn validate_current_observations(&self) -> Result<(), String> {
+        self.validate_observations(
+            self.last_reactor_energy_delta_per_sec,
+            &self.last_intake_per_sec,
+            &self.last_work_fraction,
+            &self.coolant_credit,
+            self.strike_boost.is_some(),
+        )
+    }
+
+    fn validate_observations(
+        &self,
+        last_reactor_energy_delta_per_sec: f32,
+        last_intake_per_sec: &BTreeMap<SystemId, f32>,
+        last_work_fraction: &BTreeMap<SystemId, f32>,
+        coolant_credit: &BTreeMap<String, f64>,
+        has_strike_boost: bool,
+    ) -> Result<(), String> {
+        if !last_reactor_energy_delta_per_sec.is_finite()
+            || last_intake_per_sec.keys().ne(self.network.consumers.keys())
+            || last_intake_per_sec
                 .values()
                 .any(|value| !value.is_finite() || *value < 0.0)
         {
             return Err("invalid saved energy observations".into());
         }
-        if saved
-            .last_work_fraction
-            .keys()
-            .ne(self.network.consumers.keys())
-            || saved
-                .last_work_fraction
+        if last_work_fraction.keys().ne(self.network.consumers.keys())
+            || last_work_fraction
                 .values()
                 .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
         {
             return Err("invalid saved work observations".into());
         }
-        if saved.coolant_credit.iter().any(|(id, value)| {
+        if coolant_credit.iter().any(|(id, value)| {
             id.trim().is_empty() || !value.is_finite() || !(0.0..1.0).contains(value)
         }) {
             return Err("invalid saved coolant credit".into());
         }
-        if saved.strike_boost.is_some() != self.strike_config.is_some() {
+        if has_strike_boost != self.strike_config.is_some() {
             return Err("saved strike control does not match authored equipment".into());
         }
         Ok(())
@@ -602,7 +623,8 @@ impl PowerSystem {
         if dt > 0.0 {
             next.last_reactor_energy_delta_per_sec = (next.battery_charge() - before) / dt;
         }
-        next.validate_saved(&next.capture_continuation())?;
+        next.network.validate_against(&next.hardware, &next.ship)?;
+        next.validate_current_observations()?;
         *self = next;
         Ok(())
     }
@@ -636,8 +658,14 @@ impl PowerSystem {
         if available_stock.values().any(|value| *value < 0) {
             return Err("coolant stocks cannot be negative".into());
         }
-        let capacities: BTreeSet<_> = available_stock.keys().cloned().collect();
-        self.validate_continuation(&self.capture_continuation(), &capacities)?;
+        self.validate_current_observations()?;
+        if self
+            .coolant_credit
+            .keys()
+            .any(|id| !available_stock.contains_key(id))
+        {
+            return Err("saved coolant credit references unknown actual capacity".into());
+        }
         let mut budgets = BTreeMap::new();
         for (id, available) in available_stock {
             let amount = *available as f64 + self.coolant_credit.get(id).copied().unwrap_or(0.0);
@@ -649,7 +677,7 @@ impl PowerSystem {
         }
         let mut next = self.clone();
         let before = next.battery_charge();
-        let energy = next.network.tick_with_effects(
+        let energy = next.network.tick_with_effects_in_place(
             &next.hardware,
             &next.ship,
             dt,
@@ -690,7 +718,7 @@ impl PowerSystem {
                 .map(|(id, report)| (id.clone(), report.accepted_energy / dt))
                 .collect();
         }
-        next.validate_saved(&next.capture_continuation())?;
+        next.validate_current_observations()?;
         *self = next;
         Ok(PowerTickResult {
             energy,

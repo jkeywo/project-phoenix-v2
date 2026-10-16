@@ -107,34 +107,27 @@ produces honest failure/return for the loser. Planning does not reserve a target
 team, fuel, access, future power or a physical resource merely by releasing a leaf.
 
 Independent AI/Human acquisition before release is never credited retrospectively.
-For the first single-acquisition consumer, add one optional once-only
-`SituationInstance.acquisition_unavailable` result with `observed_tick` and the
-exact earlier own `VesselOperationalOwnerData` receipt/cause. It is valid only
-while this instance has no accepted execution or physical facts, for the same
-subject acquired by the executing actor through a different, unbound Job. Derive
-it only when the existing permitted own Security view still exposes that actual
-acquired Job/result and matching target alias; the adapter verifies the full
-receipt privately. Missing knowledge, a foreign private ownership record or a
-vanished action/contact is not this evidence. Persist the original cause and
-first observed tick; never refresh it or create a second physical owner.
+An unavailable subject or a normal admission refusal leaves the released activity
+unaccepted and pending: no Job, physical fact, success dependency or promise change.
+The owner can display its ordinary permitted readiness/refusal. Its missing action
+or contact is not proof of acquisition, destruction or a failed physical Job.
+A captured target leaves the ordinary candidate pool; the planned-intent adapter
+must not reintroduce it as an executable Board target or repeatedly mint work.
 
-A closed `SituationCondition::AcquisitionUnavailable` allows the existing
-budgeted Scenario activation to run an explicit authored failure response. This
-is a nonphysical terminal result for this leaf, not Accepted/Achieved/Settled, a
-cancelled Job, or ownership undo. It prevents repeated planned dispatch and cannot
-release success dependencies. The first consumer has no later success-dependent
-physical leaves; arbitrary failure-branch propagation is not implied. Same-actor
-history/conflict/frontier validation recognises this closed unaccepted shape only
-for AcquireVessel, retaining the original root, required promise and clocks.
-Do not reuse Repair-only node monitoring or silently select a new method/deadline.
+Retain the chosen root, subject, original release and any required promise. Do not
+add an acquisition-specific unavailable field, condition, receipt or terminal
+lifecycle; do not manufacture Cancelled settlement or automatically keep/break a
+promise. Actual failures after a real binding use the same Job's SecuritySettled
+outcome and normal Scenario conditions. Unknown or foreign private ownership
+cannot supply a crew fact or retrospective acceptance.
 
-Foreign acquisition before release remains unknown until ordinary permitted
-information or an actual admitted attempt establishes a supported refusal. Do
-not publish a private-world conclusion to solve that case. During an already
-accepted competing Board job, the existing failed completion/real settlement is
-the supported outcome. Loss of current observations alone remains temporary lack
-of information, not proof of acquisition or destruction. Broader pre-acceptance
-foreign-outcome reporting is a separate requirement for a later Patrol chain.
+This first consumer does not automatically close or replan an unaccepted changed
+goal. Existing changed-work monitoring is restricted to optional maintenance's
+final compartment-Structure Repair node; it is not generic AcquireVessel support.
+If a later authored Patrol chain needs changed-goal closure, extend that common
+bounded disposition/Scenario mechanism with an explicit own-permitted Security
+reading and source policy, preserving accepted work and history. Do not silently
+reuse Repair-only readings, switch methods or reset deadlines in this slice.
 
 ## Two causal facts with different clocks
 
@@ -204,9 +197,9 @@ the original actor's recipe even after either entity is removed. An unsettled
 present actor must carry the exact finite Security team/Job mint/owner/order,
 target UUID and admission tick. A pending or consumed acquisition receipt must
 match the existing ownership cause and any still-retained original Job/target
-records in both directions. An unavailable result must retain its original own receipt, original observation
-frontier and no-accepted/no-physical-fact shape; any retained own view/Job/owner
-must not contradict it. Completed evidence cannot be reassigned to another
+records in both directions. An unaccepted pending instance has no accepted
+execution, accepted tick or physical facts; unavailable/refused machinery cannot
+forge those fields. Completed evidence cannot be reassigned to another
 leaf, team, subject, actor or Job. Terminal history can survive ordinary team
 reuse and actor/target removal, but contradictory surviving records still refuse.
 Do not reevaluate today's control source, faction, Human/GM participation or damage
@@ -239,16 +232,16 @@ and physical team remain; a later condition proves actual team settlement.
 - Exercise unknown/stale aliases and feed loss, unavailable equipment, target
   becoming ineligible, actor/target loss, recall, competing actors/teams and stale
   Human authority. No free capture, duplicate owner or early team availability.
-- Prove independent own pre-release acquisition receives no plan credit; its
-  actual permitted receipt closes the single planned leaf through the explicit
-  unaccepted result, with one authored failure response and no invented Job.
-  Unknown/foreign private ownership cannot manufacture that result. Preserve
-  unrelated normal Security work and the chosen plan history.
+- Prove independent pre-release acquisition receives no plan credit; the activity
+  remains unaccepted/pending with no new Job, physical facts or promise change,
+  including after restore. Its target is not repeatedly offered as executable
+  Board work. Preserve unrelated normal Security work, root and release history.
 - Forge source reference/UUID correspondence, scopes, clocks, result/settlement,
   pending/consumed facts and retained physical/owner contradictions; whole-candidate
   refusal leaves capture/digest unchanged. Prove Workshop history and Test support.
 
 This slice may unblock acquisition evidence for a later Patrol design. External
-repair results, safe target recovery, accepted remote orders, physical return,
+repair results, generic unaccepted changed-goal closure/replanning, safe target
+recovery, accepted remote orders, physical return,
 Dock/service reports, evacuation, negotiated surrender, crew workload/device
 acceptance and full increments 20/23/24 remain open.

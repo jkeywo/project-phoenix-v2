@@ -27,6 +27,7 @@ fn fixture_for(path: &str) -> (World, Entity, PhoenixSnapshot) {
         Transform::default(),
         crate::security::SecurityTargetActions(crate::security::SecurityTargetConfig {
             actions: vec![crate::security::SecurityActionConfig {
+                acquisition: None,
                 action: crate::security::SecurityAction::Board,
                 duration_secs: 4.0,
                 risk: 0.5,

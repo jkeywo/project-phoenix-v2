@@ -6,5 +6,6 @@ pub mod command_admission;
 pub mod gm_roster;
 pub mod lobby;
 pub mod session_connections;
+pub mod vessel_ownership;
 pub use phoenix_sim_contracts::sim_tick;
 pub mod lockstep;

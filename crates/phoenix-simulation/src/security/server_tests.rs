@@ -32,6 +32,7 @@ fn target_config() -> SecurityTargetConfig {
     SecurityTargetConfig {
         actions: vec![
             SecurityActionConfig {
+                acquisition: None,
                 action: SecurityAction::SecureContain,
                 duration_secs: 4.0,
                 risk: 0.6,
@@ -41,6 +42,7 @@ fn target_config() -> SecurityTargetConfig {
                 warning: Some("security.warning.test".to_string()),
             },
             SecurityActionConfig {
+                acquisition: None,
                 action: SecurityAction::AssistEvacuation,
                 duration_secs: 3.0,
                 risk: 0.3,
@@ -689,6 +691,7 @@ const GALLERY_CONTAINED: &str = "gallery_contained";
 fn head_target_config() -> SecurityTargetConfig {
     SecurityTargetConfig {
         actions: vec![SecurityActionConfig {
+            acquisition: None,
             action: SecurityAction::AssistEvacuation,
             duration_secs: 4.0,
             risk: 0.6,
@@ -703,6 +706,7 @@ fn head_target_config() -> SecurityTargetConfig {
 fn gallery_target_config() -> SecurityTargetConfig {
     SecurityTargetConfig {
         actions: vec![SecurityActionConfig {
+            acquisition: None,
             action: SecurityAction::SecureContain,
             duration_secs: 6.0,
             risk: 0.4,
@@ -717,6 +721,7 @@ fn gallery_target_config() -> SecurityTargetConfig {
 fn optional_target_config(action: SecurityAction) -> SecurityTargetConfig {
     SecurityTargetConfig {
         actions: vec![SecurityActionConfig {
+            acquisition: None,
             action,
             duration_secs: 5.0,
             risk: 0.2,
@@ -1432,6 +1437,7 @@ fn rows() -> Vec<TargetRow> {
             position: Vec3::new(100.0, 0.0, 0.0),
             config: SecurityTargetConfig {
                 actions: vec![SecurityActionConfig {
+                    acquisition: None,
                     action: SecurityAction::AssistEvacuation,
                     duration_secs: 20.0,
                     risk: 0.5,
@@ -1448,6 +1454,7 @@ fn rows() -> Vec<TargetRow> {
             position: Vec3::new(200.0, 0.0, 0.0),
             config: SecurityTargetConfig {
                 actions: vec![SecurityActionConfig {
+                    acquisition: None,
                     action: SecurityAction::Board,
                     duration_secs: 10.0,
                     risk: 0.2,

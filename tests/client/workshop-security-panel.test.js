@@ -5,7 +5,7 @@ import pathModule from 'node:path';
 import { parse, stringify } from 'smol-toml';
 import { WorkshopDocument } from '../../editor/workshop-document.js';
 import { createStoreZip } from '../../editor/mod-pack-export.js';
-import { inspectSecurity, validateSecurity, prepareSecurityOperation, applySecurityOperation, guardSecurityReferences } from '../../editor/workshop-security.js';
+import { inspectSecurity, validateSecurity, prepareSecurityOperation, applySecurityOperation, guardSecurityReferences, validateSecurityTarget, prepareSecurityTargetOperation, applySecurityTargetOperation } from '../../editor/workshop-security.js';
 import { mountWorkshopSecurity } from '../../gui/workshop-security-panel.js';
 
 const path = 'assets/entities/test.toml';
@@ -91,4 +91,44 @@ it('discards answers after document replacement and disposal', async () => {
   control('save').click(); await settle(); expect(control('save').disabled).toBe(true);
   draft = documentFor(source); panel.refresh(); answer({ accepted: true }); await settle();
   expect(original.snapshot().history.undo).toHaveLength(0); expect(draft.snapshot().history.undo).toHaveLength(0); panel.dispose();
+});
+
+it('authors explicit uncrewed vessel acquisition through target source/history without changing physical equipment', async () => {
+  const target = { action: [{ action: 'board', duration_secs: 4, risk: 0, priority: 'optional' }] };
+  const source = stringify({ name: 'Drone', faction: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', tags: ['npc'], behaviour: { doctrine: [] }, security_target: target, hull: { max_hp: 100 } });
+  const draft = documentFor(source), value = structuredClone(target); value.action[0].acquisition = { doctrine: 'acquired-hold' };
+  expect(() => validateSecurityTarget(value, parse(source))).not.toThrow();
+  for (const change of [v => v.action[0].outcome_flag = 'capture', v => v.action[0].action = 'secure_contain', v => v.action[0].acquisition.doctrine = '']) {
+    const bad = structuredClone(value); change(bad); expect(() => validateSecurityTarget(bad, parse(source))).toThrow();
+  }
+  expect(() => validateSecurityTarget(value, { ...parse(source), personnel: { officer: [{ id: 'populated' }] } })).toThrow();
+  const runtime = { validate: vi.fn(async () => ({ accepted: true })) }, operation = { path, value };
+  await applySecurityTargetOperation({ draft, dependencies, runtime, operation });
+  expect(parse(draft.read(path)).security_target).toEqual(value); expect(parse(draft.read(path)).hull).toEqual({ max_hp: 100 });
+  draft.undo(); expect(draft.read(path)).toBe(source); draft.redo();
+  const reopened = new WorkshopDocument(draft.archive()); expect(inspectSecurity(reopened, dependencies, path).target).toEqual(value);
+  runtime.validate.mockResolvedValue({ accepted: false, findings: [{ message: 'missing compatible hold profile' }] });
+  const unchanged = draft.read(path); await expect(applySecurityTargetOperation({ draft, dependencies, runtime, operation })).rejects.toThrow(); expect(draft.read(path)).toBe(unchanged);
+});
+
+it('mounts target-only controls, preserves inherited opt-in consent and uses existing Preview/Test', async () => {
+  document.body.innerHTML = '<main></main>';
+  const source = stringify({ faction: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', behaviour: { doctrine: [] }, security_target: { action: [{ action: 'board', duration_secs: 4, risk: 0, priority: 'optional' }] } });
+  const draft = documentFor(source), preview = vi.fn(), test = vi.fn(); let busy = false;
+  const runtime = { dependencies: async () => dependencies, validate: vi.fn(async () => ({ accepted: true })) };
+  const panel = mountWorkshopSecurity({ root: document.querySelector('main'), runtime, draft: () => draft, busy: () => busy, setBusy: v => { busy = v; }, preview, test }); await settle();
+  expect(control('acquire').disabled).toBe(false); expect(control('save').disabled).toBe(true);
+  control('acquire').checked = true; control('doctrine').value = 'acquired-hold';
+  control('preview').click(); control('test').click(); expect(preview).toHaveBeenCalledWith(path); expect(test).toHaveBeenCalledWith(path);
+  control('save-target').click(); await settle(); expect(parse(draft.read(path)).security_target.action[0].acquisition).toEqual({ doctrine: 'acquired-hold' });
+  draft.undo(); panel.refresh(); expect(control('acquire').checked).toBe(false); panel.dispose();
+});
+
+it('refuses a retained target button after disposal before busy, validation or source writes', async () => {
+  document.body.innerHTML = '<main></main>';
+  const source = stringify({ faction: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', behaviour: { doctrine: [] }, security_target: { action: [{ action: 'board', duration_secs: 4, risk: 0, priority: 'optional' }] } });
+  const draft = documentFor(source), setBusy = vi.fn(), runtime = { dependencies: async () => dependencies, validate: vi.fn(async () => ({ accepted: true })) };
+  const panel = mountWorkshopSecurity({ root: document.querySelector('main'), runtime, draft: () => draft, busy: () => false, setBusy }); await settle();
+  const save = control('save-target'); panel.dispose(); save.click(); save.dispatchEvent(new Event('click')); await settle();
+  expect(setBusy).not.toHaveBeenCalled(); expect(runtime.validate).not.toHaveBeenCalled(); expect(draft.read(path)).toBe(source); expect(draft.snapshot().history.undo).toHaveLength(0);
 });

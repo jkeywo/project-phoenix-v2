@@ -59,7 +59,7 @@ use crate::world::server::WorldContentRuntime;
 pub const TASK_VERB_SECURITY_TEAM: &str = "security_team";
 
 /// The task-lifecycle slot for one team of one operator (issue #1346).
-fn team_slot(operator: &str, team_idx: u8) -> TaskSlot {
+pub(super) fn team_slot(operator: &str, team_idx: u8) -> TaskSlot {
     TaskSlot::new(
         operator,
         SECURITY_SYSTEM_ID,
@@ -209,7 +209,11 @@ impl Plugin for SecurityPlugin {
                 // The team clock runs in `Modifiers`, after the operators have
                 // moved, so a target that drifted out of reach this tick is seen
                 // to have done so this tick.
-                tick_security_teams
+                (
+                    tick_security_teams,
+                    super::acquisition::commit_ready_acquisitions,
+                )
+                    .chain()
                     .in_set(crate::sim_sets::FixedStep::TickSecurityTeams)
                     .in_set(crate::sim_sets::SimSet::Modifiers),
                 publish_security_blackboard
@@ -240,17 +244,27 @@ fn target_rows(
         Option<&EntityName>,
         &Transform,
         &SecurityTargetActions,
+        Option<&phoenix_sim_session::vessel_ownership::VesselOperationalOwner>,
     )>,
 ) -> Vec<TargetRow> {
     let mut rows: Vec<TargetRow> = query
         .iter()
-        .map(|(uuid, name, transform, actions)| TargetRow {
+        .map(|(uuid, name, transform, actions, owner)| TargetRow {
             uuid: uuid.0.clone(),
             name: name.map(|n| n.0.clone()),
             position: transform.translation,
-            config: actions.0.clone(),
+            config: SecurityTargetConfig {
+                actions: actions
+                    .0
+                    .actions
+                    .iter()
+                    .filter(|action| owner.is_none() || action.acquisition.is_none())
+                    .cloned()
+                    .collect(),
+            },
         })
         .collect();
+    rows.retain(|row| !row.config.actions.is_empty());
     rows.sort_by(|a, b| a.uuid.cmp(&b.uuid));
     rows
 }
@@ -323,12 +337,19 @@ fn operator_target_rows(
 /// here asks who sent the command (AGENTS.md rule 6).
 #[allow(clippy::type_complexity)]
 pub fn handle_security_commands(
+    tick: Option<Res<crate::sim_tick::SimTick>>,
+    knowledge: Query<(
+        &crate::ship_plugin::ShipConfigComponent,
+        &crate::server_app::ShipSystemBlackboards,
+        &crate::science::broad::BroadTracks,
+    )>,
     mut lifecycle: Option<ResMut<EffectQueue<TaskLifecycleRequest>>>,
     targets: Query<(
         &EntityUuid,
         Option<&EntityName>,
         &Transform,
         &SecurityTargetActions,
+        Option<&phoenix_sim_session::vessel_ownership::VesselOperationalOwner>,
     )>,
     mut operators: Query<(
         Entity,
@@ -391,13 +412,49 @@ pub fn handle_security_commands(
                     target,
                     action,
                 } => {
-                    let row = rows.iter().find(|r| r.uuid == target);
+                    let request_target = target.clone();
+                    let resolved =
+                        knowledge
+                            .get(entity)
+                            .ok()
+                            .and_then(|(config, boards, tracks)| {
+                                crate::science::contact_routing::resolve(
+                                    &config.0,
+                                    boards,
+                                    Some(tracks),
+                                    &security_system_id(),
+                                    &target,
+                                )
+                            });
+                    let row = rows
+                        .iter()
+                        .find(|r| {
+                            r.uuid == target
+                                && action
+                                    .and_then(|action| r.config.action(action))
+                                    .is_none_or(|a| a.acquisition.is_none())
+                        })
+                        .or_else(|| rows.iter().find(|r| Some(&r.uuid) == resolved.as_ref()));
+                    let target = row.map_or(target, |row| row.uuid.clone());
                     let separation = row.map(|r| operator_pos.distance(r.position));
                     // An action id nothing answers to and a target that does not
                     // offer the (known) action are the same answer to the crew:
                     // that cannot be done here.
                     let offered = action
                         .and_then(|action| row.and_then(|r| r.config.action(action)))
+                        .filter(|offered| {
+                            offered.acquisition.is_none()
+                                || knowledge
+                                    .get(entity)
+                                    .ok()
+                                    .and_then(|(config, boards, tracks)| {
+                                        super::acquisition::acquisition_alias(
+                                            &config.0, boards, tracks, &target,
+                                        )
+                                    })
+                                    .as_deref()
+                                    == Some(request_target.as_str())
+                        })
                         .cloned();
                     let verdict = dispatch_status(
                         security.teams.get(team_idx as usize),
@@ -423,6 +480,19 @@ pub fn handle_security_commands(
                             ) {
                                 security.last_refusal = Some(SecurityRefusal::TeamBusy);
                                 continue;
+                            }
+                            if let Some(acquisition) = &offered.acquisition {
+                                let order =
+                                    phoenix_model::vessel_ownership::SecurityAcquisitionOrder {
+                                        target: target.clone(),
+                                        doctrine: acquisition.doctrine.clone(),
+                                        accepted_tick: tick.as_ref().map_or(0, |tick| tick.0),
+                                    };
+                                security.teams.jobs.teams[team_idx as usize]
+                                    .as_mut()
+                                    .expect("the just admitted Security job exists")
+                                    .activity
+                                    .acquisition_order = Some(order);
                             }
                             security.last_refusal = None;
                             push_lifecycle(
@@ -545,6 +615,7 @@ pub fn tick_security_teams(
         Option<&EntityName>,
         &Transform,
         &SecurityTargetActions,
+        Option<&phoenix_sim_session::vessel_ownership::VesselOperationalOwner>,
     )>,
     mut operators: Query<(
         Entity,
@@ -768,6 +839,14 @@ pub fn tick_security_teams(
                                     .and_then(|r| r.config.action(action))
                                     .cloned()
                             });
+                        if offered
+                            .as_ref()
+                            .is_some_and(|action| action.acquisition.is_some())
+                        {
+                            // Paid work reaches its original frontier. The immediately chained
+                            // exclusive adapter preflights and closes success/refusal before Publish.
+                            continue;
+                        }
                         decided.push(Transition {
                             operator: operator_uuid.clone(),
                             team_idx,
@@ -1036,7 +1115,9 @@ pub fn operate_security_ai(
         Option<&EntityName>,
         &Transform,
         &SecurityTargetActions,
+        Option<&phoenix_sim_session::vessel_ownership::VesselOperationalOwner>,
     )>,
+    knowledge: Query<&crate::science::broad::BroadTracks>,
     mut ships: Query<(
         Entity,
         &EntityUuid,
@@ -1108,7 +1189,26 @@ pub fn operate_security_ai(
             _ => Vec::new(),
         };
 
-        let own_rows = operator_target_rows(&rows, security, transform.translation);
+        let mut own_rows = operator_target_rows(&rows, security, transform.translation);
+        for row in &mut own_rows {
+            row.config.actions.retain(|action| {
+                action.acquisition.is_none()
+                    || config.is_some_and(|config| {
+                        knowledge
+                            .get(entity)
+                            .ok()
+                            .and_then(|tracks| {
+                                super::acquisition::acquisition_alias(
+                                    &config.0,
+                                    blackboards,
+                                    tracks,
+                                    &row.uuid,
+                                )
+                            })
+                            .is_some()
+                    })
+            });
+        }
         let candidates = build_candidates(
             &own_rows,
             transform.translation,
@@ -1214,13 +1314,35 @@ pub fn operate_security_ai(
             if is_assigned(candidate, &team_readout) {
                 continue;
             }
+            let acquisition = own_rows
+                .iter()
+                .find(|row| row.uuid == candidate.target)
+                .and_then(|row| row.config.action(candidate.action))
+                .is_some_and(|action| action.acquisition.is_some());
+            let target = if acquisition {
+                let Some(alias) = config.and_then(|config| {
+                    knowledge.get(entity).ok().and_then(|tracks| {
+                        super::acquisition::acquisition_alias(
+                            &config.0,
+                            blackboards,
+                            tracks,
+                            &candidate.target,
+                        )
+                    })
+                }) else {
+                    continue;
+                };
+                alias
+            } else {
+                candidate.target.clone()
+            };
             claimed.claim(*team_idx);
             emit_ai_command(
                 Some(uuid),
                 system_id.clone(),
                 SystemControlPayload::DispatchSecurityTeam {
                     team_idx: *team_idx as u8,
-                    target: candidate.target.clone(),
+                    target,
                     action: candidate.action.as_str().to_string(),
                 },
                 sources,
@@ -1262,9 +1384,12 @@ pub fn publish_security_blackboard(
         Option<&EntityName>,
         &Transform,
         &SecurityTargetActions,
+        Option<&phoenix_sim_session::vessel_ownership::VesselOperationalOwner>,
     )>,
     mut ships: Query<(
         &Transform,
+        Option<&crate::ship_plugin::ShipConfigComponent>,
+        Option<&crate::science::broad::BroadTracks>,
         &ShipSecurityTeams,
         &mut crate::server_app::ShipSystemBlackboards,
     )>,
@@ -1274,19 +1399,49 @@ pub fn publish_security_blackboard(
     }
     let key = security_system_id();
     let rows = target_rows(&targets);
-    for (transform, security, mut blackboards) in ships.iter_mut() {
-        let rows = operator_target_rows(&rows, security, transform.translation);
+    for (transform, config, tracks, security, mut blackboards) in ships.iter_mut() {
+        let mut rows = operator_target_rows(&rows, security, transform.translation);
+        let alias = |source: &str| {
+            config.and_then(|config| {
+                tracks.and_then(|tracks| {
+                    super::acquisition::acquisition_alias(&config.0, &blackboards, tracks, source)
+                })
+            })
+        };
+        for row in &mut rows {
+            row.config
+                .actions
+                .retain(|action| action.acquisition.is_none() || alias(&row.uuid).is_some());
+        }
+        rows.retain(|row| !row.config.actions.is_empty());
         let teams = security
             .teams
             .iter()
-            .map(|team| SecurityTeamSlot {
+            .enumerate()
+            .map(|(index, team)| SecurityTeamSlot {
+                acquired: security.teams.jobs.teams[index]
+                    .as_ref()
+                    .is_some_and(|job| job.activity.acquisition.is_some()),
                 state: team.state.as_str().to_string(),
-                target: team.target.clone(),
-                target_name: team
-                    .target
-                    .as_deref()
-                    .and_then(|t| rows.iter().find(|r| r.uuid == t))
-                    .and_then(|r| r.name.clone()),
+                target: if security.teams.jobs.teams[index]
+                    .as_ref()
+                    .is_some_and(|job| job.activity.acquisition_order.is_some())
+                {
+                    team.target.as_deref().and_then(&alias)
+                } else {
+                    team.target.clone()
+                },
+                target_name: if security.teams.jobs.teams[index]
+                    .as_ref()
+                    .is_some_and(|job| job.activity.acquisition_order.is_some())
+                {
+                    None
+                } else {
+                    team.target
+                        .as_deref()
+                        .and_then(|t| rows.iter().find(|r| r.uuid == t))
+                        .and_then(|r| r.name.clone())
+                },
                 action: team.action.map(|a| a.as_str().to_string()),
                 progress: team.progress(),
                 risk: team.risk,
@@ -1297,8 +1452,27 @@ pub fn publish_security_blackboard(
             .map(|row| {
                 let separation = transform.translation.distance(row.position);
                 SecurityTargetOption {
-                    uuid: row.uuid.clone(),
-                    name: row.name.clone(),
+                    uuid: if row
+                        .config
+                        .actions
+                        .iter()
+                        .any(|action| action.acquisition.is_some())
+                    {
+                        alias(&row.uuid)
+                            .expect("only current permitted acquisition targets are published")
+                    } else {
+                        row.uuid.clone()
+                    },
+                    name: if row
+                        .config
+                        .actions
+                        .iter()
+                        .any(|action| action.acquisition.is_some())
+                    {
+                        None
+                    } else {
+                        row.name.clone()
+                    },
                     separation,
                     in_range: separation <= security.config.range,
                     actions: row
@@ -1306,6 +1480,7 @@ pub fn publish_security_blackboard(
                         .actions
                         .iter()
                         .map(|action| SecurityActionOption {
+                            acquires_vessel: action.acquisition.is_some(),
                             action: action.action.as_str().to_string(),
                             duration_secs: action.duration_secs,
                             risk: action.risk,
@@ -1316,10 +1491,24 @@ pub fn publish_security_blackboard(
                 }
             })
             .collect();
+        let mut jobs = security.teams.work_list();
+        for job in &mut jobs {
+            if security
+                .teams
+                .jobs
+                .teams
+                .iter()
+                .flatten()
+                .find(|actual| actual.id == job.id)
+                .is_some_and(|actual| actual.activity.acquisition_order.is_some())
+            {
+                job.target_entity = job.target_entity.as_deref().and_then(&alias);
+            }
+        }
         let blackboard = SystemBlackboard::Security(SecurityBlackboard {
             range: security.config.range,
             teams,
-            jobs: security.teams.work_list(),
+            jobs,
             navigation: security.teams.navigation.clone().unwrap_or_default(),
             compartments: security
                 .local

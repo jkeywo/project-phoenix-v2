@@ -56,6 +56,7 @@ fn profile() -> CompiledLocalSecurity {
             targets: vec![LocalSecurityTarget {
                 compartment: "engineering".into(),
                 actions: vec![SecurityActionConfig {
+                    acquisition: None,
                     action: SecurityAction::SecureContain,
                     duration_secs: 2.0,
                     risk: 0.0,

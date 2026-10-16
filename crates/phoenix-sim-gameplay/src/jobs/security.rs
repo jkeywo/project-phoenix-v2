@@ -23,6 +23,11 @@ const UNAVAILABLE: SecurityTeam = SecurityTeam {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SecurityActivity {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acquisition_order: Option<phoenix_model::vessel_ownership::SecurityAcquisitionOrder>,
+    /// Actual acquisition work result, retained while this same team returns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acquisition: Option<phoenix_model::vessel_ownership::VesselOperationalOwnerData>,
     pub team: SecurityTeam,
     /// A work result is not a released physical team. Move it to Job.outcome
     /// only once that same team has completed its actual return.
@@ -115,6 +120,8 @@ impl SecurityJobs {
         self.jobs.assign(
             index,
             SecurityActivity {
+                acquisition_order: None,
+                acquisition: None,
                 team,
                 returning_outcome: None,
             },
@@ -242,6 +249,62 @@ impl SecurityJobs {
                 || team.phase_duration < 0.0
             {
                 return Err("invalid Security job identity, workflow or finite phase".into());
+            }
+            if job.activity.acquisition_order.is_some()
+                && job.activity.acquisition.is_none()
+                && (job.outcome == Some(JobOutcome::Completed)
+                    || job.activity.returning_outcome == Some(JobOutcome::Completed))
+            {
+                return Err("completed acquisition work lost its actual result".into());
+            }
+            if let Some(order) = &job.activity.acquisition_order {
+                if !phoenix_model::comms_channel::identity(&order.target)
+                    || !phoenix_model::comms_channel::identity(&order.doctrine)
+                    || order.accepted_tick > tick
+                    || (team.is_committed()
+                        && (team.target.as_ref() != Some(&order.target)
+                            || team.action != Some(SecurityAction::Board)))
+                {
+                    return Err(
+                        "Security acquisition order disagrees with the actual Board commitment"
+                            .into(),
+                    );
+                }
+            }
+            if let Some(acquired) = &job.activity.acquisition {
+                let order = job
+                    .activity
+                    .acquisition_order
+                    .as_ref()
+                    .ok_or("Security acquisition result has no original order")?;
+                acquired.validate(&order.target, tick)?;
+                let phoenix_model::vessel_ownership::VesselAcquisitionCause::SecurityBoard {
+                    scope,
+                    team: acquired_team,
+                    accepted_tick,
+                    ..
+                } = &acquired.cause;
+                if scope.owner != job.owner
+                    || scope.job != job.id
+                    || *accepted_tick != order.accepted_tick
+                    || acquired.doctrine != order.doctrine
+                    || self
+                        .jobs
+                        .teams
+                        .get(*acquired_team as usize)
+                        .and_then(Option::as_ref)
+                        .is_none_or(|actual| actual.id != job.id)
+                    || (team.state != SecurityTeamState::Withdrawing
+                        && team.state != SecurityTeamState::Available)
+                    || (team.state == SecurityTeamState::Withdrawing
+                        && job.activity.returning_outcome != Some(JobOutcome::Completed))
+                    || (team.state == SecurityTeamState::Available
+                        && job.outcome != Some(JobOutcome::Completed))
+                {
+                    return Err(
+                        "Security acquisition result does not belong to this completed work".into(),
+                    );
+                }
             }
             match team.state {
                 SecurityTeamState::Available

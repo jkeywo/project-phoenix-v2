@@ -164,7 +164,7 @@ export class PhSecurityTeams extends PhElement {
       label.textContent = t('component.security_teams.team', { n: String(team.teamIdx + 1) });
       const badge = document.createElement('span');
       badge.className = `status-badge ${team.state}`;
-      badge.textContent = PhSecurityTeams.stateLabel(team.state);
+      badge.textContent = team.acquired ? t('component.security_teams.acquired') + ' · ' + PhSecurityTeams.stateLabel(team.state) : PhSecurityTeams.stateLabel(team.state);
       top.appendChild(label);
       top.appendChild(badge);
       card.appendChild(top);
@@ -232,7 +232,7 @@ export class PhSecurityTeams extends PhElement {
 
       const name = document.createElement('span');
       name.className = 'name';
-      name.textContent = `${job.targetName ? t(job.targetName) : job.target} · ${PhSecurityTeams.actionLabel(job.action)}`;
+      name.textContent = `${job.targetName ? t(job.targetName) : job.target} · ${job.acquiresVessel ? t('component.security_teams.acquire_vessel') : PhSecurityTeams.actionLabel(job.action)}`;
       const chip = document.createElement('span');
       chip.className = `chip ${job.priority}`;
       chip.textContent = PhSecurityTeams.priorityLabel(job.priority);

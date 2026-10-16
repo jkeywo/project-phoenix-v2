@@ -1344,6 +1344,18 @@ pub(super) fn apply_entity_state_with(
     super::fitting::apply(world, entity, row);
     let emp_clock = crate::ship::emp::clock(world, tick).ok();
     let mut entity_mut = world.entity_mut(entity);
+    if let Some(owner) = &row.operational_owner {
+        entity_mut.insert((
+            phoenix_sim_session::vessel_ownership::VesselOperationalOwner(owner.clone()),
+            crate::entities::spawner::FactionComponent(owner.faction),
+        ));
+    } else if let Some(definition) =
+        entity_mut.get::<crate::security::acquisition::AcquisitionTargetDefinition>()
+    {
+        let faction = definition.original_faction;
+        entity_mut.remove::<phoenix_sim_session::vessel_ownership::VesselOperationalOwner>();
+        entity_mut.insert(crate::entities::spawner::FactionComponent(faction));
+    }
     if let Some(saved) = &row.equipment_recovery {
         entity_mut.insert(saved.clone());
     }

@@ -2,7 +2,7 @@
 title: Repair Runtime
 type: concept
 tags: [repair, damage, teams, blackboard, ai, external-repair, semantic-actions, feedback]
-sources: [crates/phoenix-sim-gameplay/src/jobs/repair_personnel_transfer.rs, crates/phoenix-simulation/src/console/repair/personnel_transfer.rs, crates/phoenix-simulation/src/snapshot/personnel_graph.rs, crates/phoenix-sim-gameplay/src/jobs/repair_treatment.rs, crates/phoenix-simulation/src/resources/ports_equipment.rs, crates/phoenix-sim-gameplay/src/security/local.rs, editor/workshop-security.js, gui/workshop-security-panel.js, crates/phoenix-sim-gameplay/src/jobs/security.rs, crates/phoenix-simulation/src/security/server.rs, crates/phoenix-simulation/src/snapshot/security.rs, gui/job-work-list.js, crates/phoenix-model/src/personnel.rs, crates/phoenix-sim-gameplay/src/personnel.rs, crates/phoenix-simulation/src/console/repair/personnel.rs, crates/phoenix-simulation/src/snapshot/personnel.rs, editor/workshop-personnel.js, gui/workshop-personnel-panel.js, crates/phoenix-sim-gameplay/src/jobs/repair_external_physical.rs, crates/phoenix-sim-gameplay/src/jobs/repair_physical.rs, crates/phoenix-model/src/job.rs, crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/jobs/repair_workflow.rs, gui/job-work-list.js, crates/phoenix-simulation/src/console/repair/reports.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/command_admission/mod.rs, gui/components/ph-repair-teams.js, gui/stations/engineering-actions.js, gui/action-map.js]
+sources: [crates/phoenix-model/src/vessel_ownership.rs, crates/phoenix-sim-session/src/vessel_ownership.rs, crates/phoenix-simulation/src/security/acquisition.rs, crates/phoenix-simulation/src/snapshot/vessel_ownership.rs, crates/phoenix-sim-gameplay/src/jobs/repair_personnel_transfer.rs, crates/phoenix-simulation/src/console/repair/personnel_transfer.rs, crates/phoenix-simulation/src/snapshot/personnel_graph.rs, crates/phoenix-sim-gameplay/src/jobs/repair_treatment.rs, crates/phoenix-simulation/src/resources/ports_equipment.rs, crates/phoenix-sim-gameplay/src/security/local.rs, editor/workshop-security.js, gui/workshop-security-panel.js, crates/phoenix-sim-gameplay/src/jobs/security.rs, crates/phoenix-simulation/src/security/server.rs, crates/phoenix-simulation/src/snapshot/security.rs, gui/job-work-list.js, crates/phoenix-model/src/personnel.rs, crates/phoenix-sim-gameplay/src/personnel.rs, crates/phoenix-simulation/src/console/repair/personnel.rs, crates/phoenix-simulation/src/snapshot/personnel.rs, editor/workshop-personnel.js, gui/workshop-personnel-panel.js, crates/phoenix-sim-gameplay/src/jobs/repair_external_physical.rs, crates/phoenix-sim-gameplay/src/jobs/repair_physical.rs, crates/phoenix-model/src/job.rs, crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/jobs/repair_workflow.rs, gui/job-work-list.js, crates/phoenix-simulation/src/console/repair/reports.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/command_admission/mod.rs, gui/components/ph-repair-teams.js, gui/stations/engineering-actions.js, gui/action-map.js]
 updated: 2026-10-16
 ---
 
@@ -244,3 +244,21 @@ homes/actions through history, validation and Preview/Test.
 local tasks and unchanged inherited team count, hardware and topology. A local
 profile offers local work only. External-only profiles retain their crossing
 model pending the actual craft/custody join. Medical remains subsequent work.
+
+Optional external Board actions can declare `acquisition.doctrine`. The same
+paid Security Job reaches its work frontier before the directly chained exclusive
+`security/acquisition.rs` adapter prepares ordinary NPC doctrine and Session
+`VesselOperationalOwner` together. The initial target is a genuinely uncrewed,
+actually disabled NPC, with Security's own selectable assessed-disabled contact;
+launch seats, Human controls, personnel custody and physical equipment are not
+transferred. The nonempty base-World doctrine uses existing None hold objectives.
+A result remains on the same returning Job; actual home settlement is separate.
+
+The Session owner records the frozen acquiring faction and exact Board
+actor/System/Job/team/target/clocks. It is saved and folded; the same body's
+effective faction is restored from that record or its accepted original recipe.
+`vessel_ownership.rs` validates source, clock and retained receipt contradictions
+before restore writes without treating current occupancy or damage as historical
+eligibility. The existing Workshop Security panel edits the target effect through
+accepted document/history, and the ordinary Security readout distinguishes
+acquisition from the team's continuing withdrawal.

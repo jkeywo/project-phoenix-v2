@@ -1,5 +1,5 @@
 import { t } from './strings.js';
-import { inspectSecurity, applySecurityOperation, LOCAL_SECURITY_ACTIONS, SECURITY_PRIORITIES } from '../editor/workshop-security.js';
+import { inspectSecurity, applySecurityOperation, applySecurityTargetOperation, LOCAL_SECURITY_ACTIONS, SECURITY_PRIORITIES } from '../editor/workshop-security.js';
 import { runWorkshopMutation } from './workshop-edit-session.js';
 
 export function mountWorkshopSecurity({ root, provider, runtime, draft: getDraft, busy, setBusy,
@@ -10,6 +10,7 @@ export function mountWorkshopSecurity({ root, provider, runtime, draft: getDraft
   const input = (id, value, type = 'text') => { const node = el('input', id); node.type = type; node.value = value; if (type === 'number') node.step = 'any'; return node; };
   const button = (id, key, action) => { const node = el('button', id, key); node.type = 'button'; node.addEventListener('click', action); return node; };
   const node = el('section', 'panel'), template = el('select', 'template'), materialise = input('materialise', '', 'checkbox'), enabled = input('local', '', 'checkbox');
+  const acquisition = el('fieldset', 'acquisition'), capture = input('acquire', '', 'checkbox'), doctrine = input('doctrine', '');
   const homes = el('div', 'homes'), actions = el('div', 'actions'), status = el('p', 'status'); status.setAttribute('role', 'status');
   let dependencies = null, inspection = null, loading = false, disposed = false, generation = 0, observed = null, observedDraft = null, serial = 0, homeInputs = [], rows = [];
   const actionText = { secure_contain: 'component.security_teams.action.secure_contain', assist_evacuation: 'component.security_teams.action.assist_evacuation' };
@@ -31,6 +32,9 @@ export function mountWorkshopSecurity({ root, provider, runtime, draft: getDraft
     const held = disposed || loading || busy();
     for (const control of node.querySelectorAll('input,select,button')) control.disabled = held || !inspection?.security;
     template.disabled = held || !template.options.length;
+    materialise.disabled = held || (!inspection?.security && !inspection?.target);
+    for (const control of acquisition.querySelectorAll('input,button')) control.disabled = held || !inspection?.target?.action?.some(action => action.action === 'board');
+    for (const id of ['preview', 'test']) node.querySelector('#' + prefix + id).disabled = held || (!inspection?.security && !inspection?.target);
   }
   function inspect(force = false) {
     const draft = getDraft(); if (!draft || !dependencies) { inspection = null; controls(); return; }
@@ -47,6 +51,8 @@ export function mountWorkshopSecurity({ root, provider, runtime, draft: getDraft
         homeInputs.push(control); const wrapper = label(control, 'home'); wrapper.prepend(t('component.security_teams.team', { n: String(index + 1) }) + ' '); homes.append(wrapper);
       }
       for (const target of inspection.security?.local?.target || []) for (const action of target.action) addRow({ compartment: target.compartment, ...action });
+      const board = inspection.target?.action?.find(action => action.action === 'board');
+      capture.checked = !!board?.acquisition; doctrine.value = board?.acquisition?.doctrine || '';
       status.textContent = '';
     } catch (error) { inspection = null; status.textContent = t('workshop.security.refused', { reason: error.message }); }
     controls();
@@ -74,7 +80,7 @@ export function mountWorkshopSecurity({ root, provider, runtime, draft: getDraft
     profile.local = { team_homes: homeInputs.map(control => control.value), target }; return profile;
   }
   const save = button('save', 'save', () => {
-    if (!inspection?.security || busy()) return;
+    if (disposed || !inspection?.security || busy()) return;
     const capturedDraft = getDraft();
     const token = ++generation, operation = { path: template.value, materialise: materialise.checked, value: value() };
     const current = () => !disposed && token === generation && getDraft() === capturedDraft && template.value === operation.path;
@@ -83,10 +89,22 @@ export function mountWorkshopSecurity({ root, provider, runtime, draft: getDraft
       success: () => { changed(operation.path); inspect(true); status.textContent = t('workshop.changed'); },
       error: error => { status.textContent = t('workshop.security.refused', { reason: error.report?.findings?.[0]?.message || error.message }); }, release: controls });
   });
-  const show = button('preview', null, () => { if (!busy() && inspection?.security) preview(template.value); }); show.textContent = t('workshop.entity.preview');
-  const fly = button('test', null, () => { if (!busy() && inspection?.security) test(template.value); }); fly.textContent = t('workshop.entity.test');
+  const show = button('preview', null, () => { if (!disposed && !busy() && (inspection?.security || inspection?.target)) preview(template.value); }); show.textContent = t('workshop.entity.preview');
+  const fly = button('test', null, () => { if (!disposed && !busy() && (inspection?.security || inspection?.target)) test(template.value); }); fly.textContent = t('workshop.entity.test');
+  acquisition.append(el('legend', null, 'acquisition'), label(capture, 'acquire'), label(doctrine, 'doctrine'), button('save-target', 'save_target', () => {
+    if (disposed || !inspection?.target || busy()) return;
+    const capturedDraft = getDraft(), value = structuredClone(inspection.target), board = value.action.find(action => action.action === 'board');
+    if (!board) return;
+    if (capture.checked) board.acquisition = { doctrine: doctrine.value }; else delete board.acquisition;
+    const token = ++generation, operation = { path: template.value, materialise: materialise.checked, value };
+    const current = () => !disposed && token === generation && getDraft() === capturedDraft && template.value === operation.path;
+    void runWorkshopMutation({ setBusy, current, start: controls,
+      invoke: () => applySecurityTargetOperation({ draft: capturedDraft, provider, runtime, dependencies, operation, current }),
+      success: () => { changed(operation.path); inspect(true); status.textContent = t('workshop.changed'); },
+      error: error => { status.textContent = t('workshop.security.refused', { reason: error.report?.findings?.[0]?.message || error.message }); }, release: controls });
+  }));
   node.append(el('h3', null, 'title'), el('p', null, 'hint'), label(template, 'template'), label(materialise, 'materialise'), label(enabled, 'local'), homes, actions,
-    button('add-action', 'add_action', () => addRow()), save, show, fly, status);
+    button('add-action', 'add_action', () => addRow()), save, acquisition, show, fly, status);
   template.addEventListener('change', () => inspect(true)); if (attach) root.append(node); controls(); void load();
-  return { node, refresh({ hidden = false } = {}) { node.hidden = hidden; if (!hidden) { void load(); inspect(); } }, dispose() { disposed = true; generation++; node.remove(); } };
+  return { node, refresh({ hidden = false } = {}) { node.hidden = hidden; if (!hidden) { void load(); inspect(); } }, dispose() { disposed = true; generation++; controls(); node.remove(); } };
 }

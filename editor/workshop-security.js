@@ -42,6 +42,8 @@ export function validateSecurity(profile, entity) {
 export function inspectSecurity(draft, dependencies, path) {
   const inspection = inspectEntityComposition(draft, dependencies, path);
   return { ...inspection, security: structuredClone(inspection.resolved.value.security || null),
+    target: structuredClone(inspection.resolved.value.security_target || null),
+    targetInherited: inspection.fields.some(row => (row.path === 'security_target' || row.path.startsWith('security_target.')) && row.owner !== path),
     rooms: structuredClone(inspection.resolved.value.interior?.compartment || []),
     inherited: inspection.fields.some(row => (row.path === 'security' || row.path.startsWith('security.')) && row.owner !== path) };
 }
@@ -70,5 +72,46 @@ export async function applySecurityOperation({ draft, provider, runtime, depende
   const selected = structuredClone(operation);
   return acceptWorkshopChanges({ draft, provider, runtime, dependencies, current,
     prepare: (captured, effective) => prepareSecurityOperation(captured, effective, selected).changes,
+    inspect: (candidate, effective) => inspectSecurity(candidate, effective, selected.path) });
+}
+
+// Explicit target effects use the same accepted source/history transaction as
+// local Security. World validation owns the referenced palette's compatibility.
+export function validateSecurityTarget(profile, entity) {
+  if (!closed(profile, ['action']) || !Array.isArray(profile.action) || !profile.action.length) throw new Error('Security target needs explicit actions.');
+  const seen = new Set();
+  for (const action of profile.action) {
+    if (!closed(action, ['action', 'duration_secs', 'risk', 'priority', 'outcome_flag', 'outcome_value', 'warning', 'acquisition'])
+      || !['secure_contain', 'assist_evacuation', 'board', 'place_charges'].includes(action.action) || seen.has(action.action)
+      || !finite(action.duration_secs) || action.duration_secs <= 0 || !finite(action.risk) || action.risk < 0 || action.risk > 1
+      || !SECURITY_PRIORITIES.includes(action.priority || 'optional')) throw new Error('Security target actions need supported finite terms.');
+    seen.add(action.action);
+    if (action.acquisition != null && (!closed(action.acquisition, ['doctrine']) || action.action !== 'board' || action.outcome_flag != null
+      || typeof action.acquisition.doctrine !== 'string' || !action.acquisition.doctrine || action.acquisition.doctrine.length > 128
+      || /[\u0000-\u001f\u007f]/.test(action.acquisition.doctrine) || !entity.behaviour || !entity.faction
+      || (entity.personnel?.officer || []).length || (entity.tags || []).includes('player'))) throw new Error('Acquisition needs an autonomous uncrewed non-player Board target and explicit hold doctrine, without a success flag.');
+  }
+}
+function replaceSecurityTarget(source, target) {
+  const before = parse(source), newline = source.includes('\r\n') ? '\r\n' : '\n';
+  const headers = [...source.matchAll(/^[ \t]*\[{1,2}([^\r\n]+?)\]{1,2}[ \t]*(?:#.*)?(?:\r?\n|$)/gm)];
+  const spans = headers.map((match, index) => ({ name: match[1].replace(/\]$/, '').trim(), start: match.index, end: headers[index + 1]?.index ?? source.length }));
+  for (const span of spans.filter(row => row.name === 'security_target' || row.name.startsWith('security_target.')).reverse()) source = source.slice(0, span.start) + source.slice(span.end);
+  source += (source.endsWith('\n') ? newline : newline + newline) + stringify({ security_target: target }).replace(/\r?\n/g, newline);
+  const after = parse(source), without = value => { const copy = structuredClone(value); delete copy.security_target; return stable(copy); };
+  if (stable(after.security_target) !== stable(target) || without(before) !== without(after)) throw new Error('Expand Security target into ordinary tables before editing; unrelated source must remain unchanged.');
+  return source;
+}
+export function prepareSecurityTargetOperation(draft, dependencies, operation) {
+  const inspection = inspectSecurity(draft, dependencies, operation.path);
+  if (inspection.targetInherited && !operation.materialise) throw new Error('Explicitly materialise inherited Security target terms before editing.');
+  validateSecurityTarget(operation.value, inspection.resolved.value);
+  const before = draft.read(operation.path), after = replaceSecurityTarget(before, operation.value);
+  return { changes: before === after ? [] : [{ path: operation.path, before, after }] };
+}
+export async function applySecurityTargetOperation({ draft, provider, runtime, dependencies, operation, current = () => true }) {
+  const selected = structuredClone(operation);
+  return acceptWorkshopChanges({ draft, provider, runtime, dependencies, current,
+    prepare: (captured, effective) => prepareSecurityTargetOperation(captured, effective, selected).changes,
     inspect: (candidate, effective) => inspectSecurity(candidate, effective, selected.path) });
 }

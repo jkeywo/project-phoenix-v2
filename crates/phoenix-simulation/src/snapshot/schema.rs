@@ -144,6 +144,9 @@ pub struct EntityState {
     /// clear any bootstrap selection and restore its original standing doctrine.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub npc_doctrine: Option<crate::gm::operations::npc::AppliedNpcDoctrine>,
+    /// Session acquisition cause; grants no Station or direct machinery rights.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operational_owner: Option<phoenix_model::vessel_ownership::VesselOperationalOwnerData>,
     /// The entity's AI LOD lifecycle — see [`AiFidelityState`].
     ///
     /// This is explicit rather than inferred from [`Self::control`]: fidelity

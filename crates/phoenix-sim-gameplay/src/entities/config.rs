@@ -1753,6 +1753,21 @@ impl EntityConfig {
         // dispatch names one action id and the first match answers).
         if let Some(ref security_target) = config.security_target {
             security_target.validate().map_err(SerdeError::custom)?;
+            if security_target
+                .actions
+                .iter()
+                .any(|action| action.acquisition.is_some())
+                && (config.behaviour.is_none()
+                    || config.ship_config.is_none()
+                    || config.faction.is_none_or(|faction| faction.is_nil())
+                    || config
+                        .personnel
+                        .as_ref()
+                        .is_some_and(|profile| !profile.officers.is_empty())
+                    || config.tags.iter().any(|tag| tag == "player"))
+            {
+                return Err(SerdeError::custom("vessel acquisition requires an explicitly autonomous non-player Ship with a genuinely empty authored personnel profile"));
+            }
         }
 
         // Validation: a [demolition_target] table has to name five distinct,

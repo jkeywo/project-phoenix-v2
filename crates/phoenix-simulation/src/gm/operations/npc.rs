@@ -24,6 +24,16 @@ pub struct AppliedNpcDoctrine {
 #[derive(Component, Clone, Debug, Default)]
 pub struct NpcDoctrineState(pub Option<AppliedNpcDoctrine>);
 
+/// An owner-validated change, consumed within the same exclusive transaction.
+/// No effects are applied until every collaborating owner has prepared.
+pub(crate) struct PreparedNpcDoctrine {
+    target: String,
+    previous_doctrine: Vec<DoctrineObjective>,
+    previous_state: Option<AppliedNpcDoctrine>,
+    next: AppliedNpcDoctrine,
+    changed: bool,
+}
+
 /// Postcard cannot encode the unknown-length map produced by the authoring
 /// schema's serde(flatten). Pin every field explicitly for the authoritative
 /// fold, while keeping the ordinary schema intact for TOML and RON saves.
@@ -234,27 +244,33 @@ impl NpcDoctrineControl<'_, '_> {
         target: &str,
         id: &str,
     ) -> (GmActionOutcome, Option<GmActionRefusalReason>) {
-        let Some(profile) = runtime
+        match self.prepare(runtime, target, id) {
+            Ok(prepared) => (self.commit_prepared(prepared), None),
+            Err(reason) => (GmActionOutcome::Refused, Some(reason)),
+        }
+    }
+
+    /// Validate without changing machinery. The private token is consumed in
+    /// the same exclusive transaction that prepared it, without a schedule gap.
+    pub(crate) fn prepare(
+        &self,
+        runtime: &WorldContentRuntime,
+        target: &str,
+        id: &str,
+    ) -> Result<PreparedNpcDoctrine, GmActionRefusalReason> {
+        let profile = runtime
             .gm_npc_doctrine_palette
             .iter()
-            .find(|profile| profile.id == id)
+            .find(|p| p.id == id)
+            .ok_or(GmActionRefusalReason::UnknownNpcDoctrine)?;
+        let Some((_, tags, config, behaviour, state, fleet, civilian, _, _)) =
+            self.ships.iter().find(|(uuid, ..)| uuid.0 == target)
         else {
-            return (
-                GmActionOutcome::Refused,
-                Some(GmActionRefusalReason::UnknownNpcDoctrine),
-            );
-        };
-        let Some((_, tags, config, mut behaviour, mut state, fleet, civilian, cursors, _)) =
-            self.ships.iter_mut().find(|(uuid, ..)| uuid.0 == target)
-        else {
-            return (
-                GmActionOutcome::Refused,
-                Some(if self.identities.iter().any(|uuid| uuid.0 == target) {
-                    GmActionRefusalReason::NpcDoctrineIncompatible
-                } else {
-                    GmActionRefusalReason::UnknownEntity
-                }),
-            );
+            return Err(if self.identities.iter().any(|uuid| uuid.0 == target) {
+                GmActionRefusalReason::NpcDoctrineIncompatible
+            } else {
+                GmActionRefusalReason::UnknownEntity
+            });
         };
         if !compatible(
             profile,
@@ -266,43 +282,55 @@ impl NpcDoctrineControl<'_, '_> {
             runtime,
             self.world_config.as_ref().map(|config| &config.anchors),
         ) {
-            return (
-                GmActionOutcome::Refused,
-                Some(GmActionRefusalReason::NpcDoctrineIncompatible),
-            );
+            return Err(GmActionRefusalReason::NpcDoctrineIncompatible);
         }
-        if state
+        let changed = !state
             .0
             .as_ref()
-            .is_some_and(|state| state.id == id && state.doctrine == profile.doctrine)
-            && behaviour.0.doctrine == profile.doctrine
-        {
-            return (GmActionOutcome::NoOp, None);
+            .is_some_and(|s| s.id == id && s.doctrine == profile.doctrine)
+            || behaviour.0.doctrine != profile.doctrine;
+        Ok(PreparedNpcDoctrine {
+            target: target.to_owned(),
+            previous_doctrine: behaviour.0.doctrine.clone(),
+            previous_state: state.0.clone(),
+            next: AppliedNpcDoctrine {
+                id: id.to_owned(),
+                doctrine: profile.doctrine.clone(),
+                baseline: state
+                    .0
+                    .as_ref()
+                    .map(|s| s.baseline.clone())
+                    .unwrap_or_else(|| behaviour.0.doctrine.clone()),
+            },
+            changed,
+        })
+    }
+
+    /// Infallible after `prepare` within one exclusive World transaction.
+    pub(crate) fn commit_prepared(&mut self, prepared: PreparedNpcDoctrine) -> GmActionOutcome {
+        let (_, _, _, mut behaviour, mut state, _, _, cursors, _) = self
+            .ships
+            .iter_mut()
+            .find(|(uuid, ..)| uuid.0 == prepared.target)
+            .expect("prepared NPC doctrine target remains in the exclusive transaction");
+        assert_eq!(behaviour.0.doctrine, prepared.previous_doctrine);
+        assert_eq!(state.0, prepared.previous_state);
+        if !prepared.changed {
+            return GmActionOutcome::NoOp;
         }
-        let baseline = state
-            .0
-            .as_ref()
-            .map(|state| state.baseline.clone())
-            .unwrap_or_else(|| behaviour.0.doctrine.clone());
         if let Some(mut cursors) = cursors {
-            // A replaced standing route starts at its own first waypoint. Keep
-            // unrelated mission-objective progress intact.
             cursors.0.retain(|cursor| {
                 !behaviour
                     .0
                     .doctrine
                     .iter()
-                    .chain(&profile.doctrine)
+                    .chain(&prepared.next.doctrine)
                     .any(|objective| objective.id == cursor.objective_id)
             });
         }
-        behaviour.0.doctrine = profile.doctrine.clone();
-        state.0 = Some(AppliedNpcDoctrine {
-            id: id.to_string(),
-            doctrine: profile.doctrine.clone(),
-            baseline,
-        });
-        (GmActionOutcome::Applied, None)
+        behaviour.0.doctrine = prepared.next.doctrine.clone();
+        state.0 = Some(prepared.next);
+        GmActionOutcome::Applied
     }
 
     /// The GM doctrine `target` is currently running, for the inverse path.

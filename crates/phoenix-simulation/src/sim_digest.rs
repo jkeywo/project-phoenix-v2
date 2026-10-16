@@ -457,6 +457,7 @@ const FOLD_STAGES: &[FoldStage] = &[
     ("asteroid", fold_asteroid_namespace),
     ("collisions", fold_collisions),
     ("security", fold_security_namespace),
+    ("vessel-ownership", fold_vessel_ownership_namespace),
     ("internal-repair", fold_internal_repair_namespace),
     ("personnel-custody", fold_personnel_namespace),
     ("interior-access", fold_access_namespace),
@@ -2355,6 +2356,18 @@ fn fold_umbilical_namespace(world: &World, acc: u64) -> u64 {
                 || umbilical.port_order != Default::default()
                 || umbilical.port_flow.is_some())
             .then_some(state)
+        },
+        |acc, state| fold_serde(acc, &state),
+    )
+}
+
+fn fold_vessel_ownership_namespace(world: &World, acc: u64) -> u64 {
+    fold_optional_namespace(
+        world,
+        acc,
+        "vessel-ownership-namespace",
+        |owner: &phoenix_sim_session::vessel_ownership::VesselOperationalOwner| {
+            Some(owner.0.clone())
         },
         |acc, state| fold_serde(acc, &state),
     )

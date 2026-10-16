@@ -216,6 +216,9 @@ impl SecurityConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SecurityActionConfig {
+    /// Opt-in whole-vessel success effect; never implied by the Board verb.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acquisition: Option<SecurityAcquisitionConfig>,
     /// Which of the generic verbs this is.
     pub action: SecurityAction,
     /// Seconds a team works here once it has arrived.
@@ -254,6 +257,14 @@ impl SecurityActionConfig {
     /// non-positive duration (a team that arrives and is instantly finished), a
     /// risk outside the 0–1 band the console renders, or a blank outcome flag.
     pub fn validate(&self) -> Result<(), String> {
+        if let Some(acquisition) = &self.acquisition {
+            if self.action != SecurityAction::Board
+                || self.outcome_flag.is_some()
+                || !phoenix_model::comms_channel::identity(&acquisition.doctrine)
+            {
+                return Err("vessel acquisition requires Board, an explicit compatible doctrine and no flag-only success effect".into());
+            }
+        }
         if !self.duration_secs.is_finite() || self.duration_secs <= 0.0 {
             return Err(format!(
                 "[[security_target.action]] '{}' duration_secs must be a positive number of \
@@ -291,6 +302,12 @@ impl SecurityActionConfig {
         }
         Ok(())
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SecurityAcquisitionConfig {
+    pub doctrine: String,
 }
 
 /// The authored `[security_target]` table on a world entity Security teams can be

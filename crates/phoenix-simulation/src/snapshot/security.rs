@@ -16,6 +16,25 @@ fn validate_row(
     };
     let config = config.ok_or("Security jobs have no accepted finite team owner")?;
     state.validate_config(config, tick)?;
+    for (_, board) in &row.blackboards {
+        let crate::core::messages::SystemBlackboard::Security(board) = board else {
+            continue;
+        };
+        for (index, team) in board.teams.iter().enumerate() {
+            if team.acquired
+                && state
+                    .jobs
+                    .teams
+                    .get(index)
+                    .and_then(Option::as_ref)
+                    .is_none_or(|job| job.activity.acquisition.is_none())
+            {
+                return Err(
+                    "Security acquired publication has no actual paid acquisition result".into(),
+                );
+            }
+        }
+    }
     if let Some(local) = local {
         local.validate_navigation(state)?;
     } else if config.local.is_some() {
@@ -51,6 +70,18 @@ fn validate_row(
                 .and_then(|profile| team.action.and_then(|action| profile.action(action)))
                 .ok_or("Security commitment has no matching accepted target action")?
         };
+        if job
+            .activity
+            .acquisition_order
+            .as_ref()
+            .map(|order| order.doctrine.as_str())
+            != offered
+                .acquisition
+                .as_ref()
+                .map(|config| config.doctrine.as_str())
+        {
+            return Err("Security acquisition order differs from the accepted action".into());
+        }
         if team.risk != offered.risk
             || (team.state == crate::security::SecurityTeamState::Working
                 && team.phase_duration != offered.duration_secs)

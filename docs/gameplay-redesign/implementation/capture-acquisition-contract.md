@@ -183,3 +183,9 @@ consumers they need.
   hostility/service consumers.
 - `crates/phoenix-simulation/src/snapshot/schema.rs`, `snapshot/application.rs`
   and `sim_digest.rs`: continuation, projection ordering and deterministic state.
+
+The first optional autonomous target selects a base-World palette entry whose
+nonempty doctrine contains only the existing `AiDirective::None` hold objectives.
+Hardware compatibility alone is insufficient: a hostile Destroy objective is not
+an admissible post-acquisition replacement in this bounded slice. This does not
+introduce an AI-off latch, change System sources or disable machinery.

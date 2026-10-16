@@ -1,0 +1,12 @@
+# Optional genuinely uncrewed autonomous acquisition target. Existing hardware,
+# damage, stores and per-System policies are inherited unchanged.
+includes = ["ship_harrow_patrol.toml"]
+name = "entity.acquirable_harrow.name"
+
+[[security_target.action]]
+action = "board"
+duration_secs = 4.0
+risk = 0.0
+priority = "optional"
+[security_target.action.acquisition]
+doctrine = "acquired-hold"

@@ -2338,3 +2338,46 @@ fn a_world_selected_included_template_is_validated_as_a_complete_entry() {
         "{findings:?}"
     );
 }
+
+#[test]
+fn acquisition_requires_exact_named_base_hold_profile_before_activation() {
+    let target = crate::entities::loader::FixtureTemplates
+        .load_template("assets/entities/acquirable_harrow.toml")
+        .unwrap();
+    let templates = MemoryTemplateLoader::new([("target.toml", target)]);
+    let source = r#"
+[[entity]]
+template_path="target.toml"
+name="prize"
+[[gm_npc_doctrine_palette]]
+id="acquired-hold"
+label="Hold"
+targets=["prize"]
+[[gm_npc_doctrine_palette.doctrine]]
+id="hold"
+directive_kind="None"
+base_priority=100.0
+"#;
+    let accepted = cfg(source);
+    let src = WorldSource::new("base.toml", source, &accepted);
+    assert!(validate_vessel_acquisition(&src, &templates, true).is_empty());
+    assert_eq!(
+        validate_vessel_acquisition(&src, &templates, false).len(),
+        1
+    );
+    for bad in [
+        source.replace("targets=[\"prize\"]", "targets=[\"other\"]"),
+        source.replace("id=\"acquired-hold\"", "id=\"other\""),
+        source.replace(
+            "directive_kind=\"None\"",
+            "directive_kind=\"Destroy\"\ndirective_target=\"player\"",
+        ),
+    ] {
+        let config = cfg(&bad);
+        let source = WorldSource::new("base.toml", &bad, &config);
+        assert_eq!(
+            validate_vessel_acquisition(&source, &templates, true).len(),
+            1
+        );
+    }
+}

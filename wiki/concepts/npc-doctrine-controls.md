@@ -62,3 +62,10 @@ operator explicitly selects an available choice.
 
 See [AI Ship Unification](./ai-ship-unification.md) for the ordinary consumers and
 [GM Operator](../entities/gm-operator.md) for admission and presence.
+
+`NpcDoctrineControl::prepare` now validates an authored choice without changing
+machinery; its private token is consumed by `commit_prepared` in the same
+exclusive transaction. Ordinary GM and Scenario application use that same
+prepare/commit path. The optional Security acquisition adapter joins this owner
+to Session acquisition before publishing success, preserving the original
+baseline, unrelated Objective cursors and the existing per-System controllers.

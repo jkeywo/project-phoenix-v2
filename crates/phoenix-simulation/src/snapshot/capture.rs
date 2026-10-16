@@ -1424,6 +1424,7 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                             .map(|owner| owner.0.iter().map(|bank| bank.config.id.clone()).collect()).unwrap_or_default()
                     } else {Vec::new()},
                     mesh_crew: capture_mesh_crew(entity),
+                    operational_owner: entity.get::<phoenix_sim_session::vessel_ownership::VesselOperationalOwner>().map(|owner| owner.0.clone()),
                     npc_doctrine: entity
                         .get::<crate::gm::operations::npc::NpcDoctrineState>()
                         .and_then(|state| state.0.clone()),

@@ -129,6 +129,7 @@ export function securityTeamRows(blackboard) {
   const teams = (blackboard && blackboard.teams) || [];
   return teams.map((team, index) => ({
     teamIdx: index,
+    ...(team.acquired === true ? { acquired: true } : {}),
     state: team.state || 'available',
     target: team.target || null,
     targetName: team.target_name || null,
@@ -164,6 +165,7 @@ export function securityActionRows(blackboard, onlyEligible = false) {
       rows.push({
         target: target.uuid,
         targetName: target.name || null,
+        ...(action.acquires_vessel === true ? { acquiresVessel: true } : {}),
         separation: typeof target.separation === 'number' ? target.separation : 0,
         eligible: target.in_range === true,
         action: action.action,

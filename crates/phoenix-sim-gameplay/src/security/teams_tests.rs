@@ -676,6 +676,7 @@ fn an_empty_or_duplicated_target_table_is_rejected() {
 
 fn action_config(action: SecurityAction) -> SecurityActionConfig {
     SecurityActionConfig {
+        acquisition: None,
         action,
         duration_secs: 10.0,
         risk: 0.5,
@@ -728,4 +729,22 @@ fn an_unknown_authored_action_id_is_a_parse_error() {
     )
     .expect_err("an unimplemented verb must be refused at load");
     assert!(err.to_string().contains("vent_the_deck"), "got {err}");
+}
+
+#[test]
+fn whole_vessel_effect_is_explicit_board_only_and_cannot_also_raise_a_success_flag() {
+    let mut action = action_config(SecurityAction::Board);
+    action.acquisition = Some(SecurityAcquisitionConfig {
+        doctrine: "acquired-hold".into(),
+    });
+    action.outcome_flag = None;
+    action.validate().unwrap();
+    action.action = SecurityAction::AssistEvacuation;
+    assert!(action.validate().is_err());
+    action.action = SecurityAction::Board;
+    action.outcome_flag = Some("fake_capture".into());
+    assert!(action.validate().is_err());
+    action.outcome_flag = None;
+    action.acquisition.as_mut().unwrap().doctrine = "".into();
+    assert!(action.validate().is_err());
 }

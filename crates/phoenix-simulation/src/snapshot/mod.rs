@@ -389,6 +389,7 @@ mod sensing_publications;
 mod shield_enquiry;
 mod spatial_fields;
 mod transit;
+mod vessel_ownership;
 
 mod comms_capture;
 mod comms_media;

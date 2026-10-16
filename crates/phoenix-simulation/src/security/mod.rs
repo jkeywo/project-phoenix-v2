@@ -34,6 +34,7 @@
 /// verdict and backfill selection.
 pub mod teams;
 
+pub(crate) mod acquisition;
 /// The Bevy adapter: the components, the fixed-tick systems, the backfill host
 /// and the blackboard publisher.
 pub mod server;

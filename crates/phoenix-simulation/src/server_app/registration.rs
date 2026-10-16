@@ -635,6 +635,14 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             // came out of the entity template and nothing ever writes it, so
             // `content_digest` already answers for it and `world_digest` walks
             // none of it.
+            .declare_state::<phoenix_sim_session::vessel_ownership::VesselOperationalOwner>(
+                StateClass::Folded,
+                "vessel-operational-owner",
+            )
+            .declare_state::<crate::security::acquisition::AcquisitionTargetDefinition>(
+                StateClass::DeferredFold,
+                "vessel-acquisition-recipe",
+            )
             .declare_state::<crate::security::SecurityTargetActions>(
                 StateClass::DeferredFold,
                 "security-target-state",

@@ -5085,6 +5085,9 @@ pub struct SecurityBlackboard {
 /// One Security team's live state, as the console shows it (issue #1346).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct SecurityTeamSlot {
+    /// This team's actual paid acquisition succeeded; physical return is separate.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub acquired: bool,
     /// `available` / `deploying` / `working` / `withdrawing` / `unavailable`.
     #[serde(default)]
     pub state: String,
@@ -5131,6 +5134,9 @@ pub struct SecurityTargetOption {
 /// One action a target offers, and its authored terms (issue #1346).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct SecurityActionOption {
+    /// Explicit whole-vessel effect, never inferred from the Board verb.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub acquires_vessel: bool,
     /// The action id a dispatch names.
     #[serde(default)]
     pub action: String,

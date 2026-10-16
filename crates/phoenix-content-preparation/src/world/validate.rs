@@ -40,6 +40,62 @@ use crate::world::config::{TriggerAction, WorldConfig, WorldEntity};
 
 pub use phoenix_content::findings::*;
 
+/// The first acquisition recipe requires a base-World, explicitly named
+/// autonomous hold profile. Entity parsing owns the genuine uncrewed opt-in;
+/// actual paid completion additionally prepares the ordinary NPC owner.
+fn validate_vessel_acquisition(
+    src: &WorldSource,
+    loader: &dyn TemplateLoader,
+    base: bool,
+) -> Vec<WorldFinding> {
+    let mut findings = Vec::new();
+    for instance in collect_spawned_instances(src) {
+        let Some(template) = loader.load_template(&instance.template_path) else {
+            continue;
+        };
+        let resolved = match instance.overrides {
+            Some(overrides) => match crate::entities::loader::apply_overrides(&template, overrides)
+            {
+                Ok(resolved) => resolved,
+                Err(_) => continue,
+            },
+            None => template,
+        };
+        for action in resolved
+            .security_target
+            .iter()
+            .flat_map(|target| &target.actions)
+        {
+            let Some(acquisition) = &action.acquisition else {
+                continue;
+            };
+            let supported = base
+                && !instance.doctrine_may_differ
+                && src
+                    .config
+                    .gm_npc_doctrine_palette
+                    .iter()
+                    .find(|profile| profile.id == acquisition.doctrine)
+                    .is_some_and(|profile| {
+                        profile.targets.contains(&instance.label)
+                            && !profile.doctrine.is_empty()
+                            && profile.doctrine.iter().all(|objective| {
+                                matches!(
+                                    crate::ai::core::parse_doctrine_directive(objective),
+                                    Ok(phoenix_model::messages::AiDirective::None)
+                                )
+                            })
+                    });
+            if !supported {
+                findings.push(WorldFinding { severity:Severity::Error, category:"unsupported-vessel-acquisition",
+                    message:format!("acquisition target '{}' requires its explicit base-World '{}' palette entry with this target and only nonempty None hold objectives; layer/dynamic-doctrine acquisition is unsupported",instance.label,acquisition.doctrine),
+                    source:SourceLocation {file:instance.site_file(src),line:instance.site_line(src),reference:acquisition.doctrine.clone()} });
+            }
+        }
+    }
+    findings
+}
+
 fn validate_arrival_gravity(
     src: &WorldSource,
     loader: &dyn TemplateLoader,
@@ -1572,6 +1628,7 @@ pub fn validate_supporting_world_with_arrival(
         static_arrival_scope,
     ));
     findings.extend(super::craft::findings(source, template_loader, false));
+    findings.extend(validate_vessel_acquisition(source, template_loader, false));
     findings.extend(validate_transit_origin(
         source,
         template_loader,
@@ -1865,6 +1922,7 @@ pub fn activation_findings(
     let src = WorldSource::new("", "", config);
     findings.extend(validate_arrival_gravity(&src, templates, true));
     findings.extend(super::craft::findings(&src, templates, true));
+    findings.extend(validate_vessel_acquisition(&src, templates, true));
     let mut seen = HashSet::new();
     findings.extend(validate_template_resolution_in(&src, templates, &mut seen));
     findings.extend(validate_ship_slot_capacity_in(&src, templates));
@@ -1909,6 +1967,7 @@ pub fn validate_composition_with_fragments(
     let mut findings = super::transit::destination_findings(root, children);
     findings.extend(validate_arrival_gravity(root, template_loader, true));
     findings.extend(super::craft::findings(root, template_loader, true));
+    findings.extend(validate_vessel_acquisition(root, template_loader, true));
     let transit_origins = super::transit::origin_bindings(
         root.config,
         children
@@ -1923,6 +1982,7 @@ pub fn validate_composition_with_fragments(
             !root.config.transit_destinations.is_empty(),
         ));
         findings.extend(super::craft::findings(child, template_loader, false));
+        findings.extend(validate_vessel_acquisition(child, template_loader, false));
         findings.extend(validate_transit_origin(
             child,
             template_loader,

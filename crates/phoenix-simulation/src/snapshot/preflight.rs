@@ -533,6 +533,7 @@ pub(super) fn validate_entity_resources(
         row.physics.as_ref(),
     )?;
     super::fitting::validate_entity(world, entity, row)?;
+    super::vessel_ownership::validate_entity(world, entity, row, u64::MAX)?;
     super::guided_source::validate_entity(world, Some(entity), row, u64::MAX)?;
     super::helm_movement::validate_live(world, entity, row, u64::MAX)?;
     super::transit::validate_live(world, entity, row, u64::MAX)?;

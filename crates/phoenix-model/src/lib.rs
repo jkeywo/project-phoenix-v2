@@ -11,6 +11,7 @@ pub mod emission_profile;
 pub mod entity;
 pub mod identity;
 pub mod tags;
+pub mod vessel_ownership;
 pub mod weapon_targets;
 
 pub mod texture;

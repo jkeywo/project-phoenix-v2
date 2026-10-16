@@ -3090,6 +3090,7 @@ fn security_blackboard_round_trips_and_omits_its_optional_fields_when_idle() {
         range: 400.0,
         teams: vec![
             SecurityTeamSlot {
+                acquired: false,
                 state: "working".into(),
                 target: Some("00000000-0000-8000-8000-000000000042".into()),
                 target_name: Some("world.falling_skyway.entity.rung_c_compartment.name".into()),
@@ -3098,6 +3099,7 @@ fn security_blackboard_round_trips_and_omits_its_optional_fields_when_idle() {
                 risk: 0.6,
             },
             SecurityTeamSlot {
+                acquired: false,
                 state: "available".into(),
                 ..Default::default()
             },
@@ -3108,6 +3110,7 @@ fn security_blackboard_round_trips_and_omits_its_optional_fields_when_idle() {
             separation: 180.0,
             in_range: true,
             actions: vec![SecurityActionOption {
+                acquires_vessel: false,
                 action: "assist_evacuation".into(),
                 duration_secs: 20.0,
                 risk: 0.35,
@@ -3133,6 +3136,7 @@ fn security_blackboard_round_trips_and_omits_its_optional_fields_when_idle() {
         compartments: Default::default(),
         range: 400.0,
         teams: vec![SecurityTeamSlot {
+            acquired: false,
             state: "available".into(),
             ..Default::default()
         }],

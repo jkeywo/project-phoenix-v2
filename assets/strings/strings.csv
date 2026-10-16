@@ -6511,3 +6511,10 @@ workshop.loader.members,Member tubes,Member tubes,,,
 workshop.loader.save,Save loader group,Save loader group,,,
 workshop.loader.remove,Remove loader group,Remove loader group,,,
 entity.shared_loader_cruiser.name,Optional shared handling reference,Shared Loader Cruiser,,,
+entity.acquirable_harrow.name,Optional autonomous acquisition reference,Autonomous Harrow,Autonomous Harrow,Autonomous Harrow,source
+component.security_teams.acquired,Paid acquisition result; team may still be returning,Vessel acquired,Vessel acquired,Vessel acquired,source
+component.security_teams.acquire_vessel,Explicit Security Board effect,Acquire vessel,Acquire vessel,Acquire vessel,source
+workshop.security.acquisition,Workshop optional target effect,Vessel acquisition,Vessel acquisition,Vessel acquisition,source
+workshop.security.acquire,Workshop explicit Board effect toggle,Acquire vessel on completed Board work,Acquire vessel on completed Board work,Acquire vessel on completed Board work,source
+workshop.security.doctrine,Workshop accepted post-acquisition palette ID,Post-acquisition hold doctrine,Post-acquisition hold doctrine,Post-acquisition hold doctrine,source
+workshop.security.save_target,Workshop target effect save button,Save target effect,Save target effect,Save target effect,source

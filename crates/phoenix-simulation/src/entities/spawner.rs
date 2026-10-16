@@ -738,6 +738,17 @@ impl SpawnSection for SecurityTargetSpawn {
         // own, and a hull with teams need offer none.
         if let Some(target) = &config.security_target {
             cmds.insert(crate::security::SecurityTargetActions(target.clone()));
+            if target
+                .actions
+                .iter()
+                .any(|action| action.acquisition.is_some())
+            {
+                cmds.insert(crate::security::acquisition::AcquisitionTargetDefinition {
+                    original_faction: config
+                        .faction
+                        .expect("validated acquisition target faction"),
+                });
+            }
         }
     }
 }

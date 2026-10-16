@@ -1,10 +1,11 @@
 # Staff one actual facility service visit
 
-**Proposed contract, 16 October 2026. Not adopted or implemented.**
-This is a bounded increment 21/20 foundation. Root must adopt the contract before
-runtime work. It does not close workforce, outside actors or increment 21.
+**Adopted implementation contract, 16 October 2026. Runtime is not implemented.**
+Root adopted the independently reviewed bounded increment 21/20 foundation,
+including its explicit AI-only outside-provider boundary. It does not close
+workforce, outside actors or increment 21.
 See [increment 21](increment-21.md), the
-[PASM proposal](../../../pasm/spec/design/facility-service-workforce.yaml) and
+[PASM decision](../../../pasm/spec/design/facility-service-workforce.yaml) and
 [existing facility decisions](../../../pasm/spec/design/facilities-actors.yaml).
 
 ## Audited baseline and authority boundary
@@ -184,8 +185,7 @@ unearned current location. No raw UUID/Job/visit identifiers belong in player UI
 
 ## Required evidence and boundaries
 
-Before runtime adoption, independently review this proposed scope and confirm
-that the limited AI-only provider boundary is acceptable. Then split the
+The independently reviewed AI-only provider scope is adopted. Split the
 structural fixed-capability migration from the staffing behaviour where possible.
 
 The real consumer proof must include a Human visitor using the normal Dock and

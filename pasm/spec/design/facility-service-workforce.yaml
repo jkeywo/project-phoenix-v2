@@ -1,12 +1,12 @@
 entities:
   - decision: facility-port-workforce-uses-actual-visit-scoped-team
     core:
-      status: proposed
-      confidence: provisional
+      status: accepted
+      confidence: confirmed
       title: Staff One Physical Port Visit With Existing People And Team Jobs
-      summary: "Proposed bounded increment 21/20 consumer: an optional actual non-Ship fixed provider uses its actual finite Repair team and named Fit service lead at the Dock compartment; one shared assignment binds one physical visitor/PortVisit while existing PortOrder/flow alone owns paid service work and delivery. Root adoption and runtime evidence remain required."
+      summary: "Adopted bounded increment 21/20 consumer: an optional actual non-Ship fixed provider uses its actual finite Repair team and named Fit service lead at the Dock compartment; one shared assignment binds one physical visitor/PortVisit while existing PortOrder/flow alone owns paid service work and delivery. Runtime evidence and the broader workforce exit remain required."
       rationale:
-        - "Exact source audit, authority limits, ownership joins, authoring and continuation requirements live in docs/gameplay-redesign/implementation/increment-21-staffed-port-contract.md. This proposed decision changes no runtime and does not establish workforce or full21 completion. Preserve shipped unmanned ports."
+        - "Root adopted the independently reviewed source audit, authority limits, ownership joins, authoring and continuation requirements in docs/gameplay-redesign/implementation/increment-21-staffed-port-contract.md. This decision changes no runtime and does not establish workforce or full21 completion. Preserve shipped unmanned ports."
         - "Factor the existing accepted Repair team/CompiledPersonnel/sole PersonnelRoster installation into the capability-bearing fixed-entity path once, then extend only its actual owning Repair consumers beyond Ship filters. Add no Ship marker, propulsion, duplicate team count or surrogate population."
         - "Reuse MechanicalRepair on both finite team and actual named lead. This optional specialist requirement consumes the existing Fit/Minor/Severe condition and WithRepairTeam location through the same cursor; it is not a universal Officer requirement, team-member injury simulation or service-rate bonus. Existing internal-repair multipliers retain their scope."
         - "Append one RepairActivity assignment using the same TeamJobs mint, exclusivity, route, workflow and physical return. Immutable scope binds provider Repair/Dock, actual visitor and PortVisit, team and PersonRef. The same ordinary Repair AI consumes own permitted current visit/officer/team views, emits normal posting(Some) from idle home before later service dispatch, and passes existing admission; revalidate exact intent before claim/mint. Visit end, unfitness or refused willingness produces normal Recall, physical home and posting(None), then actual existing local care when equipped/funded. No pre-posted fixture or unavailable Human provider is required; unrelated jobs are not preempted. No provider service timer, extra queue, location copy, staffing scheduler or second controller."

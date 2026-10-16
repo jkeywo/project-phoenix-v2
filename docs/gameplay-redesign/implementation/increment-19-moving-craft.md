@@ -446,3 +446,31 @@ checks, not a full-host flight/360-step or browser acceptance result. Actual
 native execution is queued through the integration owner. Mode-aware Bay custody,
 launch association/history, transmitted voyage orders, shared Job lifecycle,
 measured return and moving recovery remain separate required joins.
+
+
+### Actual local chart flight witness (authored; native execution pending)
+
+The integration lane passed the real chart-selector utility recipe and pure
+movement owner gates at `1062d545`. The new
+`tests/charted_utility_continuation.rs` therefore boots that accepted ordinary
+utility hull in a real local World with an actual charted navigation beacon.
+The two-seat Courier stays outside the utility's instruments but inside the
+unchanged fleet LOD bubble, so the craft uses normal high-fidelity per-System
+AI and the existing paid XYZ/yaw physics owner.
+
+A test-only read observer records actual Navigation/actuator emitted work. The
+witness waits for a genuinely selected fractional XYZ point, normal clearance,
+paid planar/vertical work and actual upward motion before taking its JSON
+checkpoint. Fresh-host continuation compares complete captures and digests
+through all 360 updates, with a final comparison after update 360. Post-checkpoint
+motion and newly paid vertical work are required; boot travel or inherited
+inertia cannot satisfy the continuation claim. Three malformed whole candidates
+must refuse without changing state or digest. The same ordinary motion then has
+to settle near its XYZ goal under authored acceleration/braking.
+
+This is a local-course proof, not a Bay launch, voyage Job, remote-order,
+link-loss, return or recovery journey. It does not mutate live knowledge, power,
+controls or body poses. Chart withdrawal and explicit-feed isolation already
+have separate owner tests; no artificial live binding change is used to claim
+an intermittent-feed gameplay test. This paragraph records authored evidence;
+source review and native execution results remain separate integration records.

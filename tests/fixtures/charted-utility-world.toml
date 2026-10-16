@@ -1,0 +1,25 @@
+# Ordinary local charted-point flight; no mission, remote order or Bay provenance.
+[global]
+seed = 191924
+[player_spawn]
+# Outside all utility instruments, inside the unchanged fleet LOD bubble.
+position = [400, 0, 0]
+[[entity]]
+template_path = "assets/entities/alliance_courier.toml"
+id = "player-ship"
+name = "player-ship"
+spawn_on = "game_start"
+transform = { position = [400, 0, 0] }
+[[entity]]
+template_path = "tests/fixtures/charted-utility-shuttle.toml"
+id = "charted-utility"
+name = "charted-utility"
+spawn_on = "game_start"
+transform = { position = [0, 4.25, 0] }
+[[entity]]
+template_path = "assets/entities/nav_beacon.toml"
+id = "charted-point"
+name = "charted-point"
+transform = { position = [25.25, 35.5, -45.75] }
+[entity.overrides]
+tags = ["objective_marker", "charted"]

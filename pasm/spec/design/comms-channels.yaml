@@ -1,4 +1,15 @@
 entities:
+  - decision: redesign-comms-decoded-typed-claims
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Decoded Typed Content Remains Attributed Read-Only Evidence
+      summary: "The existing paid capture owner derives a separate closed safe claim only after decoding. Supported request parameters and original transmitted outcome facts become readable without private routing references or addressed participation."
+      rationale:
+        - "[ai] Root approved increment-16-decoded-claims.md before runtime. Preserve existing actual emission, immutable payload, payment and original clocks; no new capture/controller/frontier or retained claim copy. Text stays literal; FormUp slot and MediaCall mode are claims, never local Formation or media eligibility."
+        - "Outcome exposes supported request claim, original emission/heard/read/decision/report clocks and reported availability only. Strip actor/System/craft identities, origin IDs, keys, audiences, formation sequence and machinery references. ReceiveCraft exposes kind only; its physical reception receipt and personnel references remain private. Unknown new vocabulary requires explicit safe projection."
+        - "Current permitted Comms renders read-only attributed foreign claims, with no reply, acceptance, contact resolution, planner receipt, remote machinery or new AI input. Original uncaptured requests need not be invented to display a heard outcome. Whole-candidate saved-publication consistency and actual paid typed JSON360/no-write evidence precede exit; dynamic keys, hop capture, media recording and phantom actors are outside this contract."
   - decision: redesign-comms-captured-text-paid-decoding
     core:
       status: accepted

@@ -16,16 +16,12 @@ fn source(app: &mut App) {
             include_str!("../../../../assets/worlds/domains/security-acquisition.toml"),
         ),
     ]);
-    let loaded = load(
-        LoadRequest::new(
-            "tests/fixtures/acquisition-htn-world.toml",
-            &reader,
-            &crate::world::script::load::NoSiblingScripts,
-            LoadPolicy::Activate,
-        ),
-        &crate::entities::loader::FixtureTemplates,
-        &crate::entities::include_resolve::FixtureFragments,
-    )
+    let loaded = load(LoadRequest::new(
+        "tests/fixtures/acquisition-htn-world.toml",
+        &reader,
+        &crate::world::script::load::NoSiblingScripts,
+        LoadPolicy::Activate,
+    ))
     .expect("full accepted World/domain closure before machinery tracing");
     assert!(
         !crate::world::validate::has_error(&loaded.findings),
@@ -293,7 +289,9 @@ fn exact_planned_board_binds_before_work_then_acquires_and_settles_through_json1
 #[test]
 fn ordinary_ai_uses_own_released_intent_for_exact_team_and_no_retroactive_credit() {
     let (mut app, actor, _target, _) = planned_fixture();
-    app.init_resource::<crate::lobby::Sessions>();
+    app.insert_resource(crate::lobby::Sessions(
+        crate::lobby::session::SessionManager::new(),
+    ));
     app.add_systems(
         Update,
         crate::security::server::operate_security_ai.before(handle_security_commands),

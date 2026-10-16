@@ -38,8 +38,9 @@ pub(super) fn validate(
                 return Err(fail(actor, "officer custody is from a future logical tick"));
             }
             match &person.location {
-                OfficerLocation::AtCompartment { .. } | OfficerLocation::WithRepairTeam { .. } => {
-                    if !profiles.contains_key(actor) {
+                OfficerLocation::AtCompartment { actor: holder, .. }
+                | OfficerLocation::WithRepairTeam { actor: holder, .. } => {
+                    if holder != actor || !profiles.contains_key(actor) {
                         return Err(fail(actor, "local officer has no actual live origin owner"));
                     }
                 }
@@ -60,7 +61,7 @@ pub(super) fn validate(
                         .ok_or_else(|| fail(actor, "escort has no actual team Job"))?;
                     if actual.id != *job
                         || actual.outcome.is_some()
-                        || !matches!(&actual.activity,RepairActivity::PersonnelTransfer {work,..} if work.officer==*id && !work.completed && work.stage!=PersonnelTransferStage::Collecting)
+                        || !matches!(&actual.activity,RepairActivity::PersonnelTransfer {work,..} if work.officer.origin==*actor && work.officer.officer==*id && !work.completed && work.stage!=PersonnelTransferStage::Collecting)
                     {
                         return Err(fail(
                             actor,

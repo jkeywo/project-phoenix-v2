@@ -283,7 +283,10 @@ fn joined_paid_probe_launch_recovery_keeps_actual_body_history_and_json360() {
         &mut live,
         "tactical",
         "probe-bay",
-        Control::RecoverCraft { contact },
+        Control::RecoverCraft {
+            contact,
+            reception: None,
+        },
     );
     wait(&mut live, |app| stored(app, child));
     steps(&mut live, 2);

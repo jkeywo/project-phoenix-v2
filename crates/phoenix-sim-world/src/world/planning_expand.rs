@@ -55,7 +55,7 @@ fn instantiate(
             owner: get!(owner, System),
             recipient: get!(recipient, Actor),
             channel: channel.clone(),
-            request: *request,
+            request: request.clone(),
         },
         RequestTemplate::Repair {
             actor,

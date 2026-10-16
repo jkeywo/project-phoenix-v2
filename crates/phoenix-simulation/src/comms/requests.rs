@@ -58,6 +58,7 @@ pub(crate) fn response_facts(
                 GenericCommsRequest::FormUp { .. } => fid::REQUEST_FORM_UP,
                 GenericCommsRequest::MediaCall { .. } => fid::REQUEST_MEDIA_CALL,
                 GenericCommsRequest::ReportStatus => fid::REQUEST_REPORT_STATUS,
+                GenericCommsRequest::ReceiveCraft { .. } => fid::REQUEST_RECEIVE_CRAFT,
             },
             1.0,
         );
@@ -165,7 +166,7 @@ pub(crate) fn respond(
         return false;
     };
     let wire = message.transmission.as_ref().expect("actual heard request");
-    let CommsRadioContent::Request { request } = wire.content else {
+    let CommsRadioContent::Request { request } = &wire.content else {
         return false;
     };
     if index == 0
@@ -187,7 +188,9 @@ pub(crate) fn respond(
         return false;
     }
     let choice = match index {
-        0 if request.is_formation() || request.is_media() => CommsRequestDecision::Accept,
+        0 if request.is_formation() || request.is_media() || request.is_reception() => {
+            CommsRequestDecision::Accept
+        }
         0 => CommsRequestDecision::Report,
         1 => CommsRequestDecision::Decline,
         _ => return false,

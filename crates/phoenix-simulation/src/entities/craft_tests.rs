@@ -284,6 +284,7 @@ fn recovery_needs_current_permitted_alias_then_paid_handling_withdraws_support_a
         &mut app,
         parent,
         Control::RecoverCraft {
+            reception: None,
             contact: "actual-probe".into(),
         },
     );
@@ -299,7 +300,14 @@ fn recovery_needs_current_permitted_alias_then_paid_handling_withdraws_support_a
         })
         .expect("actual paid radar must produce permitted current contact");
     assert_ne!(contact, "actual-probe");
-    command(&mut app, parent, Control::RecoverCraft { contact });
+    command(
+        &mut app,
+        parent,
+        Control::RecoverCraft {
+            contact,
+            reception: None,
+        },
+    );
     assert_eq!(
         app.world().get::<ShipBayJobs>(parent).unwrap().0[&owner()]
             .job
@@ -600,3 +608,6 @@ fn canonical_capture_keeps_stored_identity_reserves_and_whole_custody_graph() {
     assert_eq!(decoded, snapshot);
     let _ = parent;
 }
+
+#[path = "craft_reception_tests.rs"]
+mod reception;

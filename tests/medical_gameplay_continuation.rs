@@ -1,6 +1,10 @@
 //! Ordinary joined local treatment, finite medication/energy and fresh complete
 //! JSON continuation. Quiet one-host proof; not network or human-device acceptance.
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+fn person_ref(app: &App, name: &str) -> phoenix_model::personnel::PersonRef {
+    let actor = app.world().try_query_filtered::<&project_phoenix::entities::spawner::EntityUuid, With<project_phoenix::server_app::LocalShip>>().unwrap().single(app.world()).unwrap();
+    phoenix_model::personnel::PersonRef::new(&actor.0, name)
+}
 use bevy::prelude::*;
 use phoenix_model::{
     job::{JobOutcome, JobPhase},
@@ -266,25 +270,27 @@ fn joined_treatment_spends_once_and_json360_preserves_job_patient_and_ordinary_b
     let (mut live, actor) = boot();
     // Correct Human authority cannot turn an incompatible mechanical team into medics.
     let before_jobs = teams(&live, actor).0.save_state();
+    let person = person_ref(&live, "repair-chief");
     control(
         &mut live,
         ENGINEER,
         "engineering",
         "repair",
         Control::TreatDutyOfficer {
-            officer: "repair-chief".into(),
+            officer: person.clone(),
             team_idx: 0,
         },
     );
     assert_eq!(teams(&live, actor).0.save_state(), before_jobs);
     assert_eq!(medication(&live, actor), 2);
+    let person = person_ref(&live, "repair-chief");
     control(
         &mut live,
         ENGINEER,
         "engineering",
         "repair",
         Control::TreatDutyOfficer {
-            officer: "repair-chief".into(),
+            officer: person.clone(),
             team_idx: 1,
         },
     );
@@ -375,7 +381,10 @@ fn joined_treatment_spends_once_and_json360_preserves_job_patient_and_ordinary_b
                 };
                 match fault {
                     2 => work.work_secs = 0.001,
-                    3 => work.patient = "absent".into(),
+                    3 => {
+                        work.patient =
+                            phoenix_model::personnel::PersonRef::new(&actor_uuid, "absent")
+                    }
                     4 => work.medication_used = false,
                     _ => {
                         work.completed = true;

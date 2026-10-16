@@ -483,7 +483,7 @@ Later dated Comms telemetry can extend this view through its real delivery owner
 global physical custody alone is never a knowledge grant.
 
 
-## Owned carrier source slice — awaiting native integration evidence
+## Owned carrier source slice - awaiting native integration evidence
 
 The first implementation uses `PersonnelTransfer` on the existing Repair
 TeamJobs owner. `SetDutyOfficerDestination` persists a closed request on
@@ -585,3 +585,130 @@ asserts unchanged complete capture/digest, with a matching-request positive
 counter proving that the same prepared actual hardware can mint exactly one Job.
 That adapter fixture is not a substitute for normal Human admission/AI choice in
 the separate host proof; native execution remains integrator-owned.
+
+
+## Structural stable-reference source slice
+
+The local owner now carries `PersonRef { origin, officer }` through the four
+normal personnel commands, permitted rows, Treatment/PersonnelTransfer work and
+Repair destination keys. Authored IDs remain local definition keys; no person is
+recreated or moved to another roster. Compartment and posted-team custody require
+the actual holder UUID. Ordinary loss resolves actual occupants; an origin row
+alone cannot kill or boost people elsewhere. Existing local work still refuses
+foreign references before claiming a team, changing intent or minting a Job.
+
+The compound-key request map is encoded as ordered reference/request rows for
+JSON continuation, refusing duplicate or unsorted keys and the old string-key
+shape. Whole candidate checks require actual local holder, own stable work/ref
+identity and matching request; unsupported old holder fields cannot default.
+Existing owner, adapter and host fixtures retain their physical outcomes, finite
+payments, strict full capture/digest continuation and no-write assertions while
+using exact live origin UUIDs. Additional tests cover wrong holder, same-named
+foreign reference, bad request identity and closed wire shapes. The owner-level
+loss regression directly supplies offship custody to test loss routing; it does
+not claim an admitted foreign transfer.
+
+Targeted browser-module tests: four files, **201 passed**, 4.82 s. Owned Rust
+formatting and diff checks passed. Native compilation, actual host re-execution,
+compatibility joins and integration gates remain root-owned and pending; source
+review is being queued. The receiving-ship rescue consumer and full20 exit remain
+open. This slice changes no station layout, authored finite roster or Workshop
+capability.
+
+
+## Next bounded consumer: negotiated occupied-craft reception
+
+The adopted PASM decision `redesign-occupied-craft-negotiated-bay-reception`
+uses the existing physical Bay recovery path. A receiving facility accepts one
+proposed craft through ordinary generic Comms; acceptance does not operate a
+Human Bay. The receiving Bay needs explicit Comms and sensor feeds, and resolves
+its own currently earned contact before a Human or its ordinary System AI emits
+the normal admitted recovery command with the exact accepted order. A claimed
+UUID is neither an observed contact nor machinery authority.
+
+The same Bay Job performs finite paid recovery and changes the actual deployed
+craft to Carried only at its normal physical commit. People remain in the sole
+roster as AboardCraft with the same accepted berths, including after origin loss.
+The first reference facility recovers only explicit accepted targets through its
+existing authored tree; no arbitrary-contact controller or passenger pool is
+introduced. Foreign disembarkation and captured-vessel control stay separate.
+
+A typed receipt is written only after actual custody handoff and completion of
+that same Job. It retains the immutable original Comms reference/decision tick,
+actual receiver/Bay/Job scope, craft, handoff tick and sorted stable PersonRefs.
+The existing recipient request progress then records the completed reception;
+its ordinary paid reverse outcome carries that dated evidence to the sender.
+There is no new message queue or Activity variant: `CommunicationReturned` can
+carry the genuine nested physical result. Existing ReportStatus-only planner
+validation continues refusing unsupported receiving work until its real operator
+is implemented. Job paid execution, physical handoff and later reported arrival
+are distinct clocks; no team-return phase is invented for Bay equipment.
+
+Implementation scope includes an actual equipped fixed receiving facility,
+finite capacity/access/energy, the normal Human and ordinary AI controls,
+Workshop editing and validation, strict whole-candidate graph continuation and
+fresh JSON proofs for source/origin/receiver loss. No runtime reception or full
+Patrol acceptance is claimed by this contract commit. Root owns compatibility
+versions, central integration, Cargo and final gates.
+
+
+## Negotiated reception source slice
+
+ReceiveCraft now carries the sender's proposed craft identity internally. Its
+normal radio consumer requires a current own stored craft through an explicit
+Bay feed. The receiving Bay independently resolves its own earned current alias
+and exact accepted local Comms order; Human Comms cannot operate a Human Bay.
+The ordinary Bay state tree uses has_accepted_reception and normal admission.
+
+The same finite paid Bay Job retains the order and stages its physical receipt
+with the exact original receiving copy. Only successful actual set_carried and
+same-Job completion publish that receipt and mark the existing request completed.
+Its later paid reverse outcome reports the original handoff clock. People remain
+AboardCraft in the sole PersonnelRoster; local stored manifests are derived,
+including retained original identities after origin loss. No foreign room,
+second manifest owner, Activity kind, controller, queue or return phase is added.
+
+Whole-candidate checks join accepted Comms order, actual Bay Job/mint, known
+finite personnel and identical historical receipt copies. One physical Job
+cannot claim conflicting receipts. Current custody is not inferred from an old
+receipt. Ordinary source, receiver and pod destruction semantics remain intact.
+
+Optional reception_carrier preserves the six-seat machinery and adds an
+information-only Bay feed to Comms. reception_outpost is actual fixed equipment
+with finite positive listening/handling energy costs, interior and normal Bay/
+Comms policies. Existing own publication and authored policy installation cover
+that static equipment without adding propulsion. Existing Workshop composition,
+source/history and tree bindings edit the real capability.
+
+Targeted JS/authoring passed five files/34 tests (1.60 s). Layer rules and strict
+strings (6415 rows) passed. Independent source review passed the core plus narrow
+static publication joins. UI/data review passed after a missing positive radio listening cost and retired
+widget callbacks were corrected with assertions. Rust owner
+fixtures are authored but unexecuted here. Native compile, actual Human/AI radio
+and physical host proof, full JSON continuation/loss/forgery evidence and full
+reception/Patrol acceptance remain pending root integration. This source slice
+is not the full increment20/21/23 exit. Root owns versions, Cargo and final gates.
+
+## Reception integration checkpoint
+
+The reception donors were replayed onto the current media/capture integration
+at `9d9e8746`, preserving both optional Comms capabilities, ordinary radio
+settlement order and candidate-only captured-evidence validation. The request
+enum's owned craft identity removes `Copy`; existing Media/FormUp and planned
+communication consumers borrow or clone the same values. Planner validation
+remains explicitly ReportStatus-only.
+
+The actual Console builder now forwards the selected Comms publication's
+`reception_craft` list. A regression exercises that builder with a nonstandard
+Comms System ID through the normal request action, and verifies that a separate
+unbound Bay publication does not supply craft choices.
+
+Targeted browser tests passed **455 tests across six files** (1.46 s), including
+the Console builder, Comms actions/requests/capture, reception and Workshop craft
+authoring. Layer rules, strict strings (**6430 rows, zero errors**) and diff
+checks passed. Independent source review passed the merged runtime/candidate
+joins and the narrow planner ownership changes. Native compilation, protocol/
+save/rules version joins, actual Human/AI host reception and JSON/loss proofs,
+device/network acceptance and final integration gates remain root-owned and
+pending. These checks establish a source integration checkpoint, not an
+increment20/21/23 exit.

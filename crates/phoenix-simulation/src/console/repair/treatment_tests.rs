@@ -58,7 +58,10 @@ fn actual_human_and_ai_care_share_finite_team_paid_equipment_medication_and_retu
                 crate::core::messages::AdmittedCommand {
                     target: repair_system_id(),
                     payload: crate::core::messages::SystemControlPayload::TreatDutyOfficer {
-                        officer: "repair-chief".into(),
+                        officer: phoenix_model::personnel::PersonRef::new(
+                            "medical-actor",
+                            "repair-chief",
+                        ),
                         team_idx: 1,
                     },
                     response_token: None,
@@ -135,6 +138,7 @@ fn actual_human_and_ai_care_share_finite_team_paid_equipment_medication_and_retu
             .validate(
                 &profile,
                 teams.job_state(),
+                "medical-actor",
                 app.world().resource::<crate::sim_tick::SimTick>().0,
             )
             .unwrap();

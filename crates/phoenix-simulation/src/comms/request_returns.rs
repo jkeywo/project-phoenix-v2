@@ -47,7 +47,7 @@ pub(super) fn settle(
         else {
             continue;
         };
-        let CommsRadioContent::Request { request: kind } = wire.content else {
+        let CommsRadioContent::Request { request: kind } = &wire.content else {
             continue;
         };
         let stage = progress.facts.stage();
@@ -89,7 +89,7 @@ pub(super) fn settle(
                 recipient_ship: source.uuid.clone(),
                 emitted_tick: wire.emitted_tick,
                 heard_tick: wire.received_tick.expect("heard request"),
-                request: kind,
+                request: kind.clone(),
             },
             facts: progress.facts.clone(),
         };

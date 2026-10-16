@@ -1,0 +1,226 @@
+# Optional battery-backed receiving facility: no engines, passengers or second custody store.
+# Existing ordinary Comms/Bay AI and finite reserves; replenishment remains the ordinary resource model.
+includes=["battery_probe.toml"]
+name="entity.reception_outpost.name"
+tags=["station","destructible"]
+
+[collider]
+shape="Ball"
+radius=2
+length=0
+movable=false
+
+[mesh]
+shape="sphere"
+radius=2
+colour=[0.3,0.8,0.6]
+
+[[station]]
+id="bay"
+name="entity.reception_outpost.bay"
+description="entity.reception_outpost.bay"
+rank="Ltn."
+[[station.rating]]
+name="Std"
+automated_systems=[]
+detailed_systems=["reception-bay"]
+
+[[station]]
+id="comms"
+name="Comms"
+description="entity.reception_outpost.name"
+rank="Ltn."
+[[station.rating]]
+name="Std"
+automated_systems=[]
+detailed_systems=["comms"]
+
+[[console]]
+id="bay"
+name="entity.reception_outpost.bay"
+screen="gui/cruiser/tactical.html"
+home_station="bay"
+[[console.feed]]
+source="sensor-radar"
+kind="SensorRadar"
+[[console.feed]]
+source="comms"
+kind="Comms"
+
+[[console]]
+id="comms"
+name="Comms"
+screen="gui/cruiser/comms.html"
+home_station="comms"
+[[console.feed]]
+source="reception-bay"
+kind="Bay"
+
+[[system]]
+id="reception-bay"
+kind="craft-bay"
+console="bay"
+power_group="probe"
+[system.config.ai]
+root="receive"
+[[system.config.ai.tree]]
+id="receive"
+initial="ready"
+[[system.config.ai.tree.state]]
+id="ready"
+[[system.config.ai.tree.state.task]]
+id="accepted-recovery"
+when=[{value={source="fact",name="has_accepted_reception"},equals=true}]
+action={kind="write",channel="recover",value={source="literal",value=true}}
+[[system.component]]
+kind="power_input"
+id="input"
+[[system.component]]
+kind="craft_bay"
+id="bay"
+power_input="input"
+[system.component.config]
+compartment="receiving-room"
+capacity_space=2
+launch_work_secs=2
+recovery_work_secs=3
+recovery_range=20
+maximum_parent_speed=0.1
+release_offset=[0,0,-5]
+[[system.damage_component]]
+id="operation"
+binding="operation"
+fault_dose_threshold=20
+degraded_factor=0.5
+full_remedy="machinery-full"
+patch_remedy="machinery-patch"
+field_replaceable=true
+[system.damage_component.susceptibility]
+physical=1
+laser=1
+
+[[system]]
+id="comms"
+kind="comms"
+console="comms"
+power_group="probe"
+[[system.damage_component]]
+id="operation"
+binding="operation"
+fault_dose_threshold=20
+degraded_factor=0.5
+full_remedy="machinery-full"
+patch_remedy="machinery-patch"
+field_replaceable=true
+[system.damage_component.susceptibility]
+physical=1
+laser=1
+
+[comms]
+range=200
+[comms.radio]
+system="comms"
+request_reading_ticks=30
+[[comms.radio.channel]]
+id="public"
+range=200
+work_units=1
+[comms_console.ai]
+[[comms_console.ai.rule]]
+priority=10
+channel="comms_respond"
+when="fact(request_receive_craft) > 0 and fact(is_read) > 0 and fact(comms_available) > 0"
+verb="respond_to_message"
+response_index=0
+
+[interior.placements]
+comms="probe-core"
+reception-bay="receiving-room"
+[[interior.compartment]]
+id="probe-core"
+deck="probe"
+label="entity.battery_probe.room"
+x=-2
+z=-2
+width=4
+depth=4
+material="bulkhead"
+max_hp=50
+recovery_fraction=0.2
+structural_remedy="structural"
+[[interior.compartment]]
+id="receiving-room"
+deck="probe"
+label="entity.reception_outpost.bay"
+x=-2
+z=2
+width=4
+depth=4
+material="bulkhead"
+max_hp=50
+recovery_fraction=0.2
+structural_remedy="structural"
+
+[[energy.consumer]]
+system = "sensor-radar"
+initial_energy = 120
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 120
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "comms"
+initial_energy = 120
+initial_heat = 0
+continuous_cost_per_sec = 0.2
+discrete_cost = 0.1
+
+[energy.consumer.reserve]
+capacity = 120
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "reception-bay"
+initial_energy = 120
+initial_heat = 0
+continuous_cost_per_sec = 0.5
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 120
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+

@@ -2303,6 +2303,7 @@ export function buildCommsConsoleState(state, systemIds = []) {
       contacts:   bb.contacts   ?? [],
       channels:   bb.channels   ?? [],
       media_capability: bb.media_capability ?? null,
+      reception_craft: bb.reception_craft ?? [],
       comms_system_id: entry.systemId,
       comms_controllable: systemIds.includes(entry.systemId)
         && state.controlSources?.[entry.systemId] === 'Human',

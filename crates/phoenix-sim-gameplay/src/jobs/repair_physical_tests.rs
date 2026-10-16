@@ -170,13 +170,13 @@ fn json_personnel_and_active_remedy_resume_exactly_for_360_real_work_steps() {
         "officer":[{"id":"chief","label":"Chief","home_compartment":"front","competencies":["mechanical_repair"],"repair_work_multiplier":1.25}]
     })).unwrap();
     let profile = CompiledPersonnel::compile(&config, live.layout().unwrap(), 2).unwrap();
-    let mut personnel = PersonnelState::new(&profile);
+    let mut personnel = PersonnelState::new(&profile, "ship");
     personnel
         .post(
             &profile,
             live.job_state(),
             live.layout().unwrap(),
-            "chief",
+            &crate::personnel::PersonRef::new("ship", "chief"),
             Some(0),
             1,
         )
@@ -188,7 +188,7 @@ fn json_personnel_and_active_remedy_resume_exactly_for_360_real_work_steps() {
                           state: &mut DamageState,
                           inventory: &mut InfrastructureState,
                           personnel: &PersonnelState| {
-        let multipliers = personnel.repair_work_multipliers(&profile, teams.job_state());
+        let multipliers = personnel.repair_work_multipliers(&profile, teams.job_state(), "ship");
         teams.tick_physical_with_expertise(
             0.05,
             state,
@@ -231,7 +231,7 @@ fn json_personnel_and_active_remedy_resume_exactly_for_360_real_work_steps() {
     let (mut resumed, _, _, _) = fixture(8);
     resumed.restore_state(&jobs).unwrap();
     resumed_personnel
-        .validate(&profile, resumed.job_state(), 200)
+        .validate(&profile, resumed.job_state(), "ship", 200)
         .unwrap();
     for step in 0..360 {
         advance_expert(&mut live, &mut damage, &mut stock, &personnel);

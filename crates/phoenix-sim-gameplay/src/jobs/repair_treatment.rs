@@ -1,13 +1,13 @@
 //! Local care borrows the one actual Repair team commitment and physical cursor.
 use super::*;
-use crate::personnel::{CompiledPersonnel, PersonnelCondition, PersonnelState};
+use crate::personnel::{CompiledPersonnel, PersonRef, PersonnelCondition, PersonnelState};
 use crate::ship::interior::TeamLocation;
 use phoenix_model::job::JobId;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TreatmentWork {
-    pub patient: String,
+    pub patient: PersonRef,
     pub condition: PersonnelCondition,
     pub progress: f32,
     pub work_secs: f32,
@@ -29,7 +29,7 @@ impl RepairTeams {
         &mut self,
         profile: &CompiledPersonnel,
         personnel: &PersonnelState,
-        patient: &str,
+        patient: &PersonRef,
         team: usize,
     ) -> Option<JobId> {
         if !personnel
@@ -55,9 +55,10 @@ impl RepairTeams {
                 },
                 cancelled: false,
                 work: TreatmentWork {
-                    patient: patient.into(),
-                    condition: personnel.officers.get(patient)?.condition,
-                    work_secs: care.work_secs(personnel.officers.get(patient)?.condition)?,
+                    patient: patient.clone(),
+                    condition: personnel.officers.get(&patient.officer)?.condition,
+                    work_secs: care
+                        .work_secs(personnel.officers.get(&patient.officer)?.condition)?,
                     progress: 0.0,
                     medication_used: false,
                     waiting_medication: false,
@@ -127,7 +128,7 @@ impl RepairTeams {
             else {
                 continue;
             };
-            if work.patient.is_empty()
+            if work.patient.validate().is_err()
                 || work.condition == PersonnelCondition::Fit
                 || !work.work_secs.is_finite()
                 || work.work_secs <= 0.0
@@ -201,13 +202,19 @@ impl RepairTeams {
         &mut self,
         profile: &CompiledPersonnel,
         personnel: &mut PersonnelState,
+        actor: &str,
         tick: u64,
         dt: f32,
         blocked: &BTreeSet<String>,
         mut medication: impl FnMut(bool, &str, &[phoenix_model::damage::PartRequirement]) -> bool,
         mut grant: impl FnMut(&SystemId, f32) -> f32,
     ) {
-        if !dt.is_finite() || dt <= 0.0 || personnel.validate(profile, &self.state, tick).is_err() {
+        if !dt.is_finite()
+            || dt <= 0.0
+            || personnel
+                .validate(profile, &self.state, actor, tick)
+                .is_err()
+        {
             return;
         }
         let (Some(care), Some(room), Some(layout), Some(navigation)) = (
@@ -291,7 +298,7 @@ impl RepairTeams {
                     {
                         let patient = personnel
                             .officers
-                            .get_mut(&work.patient)
+                            .get_mut(&work.patient.officer)
                             .expect("validated actual patient");
                         patient.condition = PersonnelCondition::Fit;
                         patient.changed_tick = tick;

@@ -2162,6 +2162,8 @@ pub enum SystemControlPayload {
     },
     RecoverCraft {
         contact: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reception: Option<crate::craft::CraftReceptionOrder>,
     },
     CancelCraftHandling,
     ToggleBoost,
@@ -2471,22 +2473,22 @@ pub enum SystemControlPayload {
     },
     /// A co-located physical posting to an existing finite Repair team.
     SetDutyOfficerPosting {
-        officer: String,
+        officer: crate::personnel::PersonRef,
         team_idx: Option<u32>,
     },
     /// Actual local care by one existing finite compatible team.
     TreatDutyOfficer {
-        officer: String,
+        officer: crate::personnel::PersonRef,
         team_idx: u32,
     },
     /// Persistent destination intent; setting it is not a physical handoff.
     SetDutyOfficerDestination {
-        officer: String,
+        officer: crate::personnel::PersonRef,
         destination: Option<crate::personnel::PersonnelDestination>,
     },
     /// Commit an eligible actual finite team to the current destination order.
     DispatchOfficerTransfer {
-        officer: String,
+        officer: crate::personnel::PersonRef,
         team_idx: u32,
         request: crate::personnel::PersonnelDestinationRequest,
     },
@@ -5811,6 +5813,9 @@ pub struct RepairBlackboard {
 /// blackboard (issue #565).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct CommsBlackboard {
+    /// Current own stored craft from explicitly bound Bay publications only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reception_craft: Vec<crate::craft::StoredCraftView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub captured: Option<crate::comms_capture::CommsCaptureControlsView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -3,7 +3,7 @@ title: Repair Runtime
 type: concept
 tags: [repair, damage, teams, blackboard, ai, external-repair, semantic-actions, feedback]
 sources: [crates/phoenix-sim-gameplay/src/jobs/repair_personnel_transfer.rs, crates/phoenix-simulation/src/console/repair/personnel_transfer.rs, crates/phoenix-simulation/src/snapshot/personnel_graph.rs, crates/phoenix-sim-gameplay/src/jobs/repair_treatment.rs, crates/phoenix-simulation/src/resources/ports_equipment.rs, crates/phoenix-sim-gameplay/src/security/local.rs, editor/workshop-security.js, gui/workshop-security-panel.js, crates/phoenix-sim-gameplay/src/jobs/security.rs, crates/phoenix-simulation/src/security/server.rs, crates/phoenix-simulation/src/snapshot/security.rs, gui/job-work-list.js, crates/phoenix-model/src/personnel.rs, crates/phoenix-sim-gameplay/src/personnel.rs, crates/phoenix-simulation/src/console/repair/personnel.rs, crates/phoenix-simulation/src/snapshot/personnel.rs, editor/workshop-personnel.js, gui/workshop-personnel-panel.js, crates/phoenix-sim-gameplay/src/jobs/repair_external_physical.rs, crates/phoenix-sim-gameplay/src/jobs/repair_physical.rs, crates/phoenix-model/src/job.rs, crates/phoenix-sim-gameplay/src/jobs/repair.rs, crates/phoenix-sim-gameplay/src/jobs/repair_workflow.rs, gui/job-work-list.js, crates/phoenix-simulation/src/console/repair/reports.rs, crates/phoenix-simulation/src/console/repair/server.rs, crates/phoenix-simulation/src/console/repair/dispatch.rs, crates/phoenix-simulation/src/console/repair/external_server.rs, crates/phoenix-simulation/src/console/repair/visibility.rs, crates/phoenix-simulation/src/ship/coordination_systems.rs, crates/phoenix-simulation/src/ship/damage_sync.rs, crates/phoenix-sim-gameplay/src/ship/components.rs, crates/phoenix-sim-gameplay/src/modifiers/repair_teams.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/command_admission/mod.rs, gui/components/ph-repair-teams.js, gui/stations/engineering-actions.js, gui/action-map.js]
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # Repair Runtime
@@ -72,6 +72,16 @@ UUID and local officer ID. `PersonnelState` is a row value, never an entity
 component. `CompiledPersonnel` remains the accepted derived live actor binding.
 Repair command, work and publication adapters join that actor's row only; a
 global resource grants no additional Console or individual AI knowledge.
+Cross-scope person identity is the typed `PersonRef { origin, officer }`, used by
+normal controls, published rows, Treatment/PersonnelTransfer work and the one
+Repair request map. Authored officer IDs remain local to their finite definition.
+On-ship compartment and posted-team custody explicitly name their actual holder;
+loss follows that holder rather than inferring it from retained origin identity.
+The existing local consumer still requires the reference's origin to match its
+actual owner. This migration does not enable foreign disembarkation or publication.
+Snapshot request maps encode sorted compound-key rows and refuse duplicates or
+unsorted/legacy local keys; required holder fields have no old-state default.
+
 The snapshot's required global `personnel` field captures the roster once, and
 single-row machinery restore validates against current custody without rewinding
 it. Whole restore checks actual Repair jobs, finite definitions, retained source

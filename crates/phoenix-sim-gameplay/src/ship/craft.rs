@@ -2,7 +2,7 @@
 use crate::ai::state_tree::TreeRuntime;
 use crate::jobs::Job;
 use phoenix_model::{
-    craft::BayConfig,
+    craft::{BayConfig, CraftReceptionOrder, CraftReceptionReceipt},
     identity::SystemId,
     job::{JobId, JobOutcome},
 };
@@ -12,10 +12,16 @@ pub use phoenix_model::craft::BayOperation;
 
 pub fn bindings() -> crate::ai::state_tree::SupportedBindings {
     crate::ai::state_tree::SupportedBindings {
-        facts: ["can_operate", "has_stored", "has_contacts", "active"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect(),
+        facts: [
+            "can_operate",
+            "has_stored",
+            "has_contacts",
+            "active",
+            "has_accepted_reception",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect(),
         channels: ["launch", "recover", "cancel"]
             .into_iter()
             .map(str::to_owned)
@@ -32,6 +38,8 @@ pub struct BayActivity {
     pub profile: BayConfig,
     pub energy_per_sec: f32,
     pub worked_secs: f64,
+    pub reception: Option<CraftReceptionOrder>,
+    pub receipt: Option<CraftReceptionReceipt>,
 }
 impl BayActivity {
     pub fn required_secs(&self) -> f64 {
@@ -45,6 +53,25 @@ impl BayActivity {
     }
     fn validate(&self, now: u64) -> Result<(), String> {
         self.profile.validate()?;
+        if let Some(order) = &self.reception {
+            order.validate(now).map_err(str::to_owned)?;
+            if self.operation != BayOperation::Recover
+                || order.craft() != Some(self.craft_uuid.as_str())
+                || order.decision_tick > self.accepted_tick
+            {
+                return Err("Bay receiving order differs from its actual accepted recovery".into());
+            }
+        }
+        if let Some(receipt) = &self.receipt {
+            receipt.validate(now).map_err(str::to_owned)?;
+            if self.reception.as_ref() != Some(&receipt.order)
+                || receipt.craft != self.craft_uuid
+                || !self.ready()
+                || receipt.handoff_tick < self.accepted_tick
+            {
+                return Err("Bay handoff receipt differs from its actual receiving work".into());
+            }
+        }
         if !identity(&self.craft_uuid)
             || self.accepted_tick > now
             || !self.energy_per_sec.is_finite()
@@ -82,7 +109,15 @@ impl BayState {
         }
         if let Some(job) = &self.job {
             job.activity.validate(now)?;
-            if job.owner != *owner
+            if job.activity.receipt.as_ref().is_some_and(|receipt| {
+                receipt.scope.owner != *owner
+                    || receipt.scope.job != job.id
+                    || job.outcome != Some(JobOutcome::Completed)
+                    || receipt.handoff_tick <= job.execution_tick
+            }) || (job.outcome == Some(JobOutcome::Completed)
+                && job.activity.reception.is_some()
+                && job.activity.receipt.is_none())
+                || job.owner != *owner
                 || job.id.0 == 0
                 || job.id.0 >= self.next_id
                 || job.execution_tick < job.activity.accepted_tick
@@ -108,16 +143,29 @@ impl BayState {
         energy_per_sec: f32,
         now: u64,
     ) -> Result<(), String> {
+        self.begin_order(
+            owner,
+            craft_uuid,
+            operation,
+            profile,
+            energy_per_sec,
+            now,
+            None,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn begin_order(
+        &mut self,
+        owner: &SystemId,
+        craft_uuid: &str,
+        operation: BayOperation,
+        profile: &BayConfig,
+        energy_per_sec: f32,
+        now: u64,
+        reception: Option<&CraftReceptionOrder>,
+    ) -> Result<(), String> {
         self.validate(owner, now)?;
-        if let Some(job) = &mut self.job {
-            if job.outcome.is_none() {
-                if job.activity.craft_uuid == craft_uuid && job.activity.operation == operation {
-                    job.paused = false;
-                    return Ok(());
-                }
-                return Err("actual bay already owns another handling Job".into());
-            }
-        }
+        // Validate before resuming or minting, including an unchanged craft with a replaced order.
         let activity = BayActivity {
             craft_uuid: craft_uuid.into(),
             operation,
@@ -125,8 +173,22 @@ impl BayState {
             profile: profile.clone(),
             energy_per_sec,
             worked_secs: 0.0,
+            reception: reception.cloned(),
+            receipt: None,
         };
         activity.validate(now)?;
+        if let Some(job) = &mut self.job {
+            if job.outcome.is_none() {
+                if job.activity.craft_uuid == craft_uuid
+                    && job.activity.operation == operation
+                    && job.activity.reception.as_ref() == reception
+                {
+                    job.paused = false;
+                    return Ok(());
+                }
+                return Err("actual bay already owns another handling Job".into());
+            }
+        }
         let next = self
             .next_id
             .checked_add(1)
@@ -226,6 +288,9 @@ impl BayState {
     }
     /// Call only in the same transaction as the actual location/physical handoff.
     pub fn complete(&mut self) -> bool {
+        self.complete_receiving(None)
+    }
+    pub fn complete_receiving(&mut self, receipt: Option<CraftReceptionReceipt>) -> bool {
         let Some(job) = self
             .job
             .as_mut()
@@ -233,6 +298,18 @@ impl BayState {
         else {
             return false;
         };
+        if receipt.as_ref().map(|receipt| &receipt.order) != job.activity.reception.as_ref()
+            || receipt.as_ref().is_some_and(|receipt| {
+                receipt.validate(receipt.handoff_tick).is_err()
+                    || receipt.scope.owner != job.owner
+                    || receipt.scope.job != job.id
+                    || receipt.craft != job.activity.craft_uuid
+                    || receipt.handoff_tick <= job.execution_tick
+            })
+        {
+            return false;
+        }
+        job.activity.receipt = receipt;
         job.outcome = Some(JobOutcome::Completed);
         true
     }

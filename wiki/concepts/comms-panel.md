@@ -2,7 +2,7 @@
 title: Comms Panel
 type: concept
 tags: [comms, client, inbox, hails, priority, localisation, input, feedback]
-sources: [crates/phoenix-simulation/src/comms/capture.rs, crates/phoenix-simulation/src/snapshot/comms_capture.rs, gui/comms-capture.js, gui/components/comms-capture-controls.js, crates/phoenix-simulation/src/comms/media_control.rs, crates/phoenix-simulation/src/comms/media_session.rs, crates/phoenix-simulation/src/comms/media_edge.rs, crates/phoenix-simulation/src/comms/media_mesh.rs, gui/comms-media-client.js, gui/fleet-media.js, crates/phoenix-simulation/src/comms/formation.rs, crates/phoenix-simulation/src/comms/planned.rs, crates/phoenix-simulation/src/comms/request_delivery.rs, crates/phoenix-simulation/src/comms/radio_route.rs, assets/entities/relay_cruiser.toml, crates/phoenix-model/src/comms_request.rs, crates/phoenix-simulation/src/comms/requests.rs, crates/phoenix-simulation/src/comms/request_returns.rs, crates/phoenix-simulation/src/snapshot/comms_requests.rs, gui/comms-requests.js, gui/components/ph-comms-text-composer.js, editor/workshop-comms-radio.js, gui/workshop-comms-radio-panel.js, gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/world/server/mod.rs, tests/publisher_ordering.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm/operations/comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
+sources: [crates/phoenix-simulation/src/comms/reception.rs, crates/phoenix-simulation/src/comms/capture.rs, crates/phoenix-simulation/src/snapshot/comms_capture.rs, gui/comms-capture.js, gui/components/comms-capture-controls.js, crates/phoenix-simulation/src/comms/media_control.rs, crates/phoenix-simulation/src/comms/media_session.rs, crates/phoenix-simulation/src/comms/media_edge.rs, crates/phoenix-simulation/src/comms/media_mesh.rs, gui/comms-media-client.js, gui/fleet-media.js, crates/phoenix-simulation/src/comms/formation.rs, crates/phoenix-simulation/src/comms/planned.rs, crates/phoenix-simulation/src/comms/request_delivery.rs, crates/phoenix-simulation/src/comms/radio_route.rs, assets/entities/relay_cruiser.toml, crates/phoenix-model/src/comms_request.rs, crates/phoenix-simulation/src/comms/requests.rs, crates/phoenix-simulation/src/comms/request_returns.rs, crates/phoenix-simulation/src/snapshot/comms_requests.rs, gui/comms-requests.js, gui/components/ph-comms-text-composer.js, editor/workshop-comms-radio.js, gui/workshop-comms-radio-panel.js, gui/cruiser/comms.console.js, gui/stations/comms-console.js, gui/stations/comms-actions.js, gui/semantic-action-registry.js, gui/action-feedback.js, gui/comms-state.js, gui/components/ph-comms-contact-list.js, gui/components/ph-comms-hail-list.js, gui/components/ph-comms-current-message.js, gui/console-state.js, gui/action-map.js, crates/phoenix-simulation/src/command_admission/mod.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-simulation/src/console/comms/inbox.rs, crates/phoenix-sim-world/src/comms/content.rs, crates/phoenix-simulation/src/comms/server.rs, crates/phoenix-simulation/src/world/server/mod.rs, tests/publisher_ordering.rs, crates/phoenix-simulation/src/comms/scripted.rs, crates/phoenix-model/src/messages.rs, crates/phoenix-simulation/src/gm/operations/comms.rs, gui/gm-comms-panel.js, docs/gm-comms-authoring.md, assets/strings/strings.csv]
 updated: 2026-10-16
 ---
 
@@ -42,6 +42,19 @@ AI declines media requests after its normal reading work. `gui/fleet-media.js`
 and the host adapters keep media outside ordinary retained queues and use only
 the negotiated drop-only Snapshot path. Device and two-host acceptance are
 separate from source review and mocked-device tests.
+
+## Craft receiving requests
+
+The composer offers only current own stored craft from explicitly bound Bay
+publications. `buildCommsConsoleState` forwards that selected Comms publication's
+list without collecting unrelated Bay blackboards. ReceiveCraft carries a sender claim, never an observed-contact or
+ownership grant. A receiving operator accepts through ordinary Comms; machinery
+operation remains with its Bay. Bay controls display the attributed agreement
+and wait for an independently earned contact, keeping technical identities out
+of player text. The immutable current order is checked again when a held control
+is activated. The original local request reaches Completed only when actual
+physical Bay recovery writes its dated receipt; returned evidence uses the same
+ordinary paid radio path. Dismissal and source loss preserve heard lineage.
 
 ## Radio authoring
 

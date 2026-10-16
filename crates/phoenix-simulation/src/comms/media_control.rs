@@ -96,7 +96,7 @@ pub fn accepted_call(
                         decision.choice == CommsRequestDecision::Accept
                     }) =>
             {
-                let GenericCommsRequest::MediaCall { mode } = outcome.request.request else {
+                let GenericCommsRequest::MediaCall { mode } = &outcome.request.request else {
                     continue;
                 };
                 if !inbox.0.iter().any(|original| original.sender_uuid == ship && original.is_for_ship(Some(ship))
@@ -104,13 +104,13 @@ pub fn accepted_call(
                             && issued.received_tick.is_none() && issued.emitted_tick == outcome.request.emitted_tick
                             && issued.channel == wire.channel
                             && matches!(&issued.audience, CommsAudience::Contact {target_uuid} if *target_uuid == outcome.request.recipient_ship)
-                            && issued.content == CommsRadioContent::Request {request: outcome.request.request})) {continue;}
+                            && issued.content == CommsRadioContent::Request {request: outcome.request.request.clone()})) {continue;}
                 return Some(MediaCallBinding {
                     origin: origin.into(),
                     source_ship: ship.into(),
                     recipient_ship: outcome.request.recipient_ship.clone(),
                     channel: wire.channel.clone(),
-                    mode,
+                    mode: *mode,
                 });
             }
             _ => {}

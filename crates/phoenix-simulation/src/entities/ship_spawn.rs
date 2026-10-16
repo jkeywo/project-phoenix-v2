@@ -77,6 +77,9 @@ pub(super) fn install(
             crate::ship::shields::ShieldsDamageHistory::default(),
         ));
         insert_power_state(config, &[], cmds);
+        // Fixed equipped facilities use their explicitly authored ordinary
+        // System policies too; installing a policy adds no propulsion/Ship marker.
+        insert_ai_policies(config, cmds);
         if config.ship_config.as_ref().is_some_and(|ship| {
             ship.systems.iter().any(|system| {
                 crate::ship::composition::dock_composition(&system.components)

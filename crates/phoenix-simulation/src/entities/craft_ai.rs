@@ -41,6 +41,10 @@ pub(crate) fn operate(
                 ("has_stored".into(), !board.stored.is_empty()),
                 ("has_contacts".into(), !board.contacts.is_empty()),
                 ("active".into(), active),
+                (
+                    "has_accepted_reception".into(),
+                    board.receptions.iter().any(|row| row.contact.is_some()),
+                ),
             ]);
             let pending = BTreeMap::from([
                 ("launch".into(), false),
@@ -71,13 +75,21 @@ pub(crate) fn operate(
                     })
             } else if !active && result.intents.get("recover") == Some(&true) && board.can_recover {
                 // Same exact public current contact choice offered to a Human.
-                board
-                    .contacts
-                    .iter()
-                    .min_by(|a, b| a.contact.cmp(&b.contact))
-                    .map(|row| Control::RecoverCraft {
-                        contact: row.contact.clone(),
+                if let Some(row) = board.receptions.iter().find(|row| row.contact.is_some()) {
+                    Some(Control::RecoverCraft {
+                        contact: row.contact.clone().unwrap(),
+                        reception: Some(row.order.clone()),
                     })
+                } else {
+                    board
+                        .contacts
+                        .iter()
+                        .min_by(|a, b| a.contact.cmp(&b.contact))
+                        .map(|row| Control::RecoverCraft {
+                            contact: row.contact.clone(),
+                            reception: None,
+                        })
+                }
             } else {
                 None
             };

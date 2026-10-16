@@ -205,7 +205,7 @@ impl PersonnelRoster {
         self.origins.insert(
             actor.into(),
             PersonnelOrigin {
-                state: PersonnelState::new(&profile),
+                state: PersonnelState::new(&profile, actor),
                 definition: profile,
                 source,
                 accepted_tick: tick,
@@ -233,8 +233,8 @@ impl PersonnelRoster {
             }
             for state in origin.state.officers.values_mut() {
                 let aboard = match &state.location {
-                    OfficerLocation::AtCompartment { .. }
-                    | OfficerLocation::WithRepairTeam { .. } => origin_actor == actor,
+                    OfficerLocation::AtCompartment { actor: holder, .. }
+                    | OfficerLocation::WithRepairTeam { actor: holder, .. } => holder == actor,
                     OfficerLocation::WithTransfer { actor: carrier, .. } => carrier == actor,
                     OfficerLocation::AboardCraft { craft, .. } => craft == actor,
                     OfficerLocation::Lost { .. } => false,
@@ -266,7 +266,7 @@ fn at_idle_home<'a>(
 }
 
 impl PersonnelState {
-    pub fn new(profile: &CompiledPersonnel) -> Self {
+    pub fn new(profile: &CompiledPersonnel, actor: &str) -> Self {
         Self {
             officers: profile
                 .config
@@ -278,6 +278,7 @@ impl PersonnelState {
                         DutyOfficerState {
                             condition: officer.initial_condition,
                             location: OfficerLocation::AtCompartment {
+                                actor: actor.into(),
                                 compartment: officer.home_compartment.clone(),
                             },
                             changed_tick: 0,
@@ -294,6 +295,7 @@ impl PersonnelState {
         &self,
         profile: &CompiledPersonnel,
         jobs: &RepairJobState,
+        actor: &str,
         tick: u64,
     ) -> Result<(), String> {
         if self.officers.keys().collect::<BTreeSet<_>>()
@@ -315,9 +317,10 @@ impl PersonnelState {
                 return Err("officer posting is from a future logical tick".into());
             }
             match &officer.location {
-                OfficerLocation::AtCompartment { compartment }
-                    if compartment == &definition.home_compartment => {}
-                OfficerLocation::WithRepairTeam { team_idx } => {
+                OfficerLocation::AtCompartment { actor: holder, compartment }
+                    if holder == actor && compartment == &definition.home_compartment => {}
+                OfficerLocation::WithRepairTeam { actor: holder, team_idx } => {
+                    if holder != actor { return Err("posted officer has another actual holder".into()); }
                     let team = profile
                         .config
                         .repair_teams
@@ -343,12 +346,12 @@ impl PersonnelState {
                 }
                 OfficerLocation::AboardCraft {craft,berth} if !craft.is_empty() && !berth.is_empty()=>{},
                 OfficerLocation::Lost {actor} if !actor.is_empty()=>{},
-                OfficerLocation::WithTransfer {actor,team_idx,job} if !actor.is_empty() && jobs.teams.get(*team_idx as usize).and_then(Option::as_ref).is_some_and(|active|active.id==*job && active.outcome.is_none() && matches!(&active.activity,RepairActivity::PersonnelTransfer {work,..} if work.officer==definition.id && !work.completed && work.stage!=PersonnelTransferStage::Collecting))=>{},
+                OfficerLocation::WithTransfer {actor:holder,team_idx,job} if holder==actor && jobs.teams.get(*team_idx as usize).and_then(Option::as_ref).is_some_and(|active|active.id==*job && active.outcome.is_none() && matches!(&active.activity,RepairActivity::PersonnelTransfer {work,..} if work.officer.origin==actor && work.officer.officer==definition.id && !work.completed && work.stage!=PersonnelTransferStage::Collecting))=>{},
                 _ => return Err("unposted officer is outside its supported actual custody".into()),
             }
         }
-        self.validate_treatment(profile, jobs)?;
-        self.validate_personnel_transfers(profile, jobs)?;
+        self.validate_treatment(profile, jobs, actor)?;
+        self.validate_personnel_transfers(profile, jobs, actor)?;
         Ok(())
     }
 
@@ -359,11 +362,13 @@ impl PersonnelState {
         profile: &CompiledPersonnel,
         jobs: &RepairJobState,
         interior: &InteriorConfig,
-        officer_id: &str,
+        person: &PersonRef,
         destination: Option<u32>,
         tick: u64,
     ) -> Result<(), String> {
-        self.validate(profile, jobs, tick)?;
+        person.validate()?;
+        self.validate(profile, jobs, &person.origin, tick)?;
+        let officer_id = person.officer.as_str();
         let definition = profile
             .config
             .officers
@@ -377,10 +382,10 @@ impl PersonnelState {
         if destination.is_some() && officer.condition != PersonnelCondition::Fit {
             return Err("unfit officers cannot be newly posted".into());
         }
-        if jobs.teams.iter().flatten().any(|job|job.outcome.is_none() && matches!(&job.activity, RepairActivity::Treatment { work, .. } if work.patient == officer_id)) {
+        if jobs.teams.iter().flatten().any(|job|job.outcome.is_none() && matches!(&job.activity, RepairActivity::Treatment { work, .. } if &work.patient == person)) {
             return Err("officer is committed to actual treatment".into());
         }
-        if jobs.teams.iter().flatten().any(|job|job.outcome.is_none() && matches!(&job.activity,RepairActivity::PersonnelTransfer {work,..} if work.officer==officer_id && !work.completed)) {return Err("officer is committed to actual escort work".into());}
+        if jobs.teams.iter().flatten().any(|job|job.outcome.is_none() && matches!(&job.activity,RepairActivity::PersonnelTransfer {work,..} if &work.officer==person && !work.completed)) {return Err("officer is committed to actual escort work".into());}
         let current = match &officer.location {
             OfficerLocation::Lost { .. }
             | OfficerLocation::AboardCraft { .. }
@@ -388,7 +393,7 @@ impl PersonnelState {
                 return Err("officer is not available at its actual local posting site".into())
             }
             OfficerLocation::AtCompartment { .. } => None,
-            OfficerLocation::WithRepairTeam { team_idx } => Some(*team_idx),
+            OfficerLocation::WithRepairTeam { team_idx, .. } => Some(*team_idx),
         };
         if current == destination {
             return Ok(());
@@ -399,8 +404,8 @@ impl PersonnelState {
             | OfficerLocation::WithTransfer { .. } => {
                 return Err("lost officer has no operational location".into());
             }
-            OfficerLocation::AtCompartment { compartment } => compartment.as_str(),
-            OfficerLocation::WithRepairTeam { team_idx } => {
+            OfficerLocation::AtCompartment { compartment, .. } => compartment.as_str(),
+            OfficerLocation::WithRepairTeam { team_idx, .. } => {
                 at_idle_home(jobs, interior, *team_idx as usize)
                     .ok_or("officer cannot leave a team that is away or committed")?
             }
@@ -414,21 +419,28 @@ impl PersonnelState {
                 .ok_or("unknown team posting")?;
             if !compatible(team, definition)
                 || at_idle_home(jobs, interior, team_idx as usize) != Some(compartment)
-                || self
-                    .officers
-                    .values()
-                    .any(|officer| officer.location == OfficerLocation::WithRepairTeam { team_idx })
+                || self.officers.values().any(|officer| {
+                    officer.location
+                        == OfficerLocation::WithRepairTeam {
+                            actor: person.origin.clone(),
+                            team_idx,
+                        }
+                })
             {
                 return Err(
                     "posting requires one free compatible co-located team at its idle home".into(),
                 );
             }
-            OfficerLocation::WithRepairTeam { team_idx }
+            OfficerLocation::WithRepairTeam {
+                actor: person.origin.clone(),
+                team_idx,
+            }
         } else {
             if compartment != definition.home_compartment {
                 return Err("officer release requires its actual home compartment".into());
             }
             OfficerLocation::AtCompartment {
+                actor: person.origin.clone(),
                 compartment: compartment.into(),
             }
         };
@@ -449,18 +461,18 @@ impl PersonnelState {
         &self,
         profile: &CompiledPersonnel,
         jobs: &RepairJobState,
-        patient: &str,
+        patient: &PersonRef,
     ) -> Vec<u32> {
-        let Some(state) = self.officers.get(patient) else {
+        let Some(state) = self.officers.get(&patient.officer) else {
             return Vec::new();
         };
-        if jobs.teams.iter().flatten().any(|job|job.outcome.is_none() && matches!(&job.activity,RepairActivity::PersonnelTransfer {work,..} if work.officer==patient && !work.completed)) {return Vec::new();}
+        if jobs.teams.iter().flatten().any(|job|job.outcome.is_none() && matches!(&job.activity,RepairActivity::PersonnelTransfer {work,..} if &work.officer==patient && !work.completed)) {return Vec::new();}
         let Some(room) = profile.care_compartment.as_ref() else {
             return Vec::new();
         };
         if profile.config.care.as_ref().is_some_and(|care|jobs.teams.iter().flatten().any(|job|job.outcome.is_none() && matches!(&job.activity,RepairActivity::Refit {target,..} if target==&care.system))) {return Vec::new();}
-        if state.condition==PersonnelCondition::Fit || !matches!(&state.location,OfficerLocation::AtCompartment {compartment} if compartment==room)
-            || jobs.teams.iter().flatten().any(|job|job.outcome.is_none() && matches!(&job.activity,RepairActivity::Treatment {work,..} if work.patient==patient)) {return Vec::new();}
+        if state.condition==PersonnelCondition::Fit || !matches!(&state.location,OfficerLocation::AtCompartment {actor,compartment} if actor==&patient.origin && compartment==room)
+            || jobs.teams.iter().flatten().any(|job|job.outcome.is_none() && matches!(&job.activity,RepairActivity::Treatment {work,..} if &work.patient==patient)) {return Vec::new();}
         profile.config.repair_teams.iter().filter_map(|team| {
             let index=team.team_idx as usize;
             (team.competencies.contains(&DutyCompetency::MedicalCare) && jobs.teams.get(index).is_some_and(|entry|entry.as_ref().is_none_or(|job|job.outcome.is_some()))
@@ -472,6 +484,7 @@ impl PersonnelState {
         &self,
         profile: &CompiledPersonnel,
         jobs: &RepairJobState,
+        actor: &str,
     ) -> Result<(), String> {
         let mut patients = BTreeSet::new();
         for (index, entry) in jobs.teams.iter().enumerate() {
@@ -497,7 +510,7 @@ impl PersonnelState {
                 .ok_or("care has no actual service compartment")?;
             let patient = self
                 .officers
-                .get(&work.patient)
+                .get(&work.patient.officer)
                 .ok_or("unknown actual treatment patient")?;
             let cursor = jobs
                 .navigation
@@ -507,10 +520,13 @@ impl PersonnelState {
             let duration = care
                 .work_secs(work.condition)
                 .ok_or("treatment cannot claim a fit condition")?;
-            if !profile.config.repair_teams.iter().any(|team| {
-                team.team_idx as usize == index
-                    && team.competencies.contains(&DutyCompetency::MedicalCare)
-            }) || work.work_secs != duration
+            if work.patient.origin != actor
+                || work.patient.validate().is_err()
+                || !profile.config.repair_teams.iter().any(|team| {
+                    team.team_idx as usize == index
+                        && team.competencies.contains(&DutyCompetency::MedicalCare)
+                })
+                || work.work_secs != duration
                 || !work.progress.is_finite()
                 || !(0.0..=duration).contains(&work.progress)
                 || (work.progress > 0.0 && !work.medication_used)
@@ -529,7 +545,7 @@ impl PersonnelState {
             if job.outcome.is_some() {
                 continue;
             }
-            if !matches!(&patient.location,OfficerLocation::AtCompartment {compartment} if compartment==room)
+            if !matches!(&patient.location,OfficerLocation::AtCompartment {actor:holder,compartment} if holder==actor && compartment==room)
             {
                 return Err("active treatment patient left its actual service compartment".into());
             }
@@ -579,6 +595,7 @@ impl PersonnelState {
         &self,
         profile: &CompiledPersonnel,
         jobs: &RepairJobState,
+        actor: &str,
     ) -> Result<(), String> {
         for (index, entry) in jobs.teams.iter().enumerate() {
             let Some(job) = entry else {
@@ -594,11 +611,11 @@ impl PersonnelState {
                 .config
                 .officers
                 .iter()
-                .find(|officer| officer.id == work.officer)
+                .find(|officer| officer.id == work.officer.officer)
                 .ok_or("transfer names an unknown accepted officer")?;
             let person = self
                 .officers
-                .get(&work.officer)
+                .get(&work.officer.officer)
                 .ok_or("transfer has no actual person")?;
             let team = profile
                 .config
@@ -606,9 +623,11 @@ impl PersonnelState {
                 .iter()
                 .find(|team| team.team_idx as usize == index)
                 .ok_or("transfer has no accepted finite team")?;
-            if !team
-                .competencies
-                .contains(&DutyCompetency::PersonnelTransport)
+            if work.officer.origin != actor
+                || work.officer.validate().is_err()
+                || !team
+                    .competencies
+                    .contains(&DutyCompetency::PersonnelTransport)
                 || (job.outcome.is_none()
                     && !work.completed
                     && person.condition == PersonnelCondition::Severe
@@ -636,7 +655,7 @@ impl PersonnelState {
                     *cancelled
                         && (carrying
                             || person.location == work.plan.pickup
-                            || matches!(&person.location,OfficerLocation::AtCompartment {compartment} if compartment==&definition.home_compartment)
+                            || matches!(&person.location,OfficerLocation::AtCompartment {actor:holder,compartment} if holder==actor && compartment==&definition.home_compartment)
                             || matches!(person.location, OfficerLocation::Lost { .. }))
                 }
             };
@@ -652,17 +671,23 @@ impl PersonnelState {
         &self,
         profile: &CompiledPersonnel,
         jobs: &RepairJobState,
+        actor: &str,
     ) -> Vec<f32> {
         let mut result = vec![1.0; jobs.teams.len()];
         for definition in &profile.config.officers {
             let Some(DutyOfficerState {
-                location: OfficerLocation::WithRepairTeam { team_idx },
+                location:
+                    OfficerLocation::WithRepairTeam {
+                        actor: holder,
+                        team_idx,
+                    },
                 ..
             }) = self.officers.get(&definition.id)
             else {
                 continue;
             };
-            if self.officers[&definition.id].condition != PersonnelCondition::Fit
+            if holder != actor
+                || self.officers[&definition.id].condition != PersonnelCondition::Fit
                 || !definition
                     .competencies
                     .contains(&DutyCompetency::MechanicalRepair)
@@ -713,9 +738,10 @@ impl PersonnelState {
         profile: &CompiledPersonnel,
         jobs: &RepairJobState,
         interior: &InteriorConfig,
+        actor: &str,
         tick: u64,
     ) -> PersonnelView {
-        let multipliers = self.repair_work_multipliers(profile, jobs);
+        let multipliers = self.repair_work_multipliers(profile, jobs, actor);
         PersonnelView {
             carried_destinations: Vec::new(),
             teams: profile
@@ -730,9 +756,10 @@ impl PersonnelState {
                     officer: self.officers.iter().find_map(|(id, officer)| {
                         (officer.location
                             == OfficerLocation::WithRepairTeam {
+                                actor: actor.into(),
                                 team_idx: team.team_idx,
                             })
-                        .then(|| id.clone())
+                        .then(|| PersonRef::new(actor, id))
                     }),
                     active_work_multiplier: multipliers
                         .get(team.team_idx as usize)
@@ -757,7 +784,7 @@ impl PersonnelState {
                                     profile,
                                     jobs,
                                     interior,
-                                    &definition.id,
+                                    &PersonRef::new(actor, &definition.id),
                                     Some(team.team_idx),
                                     tick,
                                 )
@@ -769,21 +796,32 @@ impl PersonnelState {
                         matches!(officer.location, OfficerLocation::WithRepairTeam { .. })
                             && self
                                 .clone()
-                                .post(profile, jobs, interior, &definition.id, None, tick)
+                                .post(
+                                    profile,
+                                    jobs,
+                                    interior,
+                                    &PersonRef::new(actor, &definition.id),
+                                    None,
+                                    tick,
+                                )
                                 .is_ok();
                     Some(DutyOfficerView {
                         destination_request: None,
                         transfer_teams: Vec::new(),
                         transfer: None,
                         condition: officer.condition,
-                        treatment_teams: self.treatment_teams(profile, jobs, &definition.id),
+                        treatment_teams: self.treatment_teams(
+                            profile,
+                            jobs,
+                            &PersonRef::new(actor, &definition.id),
+                        ),
                         treatment: jobs.teams.iter().enumerate().find_map(|(index, entry)| {
                             let job = entry.as_ref().filter(|job| job.outcome.is_none())?;
                             let RepairActivity::Treatment { work, phase, .. } = &job.activity
                             else {
                                 return None;
                             };
-                            if work.patient != definition.id {
+                            if work.patient != PersonRef::new(actor, &definition.id) {
                                 return None;
                             }
                             Some(OfficerTreatmentView {
@@ -802,7 +840,7 @@ impl PersonnelState {
                                 waiting_medication: work.waiting_medication,
                             })
                         }),
-                        id: definition.id.clone(),
+                        person: PersonRef::new(actor, &definition.id),
                         label: definition.label.clone(),
                         competencies: definition.competencies.clone(),
                         location: officer.location.clone(),

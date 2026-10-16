@@ -174,6 +174,7 @@ export function registerCommsActions(registry, options = {}) {
     if (!audience || !['all', 'fleet', 'contact'].includes(audience.kind) || (typeof request === 'object' && audience.kind !== 'contact')) return false;
     if (audience.kind === 'contact' && !(view.contacts || []).some(contact => contactId(contact) === audience.target_uuid)
       && !(view.messages || []).some(message => message.sender_uuid === audience.target_uuid && message.transmission?.received_tick != null)) return false;
+    if (request?.receive_craft && !(view.reception_craft || []).some(row=>row.id===request.receive_craft.craft)) return false;
     if (draft.planned_request !== undefined) {
       if (typeof draft.planned_request !== 'string' || new TextEncoder().encode(draft.planned_request).length > 2048
         || !draft.planned_request.trim() || /[\u0000-\u001f\u007f-\u009f]/u.test(draft.planned_request)

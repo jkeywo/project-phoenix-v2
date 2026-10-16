@@ -3,10 +3,16 @@ const index = value => Number.isSafeInteger(value) && value >= 0 && value <= 0xf
 const text = value => typeof value === 'string' && value.length > 0;
 const competencies = values => Array.isArray(values) && values.length > 0
   && values.every(value => ['mechanical_repair', 'medical_care', 'personnel_transport'].includes(value)) && new Set(values).size === values.length;
+export const personKey = person => JSON.stringify([person?.origin, person?.officer]);
+const personRef = person => person && text(person.origin) && person.origin.trim() === person.origin
+  && person.origin.length <= 128 && !/[\x00-\x1f\x7f]/.test(person.origin)
+  && typeof person.officer === 'string' && /^[a-z0-9-]+$/.test(person.officer)
+  && Object.keys(person).every(key => key === 'origin' || key === 'officer');
+const samePerson = (a,b) => personRef(a) && personRef(b) && a.origin === b.origin && a.officer === b.officer;
 export function personnelPayload(value, owner, controllable) {
   if (!value || !text(owner) || !Array.isArray(value.teams) || !Array.isArray(value.officers)) return null;
   const teams = value.teams.filter(team => team && text(team.id) && text(team.label) && index(team.team_idx)
-    && competencies(team.competencies) && Number.isFinite(team.active_work_multiplier) && team.active_work_multiplier >= 1);
+    && (team.officer == null || personRef(team.officer)) && competencies(team.competencies) && Number.isFinite(team.active_work_multiplier) && team.active_work_multiplier >= 1);
   if (teams.length !== value.teams.length || new Set(teams.map(team => team.team_idx)).size !== teams.length) return null;
   const known = new Set(teams.map(team => team.team_idx));
   const carried = value.carried_destinations ?? [];
@@ -14,7 +20,7 @@ export function personnelPayload(value, owner, controllable) {
     || new Set(carried.map(row => row.craft)).size !== carried.length) return null;
   const destination = row => row?.kind === 'home' || row?.kind === 'craft' && text(row.craft);
 
-  const officers = value.officers.filter(officer => officer && text(officer.id) && text(officer.label)
+  const officers = value.officers.filter(officer => officer && personRef(officer.person) && text(officer.label)
     && competencies(officer.competencies) && Number.isSafeInteger(officer.changed_tick) && officer.changed_tick >= 0
     && Number.isFinite(officer.repair_work_multiplier) && officer.repair_work_multiplier >= 1
     && ['fit','minor','severe'].includes(officer.condition ?? 'fit')
@@ -28,30 +34,30 @@ export function personnelPayload(value, owner, controllable) {
     && typeof officer.can_release === 'boolean' && Array.isArray(officer.available_teams)
     && officer.available_teams.every(team => index(team) && known.has(team))
     && new Set(officer.available_teams).size === officer.available_teams.length
-    && (officer.location?.kind === 'at_compartment' && text(officer.location.compartment)
-      || officer.location?.kind === 'with_repair_team' && index(officer.location.team_idx) && known.has(officer.location.team_idx)
+    && (officer.location?.kind === 'at_compartment' && text(officer.location.actor) && text(officer.location.compartment)
+      || officer.location?.kind === 'with_repair_team' && text(officer.location.actor) && index(officer.location.team_idx) && known.has(officer.location.team_idx)
       || officer.location?.kind === 'with_transfer' && text(officer.location.actor) && index(officer.location.team_idx) && known.has(officer.location.team_idx) && Number.isSafeInteger(officer.location.job) && officer.location.job >= 0
       || officer.location?.kind === 'aboard_craft' && text(officer.location.berth) && carried.some(craft => craft.craft === officer.location.craft)));
-  if (officers.length !== value.officers.length || new Set(officers.map(officer => officer.id)).size !== officers.length) return null;
+  if (officers.length !== value.officers.length || new Set(officers.map(officer => personKey(officer.person))).size !== officers.length) return null;
   return { carried_destinations: carried.map(row => ({...row})), system_id: owner, controllable: controllable === true, teams: teams.map(team => ({ ...team })),
-    officers: officers.map(officer => ({ ...officer, condition: officer.condition ?? 'fit', transfer_teams: [...(officer.transfer_teams ?? [])], treatment_teams: [...(officer.treatment_teams ?? [])], location: { ...officer.location }, available_teams: [...officer.available_teams] })) };
+    officers: officers.map(officer => ({ ...officer, person: {...officer.person}, condition: officer.condition ?? 'fit', transfer_teams: [...(officer.transfer_teams ?? [])], treatment_teams: [...(officer.treatment_teams ?? [])], location: { ...officer.location }, available_teams: [...officer.available_teams] })) };
 }
 
 export function personnelPosting(view, detail) {
   if (!view || view.controllable !== true || !detail || detail.control_system_id !== view.system_id) return null;
-  const officer = view.officers?.find(row => row.id === detail.officer);
+  const officer = view.officers?.find(row => samePerson(row.person, detail.officer));
   if (!officer || detail.changed_tick !== officer.changed_tick) return null;
   if (detail.team_idx === null ? !officer.can_release
     : !index(detail.team_idx) || !officer.available_teams.includes(detail.team_idx)) return null;
-  return { officer: officer.id, team_idx: detail.team_idx };
+  return { officer: {...officer.person}, team_idx: detail.team_idx };
 }
 
 export function personnelTreatment(view, detail) {
   if (!view || view.controllable !== true || !detail || detail.control_system_id !== view.system_id) return null;
-  const officer = view.officers?.find(row => row.id === detail.officer);
+  const officer = view.officers?.find(row => samePerson(row.person, detail.officer));
   if (!officer || detail.changed_tick !== officer.changed_tick || !index(detail.team_idx)
     || officer.condition === 'fit' || !officer.treatment_teams?.includes(detail.team_idx)) return null;
-  return { officer: officer.id, team_idx: detail.team_idx };
+  return { officer: {...officer.person}, team_idx: detail.team_idx };
 }
 
 function sameDestinationRequest(a,b) {
@@ -61,18 +67,18 @@ function sameDestinationRequest(a,b) {
 /** Visible choices are information only; the ordinary owner rechecks actual custody. */
 export function personnelDestination(view, detail) {
   if (!view || view.controllable !== true || !detail || detail.control_system_id !== view.system_id) return null;
-  const officer = view.officers?.find(row => row.id === detail.officer);
+  const officer = view.officers?.find(row => samePerson(row.person, detail.officer));
   if (!officer || detail.changed_tick !== officer.changed_tick) return null;
   const destination = detail.destination;
   if (destination !== null && !(destination?.kind === 'home' || destination?.kind === 'craft'
     && view.carried_destinations?.some(craft => craft.craft === destination.craft))) return null;
-  return {officer:officer.id,destination:destination === null ? null : destination.kind === 'home' ? {kind:'home'} : {kind:'craft',craft:destination.craft}};
+  return {officer:{...officer.person},destination:destination === null ? null : destination.kind === 'home' ? {kind:'home'} : {kind:'craft',craft:destination.craft}};
 }
 export function personnelTransfer(view, detail) {
   if (!view || view.controllable !== true || !detail || detail.control_system_id !== view.system_id) return null;
-  const officer = view.officers?.find(row => row.id === detail.officer);
+  const officer = view.officers?.find(row => samePerson(row.person, detail.officer));
   if (!officer || detail.changed_tick !== officer.changed_tick || !index(detail.team_idx)
     || !officer.destination_request || !sameDestinationRequest(detail.request, officer.destination_request)
     || !officer.transfer_teams?.includes(detail.team_idx)) return null;
-  return {officer:officer.id,team_idx:detail.team_idx,request:{destination:{...officer.destination_request.destination},requested_tick:officer.destination_request.requested_tick}};
+  return {officer:{...officer.person},team_idx:detail.team_idx,request:{destination:{...officer.destination_request.destination},requested_tick:officer.destination_request.requested_tick}};
 }

@@ -2,8 +2,8 @@
 title: Physical Craft Handling
 type: concept
 tags: [craft, jobs, resources, ownership, persistence]
-sources: [crates/phoenix-model/src/craft.rs, crates/phoenix-sim-gameplay/src/ship/craft.rs, crates/phoenix-sim-gameplay/src/ship/craft_profile.rs, crates/phoenix-simulation/src/entities/craft.rs, crates/phoenix-simulation/src/entities/craft_runtime.rs, crates/phoenix-simulation/src/entities/craft_presence.rs, crates/phoenix-simulation/src/entities/craft_ai.rs, crates/phoenix-simulation/src/snapshot/craft.rs, crates/phoenix-presentation/src/actor_visibility.rs, gui/components/bay-controls.js, gui/workshop-system-components.js]
-updated: 2026-10-15
+sources: [crates/phoenix-simulation/src/comms/reception.rs, assets/entities/reception_outpost.toml, crates/phoenix-model/src/craft.rs, crates/phoenix-sim-gameplay/src/ship/craft.rs, crates/phoenix-sim-gameplay/src/ship/craft_profile.rs, crates/phoenix-simulation/src/entities/craft.rs, crates/phoenix-simulation/src/entities/craft_runtime.rs, crates/phoenix-simulation/src/entities/craft_presence.rs, crates/phoenix-simulation/src/entities/craft_ai.rs, crates/phoenix-simulation/src/snapshot/craft.rs, crates/phoenix-presentation/src/actor_visibility.rs, gui/components/bay-controls.js, gui/workshop-system-components.js]
+updated: 2026-10-16
 ---
 
 # Physical Craft Handling
@@ -83,3 +83,30 @@ stored pod facts require an explicit permitted Bay feed; deployment withdraws
 live personnel telemetry. The optional six-seat Personnel Carrier grants that
 feed to Engineering while Tactical retains Bay control. Broader craft and
 rescue/capture acceptance remain separate consumers.
+
+
+## Negotiated receiving work
+
+`comms/reception.rs` reads retained accepted recipient-local ReceiveCraft facts
+only through an explicitly permitted Comms feed. The claimed craft identity is
+correlated with a separately earned current Broad alias before normal Bay
+admission. Human Comms consent does not operate a Human Bay. The ordinary Bay
+tree can use `has_accepted_reception`; the fixed optional reception outpost
+uses that fact rather than selecting arbitrary contacts.
+
+The same BayActivity retains the immutable accepted order and paid work. Its
+physical commit stages the exact receiving-copy update and receipt, changes
+actual ProbeCustody, then completes that same Job and original request facts.
+The receipt carries actual receiver/Bay/Job, original order and decision clock,
+physical handoff clock and sorted stable people references. The ordinary paid
+reverse Comms outcome reports that evidence later. Personnel remain AboardCraft
+in their sole roster; no foreign compartment transfer or second manifest owner
+is introduced. A stored Bay view derives the locally aboard manifest, including
+people whose original actor was removed. No remote personnel telemetry follows.
+
+Whole-candidate checks join Bay work and Comms lineage, the Job mint frontier,
+finite personnel origins and identical historical copies. Conflicting receipts
+for one physical Job refuse. Fixed equipped actors use the existing authored
+Comms policies and own sensor publication; no propulsion or special receiving
+controller is installed. Browser-module tests and source review are separate
+from actual native/radio/session and full reception acceptance.

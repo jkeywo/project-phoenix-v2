@@ -16,6 +16,9 @@ export class PhCommsTextComposer extends PhElement {
       <button id="request" type="button">${t('comms.request.report_status')}</button>
       <button id="audio-call" type="button" hidden>${t('comms.request.media_audio')}</button>
       <button id="video-call" type="button" hidden>${t('comms.request.media_video')}</button></fieldset>
+      <fieldset id="reception-controls" hidden><legend>${t('comms.request.receive_craft')}</legend>
+      <label>${t('comms.request.reception_choice')}<select id="reception-craft"></select></label>
+      <button id="send-reception" type="button">${t('comms.request.receive_craft')}</button></fieldset>
       <details><summary>${t('comms.request.form_up')}</summary>
       <fieldset id="formation-controls"><legend>${t('comms.request.formation_slot_title')}</legend>
       <label>X<input id="slot-x" type="number" step="1" min="-1000000" max="1000000" value="-40"></label>
@@ -42,6 +45,11 @@ export class PhCommsTextComposer extends PhElement {
           {source:'control', detail:{...this.draft(), request:{media_call:{mode}}}});
       });
     }
+    this.$('send-reception').addEventListener('click',()=>{
+      if(this.$('reception-controls').disabled)return;
+      const craft=(this.state?.reception_craft || []).find(row=>row.id===this.$('reception-craft').value);
+      if(craft)window.activateSemanticAction?.(COMMS_SEND_REQUEST_ACTION_ID,{source:'control',detail:{...this.draft(),request:{receive_craft:{craft:craft.id}}}});
+    });
     this.$('form-up').addEventListener('click', () => {
       if (this.$('formation-controls').disabled) return;
       const draft = this.draft();
@@ -104,6 +112,10 @@ export class PhCommsTextComposer extends PhElement {
       this.$(id).hidden = !capable;
       this.$(id).disabled = this.controls.disabled || !this.audience.value.startsWith('contact:');
     }
+    const stored=state.reception_craft || [];
+    this.options(this.$('reception-craft'),stored.map((row,index)=>[row.id,row.name?wireText(row.name):t('craft.bay.stored',{index:index+1})]));
+    this.$('reception-controls').hidden=!stored.length;
+    this.$('reception-controls').disabled=this.controls.disabled || !stored.length || !this.audience.value.startsWith('contact:');
     this.$('formation-controls').disabled = this.controls.disabled || !this.audience.value.startsWith('contact:');
     const planned = (state.planned_requests || []).filter(row => row.request === 'report_status'
       && (state.channels || []).some(channel => channel.id === row.channel)

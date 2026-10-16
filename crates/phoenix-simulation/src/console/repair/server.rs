@@ -33,8 +33,10 @@ pub struct ShipRepairTeams(pub RepairTeams);
 /// the worst tier and largest deficit.
 #[derive(Component, Clone, Debug, Default)]
 pub struct RepairRequestQueue {
-    pub personnel_destinations:
-        std::collections::BTreeMap<String, phoenix_model::personnel::PersonnelDestinationRequest>,
+    pub personnel_destinations: std::collections::BTreeMap<
+        phoenix_model::personnel::PersonRef,
+        phoenix_model::personnel::PersonnelDestinationRequest,
+    >,
     pub entries: Vec<RepairQueueEntry>,
     pub recoveries: Vec<(RepairGroup, phoenix_model::observation::ObservationMetadata)>,
 }
@@ -520,7 +522,7 @@ pub fn tick_repair_teams(
                 queue.personnel_destinations.retain(|officer, request| {
                     let Some(person) = roster
                         .state(&actor.0)
-                        .and_then(|state| state.officers.get(officer))
+                        .and_then(|state| state.officers.get(&officer.officer))
                     else {
                         return true;
                     };
@@ -528,11 +530,16 @@ pub fn tick_repair_teams(
                         (
                             phoenix_model::personnel::PersonnelDestination::Home,
                             phoenix_model::personnel::OfficerLocation::AtCompartment {
+                                actor: holder,
                                 compartment,
                             },
-                        ) => profile.config.officers.iter().any(|definition| {
-                            definition.id == *officer && definition.home_compartment == *compartment
-                        }),
+                        ) => {
+                            holder == &actor.0
+                                && profile.config.officers.iter().any(|definition| {
+                                    definition.id == officer.officer
+                                        && definition.home_compartment == *compartment
+                                })
+                        }
                         (
                             phoenix_model::personnel::PersonnelDestination::Craft { craft },
                             phoenix_model::personnel::OfficerLocation::AboardCraft {
@@ -575,6 +582,7 @@ pub fn tick_repair_teams(
                 teams.0.tick_treatments(
                     profile,
                     state,
+                    &ship_uuid.expect("personnel state joined by actual UUID").0,
                     tick.0,
                     dt,
                     &blocked,
@@ -637,7 +645,13 @@ pub fn tick_repair_teams(
             }
             let expertise = personnel_profile
                 .zip(personnel_state.as_deref())
-                .map(|(profile, state)| state.repair_work_multipliers(profile, teams.0.job_state()))
+                .map(|(profile, state)| {
+                    state.repair_work_multipliers(
+                        profile,
+                        teams.0.job_state(),
+                        &ship_uuid.expect("personnel state joined by actual UUID").0,
+                    )
+                })
                 .unwrap_or_default();
             let committed = teams.0.tick_physical_with_expertise(
                 dt * modifiers.get(&ModifierSlot::RepairRate),
@@ -1081,6 +1095,7 @@ pub(crate) fn publish_repair_blackboard(
                         profile,
                         teams.0.job_state(),
                         teams.0.layout()?,
+                        &actor?.0,
                         tick.as_ref().map_or(0, |tick| tick.0),
                     ))
                 }),
@@ -1784,11 +1799,11 @@ pub fn operate_repair_ai(
                                 phoenix_model::personnel::OfficerLocation::WithRepairTeam { .. }
                             ) && officer.can_release
                             {
-                                Some(crate::core::messages::SystemControlPayload::SetDutyOfficerPosting {officer:officer.id.clone(),team_idx:None})
+                                Some(crate::core::messages::SystemControlPayload::SetDutyOfficerPosting {officer:officer.person.clone(),team_idx:None})
                             } else {
                                 officer.transfer_teams.iter().copied().find(|team|free.contains(&(*team as usize))).map(|team| {
                                     free.retain(|free|*free!=team as usize);
-                                    crate::core::messages::SystemControlPayload::DispatchOfficerTransfer {officer:officer.id.clone(),team_idx:team,request:request.clone()}
+                                    crate::core::messages::SystemControlPayload::DispatchOfficerTransfer {officer:officer.person.clone(),team_idx:team,request:request.clone()}
                                 })
                             };
                             if let Some(payload) = payload {
@@ -1836,7 +1851,7 @@ pub fn operate_repair_ai(
                                     entity_uuid,
                                     repair_system_id(),
                                     crate::core::messages::SystemControlPayload::TreatDutyOfficer {
-                                        officer: officer.id.clone(),
+                                        officer: officer.person.clone(),
                                         team_idx: team,
                                     },
                                     sources,

@@ -97,7 +97,7 @@ pub(crate) fn communication_requests(
                 released_tick: row.armed_tick,
                 recipient_uuid: uuid.into(),
                 channel: channel.clone(),
-                request: *request,
+                request: request.clone(),
             };
             value.validate(now).ok()?;
             Some(value)

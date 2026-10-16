@@ -192,3 +192,80 @@ fn physical_removal_is_a_single_terminal_failure_and_completion_cannot_remain_pa
     invalid.job.as_mut().unwrap().paused = true;
     assert!(invalid.validate(&owner(), 11).is_err());
 }
+
+#[test]
+fn receiving_work_retains_exact_order_and_cannot_complete_without_actual_handoff_receipt() {
+    use phoenix_model::{
+        activity::ActivityJob,
+        comms_request::{CommsRequestReference, GenericCommsRequest},
+    };
+    let order = CraftReceptionOrder {
+        request: CommsRequestReference {
+            formation_sequence: None,
+            origin_id: "actual-request".into(),
+            source_ship: "origin".into(),
+            recipient_ship: "receiver".into(),
+            emitted_tick: 1,
+            heard_tick: 2,
+            request: GenericCommsRequest::ReceiveCraft {
+                craft: "actual-pod".into(),
+            },
+        },
+        decision_tick: 3,
+    };
+    let mut state = BayState::default();
+    state
+        .begin_order(
+            &owner(),
+            "actual-pod",
+            BayOperation::Recover,
+            &profile(),
+            1.0,
+            4,
+            Some(&order),
+        )
+        .unwrap();
+    let before = state.clone();
+    let mut replaced = order.clone();
+    replaced.decision_tick = 4;
+    assert!(state
+        .begin_order(
+            &owner(),
+            "actual-pod",
+            BayOperation::Recover,
+            &profile(),
+            1.0,
+            4,
+            Some(&replaced)
+        )
+        .is_err());
+    assert_eq!(state, before);
+    for now in 5..8 {
+        state.advance(&owner(), now, 1.0, 1.0, |_, _| 1.0).unwrap();
+    }
+    let ready = state.clone();
+    assert!(!state.complete());
+    assert_eq!(state, ready);
+    let job = state.job.as_ref().unwrap();
+    let receipt = CraftReceptionReceipt {
+        order,
+        scope: ActivityJob {
+            actor: "receiver".into(),
+            owner: owner(),
+            job: job.id,
+        },
+        craft: "actual-pod".into(),
+        handoff_tick: 8,
+        people: Vec::new(),
+    };
+    let mut wrong = receipt.clone();
+    wrong.scope.job = JobId(90);
+    assert!(!state.complete_receiving(Some(wrong)));
+    assert_eq!(state, ready);
+    assert!(state.complete_receiving(Some(receipt.clone())));
+    state.validate(&owner(), 8).unwrap();
+    assert_eq!(state.job.as_ref().unwrap().activity.receipt, Some(receipt));
+    let restored: BayState = serde_json::from_slice(&serde_json::to_vec(&state).unwrap()).unwrap();
+    assert_eq!(state, restored);
+    assert!(!state.complete());
+}

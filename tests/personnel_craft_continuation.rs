@@ -1,6 +1,10 @@
 //! Joined actual personnel escort/Bay handoff, finite custody and complete continuation.
 //! One-host evidence only; not network, browser/device or full increment20 acceptance.
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+fn person_ref(app: &App, name: &str) -> phoenix_model::personnel::PersonRef {
+    let actor = app.world().try_query_filtered::<&project_phoenix::entities::spawner::EntityUuid, With<project_phoenix::server_app::LocalShip>>().unwrap().single(app.world()).unwrap();
+    phoenix_model::personnel::PersonRef::new(&actor.0, name)
+}
 use bevy::{ecs::entity_disabling::Disabled, prelude::*};
 use bevy_rapier3d::prelude::{RapierColliderHandle, RapierRigidBodyHandle};
 use phoenix_model::{
@@ -225,12 +229,13 @@ fn people(app: &App, parent: Entity) -> phoenix_model::personnel::PersonnelView 
         .expect("actual permitted local personnel")
 }
 fn prepare_escort(app: &mut App, parent: Entity, child: Entity) -> String {
+    let person = person_ref(app, "repair-chief");
     control(
         app,
         "engineering",
         "repair",
         Control::SetDutyOfficerPosting {
-            officer: "repair-chief".into(),
+            officer: person.clone(),
             team_idx: None,
         },
     );
@@ -241,12 +246,13 @@ fn prepare_escort(app: &mut App, parent: Entity, child: Entity) -> String {
             .any(|row| row.craft == app.world().get::<EntityUuid>(child).unwrap().0)
     });
     let uuid = app.world().get::<EntityUuid>(child).unwrap().0.clone();
+    let person = person_ref(app, "repair-chief");
     control(
         app,
         "engineering",
         "repair",
         Control::SetDutyOfficerDestination {
-            officer: "repair-chief".into(),
+            officer: person.clone(),
             destination: Some(PersonnelDestination::Craft {
                 craft: uuid.clone(),
             }),
@@ -271,16 +277,17 @@ fn dispatch(app: &mut App, person: &str, team: u32) {
     let request = people(app, parent)
         .officers
         .into_iter()
-        .find(|officer| officer.id == person)
+        .find(|officer| officer.person.officer == person)
         .unwrap()
         .destination_request
         .unwrap();
+    let person = person_ref(app, person);
     control(
         app,
         "engineering",
         "repair",
         Control::DispatchOfficerTransfer {
-            officer: person.into(),
+            officer: person,
             team_idx: team,
             request,
         },
@@ -397,12 +404,13 @@ fn joined_escort_physical_handoff_launch_recovery_unload_and_json360() {
         bay(&live, parent).job.is_none(),
         "an actual escort owns the handoff boundary"
     );
+    let person = person_ref(&live, "technician");
     control(
         &mut live,
         "engineering",
         "repair",
         Control::SetDutyOfficerDestination {
-            officer: "technician".into(),
+            officer: person.clone(),
             destination: Some(PersonnelDestination::Craft {
                 craft: uuid.clone(),
             }),
@@ -494,7 +502,10 @@ fn joined_escort_physical_handoff_launch_recovery_unload_and_json360() {
                     .as_mut()
                     .unwrap()
                     .personnel_destinations
-                    .remove("repair-chief");
+                    .remove(&phoenix_model::personnel::PersonRef::new(
+                        &parent_uuid,
+                        "repair-chief",
+                    ));
             }
         }
         let before = capture(live.world());
@@ -529,12 +540,13 @@ fn joined_escort_physical_handoff_launch_recovery_unload_and_json360() {
         ),
         "occupied berth cannot be duplicated"
     );
+    let person = person_ref(&live, "technician");
     control(
         &mut live,
         "engineering",
         "repair",
         Control::SetDutyOfficerDestination {
-            officer: "technician".into(),
+            officer: person.clone(),
             destination: None,
         },
     );
@@ -561,7 +573,7 @@ fn joined_escort_physical_handoff_launch_recovery_unload_and_json360() {
         people(&live, parent)
             .officers
             .iter()
-            .all(|person| person.id != "repair-chief"),
+            .all(|person| person.person.officer != "repair-chief"),
         "deployment cannot reveal remote current crew facts"
     );
     continuation(&mut live);
@@ -574,17 +586,21 @@ fn joined_escort_physical_handoff_launch_recovery_unload_and_json360() {
         &mut live,
         "tactical",
         "probe-bay",
-        Control::RecoverCraft { contact },
+        Control::RecoverCraft {
+            contact,
+            reception: None,
+        },
     );
     wait(&mut live, |app| stored(app, child));
     steps(&mut live, 2);
     assert_eq!(live.world().get::<EntityUuid>(child).unwrap().0, uuid);
+    let person = person_ref(&live, "repair-chief");
     control(
         &mut live,
         "engineering",
         "repair",
         Control::SetDutyOfficerDestination {
-            officer: "repair-chief".into(),
+            officer: person.clone(),
             destination: Some(PersonnelDestination::Home),
         },
     );
@@ -599,6 +615,7 @@ fn joined_escort_physical_handoff_launch_recovery_unload_and_json360() {
     assert_eq!(
         officer(&live, parent, "repair-chief"),
         OfficerLocation::AtCompartment {
+            actor: live.world().get::<EntityUuid>(parent).unwrap().0.clone(),
             compartment: "engineering".into()
         }
     );
@@ -755,7 +772,7 @@ fn actual_world_removal_preserves_offship_people_and_resolves_only_actual_host_c
             assert!(people(&live, parent)
                 .officers
                 .iter()
-                .all(|person| person.id != "repair-chief"));
+                .all(|person| person.person.officer != "repair-chief"));
         }
         continuation(&mut live);
         assert_eq!(
@@ -785,12 +802,13 @@ fn retargeted_actual_escort_returns_the_same_person_physically_before_releasing_
         .0
         .work_list()[0]
         .id;
+    let person = person_ref(&live, "repair-chief");
     control(
         &mut live,
         "engineering",
         "repair",
         Control::SetDutyOfficerDestination {
-            officer: "repair-chief".into(),
+            officer: person.clone(),
             destination: Some(PersonnelDestination::Home),
         },
     );
@@ -814,6 +832,7 @@ fn retargeted_actual_escort_returns_the_same_person_physically_before_releasing_
     assert_eq!(
         officer(&live, parent, "repair-chief"),
         OfficerLocation::AtCompartment {
+            actor: live.world().get::<EntityUuid>(parent).unwrap().0.clone(),
             compartment: "engineering".into()
         }
     );

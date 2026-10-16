@@ -303,7 +303,7 @@ fn idle_external_application_preserves_an_internal_return_without_rewriting_owne
 
 #[test]
 fn dormant_source_does_not_change_active_work_payments_or_competing_claims() {
-    fn rig(with_idle: bool) -> (App, Entity, Entity, Entity) {
+    fn rig(with_idle: bool, break_component: bool) -> (App, Entity, Entity, Entity) {
         let mut app = app();
         if with_idle {
             let idle = source(&mut app, "aaa-idle");
@@ -316,86 +316,145 @@ fn dormant_source_does_not_change_active_work_payments_or_competing_claims() {
         }
         let first = source(&mut app, "source-a");
         let second = source(&mut app, "source-b");
-        let target = target(&mut app, true).0;
+        let target = target(&mut app, break_component).0;
         (app, first, second, target)
     }
-    let (mut baseline, first, second, target) = rig(false);
-    let (mut extra, extra_first, extra_second, extra_target) = rig(true);
-    let initial = level(&baseline, first) + level(&baseline, second);
-    let initial_target = baseline
-        .world()
-        .get::<ShipDamage>(target)
-        .unwrap()
-        .state
-        .clone();
-    for step in 0..1000 {
-        baseline
-            .world_mut()
-            .run_system_once(apply_external_repair)
-            .unwrap();
-        extra
-            .world_mut()
-            .run_system_once(apply_external_repair)
-            .unwrap();
+    fn restored(app: &App, target: Entity) -> bool {
+        let damage = app.world().get::<ShipDamage>(target).unwrap();
+        let (current, full) = damage.structural_totals();
+        current == full
+            && damage
+                .state
+                .components
+                .values()
+                .flat_map(|parts| parts.values())
+                .all(|component| {
+                    component.condition == phoenix_model::damage::ComponentCondition::Healthy
+                })
+    }
+    for break_component in [false, true] {
+        let (mut baseline, first, second, target) = rig(false, break_component);
+        let (mut extra, extra_first, extra_second, extra_target) = rig(true, break_component);
+        let initial = level(&baseline, first) + level(&baseline, second);
+        let initial_target = baseline
+            .world()
+            .get::<ShipDamage>(target)
+            .unwrap()
+            .state
+            .clone();
+        for step in 0..1000 {
+            baseline
+                .world_mut()
+                .run_system_once(apply_external_repair)
+                .unwrap();
+            extra
+                .world_mut()
+                .run_system_once(apply_external_repair)
+                .unwrap();
+            assert_eq!(
+                source_state(&baseline, first),
+                source_state(&extra, extra_first),
+                "first {step}"
+            );
+            assert_eq!(
+                source_state(&baseline, second),
+                source_state(&extra, extra_second),
+                "second {step}"
+            );
+            assert_eq!(
+                baseline.world().get::<ShipDamage>(target).unwrap().state,
+                extra.world().get::<ShipDamage>(extra_target).unwrap().state,
+                "target {step}"
+            );
+            if step == 0 {
+                assert!(reserved(&baseline, first) > 0);
+                if break_component {
+                    // Independent structure/component stages may run together;
+                    // exclusivity is per physical target, not per visited ship.
+                    assert!(reserved(&baseline, second) > 0);
+                    let claim = |actor| {
+                        let teams = &baseline.world().get::<ShipRepairTeams>(actor).unwrap().0;
+                        let stage = teams
+                            .job_state()
+                            .external_physical_work
+                            .values()
+                            .find(|stage| stage.reserved)
+                            .unwrap();
+                        (stage.target_uuid.clone(), stage.target.clone().unwrap())
+                    };
+                    let first_claim = claim(first);
+                    let second_claim = claim(second);
+                    assert_eq!(first_claim.0, "facility");
+                    assert_eq!(second_claim.0, "facility");
+                    assert_ne!(
+                        first_claim.1, second_claim.1,
+                        "two crews must not reserve the same physical work"
+                    );
+                } else {
+                    assert_eq!(
+                        reserved(&baseline, second),
+                        0,
+                        "single damaged compartment is already claimed by the first crew"
+                    );
+                }
+            }
+            if restored(&baseline, target) {
+                break;
+            }
+        }
+        assert!(
+            restored(&baseline, target) && restored(&extra, extra_target),
+            "actual structure/components must be restored within the original owner-test budget"
+        );
+        assert!(level(&baseline, first) + level(&baseline, second) < initial);
+        assert_ne!(
+            baseline.world().get::<ShipDamage>(target).unwrap().state,
+            initial_target
+        );
+        assert_eq!(reserved(&baseline, first) + reserved(&baseline, second), 0);
+        // Stage completion deliberately keeps the existing field commitment
+        // aboard. End it through normal admitted recall, not a fabricated
+        // automatic Job outcome (repair_external_physical::tick's contract).
+        for (app, actors) in [
+            (&mut baseline, [first, second]),
+            (&mut extra, [extra_first, extra_second]),
+        ] {
+            for actor in actors {
+                assert!(app
+                    .world()
+                    .get::<ShipRepairTeams>(actor)
+                    .unwrap()
+                    .0
+                    .external_target()
+                    .is_some());
+                app.world_mut()
+                    .entity_mut(actor)
+                    .insert(AdmittedCommands(vec![correlated_external_command(
+                        "equivalence-recall",
+                        SystemControlPayload::RecallExternalRepair,
+                    )]));
+            }
+            app.world_mut()
+                .run_system_once(handle_external_repair_commands)
+                .unwrap();
+            app.world_mut()
+                .run_system_once(apply_external_repair)
+                .unwrap();
+            for actor in actors {
+                let teams = &app.world().get::<ShipRepairTeams>(actor).unwrap().0;
+                assert!(teams.external_target().is_none());
+                assert!(teams.job_state().external_physical_work.is_empty());
+            }
+        }
         assert_eq!(
             source_state(&baseline, first),
-            source_state(&extra, extra_first),
-            "first {step}"
+            source_state(&extra, extra_first)
         );
         assert_eq!(
             source_state(&baseline, second),
-            source_state(&extra, extra_second),
-            "second {step}"
-        );
-        assert_eq!(
-            baseline.world().get::<ShipDamage>(target).unwrap().state,
-            extra.world().get::<ShipDamage>(extra_target).unwrap().state,
-            "target {step}"
-        );
-        if step == 0 {
-            assert!(reserved(&baseline, first) > 0);
-            assert_eq!(
-                reserved(&baseline, second),
-                0,
-                "ordinary competing claims remain exclusive"
-            );
-        }
-        if baseline
-            .world()
-            .get::<ShipRepairTeams>(first)
-            .unwrap()
-            .0
-            .external_target()
-            .is_none()
-            && baseline
-                .world()
-                .get::<ShipRepairTeams>(second)
-                .unwrap()
-                .0
-                .external_target()
-                .is_none()
-        {
-            break;
-        }
-    }
-    for source in [first, second] {
-        assert!(
-            baseline
-                .world()
-                .get::<ShipRepairTeams>(source)
-                .unwrap()
-                .0
-                .external_target()
-                .is_none(),
-            "both physical jobs must finish within the existing owner-test budget"
+            source_state(&extra, extra_second)
         );
     }
-    assert!(level(&baseline, first) + level(&baseline, second) < initial);
-    assert_ne!(
-        baseline.world().get::<ShipDamage>(target).unwrap().state,
-        initial_target
-    );
-    assert_eq!(reserved(&baseline, first) + reserved(&baseline, second), 0);
 }
 
 #[test]

@@ -108,7 +108,7 @@ fn dependency_path(
     start: SystemKey,
     goal: SystemKey,
 ) -> Option<Vec<SystemKey>> {
-    let mut parents = HashMap::default();
+    let mut parents = HashMap::<SystemKey, Option<SystemKey>>::default();
     parents.insert(start, None);
     let mut pending = std::collections::VecDeque::from([start]);
     while let Some(node) = pending.pop_front() {

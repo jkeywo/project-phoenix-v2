@@ -1,5 +1,4 @@
 use super::*;
-use crate::console::weapons::BEAM_DAMAGE_PER_SEC;
 use crate::core::messages::*;
 use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
 use crate::ship::damage::collision_damage;
@@ -3422,9 +3421,40 @@ fn beam_owner_diagnostic(app: &App) -> String {
     )
 }
 
+/// This sparse server rig already uses the Battleship's accepted power/tree
+/// hardware, but its generic startup leaves combat banks empty. Install the
+/// same accepted bank definitions so the paid emitter has a real impact profile.
+fn install_actual_fixture_beam_profile(app: &mut App) -> f32 {
+    let authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_battleship.toml",
+    )
+    .expect("the shared fixture's real Battleship composes");
+    let combat = crate::entities::config::PhaserCombatConfig::from_weapons_console(
+        authored.weapons_console.as_ref().unwrap(),
+    );
+    let fore = combat.bank_by_id("fore").unwrap();
+    assert!(fore.beam_damage_per_sec > 0.0);
+    assert!(fore.beam_duration_secs > 0.0);
+    let rate = fore.beam_damage_per_sec;
+    let ship = app.world().resource::<ShipEntity>().0;
+    assert!(app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(ship)
+        .unwrap()
+        .0
+        .network()
+        .consumers
+        .contains_key(&crate::ship::system_registry::phaser_fore_system_id()));
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(crate::console::weapons::PhaserCombatConfigResource(combat));
+    rate
+}
+
 #[test]
 fn no_damage_refund_on_sever() {
     let mut app = test_app();
+    install_actual_fixture_beam_profile(&mut app);
     // setup_weapons_world (called by lock_and_fire) now spawns the
     // asteroid ECS entity itself. Fetch its handle by querying for the
     // matching UUID after the fact.
@@ -3443,24 +3473,53 @@ fn no_damage_refund_on_sever() {
             .expect("setup_weapons_world should have spawned the target asteroid")
     };
 
-    // Apply partial damage via accumulator.
-    set_active_beam_damage_accumulator(&mut app, 10.0);
+    let hp_after_fire = app
+        .world()
+        .get::<crate::entities::spawner::EntitySystemHull>(asteroid_entity)
+        .unwrap()
+        .0
+        .total_current();
+    assert!(
+        hp_after_fire > 0.0 && hp_after_fire < 30.0,
+        "normal paid Fire must already hit the target"
+    );
+    // A second ordinary interval deals genuine additional paid damage.
     let _ = tick(&mut app);
     eprintln!(
         "no-refund after original damage step: {}",
         beam_owner_diagnostic(&app)
     );
 
-    // Now sever by rotating ship.
+    let hp_before_sever = app
+        .world()
+        .get::<crate::entities::spawner::EntitySystemHull>(asteroid_entity)
+        .unwrap()
+        .0
+        .total_current();
+    assert!(hp_before_sever > 0.0 && hp_before_sever < hp_after_fire);
+    let ship = app.world().resource::<ShipEntity>().0;
+    assert!(
+        app.world()
+            .get::<crate::ship::power::ShipPowerSystem>(ship)
+            .unwrap()
+            .0
+            .emitted_work(&crate::ship::system_registry::phaser_fore_system_id())
+            > 0.0
+    );
+    // Now sever by rotating the real firing mount out of arc.
     set_ship_yaw(&mut app, std::f32::consts::PI);
-    let _ = tick(&mut app);
+    let severed = tick(&mut app);
+    assert!(severed
+        .iter()
+        .any(|message| matches!(message.msg, ServerMessage::BeamEnded { .. })));
+    assert!(active_beam_target_is_none(&mut app));
 
     let hp = app
         .world()
         .get::<crate::entities::spawner::EntitySystemHull>(asteroid_entity)
         .map(|h| h.0.total_current());
     assert!(
-        hp.is_some() && hp.unwrap() < 30.0,
+        hp == Some(hp_before_sever),
         "asteroid should retain damage after sever (no refund), hp={:?}",
         hp
     );
@@ -4111,58 +4170,121 @@ fn empty_modifier_table_reproduces_base_phaser_damage() {
     assert!(hp_before.is_some(), "asteroid should still exist after <1s");
 }
 
-/// PhaserDamage modifier at 2Ã— doubles the kill rate.
-/// With BEAM_DAMAGE_PER_SEC=5 and 30-HP asteroid:
-/// - Base: 6 seconds to destroy
-/// - 2Ã— modifier (bonus=1.0): 3 seconds to destroy
-///   Test: after running ~4s of game time, the asteroid is destroyed with 2Ã— but not with 1Ã—.
+/// The same accepted bank, physical target and elapsed paid work kill only
+/// with the doubled damage modifier. No damage accumulator is manufactured.
 #[test]
 fn phaser_damage_modifier_doubles_kill_rate() {
     use crate::core::messages::{ModifierSlot, ModifierSource};
     use crate::modifiers::Modifier;
 
-    // --- App with 2Ã— PhaserDamage modifier ---
     let mut app_fast = test_app();
-    setup_weapons_world_with_entity(&mut app_fast, 0.0, -20.0);
-    start_game_with_weapons(&mut app_fast);
-    // Apply 2Ã— phaser damage modifier after ship is spawned.
+    let rate = install_actual_fixture_beam_profile(&mut app_fast);
     modify_ship_modifiers(&mut app_fast, |mods| {
         mods.add_or_update(Modifier {
-            source: ModifierSource::ImpulseDrive,
+            source: ModifierSource::World {
+                id: "beam-rate-fixture".into(),
+                tag: "damage".into(),
+            },
             slot: ModifierSlot::PhaserDamage,
-            bonus: 1.0, // â†' multiplier 2.0
+            bonus: 1.0,
         });
     });
-    push(
-        &mut app_fast,
-        "weapons",
-        ClientMessage::ControlSystem {
-            target: crate::ship::system_registry::tactical_radar_system_id(),
-            payload: SystemControlPayload::SetTarget {
-                uuid: "target-uuid".into(),
-            },
-        },
+    let fired_fast = lock_and_fire(&mut app_fast, 0.0, -20.0);
+    let mut app_base = test_app();
+    assert_eq!(install_actual_fixture_beam_profile(&mut app_base), rate);
+    let fired_base = lock_and_fire(&mut app_base, 0.0, -20.0);
+    for (app, multiplier) in [(&app_fast, 2.0), (&app_base, 1.0)] {
+        let ship = app.world().resource::<ShipEntity>().0;
+        assert_eq!(
+            app.world()
+                .get::<crate::modifiers::ShipModifiers>(ship)
+                .unwrap()
+                .get(&ModifierSlot::PhaserDamage),
+            multiplier
+        );
+    }
+    for fired in [&fired_fast, &fired_base] {
+        assert!(fired
+            .iter()
+            .any(|message| matches!(message.msg, ServerMessage::BeamStarted { .. })));
+    }
+    let dt = app_fast
+        .world()
+        .resource::<Time<Fixed>>()
+        .timestep()
+        .as_secs_f32();
+    assert_eq!(
+        app_base
+            .world()
+            .resource::<Time<Fixed>>()
+            .timestep()
+            .as_secs_f32(),
+        dt
     );
-    tick(&mut app_fast);
-    push(
-        &mut app_fast,
-        "weapons",
-        ClientMessage::ControlSystem {
-            target: crate::ship::system_registry::phaser_fore_system_id(),
-            payload: SystemControlPayload::FirePhaser,
-        },
+    // Include the first interval that handled the ordinary Fire. The authored
+    // bank supplies the rate; both hosts run exactly the same actual duration.
+    let intervals = (30.0 / (rate * 2.0 * dt)).ceil() as usize;
+    assert!((2..=100).contains(&intervals));
+    assert!(rate * dt * intervals as f32 < 30.0);
+    let fast_ship = app_fast.world().resource::<ShipEntity>().0;
+    let duration = app_fast
+        .world()
+        .get::<crate::console::weapons::PhaserCombatConfigResource>(fast_ship)
+        .unwrap()
+        .0
+        .bank_by_id("fore")
+        .unwrap()
+        .beam_duration_secs;
+    assert!(
+        dt * intervals as f32 <= duration,
+        "comparison must fit the real authored firing cycle"
     );
-    tick(&mut app_fast); // processes FirePhaser, beam becomes active
+    let start_fast = app_fast
+        .world()
+        .resource::<Time<Fixed>>()
+        .elapsed_secs_f64();
+    let start_base = app_base
+        .world()
+        .resource::<Time<Fixed>>()
+        .elapsed_secs_f64();
+    let owner = crate::ship::system_registry::phaser_fore_system_id();
+    let mut work_fast = 0.0;
+    let mut work_base = 0.0;
+    for interval in 0..intervals {
+        if interval > 0 {
+            tick(&mut app_fast);
+            tick(&mut app_base);
+        }
+        for (app, total) in [(&app_fast, &mut work_fast), (&app_base, &mut work_base)] {
+            let ship = app.world().resource::<ShipEntity>().0;
+            let work = app
+                .world()
+                .get::<crate::ship::power::ShipPowerSystem>(ship)
+                .unwrap()
+                .0
+                .emitted_work(&owner);
+            assert!(
+                work > 0.0,
+                "every compared interval must perform real finite bank work"
+            );
+            *total += work;
+        }
+    }
+    assert!((work_fast - work_base).abs() < 1e-6);
+    let elapsed_fast = app_fast
+        .world()
+        .resource::<Time<Fixed>>()
+        .elapsed_secs_f64()
+        - start_fast;
+    let elapsed_base = app_base
+        .world()
+        .resource::<Time<Fixed>>()
+        .elapsed_secs_f64()
+        - start_base;
+    assert!((elapsed_fast - elapsed_base).abs() < 1e-9);
+    assert!((elapsed_fast - (intervals - 1) as f64 * f64::from(dt)).abs() < 1e-6);
     eprintln!(
-        "damage-modifier after actual Fire: {}",
-        beam_owner_diagnostic(&app_fast)
-    );
-
-    // Inject accumulated damage: 3.5s × (5 HP/s × 2×) = 35 HP → enough to destroy 30-HP asteroid.
-    set_active_beam_damage_accumulator(&mut app_fast, BEAM_DAMAGE_PER_SEC * 2.0 * 3.5);
-    tick(&mut app_fast); // One tick to process the accumulated damage.
-    eprintln!(
-        "damage-modifier after original damage step: {}",
+        "damage-modifier after equal paid duration: {}",
         beam_owner_diagnostic(&app_fast)
     );
 
@@ -4175,37 +4297,8 @@ fn phaser_damage_modifier_doubles_kill_rate() {
         .any(|a| a.uuid == "target-uuid");
     assert!(
         !still_exists_fast,
-        "with 2Ã— phaser damage modifier, asteroid should be destroyed after 3.5s of beam"
+        "the doubled modifier must destroy the actual target in the computed paid duration"
     );
-
-    // --- App with identity modifier (baseline): same damage injected but at 1Ã— ---
-    let mut app_base = test_app();
-    setup_weapons_world_with_entity(&mut app_base, 0.0, -20.0);
-    start_game_with_weapons(&mut app_base);
-    push(
-        &mut app_base,
-        "weapons",
-        ClientMessage::ControlSystem {
-            target: crate::ship::system_registry::tactical_radar_system_id(),
-            payload: SystemControlPayload::SetTarget {
-                uuid: "target-uuid".into(),
-            },
-        },
-    );
-    tick(&mut app_base);
-    push(
-        &mut app_base,
-        "weapons",
-        ClientMessage::ControlSystem {
-            target: crate::ship::system_registry::phaser_fore_system_id(),
-            payload: SystemControlPayload::FirePhaser,
-        },
-    );
-    tick(&mut app_base); // processes FirePhaser, beam becomes active
-                         // Inject same real time but at base rate: 3.5s × 5 HP/s = 17.5 HP accumulated
-    set_active_beam_damage_accumulator(&mut app_base, BEAM_DAMAGE_PER_SEC * 1.0 * 3.5);
-    tick(&mut app_base);
-
     let still_exists_base = app_base
         .world()
         .resource::<WorldResource>()
@@ -4215,7 +4308,21 @@ fn phaser_damage_modifier_doubles_kill_rate() {
         .any(|a| a.uuid == "target-uuid");
     assert!(
         still_exists_base,
-        "with identity modifier, asteroid should survive 3.5s of beam (only 17.5/30 HP removed)"
+        "the unmodified bank must leave the same target alive after equal paid duration"
+    );
+    let mut hulls = app_base
+        .world_mut()
+        .query::<(&AsteroidUuid, &crate::entities::spawner::EntitySystemHull)>();
+    let remaining = hulls
+        .iter(app_base.world())
+        .find(|(id, _)| id.0 == "target-uuid")
+        .unwrap()
+        .1
+         .0
+        .total_current();
+    assert!(
+        remaining > 0.0 && remaining < 30.0,
+        "baseline must deal real partial damage too"
     );
 }
 

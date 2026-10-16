@@ -65,11 +65,89 @@ Actual collision eligibility, not the launch target UUID or allegiance, chooses
 the struck subject. Friendly/civilian impact has the same physical consequence.
 
 The marker has zero damaging/EMP payload and zero proximity detonation radius.
-The actual collision owner must verify contact against the current supported
-hull geometry; a loose bounding radius or ordinary explosive proximity event
-alone is insufficient. Root/Craft review must settle the existing collision
-query/shape seam before runtime. Do not quietly inherit the usual five-unit
-explosive radius or invent a hull hit from acquired target intent.
+The first consumer explicitly models a point marker's contact at the current
+Damage boundary. It does not claim a swept first-impact or continuous collision
+solution. The actual lifecycle owner enumerates live supported hull colliders;
+TorpedoTargetSnapshot's UUID-sorted World radii are neither physical shape proof
+nor a required prefilter for this path. Missing/undersized coarse World radius
+must not prevent a real contained point reaching the exact query. A path crossing the hull between
+sampled endpoints can miss under this bounded model. Zero radius alone proves
+nothing, and no explosive near-miss can become a delivered marker.
+
+Require the actual surviving round's current point to satisfy live
+`Collider::contains_point(translation, rotation, point)`. Supported shape is an
+actual same-body, parentless Ball, Y Capsule or Y Cylinder with
+`ColliderScale::Absolute(ONE)`, no substituted shape/config/bounding radius.
+The translation is current ShipPhysics x/y/z and rotation is exactly
+`Quat::from_euler(YXZ, -yaw, 0, roll)`, matching physical synchronization.
+Visual/model/LOD Transform scale is not collider scale and never inflates this
+query. Missing/unsupported collider, nonfinite input or outside endpoint gives
+no attachment. This is a real point/solid intersection at the sampled boundary,
+not an inference from target intent, a cached World pose or an unearned report.
+
+For an intersecting endpoint, `Collider::project_point` with the same pose and
+`solid=false` supplies its nearest real boundary projection. Require finite
+output on that accepted shape; this is the attachment contact point, not a
+precise component position. If several actual hulls contain the endpoint, pick
+least endpoint-to-boundary distance then UUID in the existing lifecycle's
+stable round order. Retain that world contact as subject-local offset. Current
+shield arc uses the round's actual incoming bearing through existing shield
+routing. PDC/interception has already run; ordinary explosive rounds keep their
+existing proximity behavior. No new projectile owner or general CCD is added.
+
+### Sole lifecycle frontier and layer boundary
+
+The existing Simulation `console/weapons/torpedo.rs::tick_torpedo_lifecycle`
+remains the only terminal flight/impact/expiry owner. Within its existing stable
+owner/round walk, the frozen mark-only profile selects the exact live-shape
+predicate instead of Gameplay `TorpedoSystem::find_detonation_hits`' coarse
+proximity predicate. The pure proximity finder must explicitly skip mark-only
+rounds: a coarse match outside the actual shape does not consume, destroy,
+detonate, spawn or stop that marker. It continues through ordinary guided
+advancement and eventual exact impact or expiry. Unmarked flight retains its
+existing proximity path and outcome ordering.
+
+Only after the private Simulation shape query supplies a real contact does the
+same existing `TorpedoSystem::handle_collision_full` removal frontier consume
+that exact surviving round and return its frozen payload. A value-only private
+contact result carries target identity, world surface point and incoming bearing
+to the existing lifecycle settlement/spawn branch. It is not stored as a second
+flight state or published as a controller observation. Stable UUID tie order
+applies inside physical contact choice; ordinary source ordering is preserved.
+
+Gameplay owns frozen payload data, motion, ammunition and single-round removal;
+it imports no Rapier/Simulation scene API. Simulation owns the actual Collider
+query and accepted runtime equipment installation. Neither private physical
+geometry nor raw subject route enters AI inputs, Console controls or permitted
+reports. Preserve the existing launch-origin/source exclusion and actual
+surviving collision interval, PDC-before-impact and contact-before-final-expiry
+ordering. No new arming timer, early source lookup or projectile controller is
+introduced. Unsupported geometry contributes no marker hit; it is not replaced
+with a radius, free beacon, refunded round or implicit World action.
+
+### Local dependency/API proof
+
+The locked dependency is bevy_rapier3d 0.33.0 (Rapier 0.31.0, Parry 0.25.3),
+already used by Simulation. Its local `geometry/collider_impl.rs` exposes
+`contains_point` (line754) and `project_point` (line718), both querying the
+actual `Collider.raw` with a supplied translation/rotation; neither requires a
+new backend broad phase, renderer or package. These APIs are the exact selected
+point-contact and boundary-projection consumers. The cache source pin is
+`C:/Users/jkeyw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/` with the
+locked package/version. Line references describe that locked source, not a new
+remote dependency.
+
+Repository `phoenix-model/src/entity/hull.rs` defines the three accepted shapes.
+Simulation `entities/spawner.rs` constructs the actual Ball, Capsule(length/2)
+and Cylinder(half_height) and pins Absolute(ONE). Gameplay
+`ship/physics_systems.rs::sync_ship_position` supplies the same physical pose;
+Physics SyncBackend/Writeback precede the torpedo Damage boundary. Therefore
+this query uses the current physical body's actual shape/pose, including planar
+banking rotation, while ignoring presentation-only scaling. Tests must pin the
+actual Capsule/Cylinder altitude/cap failures that a broad bounding radius
+would falsely accept, visual-scale independence, missing/undersized coarse radius,
+continued marker flight after coarse outside-shape matches, current-pose movement
+and full-yaw/roll attachment/saved-projection consistency.
 
 A currently raised shield arc stops the marker; it consumes the actual round
 without spawning equipment or applying damage. A successful unshielded contact
@@ -90,8 +168,13 @@ controller or player/AI simulation variant is introduced.
 An explicit accepted attachment profile permits one canonical location state:
 Attached(subject UUID, subject-local offset, attached tick), or Detached. Only
 physical contact creates Attached. It is mechanical state, never a public target
-handle, observation or machinery command. First offsets follow planar subject
-yaw with fixed relative height; this does not add capital-ship 3D control.
+handle, observation or machinery command. The local three-dimensional offset is
+computed with the inverse of the subject's full existing physical rotation
+`Quat::from_euler(YXZ, -yaw, 0, roll)`, and projected with that same rotation on
+every update. Thus banking/roll cannot slide the beacon onto a different hull
+surface or disagree with the actual collider. It adds no capital-ship pitch,
+vertical Helm control or independently chosen child pose. Parent planar motion
+and its existing physical banking remain unchanged.
 
 The existing physical pose-synchronization owner gains a reusable rigid-constraint
 projection. For an attached body that projection is its sole pose writer:
@@ -117,7 +200,16 @@ only this exact attached mechanical pair from physical contact/solver response
 and from `server_app/collision.rs::handle_collisions` damage/de-overlap. The
 existing Physics registration must gain a narrow relation-aware pair filter;
 there is no existing attachment filter to assume. Join that filter and the
-ordinary collision consumer before enabling contact spawning. The exclusion
+ordinary collision consumer before enabling contact spawning. The concrete seam is the existing `register_physics` installation of
+`RapierPhysicsPlugin<()>`, changed to a read-only relation-aware
+`BevyPhysicsHooks` SystemParam. Add `ActiveHooks::FILTER_CONTACT_PAIRS` only on
+the beacon. Local dependency `pipeline/physics_hooks.rs` exposes actual entities
+through `PairFilterContextView::collider1/collider2`; return None only for its
+exact current attached subject, and `Some(SolverFlags::COMPUTE_IMPULSES)` for
+other pairs after existing groups/ActiveCollisionTypes. Non-beacon pairs never
+invoke this optional hook. The ordinary collision consumer reuses that exact
+pair predicate, including any existing retained contact pair. No shape-query,
+weapon ray or global collision group is removed. The exclusion
 ends on actual detach and grants no immunity against other bodies, weapons,
 ray queries, compartment damage or detection. Prove prolonged attachment causes
 neither recurring parent-pair damage nor solver forces, while an actual third
@@ -239,6 +331,9 @@ and Comms review of its exact missing physical/report joins.
 Craft's read-only physical contract review and Comms' read-only report contract
 review pass after the contact-pair, checked-pose, raw-payment and independent
 source-emission clarifications. These reviews endorse the proposed contracts;
-they do not establish that a shape-query, attachment filter or paid-report API
-already exists. Root adoption remains pending. No runtime, native execution,
+they do not establish that an attachment filter or paid-report join already
+exists. The subsequent local dependency audit pins available existing Collider
+point/projection APIs for the explicitly bounded endpoint contact model; that
+API choice has Craft's additional read-only source/API review against the locked
+local dependency; actual consumer proof and Root adoption remain pending. No runtime, native execution,
 asset acceptance or full increment exit is claimed.

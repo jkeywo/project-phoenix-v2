@@ -12,6 +12,8 @@
 seeds       = [1, 2, 3, 4, 5]
 sim_seconds = 120
 world       = "assets/worlds/duel.toml"
+# [ai] Recorded enemy-group neutralization time; numerical timing limits unchanged.
+neutralization_group = "side_b"
 
 # RECHECKED 2026-09-11 (issue #1438) against the behaviour change that lets an
 # AI-operated `repair` System sitting on a HUMAN seat receive a Channel-3
@@ -75,7 +77,7 @@ side_a = ["cruiser"]
 side_b = ["ship_harrow_destroyer"]
   [matchup.thresholds]
   min_win_rate      = 1.0
-  max_ttk_median    = 10.0
+  max_neutralization_median = 10.0
   min_damage_margin = 100.0
 
 [[matchup]]
@@ -84,7 +86,7 @@ side_a = ["cruiser"]
 side_b = ["ship_harrow_cruiser"]
   [matchup.thresholds]
   min_win_rate      = 1.0
-  max_ttk_median    = 25.0
+  max_neutralization_median = 25.0
   min_damage_margin = 200.0
 
 [[matchup]]
@@ -93,7 +95,7 @@ side_a = ["cruiser"]
 side_b = ["ship_harrow_patrol"]
   [matchup.thresholds]
   min_win_rate      = 1.0
-  max_ttk_median    = 20.0
+  max_neutralization_median = 20.0
   min_damage_margin = 200.0
 
 [[matchup]]
@@ -102,7 +104,7 @@ side_a = ["cruiser"]
 side_b = ["ship_harrow_warhawk"]
   [matchup.thresholds]
   min_win_rate      = 1.0
-  max_ttk_median    = 25.0
+  max_neutralization_median = 25.0
   # Re-pegged 50 -> 25 by #1388's dock hull row; see the evidence block above
   # for the measured with/without figures and why this row alone moved.
   min_damage_margin = 25.0

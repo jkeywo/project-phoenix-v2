@@ -81,3 +81,5 @@ in `tick_policy_machine` from that System's own parameters.
 - [AI Ship Unification](./ai-ship-unification.md)
 - [ShipPlugin](./ship-plugin.md)
 - [Information-Parity Audit](./information-parity-audit.md)
+
+[ai] Untargeted measured pursuit first honors a current shared target. Without one, it chooses the nearest current hostile reading, then the most recently observed hostile history, with distance and public contact key as deterministic ties. Fresh information-only readings can guide movement without granting actuator control. Historical records are retained; matching names are not fused and named-target ambiguity is unchanged.

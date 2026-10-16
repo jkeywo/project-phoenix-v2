@@ -520,3 +520,161 @@ fn current_held_board_cannot_bypass_new_conceal_or_missing_observer_scope() {
 
 #[path = "surfaces_borrowed_tests.rs"]
 mod borrowed_input_tests;
+
+fn pursuit_fixture() -> (
+    phoenix_model::sensing_tracks::SensorTrackSnapshot,
+    crate::ai::faction::FactionRegistry,
+) {
+    let (world, observer, owner, _) = rig();
+    let boards = world
+        .get::<crate::server_app::ShipSystemBlackboards>(observer)
+        .unwrap();
+    let crate::core::messages::SystemBlackboard::Helm(board) = &boards.0[&owner] else {
+        panic!()
+    };
+    let mut track = board.tracks.as_ref().unwrap()[0].clone();
+    track.identity = Some(TrackIdentity {
+        name: "same-visible-name".into(),
+        faction: Some(uuid::Uuid::from_u128(2).to_string()),
+        references: vec![],
+    });
+    let mut registry = crate::ai::faction::FactionRegistry::default();
+    registry.insert(crate::ai::faction::FactionConfig {
+        uuid: uuid::Uuid::from_u128(1),
+        name: "observer".into(),
+        display_name: None,
+        enemies: vec![uuid::Uuid::from_u128(2)],
+        compliance: None,
+    });
+    (track, registry)
+}
+
+fn pursuit_picture(
+    tracks: Vec<phoenix_model::sensing_tracks::SensorTrackSnapshot>,
+) -> MeasuredHelm {
+    let mut boards = crate::server_app::ShipSystemBlackboards::default();
+    boards.0.insert(
+        crate::ship::system_registry::helm_radar_system_id(),
+        crate::core::messages::SystemBlackboard::Helm(HelmBlackboard {
+            tracks: Some(tracks),
+            ..Default::default()
+        }),
+    );
+    build(
+        &boards,
+        None,
+        None,
+        &ShipPhysics::default(),
+        None,
+        Some(&crate::entities::spawner::FactionComponent(
+            uuid::Uuid::from_u128(1),
+        )),
+        None,
+        &Default::default(),
+        None,
+        None,
+    )
+}
+
+#[test]
+fn measured_pursuit_prefers_current_then_newest_history_without_fusing_named_contacts() {
+    let (mut old, registry) = pursuit_fixture();
+    old.contact_id = "old-west".into();
+    old.position = [-260.0, 0.0];
+    old.observed_tick = 2820;
+    old.predicted = true;
+    old.selectable = false;
+    let mut recent = old.clone();
+    recent.contact_id = "recent-east".into();
+    recent.position = [313.0, 0.0];
+    recent.observed_tick = 4590;
+    let mut picture = pursuit_picture(vec![old.clone(), recent.clone()]);
+    assert_eq!(
+        picture.destroy_target(&[objective("")], &[], &registry),
+        Some(contact_key("recent-east"))
+    );
+    assert_eq!(
+        picture.selection(Some("recent-east")),
+        None,
+        "history never grants actuator selection"
+    );
+    assert_eq!(
+        picture.named_target("same-visible-name"),
+        None,
+        "matching names do not fuse distinct contacts"
+    );
+    assert_eq!(
+        picture.destroy_target(&[objective("old-west")], &[], &registry),
+        Some(contact_key("old-west")),
+        "explicit historical navigation target remains explicit"
+    );
+
+    old.predicted = false; // Fresh information-only observation, not selectable.
+    old.position = [-500.0, 0.0];
+    picture = pursuit_picture(vec![old.clone(), recent.clone()]);
+    assert_eq!(
+        picture.destroy_target(&[objective("")], &[], &registry),
+        Some(contact_key("old-west")),
+        "fresh information-only movement beats nearer history"
+    );
+    assert_eq!(picture.selection(Some("old-west")), None);
+
+    recent.predicted = false;
+    recent.selectable = true;
+    recent.position = [700.0, 0.0];
+    picture = pursuit_picture(vec![old, recent]);
+    assert_eq!(
+        picture.destroy_target(&[objective("")], &[], &registry),
+        Some(contact_key("old-west")),
+        "nearest fresh observation wins autonomously"
+    );
+    let selected = picture.selection(Some("recent-east")).unwrap();
+    assert_eq!(
+        picture.destroy_target(&[objective("")], &[selected], &registry),
+        Some(selected),
+        "current explicit choice wins over autonomous acquisition"
+    );
+}
+
+#[test]
+fn measured_pursuit_filters_hostility_and_breaks_history_ties_independently_of_input_order() {
+    let (mut a, registry) = pursuit_fixture();
+    a.contact_id = "a".into();
+    a.position = [-50.0, 0.0];
+    a.predicted = true;
+    a.selectable = false;
+    a.observed_tick = 100;
+    let mut b = a.clone();
+    b.contact_id = "b".into();
+    b.position = [50.0, 0.0];
+    let mut friend = a.clone();
+    friend.contact_id = "friend".into();
+    friend.position = [1.0, 0.0];
+    friend.predicted = false;
+    friend.identity.as_mut().unwrap().faction = Some(uuid::Uuid::from_u128(1).to_string());
+    let mut unknown = friend.clone();
+    unknown.contact_id = "unknown".into();
+    unknown.identity = None;
+    let expected = contact_key("a").min(contact_key("b"));
+    let picture = pursuit_picture(vec![friend.clone(), a.clone(), unknown.clone(), b.clone()]);
+    assert_eq!(
+        picture.destroy_target(
+            &[objective("")],
+            &[contact_key("friend"), contact_key("unknown")],
+            &registry
+        ),
+        Some(expected)
+    );
+    let reversed = pursuit_picture(vec![b.clone(), unknown, a.clone(), friend]);
+    assert_eq!(
+        reversed.destroy_target(&[objective("")], &[], &registry),
+        Some(expected)
+    );
+    b.position = [20.0, 0.0];
+    let nearer = pursuit_picture(vec![a, b]);
+    assert_eq!(
+        nearer.destroy_target(&[objective("")], &[], &registry),
+        Some(contact_key("b")),
+        "equal-age history uses distance before key"
+    );
+}

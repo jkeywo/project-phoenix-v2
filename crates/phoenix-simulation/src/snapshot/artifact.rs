@@ -659,7 +659,8 @@ pub const SNAPSHOT_FORMAT: u32 = 89;
 /// "0.77" releases AI impulse when pursuit loses its target or alignment.
 /// Broadside torpedo holds resume approach after an uncommitted target escapes.
 /// "0.78" keeps predicted radar history out of physical Helm avoidance.
-pub const SIMULATION_RULES: &str = "0.78";
+/// "0.79" prefers current and recent measured evidence for autonomous Helm pursuit.
+pub const SIMULATION_RULES: &str = "0.79";
 
 /// The authored data, computed rather than remembered.
 ///

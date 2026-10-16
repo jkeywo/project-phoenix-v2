@@ -2,7 +2,7 @@
 title: Testing Strategy
 type: concept
 tags: [tests, rust, javascript, playwright, pasm, ci]
-sources: [tests/native_cli_smoke.rs, src/bin/tests/phoenix_perf_cli_tests.rs, src/bin/tests/capture_billboard_cli_tests.rs, src/bin/tests/tune_lods_cli_tests.rs, scripts/fleet-browser-matrix.mjs, scripts/fleet-mixed-matrix.mjs, scripts/fleet-channel-impairment.mjs, docs/acceptance/1530-six-peer-matrix.md, scripts/t5-journeys.mjs, tests/t5_journeys.rs, tests/client/t5-journeys.test.js, docs/acceptance/1553-t5-journeys.md, scripts/fleet-relay-probe.mjs, docs/acceptance/1543-performance-proposal.md, AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, tests/combat_balance.rs, tests/lockstep_six_peer.rs, assets/worlds/probe_fleet_six_peer.toml, docs/acceptance/1519-six-peer-endurance.md, crates/phoenix-simulation/src/core/codec_tests.rs, scripts/prepare-gm-live-event.mjs, docs/acceptance/1320-gm-live-event.md, crates/phoenix-simulation/src/perf/phase.rs, crates/phoenix-simulation/src/perf/phase_trace.rs, src/headless/app.rs, src/bin/phoenix_headless.rs, tests/phase_profiling.rs, docs/phase-timing-reduction.md, tests/common/default_pool.rs, docs/default-pool-perturbations.md, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/sim_sets/order.rs, crates/phoenix-simulation/src/sim_sets/order/pass.rs, tests/fixed_update_ambiguities.rs, tests/pool_equivalence.rs, tests/admitted_producer_ordering.rs, tests/captain_sensors_ordering.rs, tests/tactical_target_ordering.rs, tests/snapshot_resume.rs, tests/fixtures/worlds/scripted_order_resume.toml, docs/script-callback-order-proof.md, docs/declared-fixed-order.md, pasm/spec/architecture/deterministic-simulation.yaml]
+sources: [scripts/balance-runs.mjs, scripts/balance-runs.cruiser.toml, tests/client/balance-runs.test.js, pasm/spec/architecture/headless-balance-telemetry.yaml, tests/native_cli_smoke.rs, src/bin/tests/phoenix_perf_cli_tests.rs, src/bin/tests/capture_billboard_cli_tests.rs, src/bin/tests/tune_lods_cli_tests.rs, scripts/fleet-browser-matrix.mjs, scripts/fleet-mixed-matrix.mjs, scripts/fleet-channel-impairment.mjs, docs/acceptance/1530-six-peer-matrix.md, scripts/t5-journeys.mjs, tests/t5_journeys.rs, tests/client/t5-journeys.test.js, docs/acceptance/1553-t5-journeys.md, scripts/fleet-relay-probe.mjs, docs/acceptance/1543-performance-proposal.md, AGENTS.md, .github/workflows/ci.yml, tests/client/, tests/smoke/, tests/headless_runner.rs, tests/combat_balance.rs, tests/lockstep_six_peer.rs, assets/worlds/probe_fleet_six_peer.toml, docs/acceptance/1519-six-peer-endurance.md, crates/phoenix-simulation/src/core/codec_tests.rs, scripts/prepare-gm-live-event.mjs, docs/acceptance/1320-gm-live-event.md, crates/phoenix-simulation/src/perf/phase.rs, crates/phoenix-simulation/src/perf/phase_trace.rs, src/headless/app.rs, src/bin/phoenix_headless.rs, tests/phase_profiling.rs, docs/phase-timing-reduction.md, tests/common/default_pool.rs, docs/default-pool-perturbations.md, crates/phoenix-simulation/src/server_app/components.rs, crates/phoenix-simulation/src/sim_sets/order.rs, crates/phoenix-simulation/src/sim_sets/order/pass.rs, tests/fixed_update_ambiguities.rs, tests/pool_equivalence.rs, tests/admitted_producer_ordering.rs, tests/captain_sensors_ordering.rs, tests/tactical_target_ordering.rs, tests/snapshot_resume.rs, tests/fixtures/worlds/scripted_order_resume.toml, docs/script-callback-order-proof.md, docs/declared-fixed-order.md, pasm/spec/architecture/deterministic-simulation.yaml]
 updated: 2026-10-16
 ---
 
@@ -48,7 +48,12 @@ CLI-generated duel rosters use the authored arena's `on_all_neutralized` victory
 condition. `tests/combat_balance.rs` disables two opponents in sequence, checks
 that only the last ends the encounter, and verifies no death or despawn was
 fabricated. Balance TTK still measures actual deaths, so a disablement victory
-can legitimately have no TTK sample.
+can legitimately have no TTK sample. [ai] The Cruiser matrix separately binds
+`neutralization_group = "side_b"`. Its neutralization timing uses the recorded
+firing time of the unique once-only, ungated, zero-delay group trigger in a
+victory/GameOver report, never the final run duration or an escort death. Missing
+or ambiguous evidence is counted and blocks timing gates. Non-victories are
+excluded; numerical timing limits remain unchanged.
 
 The six-peer lockstep binary runs four ship hosts and two GM peers as complete
 headless Apps. Its short workload keeps twelve Station clients, two GM

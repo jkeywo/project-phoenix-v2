@@ -9,6 +9,7 @@ pub(super) struct MeasuredHelm {
     pub velocities: BTreeMap<uuid::Uuid, [f32; 2]>,
     known: Vec<(String, Vec<String>, uuid::Uuid)>,
     current: BTreeSet<uuid::Uuid>,
+    observations: BTreeMap<uuid::Uuid, (bool, u64)>,
 }
 
 /// A controller-local key from the PUBLIC handle, never the actual actor UUID.
@@ -62,7 +63,54 @@ impl MeasuredHelm {
             return None;
         };
         if target.is_empty() {
-            helm_destroy_target(scored, &self.view, shared, registry)
+            let hostile = |entity: &&crate::ai::AiWorldEntity| {
+                crate::ai::faction::is_enemy(self.view.self_faction, entity.faction, registry)
+            };
+            // Shared selection remains authoritative only while it resolves to
+            // a current selectable reading. History is navigation knowledge,
+            // not a route back to the physical actuator target.
+            if let Some(selected) = shared.iter().find(|id| {
+                self.current.contains(*id)
+                    && self
+                        .view
+                        .entities
+                        .iter()
+                        .filter(hostile)
+                        .any(|e| e.uuid == **id)
+            }) {
+                return Some(*selected);
+            }
+            let distance = |entity: &crate::ai::AiWorldEntity| {
+                let dx = entity.position[0] - self.view.entity_pos[0];
+                let dz = entity.position[2] - self.view.entity_pos[2];
+                dx * dx + dz * dz
+            };
+            self.view
+                .entities
+                .iter()
+                .filter(hostile)
+                .filter_map(|entity| {
+                    self.observations
+                        .get(&entity.uuid)
+                        .map(|observation| (entity, observation))
+                })
+                .min_by(|(a, (a_predicted, a_tick)), (b, (b_predicted, b_tick))| {
+                    // Fresh information-only readings can guide movement too.
+                    // Once all readings are lost, keep pursuing the newest
+                    // evidence instead of switching to a nearer obsolete ghost.
+                    a_predicted
+                        .cmp(b_predicted)
+                        .then_with(|| {
+                            if *a_predicted {
+                                b_tick.cmp(a_tick)
+                            } else {
+                                std::cmp::Ordering::Equal
+                            }
+                        })
+                        .then_with(|| distance(a).total_cmp(&distance(b)))
+                        .then_with(|| a.uuid.cmp(&b.uuid))
+                })
+                .map(|(entity, _)| entity.uuid)
         } else {
             self.named_target(target)
         }
@@ -96,6 +144,7 @@ pub(super) fn build(
         velocities: BTreeMap::new(),
         known: Vec::new(),
         current: BTreeSet::new(),
+        observations: BTreeMap::new(),
     };
     // Without the observer key, an active observer-specific permission table
     // cannot be applied. Missing scope must not become a legacy world view.
@@ -165,6 +214,9 @@ pub(super) fn build(
             names
         });
         result.known.push((track.contact_id.clone(), names, key));
+        result
+            .observations
+            .insert(key, (track.predicted, track.observed_tick));
         if let Some(velocity) = track
             .velocity
             .filter(|velocity| velocity.iter().all(|value| value.is_finite()))

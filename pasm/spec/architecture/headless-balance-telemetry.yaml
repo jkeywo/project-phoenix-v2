@@ -271,6 +271,7 @@ entities:
       summary: Node script that reads a TOML config (class-matrix shorthand, explicit matchups, or a scenario sweep), fans out phoenix-headless processes across a bounded concurrency pool, and merges the per-run report JSON into per-matchup win/loss/draw/timeout rates, time-to-kill distributions, and mean damage margins as a markdown table and optional merged JSON.
       rationale:
         - "[ai] The merge and formatting are pure functions exported for vitest; the CLI entry is guarded so importing never spawns. Failed, unparseable, and hung runs (configurable run_timeout_secs kill) are recorded per-run and never sink the batch."
+        - "[ai] User requested neutralization timing on 2026-10-16. A configured neutralization_group binds a canonical duel metric to exactly one once-only, ungated, zero-delay on_all_neutralized trigger. Only victory/GameOver reports with a fired trigger and finite in-run last_fired_secs contribute; outcome or run duration alone never manufactures a neutralization timestamp. Missing, ambiguous or invalid evidence is counted and makes timing gates unmeasurable, even if other victories have samples. Non-victories are excluded. Literal death-based TTK remains separate. The Cruiser gate adopts max_neutralization_median with its existing 10/25/20/25-second limits unchanged."
     architecture:
       kind: offline-tool
       authority: observational

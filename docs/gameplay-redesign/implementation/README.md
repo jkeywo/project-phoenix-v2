@@ -19,6 +19,8 @@ The [Cruiser combat-effectiveness pass](./cruiser-combat-effectiveness-2026-10-1
 
 The [Warhawk combat-effectiveness correction](./warhawk-combat-effectiveness-2026-10-16.html) stops predicted radar history from becoming expanding physical avoidance obstacles, and makes both steering paths respect hazard eligibility. Warhawk wins improve from 0/10 to 10/10 without changing weapon values. The original matrix now wins 20/20; fresh seeds win 19/20 with one Destroyer draw. All 40 runs execute. Four death-TTK checks per matrix remain unmeasurable; the fresh Destroyer win-rate check also fails. Focused native tests and deterministic replay pass; rules advance to 0.78. Accepted optimisation code is preserved.
 
+The [Destroyer seed 7 pursuit and timing correction](./destroyer7-pursuit-and-neutralization-2026-10-16.html) prioritizes current observations and then the freshest hostile history instead of a nearer obsolete track. Seed 7 now neutralizes its opponent at **73.10s**, and both original and fresh matrices win **20/20**, with no run failures. Canonical duel timing now reads the explicit group-neutralization trigger; literal death TTK remains separate. All 40 victorious timing samples have evidence, but each matrix still misses its four unchanged timing limits. The 15 focused native tests, 82 JavaScript tests and 74-checkpoint deterministic replay pass. Rules advance to 0.79; weapon values and accepted optimisation code are unchanged.
+
 ## Per-increment progress — 16 October 2026
 
 The user requested a pause after finishing increments 8–12 on 16 October.
@@ -31,7 +33,7 @@ exits; physical-device and human-workload acceptance remain open. Later initial
 commits are implementation checkpoints, not verified increment exits.
 
 Current integrated compatibility is **protocol 46, snapshot 89 and simulation
-rules 0.78**, after the Warhawk radar-history avoidance correction. These versions identify supported
+rules 0.79**, after the Destroyer pursuit freshness correction. These versions identify supported
 state; they do not establish a verified gameplay exit.
 
 The selected four-owner union at `8ac62cce` / rules 0.74 passes **1618/1618**

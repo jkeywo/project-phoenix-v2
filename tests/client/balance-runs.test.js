@@ -1218,3 +1218,78 @@ describe('formatMatrix', () => {
     expect(grid).toContain('| **courier** | 0% | 0% |');
   });
 });
+
+describe('explicit duel neutralization timing', () => {
+  const trigger = (extra = {}) => ({
+    condition: 'on_all_neutralized(side_b, after_secs=0)', repeat: false,
+    fired: true, pending: false, when_holds: true, last_fired_secs: 37.0833,
+    fire_history: [], ...extra,
+  });
+  const evidence = (extra = {}) => ({
+    ...report({ outcome: 'victory', playerDealt: 400, enemyDealt: 100 }),
+    final_phase: 'GameOver', sim_seconds: 37.1,
+    scenario: { triggers: [trigger()] }, ...extra,
+  });
+  const run = (r = evidence(), extra = {}) => ({ matchup: 'duel', seed: 7, neutralizationGroup: 'side_b', report: r, ...extra });
+  const metric = (runs) => mergeReports(runs).matchups.duel.neutralization;
+
+  it('carries explicit global and per-matchup bindings through tasks without inferring a group', () => {
+    const config = { seeds: [7], neutralization_group: 'side_b', matchup: [
+      { name: 'one', side_a: ['cruiser'], side_b: ['destroyer'] },
+      { name: 'two', side_a: ['cruiser'], side_b: ['warhawk'], neutralization_group: 'foes' },
+    ] };
+    const matchups = expandMatchups(config);
+    expect(buildRunTasks(config, matchups).map((t) => t.neutralizationGroup)).toEqual(['side_b', 'foes']);
+    expect(expandMatchups({ class_matrix: ['a'] })[0]).not.toHaveProperty('neutralizationGroup');
+    expect(() => expandMatchups({ ...config, neutralization_group: '' })).toThrow('neutralization_group');
+    expect(() => mergeReports([run(), run(evidence(), { neutralizationGroup: 'other' })])).toThrow('inconsistent');
+  });
+
+  it('uses the last group-neutralization event, not duration or an earlier escort death', () => {
+    const r = evidence({ damage_by_ship: { escort: { death: [60, 1] } } });
+    const s = mergeReports([run(r)]).matchups.duel;
+    expect(s.neutralization).toMatchObject({ group: 'side_b', min: 37.0833, median: 37.0833, max: 37.0833, count: 1 });
+    expect(s.ttk).toMatchObject({ median: 1, count: 1 });
+    expect(metric([run(evidence({ scenario: { triggers: [trigger({ last_fired_secs: 0 })] } }))]).count).toBe(1);
+  });
+
+  it.each(['defeat', 'draw', 'timeout', 'reported'])('excludes %s despite earlier neutralization or death', (outcome) => {
+    const n = metric([run(evidence({ outcome, damage_by_ship: { escort: { death: [60, 1] } } }))]);
+    expect(n.count).toBe(0);
+    expect(n.excluded.notVictory).toBe(1);
+  });
+
+  it.each([
+    ['unrelated victory', []],
+    ['wrong group', [trigger({ condition: 'on_all_neutralized(side_a, after_secs=0)' })]],
+    ['partial group still pending', [trigger({ fired: false, pending: true, last_fired_secs: null })]],
+    ['duplicate evidence', [trigger(), trigger()]],
+    ['repeated trigger', [trigger({ repeat: true })]],
+    ['guarded trigger', [trigger({ when: 'flag(ready)' })]],
+    ['delayed trigger', [trigger({ condition: 'on_all_neutralized(side_b, after_secs=5)' })]],
+    ['negative time', [trigger({ last_fired_secs: -1 })]],
+    ['future time', [trigger({ last_fired_secs: 38 })]],
+    ['missing time', [trigger({ last_fired_secs: undefined })]],
+    ['nonfinite time', [trigger({ last_fired_secs: Infinity })]],
+  ])('records a gap for %s rather than silently improving the median', (_name, triggers) => {
+    const s = mergeReports([run(), run(evidence({ scenario: { triggers } }), { seed: 8 })]);
+    expect(s.matchups.duel.neutralization.count).toBe(1);
+    expect(s.matchups.duel.neutralization.unmeasurable.total).toBe(1);
+    expect(evaluateThresholds(s, [], { max_neutralization_median: 100 })[0]).toMatchObject({ actual: null, pass: null });
+  });
+
+  it('requires a complete victory ending and records absent evidence', () => {
+    expect(metric([run(evidence({ final_phase: 'InProgress' }))]).unmeasurable.total).toBe(1);
+    expect(metric([run(evidence({ scenario: undefined }))]).unmeasurable.total).toBe(1);
+    expect(metric([run(evidence(), { neutralizationGroup: undefined })]).excluded.notConfigured).toBe(1);
+  });
+
+  it('gates real measured neutralization and renders it separately from death TTK', () => {
+    const s = mergeReports([run()]);
+    expect(evaluateThresholds(s, [], { max_neutralization_median: 25 })[0]).toMatchObject({ actual: 37.0833, pass: false });
+    expect(formatMarkdown(s)).toContain('Neutralization min/med/max');
+    expect(formatMarkdown(s)).toContain('37.1 / 37.1 / 37.1');
+    expect(s.matchups.duel.ttk.count).toBe(0);
+    expect(formatMatrix({ matchups: { cruiser_vs_cruiser: s.matchups.duel } }, ['cruiser'], 'neutralization')).toContain('37.1');
+  });
+});

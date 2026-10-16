@@ -1,0 +1,2671 @@
+{
+  "aiAuthored": true,
+  "date": "2026-10-16",
+  "build": {
+    "source": {
+      "sourceRevision": "ca9f10587aef6dbbefd66da99f63ce624f3c75ff",
+      "runtimeSourceSha256": "af862c057287c4c8fc38e98937389b38cfd37a7964e7d33bcadbd6041f40f207",
+      "runtimeSourceClean": false,
+      "repositoryDirty": true,
+      "exampleSha256": "191635f3f52de979f60891e2b78f9d7f269de405d4e75a0a711bc8d617cff46c"
+    },
+    "command": "cargo build --profile measure --features headless --bin phoenix-headless --message-format=json-render-diagnostics",
+    "rules": "0.79",
+    "targetDirectory": "C:\\Users\\jkeyw\\.codex\\worktrees\\combat-balance-fixes\\increment-14-native-validation/target",
+    "binarySha256": "3694107b20d48a33edf3fbb1ea05631512f922a79ab4a37e165547f6048e0f2e",
+    "binary": ".phoenix/destroyer7-fixed.exe",
+    "patchSha256": "017e630872b3611730f4ac92b977f1396c7f65757e64aa40017079ca7b040989",
+    "simulationArtifact": {
+      "reason": "compiler-artifact",
+      "package_id": "path+file:///C:/Users/jkeyw/.codex/worktrees/combat-balance-fixes/increment-14-native-validation/crates/phoenix-simulation#0.1.0",
+      "manifest_path": "C:\\Users\\jkeyw\\.codex\\worktrees\\combat-balance-fixes\\increment-14-native-validation\\crates\\phoenix-simulation\\Cargo.toml",
+      "target": {
+        "kind": [
+          "lib"
+        ],
+        "crate_types": [
+          "lib"
+        ],
+        "name": "phoenix_simulation",
+        "src_path": "C:\\Users\\jkeyw\\.codex\\worktrees\\combat-balance-fixes\\increment-14-native-validation\\crates\\phoenix-simulation\\src\\lib.rs",
+        "edition": "2021",
+        "doc": true,
+        "doctest": true,
+        "test": true
+      },
+      "profile": {
+        "opt_level": "3",
+        "debuginfo": 0,
+        "debug_assertions": false,
+        "overflow_checks": false,
+        "test": false
+      },
+      "features": [
+        "headless",
+        "server"
+      ],
+      "filenames": [
+        "C:\\Users\\jkeyw\\.codex\\worktrees\\combat-balance-fixes\\increment-14-native-validation\\target\\measure\\deps\\libphoenix_simulation-7e77ee5c1823ad7a.rlib",
+        "C:\\Users\\jkeyw\\.codex\\worktrees\\combat-balance-fixes\\increment-14-native-validation\\target\\measure\\deps\\libphoenix_simulation-7e77ee5c1823ad7a.rmeta"
+      ],
+      "executable": null,
+      "fresh": false
+    },
+    "executableArtifact": {
+      "reason": "compiler-artifact",
+      "package_id": "path+file:///C:/Users/jkeyw/.codex/worktrees/combat-balance-fixes/increment-14-native-validation#project-phoenix@0.1.0",
+      "manifest_path": "C:\\Users\\jkeyw\\.codex\\worktrees\\combat-balance-fixes\\increment-14-native-validation\\Cargo.toml",
+      "target": {
+        "kind": [
+          "bin"
+        ],
+        "crate_types": [
+          "bin"
+        ],
+        "name": "phoenix-headless",
+        "src_path": "C:\\Users\\jkeyw\\.codex\\worktrees\\combat-balance-fixes\\increment-14-native-validation\\src\\bin\\phoenix_headless.rs",
+        "edition": "2021",
+        "required-features": [
+          "headless"
+        ],
+        "doc": true,
+        "doctest": false,
+        "test": true
+      },
+      "profile": {
+        "opt_level": "3",
+        "debuginfo": 0,
+        "debug_assertions": false,
+        "overflow_checks": false,
+        "test": false
+      },
+      "features": [
+        "default",
+        "headless",
+        "server"
+      ],
+      "filenames": [
+        "C:\\Users\\jkeyw\\.codex\\worktrees\\combat-balance-fixes\\increment-14-native-validation\\target\\measure\\phoenix-headless.exe",
+        "C:\\Users\\jkeyw\\.codex\\worktrees\\combat-balance-fixes\\increment-14-native-validation\\target\\measure\\phoenix_headless.pdb"
+      ],
+      "executable": "C:\\Users\\jkeyw\\.codex\\worktrees\\combat-balance-fixes\\increment-14-native-validation\\target\\measure\\phoenix-headless.exe",
+      "fresh": false
+    },
+    "simulationDependencySha256": "a52d9c889c357e61f72ea4cd8eff93b3ab10ac7227359ccecabeb654e9a38e68",
+    "cargoJsonSha256": "2d9cc5c6693cf9f1df35e1b241bdd437c5ade6027d0fbb972d2214458c0c3e10",
+    "authoredCruiserSha256": "54242c058a531824492cc3a10096c9e16eb83848c0c427071d75c89587307f1d",
+    "matrixSha256": "b90b8030d7a0995370b277fbd7225ccaf03e31d8917a596cebf7eaed6dbededd"
+  },
+  "validation": {
+    "summary": "15 focused native tests, 82 JavaScript metrics tests, PASM validate/scan/traceability, formatting and wiki reference checks pass. Both 20-duel matrices complete with 40/40 wins and no timing-evidence gaps. Seed 7 deterministic replay agrees at all 74 checkpoints. Each matrix still fails four unchanged timing thresholds.",
+    "native": {
+      "passed": 15,
+      "command": "cargo test -p phoenix-simulation --lib --no-default-features -- ship::helm_ai::surfaces::measured::tests:: strict_mode_accepts_every_shipped_hull strict_mode_is_on_by_default",
+      "log": ".phoenix/destroyer7-native-tests.log"
+    },
+    "javascript": {
+      "passed": 82,
+      "command": "npx vitest run tests/client/balance-runs.test.js",
+      "log": ".phoenix/destroyer7-balance-metrics-tests.log",
+      "initialFailure": "One new formatting assertion expected two decimal places; corrected to the existing one-decimal formatter and reran the suite."
+    },
+    "pasm": {
+      "validate": 0,
+      "scan": 0,
+      "traceability": 0
+    },
+    "wiki": {
+      "pages": [
+        {
+          "page": "wiki/concepts/ai-helm-decomposition.md",
+          "sources": 21,
+          "result": "PASS"
+        },
+        {
+          "page": "wiki/concepts/testing-strategy.md",
+          "sources": 51,
+          "result": "PASS"
+        }
+      ],
+      "indexLinks": 73,
+      "result": "PASS"
+    },
+    "balance": {
+      "original": {
+        "runs": 20,
+        "wins": 20,
+        "losses": 0,
+        "draws": 0,
+        "timeouts": 0,
+        "reported": 0,
+        "failures": 0
+      },
+      "fresh": {
+        "runs": 20,
+        "wins": 20,
+        "losses": 0,
+        "draws": 0,
+        "timeouts": 0,
+        "reported": 0,
+        "failures": 0
+      },
+      "originalFailedThresholds": [
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "max_neutralization_median",
+          "limit": 10,
+          "actual": 61.050003,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "max_neutralization_median",
+          "limit": 25,
+          "actual": 30.633333,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "max_neutralization_median",
+          "limit": 20,
+          "actual": 40.5,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "max_neutralization_median",
+          "limit": 25,
+          "actual": 37.066666,
+          "pass": false
+        }
+      ],
+      "freshFailedThresholds": [
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "max_neutralization_median",
+          "limit": 10,
+          "actual": 42.2,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "max_neutralization_median",
+          "limit": 25,
+          "actual": 35.983334,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "max_neutralization_median",
+          "limit": 20,
+          "actual": 36.683334,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "max_neutralization_median",
+          "limit": 25,
+          "actual": 38.95,
+          "pass": false
+        }
+      ]
+    },
+    "replay": {
+      "seed": 7,
+      "commands": 0,
+      "checkpoints": 74,
+      "finalDigest": "0x2eba696c0a96e4ac",
+      "result": "all agreed",
+      "limitation": "Same frozen local content; existing computed opponent template warning means this recording does not certify cross-content replay compatibility."
+    },
+    "buildWarning": "Existing native-host audio methods take_authored/take_computer are unused in this headless feature configuration.",
+    "notRun": [
+      "Full pre-push gates",
+      "Game browser/native acceptance",
+      "Human/device acceptance",
+      "Performance profiling"
+    ]
+  },
+  "before": [
+    {
+      "matchups": {
+        "cruiser_vs_harrow_destroyer": {
+          "label": "cruiser_vs_harrow_destroyer",
+          "sideA": [
+            "cruiser"
+          ],
+          "sideB": [
+            "ship_harrow_destroyer"
+          ],
+          "total": 5,
+          "completed": 5,
+          "wins": 5,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 0,
+          "reported": 0,
+          "failures": 0,
+          "decided": 5,
+          "winRate": 1,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "neutralization": {
+            "group": "side_b",
+            "min": 34.183334,
+            "median": 60.95,
+            "max": 73.86667,
+            "count": 5,
+            "excluded": {
+              "notConfigured": 0,
+              "notVictory": 0
+            },
+            "unmeasurable": {
+              "missingEvidence": 0,
+              "ambiguousEvidence": 0,
+              "invalidEvidence": 0,
+              "total": 0
+            }
+          },
+          "damageMargin": {
+            "mean": 181.359,
+            "count": 5
+          },
+          "mandatorySetCompletion": {
+            "completed": 0,
+            "sampled": 0,
+            "rate": null,
+            "unmeasurable": {
+              "total": 5,
+              "missingScenario": 0,
+              "malformedObjectives": 0,
+              "noMandatoryObjectives": 5
+            }
+          },
+          "fallingSkywayCleanLedger": null,
+          "phases": {
+            "acquire": 12.167,
+            "escape": 72.901,
+            "inbound": 114.333,
+            "orbit": 198.818,
+            "recover": 24.167,
+            "reenter": 6.133,
+            "shadow": 57.718,
+            "torpedo_run": 78.266
+          },
+          "stationActivity": {
+            "captain": {
+              "human": 0,
+              "ai": 35,
+              "offline": 0,
+              "total": 35
+            },
+            "engineering": {
+              "human": 0,
+              "ai": 109,
+              "offline": 0,
+              "total": 109
+            },
+            "helm": {
+              "human": 0,
+              "ai": 71155,
+              "offline": 0,
+              "total": 71155
+            },
+            "science": {
+              "human": 0,
+              "ai": 120,
+              "offline": 0,
+              "total": 120
+            },
+            "tactical": {
+              "human": 0,
+              "ai": 8255,
+              "offline": 0,
+              "total": 8255
+            }
+          },
+          "failuresDetail": []
+        },
+        "cruiser_vs_harrow_cruiser": {
+          "label": "cruiser_vs_harrow_cruiser",
+          "sideA": [
+            "cruiser"
+          ],
+          "sideB": [
+            "ship_harrow_cruiser"
+          ],
+          "total": 5,
+          "completed": 5,
+          "wins": 5,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 0,
+          "reported": 0,
+          "failures": 0,
+          "decided": 5,
+          "winRate": 1,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "neutralization": {
+            "group": "side_b",
+            "min": 29.900002,
+            "median": 37.066666,
+            "max": 53.61667,
+            "count": 5,
+            "excluded": {
+              "notConfigured": 0,
+              "notVictory": 0
+            },
+            "unmeasurable": {
+              "missingEvidence": 0,
+              "ambiguousEvidence": 0,
+              "invalidEvidence": 0,
+              "total": 0
+            }
+          },
+          "damageMargin": {
+            "mean": 339.053,
+            "count": 5
+          },
+          "mandatorySetCompletion": {
+            "completed": 0,
+            "sampled": 0,
+            "rate": null,
+            "unmeasurable": {
+              "total": 5,
+              "missingScenario": 0,
+              "malformedObjectives": 0,
+              "noMandatoryObjectives": 5
+            }
+          },
+          "fallingSkywayCleanLedger": null,
+          "phases": {
+            "acquire": 11.833,
+            "orbit": 258.3,
+            "shadow": 92.335,
+            "torpedo_run": 25.066
+          },
+          "stationActivity": {
+            "captain": {
+              "human": 0,
+              "ai": 15,
+              "offline": 0,
+              "total": 15
+            },
+            "engineering": {
+              "human": 0,
+              "ai": 82,
+              "offline": 0,
+              "total": 82
+            },
+            "helm": {
+              "human": 0,
+              "ai": 44100,
+              "offline": 0,
+              "total": 44100
+            },
+            "science": {
+              "human": 0,
+              "ai": 78,
+              "offline": 0,
+              "total": 78
+            },
+            "tactical": {
+              "human": 0,
+              "ai": 10450,
+              "offline": 0,
+              "total": 10450
+            }
+          },
+          "failuresDetail": []
+        },
+        "cruiser_vs_harrow_patrol": {
+          "label": "cruiser_vs_harrow_patrol",
+          "sideA": [
+            "cruiser"
+          ],
+          "sideB": [
+            "ship_harrow_patrol"
+          ],
+          "total": 5,
+          "completed": 5,
+          "wins": 5,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 0,
+          "reported": 0,
+          "failures": 0,
+          "decided": 5,
+          "winRate": 1,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "neutralization": {
+            "group": "side_b",
+            "min": 33.816666,
+            "median": 40.5,
+            "max": 42.016666,
+            "count": 5,
+            "excluded": {
+              "notConfigured": 0,
+              "notVictory": 0
+            },
+            "unmeasurable": {
+              "missingEvidence": 0,
+              "ambiguousEvidence": 0,
+              "invalidEvidence": 0,
+              "total": 0
+            }
+          },
+          "damageMargin": {
+            "mean": 297.0079999999999,
+            "count": 5
+          },
+          "mandatorySetCompletion": {
+            "completed": 0,
+            "sampled": 0,
+            "rate": null,
+            "unmeasurable": {
+              "total": 5,
+              "missingScenario": 0,
+              "malformedObjectives": 0,
+              "noMandatoryObjectives": 5
+            }
+          },
+          "fallingSkywayCleanLedger": null,
+          "phases": {
+            "acquire": 4.165,
+            "orbit": 129.284,
+            "shadow": 0.835,
+            "torpedo_run": 62.499
+          },
+          "stationActivity": {
+            "captain": {
+              "human": 0,
+              "ai": 15,
+              "offline": 0,
+              "total": 15
+            },
+            "engineering": {
+              "human": 0,
+              "ai": 82,
+              "offline": 0,
+              "total": 82
+            },
+            "helm": {
+              "human": 0,
+              "ai": 46623,
+              "offline": 0,
+              "total": 46623
+            },
+            "science": {
+              "human": 0,
+              "ai": 74,
+              "offline": 0,
+              "total": 74
+            },
+            "tactical": {
+              "human": 0,
+              "ai": 11384,
+              "offline": 0,
+              "total": 11384
+            }
+          },
+          "failuresDetail": []
+        },
+        "cruiser_vs_harrow_warhawk": {
+          "label": "cruiser_vs_harrow_warhawk",
+          "sideA": [
+            "cruiser"
+          ],
+          "sideB": [
+            "ship_harrow_warhawk"
+          ],
+          "total": 5,
+          "completed": 5,
+          "wins": 5,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 0,
+          "reported": 0,
+          "failures": 0,
+          "decided": 5,
+          "winRate": 1,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "neutralization": {
+            "group": "side_b",
+            "min": 33.3,
+            "median": 37.066666,
+            "max": 45.75,
+            "count": 5,
+            "excluded": {
+              "notConfigured": 0,
+              "notVictory": 0
+            },
+            "unmeasurable": {
+              "missingEvidence": 0,
+              "ambiguousEvidence": 0,
+              "invalidEvidence": 0,
+              "total": 0
+            }
+          },
+          "damageMargin": {
+            "mean": 379.86899999999997,
+            "count": 5
+          },
+          "mandatorySetCompletion": {
+            "completed": 0,
+            "sampled": 0,
+            "rate": null,
+            "unmeasurable": {
+              "total": 5,
+              "missingScenario": 0,
+              "malformedObjectives": 0,
+              "noMandatoryObjectives": 5
+            }
+          },
+          "fallingSkywayCleanLedger": null,
+          "phases": {
+            "acquire": 11.665,
+            "hold": 122.266,
+            "orbit": 166.134,
+            "shadow": 66.535,
+            "torpedo_run": 24.335
+          },
+          "stationActivity": {
+            "captain": {
+              "human": 0,
+              "ai": 15,
+              "offline": 0,
+              "total": 15
+            },
+            "engineering": {
+              "human": 0,
+              "ai": 105,
+              "offline": 0,
+              "total": 105
+            },
+            "helm": {
+              "human": 0,
+              "ai": 46887,
+              "offline": 0,
+              "total": 46887
+            },
+            "science": {
+              "human": 0,
+              "ai": 57,
+              "offline": 0,
+              "total": 57
+            },
+            "tactical": {
+              "human": 0,
+              "ai": 9950,
+              "offline": 0,
+              "total": 9950
+            }
+          },
+          "failuresDetail": []
+        }
+      },
+      "totals": {
+        "runs": 20,
+        "wins": 20,
+        "losses": 0,
+        "draws": 0,
+        "timeouts": 0,
+        "reported": 0,
+        "failures": 0
+      },
+      "thresholds": [
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 1,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "max_neutralization_median",
+          "limit": 10,
+          "actual": 60.95,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "min_damage_margin",
+          "limit": 100,
+          "actual": 181.359,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 1,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "max_neutralization_median",
+          "limit": 25,
+          "actual": 37.066666,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "min_damage_margin",
+          "limit": 200,
+          "actual": 339.053,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 1,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "max_neutralization_median",
+          "limit": 20,
+          "actual": 40.5,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "min_damage_margin",
+          "limit": 200,
+          "actual": 297.0079999999999,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 1,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "max_neutralization_median",
+          "limit": 25,
+          "actual": 37.066666,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "min_damage_margin",
+          "limit": 25,
+          "actual": 379.86899999999997,
+          "pass": true
+        }
+      ]
+    },
+    {
+      "matchups": {
+        "cruiser_vs_harrow_destroyer": {
+          "label": "cruiser_vs_harrow_destroyer",
+          "sideA": [
+            "cruiser"
+          ],
+          "sideB": [
+            "ship_harrow_destroyer"
+          ],
+          "total": 5,
+          "completed": 5,
+          "wins": 4,
+          "losses": 0,
+          "draws": 1,
+          "timeouts": 0,
+          "reported": 0,
+          "failures": 0,
+          "decided": 5,
+          "winRate": 0.8,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "neutralization": {
+            "group": "side_b",
+            "min": 33.75,
+            "median": 42.1166665,
+            "max": 56.550003,
+            "count": 4,
+            "excluded": {
+              "notConfigured": 0,
+              "notVictory": 1
+            },
+            "unmeasurable": {
+              "missingEvidence": 0,
+              "ambiguousEvidence": 0,
+              "invalidEvidence": 0,
+              "total": 0
+            }
+          },
+          "damageMargin": {
+            "mean": 162.3294,
+            "count": 5
+          },
+          "mandatorySetCompletion": {
+            "completed": 0,
+            "sampled": 0,
+            "rate": null,
+            "unmeasurable": {
+              "total": 5,
+              "missingScenario": 0,
+              "malformedObjectives": 0,
+              "noMandatoryObjectives": 5
+            }
+          },
+          "fallingSkywayCleanLedger": null,
+          "phases": {
+            "acquire": 42.483,
+            "escape": 79.834,
+            "inbound": 101.833,
+            "orbit": 186.633,
+            "recover": 12,
+            "reenter": 3.066,
+            "shadow": 84.384,
+            "torpedo_run": 78.6
+          },
+          "stationActivity": {
+            "captain": {
+              "human": 0,
+              "ai": 33,
+              "offline": 0,
+              "total": 33
+            },
+            "engineering": {
+              "human": 0,
+              "ai": 112,
+              "offline": 0,
+              "total": 112
+            },
+            "helm": {
+              "human": 0,
+              "ai": 71617,
+              "offline": 0,
+              "total": 71617
+            },
+            "science": {
+              "human": 0,
+              "ai": 108,
+              "offline": 0,
+              "total": 108
+            },
+            "tactical": {
+              "human": 0,
+              "ai": 7108,
+              "offline": 0,
+              "total": 7108
+            }
+          },
+          "failuresDetail": []
+        },
+        "cruiser_vs_harrow_cruiser": {
+          "label": "cruiser_vs_harrow_cruiser",
+          "sideA": [
+            "cruiser"
+          ],
+          "sideB": [
+            "ship_harrow_cruiser"
+          ],
+          "total": 5,
+          "completed": 5,
+          "wins": 5,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 0,
+          "reported": 0,
+          "failures": 0,
+          "decided": 5,
+          "winRate": 1,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "neutralization": {
+            "group": "side_b",
+            "min": 30.066668,
+            "median": 39.283333,
+            "max": 42.333336,
+            "count": 5,
+            "excluded": {
+              "notConfigured": 0,
+              "notVictory": 0
+            },
+            "unmeasurable": {
+              "missingEvidence": 0,
+              "ambiguousEvidence": 0,
+              "invalidEvidence": 0,
+              "total": 0
+            }
+          },
+          "damageMargin": {
+            "mean": 336.6936,
+            "count": 5
+          },
+          "mandatorySetCompletion": {
+            "completed": 0,
+            "sampled": 0,
+            "rate": null,
+            "unmeasurable": {
+              "total": 5,
+              "missingScenario": 0,
+              "malformedObjectives": 0,
+              "noMandatoryObjectives": 5
+            }
+          },
+          "fallingSkywayCleanLedger": null,
+          "phases": {
+            "acquire": 11.767,
+            "orbit": 266.949,
+            "shadow": 74.718,
+            "torpedo_run": 24.801
+          },
+          "stationActivity": {
+            "captain": {
+              "human": 0,
+              "ai": 15,
+              "offline": 0,
+              "total": 15
+            },
+            "engineering": {
+              "human": 0,
+              "ai": 89,
+              "offline": 0,
+              "total": 89
+            },
+            "helm": {
+              "human": 0,
+              "ai": 44433,
+              "offline": 0,
+              "total": 44433
+            },
+            "science": {
+              "human": 0,
+              "ai": 78,
+              "offline": 0,
+              "total": 78
+            },
+            "tactical": {
+              "human": 0,
+              "ai": 8608,
+              "offline": 0,
+              "total": 8608
+            }
+          },
+          "failuresDetail": []
+        },
+        "cruiser_vs_harrow_patrol": {
+          "label": "cruiser_vs_harrow_patrol",
+          "sideA": [
+            "cruiser"
+          ],
+          "sideB": [
+            "ship_harrow_patrol"
+          ],
+          "total": 5,
+          "completed": 5,
+          "wins": 5,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 0,
+          "reported": 0,
+          "failures": 0,
+          "decided": 5,
+          "winRate": 1,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "neutralization": {
+            "group": "side_b",
+            "min": 36.683334,
+            "median": 38.05,
+            "max": 39.033333,
+            "count": 5,
+            "excluded": {
+              "notConfigured": 0,
+              "notVictory": 0
+            },
+            "unmeasurable": {
+              "missingEvidence": 0,
+              "ambiguousEvidence": 0,
+              "invalidEvidence": 0,
+              "total": 0
+            }
+          },
+          "damageMargin": {
+            "mean": 298.332,
+            "count": 5
+          },
+          "mandatorySetCompletion": {
+            "completed": 0,
+            "sampled": 0,
+            "rate": null,
+            "unmeasurable": {
+              "total": 5,
+              "missingScenario": 0,
+              "malformedObjectives": 0,
+              "noMandatoryObjectives": 5
+            }
+          },
+          "fallingSkywayCleanLedger": null,
+          "phases": {
+            "acquire": 4.165,
+            "orbit": 106.933,
+            "shadow": 0.835,
+            "torpedo_run": 77.567
+          },
+          "stationActivity": {
+            "captain": {
+              "human": 0,
+              "ai": 15,
+              "offline": 0,
+              "total": 15
+            },
+            "engineering": {
+              "human": 0,
+              "ai": 101,
+              "offline": 0,
+              "total": 101
+            },
+            "helm": {
+              "human": 0,
+              "ai": 45792,
+              "offline": 0,
+              "total": 45792
+            },
+            "science": {
+              "human": 0,
+              "ai": 70,
+              "offline": 0,
+              "total": 70
+            },
+            "tactical": {
+              "human": 0,
+              "ai": 11432,
+              "offline": 0,
+              "total": 11432
+            }
+          },
+          "failuresDetail": []
+        },
+        "cruiser_vs_harrow_warhawk": {
+          "label": "cruiser_vs_harrow_warhawk",
+          "sideA": [
+            "cruiser"
+          ],
+          "sideB": [
+            "ship_harrow_warhawk"
+          ],
+          "total": 5,
+          "completed": 5,
+          "wins": 5,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 0,
+          "reported": 0,
+          "failures": 0,
+          "decided": 5,
+          "winRate": 1,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "neutralization": {
+            "group": "side_b",
+            "min": 34.283333,
+            "median": 38.95,
+            "max": 42.433334,
+            "count": 5,
+            "excluded": {
+              "notConfigured": 0,
+              "notVictory": 0
+            },
+            "unmeasurable": {
+              "missingEvidence": 0,
+              "ambiguousEvidence": 0,
+              "invalidEvidence": 0,
+              "total": 0
+            }
+          },
+          "damageMargin": {
+            "mean": 349.5168,
+            "count": 5
+          },
+          "mandatorySetCompletion": {
+            "completed": 0,
+            "sampled": 0,
+            "rate": null,
+            "unmeasurable": {
+              "total": 5,
+              "missingScenario": 0,
+              "malformedObjectives": 0,
+              "noMandatoryObjectives": 5
+            }
+          },
+          "fallingSkywayCleanLedger": null,
+          "phases": {
+            "acquire": 11.665,
+            "hold": 92.768,
+            "orbit": 163.533,
+            "shadow": 92.669,
+            "torpedo_run": 23.568
+          },
+          "stationActivity": {
+            "captain": {
+              "human": 0,
+              "ai": 15,
+              "offline": 0,
+              "total": 15
+            },
+            "engineering": {
+              "human": 0,
+              "ai": 113,
+              "offline": 0,
+              "total": 113
+            },
+            "helm": {
+              "human": 0,
+              "ai": 43626,
+              "offline": 0,
+              "total": 43626
+            },
+            "science": {
+              "human": 0,
+              "ai": 62,
+              "offline": 0,
+              "total": 62
+            },
+            "tactical": {
+              "human": 0,
+              "ai": 9450,
+              "offline": 0,
+              "total": 9450
+            }
+          },
+          "failuresDetail": []
+        }
+      },
+      "totals": {
+        "runs": 20,
+        "wins": 19,
+        "losses": 0,
+        "draws": 1,
+        "timeouts": 0,
+        "reported": 0,
+        "failures": 0
+      },
+      "thresholds": [
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 0.8,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "max_neutralization_median",
+          "limit": 10,
+          "actual": 42.1166665,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "min_damage_margin",
+          "limit": 100,
+          "actual": 162.3294,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 1,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "max_neutralization_median",
+          "limit": 25,
+          "actual": 39.283333,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "min_damage_margin",
+          "limit": 200,
+          "actual": 336.6936,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 1,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "max_neutralization_median",
+          "limit": 20,
+          "actual": 38.05,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "min_damage_margin",
+          "limit": 200,
+          "actual": 298.332,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 1,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "max_neutralization_median",
+          "limit": 25,
+          "actual": 38.95,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "min_damage_margin",
+          "limit": 25,
+          "actual": 349.5168,
+          "pass": true
+        }
+      ]
+    }
+  ],
+  "after": [
+    {
+      "matchups": {
+        "cruiser_vs_harrow_destroyer": {
+          "label": "cruiser_vs_harrow_destroyer",
+          "sideA": [
+            "cruiser"
+          ],
+          "sideB": [
+            "ship_harrow_destroyer"
+          ],
+          "total": 5,
+          "completed": 5,
+          "wins": 5,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 0,
+          "reported": 0,
+          "failures": 0,
+          "decided": 5,
+          "winRate": 1,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "neutralization": {
+            "group": "side_b",
+            "min": 34.183334,
+            "median": 61.050003,
+            "max": 73.86667,
+            "count": 5,
+            "excluded": {
+              "notConfigured": 0,
+              "notVictory": 0
+            },
+            "unmeasurable": {
+              "missingEvidence": 0,
+              "ambiguousEvidence": 0,
+              "invalidEvidence": 0,
+              "total": 0
+            }
+          },
+          "damageMargin": {
+            "mean": 176.63899999999998,
+            "count": 5
+          },
+          "mandatorySetCompletion": {
+            "completed": 0,
+            "sampled": 0,
+            "rate": null,
+            "unmeasurable": {
+              "total": 5,
+              "missingScenario": 0,
+              "malformedObjectives": 0,
+              "noMandatoryObjectives": 5
+            }
+          },
+          "fallingSkywayCleanLedger": null,
+          "phases": {
+            "acquire": 12.167,
+            "escape": 72.901,
+            "inbound": 114.367,
+            "orbit": 199.001,
+            "recover": 24.167,
+            "reenter": 6.133,
+            "shadow": 57.868,
+            "torpedo_run": 78.266
+          },
+          "stationActivity": {
+            "captain": {
+              "human": 0,
+              "ai": 35,
+              "offline": 0,
+              "total": 35
+            },
+            "engineering": {
+              "human": 0,
+              "ai": 109,
+              "offline": 0,
+              "total": 109
+            },
+            "helm": {
+              "human": 0,
+              "ai": 71194,
+              "offline": 0,
+              "total": 71194
+            },
+            "science": {
+              "human": 0,
+              "ai": 118,
+              "offline": 0,
+              "total": 118
+            },
+            "tactical": {
+              "human": 0,
+              "ai": 8263,
+              "offline": 0,
+              "total": 8263
+            }
+          },
+          "failuresDetail": []
+        },
+        "cruiser_vs_harrow_cruiser": {
+          "label": "cruiser_vs_harrow_cruiser",
+          "sideA": [
+            "cruiser"
+          ],
+          "sideB": [
+            "ship_harrow_cruiser"
+          ],
+          "total": 5,
+          "completed": 5,
+          "wins": 5,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 0,
+          "reported": 0,
+          "failures": 0,
+          "decided": 5,
+          "winRate": 1,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "neutralization": {
+            "group": "side_b",
+            "min": 27.666668,
+            "median": 30.633333,
+            "max": 36.9,
+            "count": 5,
+            "excluded": {
+              "notConfigured": 0,
+              "notVictory": 0
+            },
+            "unmeasurable": {
+              "missingEvidence": 0,
+              "ambiguousEvidence": 0,
+              "invalidEvidence": 0,
+              "total": 0
+            }
+          },
+          "damageMargin": {
+            "mean": 353.66099999999994,
+            "count": 5
+          },
+          "mandatorySetCompletion": {
+            "completed": 0,
+            "sampled": 0,
+            "rate": null,
+            "unmeasurable": {
+              "total": 5,
+              "missingScenario": 0,
+              "malformedObjectives": 0,
+              "noMandatoryObjectives": 5
+            }
+          },
+          "fallingSkywayCleanLedger": null,
+          "phases": {
+            "acquire": 11.733,
+            "orbit": 198.017,
+            "shadow": 82.085,
+            "torpedo_run": 29.267
+          },
+          "stationActivity": {
+            "captain": {
+              "human": 0,
+              "ai": 15,
+              "offline": 0,
+              "total": 15
+            },
+            "engineering": {
+              "human": 0,
+              "ai": 74,
+              "offline": 0,
+              "total": 74
+            },
+            "helm": {
+              "human": 0,
+              "ai": 36051,
+              "offline": 0,
+              "total": 36051
+            },
+            "science": {
+              "human": 0,
+              "ai": 62,
+              "offline": 0,
+              "total": 62
+            },
+            "tactical": {
+              "human": 0,
+              "ai": 9438,
+              "offline": 0,
+              "total": 9438
+            }
+          },
+          "failuresDetail": []
+        },
+        "cruiser_vs_harrow_patrol": {
+          "label": "cruiser_vs_harrow_patrol",
+          "sideA": [
+            "cruiser"
+          ],
+          "sideB": [
+            "ship_harrow_patrol"
+          ],
+          "total": 5,
+          "completed": 5,
+          "wins": 5,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 0,
+          "reported": 0,
+          "failures": 0,
+          "decided": 5,
+          "winRate": 1,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "neutralization": {
+            "group": "side_b",
+            "min": 33.816666,
+            "median": 40.5,
+            "max": 50.016666,
+            "count": 5,
+            "excluded": {
+              "notConfigured": 0,
+              "notVictory": 0
+            },
+            "unmeasurable": {
+              "missingEvidence": 0,
+              "ambiguousEvidence": 0,
+              "invalidEvidence": 0,
+              "total": 0
+            }
+          },
+          "damageMargin": {
+            "mean": 293.74819999999994,
+            "count": 5
+          },
+          "mandatorySetCompletion": {
+            "completed": 0,
+            "sampled": 0,
+            "rate": null,
+            "unmeasurable": {
+              "total": 5,
+              "missingScenario": 0,
+              "malformedObjectives": 0,
+              "noMandatoryObjectives": 5
+            }
+          },
+          "fallingSkywayCleanLedger": null,
+          "phases": {
+            "acquire": 4.165,
+            "orbit": 137.284,
+            "shadow": 0.835,
+            "torpedo_run": 62.499
+          },
+          "stationActivity": {
+            "captain": {
+              "human": 0,
+              "ai": 17,
+              "offline": 0,
+              "total": 17
+            },
+            "engineering": {
+              "human": 0,
+              "ai": 89,
+              "offline": 0,
+              "total": 89
+            },
+            "helm": {
+              "human": 0,
+              "ai": 48804,
+              "offline": 0,
+              "total": 48804
+            },
+            "science": {
+              "human": 0,
+              "ai": 74,
+              "offline": 0,
+              "total": 74
+            },
+            "tactical": {
+              "human": 0,
+              "ai": 11195,
+              "offline": 0,
+              "total": 11195
+            }
+          },
+          "failuresDetail": []
+        },
+        "cruiser_vs_harrow_warhawk": {
+          "label": "cruiser_vs_harrow_warhawk",
+          "sideA": [
+            "cruiser"
+          ],
+          "sideB": [
+            "ship_harrow_warhawk"
+          ],
+          "total": 5,
+          "completed": 5,
+          "wins": 5,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 0,
+          "reported": 0,
+          "failures": 0,
+          "decided": 5,
+          "winRate": 1,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "neutralization": {
+            "group": "side_b",
+            "min": 33.3,
+            "median": 37.066666,
+            "max": 42.95,
+            "count": 5,
+            "excluded": {
+              "notConfigured": 0,
+              "notVictory": 0
+            },
+            "unmeasurable": {
+              "missingEvidence": 0,
+              "ambiguousEvidence": 0,
+              "invalidEvidence": 0,
+              "total": 0
+            }
+          },
+          "damageMargin": {
+            "mean": 385.9994,
+            "count": 5
+          },
+          "mandatorySetCompletion": {
+            "completed": 0,
+            "sampled": 0,
+            "rate": null,
+            "unmeasurable": {
+              "total": 5,
+              "missingScenario": 0,
+              "malformedObjectives": 0,
+              "noMandatoryObjectives": 5
+            }
+          },
+          "fallingSkywayCleanLedger": null,
+          "phases": {
+            "acquire": 11.665,
+            "hold": 116.9,
+            "orbit": 162.55,
+            "shadow": 68.319,
+            "torpedo_run": 24.335
+          },
+          "stationActivity": {
+            "captain": {
+              "human": 0,
+              "ai": 15,
+              "offline": 0,
+              "total": 15
+            },
+            "engineering": {
+              "human": 0,
+              "ai": 96,
+              "offline": 0,
+              "total": 96
+            },
+            "helm": {
+              "human": 0,
+              "ai": 45756,
+              "offline": 0,
+              "total": 45756
+            },
+            "science": {
+              "human": 0,
+              "ai": 57,
+              "offline": 0,
+              "total": 57
+            },
+            "tactical": {
+              "human": 0,
+              "ai": 9937,
+              "offline": 0,
+              "total": 9937
+            }
+          },
+          "failuresDetail": []
+        }
+      },
+      "totals": {
+        "runs": 20,
+        "wins": 20,
+        "losses": 0,
+        "draws": 0,
+        "timeouts": 0,
+        "reported": 0,
+        "failures": 0
+      },
+      "thresholds": [
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 1,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "max_neutralization_median",
+          "limit": 10,
+          "actual": 61.050003,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "min_damage_margin",
+          "limit": 100,
+          "actual": 176.63899999999998,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 1,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "max_neutralization_median",
+          "limit": 25,
+          "actual": 30.633333,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "min_damage_margin",
+          "limit": 200,
+          "actual": 353.66099999999994,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 1,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "max_neutralization_median",
+          "limit": 20,
+          "actual": 40.5,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "min_damage_margin",
+          "limit": 200,
+          "actual": 293.74819999999994,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 1,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "max_neutralization_median",
+          "limit": 25,
+          "actual": 37.066666,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "min_damage_margin",
+          "limit": 25,
+          "actual": 385.9994,
+          "pass": true
+        }
+      ]
+    },
+    {
+      "matchups": {
+        "cruiser_vs_harrow_destroyer": {
+          "label": "cruiser_vs_harrow_destroyer",
+          "sideA": [
+            "cruiser"
+          ],
+          "sideB": [
+            "ship_harrow_destroyer"
+          ],
+          "total": 5,
+          "completed": 5,
+          "wins": 5,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 0,
+          "reported": 0,
+          "failures": 0,
+          "decided": 5,
+          "winRate": 1,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "neutralization": {
+            "group": "side_b",
+            "min": 33.75,
+            "median": 42.2,
+            "max": 73.1,
+            "count": 5,
+            "excluded": {
+              "notConfigured": 0,
+              "notVictory": 0
+            },
+            "unmeasurable": {
+              "missingEvidence": 0,
+              "ambiguousEvidence": 0,
+              "invalidEvidence": 0,
+              "total": 0
+            }
+          },
+          "damageMargin": {
+            "mean": 161.131,
+            "count": 5
+          },
+          "mandatorySetCompletion": {
+            "completed": 0,
+            "sampled": 0,
+            "rate": null,
+            "unmeasurable": {
+              "total": 5,
+              "missingScenario": 0,
+              "malformedObjectives": 0,
+              "noMandatoryObjectives": 5
+            }
+          },
+          "fallingSkywayCleanLedger": null,
+          "phases": {
+            "acquire": 12.033,
+            "escape": 58.734,
+            "inbound": 99.8,
+            "orbit": 163.85,
+            "recover": 12,
+            "reenter": 3.066,
+            "shadow": 67.018,
+            "torpedo_run": 78.6
+          },
+          "stationActivity": {
+            "captain": {
+              "human": 0,
+              "ai": 31,
+              "offline": 0,
+              "total": 31
+            },
+            "engineering": {
+              "human": 0,
+              "ai": 93,
+              "offline": 0,
+              "total": 93
+            },
+            "helm": {
+              "human": 0,
+              "ai": 60940,
+              "offline": 0,
+              "total": 60940
+            },
+            "science": {
+              "human": 0,
+              "ai": 106,
+              "offline": 0,
+              "total": 106
+            },
+            "tactical": {
+              "human": 0,
+              "ai": 7139,
+              "offline": 0,
+              "total": 7139
+            }
+          },
+          "failuresDetail": []
+        },
+        "cruiser_vs_harrow_cruiser": {
+          "label": "cruiser_vs_harrow_cruiser",
+          "sideA": [
+            "cruiser"
+          ],
+          "sideB": [
+            "ship_harrow_cruiser"
+          ],
+          "total": 5,
+          "completed": 5,
+          "wins": 5,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 0,
+          "reported": 0,
+          "failures": 0,
+          "decided": 5,
+          "winRate": 1,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "neutralization": {
+            "group": "side_b",
+            "min": 30.066668,
+            "median": 35.983334,
+            "max": 45.433334,
+            "count": 5,
+            "excluded": {
+              "notConfigured": 0,
+              "notVictory": 0
+            },
+            "unmeasurable": {
+              "missingEvidence": 0,
+              "ambiguousEvidence": 0,
+              "invalidEvidence": 0,
+              "total": 0
+            }
+          },
+          "damageMargin": {
+            "mean": 340.21680000000003,
+            "count": 5
+          },
+          "mandatorySetCompletion": {
+            "completed": 0,
+            "sampled": 0,
+            "rate": null,
+            "unmeasurable": {
+              "total": 5,
+              "missingScenario": 0,
+              "malformedObjectives": 0,
+              "noMandatoryObjectives": 5
+            }
+          },
+          "fallingSkywayCleanLedger": null,
+          "phases": {
+            "acquire": 11.699,
+            "orbit": 255.916,
+            "shadow": 88.752,
+            "torpedo_run": 14.333
+          },
+          "stationActivity": {
+            "captain": {
+              "human": 0,
+              "ai": 15,
+              "offline": 0,
+              "total": 15
+            },
+            "engineering": {
+              "human": 0,
+              "ai": 84,
+              "offline": 0,
+              "total": 84
+            },
+            "helm": {
+              "human": 0,
+              "ai": 42153,
+              "offline": 0,
+              "total": 42153
+            },
+            "science": {
+              "human": 0,
+              "ai": 70,
+              "offline": 0,
+              "total": 70
+            },
+            "tactical": {
+              "human": 0,
+              "ai": 9099,
+              "offline": 0,
+              "total": 9099
+            }
+          },
+          "failuresDetail": []
+        },
+        "cruiser_vs_harrow_patrol": {
+          "label": "cruiser_vs_harrow_patrol",
+          "sideA": [
+            "cruiser"
+          ],
+          "sideB": [
+            "ship_harrow_patrol"
+          ],
+          "total": 5,
+          "completed": 5,
+          "wins": 5,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 0,
+          "reported": 0,
+          "failures": 0,
+          "decided": 5,
+          "winRate": 1,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "neutralization": {
+            "group": "side_b",
+            "min": 29.183334,
+            "median": 36.683334,
+            "max": 38.666668,
+            "count": 5,
+            "excluded": {
+              "notConfigured": 0,
+              "notVictory": 0
+            },
+            "unmeasurable": {
+              "missingEvidence": 0,
+              "ambiguousEvidence": 0,
+              "invalidEvidence": 0,
+              "total": 0
+            }
+          },
+          "damageMargin": {
+            "mean": 300.1308,
+            "count": 5
+          },
+          "mandatorySetCompletion": {
+            "completed": 0,
+            "sampled": 0,
+            "rate": null,
+            "unmeasurable": {
+              "total": 5,
+              "missingScenario": 0,
+              "malformedObjectives": 0,
+              "noMandatoryObjectives": 5
+            }
+          },
+          "fallingSkywayCleanLedger": null,
+          "phases": {
+            "acquire": 4.165,
+            "orbit": 95.967,
+            "shadow": 0.835,
+            "torpedo_run": 77.567
+          },
+          "stationActivity": {
+            "captain": {
+              "human": 0,
+              "ai": 15,
+              "offline": 0,
+              "total": 15
+            },
+            "engineering": {
+              "human": 0,
+              "ai": 97,
+              "offline": 0,
+              "total": 97
+            },
+            "helm": {
+              "human": 0,
+              "ai": 43752,
+              "offline": 0,
+              "total": 43752
+            },
+            "science": {
+              "human": 0,
+              "ai": 66,
+              "offline": 0,
+              "total": 66
+            },
+            "tactical": {
+              "human": 0,
+              "ai": 10694,
+              "offline": 0,
+              "total": 10694
+            }
+          },
+          "failuresDetail": []
+        },
+        "cruiser_vs_harrow_warhawk": {
+          "label": "cruiser_vs_harrow_warhawk",
+          "sideA": [
+            "cruiser"
+          ],
+          "sideB": [
+            "ship_harrow_warhawk"
+          ],
+          "total": 5,
+          "completed": 5,
+          "wins": 5,
+          "losses": 0,
+          "draws": 0,
+          "timeouts": 0,
+          "reported": 0,
+          "failures": 0,
+          "decided": 5,
+          "winRate": 1,
+          "ttk": {
+            "min": null,
+            "median": null,
+            "max": null,
+            "count": 0
+          },
+          "neutralization": {
+            "group": "side_b",
+            "min": 34.283333,
+            "median": 38.95,
+            "max": 42.283333,
+            "count": 5,
+            "excluded": {
+              "notConfigured": 0,
+              "notVictory": 0
+            },
+            "unmeasurable": {
+              "missingEvidence": 0,
+              "ambiguousEvidence": 0,
+              "invalidEvidence": 0,
+              "total": 0
+            }
+          },
+          "damageMargin": {
+            "mean": 351.8402,
+            "count": 5
+          },
+          "mandatorySetCompletion": {
+            "completed": 0,
+            "sampled": 0,
+            "rate": null,
+            "unmeasurable": {
+              "total": 5,
+              "missingScenario": 0,
+              "malformedObjectives": 0,
+              "noMandatoryObjectives": 5
+            }
+          },
+          "fallingSkywayCleanLedger": null,
+          "phases": {
+            "acquire": 11.665,
+            "hold": 92.701,
+            "orbit": 163.383,
+            "shadow": 92.586,
+            "torpedo_run": 23.568
+          },
+          "stationActivity": {
+            "captain": {
+              "human": 0,
+              "ai": 15,
+              "offline": 0,
+              "total": 15
+            },
+            "engineering": {
+              "human": 0,
+              "ai": 109,
+              "offline": 0,
+              "total": 109
+            },
+            "helm": {
+              "human": 0,
+              "ai": 43596,
+              "offline": 0,
+              "total": 43596
+            },
+            "science": {
+              "human": 0,
+              "ai": 62,
+              "offline": 0,
+              "total": 62
+            },
+            "tactical": {
+              "human": 0,
+              "ai": 9452,
+              "offline": 0,
+              "total": 9452
+            }
+          },
+          "failuresDetail": []
+        }
+      },
+      "totals": {
+        "runs": 20,
+        "wins": 20,
+        "losses": 0,
+        "draws": 0,
+        "timeouts": 0,
+        "reported": 0,
+        "failures": 0
+      },
+      "thresholds": [
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 1,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "max_neutralization_median",
+          "limit": 10,
+          "actual": 42.2,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_destroyer",
+          "metric": "min_damage_margin",
+          "limit": 100,
+          "actual": 161.131,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 1,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "max_neutralization_median",
+          "limit": 25,
+          "actual": 35.983334,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_cruiser",
+          "metric": "min_damage_margin",
+          "limit": 200,
+          "actual": 340.21680000000003,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 1,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "max_neutralization_median",
+          "limit": 20,
+          "actual": 36.683334,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_patrol",
+          "metric": "min_damage_margin",
+          "limit": 200,
+          "actual": 300.1308,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "max_failures",
+          "limit": 0,
+          "actual": 0,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "min_win_rate",
+          "limit": 1,
+          "actual": 1,
+          "pass": true
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "max_neutralization_median",
+          "limit": 25,
+          "actual": 38.95,
+          "pass": false
+        },
+        {
+          "matchup": "cruiser_vs_harrow_warhawk",
+          "metric": "min_damage_margin",
+          "limit": 25,
+          "actual": 351.8402,
+          "pass": true
+        }
+      ]
+    }
+  ],
+  "seed7": {
+    "outcome": "victory",
+    "seconds": 73.1333,
+    "trigger": {
+      "condition": "on_all_neutralized(side_b, after_secs=0)",
+      "repeat": false,
+      "fired": true,
+      "pending": false,
+      "when_holds": true,
+      "last_fired_secs": 73.1,
+      "fire_history": []
+    }
+  },
+  "diagnosis": {
+    "points": [
+      {
+        "t": 65,
+        "trueRange": 36.78367084165909,
+        "heading": 3.9857745,
+        "alert": true,
+        "contacts": [
+          {
+            "id": "14:tactical-radar:contact-1",
+            "observedAt": 47,
+            "predicted": true,
+            "position": [
+              -238.81354,
+              -1.508385
+            ],
+            "distance": 120.58722225517977
+          },
+          {
+            "id": "14:tactical-radar:contact-53",
+            "observedAt": 64.5,
+            "predicted": false,
+            "position": [
+              -143.02415,
+              32.621193
+            ],
+            "distance": 36.08871586379389
+          }
+        ]
+      },
+      {
+        "t": 75,
+        "trueRange": 260.68744479091816,
+        "heading": 1.1416901,
+        "alert": true,
+        "contacts": [
+          {
+            "id": "14:tactical-radar:contact-1",
+            "observedAt": 47,
+            "predicted": true,
+            "position": [
+              -351.95062,
+              55.060215
+            ],
+            "distance": 224.34896125952355
+          },
+          {
+            "id": "14:tactical-radar:contact-53",
+            "observedAt": 74.5,
+            "predicted": false,
+            "position": [
+              -29.792767,
+              -187.90182
+            ],
+            "distance": 260.19553443568515
+          }
+        ]
+      },
+      {
+        "t": 77,
+        "trueRange": 310.7124138197401,
+        "heading": 0.3525655,
+        "alert": true,
+        "contacts": [
+          {
+            "id": "14:tactical-radar:contact-1",
+            "observedAt": 47,
+            "predicted": true,
+            "position": [
+              -374.57803,
+              66.37394
+            ],
+            "distance": 259.8437608943099
+          },
+          {
+            "id": "14:tactical-radar:contact-53",
+            "observedAt": 76.5,
+            "predicted": true,
+            "position": [
+              20.741798,
+              -241.35912
+            ],
+            "distance": 312.8297535826479
+          }
+        ]
+      },
+      {
+        "t": 80,
+        "trueRange": 394.67800152503577,
+        "heading": -0.9279362,
+        "alert": true,
+        "contacts": [
+          {
+            "id": "14:tactical-radar:contact-1",
+            "observedAt": 47,
+            "predicted": true,
+            "position": [
+              -408.51917,
+              83.34452
+            ],
+            "distance": 293.03035950337596
+          },
+          {
+            "id": "14:tactical-radar:contact-53",
+            "observedAt": 76.5,
+            "predicted": true,
+            "position": [
+              105.59461,
+              -326.2119
+            ],
+            "distance": 410.94499015182646
+          }
+        ]
+      },
+      {
+        "t": 90,
+        "trueRange": 697.5420367966053,
+        "heading": -1.8613794,
+        "alert": true,
+        "contacts": [
+          {
+            "id": "14:tactical-radar:contact-1",
+            "observedAt": 47,
+            "predicted": true,
+            "position": [
+              -521.65625,
+              139.91312
+            ],
+            "distance": 324.20124791432016
+          },
+          {
+            "id": "14:tactical-radar:contact-53",
+            "observedAt": 76.5,
+            "predicted": true,
+            "position": [
+              388.43732,
+              -609.0546
+            ],
+            "distance": 880.9901464013574
+          }
+        ]
+      },
+      {
+        "t": 100,
+        "trueRange": 817.9913758584339,
+        "heading": -1.9114951,
+        "alert": false,
+        "contacts": [
+          {
+            "id": "14:tactical-radar:contact-1",
+            "observedAt": 47,
+            "predicted": true,
+            "position": [
+              -634.79333,
+              196.48172
+            ],
+            "distance": 362.6194988244137
+          },
+          {
+            "id": "14:tactical-radar:contact-53",
+            "observedAt": 76.5,
+            "predicted": true,
+            "position": [
+              671.28,
+              -891.89734
+            ],
+            "distance": 1358.7633367788292
+          }
+        ]
+      },
+      {
+        "t": 119,
+        "trueRange": 917.4528279237643,
+        "heading": 0.52060646,
+        "alert": false,
+        "contacts": [
+          {
+            "id": "14:tactical-radar:contact-53",
+            "observedAt": 76.5,
+            "predicted": true,
+            "position": [
+              1208.6812,
+              -1429.2985
+            ],
+            "distance": 2119.0901610604733
+          }
+        ]
+      }
+    ],
+    "beamEvents": [
+      {
+        "t": 1.7833,
+        "type": "BeamStarted",
+        "data": {
+          "bank": "fore",
+          "source_uuid": "00000000-0000-8000-8000-000000000000",
+          "target_uuid": "00000000-0000-8000-8000-000100000000"
+        }
+      },
+      {
+        "t": 1.7833,
+        "type": "BeamStarted",
+        "data": {
+          "bank": "aft",
+          "source_uuid": "00000000-0000-8000-8000-000000000000",
+          "target_uuid": "00000000-0000-8000-8000-000100000000"
+        }
+      },
+      {
+        "t": 2.7,
+        "type": "BeamEnded",
+        "data": {
+          "bank": "aft",
+          "source_uuid": "00000000-0000-8000-8000-000000000000",
+          "target_uuid": "00000000-0000-8000-8000-000100000000"
+        }
+      },
+      {
+        "t": 5.9,
+        "type": "BeamEnded",
+        "data": {
+          "bank": "fore",
+          "source_uuid": "00000000-0000-8000-8000-000000000000",
+          "target_uuid": "00000000-0000-8000-8000-000100000000"
+        }
+      },
+      {
+        "t": 20.8833,
+        "type": "BeamStarted",
+        "data": {
+          "bank": "fore",
+          "source_uuid": "00000000-0000-8000-8000-000000000000",
+          "target_uuid": "00000000-0000-8000-8000-000100000000"
+        }
+      },
+      {
+        "t": 22.3833,
+        "type": "BeamStarted",
+        "data": {
+          "bank": "aft",
+          "source_uuid": "00000000-0000-8000-8000-000000000000",
+          "target_uuid": "00000000-0000-8000-8000-000100000000"
+        }
+      },
+      {
+        "t": 25.1167,
+        "type": "BeamEnded",
+        "data": {
+          "bank": "aft",
+          "source_uuid": "00000000-0000-8000-8000-000000000000",
+          "target_uuid": "00000000-0000-8000-8000-000100000000"
+        }
+      },
+      {
+        "t": 25.1167,
+        "type": "BeamEnded",
+        "data": {
+          "bank": "fore",
+          "source_uuid": "00000000-0000-8000-8000-000000000000",
+          "target_uuid": "00000000-0000-8000-8000-000100000000"
+        }
+      },
+      {
+        "t": 45.05,
+        "type": "BeamStarted",
+        "data": {
+          "bank": "fore",
+          "source_uuid": "00000000-0000-8000-8000-000000000000",
+          "target_uuid": "00000000-0000-8000-8000-000100000000"
+        }
+      },
+      {
+        "t": 47.55,
+        "type": "BeamStarted",
+        "data": {
+          "bank": "aft",
+          "source_uuid": "00000000-0000-8000-8000-000000000000",
+          "target_uuid": "00000000-0000-8000-8000-000100000000"
+        }
+      },
+      {
+        "t": 47.9333,
+        "type": "BeamEnded",
+        "data": {
+          "bank": "fore",
+          "source_uuid": "00000000-0000-8000-8000-000000000000",
+          "target_uuid": "00000000-0000-8000-8000-000100000000"
+        }
+      },
+      {
+        "t": 49.7167,
+        "type": "BeamEnded",
+        "data": {
+          "bank": "aft",
+          "source_uuid": "00000000-0000-8000-8000-000000000000",
+          "target_uuid": "00000000-0000-8000-8000-000100000000"
+        }
+      },
+      {
+        "t": 64.1833,
+        "type": "BeamStarted",
+        "data": {
+          "bank": "fore",
+          "source_uuid": "00000000-0000-8000-8000-000000000000",
+          "target_uuid": "00000000-0000-8000-8000-000100000000"
+        }
+      },
+      {
+        "t": 65.85,
+        "type": "BeamStarted",
+        "data": {
+          "bank": "aft",
+          "source_uuid": "00000000-0000-8000-8000-000000000000",
+          "target_uuid": "00000000-0000-8000-8000-000100000000"
+        }
+      },
+      {
+        "t": 66.65,
+        "type": "BeamEnded",
+        "data": {
+          "bank": "fore",
+          "source_uuid": "00000000-0000-8000-8000-000000000000",
+          "target_uuid": "00000000-0000-8000-8000-000100000000"
+        }
+      },
+      {
+        "t": 68.3667,
+        "type": "BeamEnded",
+        "data": {
+          "bank": "aft",
+          "source_uuid": "00000000-0000-8000-8000-000000000000",
+          "target_uuid": "00000000-0000-8000-8000-000100000000"
+        }
+      }
+    ],
+    "rootCause": "Untargeted measured pursuit chooses nearest obsolete hostile history when the current route disappears, instead of the most recently observed hostile history."
+  },
+  "scope": "Measured target acquisition and offline timing metrics only. No weapon damage, ship data, networking or optimisation implementation changes.",
+  "limits": [
+    "Neutralization metric explicitly binds a canonical once-only ungated zero-delay duel trigger; arbitrary mission endings do not qualify.",
+    "Current information-only observations guide movement without granting actuator authority; history cannot reacquire a hidden actor.",
+    "Numerical timing limits unchanged: Destroyer10s, Cruiser25s, Patrol20s, Warhawk25s.",
+    "No full pre-push gates, human/device acceptance or wall-time performance claim."
+  ],
+  "rawArchive": ".phoenix/redesign-baseline/2026-10-16-destroyer7-neutralization/"
+}

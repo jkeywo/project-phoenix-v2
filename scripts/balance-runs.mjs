@@ -4,7 +4,7 @@
 // Reads a TOML config describing a matrix of side compositions (or an explicit
 // list of matchups, or a scenario sweep), fans out `phoenix-headless` processes
 // in parallel across every (matchup × seed) pair, and folds the per-run report
-// JSON into win/loss/draw rates, time-to-kill distributions, and damage margins
+// JSON into win/loss/draw rates, death/neutralization timings, and damage margins
 // per matchup — emitted as one merged JSON object plus a readable markdown table.
 //
 //   node scripts/balance-runs.mjs <config.toml> [--out <dir>]
@@ -72,6 +72,12 @@
 //     non-decisive escort loss, not a fight-ending kill. A run with no deaths
 //     (e.g. a bloodless draw/timeout) contributes no TTK sample. min/median/max
 //     are taken over the collected samples per matchup.
+//   - Neutralization timing is opt-in via neutralization_group. Only a victory
+//     in GameOver with exactly one once-only, ungated, zero-delay group trigger
+//     contributes its recorded firing time. Never infer this from deaths or
+//     run duration. Missing/ambiguous evidence is counted and blocks timing
+//     gates; non-victories are excluded. This binds the canonical duel contract,
+//     not arbitrary mission/wave endings. Literal death-based TTK is unchanged.
 //   - Damage margin per run = player.damage_dealt - enemy.damage_dealt; the
 //     merge reports the mean over every run that produced a report. Positive =
 //     the player side out-damaged the enemy.
@@ -117,7 +123,8 @@
 // Known metrics: min_win_rate / max_win_rate (over DECIDED runs — see the merge
 // conventions above; a wholly report-bearing sweep has none, and records "no
 // data" rather than failing a rate it cannot have),
-// min_ttk_median / max_ttk_median (seconds), min_damage_margin /
+// min_ttk_median / max_ttk_median (seconds), min_neutralization_median /
+// max_neutralization_median (seconds, complete victory evidence required), min_damage_margin /
 // max_damage_margin (mean player-minus-enemy damage),
 // min_mandatory_set_completion_rate / max_mandatory_set_completion_rate,
 // max_mandatory_set_unmeasurable, and max_failures.
@@ -217,6 +224,15 @@ export function resolveMandatoryObjectiveIds(ids) {
   return resolved;
 }
 
+/** Explicit canonical duel group, never inferred from a matchup label. */
+function resolveNeutralizationGroup(value) {
+  if (value == null) return null;
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_.:-]+$/.test(value)) {
+    throw new Error('`neutralization_group` must be a non-empty simple group identifier');
+  }
+  return value;
+}
+
 /**
  * Expand a parsed config into matchup descriptors `{label, sideA, sideB, world}`.
  * PURE — no filesystem, no spawning.
@@ -233,11 +249,15 @@ export function resolveMandatoryObjectiveIds(ids) {
 export function expandMatchups(config) {
   const matchups = [];
   const matchupWorld = config.world ?? DEFAULT_MATCHUP_WORLD;
+  const binding = (value = config.neutralization_group) => {
+    const group = resolveNeutralizationGroup(value);
+    return group === null ? {} : { neutralizationGroup: group };
+  };
 
   if (Array.isArray(config.class_matrix)) {
     for (const a of config.class_matrix) {
       for (const b of config.class_matrix) {
-        matchups.push({ label: matchupLabel([a], [b]), sideA: [a], sideB: [b], world: matchupWorld });
+        matchups.push({ label: matchupLabel([a], [b]), sideA: [a], sideB: [b], world: matchupWorld, ...binding() });
       }
     }
   }
@@ -254,6 +274,7 @@ export function expandMatchups(config) {
         // Per-matchup threshold overrides, carried through so
         // evaluateThresholds can merge them over the global [thresholds].
         thresholds: m.thresholds,
+        ...binding(m.neutralization_group ?? config.neutralization_group),
       });
     }
   }
@@ -269,6 +290,7 @@ export function expandMatchups(config) {
         sideB: [],
         world: config.world,
         playerShip: scenarioShipPath(hull),
+        ...binding(),
       });
     }
   }
@@ -294,6 +316,7 @@ export function buildRunTasks(config, matchups) {
         matchup: m.label,
         sideA: m.sideA,
         sideB: m.sideB,
+        ...(m.neutralizationGroup == null ? {} : { neutralizationGroup: m.neutralizationGroup }),
         playerShip: m.playerShip,
         world: m.world,
         seed,
@@ -338,6 +361,26 @@ function runTtk(report) {
     }
   }
   return latest;
+}
+
+/** Read the canonical duel's explicit group-neutralization evidence. */
+function runNeutralization(report, group) {
+  if (group === null) return { excluded: 'notConfigured' };
+  if (report.outcome !== 'victory') return { excluded: 'notVictory' };
+  if (report.final_phase !== 'GameOver' || !Array.isArray(report.scenario?.triggers)) {
+    return { gap: 'missingEvidence' };
+  }
+  const prefix = `on_all_neutralized(${group},`;
+  const matches = report.scenario.triggers.filter((t) => typeof t?.condition === 'string' && t.condition.startsWith(prefix));
+  if (matches.length !== 1) return { gap: matches.length ? 'ambiguousEvidence' : 'missingEvidence' };
+  const t = matches[0];
+  if (t.condition !== `on_all_neutralized(${group}, after_secs=0)` || t.repeat !== false
+    || t.when != null || t.fired !== true || t.pending !== false
+    || !Number.isFinite(t.last_fired_secs) || t.last_fired_secs < 0
+    || !Number.isFinite(report.sim_seconds) || t.last_fired_secs > report.sim_seconds + 0.0001) {
+    return { gap: 'invalidEvidence' };
+  }
+  return { seconds: t.last_fired_secs };
 }
 
 /** Validate the canonical objective rows once for every scenario metric. */
@@ -494,6 +537,10 @@ export function mergeReports(runs, { mandatoryObjectiveIds = null } = {}) {
         reported: 0,
         failures: 0,
         ttkSamples: [],
+        neutralizationGroup: resolveNeutralizationGroup(run.neutralizationGroup),
+        neutralizationSamples: [],
+        neutralizationExcluded: { notConfigured: 0, notVictory: 0 },
+        neutralizationGaps: { missingEvidence: 0, ambiguousEvidence: 0, invalidEvidence: 0 },
         marginSamples: [],
         failuresDetail: [],
         phaseSeconds: {},
@@ -555,6 +602,14 @@ export function mergeReports(runs, { mandatoryObjectiveIds = null } = {}) {
       case 'reported': m.reported += 1; break;
       default: m.timeouts += 1; break; // unknown outcome: bucket with timeout, still "completed"
     }
+
+    if (resolveNeutralizationGroup(run.neutralizationGroup) !== m.neutralizationGroup) {
+      throw new Error(`inconsistent neutralization_group for ${run.matchup}`);
+    }
+    const neutralization = runNeutralization(run.report, m.neutralizationGroup);
+    if (neutralization.excluded) m.neutralizationExcluded[neutralization.excluded] += 1;
+    else if (neutralization.gap) m.neutralizationGaps[neutralization.gap] += 1;
+    else m.neutralizationSamples.push(neutralization.seconds);
 
     const ttk = runTtk(run.report);
     if (ttk !== null) m.ttkSamples.push(ttk);
@@ -665,6 +720,15 @@ export function mergeReports(runs, { mandatoryObjectiveIds = null } = {}) {
         max: m.ttkSamples.length ? Math.max(...m.ttkSamples) : null,
         count: m.ttkSamples.length,
       },
+      neutralization: {
+        group: m.neutralizationGroup,
+        min: m.neutralizationSamples.length ? Math.min(...m.neutralizationSamples) : null,
+        median: median(m.neutralizationSamples),
+        max: m.neutralizationSamples.length ? Math.max(...m.neutralizationSamples) : null,
+        count: m.neutralizationSamples.length,
+        excluded: m.neutralizationExcluded,
+        unmeasurable: { ...m.neutralizationGaps, total: Object.values(m.neutralizationGaps).reduce((a, b) => a + b, 0) },
+      },
       damageMargin: { mean: mean(m.marginSamples), count: m.marginSamples.length },
       mandatorySetCompletion: {
         completed: m.mandatorySetCompleted,
@@ -774,8 +838,8 @@ export function formatMarkdown(summary) {
     headings.push('Falling Skyway clean ledger');
     separators.push(':---:');
   }
-  headings.push('TTK min/med/max (s)', 'Dmg margin');
-  separators.push(':---:', '---:');
+  headings.push('Death TTK min/med/max (s)', 'Neutralization min/med/max (s)', 'Neutralization samples/gaps', 'Dmg margin');
+  separators.push(':---:', ':---:', ':---:', '---:');
   lines.push(`| ${headings.join(' | ')} |`);
   lines.push(`|${separators.join('|')}|`);
   for (const s of rows) {
@@ -797,7 +861,9 @@ export function formatMarkdown(summary) {
     if (showFallingSkywayCleanLedger) {
       cells.push(formatFallingSkywayCleanLedger(s.fallingSkywayCleanLedger));
     }
-    cells.push(ttk, num(s.damageMargin.mean));
+    const n = s.neutralization;
+    cells.push(ttk, n?.count ? `${num(n.min)} / ${num(n.median)} / ${num(n.max)}` : '—',
+      n?.group ? `${n.count} / ${n.unmeasurable.total}` : '—', num(s.damageMargin.mean));
     lines.push(`| ${cells.join(' | ')} |`);
   }
   const t = summary.totals;
@@ -847,6 +913,7 @@ export function formatMatrix(summary, classes, metric = 'winRate') {
   const cell = (a, b) => {
     const s = summary.matchups[matchupLabel([a], [b])];
     if (!s) return '—';
+    if (metric === 'neutralization') return s.neutralization?.median == null ? '—' : num(s.neutralization.median);
     if (metric === 'ttk') return s.ttk.median === null ? '—' : num(s.ttk.median);
     return pct(s.winRate);
   };
@@ -910,6 +977,8 @@ const THRESHOLD_METRICS = {
   max_win_rate: { actual: (s) => s.winRate, ok: (a, limit) => a <= limit },
   min_ttk_median: { actual: (s) => s.ttk.median, ok: (a, limit) => a >= limit },
   max_ttk_median: { actual: (s) => s.ttk.median, ok: (a, limit) => a <= limit },
+  min_neutralization_median: { actual: (s) => s.neutralization?.unmeasurable.total === 0 ? s.neutralization.median : null, ok: (a, limit) => a >= limit },
+  max_neutralization_median: { actual: (s) => s.neutralization?.unmeasurable.total === 0 ? s.neutralization.median : null, ok: (a, limit) => a <= limit },
   min_damage_margin: { actual: (s) => s.damageMargin.mean, ok: (a, limit) => a >= limit },
   max_damage_margin: { actual: (s) => s.damageMargin.mean, ok: (a, limit) => a <= limit },
   min_mandatory_set_completion_rate: {
@@ -1085,7 +1154,7 @@ function runOne(bin, task) {
 
 /** The identity fields carried onto every run result. */
 function taskId(task) {
-  return { matchup: task.matchup, sideA: task.sideA, sideB: task.sideB, seed: task.seed };
+  return { matchup: task.matchup, sideA: task.sideA, sideB: task.sideB, seed: task.seed, ...(task.neutralizationGroup == null ? {} : { neutralizationGroup: task.neutralizationGroup }) };
 }
 
 /** Hand-rolled concurrency pool (no p-limit dependency). */
@@ -1125,6 +1194,7 @@ and merges the per-run reports. Markdown summary → stdout; with --out <dir>,
 merged.json + summary.md + the per-run AAR reports (runs/<matchup>-seed<N>.json)
 are also written there (keep that dir out of git). A config [thresholds] table
 (and per-[[matchup]] overrides) is evaluated and recorded in both outputs.
+Set neutralization_group = "side_b" for explicit canonical duel neutralization timing.
 Set mandatory_objective_ids = [...] to measure exactly one scenario spine;
 unposted expected objectives count as failures rather than vacuous success.
 Set enforce_thresholds = true in a ratified config to fail the batch when a

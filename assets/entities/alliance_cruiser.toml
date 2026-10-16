@@ -1603,6 +1603,11 @@ max_commanded_total = 8
 rates = [ 6, 5, 4, 2, -2, -6 ]
 emergency_threshold = 25
 
+# Keep pressure through an attack-pass retreat after actual combat.
+# Preserve the inherited 150-unit first-contact trigger and its information reach.
+[captain_console.ai.param]
+combat_window_secs = 30.0
+
 [captain_console]
 
 [engineering_console]

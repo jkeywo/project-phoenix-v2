@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { parse, stringify } from 'smol-toml';
 import { resolveTemplate } from '../../editor/entity-includes.js';
+import { weaponSystemAddress } from '../../editor/workshop-weapons.js';
 import { createStoreZip, readStoreZip } from '../../editor/mod-pack-export.js';
 import { WORKSHOP_MANIFEST } from '../fixtures/workshop-pack.js';
 import { revealWorkshopPanel } from './dock-helpers.js';
@@ -24,6 +25,13 @@ function entitySources(directory = 'assets/entities') {
 }
 const inherited = resolveTemplate('assets/entities/alliance_cruiser.toml', entitySources(), parse);
 if (!inherited.ok) throw new Error('Actual Cruiser fixture failed include resolution');
+const fittedSystems = new Set(inherited.resolved.value.fitting.slot.map(slot => slot.system));
+const unfittedBeam = inherited.resolved.value.weapon.find(weapon => weapon.delivery.kind === 'beam'
+  && !fittedSystems.has(weaponSystemAddress(weapon).id));
+if (!unfittedBeam) throw new Error('Actual Cruiser fixture needs an authored unfitted beam for the equipment edit');
+const unfittedBeamSystem = weaponSystemAddress(unfittedBeam).id;
+if (!inherited.resolved.value.energy.consumer.some(consumer => consumer.system === unfittedBeamSystem))
+  throw new Error('The authored unfitted beam needs its actual finite energy consumer');
 const capacities = inherited.resolved.value.infrastructure.capacity;
 // The selected primary resource cannot also remain an additional choice.
 const additionalResources = inherited.resolved.value.umbilical.allowed_resources.filter(id => id !== 'torpedoes');
@@ -201,14 +209,17 @@ test('Workshop edits inherited stores and service links, then reloads and exerci
     await applied(page, 'magazine-apply');
     const beforeWeapon = await sourceOf(page);
     // Common equipment uses the same source, history and Rust validation as
-    // stores. Select the first beam without coupling the journey to its id.
+    // stores. A fitted slot must retain its exact default machinery; choose an
+    // actual unfitted beam through the existing weapon-to-System identity rule.
     await revealWorkshopPanel(page, 'composition');
     const weapon = id => page.locator('#workshop-weapon-' + id);
     await weapon('template').selectOption(HULL);
     await expect(weapon('save')).toBeEnabled();
-    const beam = await weapon('existing').evaluate(select => [...select.options].find(option => /\(Beam\)$/.test(option.textContent))?.value);
+    const beam = await weapon('existing').evaluate((select, id) => [...select.options]
+      .find(option => option.textContent.startsWith(id + ' ('))?.value, unfittedBeam.id);
     expect(beam).toBeDefined(); await weapon('existing').selectOption(beam);
     const weaponId = await weapon('id').inputValue(), range = Number(await weapon('range').inputValue());
+    expect(weaponId).toBe(unfittedBeam.id);
     await weapon('range').fill(String(range + 1)); await weapon('save').click();
     await expect(weapon('status')).toContainText('materialise');
     expect(await sourceOf(page)).toBe(beforeWeapon);
@@ -228,9 +239,10 @@ test('Workshop edits inherited stores and service links, then reloads and exerci
     const energy = id => page.locator('#workshop-energy-' + id);
     await energy('template').selectOption(HULL);
     await expect(energy('apply')).toBeEnabled();
-    const consumer = await energy('subject').evaluate(select => [...select.options].find(option => option.value.startsWith('consumer:'))?.value);
-    expect(consumer).toBeTruthy(); const consumerId = consumer.slice('consumer:'.length);
-    await energy('subject').selectOption(consumer);
+    // Exercise that same real unfitted System's reserve, preserving every
+    // fitted beam/reactor definition while materialising the full Energy profile.
+    const consumerId = unfittedBeamSystem;
+    await energy('subject').selectOption('consumer:' + consumerId);
     const reserve = Number(await energy('reserve-capacity').inputValue());
     await energy('reserve-capacity').fill(String(reserve + 10)); await energy('apply').click();
     await expect(energy('status')).toContainText('materialise');

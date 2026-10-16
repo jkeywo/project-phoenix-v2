@@ -182,10 +182,16 @@ stand in for this handoff.
 ## Ordered implementation slices after native clearance
 
 1. Pin leaf field bounds/accepted recipes and Comms/Navigation command vocabulary
-   with the actual owners. Add the strict unarmed ordinary Full3D consumer, its
-   real accepted waypoint publication, existing Workshop validation and source
-   editing. Do not broadly relax fixed-probe validation or permit unsupported
-   propulsion by a Boolean marker.
+   with the actual owners. Before any moving host tracer, execute a targeted
+   native accepted-loader check through real include resolution and
+   EntityConfig::from_toml for the complete actual authored recipe. Literal TOML
+   parsing, a hand-merged JS model and source review do not establish acceptance.
+   Atomic energy/interior/sensing/damage replacements must retain all required
+   hardware; verify exact authored Console/System ownership after real synthesis.
+   Add the strict unarmed ordinary Full3D consumer, its real accepted waypoint
+   publication, existing Workshop validation and source editing. Do not broadly
+   relax fixed-probe validation or permit unsupported propulsion by a Boolean
+   marker.
 2. Add real paid travel/recall send/read/decision lineage and own admitted Nav Job
    acceptance. Wire the same course/generation to existing paid XYZ Helm; prove
    finite above-plane travel before adding return handling.

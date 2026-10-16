@@ -13,6 +13,8 @@ The follow-up [combat correction report](./combat-balance-corrections-2026-10-16
 
 The subsequent [Cruiser balance pass](./cruiser-balance-followup-2026-10-16.html) extends Tactical detection, retains distant shared Helm contacts on screen, and reduces standard beam penetration for greater local deposition. The unchanged original and fresh-seed matrices each produce five neutralization victories in twenty trials. This remains below the unchanged balance thresholds; see the report for integrated-build evidence and remaining engagement problems. Tuning was merged into local main at `25ccf11e`.
 
+The [Destroyer engagement correction](./destroyer-engagement-2026-10-16.html) fixes runaway AI impulse and expired torpedo holds, and retains Cruiser alert through attack-pass retreats. The final original matrix is 5W/0L/9D/6T; fresh seeds give 5W/0L/7D/8T. All five 300-second Destroyer diagnostics remain active, but none wins. Damage values and balance thresholds are unchanged. Runtime and authored commits are `9b963bf4` and `58eaae87`; rules advance to 0.77.
+
 ## Per-increment progress — 16 October 2026
 
 The user requested a pause after finishing increments 8–12 on 16 October.
@@ -25,7 +27,7 @@ exits; physical-device and human-workload acceptance remain open. Later initial
 commits are implementation checkpoints, not verified increment exits.
 
 Current integrated compatibility is **protocol 46, snapshot 89 and simulation
-rules 0.76**, after the combat fixes merged at `aff0fad9`. These versions identify supported
+rules 0.77**, after the Destroyer engagement correction at `9b963bf4`. These versions identify supported
 state; they do not establish a verified gameplay exit.
 
 The selected four-owner union at `8ac62cce` / rules 0.74 passes **1618/1618**

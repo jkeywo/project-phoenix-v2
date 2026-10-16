@@ -85,11 +85,15 @@ fn absent_equipment_never_borrows_another_ships_or_global_weapons() {
         ))
         .id();
     unarm(&mut app, player);
-    let config = crate::entities::config::EntityConfig::from_toml_in_mode(
-        "[behaviour]",
-        crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+    // Bare [behaviour] synthesizes a real Command System and therefore needs
+    // physical layout/damage. Use the shipped genuinely unarmed NPC instead of
+    // bypassing those accepted equipment requirements for this negative path.
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/ship_civilian_hauler.toml",
     )
     .unwrap();
+    assert!(config.weapons_console.is_none());
+    assert!(config.torpedoes.is_none());
     let npc = crate::entities::spawner::spawn_entity(
         &mut app.world_mut().commands(),
         &config,
@@ -98,6 +102,14 @@ fn absent_equipment_never_borrows_another_ships_or_global_weapons() {
         None,
     );
     app.world_mut().flush();
+    assert!(app.world().get::<crate::server_app::Ship>(npc).is_some());
+    assert!(app
+        .world()
+        .get::<crate::ship::compartment_damage::ShipDamage>(npc)
+        .is_some());
+    assert!(app.world().get::<PhaserCombatConfigResource>(npc).is_none());
+    assert!(app.world().get::<TorpedoSystemResource>(npc).is_none());
+    assert!(app.world().get::<BlasterSystemResource>(npc).is_none());
     // Keep the compatibility tubes loaded: a fallback would be able to fire
     // or unload a real round, rather than failing because its magazine is empty.
     {

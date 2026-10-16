@@ -14028,13 +14028,34 @@ fn spawn_shield_target(app: &mut App, uuid: &str, freq: f32) {
     ));
 }
 
-/// Puts the LocalShip's Tactical fine systems under AI control (so
-/// `any_tactical_system_operates_ai` is true) and locks it onto
-/// `target_uuid` — shared setup for both auto-match tests.
+/// Isolate the advisory's HighFidelity gate with actual AI-operated banks and a
+/// held radar lock. Acquisition is an explicit unit-fixture precondition; the
+/// independent target selector must not replace it during the frequency delay.
 fn setup_npc_auto_match(app: &mut App, target_uuid: &str) {
     set_tactical_control_source(app, crate::ship::control_source::ControlSource::Ai);
-    set_weapons_target(app, Some(target_uuid.into()));
+    // The general helper names fore/aft; this reduced rig actually owns
+    // port/starboard. The frequency consumer correctly asks each actual bank.
     let ship = local_ship_entity(app);
+    let banks: Vec<_> = app
+        .world()
+        .get::<crate::ship_plugin::ShipConfigComponent>(ship)
+        .unwrap()
+        .0
+        .systems
+        .iter()
+        .filter(|system| system.kind == crate::ship::system_registry::PHASER_BANK_KIND)
+        .map(|system| system.id.clone())
+        .collect();
+    assert_eq!(banks.len(), 2);
+    for bank in banks {
+        set_system_control_source(app, bank, crate::ship::control_source::ControlSource::Ai);
+    }
+    set_system_control_source(
+        app,
+        crate::ship::system_registry::tactical_radar_system_id(),
+        crate::ship::control_source::ControlSource::Human,
+    );
+    set_weapons_target(app, Some(target_uuid.into()));
     let source =
         crate::science::scan_blackboard_key_for(&crate::ship::system_registry::sensors_system_id());
     {
@@ -14076,6 +14097,42 @@ fn setup_npc_auto_match(app: &mut App, target_uuid: &str) {
     );
 }
 
+fn assert_npc_frequency_premises(app: &mut App, target_uuid: &str, frequency: f32) {
+    assert_eq!(get_weapons_target(app).as_deref(), Some(target_uuid));
+    let ship = local_ship_entity(app);
+    let config = &app
+        .world()
+        .get::<crate::ship_plugin::ShipConfigComponent>(ship)
+        .unwrap()
+        .0;
+    let sources = app.world().get::<ShipSystemControlSources>(ship).unwrap();
+    let boards = app
+        .world()
+        .get::<crate::server_app::ShipSystemBlackboards>(ship)
+        .unwrap();
+    let mut banks = 0;
+    for bank in config
+        .systems
+        .iter()
+        .filter(|system| system.kind == crate::ship::system_registry::PHASER_BANK_KIND)
+    {
+        banks += 1;
+        assert!(sources.0.policy_for(&bank.id).operate_ai);
+        assert_eq!(
+            crate::science::shield_enquiry::latest_permitted_finding(
+                config,
+                boards,
+                &bank.id,
+                target_uuid
+            )
+            .map(|finding| finding.frequency),
+            Some(frequency),
+            "actual bank must retain its own explicitly permitted acquired finding"
+        );
+    }
+    assert_eq!(banks, 2);
+}
+
 fn local_ship_entity(app: &mut App) -> Entity {
     let mut q = app
         .world_mut()
@@ -14113,6 +14170,7 @@ fn npc_auto_match_frequency_matches_with_high_fidelity() {
     // cross the delay. Run extra to stay clear of first-tick dt edge cases.
     for _ in 0..15 {
         tick(&mut app);
+        assert_npc_frequency_premises(&mut app, target_uuid, target_freq);
     }
 
     assert_eq!(
@@ -14146,6 +14204,7 @@ fn npc_auto_match_frequency_gated_off_without_high_fidelity() {
 
     for _ in 0..15 {
         tick(&mut app);
+        assert_npc_frequency_premises(&mut app, target_uuid, target_freq);
     }
 
     assert_eq!(

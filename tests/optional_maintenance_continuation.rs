@@ -344,6 +344,28 @@ fn assert_same(live: &App, resumed: &App, step: usize) {
 
 fn establish_need(app: &mut App, actor: Entity) -> (f64, i64) {
     // Consume finite existing stock, never create a resource or a delivery.
+    // Read-only native diagnostic: keep the original one-update/zero-stock
+    // assertion so an unapplied effect cannot be mistaken for a valid need.
+    eprintln!(
+        "maintenance consumption before: tick={} phase={:?} stock={:?} queued={:?} deliveries={:?}",
+        app.world()
+            .resource::<project_phoenix::sim_tick::SimTick>()
+            .0,
+        app.world()
+            .resource::<State<project_phoenix::core::messages::GamePhase>>()
+            .get(),
+        app.world()
+            .get::<InfrastructureCondition>(actor)
+            .unwrap()
+            .0
+            .capacity_stock("structural_parts"),
+        app.world()
+            .resource::<project_phoenix::effect_queue::EffectQueue<
+                project_phoenix::infrastructure::CapacityAdjustment,
+            >>()
+            .0,
+        app.world().get::<ShipLogistics>(actor).unwrap().0.batches,
+    );
     let level = app
         .world()
         .get::<InfrastructureCondition>(actor)
@@ -370,6 +392,26 @@ fn establish_need(app: &mut App, actor: Entity) -> (f64, i64) {
             delta: -level,
         });
     app.update();
+    eprintln!(
+        "maintenance consumption after: tick={} phase={:?} stock={:?} queued={:?} deliveries={:?}",
+        app.world()
+            .resource::<project_phoenix::sim_tick::SimTick>()
+            .0,
+        app.world()
+            .resource::<State<project_phoenix::core::messages::GamePhase>>()
+            .get(),
+        app.world()
+            .get::<InfrastructureCondition>(actor)
+            .unwrap()
+            .0
+            .capacity_stock("structural_parts"),
+        app.world()
+            .resource::<project_phoenix::effect_queue::EffectQueue<
+                project_phoenix::infrastructure::CapacityAdjustment,
+            >>()
+            .0,
+        app.world().get::<ShipLogistics>(actor).unwrap().0.batches,
+    );
     assert_eq!(
         app.world()
             .get::<InfrastructureCondition>(actor)

@@ -2297,13 +2297,13 @@ fn no_damage_refund_on_sever() {
 }
 
 #[test]
-fn retarget_after_cooldown_cancels_prior_beam_and_starts_new() {
+fn retarget_after_a_paid_cycle_waits_for_cooldown_then_starts_new() {
     let mut app = test_app();
     app.world_mut()
         .insert_resource(WorldResource(crate::core::messages::WorldData {
             entities: vec![
                 crate::core::messages::EntitySnapshot::asteroid("t1", 0.0, -20.0, 2.0),
-                crate::core::messages::EntitySnapshot::asteroid("t2", 0.0, -15.0, 2.0),
+                crate::core::messages::EntitySnapshot::asteroid("t2", -10.0, -15.0, 2.0),
             ],
             ..Default::default()
         }));
@@ -2317,15 +2317,20 @@ fn retarget_after_cooldown_cancels_prior_beam_and_starts_new() {
         )])),
         Transform::from_xyz(0.0, 0.0, -20.0),
     ));
-    app.world_mut().spawn((
-        crate::server_app::Asteroid,
-        crate::server_app::AsteroidUuid("t2".into()),
-        EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
-            crate::core::messages::SystemId("captain".into()),
-            30.0,
-        )])),
-        Transform::from_xyz(0.0, 0.0, -15.0),
-    ));
+    // Keep the next target off the first physical firing ray, while remaining
+    // inside this same port bank's actual arc and reach.
+    let second = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Asteroid,
+            crate::server_app::AsteroidUuid("t2".into()),
+            EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
+                crate::core::messages::SystemId("captain".into()),
+                30.0,
+            )])),
+            Transform::from_xyz(-10.0, 0.0, -15.0),
+        ))
+        .id();
     start_game_with_weapons(&mut app);
 
     push(
@@ -2348,13 +2353,81 @@ fn retarget_after_cooldown_cancels_prior_beam_and_starts_new() {
     let _ = tick(&mut app);
     assert_eq!(get_active_beam_target(&mut app).as_deref(), Some("t1"));
 
-    set_active_beam_remaining_secs(&mut app, 0.0);
-    set_active_beam_damage_accumulator(&mut app, 0.0);
-    let _ = tick(&mut app);
-
-    assert!(phaser_bank_is_active(&mut app, "port"));
-
-    start_phaser_cooldown(&mut app, "port", 0.0);
+    let ship = local_ship(&mut app);
+    let owner = SystemId("phaser-port".into());
+    let remaining = app
+        .world_mut()
+        .get_mut::<ActiveBeam>(ship)
+        .unwrap()
+        .bank_slot_mut("port")
+        .unwrap()
+        .remaining_secs;
+    let cooldown_secs = app
+        .world()
+        .get::<PhaserCombatConfigResource>(ship)
+        .unwrap()
+        .0
+        .bank_by_id("port")
+        .unwrap()
+        .cooldown_secs;
+    let dt = app
+        .world()
+        .resource::<Time<Fixed>>()
+        .timestep()
+        .as_secs_f32();
+    assert!(remaining > 0.0 && cooldown_secs > 0.0 && dt > 0.0);
+    let burn_bound = (remaining / dt).ceil() as usize + 1;
+    let mut completed = false;
+    for _ in 0..burn_bound {
+        // This Weapons-only fixture omits the Power plugin's interval opener.
+        app.world_mut()
+            .get_mut::<crate::ship::power::ShipPowerSystem>(ship)
+            .unwrap()
+            .0
+            .begin_work_interval();
+        let out = tick(&mut app);
+        assert!(
+            app.world()
+                .get::<crate::ship::power::ShipPowerSystem>(ship)
+                .unwrap()
+                .0
+                .emitted_work(&owner)
+                > 0.0,
+            "the same bank must pay for every real burn interval"
+        );
+        if active_beam_target_is_none(&mut app) {
+            assert!(out.iter().any(|message| matches!(&message.msg, ServerMessage::BeamEnded { bank, .. } if bank == "port")));
+            assert!(
+                phaser_bank_is_active(&mut app, "port"),
+                "normal completion must start the real cooldown"
+            );
+            completed = true;
+            break;
+        }
+    }
+    assert!(
+        completed,
+        "the finite authored beam must settle within its actual duration"
+    );
+    for _ in 0..(cooldown_secs / dt).ceil() as usize + 1 {
+        if !phaser_bank_is_active(&mut app, "port") {
+            break;
+        }
+        tick(&mut app);
+    }
+    assert!(
+        !phaser_bank_is_active(&mut app, "port"),
+        "the actual cooldown must elapse before retargeted fire"
+    );
+    assert!(
+        app.world()
+            .get::<EntitySystemHull>(second)
+            .unwrap()
+            .0
+            .total_current()
+            > 0.0,
+        "the real next target must survive the first paid firing cycle"
+    );
 
     push(
         &mut app,
@@ -2389,9 +2462,8 @@ fn retarget_after_cooldown_cancels_prior_beam_and_starts_new() {
 /// opens, and every later tick re-resolves *that captured uuid*, never the
 /// live selection. Changing the combat lock (and even re-issuing FirePhaser on
 /// the same bank) while the beam is live must leave the beam on its original
-/// target. Modelled on `retarget_after_cooldown_cancels_prior_beam_and_starts_new`
-/// but WITHOUT winding `remaining_secs`/cooldown down — the beam stays live
-/// throughout.
+/// target. Paired with `retarget_after_a_paid_cycle_waits_for_cooldown_then_starts_new`,
+/// but without waiting for the previous cycle — the beam stays live throughout.
 #[test]
 fn firing_beam_retains_captured_target_when_combat_lock_changes() {
     let mut app = test_app();
@@ -12598,9 +12670,34 @@ fn conservation_fixture(
     mission_threat_remaining: i64,
 ) -> (App, Entity) {
     let mut app = test_app();
+    setup_weapons_world_with_entity(&mut app, 0.0, -20.0);
     start_game_with_weapons(&mut app);
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("conservation-target").unwrap(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
+            payload: SystemControlPayload::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        },
+    );
+    assert_eq!(
+        feedback_for(&tick(&mut app), "conservation-target"),
+        Some(ActionFeedbackOutcome::Applied)
+    );
+    tick(&mut app); // ordinary held combat-lock publication
     load_tube_now(&mut app, "fore_port");
     let ship = local_ship(&mut app);
+    assert_eq!(
+        app.world()
+            .get::<TacticalRadarSelection>(ship)
+            .unwrap()
+            .0
+            .as_deref(),
+        Some("target-uuid")
+    );
 
     app.init_resource::<crate::world::server::WorldContentRuntime>();
     app.world_mut()
@@ -12658,22 +12755,107 @@ fn conservation_fixture(
             payload: SystemControlPayload::FireTorpedo {
                 target_uuid: Some("target-uuid".into()),
             },
-            response_token: None,
-            feedback_correlation: None,
+            response_token: Some("weapons".into()),
+            feedback_correlation: Some(ActionCorrelationId::new("conservation-attempt").unwrap()),
         });
     (app, ship)
 }
 
-/// Run `handle_fire_torpedo` once and report whether a round left a tube.
+/// Report the first actual attempt; prove any held attempt can release after
+/// changing only the mission conservation input, without a readiness bypass.
 fn launched_from_admitted_command(app: &mut App) -> bool {
     use bevy::ecs::system::RunSystemOnce;
-    app.world_mut()
-        .run_system_once(handle_fire_torpedo)
-        .expect("handle_fire_torpedo should run");
-    app.world()
-        .resource::<SimOutbox>()
-        .iter()
-        .any(|(_, m)| matches!(m, ServerMessage::TorpedoLaunched { .. }))
+    let attempt = |app: &mut App| {
+        let ship = local_ship(app);
+        let owner = crate::ship::system_registry::torpedo_tube_fore_port_system_id();
+        let rounds = app
+            .world()
+            .get::<TorpedoSystemResource>(ship)
+            .unwrap()
+            .0
+            .rounds_aboard();
+        let energy = app
+            .world()
+            .get::<crate::ship::power::ShipPowerSystem>(ship)
+            .unwrap()
+            .0
+            .network()
+            .consumers[&owner]
+            .energy;
+        let launches = |app: &App| {
+            app.world()
+                .resource::<SimOutbox>()
+                .iter()
+                .filter(|(_, message)| matches!(message, ServerMessage::TorpedoLaunched { .. }))
+                .count()
+        };
+        let before = launches(app);
+        let mut cursor = app
+            .world()
+            .resource::<Messages<OutboundMessage>>()
+            .get_cursor_current();
+        app.world_mut()
+            .run_system_once(handle_fire_torpedo)
+            .expect("handle_fire_torpedo should run");
+        let after = launches(app);
+        let fired = after > before;
+        let feedback: Vec<_> = cursor
+            .read(app.world().resource::<Messages<OutboundMessage>>())
+            .filter_map(|message| match &message.msg {
+                ServerMessage::ActionFeedback {
+                    correlation,
+                    outcome,
+                } if correlation.as_str() == "conservation-attempt" => Some(*outcome),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            feedback,
+            vec![if fired {
+                ActionFeedbackOutcome::Applied
+            } else {
+                ActionFeedbackOutcome::Refused
+            }]
+        );
+        assert_eq!(after - before, usize::from(fired));
+        assert_eq!(
+            app.world()
+                .get::<TorpedoSystemResource>(ship)
+                .unwrap()
+                .0
+                .rounds_aboard(),
+            rounds - u32::from(fired)
+        );
+        let after_energy = app
+            .world()
+            .get::<crate::ship::power::ShipPowerSystem>(ship)
+            .unwrap()
+            .0
+            .network()
+            .consumers[&owner]
+            .energy;
+        assert_eq!(
+            energy - after_energy,
+            if fired { 1.0 } else { 0.0 },
+            "only an actual launch pays the fixture's full one-unit cost"
+        );
+        fired
+    };
+    let fired = attempt(app);
+    if !fired {
+        // A held conservation case must not pass because its target, loaded
+        // tube or finite machinery is unusable. Change only the existing World
+        // input to zero threat and require the very same actual owner to fire.
+        app.world_mut()
+            .resource_mut::<crate::world::server::WorldContentRuntime>()
+            .flags
+            .set_flag_value(crate::entities::config::MISSION_THREAT_REMAINING_COUNTER, 0);
+        assert!(
+            attempt(app),
+            "clearing only mission conservation must release the same paid launch"
+        );
+    }
+    fired
 }
 
 #[test]
@@ -16037,7 +16219,19 @@ fn phaser_bank_flag_guard_reads_the_world_in_both_directions() {
 /// actually flies. Read from content rather than hand-built, so this test
 /// cannot drift away from the hull it stands for.
 fn shipped_player_phaser_policy() -> crate::ai::policy::AiPolicy {
-    crate::entities::authored_ai_pins::shipped_policy_toml("phaser_bank")
+    // A generic fleet-first lookup can select an inherited, always-armed
+    // Harrow variant. This behavioral claim is explicitly about the player hull.
+    crate::entities::include_resolve::load_entity_config("assets/entities/alliance_cruiser.toml")
+        .expect("the actual player Cruiser composes")
+        .weapons_console
+        .as_ref()
+        .unwrap()
+        .phaser_banks
+        .first()
+        .unwrap()
+        .ai
+        .as_ref()
+        .unwrap()
         .to_policy()
         .expect("the shipped phaser-bank policy decodes")
 }

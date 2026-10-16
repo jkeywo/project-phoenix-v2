@@ -79,6 +79,35 @@ fn discrete_shortfall_keeps_loaded_ammunition_and_waits_for_full_cost() {
     load_tube_now(&mut app, "fore_port");
     let ship = local_ship_entity(&mut app);
     let id = crate::ship::system_registry::torpedo_tube_fore_port_system_id();
+    // Keep the fixture's already-loaded round through the ordinary standing
+    // order. A target of zero would correctly start paid unloading after the
+    // first refused shot and consume 0.2 of the next attempt's one-unit budget.
+    push(
+        &mut app,
+        "weapons",
+        ClientMessage::ControlSystemCorrelated {
+            correlation: ActionCorrelationId::new("energy-hold-loaded").unwrap(),
+            target: id.clone(),
+            payload: SystemControlPayload::SetTorpedoVolleyTarget { count: 1 },
+        },
+    );
+    assert_eq!(
+        feedback_for(&tick(&mut app), "energy-hold-loaded"),
+        Some(ActionFeedbackOutcome::Applied)
+    );
+    let tube = app
+        .world()
+        .get::<TorpedoSystemResource>(ship)
+        .unwrap()
+        .0
+        .tube("fore_port")
+        .unwrap();
+    assert_eq!((tube.loaded_count, tube.target_count), (1, 1));
+    assert!(!matches!(
+        tube.load_state,
+        crate::weapons::torpedo::TubeLoadState::Loading { .. }
+            | crate::weapons::torpedo::TubeLoadState::Unloading { .. }
+    ));
     set_local_energy(&mut app, ship, &id, 0.5);
     let before = app
         .world()

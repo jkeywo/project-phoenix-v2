@@ -53,6 +53,75 @@ launches use their existing owners; no missing remote actor becomes a current
 private destruction report. This tracer proves same-home recovery, not automatic
 transfer of an active trip to a foreign facility or new commander.
 
+## Launch report knowledge — approved owner refinement
+
+The current `ship/craft.rs::BayState` retains one handling Job only.
+`begin_order` replaces a terminal Job when the next real assignment begins;
+`complete_receiving` retains a receiving handoff receipt on that one Job.
+`entities/craft_view.rs::publish` projects that current Job and actual own stored
+craft. There is no retained launch-result journal to reuse. A second launch or
+recovery would therefore erase the first launch evidence needed for a later
+Travel request. Polling the deployed child's current custody/association instead
+would silently reveal foreign recovery/relaunch or loss.
+
+Extend this same Bay owner with a narrow dated **own launch report**. Only its
+real successful paid end-Physics launch transaction creates the immutable cause:
+craft identity, home identity, actual Bay ActivityJob and physical commit tick.
+That one event establishes the child's launch association and the parent's own
+report copy together. The parent copy is retained knowledge of its own action,
+not a second location, current-child registry, controller or pose account. Failed,
+paused, cancelled, blocked or merely ready handling produces neither copy;
+retry/restore cannot manufacture another launch event.
+
+First technical retention is at most 128 reports per actual Bay, in deterministic
+(commit tick, Bay JobId, craft identity) order, keeping the newest local report
+for each craft. Only a newer successful launch by this same Bay can replace that
+craft's retained report. Ordinary bounded oldest-report retirement may forget a
+report; it does not cancel already emitted requests or accepted work, whose
+existing original request/Job references retain their own continuation. This is
+a technical knowledge-history bound, not ship message capacity or a launch cost:
+a full journal never prevents physical launch or creates a resource reservation.
+No distant recovery, foreign launch, missing contact, remote loss or controller
+change edits or withdraws the parent's retained historical report.
+
+The existing typed Bay publication exposes only this parent's retained report
+under the actual Bay System key. A Comms/Navigation System sees it only through
+an explicit Console Bay feed; sharing a seat or display grants no access. The
+parent report can establish a known receiver identity and VoyageRef for this new
+best-effort request family. It supplies no current contact, alias, position,
+velocity, route, receiving power, delivery viability or future remote authority.
+It never becomes a generic public contact or a hidden remote progress roster.
+
+A source semantic action binds the exact currently permitted own historical
+report plus the separately offered known XYZ Navigation point. The actual Radio
+owner still validates/pays ordinary emission and physically delivers through its
+normal path. Source success means real emission, never proof of reception.
+Silence, receiver absence, link loss and later foreign custody cannot be used as
+an implicit source-side delivery/eligibility oracle. A returned fact must still
+be genuinely transmitted and heard. The receiver independently compares the
+request to its own actual launch association/current allowed relationship and
+separately admits its own Navigation; an old sender report is no actuator token.
+
+Snapshot/digest includes the child's association and this existing Bay owner's
+retained report history. Validate identities, original scope actor/owner/JobId,
+finite ordered clocks, uniqueness and retention bound before either restore door
+writes. Compare exact cause against the actual completed launch Job and matching
+child association where those original owners are still available for that same
+launch. Their later replacement/removal is legitimate history, not evidence of a
+forgery or permission to authenticate an erased past. In particular a parent
+report may outlive the child, while the child's genuine association may outlive
+the home; no invented live lookup, reconstructed launch or global history service
+repairs missing provenance. Existing accepted request/Job lineage remains checked
+against its retained original cause when the local report has retired.
+
+Required owner evidence includes two successive real launches replacing the
+single current Bay Job while the first own report remains usable; exact no-write
+failure/retry and same-transaction association/report creation; explicit-feed
+isolation; parent report unchanged across actual remote removal/foreign launch;
+newer same-Bay launch and deterministic bounded retirement; and fresh whole-save
+continuation with a retained historical report whose original actor/Job no longer
+exists. This contract refinement adds no runtime or Comms enum by itself.
+
 ## Closed Comms contract
 
 These are intended new closed definitions, **not existing APIs**. Comms has

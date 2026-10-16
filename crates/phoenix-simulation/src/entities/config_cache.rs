@@ -59,7 +59,33 @@ pub fn nested_template_paths(config: &crate::entities::config::EntityConfig) -> 
             out.push(p.path().to_string());
         }
     }
+    if let Some(torpedoes) = &config.torpedoes {
+        out.extend(torpedoes.tubes.iter().filter_map(|tube| {
+            tube.marking
+                .as_ref()
+                .map(|payload| payload.template.clone())
+        }));
+    }
+    out.sort();
+    out.dedup();
     out
+}
+
+/// Final cross-recipe acceptance, shared by native preload and browser settle.
+/// A parseable launcher cannot silently reference absent or incompatible body
+/// equipment. Reads only this candidate closure and performs no filesystem IO.
+pub(crate) fn validate_marking_dependencies(
+    templates: &HashMap<String, crate::entities::config::EntityConfig>,
+) -> Result<(), String> {
+    let mut ordered: Vec<_> = templates.iter().collect();
+    ordered.sort_by(|a, b| a.0.cmp(b.0));
+    for (path, config) in ordered {
+        phoenix_sim_gameplay::weapons::marking::validate_payload_dependencies(config, |path| {
+            templates.get(path)
+        })
+        .map_err(|error| format!("{path}: {error}"))?;
+    }
+    Ok(())
 }
 
 // ── Thread-local preload state ────────────────────────────────────────────────
@@ -320,11 +346,21 @@ pub fn set_config_request_callback(callback: Function) {
 
 #[cfg(target_arch = "wasm32")]
 fn settle_preload_complete() -> bool {
-    let complete = PENDING_QUEUE.with(|q| q.borrow().is_empty())
+    let sources_complete = PENDING_QUEUE.with(|q| q.borrow().is_empty())
         && IN_FLIGHT.with(|q| q.borrow().is_empty())
         && SIDECAR_PRELOAD_PENDING.with(|q| q.borrow().is_empty())
         && !WORLD_PRELOAD_PENDING.with(|pending| *pending.borrow())
         && PRELOAD_FAILURE.with(|failure| failure.borrow().is_none());
+    if sources_complete {
+        if let Err(error) =
+            CONFIG_CACHE.with(|cache| validate_marking_dependencies(&cache.borrow()))
+        {
+            PRELOAD_FAILURE.with(|failure| {
+                failure.borrow_mut().get_or_insert(error);
+            });
+        }
+    }
+    let complete = sources_complete && PRELOAD_FAILURE.with(|failure| failure.borrow().is_none());
     PRELOAD_COMPLETE.with(|flag| {
         *flag.borrow_mut() = complete;
     });

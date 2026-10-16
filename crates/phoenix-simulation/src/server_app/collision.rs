@@ -127,6 +127,7 @@ pub(crate) struct CollisionSinks<'w, 's> {
 pub(crate) fn handle_collisions(
     time: Res<Time>,
     context: ReadRapierContext,
+    pairs: crate::console::weapons::marking::MechanicalPairs,
     bodies: CollisionBodies,
     sinks: CollisionSinks,
     // Seeded RNG + log filter + God Mode (issue #900), bundled: separately
@@ -246,6 +247,7 @@ pub(crate) fn handle_collisions(
                     pair.collider1()
                 }
             })
+            .filter(|other| !pairs.connected(ship_entity, *other))
             .collect();
         contacts.sort_by_key(|other| collision_order_key(*other, &body_query));
 

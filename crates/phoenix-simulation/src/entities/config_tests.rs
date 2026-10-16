@@ -4770,6 +4770,7 @@ fn torpedo_in_flight_snapshots_shield_pierce_at_launch() {
     let mut cfg = TorpedoConfig::default();
     cfg.shield_pierce = 0.75;
     let tubes = vec![TorpedoTubeConfig {
+        marking: None,
         load_priority: 100,
         targets: None,
         impact: phoenix_model::damage::DamageProfile::default(),
@@ -5031,6 +5032,7 @@ count = 10
 fn validate_torpedo_tubes_accepts_valid_list() {
     let tubes = vec![
         TorpedoTubeConfig {
+            marking: None,
             load_priority: 100,
             targets: None,
             impact: phoenix_model::damage::DamageProfile::default(),
@@ -5046,6 +5048,7 @@ fn validate_torpedo_tubes_accepts_valid_list() {
             ai: None,
         },
         TorpedoTubeConfig {
+            marking: None,
             load_priority: 100,
             targets: None,
             impact: phoenix_model::damage::DamageProfile::default(),
@@ -5074,6 +5077,7 @@ fn validate_torpedo_tubes_rejects_empty_list() {
 fn validate_torpedo_tubes_rejects_duplicate_ids() {
     let tubes = vec![
         TorpedoTubeConfig {
+            marking: None,
             load_priority: 100,
             targets: None,
             impact: phoenix_model::damage::DamageProfile::default(),
@@ -5089,6 +5093,7 @@ fn validate_torpedo_tubes_rejects_duplicate_ids() {
             ai: None,
         },
         TorpedoTubeConfig {
+            marking: None,
             load_priority: 100,
             targets: None,
             impact: phoenix_model::damage::DamageProfile::default(),
@@ -5112,6 +5117,7 @@ fn validate_torpedo_tubes_rejects_duplicate_ids() {
 #[test]
 fn validate_torpedo_tubes_rejects_fire_arc_out_of_range() {
     let tubes = vec![TorpedoTubeConfig {
+        marking: None,
         load_priority: 100,
         targets: None,
         impact: phoenix_model::damage::DamageProfile::default(),
@@ -5134,6 +5140,7 @@ fn validate_torpedo_tubes_rejects_fire_arc_out_of_range() {
 
 fn torpedo_tube(id: &str) -> TorpedoTubeConfig {
     TorpedoTubeConfig {
+        marking: None,
         load_priority: 100,
         targets: None,
         impact: phoenix_model::damage::DamageProfile::default(),

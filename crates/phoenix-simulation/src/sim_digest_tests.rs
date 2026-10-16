@@ -131,6 +131,7 @@ fn optional_namespace_exact_fold_characterization() {
             ("helm-movement-intent", 13509907477215362722),
             ("transit-drive-orders", 13509907477215362722),
             ("physical-craft", 13509907477215362722),
+            ("marking-attachment", 13509907477215362722),
             ("weapon-target-assignments", 13509907477215362722),
             ("guided-source-order-knowledge", 13509907477215362722),
             ("ship-illumination-intent", 13509907477215362722),

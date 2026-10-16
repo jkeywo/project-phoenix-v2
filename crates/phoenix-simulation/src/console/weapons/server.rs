@@ -107,6 +107,7 @@ impl Plugin for WeaponsPlugin {
         // lifecycle runner receives only the registered callbacks.
         super::blackboard::register_weapons_replication_lifecycle(app);
         super::flight_carrier::register(app);
+        super::marking::register(app);
         super::guidance_link::register(app);
         super::illumination::register(app);
         // The AI host spine's read-only world context (issue #1207): the phaser,

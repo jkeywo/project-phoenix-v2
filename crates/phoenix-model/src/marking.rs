@@ -108,6 +108,8 @@ impl MarkingAttachment {
             || !valid(&self.round)
             || !valid(&self.source)
             || self.source == body
+            || self.round == body
+            || self.round == self.source
             || self.contact_tick > now
         {
             return Err("marker has invalid actual causal identity/clock".into());
@@ -116,6 +118,8 @@ impl MarkingAttachment {
             MarkingLocation::Attached { subject, offset }
                 if !valid(subject)
                     || subject == body
+                    || subject == &self.source
+                    || subject == &self.round
                     || offset
                         .iter()
                         .any(|v| !v.is_finite() || v.abs() > 1_000_000.0) =>

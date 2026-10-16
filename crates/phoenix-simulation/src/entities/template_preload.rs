@@ -208,7 +208,10 @@ pub fn preload_entity_templates(dir: &str) -> Result<TemplatePreload, String> {
     // Accumulated across the whole template set so the summary is a fleet total
     // rather than a per-file trickle.
     let mut ai_declarations = AiDeclarationReport::default();
-    for path in entries {
+    let mut pending: std::collections::VecDeque<_> = entries.into();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut accepted = std::collections::HashMap::new();
+    while let Some(path) = pending.pop_front() {
         // Key on the repo-relative path the world TOML uses, with forward
         // slashes — on Windows `Path::display` would emit backslashes and every
         // lookup would miss. Built from the WHOLE path rather than
@@ -226,6 +229,9 @@ pub fn preload_entity_templates(dir: &str) -> Result<TemplatePreload, String> {
         let key = crate::entities::include_resolve::canonical_template_path(
             &path.to_string_lossy().replace('\\', "/"),
         );
+        if !seen.insert(key.clone()) {
+            continue;
+        }
         if crate::content_fs::read_to_string(&path).is_err() {
             warn!(target: "config", "template unreadable, skipping: {key}");
             continue;
@@ -242,6 +248,16 @@ pub fn preload_entity_templates(dir: &str) -> Result<TemplatePreload, String> {
         let toml = resolved.toml.clone();
         match resolved.parse() {
             Ok(cfg) => {
+                // Explicit marker recipes use this same pre-init parse/marker
+                // gate, including dependencies outside the initial hull dir.
+                // The runtime consumer remains cache-only after freeze.
+                pending.extend(
+                    cfg.torpedoes
+                        .iter()
+                        .flat_map(|torpedoes| &torpedoes.tubes)
+                        .filter_map(|tube| tube.marking.as_ref())
+                        .map(|payload| std::path::PathBuf::from(&payload.template)),
+                );
                 marker_findings.extend(validate_template_markers(&key, &toml, &cfg));
                 let stem = path.file_stem().unwrap_or_default().to_string_lossy();
                 let missing = ai_declaration_manifest::undeclared_keys(&cfg).len();
@@ -252,6 +268,7 @@ pub fn preload_entity_templates(dir: &str) -> Result<TemplatePreload, String> {
                         .lines
                         .extend(ai_declaration_manifest::manifest_lines(&stem, &cfg));
                 }
+                accepted.insert(key.clone(), cfg.clone());
                 crate::entities::config_cache::insert_native_config(key, cfg);
                 loaded += 1;
             }
@@ -273,6 +290,8 @@ pub fn preload_entity_templates(dir: &str) -> Result<TemplatePreload, String> {
              instead of the authored ones"
         ));
     }
+
+    crate::entities::config_cache::validate_marking_dependencies(&accepted)?;
 
     Ok(TemplatePreload {
         loaded,

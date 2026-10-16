@@ -341,21 +341,22 @@ proof remains pending. No runtime, native execution,
 asset acceptance or full increment exit is claimed.
 
 
-## Physical presence follow-up awaiting integrator adoption
+## Adopted first-slice physical presence boundary
 
 The first runtime source review found an interaction with carried craft: an
 already attached beacon would remain an active world body if its deployed probe
 subject were later recovered. A missing observation or Disabled component is
 not evidence of destruction and must never detach it for that reason.
 
-Proposed bounded first-slice resolution: exclude actual carry-capable bodies
-(PhysicalProbe/ProbeCustody or an accepted ProbeProfile) from eligible marking
-contacts and from attached-subject continuation. Keep ordinary independent hull
-and facility contacts. A later carried-child presence design can deliberately
-extend this boundary; this change introduces no stored-child custody or cleaning
-operation. This proposal has not been adopted and its exclusion is not yet
-implemented. The current runtime work is not ready for integration or an exit
-claim until this physical presence boundary is resolved.
+Root adopts the bounded first-slice resolution before its runtime change:
+exclude any actual ProbeCustody owner or accepted ProbeProfile from eligible
+marking contacts and from attached-subject continuation, even while deployed.
+Keep ordinary independent hull and facility contacts. Absence of current
+Carried state is not enough: the body must not be carry-capable. Both actual
+contact and complete-candidate/current-parent restore guards enforce this same
+boundary. A later attached-stored-body physical-presence design can deliberately
+extend it; that remains open and this slice introduces no stored-child custody
+or cleaning operation. No generic all-target attachment claim is made.
 
 
 ## Isolated runtime checkpoint (not an integrated delivery)
@@ -379,8 +380,8 @@ Owned formatting and diff checks pass. The recipe chunk previously passed strict
 strings (6,510 strings, zero errors/warnings). Rust owner tests, real accepted
 loader execution, actual host tracing, continuation forgeries, collision/native
 acceptance and final gates remain integrator-owned and unexecuted for this packet.
-The carry-capable target boundary above, S066 foundation synchronization, actual
-paid limited report/provenance, complete dependent recipe/Workshop support and
+Implementation of the adopted carry-capable target boundary above, S066
+foundation synchronization, actual paid limited report/provenance, complete dependent recipe/Workshop support and
 ordinary Human/AI host proof must close before a coherent vertical-slice claim.
 ### Explicit sensor-to-radio knowledge binding
 
@@ -390,4 +391,81 @@ missing binding refuses the recipe. This permits the selected reporting
 consumer to read its own sensor evidence without pooling unrelated Console
 knowledge. The accepted-loader positive and missing-feed tests are authored but
 not executed in this worker. Independent source review passed; the actual paid
-report consumer and carried-target policy remain separate unfinished work.
+report consumer and the adopted carried-target guard remain separate unfinished work.
+
+## Structural checkpoint for integrator foundation synchronization
+
+The isolated branch now implements the adopted first-slice independent-hull
+restriction at actual contact and both attached-parent continuation boundaries.
+It also contains endpoint shape contact, ordinary finite body creation, exact
+parent-pair filtering, the existing physical owner's bank-aware projection and
+actual removal transaction, limited subject-only Broad acquisition, raw Radio
+payment receipts, and canonical capture/fold/preflight/apply joins. `report`
+remains `None`: unsupported historical report frontiers are refused until the
+real paid provenance consumer exists.
+
+Craft independently source-reviewed the physical/contact and removal tests;
+Personnel reviewed the candidate/current-parent restore guards and typed causal
+closure; Comms reviewed limited sensing and the once-paid raw Radio receipt.
+These are bounded source verdicts, not execution evidence. The focused new owner
+tests are authored but not run here. Explicit owned-file Rust formatting and
+diff checks pass. Root separately ran the actual accepted-recipe tests against
+the integrated recipe and knowledge-binding donors: two tests passed at
+`1062d545`, recorded in
+`.phoenix/resumed-charted-and-marking-accepted-owners-retry.log`.
+
+This checkpoint permits the integrator to synchronize a clean tracked branch
+with current S066 source without stashing work. Paid late report delivery,
+historical report provenance, complete used-template dependency acceptance,
+Workshop payload authoring and full actual-host continuation remain unfinished.
+No complete marking consumer, generic carry-capable target support, native
+physical acceptance or increment15 playable exit is claimed.
+
+## Late paid-report source checkpoint
+
+The next isolated source slice adds the adopted report consumer. Its private
+current-endpoint adapter rebuilds physical poses, exact Radio control and current
+Operation from the same-tick raw listening receipt. S066 receiver coverage and
+the existing channel/key/range/path/jamming/protection route still apply; no
+continuous payment is repeated. A fresh own bound sensor sample pays the normal
+discrete transmission cost and advances its original sample frontier even when
+no recipient can hear it. Missed samples are not queued or retried.
+
+Delivery enters only willing same-faction SensorRadar track owners, through the
+existing sample receipt mechanism after the legacy sharing batch. Private target
+routes and identity/classification/assessment/observation claims are removed.
+Original timing, uncertainty and measured motion remain the sample's existing
+evidence. Neither delivery nor receipt grants a targeting association or control.
+The retained frontier is checked against the candidate body's original sensor
+sample token, allocated contact range and observation clock; aged-out samples
+need no replacement history ledger and are never refreshed by restore.
+
+Comms independently reviewed the current paid endpoints and report producer;
+Craft reviewed the actual paid Radio/Broad/report owner tests; Personnel reviewed
+the candidate frontier consistency guard. Owner tests are authored, not run in
+this worker. The tests separate their initial physical attachment premise from
+the still-pending whole-host flight/contact proof. Complete accepted dependency
+validation, Workshop authoring, native execution and the full physical/report
+continuation journey remain required before the vertical-slice exit.
+
+## Accepted dependency source checkpoint
+
+The optional `marking_cruiser.toml` reference changes only one inherited guided
+tube's marker recipe and the hull name. Its actual resolved accepted-loader test
+compares the complete canonical recipe with the base Cruiser after removing
+those two intended differences, including real seats, Consoles, finite stocks,
+energy, interiors, ordinary AI and the independent tubes.
+
+Native pre-init discovery follows explicit marker recipes through its existing
+parse/model-marker gate, including a child outside the initial hull directory.
+Final native and browser acceptance validate each dependency against their
+complete candidate cache. Missing or incompatible body equipment refuses before
+play and cannot be satisfied from an older native global-cache entry. Runtime
+launch/spawn remains cache-only. The existing native used-template identity walk
+already follows `nested_template_paths`, as browser preload does; the added
+ledger test checks the composed beacon digest without hashing unrelated assets.
+
+Independent source review passed. These new accepted-launcher/dependency/ledger
+tests remain unexecuted by the worker; native accepted-loader evidence must
+precede the whole-host tracer. Workshop dependency-aware authoring and physical
+native acceptance are still separate unfinished work.

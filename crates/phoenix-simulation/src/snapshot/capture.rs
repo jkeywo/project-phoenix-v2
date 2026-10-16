@@ -796,7 +796,7 @@ pub(super) fn weapon_state(
                     .iter()
                     .map(|t| TorpedoInFlight {
                         last_guidance: t.last_guidance.clone(),
-                        profile: t.profile,
+                        profile: t.profile.clone(),
                         durability_remaining: t.durability_remaining,
                         strike_damage_bonus: t.strike_damage_bonus,
                         uuid: t.uuid.clone(),
@@ -817,7 +817,7 @@ pub(super) fn weapon_state(
                     .iter()
                     .map(|b| BurstState {
                         launch_uuid: b.launch_uuid.clone(),
-                        profile: b.profile,
+                        profile: b.profile.clone(),
                         burst_interval_secs: b.burst_interval_secs,
                         tube_id: b.tube_id.clone(),
                         pending: b.pending,
@@ -1478,6 +1478,7 @@ pub(super) fn capture_entities(world: &World) -> Vec<EntityState> {
                     jamming: entity.get::<crate::comms::jamming::ShipJamming>().cloned(),
                     signal_protection: entity.get::<crate::science::protection::ShipSignalProtection>().cloned(),
                     comms_media: entity.get::<crate::comms::media_control::ShipCommsMediaIntent>().cloned(),
+                    marking_attachment: entity.get::<phoenix_sim_gameplay::weapons::marking::ShipMarkingAttachment>().map(|state| state.0.clone()),
                     emission_intent: entity.get::<crate::console::command::emission::ShipEmissionIntent>().map(|state| state.0.clone()),
                     comms_capture: entity.get::<crate::comms::capture::ShipCommsCapture>().cloned(),
                     comms_traffic: entity.get::<crate::comms::traffic::ShipCommsTraffic>().map(|owner| owner.state.clone()),

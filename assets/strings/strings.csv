@@ -6586,3 +6586,4 @@ entity.utility_shuttle.name,Ordinary optional unarmed Full3D utility equipment,U
 entity.marking_beacon.name,Finite weapon-delivered sensor equipment,Marking beacon,,,
 component.security_teams.planned_team,Released acquisition requests one actual Security team,Planned · Team {n},Planned · Team {n},Planned · Team {n},source
 workshop.activities.acquire_vessel,Typed Security acquisition activity authoring,Acquire vessel,Acquire vessel,Acquire vessel,source
+entity.marking_cruiser.name,Optional finite physical marking loadout,Marking Cruiser,,,

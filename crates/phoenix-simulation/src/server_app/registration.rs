@@ -227,7 +227,10 @@ fn register_physics(app: &mut App) {
         .as_secs_f32(),
         substeps: 1,
     })
-    .add_plugins(RapierPhysicsPlugin::<()>::default().in_fixed_schedule())
+    .add_plugins(
+        RapierPhysicsPlugin::<crate::console::weapons::marking::MarkingPhysicsHooks>::default()
+            .in_fixed_schedule(),
+    )
     // Rapier 0.33 propagates transforms without Bevy 0.18's dirty-tree
     // marking pass. A ship with visual children can otherwise retain an old
     // global pose and contact different geometry from a rendererless peer.

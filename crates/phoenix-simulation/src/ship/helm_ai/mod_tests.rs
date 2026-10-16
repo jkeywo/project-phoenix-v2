@@ -9827,7 +9827,7 @@ fn set_torpedoes_in_flight(app: &mut App, n: usize) {
                 previous_position: None,
                 collision_interval_secs: None,
                 last_guidance: None,
-                profile,
+                profile: profile.clone(),
                 durability_remaining: profile.durability,
                 strike_damage_bonus: 0.0,
                 uuid: format!("salvo-{i}"),

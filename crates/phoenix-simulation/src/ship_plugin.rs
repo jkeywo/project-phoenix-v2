@@ -330,6 +330,12 @@ impl Plugin for ShipPlugin {
                         .after(apply_helm_commands)
                         .after(tick_impulse)
                         .after(tick_boost),
+                    crate::ship::physics_systems::project_marking_attachments
+                        .in_set(crate::sim_sets::FixedStep::ProjectMarkingBeforePhysics)
+                        .in_set(crate::sim_sets::SimSet::Physics),
+                    crate::ship::physics_systems::project_marking_attachments
+                        .in_set(crate::sim_sets::FixedStep::ProjectMarkingAfterDock)
+                        .in_set(crate::sim_sets::SimSet::Modifiers),
                     sync_ship_position
                         .in_set(crate::sim_sets::FixedStep::SyncShipPosition)
                         .in_set(crate::sim_sets::SimSet::Physics)

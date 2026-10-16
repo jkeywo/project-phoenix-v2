@@ -27,6 +27,7 @@ pub mod media_control;
 pub mod media_edge;
 pub mod media_mesh;
 pub mod media_session;
+pub(crate) mod paid_radio;
 pub(crate) mod planned;
 pub mod radio;
 pub mod range;

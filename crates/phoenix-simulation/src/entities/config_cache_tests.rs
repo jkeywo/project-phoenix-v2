@@ -150,6 +150,30 @@ fn nested_template_paths_empty_for_bare_config() {
 }
 
 #[test]
+fn actual_marking_dependency_is_discovered_and_refused_until_complete_compatible_acceptance() {
+    let source = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/marking_cruiser.toml",
+    )
+    .unwrap();
+    let child =
+        crate::entities::include_resolve::load_entity_config("assets/entities/marking_beacon.toml")
+            .unwrap();
+    assert_eq!(
+        super::nested_template_paths(&source),
+        ["assets/entities/marking_beacon.toml"]
+    );
+    let mut accepted = HashMap::from([("assets/entities/marking_cruiser.toml".into(), source)]);
+    let error = super::validate_marking_dependencies(&accepted).unwrap_err();
+    assert!(error.contains("marking_cruiser.toml") && error.contains("marking_beacon.toml"));
+    accepted.insert("assets/entities/marking_beacon.toml".into(), child.clone());
+    super::validate_marking_dependencies(&accepted).unwrap();
+    let mut incompatible = child;
+    incompatible.energy.as_mut().unwrap().consumers[0].initial_energy = 0.0;
+    accepted.insert("assets/entities/marking_beacon.toml".into(), incompatible);
+    assert!(super::validate_marking_dependencies(&accepted).is_err());
+}
+
+#[test]
 fn nested_template_paths_returns_asteroid_field_type_paths() {
     let toml_str = r#"
 tags = ["field"]

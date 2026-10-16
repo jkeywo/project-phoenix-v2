@@ -3,9 +3,11 @@
 use crate::damage::DamageProfile;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GuidedRoundProfile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marking: Option<crate::marking::FrozenMarkingPayload>,
     pub speed: f32,
     pub turn_rate: f32,
     pub lifespan: f32,
@@ -40,6 +42,21 @@ impl GuidedRoundProfile {
             );
         }
         self.impact.validate()?;
+        if let Some(marking) = &self.marking {
+            marking.validate()?;
+            if self.damage_hull != 0
+                || self.damage_shields != 0
+                || self.detonation_radius != 0.0
+                || self.shield_pierce != 0.0
+                || self.impact.penetration != 0.0
+                || self.impact.emp.is_some()
+            {
+                return Err(
+                    "mark-only rounds cannot carry damage, EMP, penetration or proximity delivery"
+                        .into(),
+                );
+            }
+        }
         if let Some(seeker) = &self.seeker {
             seeker.validate()?;
         }

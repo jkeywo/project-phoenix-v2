@@ -69,3 +69,9 @@ exclusive transaction. Ordinary GM and Scenario application use that same
 prepare/commit path. The optional Security acquisition adapter joins this owner
 to Session acquisition before publishing success, preserving the original
 baseline, unrelated Objective cursors and the existing per-System controllers.
+
+See the [integrated acquisition and loading ownership map](../../docs/architecture/vessel-acquisition-and-guided-loading.md)
+for the Session owner, same Security Job receipt/settlement, prepared doctrine
+join and effective faction projection. Acquisition grants no Station or direct
+machinery command authority; the source pin and pending native evidence are
+stated separately from runtime ownership.

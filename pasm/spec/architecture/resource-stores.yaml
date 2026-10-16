@@ -4,14 +4,14 @@ entities:
       status: implemented
       confidence: confirmed
       title: Ammunition Stock State
-      summary: "Gameplay TorpedoSystem owns one Stock magazine. Tube loading reserves a named round, cancellation releases it and completion consumes it into ready tube contents. Replenishment accounts for those physical commitments. Snapshot and resource digest carry stocks, claims and loading continuation; ordinary grant AI and admitted commands remain. Projectile effects remain the existing deferred digest boundary."
+      summary: "Gameplay TorpedoSystem owns one Stock magazine. Tube loading reserves a named round, cancellation releases it and completion consumes it into ready tube contents. Replenishment accounts for those physical commitments. Snapshot and resource digest carry stocks, claims and loading continuation; ordinary grant AI and admitted commands remain. Optional guided loader groups retain each tube load_priority inside this same TorpedoSystem; grouped priority is saved/folded here, while immutable groups rebuild from content and loader_wait/per-step budgets are derived. Projectile effects remain the existing deferred digest boundary."
     architecture:
       kind: subsystem
       authority: authoritative
     implementation:
       status: declared
-      paths: [crates/phoenix-sim-gameplay/src/resources/stock.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/snapshot/schema.rs, crates/phoenix-simulation/src/sim_digest.rs]
-      symbols: [Stock, TorpedoSystem, reserve_requirements, validate_magazine]
+      paths: [crates/phoenix-sim-gameplay/src/resources/stock.rs, crates/phoenix-sim-gameplay/src/weapons/torpedo.rs, crates/phoenix-sim-gameplay/src/weapons/shared_loaders.rs, crates/phoenix-simulation/src/console/weapons/torpedo.rs, crates/phoenix-simulation/src/console/weapons/shared_loaders.rs, crates/phoenix-simulation/src/snapshot/schema.rs, crates/phoenix-simulation/src/sim_digest.rs]
+      symbols: [Stock, TorpedoSystem, reserve_requirements, validate_magazine, set_load_priority, loader_order, loader_budgets]
       tests: [crates/phoenix-sim-gameplay/src/weapons/torpedo_tests.rs, crates/phoenix-simulation/src/resources/server_tests.rs]
   - component: resource-service-bindings
     core:

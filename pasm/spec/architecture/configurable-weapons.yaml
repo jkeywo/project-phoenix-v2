@@ -4,7 +4,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Configurable Weapon Compilation
-      summary: "Authored weapon entries combine a common mount, supported beam/bolt/guided delivery parameters, markers, firing patterns and individual AI declarations. Content compiles them once into the existing strategy parameters. Stable strategy IDs preserve System and command addressing; no duplicate weapon state or controller is installed. Shipped armament uses the common authored form."
+      summary: "Authored weapon entries combine a common mount, supported beam/bolt/guided delivery parameters, markers, firing patterns and individual AI declarations. Content compiles them once into the existing strategy parameters. Stable strategy IDs preserve System and command addressing; no duplicate weapon state or controller is installed. Shipped armament uses the common authored form. Optional shared loader membership/work_rate and initial guided priority compile into the existing guided owner, without another load executor or resource."
     implementation:
       status: declared
       paths: [crates/phoenix-sim-gameplay/src/entities/config/weapon_definition.rs, crates/phoenix-sim-gameplay/src/entities/config.rs, crates/phoenix-content/src/entity_override.rs, editor/workshop-weapons.js, gui/workshop-weapon-panel.js]

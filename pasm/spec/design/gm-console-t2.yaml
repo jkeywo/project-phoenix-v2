@@ -274,7 +274,7 @@ entities:
     architecture:
       classification: authoritative
       owner: gm-t2-authored-npc-doctrine
-      writers: [gm-t2-authored-npc-doctrine]
+      writers: [gm-t2-authored-npc-doctrine, vessel-acquisition-transaction]
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared

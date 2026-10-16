@@ -1,0 +1,79 @@
+entities:
+  - component: vessel-acquisition-value-contracts
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Vessel Acquisition Value Contracts
+      summary: "Model defines the closed SecurityAcquisitionOrder, VesselAcquisitionCause and VesselOperationalOwnerData values and validates identities and original clocks. These are shared typed data embedded in existing owners and snapshots, not a runtime pool, command executor or second ownership store."
+    implementation:
+      status: declared
+      paths: [crates/phoenix-model/src/vessel_ownership.rs]
+      symbols: [SecurityAcquisitionOrder, VesselAcquisitionCause, VesselOperationalOwnerData]
+  - component: session-vessel-operational-authority
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Session Vessel Operational Authority
+      summary: "Session owns the optional VesselOperationalOwner component for an actually acquired vessel. Its acquire contract validates the candidate and refuses replacement. Controller, frozen acquiring faction, acquired tick, original Security cause and original hold-doctrine identity remain one canonical owner value; they grant no Station tenure or direct machinery command route."
+    architecture:
+      kind: authority-service
+      authority: authoritative
+      owns: [vessel-operational-owner]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-sim-session/src/vessel_ownership.rs, crates/phoenix-model/src/vessel_ownership.rs]
+      symbols: [VesselOperationalOwner, acquire, VesselOperationalOwnerData]
+  - state: vessel-operational-owner
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Acquired Vessel Operational Owner
+      summary: "Actual optional Session component, registered Folded as vessel-operational-owner. Its Model cause embeds the real actor/Security System/Job/team/target and accepted/useful-work ticks. UUID-sorted optional namespace folding and entity snapshot preserve the whole value; Security retains the matching result as physical Job history, not another source of operational authority."
+      rationale:
+        - "Acquisition eligibility is tested at commit. Historical restore does not replay today's damage, crew, GM puppeting, issuer survival or faction equality as evidence of past eligibility. Available accepted recipes and retained matching jobs constrain the cause; coordinated rewriting of all historical evidence is not authenticated."
+    architecture:
+      classification: authoritative
+      owner: session-vessel-operational-authority
+      writers: [vessel-acquisition-transaction]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-sim-session/src/vessel_ownership.rs, crates/phoenix-simulation/src/security/acquisition.rs, crates/phoenix-simulation/src/snapshot/vessel_ownership.rs, crates/phoenix-simulation/src/snapshot/schema.rs, crates/phoenix-simulation/src/snapshot/capture.rs, crates/phoenix-simulation/src/snapshot/application.rs, crates/phoenix-simulation/src/snapshot/restore.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/sim_digest.rs]
+      symbols: [VesselOperationalOwner, operational_owner, validate_roster, fold_vessel_ownership_namespace]
+  - component: vessel-acquisition-transaction
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Paid Security Acquisition Transaction Join
+      summary: "The existing exclusive Simulation adapter runs directly after the paid Security team tick. It prepares actual eligibility, Session candidate and existing NpcDoctrineControl hold, then commits the same target's owner/effective faction, same Security Job result and withdrawal. This is a cross-owner transaction join, not another System controller or a transfer of Session, Security or doctrine state ownership."
+      rationale:
+        - "Only opt-in Board actions on genuinely uncrewed disabled non-player vessels are supported. Offered acquisition uses Security's permitted selectable nonpredicted earned alias and observed disabled assessment; canonical physical and authority checks still revalidate at commit. A private source UUID or World flag is not an operator observation."
+        - "NpcDoctrineControl prepare/commit_prepared applies the accepted nonempty base-World all-None hold through its existing owner in the same exclusive transaction. Original hostile doctrine does not resume on recovery. No blanket AI-off or non-operational latch is added; ordinary per-System control sources, knowledge and mechanics continue."
+        - "Existing FactionComponent is the effective faction projection: accepted original recipe without an acquired owner, frozen Session owner faction after acquisition. Acquisition and restore rebuild that component before faction readers; the global faction-relationship registry remains its separate existing owner. The adapter revalidates future faction-sensitive locks and preserves already emitted projectiles. There is no second editable allegiance or faction pool."
+        - "Same-Job acquisition_order records original accepted target/doctrine/tick, acquisition retains actual useful-work result, returning_outcome retains withdrawal result and terminal Job.outcome appears only at actual home settlement. Preparation failure refuses acquisition and withdraws the same team without refunding consumed work."
+        - "Whole-candidate and row-local guards validate accepted opt-in/empty recipe, registered frozen faction, original hold profile, cause clocks, consumed job mint and matching surviving job results before writes. Current doctrine may legitimately change later; its state stays with the existing doctrine owner."
+    architecture:
+      kind: transaction-adapter
+      authority: authoritative
+      owns: [vessel-acquisition-recipe]
+      reads: [security-team-state, security-target-state, vessel-operational-owner, gm-npc-doctrine-state, faction-relationship-state, ship-station-system-topology-state, system-control-source-state, world-configuration-state]
+      writes: [vessel-operational-owner, security-team-state, gm-npc-doctrine-state]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/security/acquisition.rs, crates/phoenix-simulation/src/security/server.rs, crates/phoenix-simulation/src/gm/operations/npc.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/snapshot/application.rs]
+      symbols: [commit_ready_acquisitions, acquisition_alias, eligible, revalidate_faction_locks, prepare, commit_prepared, FactionComponent]
+  - state: vessel-acquisition-recipe
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Accepted Acquisition Target Recipe
+      summary: "Actual AcquisitionTargetDefinition stores the accepted original faction for the supported acquisition target. It is immutable content-bound data, registered DeferredFold with zero independently folded fields. Together with accepted Security target actions and original personnel recipe it supports validation/restoring the ordinary unacquired faction; it is not current faction selection or a population owner."
+    architecture:
+      classification: authoritative
+      owner: vessel-acquisition-transaction
+      writers: [vessel-acquisition-transaction]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/security/acquisition.rs, crates/phoenix-simulation/src/entities/spawner.rs, crates/phoenix-simulation/src/server_app/registration.rs, crates/phoenix-simulation/src/snapshot/vessel_ownership.rs, crates/phoenix-simulation/src/snapshot/application.rs]
+      symbols: [AcquisitionTargetDefinition, original_faction]

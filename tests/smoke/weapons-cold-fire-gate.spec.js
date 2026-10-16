@@ -78,6 +78,28 @@ function beamCount(client) {
   );
 }
 
+// Capture only the actual phone's permitted publications, never host ECS data.
+// This distinguishes admission/consumer refusal from missing beam delivery.
+async function consoleEvidence(client) {
+  return client.page.evaluate(() => {
+    const messages = window.__messages || [];
+    const latest = type => [...messages].reverse().find(message => message.type === type)?.data ?? null;
+    const blackboards = {};
+    for (const message of messages) {
+      if (message.type !== 'BlackboardUpdate') continue;
+      for (const [owner, board] of message.data.updates || []) {
+        if (['tactical-radar', 'tactical', 'phaser-control', 'power-reactor', 'viewscreen'].includes(owner)
+          || owner.startsWith('phaser-')) blackboards[owner] = board;
+      }
+    }
+    return {
+      actions: messages.filter(message => message.type === 'ActionFeedback').slice(-12),
+      targetLock: latest('TargetLock'), weapons: latest('WeaponsUpdate'),
+      simulation: latest('SimState'), blackboards,
+    };
+  });
+}
+
 async function startGame(context) {
   // Serve the self-contained world instead of the real default.toml.
   await context.route('**/assets/worlds/default.toml', (route) =>
@@ -191,9 +213,26 @@ test('Tactical holds and releases firing independently of Engineering flow', { t
     && message.data.correlation === 'held-fire' && message.data.outcome === 'Refused'), undefined, { timeout: 15000 });
   expect(await beamCount(tactical), 'an acknowledged held fire order produces no beam').toBe(0);
   await setRestraint(tactical, false);
+  const beforeReleasedFire = {
+    tactical: await consoleEvidence(tactical), engineering: await consoleEvidence(engineering),
+  };
   await tactical.send('ControlSystemCorrelated', { target: 'phaser-fore', correlation: 'released-fire', payload: { type: 'FirePhaser' } });
-  const beamStarted = await tactical.waitForMessage('BeamStarted', 20000);
-  expect(beamStarted.data.target_uuid).toBe(raiderContact);
+  try {
+    const receipt = await tactical.page.waitForFunction(() => window.__messages?.find(message =>
+      message.type === 'ActionFeedback' && message.data.correlation === 'released-fire')?.data,
+    undefined, { timeout: 15000 });
+    const feedback = await receipt.jsonValue();
+    expect(feedback.outcome, 'the actual released-fire consumer must apply the command').toBe('Applied');
+    const beamStarted = await tactical.waitForMessage('BeamStarted', 20000);
+    expect(beamStarted.data.target_uuid).toBe(raiderContact);
+  } catch (error) {
+    await test.info().attach('released-fire-permitted-state', {
+      body: Buffer.from(JSON.stringify({ target: raiderContact, before: beforeReleasedFire,
+        after: { tactical: await consoleEvidence(tactical), engineering: await consoleEvidence(engineering) } }, null, 2)),
+      contentType: 'application/json',
+    });
+    throw error;
+  }
 
   expect(serverCrashes).toEqual([]);
 

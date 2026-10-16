@@ -3393,6 +3393,35 @@ fn beam_severs_when_target_leaves_phaser_range() {
 }
 
 /// No damage refund on sever — whatever HP was dealt is permanent.
+fn beam_owner_diagnostic(app: &App) -> String {
+    let ship = app.world().resource::<ShipEntity>().0;
+    let owner = crate::ship::system_registry::phaser_fore_system_id();
+    let power = app.world().get::<crate::ship::power::ShipPowerSystem>(ship);
+    format!(
+        "active={:?}, prepared={:?}, energy={:?}, work={:?}, restraint={:?}, modifier={:?}",
+        app.world()
+            .get::<crate::console::weapons::ActiveBeam>(ship)
+            .map(|beam| beam
+                .live_banks()
+                .map(|(bank, slot)| (
+                    bank.clone(),
+                    slot.target_uuid.clone(),
+                    slot.remaining_secs,
+                    slot.damage_accumulator
+                ))
+                .collect::<Vec<_>>()),
+        app.world()
+            .resource::<crate::console::weapons::shared::BeamContext>()
+            .0,
+        power.and_then(|power| power.0.network().consumers.get(&owner)),
+        power.map(|power| power.0.emitted_work(&owner)),
+        power.map(|power| power.0.weapons_restrained()),
+        app.world()
+            .get::<crate::modifiers::ShipModifiers>(ship)
+            .map(|mods| mods.get(&ModifierSlot::PhaserDamage))
+    )
+}
+
 #[test]
 fn no_damage_refund_on_sever() {
     let mut app = test_app();
@@ -3400,6 +3429,10 @@ fn no_damage_refund_on_sever() {
     // asteroid ECS entity itself. Fetch its handle by querying for the
     // matching UUID after the fact.
     let _ = lock_and_fire(&mut app, 0.0, -20.0);
+    eprintln!(
+        "no-refund after actual Fire: {}",
+        beam_owner_diagnostic(&app)
+    );
     let asteroid_entity = {
         let mut q = app
             .world_mut()
@@ -3413,6 +3446,10 @@ fn no_damage_refund_on_sever() {
     // Apply partial damage via accumulator.
     set_active_beam_damage_accumulator(&mut app, 10.0);
     let _ = tick(&mut app);
+    eprintln!(
+        "no-refund after original damage step: {}",
+        beam_owner_diagnostic(&app)
+    );
 
     // Now sever by rotating ship.
     set_ship_yaw(&mut app, std::f32::consts::PI);
@@ -4116,10 +4153,18 @@ fn phaser_damage_modifier_doubles_kill_rate() {
         },
     );
     tick(&mut app_fast); // processes FirePhaser, beam becomes active
+    eprintln!(
+        "damage-modifier after actual Fire: {}",
+        beam_owner_diagnostic(&app_fast)
+    );
 
     // Inject accumulated damage: 3.5s × (5 HP/s × 2×) = 35 HP → enough to destroy 30-HP asteroid.
     set_active_beam_damage_accumulator(&mut app_fast, BEAM_DAMAGE_PER_SEC * 2.0 * 3.5);
     tick(&mut app_fast); // One tick to process the accumulated damage.
+    eprintln!(
+        "damage-modifier after original damage step: {}",
+        beam_owner_diagnostic(&app_fast)
+    );
 
     let still_exists_fast = app_fast
         .world()

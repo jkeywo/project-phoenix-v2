@@ -26666,3 +26666,57 @@ fn falling_skyway_breaking_up_the_stray_frees_the_sensors_seat_for_the_aimed_mas
         "and the reading it took closes the task that asked for it"
     );
 }
+
+/// CLI duel rosters use the same recoverable-defeat condition as the authored
+/// arena. One disabled opponent is insufficient; the last neutralization ends
+/// the fight without inventing deaths or removing recoverable ships.
+#[test]
+fn generated_duel_victory_counts_disabled_opponents_without_destruction() {
+    use project_phoenix::ai::server::AiEntityDisabled;
+    use project_phoenix::entities::spawner::EntityUuid;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/duel.toml".into(),
+        side_a: vec!["cruiser".into()],
+        side_b: vec!["ship_harrow_destroyer".into(); 2],
+        seed: Some(1),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("CLI duel loads");
+    run(&mut app, 10);
+    let opponents: Vec<String> = {
+        let world = app.world().resource::<WorldContentRuntime>();
+        ["side_b_1", "side_b_2"]
+            .iter()
+            .map(|name| world.name_to_uuid[*name].clone())
+            .collect()
+    };
+    for (index, uuid) in opponents.iter().enumerate() {
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDisabled>>()
+            .write(AiEntityDisabled {
+                entity_uuid: uuid.clone(),
+                disabled: true,
+            });
+        run(&mut app, 5);
+        if index == 0 {
+            assert_eq!(
+                app.world().resource::<State<GamePhase>>().get(),
+                &GamePhase::InProgress,
+                "a remaining opponent prevents victory"
+            );
+        }
+    }
+    let report = build_report(&mut app, &args, 0.0);
+    assert_eq!(report.outcome_report.outcome, RunOutcome::Victory);
+    assert!(report
+        .damage_by_ship
+        .values()
+        .all(|ship| ship.death.is_none()));
+    let mut entities = app.world_mut().query::<&EntityUuid>();
+    for uuid in opponents {
+        assert!(entities.iter(app.world()).any(|entity| entity.0 == uuid));
+    }
+}

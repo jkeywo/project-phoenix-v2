@@ -2485,19 +2485,7 @@ id = "phaser-fore"
 kind = "phaser_bank"
 console = "tactical"
 power_group = "energy-phaser-fore"
-# One physical turret borrows this bank's ordinary target/operability.
-[[system.component]]
-kind = "power_input"
-id = "turret-power"
-[[system.component]]
-kind = "turret"
-id = "turret"
-power_input = "turret-power"
-[system.component.config]
-facing_deg = 0
-traverse_arc_deg = 270
-traverse_deg_per_sec = 45
-aim_tolerance_deg = 2
+# Fore and aft beams use their authored fixed firing arcs.
 [[system.damage_component]]
 id = "operation"
 binding = "operation"

@@ -28,6 +28,9 @@ over ammunition. These shared mechanisms introduce no new combat controller.
 - **Blasters:** straight, non-homing projectile volleys. Each bank predicts target motion at firing time, may require holding to charge, then fires its configured volley; bolts have their own speed, range-derived lifetime, collision radius, damage, and shield pierce.
 - **Torpedoes:** guided, proximity-detonating projectiles. Tubes have arcs and load state, share a magazine, and snapshot damage/pierce at launch.
 
+The Alliance Cruiser fore and aft banks use their authored fixed firing arcs;
+the fore bank has no optional Turret component or traverse constraint.
+
 Preparation and sustained beams spend affordable continuous local energy; an
 instant firing step pays every simultaneous barrel/projectile before ammo,
 cooldown or effects change. Pending torpedo burst rounds remain physical onboard

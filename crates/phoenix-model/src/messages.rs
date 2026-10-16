@@ -59,7 +59,8 @@ use uuid::Uuid;
 /// Revision 43 carries finite Radio listening priorities and dated contextual reports.
 /// Revision 44 carries explicitly known charted XYZ courses through Navigation.
 /// Revision 45 carries planned vessel acquisition and configured physical marking payloads.
-pub const PROTOCOL_VERSION: u32 = 45;
+/// Revision 46 carries authored shield-focus availability in permitted operation views.
+pub const PROTOCOL_VERSION: u32 = 46;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).

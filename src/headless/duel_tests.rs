@@ -52,7 +52,7 @@ fn on_side_b_destroyed(ctx) { ctx.effects.game_over("", "victory"); }
 
 // duel:slots
 on_timer(0, "spawn_side_a_2");
-on_all_destroyed("side_b", "on_side_b_destroyed");
+on_all_neutralized("side_b", "on_side_b_destroyed");
 
 fn spawn_side_a_2(ctx) { spawn_slot(ctx, "side_a_2", "assets/entities/placeholder.toml", "aaaa", "side_a"); }
 """
@@ -147,7 +147,7 @@ fn drivers(world: &toml::Value) -> Vec<(String, String, String, String)> {
 fn registrations(world: &toml::Value) -> Vec<String> {
     generated(world)
         .lines()
-        .filter(|l| l.starts_with("on_timer(") || l.starts_with("on_all_destroyed("))
+        .filter(|l| l.starts_with("on_timer(") || l.starts_with("on_all_neutralized("))
         .map(|l| l.to_string())
         .collect()
 }
@@ -155,7 +155,7 @@ fn registrations(world: &toml::Value) -> Vec<String> {
 fn has_victory(world: &toml::Value) -> bool {
     registrations(world)
         .iter()
-        .any(|r| r.starts_with("on_all_destroyed(\"side_b\""))
+        .any(|r| r.starts_with("on_all_neutralized(\"side_b\""))
 }
 
 /// A world with no marker must be rejected, not silently run with the ship
@@ -277,7 +277,7 @@ fn the_generated_block_is_the_expected_rhai() {
     assert_eq!(
         generated(&world),
         "on_timer(0, \"spawn_side_b_1\");\n\
-             on_all_destroyed(\"side_b\", \"on_side_b_destroyed\");\n\
+             on_all_neutralized(\"side_b\", \"on_side_b_destroyed\");\n\
              \n\
              fn spawn_side_b_1(ctx) { spawn_slot(ctx, \"side_b_1\", \
              \"assets/entities/destroyer.toml\", \
@@ -361,7 +361,7 @@ fn registrations_keep_the_declarative_order() {
             "on_timer(0, \"spawn_side_b_3\");",
             "on_timer(0, \"spawn_side_b_4\");",
             "on_timer(0, \"spawn_side_b_5\");",
-            "on_all_destroyed(\"side_b\", \"on_side_b_destroyed\");",
+            "on_all_neutralized(\"side_b\", \"on_side_b_destroyed\");",
         ]
     );
 }
@@ -386,7 +386,7 @@ fn generates_no_slot_the_lists_do_not_reach() {
 
 #[test]
 fn empty_side_b_omits_the_victory_trigger() {
-    // Degenerate: nobody on side B. The victory `on_all_destroyed` group
+    // Degenerate: nobody on side B. The victory `on_all_neutralized` group
     // would be empty and fire immediately — so it is not registered.
     let world = apply_duel_sides(
         fixture(),
@@ -741,7 +741,7 @@ setup = "fn spawn_slot(ctx, n, t, f, g) {}\nfn on_side_b_destroyed(ctx) {}\n// d
         source(&world).ends_with(
             "// duel:slots\n\
                  on_timer(0, \"spawn_side_b_1\");\n\
-                 on_all_destroyed(\"side_b\", \"on_side_b_destroyed\");\n\
+                 on_all_neutralized(\"side_b\", \"on_side_b_destroyed\");\n\
                  \n\
                  fn spawn_side_b_1(ctx) { spawn_slot(ctx, \"side_b_1\", \
                  \"assets/entities/destroyer.toml\", \

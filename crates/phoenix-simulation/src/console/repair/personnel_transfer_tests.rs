@@ -261,6 +261,7 @@ fn actual_admitted_dispatch_refuses_changed_intent_before_any_claim_or_mint() {
                         id: "pod".into(),
                         name: None,
                         space: 1,
+                        people: vec![],
                     }],
                     ..Default::default()
                 }),

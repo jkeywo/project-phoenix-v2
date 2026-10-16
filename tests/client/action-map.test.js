@@ -130,6 +130,7 @@ describe('ACTION_MAP', () => {
       'dispatch_officer_transfer',
       'set_helm_desired_heading',
       'set_helm_desired_speed',
+      'set_helm_follow_navigation',
       'set_helm_match_speed',
       'set_helm_mode',
       'set_radar_sharing',

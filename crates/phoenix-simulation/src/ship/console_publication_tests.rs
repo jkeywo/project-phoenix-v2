@@ -740,7 +740,12 @@ fn outgoing_values_share_within_one_publication_but_old_messages_survive_changes
     }
     app.world_mut().get_mut::<ConsoleHosts>(entity).unwrap().0[0].host =
         Some(StationId("visitor-seat".into()));
-    let revoked = sent(&mut app, 2).remove(0);
+    let handoff = every_sent(&mut app, 2);
+    assert!(
+        !handoff.contains_key(local),
+        "unchanged local scope stays suppressed"
+    );
+    let revoked = handoff["crew"].clone();
     let ServerMessage::BlackboardUpdate {
         updates,
         console_scope,
@@ -754,10 +759,24 @@ fn outgoing_values_share_within_one_publication_but_old_messages_survive_changes
     {
         let cache = app.world().resource::<LastConsolePublications>();
         assert!(cache.0["crew"].1.is_empty());
+        // Local did not publish during handoff, so it retains the last
+        // generation's value; only the new recipient shares this call's packet.
         assert!(Arc::ptr_eq(
+            &cache.0[local].1[&SystemId("b".into())],
+            &shared_update(&rebased, "b")
+        ));
+        assert!(Arc::ptr_eq(
+            &cache.0["visitor"].1[&SystemId("b".into())],
+            &shared_update(&handoff["visitor"], "b")
+        ));
+        assert!(!Arc::ptr_eq(
             &cache.0[local].1[&SystemId("b".into())],
             &cache.0["visitor"].1[&SystemId("b".into())]
         ));
+        assert_eq!(
+            serde_json::to_vec(cache.0[local].1[&SystemId("b".into())].as_ref()).unwrap(),
+            serde_json::to_vec(cache.0["visitor"].1[&SystemId("b".into())].as_ref()).unwrap()
+        );
     }
     assert_eq!(serde_json::to_value(&initial).unwrap(), initial_json);
     app.world_mut()

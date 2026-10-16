@@ -63,12 +63,22 @@ fn actor() -> (App, Entity) {
     world.register_component::<EntitySystemHull>();
     world.register_component::<crate::console::command::server::ShipStationStances>();
     world.register_component::<crate::ship_plugin::ShipSystemControlSources>();
+    // The accepted ShipConfig carries the ordinary crew continuation contract.
+    // Use the same Backfill seed as an actual NPC installation, without adding
+    // human occupancy or changing this isolated disablement event fixture.
+    let ship_config = config.ship_config.unwrap();
+    let (sources, ratings) = crate::ship::rating::seed_boot_ratings(&ship_config, |_| {
+        crate::ship::rating::BACKFILL_RATING.into()
+    });
     let entity = world
         .spawn((
             EntityUuid("actor".into()),
             damage,
             ShipRedAlert(false),
-            crate::ship_plugin::ShipConfigComponent(config.ship_config.unwrap()),
+            crate::ship_plugin::ShipConfigComponent(ship_config),
+            crate::ship_plugin::ShipSystemControlSources(sources),
+            crate::ship_plugin::ActiveStationRatings(ratings),
+            crate::lobby::crew_replication::ShipCrewPresence::default(),
         ))
         .id();
     (app, entity)
@@ -103,6 +113,15 @@ fn full_snapshot_preserves_the_actor_frontier_and_next_recovery_occurs_once() {
         serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
     assert_eq!(saved.entities.len(), 1);
     assert!(saved.entities[0].disablement.as_ref().unwrap().disabled);
+    let crew = saved.entities[0]
+        .mesh_crew
+        .as_ref()
+        .expect("ordinary accepted-config crew owner");
+    assert!(
+        crew.occupied.is_empty(),
+        "Backfill does not invent Human occupancy"
+    );
+    assert!(!crew.sources.is_empty(), "actual Backfill seed is retained");
     let (mut resumed, restored) = actor();
     let report = restore(resumed.world_mut(), &saved);
     assert!(report.is_complete(), "{report:?}");

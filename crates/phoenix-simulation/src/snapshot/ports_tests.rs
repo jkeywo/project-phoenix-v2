@@ -104,6 +104,40 @@ fn advance(world: &mut World, entity: Entity, tick: u64, dt: f32) -> i64 {
     offered
 }
 
+// These bare owner Worlds omit the App's Publish schedule. Whole restore
+// rebuilds these four actual read models; capture the same normal publications
+// before saving rather than expecting an empty bootstrap blackboard to survive.
+fn publish_fixture_observations(world: &mut World, visitor: Entity) {
+    use bevy::ecs::system::RunSystemOnce;
+    world
+        .run_system_once(crate::science::server::publish_scan_blackboard)
+        .unwrap();
+    world
+        .run_system_once(crate::science::passive::publish)
+        .unwrap();
+    world
+        .run_system_once(crate::ship::sensors::publish_sensor_radar_blackboard)
+        .unwrap();
+    world
+        .run_system_once(crate::console::command::server::publish_command_blackboard)
+        .unwrap();
+    let boards = &world
+        .get::<crate::server_app::ShipSystemBlackboards>(visitor)
+        .unwrap()
+        .0;
+    for key in [
+        "scan/7:sensors",
+        "passive-receiver",
+        "sensor-radar",
+        "command",
+    ] {
+        assert!(
+            boards.contains_key(&crate::core::messages::SystemId(key.into())),
+            "actual ordinary publication {key}"
+        );
+    }
+}
+
 fn fixture() -> (World, Entity, Entity) {
     let mut world = bare_world();
     let visitor = spawn(&mut world, VISITOR, "assets/entities/alliance_cruiser.toml");
@@ -216,6 +250,7 @@ fn fixture() -> (World, Entity, Entity) {
             ["machinery-for-alloy"],
         1
     );
+    publish_fixture_observations(&mut world, visitor);
     (world, visitor, provider)
 }
 

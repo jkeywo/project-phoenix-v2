@@ -748,7 +748,11 @@ fn actual_medical_reference_replenishes_its_managed_hold_from_finite_paid_port_s
         offer: offer.id.clone(),
         destination,
         store: Some("hold-medication".into()),
-        lots: 1,
+        // Permit two real lots, retaining room/quota limits. At the authored
+        // rate20 a single lot takes nonrepresentable f32 0.05s: conservative
+        // work rounding correctly leaves it just below one whole lot. This
+        // request exercises one complete lot PLUS retained paid fractional WIP.
+        lots: 2,
         tick: app.world().resource::<crate::sim_tick::SimTick>().0,
         ordered: false,
         inbound: false,
@@ -765,6 +769,19 @@ fn actual_medical_reference_replenishes_its_managed_hold_from_finite_paid_port_s
     assert_eq!(
         crate::resources::ports_equipment::settle(app.world_mut(), &request),
         Ok(1)
+    );
+    let flow = app
+        .world()
+        .get::<TransferUmbilical>(visitor)
+        .unwrap()
+        .port_flow
+        .as_ref()
+        .unwrap();
+    assert_eq!(flow.lines[0].requested_lots, 2);
+    assert_eq!(flow.lines[0].delivered_lots, 1);
+    assert!(
+        flow.fraction > 0.0 && flow.fraction < 1.0,
+        "fractional second lot is paid work, not goods"
     );
     assert_eq!(quantity(&app, visitor, "hold-medication"), before[0] + 1);
     assert_eq!(quantity(&app, provider, "medical-supplies"), before[1] - 1);

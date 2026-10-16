@@ -1689,6 +1689,13 @@ pub(super) fn apply_entity_state_with(
     } else {
         entity_mut.remove::<crate::comms::capture::ShipCommsCapture>();
     }
+    if let Some(saved) = &row.emission_intent {
+        entity_mut.insert(crate::console::command::emission::ShipEmissionIntent(
+            saved.clone(),
+        ));
+    } else {
+        entity_mut.remove::<crate::console::command::emission::ShipEmissionIntent>();
+    }
     if let Some(saved) = &row.comms_media {
         entity_mut.insert(saved.clone());
     } else {

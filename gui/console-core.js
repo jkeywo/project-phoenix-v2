@@ -1,3 +1,4 @@
+import { registerEmissionProfileActions } from './stations/emission-profile-actions.js';
 import { registerCaptureActions } from './stations/comms-capture-actions.js';
 import {registerIdentityActions} from './stations/identity-actions.js';
 import {registerConcealmentActions} from './stations/concealment-actions.js';
@@ -130,7 +131,7 @@ import { preserveLocaleEditContext } from './locale-edit-context.js';
 export { preserveLocaleEditContext as preserveConsoleEditContext } from './locale-edit-context.js';
 
 const preserveConsoleEditContext = preserveLocaleEditContext;
-const equipmentActionContexts = ['stock', 'fitting', 'guidance', 'illumination', 'jamming', 'protection', 'bay'];
+const equipmentActionContexts = ['command-emission', 'stock', 'fitting', 'guidance', 'illumination', 'jamming', 'protection', 'bay'];
 
 export function initConsole({
   name,
@@ -455,6 +456,10 @@ export function initConsole({
 
   let systemStatusWidget = null;
   let localStockWidget = null;
+  registerEmissionProfileActions(_semanticActions, {getViews: () => {
+    const projected = familyView(_latestState || {}, 'command');
+    return (projected.stations || _latestState?.stations || []).map(card => card.emission).filter(Boolean);
+  }, sendAction});
   registerLogisticsActions(_semanticActions, { getState: () => _latestState, sendAction });
   registerFittingActions(_semanticActions, { getState: () => _latestState, sendAction });
   registerGuidanceActions(_semanticActions, { getState: () => _latestState, sendAction });

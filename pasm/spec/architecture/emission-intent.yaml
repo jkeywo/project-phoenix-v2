@@ -1,0 +1,30 @@
+entities:
+  - component: emission-intent-control
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Advisory Emission Intent
+      summary: The actual authored Command owner admits one optional emission intent. Its publication conveys intent through explicit Console feeds; current paid machinery work supplies advisory status without limiting Human controls.
+    architecture:
+      kind: command-consumer
+      authority: authoritative
+      writes: [ship-emission-intent]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/console/command/emission.rs, crates/phoenix-simulation/src/console/command/server.rs]
+      symbols: [ShipEmissionIntent, handle_commands, permitted_intent, advisory]
+  - state: ship-emission-intent
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Ship Emission Intent
+      summary: One required retained EmissionIntentState for the exact accepted optional Console-owned Command profile. Whole-candidate and row-local guards reject missing, foreign or unauthored owners before writes; measured work remains derived.
+    architecture:
+      classification: authoritative
+      owner: emission-intent-control
+      writers: [emission-intent-control]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-sim-gameplay/src/ship/emission_profile.rs, crates/phoenix-simulation/src/snapshot/emission_intent.rs, crates/phoenix-simulation/src/sim_digest.rs]
+      symbols: [EmissionIntentState, ShipEmissionIntent]

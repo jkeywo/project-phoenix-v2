@@ -7,6 +7,7 @@ pub mod comms_media;
 pub mod comms_request;
 pub mod console;
 pub mod debug_surface;
+pub mod emission_profile;
 pub mod entity;
 pub mod identity;
 pub mod tags;

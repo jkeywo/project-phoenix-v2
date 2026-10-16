@@ -883,6 +883,8 @@ pub fn validate_project(files: &BTreeMap<String, Vec<u8>>) -> WorkshopValidation
 }
 
 #[cfg(test)]
+mod emission_profile_tests;
+#[cfg(test)]
 mod tests;
 
 use crate::entities::include_resolve::ParseEntityTemplate as _;

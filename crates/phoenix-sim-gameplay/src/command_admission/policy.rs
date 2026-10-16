@@ -41,6 +41,16 @@ pub fn command_policy(
             );
         }
     }
+    if matches!(payload, SystemControlPayload::SetEmissionIntent { .. })
+        && crate::ship::emission_profile::profile(config)
+            .ok()
+            .flatten()
+            .is_none_or(|(owner, _)| &owner != target)
+    {
+        return crate::ship::control_source::control_tick_policy(
+            crate::ship::control_source::ControlSource::Offline,
+        );
+    }
     let movement_kind = match payload {
         SystemControlPayload::SetHelmMode { .. } => {
             Some(&[HELM_THRUST_KIND, HELM_STEERING_KIND, LATERAL_THRUST_KIND][..])

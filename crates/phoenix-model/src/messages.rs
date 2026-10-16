@@ -2113,6 +2113,9 @@ pub enum SystemControlPayload {
     /// selection, so a retried, duplicated or stale-UI order is idempotent. An
     /// unauthored stance id, or a station this Command does not direct, is
     /// rejected by the handler (it never invents an order).
+    SetEmissionIntent {
+        intent: crate::emission_profile::EmissionIntent,
+    },
     SetStationStance {
         station: StationId,
         stance: String,
@@ -4378,6 +4381,8 @@ impl Default for CaptainBlackboard {
 /// `selected_stance` — the client never guesses posture from a colour change.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct CommandBlackboard {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emission: Option<crate::emission_profile::EmissionIntentView>,
     /// Stable system id for the Command coarse system (the admitted target for
     /// `SetStationStance`).
     #[serde(default = "default_command_system_id")]
@@ -4428,6 +4433,7 @@ fn default_command_system_id() -> SystemId {
 impl Default for CommandBlackboard {
     fn default() -> Self {
         Self {
+            emission: None,
             command_system_id: default_command_system_id(),
             directed_station: StationId::default(),
             directed_station_name: String::new(),

@@ -138,6 +138,7 @@ fn optional_namespace_exact_fold_characterization() {
             ("ship-identity-emitter-intent", 13509907477215362722),
             ("ship-concealment-emitter-intent", 13509907477215362722),
             ("ship-comms-media-intent", 13509907477215362722),
+            ("ship-emission-intent", 13509907477215362722),
             ("ship-comms-capture", 13509907477215362722),
             ("broad-tracks", 13509907477215362722),
             ("navigation-sharing", 13509907477215362722),

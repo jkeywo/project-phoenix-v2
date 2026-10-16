@@ -5,11 +5,34 @@ use crate::{
     ship_plugin::{ShipConfigComponent, ShipSystemControlSources},
 };
 use bevy::prelude::*;
-use phoenix_model::emission_profile::{EmissionAdvisoryView, EmissionIntent, EmissionIntentView};
+use phoenix_model::emission_profile::{EmissionAdvisoryView, EmissionIntent};
 use phoenix_sim_gameplay::ship::emission_profile::{profile, EmissionIntentState};
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct ShipEmissionIntent(pub EmissionIntentState);
+
+pub(crate) fn register(app: &mut App) {
+    use crate::authoritative::{DeclareState, StateClass};
+    use crate::command_admission::{ConsumerMatcher, FeedbackAddress, RegisterAdmittedConsumer};
+    use crate::core::messages::SystemControlPayloadDiscriminants as Payload;
+    app.declare_state::<ShipEmissionIntent>(StateClass::Folded, "ship-emission-intent")
+        .register_admitted_consumer(
+            ConsumerMatcher::kind_payload(
+                crate::ship::system_registry::COMMAND_KIND,
+                Payload::SetEmissionIntent,
+            )
+            .with_feedback(
+                FeedbackAddress::DeclaredKindOnly,
+                &[Payload::SetEmissionIntent],
+            ),
+        )
+        .add_systems(
+            FixedUpdate,
+            handle_commands
+                .in_set(crate::sim_sets::SimSet::Input)
+                .in_set(crate::sim_sets::FixedStep::HandleEmissionIntent),
+        );
+}
 
 pub(crate) fn install(
     config: &crate::entities::config::EntityConfig,
@@ -64,29 +87,6 @@ pub(crate) fn handle_commands(
             );
         }
     }
-}
-
-pub(crate) fn intent_view(
-    world: &World,
-    entity: Entity,
-    owner: &SystemId,
-) -> Option<EmissionIntentView> {
-    let state = world.get::<ShipEmissionIntent>(entity)?;
-    let config = world.get::<ShipConfigComponent>(entity)?;
-    state.0.validate(&config.0).ok()?;
-    if owner != &state.0.owner {
-        return None;
-    }
-    Some(EmissionIntentView {
-        owner: owner.clone(),
-        intent: state.0.intent,
-        controllable: world
-            .get::<ShipSystemControlSources>(entity)
-            .is_some_and(|sources| {
-                sources.0.entries().any(|(actual, _)| actual == owner)
-                    && sources.0.policy_for(owner).accept_human_input
-            }),
-    })
 }
 
 /// Only the requesting System's explicit permitted Command feed conveys intent.
@@ -186,8 +186,13 @@ pub(crate) fn advisory(
 }
 
 #[cfg(test)]
+#[path = "emission_integration_tests.rs"]
+mod integration_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use phoenix_model::emission_profile::EmissionIntentView;
     #[test]
     fn optional_fit_uses_the_actual_accepted_hull_without_replacing_hardware_or_seats() {
         let base = crate::entities::include_resolve::load_entity_config(

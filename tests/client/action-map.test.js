@@ -48,6 +48,7 @@ describe('ACTION_MAP', () => {
       'set_access_seal',
       'set_boost',
       'set_console_view',
+      'set_emission_intent',
       'set_energy_generation',
       'set_energy_group',
       'set_energy_mode',

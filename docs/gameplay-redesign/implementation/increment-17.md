@@ -725,3 +725,31 @@ operation, mounted Workshop history/Preview/Test, ordinary policy/urgency
 physical evidence, exact Console isolation and full fresh-JSON/no-write
 continuation remain open; this is neither a compiled implementation nor an
 increment17 exit.
+
+### S027 central integration packet
+
+The central joins above are implemented in the isolated integration packet:
+closed Model payload and exact Command admission; accepted authored validation;
+ordinary spawn and singular Command registration; actual-owner/no-stance
+publication; current Broadcast paid-work advisory; required-state capture,
+row-local/whole-candidate guards, restore publication and digest/census; and the
+Command/common-status/Workshop shell mounts. Advisory presentation does not
+limit machinery controls. Command profile mounts retire before replacement,
+including replacement by the same owner, and profile-only cards omit unrelated
+stance UI. Compatibility versions remain owned by the final integration lane.
+
+Source regressions cover noncanonical Command identity with no stance target,
+required/forbidden saved equipment state, candidate-recipe precedence, Disabled
+actors and malformed publication bindings. The actual host proof uses ordinary
+joined controls, the actual transponder tree and finite paid hardware, plus
+fresh JSON continuation and whole-candidate no-write checks. These native tests
+are authored but have not run in this lane; root owns their execution.
+
+Eight focused JavaScript files pass all 573 tests, including mounted Command
+and shared-status integration, retired-card refusal, closed action inventory
+and Workshop transaction behavior. Layer rules, strict strings (6441 entries),
+the pure client build and owned Rust formatting also pass. Independent bounded
+source re-review passes
+for central authority, knowledge, interval timing, continuation and UI lifecycle.
+This packet does not claim native execution, device acceptance, complete
+Workshop Preview/Test acceptance, or an increment17 exit.

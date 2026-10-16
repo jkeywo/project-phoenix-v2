@@ -59,6 +59,8 @@ pub struct SystemStatus {
     pub concealment: Option<crate::concealment_ui::ConcealmentControlsView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bay: Option<crate::craft::BayControlsView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emission: Option<crate::emission_profile::EmissionAdvisoryView>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,6 +143,7 @@ impl SystemStatus {
             identity: None,
             concealment: None,
             bay: None,
+            emission: None,
         };
         if offline && !matches!(damage, Some(DamageTier::Disabled | DamageTier::Destroyed)) {
             status.unavailable(StatusReasonCode::Offline, None);

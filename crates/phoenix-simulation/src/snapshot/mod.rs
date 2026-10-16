@@ -393,6 +393,7 @@ mod transit;
 mod comms_capture;
 mod comms_media;
 mod concealment;
+mod emission_intent;
 mod guided_source;
 mod identity;
 mod illumination;

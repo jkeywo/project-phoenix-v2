@@ -124,6 +124,7 @@ impl Plugin for CommandPlugin {
         // (issue #1109). Idempotent — every plugin registering a gated system
         // calls it.
         crate::ai::cadence::register_ai_cadence(app);
+        super::emission::register(app);
         app.init_resource::<ActiveObjectiveStances>();
         // Authoritative-state exclusion declarations (issue #1221, Track 3 step
         // C9). Both are DERIVED scratch around the folded `ShipStationStances`:
@@ -734,7 +735,7 @@ fn operate_command_ai(
 
 /// Publish the Command console readout for every ship carrying a Command station
 /// (issue #1107).
-fn publish_command_blackboard(
+pub(crate) fn publish_command_blackboard(
     active: Option<Res<ActiveObjectiveStances>>,
     mut ships: Query<
         (
@@ -743,74 +744,94 @@ fn publish_command_blackboard(
             &ShipSystemControlSources,
             &crate::ship::state::ShipRedAlert,
             Option<&ShipStationStances>,
+            Option<&super::emission::ShipEmissionIntent>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
-    let active = active.as_deref();
-    for (entity_uuid, ship_config, control_sources, red_alert, stances, mut bbs) in ships.iter_mut()
-    {
-        let scoped_active = active.map(|a| a.for_ship(entity_uuid.map_or("", |u| u.0.as_str())));
-        let active = scoped_active.as_ref();
+    for (uuid, ship_config, sources, alert, stances, emission, mut boards) in &mut ships {
+        let scoped = active
+            .as_deref()
+            .map(|value| value.for_ship(uuid.map_or("", |id| id.0.as_str())));
         let config = &ship_config.0;
-        let Some(command) = command_console(config) else {
-            continue;
-        };
-        let Some(target) = command.command_target.clone() else {
-            continue;
-        };
-        let Some(target_station) = config.station(&target) else {
-            continue;
-        };
-
-        let directed_station_ai = station_is_ai_controlled(config, &control_sources.0, &target);
-        let command_auto = control_sources
-            .0
-            .source_for(&crate::ship::system_registry::command_system_id())
-            == ControlSource::Ai;
-
-        // The EFFECTIVE catalogue this tick: permanent stances plus any active
-        // objective contribution to this target (issue #1110). The console lists
-        // exactly this, so an objective stance appears while its objective is
-        // active and vanishes when it ends — the same vocabulary the AI and the
-        // order applier read.
-        let contributed = contributed_for(active, &target);
-        let catalogue = command_stance::effective_catalogue(&target_station.stances, &contributed);
-
-        // The stance in force: an explicit stored selection, else the alert
-        // level's neutral (the tracking default the AI hosts see).
-        let selected_stance = stances
-            .and_then(|s| s.0.get(&target).cloned())
-            .or_else(|| {
-                command_stance::neutral_stance_for_alert(&catalogue, red_alert.0)
-                    .map(str::to_string)
-            })
-            .unwrap_or_default();
-
-        let options: Vec<CommandStanceOption> = catalogue
+        for system in config
+            .systems
             .iter()
-            .map(|stance| CommandStanceOption {
-                id: stance.id.clone(),
-                label: stance.label.clone(),
-                kind: stance_kind_wire(stance.kind).to_string(),
-                high_alert: stance.high_alert,
-            })
-            .collect();
-
-        let bb = CommandBlackboard {
-            command_system_id: crate::ship::system_registry::command_system_id(),
-            directed_station: target.clone(),
-            directed_station_name: target_station.name.clone(),
-            directed_station_ai,
-            command_auto,
-            selected_stance,
-            stances: options,
-        };
-        bbs.0.insert(
-            SystemId(crate::ship::system_registry::COMMAND_SYSTEM_ID.to_string()),
-            SystemBlackboard::Command(bb),
-        );
+            .filter(|system| system.kind == crate::ship::system_registry::COMMAND_KIND)
+        {
+            let target = config
+                .console_for_system(&system.id)
+                .and_then(|console| console.command_target.as_ref())
+                .and_then(|target| config.station(target));
+            let emission = emission
+                .filter(|state| state.0.owner == system.id && state.0.validate(config).is_ok())
+                .map(
+                    |state| phoenix_model::emission_profile::EmissionIntentView {
+                        owner: system.id.clone(),
+                        intent: state.0.intent,
+                        controllable: sources.0.entries().any(|(owner, _)| owner == &system.id)
+                            && sources.0.policy_for(&system.id).accept_human_input,
+                    },
+                );
+            if target.is_none() && emission.is_none() {
+                continue;
+            }
+            let (
+                directed_station,
+                directed_station_name,
+                directed_station_ai,
+                selected_stance,
+                options,
+            ) = if let Some(target) = target {
+                let contributed = contributed_for(scoped.as_ref(), &target.id);
+                let catalogue = command_stance::effective_catalogue(&target.stances, &contributed);
+                let selected = stances
+                    .and_then(|stances| stances.0.get(&target.id).cloned())
+                    .or_else(|| {
+                        command_stance::neutral_stance_for_alert(&catalogue, alert.0)
+                            .map(str::to_string)
+                    })
+                    .unwrap_or_default();
+                let options = catalogue
+                    .iter()
+                    .map(|stance| CommandStanceOption {
+                        id: stance.id.clone(),
+                        label: stance.label.clone(),
+                        kind: stance_kind_wire(stance.kind).into(),
+                        high_alert: stance.high_alert,
+                    })
+                    .collect();
+                (
+                    target.id.clone(),
+                    target.name.clone(),
+                    station_is_ai_controlled(config, &sources.0, &target.id),
+                    selected,
+                    options,
+                )
+            } else {
+                (
+                    StationId(String::new()),
+                    String::new(),
+                    false,
+                    String::new(),
+                    Vec::new(),
+                )
+            };
+            boards.0.insert(
+                system.id.clone(),
+                SystemBlackboard::Command(CommandBlackboard {
+                    emission,
+                    command_system_id: system.id.clone(),
+                    directed_station,
+                    directed_station_name,
+                    directed_station_ai,
+                    command_auto: sources.0.source_for(&system.id) == ControlSource::Ai,
+                    selected_stance,
+                    stances: options,
+                }),
+            );
+        }
     }
 }
 

@@ -1,0 +1,42 @@
+// @vitest-environment jsdom
+import {afterEach, expect, it, vi} from 'vitest';
+import {buildCommandConsoleState} from '../../gui/console-state.js';
+import {renderStation} from '../../gui/stations/command-console.js';
+import {mountSystemStatus} from '../../gui/components/ph-system-status.js';
+afterEach(() => {document.body.replaceChildren(); delete window.activateSemanticAction;});
+it('mounts actual Command intent without a stance target and refuses information-only control', () => {
+  const state = {blackboardKinds:{orders:'Command'}, blackboards:{orders:{command_system_id:'orders',emission:{owner:'orders',intent:'low_emission',controllable:true}}}, controlSources:{orders:'Human'}, controlSystemIds:['orders']};
+  const own = buildCommandConsoleState(state, ['orders']);
+  expect(own.stations[0].emission.controllable).toBe(true);
+  document.body.innerHTML = '<div id="stations-list"></div>';
+  window.activateSemanticAction = vi.fn();
+  renderStation(own, document);
+  const choice = document.querySelector('[data-emission-profile] button');
+  expect(choice.disabled).toBe(false); choice.click();
+  expect(window.activateSemanticAction).toHaveBeenCalledWith('command.emission-intent', expect.objectContaining({detail:{owner:'orders',intent:'normal'}}));
+  renderStation(own, document);
+  choice.click();
+  expect(window.activateSemanticAction).toHaveBeenCalledTimes(1);
+  expect(document.querySelector('.directed')).toBeNull();
+  expect(document.querySelector('.stances')).toBeNull();
+  const retired = document.querySelector('[data-emission-profile] button');
+  renderStation({stations:[]}, document);
+  retired.click();
+  expect(window.activateSemanticAction).toHaveBeenCalledTimes(1);
+  const readOnly = buildCommandConsoleState({...state,controlSystemIds:[]}, ['orders']);
+  renderStation(readOnly, document);
+  expect([...document.querySelectorAll('[data-emission-profile] button')].every(button => button.disabled)).toBe(true);
+});
+it('marks current high work on the common indicator while keeping machinery available', () => {
+  const widget = mountSystemStatus(document);
+  const row = {system_id:'reactor',display_name:'Reactor',availability:'normal',reasons:[],delegated:false,emission:{observed_tick:8,rate:'3',cause:'reactor',advisory_rate:'0.25',high:true}};
+  widget.update([row]);
+  const indicator = document.querySelector('[data-system-id=reactor]');
+  expect(indicator.dataset.emissionHigh).toBe('true');
+  expect(indicator.disabled).toBe(false); indicator.click();
+  expect(document.querySelector('[data-emission-advisory]').hidden).toBe(false);
+  widget.update([{...row,emission:null}]);
+  expect(indicator.dataset.emissionHigh).toBe('false');
+  expect(document.querySelector('[data-emission-advisory]').hidden).toBe(true);
+  widget.dispose();
+});

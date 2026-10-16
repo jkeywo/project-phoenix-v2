@@ -1032,6 +1032,9 @@ impl EntityConfig {
         weapon_definition::validate_round_feeds(&config).map_err(SerdeError::custom)?;
         crate::ship::transit_profile::validate_entity(&config).map_err(SerdeError::custom)?;
         crate::ship::craft_profile::validate_entity(&config).map_err(SerdeError::custom)?;
+        if let Some(ship) = &config.ship_config {
+            crate::ship::emission_profile::profile(ship).map_err(SerdeError::custom)?;
+        }
 
         if config.interior.is_none()
             && config

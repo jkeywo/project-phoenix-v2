@@ -14,6 +14,7 @@ sources:
   - crates/phoenix-sim-gameplay/src/science/sharing.rs
   - crates/phoenix-simulation/src/science/sharing.rs
   - crates/phoenix-simulation/src/console/navigation/sharing.rs
+  - crates/phoenix-simulation/src/sim_sets/order.rs
   - crates/phoenix-sim-gameplay/src/science/sensing.rs
   - crates/phoenix-sim-gameplay/src/science/signatures.rs
   - crates/phoenix-simulation/src/science/broad.rs
@@ -125,6 +126,10 @@ uses the ordinary owned, paid `SetNavigationWaypoint` path.
 The Navigation plugin installs the accepted owner and derived chart profile;
 snapshot preflight binds the saved intent/history to that owner and logical
 clock before writes. Capture, restore and the digest carry the same frontier.
+The sharing owner runs late in Modifiers after scans, Broad and actual radar-feed
+delivery, before objective cursor advancement. Its current-route guard sees that
+completed receipt frontier; physical modifier translation and Tractor keep their
+earlier order.
 Custom Navigation IDs also own ordinary waypoint and traffic-order payment;
 accepted composition never falls back to an absent canonical ID.
 

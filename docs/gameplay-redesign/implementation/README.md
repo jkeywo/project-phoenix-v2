@@ -11,29 +11,21 @@ complete [migration ledger](./migration-ledger.json). The
 
 Only increment 0 is formally closed. Increments 1–7 have recorded automated
 exits; physical-device and human-workload acceptance remain open. Later initial
-commits are implementation checkpoints, not verified increment exits. The latest
-focused host results cover 21 tests across 13 targets after a clearance fixture
-correction; they do not replace the full integrated gate. The earlier broader native run passed 771 tests and failed 23. The focused
-correction batch passed 151 and failed one; its final authored Power policy
-correction now passes. The latest media/capture selection passed 90 tests across
-Model, Gameplay and Simulation and exposed three older spawn, equipment-recovery
-and beam-retention regressions. Their reviewed corrections, including a real
-retained-beam routing fix, are integrated and await native retry. All selected new media and
-decoder owner tests pass. Separately, 188 codec, seven native transport and 17
-selected content/Workshop checks pass. These results do not establish a passing
-integrated exit.
+commits are implementation checkpoints, not verified increment exits.
 
-At `f1643e85`, all eight selected host-test targets compile successfully with
-`headless,host`: Comms capture, emissions, formation, fixed turrets, finite decoys,
-personnel reception, optional maintenance and authoritative-state enumeration.
-The native build completed in 7m25s, but all 23 selected tests refused boot on a
-shared catalogue error: `battery_turret.toml` replaces the energy table without
-the required reactor definition. Complete energy/interior data and a missing
-receiver compartment connection are now corrected. The catalogue loads; the next
-check exposes a conflicting FixedUpdate ordering constraint. A targeted native
-diagnostic is rebuilding to identify the exact constraint. The census also omitted
-the existing PowerFlowRng alias; its exact owner/count assertion is corrected.
-No gameplay result or playable exit is claimed from this run.
+The latest eight-target host batch at `fd3d06de` passed 11 tests and failed 12.
+Both fixed-turret journeys, four personnel journeys, one emission-policy journey
+and all four authoritative-state checks pass. Decoy acceptance, capture/decoding,
+emission continuation, formation, maintenance opportunities and receiving work
+still have failing cases. Reviewed fixes for the phantom shield Console, fixture
+identity and receiver addressability are integrated; the affected native retry
+is running at `35f62881`. The three actual accepted-loader regressions pass.
+
+The catalogue-completeness and fixed-step ordering blockers are corrected. Those
+checks establish neither a green host batch nor the full integrated gate. Earlier
+owner, codec, transport and host evidence, with its source pins and limitations,
+remains in the integration checkpoint. Human/device, balance and workload
+acceptance remain separate.
 
 | Increment | Implementation state | Material remaining work |
 |---|---|---|
@@ -54,10 +46,10 @@ No gameplay result or playable exit is claimed from this run.
 | 14 — Sensing/environment | Substantial implementation | Knowledge, presentation, balance and full acceptance. |
 | 15 — Layered combat | Assignments, traversal, sustained/kinetic/broadside fire, 3D missiles/PDCs, guidance, illumination, EMP and shield enquiry implemented | Physical marking payloads and optional shared loader groups/priorities remain unimplemented; full-host illumination/link-loss/payload journeys, multiple viable engagement styles, balance/workload and full acceptance. |
 | 16 — Comms/orders | Channels, requests and relay operational | Media/decoder owner checks pass on their tested revision; typed claims source integrated; listening priorities/chatter, contextual operations and full native/playable acceptance remain. |
-| 17 — Electronic operations | Jamming/protection/identity operational | Concealment owner/snapshot checks pass; low-emission source/proofs integrated but unexecuted; bounded disruption, broader information/access and acceptance remain. |
-| 18 — Movement/transit | Local jumps verified; sector code integrated | Formation owner/restore checks pass; Helm follow source/proofs integrated but unexecuted; remaining assistance and acceptance. |
-| 19 — Craft/deployables | Physical probe handling verified | Fixed beam turret and finite physical decoy source/proofs integrated and host targets compile; native execution, moving craft, sorties, remote operation and acceptance remain. |
-| 20 — Personnel | Officers, care and retained roster operational | Transfer and consent-bound reception source/proofs integrated but native unverified; broader boarding/away/rescue/capture and acceptance remain. |
+| 17 — Electronic operations | Jamming/protection/identity operational; ordinary AI emission-policy host case passes | Emission continuation fixture correction awaiting retry; bounded disruption isolated source reviewed but native unverified; broader information/access and acceptance remain. |
+| 18 — Movement/transit | Local jumps verified; sector code integrated; formation owner/restore checks pass | Full-host formation fixture identity correction awaiting retry; remaining assistance and acceptance. |
+| 19 — Craft/deployables | Physical probe and both fixed beam-turret host journeys verified | Decoy actual accepted-loader tests pass after parser correction; host retry, moving craft, sorties, remote operation and acceptance remain. |
+| 20 — Personnel | Officers/care/roster and four physical personnel host journeys verified | Consent-bound reception addressability correction awaiting retry; security acquisition isolated source reviewed but native unverified; broader boarding/away/rescue/capture and acceptance remain. |
 | 21 — Facilities/actors | Finite ports and physical supply verified | Workforce, broader objectives/dependencies and acceptance. |
 | 22 — Authored HTN execution | Working scheduling/activity core | Broader operator/scenario coverage and full integration. |
 | 23 — Continuing modes | Accepted-commitment foundation | Patrol, War and Sandbox are not delivered. |

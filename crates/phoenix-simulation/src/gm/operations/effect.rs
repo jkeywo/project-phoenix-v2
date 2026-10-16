@@ -590,8 +590,11 @@ pub const WEAPON_KIND_GM_DIRECT: &str = "gm.direct";
 /// asteroid, and anything carrying an `EntitySystemHull` is a legitimate
 /// target.
 ///
-/// Damage is mirrored into [`crate::entities::spawner::EntityShipArcHull`] the
-/// way every other hull-damage source mirrors it (issue #514): the per-arc pool
+/// For a legacy target without `ShipDamage`, damage is mirrored into
+/// [`crate::entities::spawner::EntityShipArcHull`] the way its other hull-damage
+/// sources mirror it (issue #514). Modern hulls change only actual compartments;
+/// their read-only projections are rebuilt by the physical owner. The legacy
+/// per-arc pool
 /// tracks TOTAL hull damage taken, it is authoritative snapshot state, and
 /// `crate::ship::damage_sync::sync_console_damage_tiers` derives the
 /// `shield-arc-<id>` offline entries from it. A GM hit that moved
@@ -633,6 +636,7 @@ pub(crate) fn apply_gm_direct_effects(
         &crate::entities::spawner::EntityUuid,
         Option<&mut EntitySystemHull>,
         Option<&mut crate::ship::compartment_damage::ShipDamage>,
+        Option<&mut crate::entities::spawner::EntityShipArcHull>,
         Has<crate::lockstep::FleetSlotOf>,
         Has<crate::server_app::LocalShip>,
         Option<&AsteroidUuid>,
@@ -666,6 +670,7 @@ pub(crate) fn apply_gm_direct_effects(
             uuid,
             mut hull,
             mut physical_damage,
+            mut arc_hull,
             is_fleet_ship,
             is_local,
             asteroid,
@@ -754,12 +759,21 @@ pub(crate) fn apply_gm_direct_effects(
                 } else if let Some(hull) = hull.as_deref_mut() {
                     match effect.kind {
                         GmDirectEffectKind::Damage => {
-                            crate::ship::damage::apply_hull_damage_within(
+                            let result = crate::ship::damage::apply_hull_damage_within(
                                 &mut hull.0,
                                 scope.as_deref(),
                                 amount,
                                 rng,
-                            )
+                            );
+                            // Only legacy hulls own a second canonical arc pool.
+                            // Physical hulls above keep compartment authority and
+                            // rebuild their ordinary projections elsewhere. Mirror
+                            // the APPLIED scoped amount, not requested overflow,
+                            // on the same event generator as the legacy hit.
+                            if let Some(arcs) = arc_hull.as_deref_mut() {
+                                arcs.0.apply_damage(result.0, rng);
+                            }
+                            result
                         }
                         GmDirectEffectKind::Heal => (
                             hull.0

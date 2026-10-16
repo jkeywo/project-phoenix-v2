@@ -251,6 +251,22 @@ fn engine_port_offline_reduces_thrust_compared_to_both_online() {
             &mut app,
             std::time::Duration::from_millis(TICK_MS),
         );
+        // This bare helper retains legacy HP for other tests. Actual powered
+        // propulsion now also requires accepted physical Operation hardware;
+        // install the SAME Battleship definition used by its finite power.
+        let config = crate::entities::include_resolve::load_entity_config(
+            "assets/entities/alliance_battleship.toml",
+        )
+        .unwrap();
+        let damage = crate::ship::compartment_damage::ShipDamage::from_config(&config)
+            .unwrap()
+            .unwrap();
+        let ship = app
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut().entity_mut(ship).insert(damage);
         app
     };
 
@@ -273,8 +289,20 @@ fn engine_port_offline_reduces_thrust_compared_to_both_online() {
     // ── Both engines online ────────────────────────────────────────────
     let mut app_both = make_app();
     set_full_thrust(&mut app_both);
+    let mut paid_both = 0.0;
     for _ in 0..TICKS {
         tick(&mut app_both);
+        let ship = app_both
+            .world_mut()
+            .query_filtered::<Entity, With<LocalShip>>()
+            .single(app_both.world())
+            .unwrap();
+        paid_both += app_both
+            .world()
+            .get::<crate::ship::power::ShipPowerSystem>(ship)
+            .unwrap()
+            .0
+            .emitted_work(&crate::ship::system_registry::helm_thrust_system_id());
     }
     let speed_both = app_both
         .world_mut()
@@ -284,18 +312,49 @@ fn engine_port_offline_reduces_thrust_compared_to_both_online() {
         .forward_speed;
 
     // ── Port engine disabled ───────────────────────────────────────────
-    // Zero the port engine HP, tick once so sync_console_damage_tiers runs
-    // (populating offline_systems), then drive at full thrust for TICKS more.
+    // Destroy actual port-engine Operation, tick once so the physical owner
+    // populates offline_systems, then drive at full thrust for TICKS more.
     let mut app_one = make_app();
-    set_console_hp_direct(
-        &mut app_one,
-        crate::core::messages::SystemId("helm-engine-port".into()),
-        0.0,
-    );
+    let ship = app_one
+        .world_mut()
+        .query_filtered::<Entity, With<LocalShip>>()
+        .single(app_one.world())
+        .unwrap();
+    let port = crate::ship::system_registry::helm_engine_port_system_id();
+    let mut damage = app_one
+        .world_mut()
+        .get_mut::<crate::ship::compartment_damage::ShipDamage>(ship)
+        .unwrap();
+    let operation = damage
+        .state
+        .components
+        .get_mut(&port)
+        .unwrap()
+        .get_mut("operation")
+        .unwrap();
+    operation.condition = phoenix_model::damage::ComponentCondition::Destroyed;
+    operation.last_source = Some("engine-operation-test-incident".into());
+    drop(damage);
     tick(&mut app_one); // let Damage tier propagate
     set_full_thrust(&mut app_one);
+    assert!(
+        app_one
+            .world()
+            .get::<crate::ship_plugin::ShipSystemControlSources>(ship)
+            .unwrap()
+            .0
+            .is_offline(&port),
+        "actual destroyed engine Operation disables the port engine"
+    );
+    let mut paid_one = 0.0;
     for _ in 0..TICKS {
         tick(&mut app_one);
+        paid_one += app_one
+            .world()
+            .get::<crate::ship::power::ShipPowerSystem>(ship)
+            .unwrap()
+            .0
+            .emitted_work(&crate::ship::system_registry::helm_thrust_system_id());
     }
     let speed_one = app_one
         .world_mut()
@@ -304,7 +363,15 @@ fn engine_port_offline_reduces_thrust_compared_to_both_online() {
         .unwrap()
         .forward_speed;
 
-    // With enough ticks, app_both should be near 25 m/s and app_one near 12.5 m/s.
+    assert!(
+        paid_both > 0.0 && paid_one > 0.0,
+        "both physical runs must buy finite propulsion work: both={paid_both},one={paid_one}"
+    );
+    assert!(
+        speed_both > 0.0 && speed_one > 0.0,
+        "actual powered propulsion must move both hulls: both={speed_both},one={speed_one}"
+    );
+    // Retain the actual damage-dependent velocity comparison.
     assert!(
         speed_one < speed_both,
         "forward_speed with one engine offline ({speed_one:.4}) should be less than \

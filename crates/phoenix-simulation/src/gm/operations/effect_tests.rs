@@ -1077,13 +1077,20 @@ fn a_direct_heal_leaves_the_per_arc_hull_pool_where_the_damage_left_it() {
         25_000,
     );
     app.update();
+    let after_hit = (total_current(&app, target), arc_total(&app, target));
+    assert!(
+        (after_hit.0 - 75.0).abs() < 0.01 && (after_hit.1 - 75.0).abs() < 0.01,
+        "actual direct hit must debit both legacy pools before healing: {after_hit:?}"
+    );
     arm(&mut app, 2, 4, "player-1", GmDirectEffectKind::Heal, 25_000);
     app.update();
 
     assert!((total_current(&app, target) - 100.0).abs() < 0.01);
     assert!(
         (arc_total(&app, target) - 75.0).abs() < 0.01,
-        "arc hull only ever refills the way the ordinary repair path refills it"
+        "legacy arc hull must retain actual post-hit75 while system hull heals: system={}, arc={}",
+        total_current(&app, target),
+        arc_total(&app, target)
     );
 }
 
@@ -1321,5 +1328,81 @@ fn an_effect_armed_for_a_later_tick_is_retained() {
             .entries()
             .len(),
         1
+    );
+}
+
+/// Scoped legacy overflow cannot become damage to unrelated arc capacity.
+#[test]
+fn scoped_legacy_damage_mirrors_only_the_applied_amount_and_physical_damage_does_not_mirror() {
+    for scope in [
+        GmDirectEffectScope::System(SystemId("engine".into())),
+        GmDirectEffectScope::Station(crate::core::messages::StationId("helm".into())),
+    ] {
+        let mut app = damage_app(4, 19);
+        let target = spawn_stationed_hull(
+            &mut app,
+            "legacy",
+            &[
+                ("engine", 10.0, Some("helm")),
+                ("reactor", 90.0, Some("engineering")),
+            ],
+        );
+        attach_arc_hull(&mut app, target, &[("fore", 50.0), ("aft", 50.0)]);
+        arm_scoped(
+            &mut app,
+            1,
+            4,
+            "legacy",
+            scope,
+            GmDirectEffectKind::Damage,
+            25_000,
+        );
+        app.update();
+        let actual = (total_current(&app, target), arc_total(&app, target));
+        assert!(
+            (actual.0 - 90.0).abs() < 0.01 && (actual.1 - 90.0).abs() < 0.01,
+            "scoped legacy applied10 must debit10 from both pools: {actual:?}"
+        );
+    }
+    let mut app = damage_app(4, 19);
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    let damage = crate::ship::compartment_damage::ShipDamage::from_config(&config)
+        .unwrap()
+        .unwrap();
+    let before = damage.structural_totals().0;
+    let target = spawn_hull(&mut app, "physical", &[("legacy-projection", 100.0)], true);
+    app.world_mut().entity_mut(target).insert(damage);
+    attach_arc_hull(&mut app, target, &[("fore", 50.0), ("aft", 50.0)]);
+    arm(
+        &mut app,
+        1,
+        4,
+        "physical",
+        GmDirectEffectKind::Damage,
+        25_000,
+    );
+    app.update();
+    let physical = app
+        .world()
+        .get::<crate::ship::compartment_damage::ShipDamage>(target)
+        .unwrap()
+        .structural_totals()
+        .0;
+    assert!(
+        (before - physical - 25.0).abs() < 0.01,
+        "actual compartments absorb25: before={before},after={physical}"
+    );
+    assert_eq!(
+        total_current(&app, target),
+        100.0,
+        "physical damage does not debit legacy System projection"
+    );
+    assert_eq!(
+        arc_total(&app, target),
+        100.0,
+        "physical damage does not mint a second durability debit"
     );
 }

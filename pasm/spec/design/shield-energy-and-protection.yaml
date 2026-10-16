@@ -65,4 +65,4 @@ entities:
       title: Author Shield Focus Availability Per Arc
       summary: "Each shield arc declares focus_available, default true. Disabled arcs cannot be focused by human or ordinary AI commands, and their permitted operation view and Workshop control expose that capability. Shipped single-shield Harrows explicitly disable focus in their data; arc count never determines capability, so a custom single-arc design may retain focus."
       rationale:
-        - "User correction of the combat balance regression: single-shield ships should have no focus available, configured in data rather than an arc-count rule in runtime or tests. Other shield operations remain available independently."
+        - "User correction of the combat balance regression: single-shield ships should have no focus available, configured in data rather than an arc-count rule in runtime or tests. Other shield operations remain available independently. Focus preference ranks eligible arcs separately from general protection and recovery priority; an urgent non-focus arc can still receive recovery."

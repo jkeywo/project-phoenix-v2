@@ -197,3 +197,40 @@ fn individual_tree_raises_static_equipment_and_suspends_memory_when_human_operat
     .unwrap();
     assert_eq!(before, after);
 }
+
+#[test]
+fn focus_eligibility_does_not_block_recovery_to_an_urgent_nonfocus_arc() {
+    let (mut app, entity, donor, target) = fixture();
+    app.world_mut()
+        .get_mut::<ShipShields>(entity)
+        .unwrap()
+        .0
+        .facings
+        .iter_mut()
+        .find(|arc| arc.id == "fore")
+        .unwrap()
+        .focus_available = false;
+    app.world_mut()
+        .get_mut::<ShipConfigComponent>(entity)
+        .unwrap()
+        .0
+        .consoles
+        .iter_mut()
+        .find(|console| console.id.0 == "private-shield-test")
+        .unwrap()
+        .feeds
+        .push(phoenix_model::console::ConsoleFeed {
+            source: target.clone(),
+            kind: phoenix_model::console::ConsoleObservationKind::ShieldArc,
+        });
+    publish(&mut app, entity);
+    let commands = decide(&mut app, entity);
+    assert!(commands.iter().all(|command| command.target == donor));
+    assert!(commands
+        .iter()
+        .any(|command| command.payload == Control::SetShieldArcFocus { focused: true }));
+    assert!(commands.iter().any(|command| command.payload
+        == Control::SetShieldRecovery {
+            target: Some(target.clone())
+        }));
+}

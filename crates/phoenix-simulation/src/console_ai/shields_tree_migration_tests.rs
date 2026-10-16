@@ -679,3 +679,28 @@ fn authored_unavailable_arcs_do_not_emit_focus_commands() {
         Control::SetShieldArcFocus { focused: true }
     )));
 }
+
+#[test]
+fn focus_ranks_capable_arcs_when_the_most_damaged_arc_cannot_focus() {
+    let mut app = app();
+    let entity = actor(&mut app, "mixed-focus-capability");
+    let fore = index(&app, entity, "fore");
+    app.world_mut()
+        .get_mut::<ShipShields>(entity)
+        .unwrap()
+        .0
+        .facings[fore]
+        .focus_available = false;
+    health(&mut app, entity, "fore", 0.1);
+    health(&mut app, entity, "aft", 0.25);
+    observe(&mut app);
+    decide(&mut app);
+    assert_eq!(focus(&app, entity).as_deref(), Some("aft"));
+    observe(&mut app);
+    decide(&mut app);
+    assert_eq!(
+        focus(&app, entity).as_deref(),
+        Some("aft"),
+        "the ineligible urgent arc must not clear capable focus"
+    );
+}

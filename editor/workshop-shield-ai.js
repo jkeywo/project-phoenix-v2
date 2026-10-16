@@ -15,7 +15,7 @@ export function initialShieldTree(recoveryTargets = []) {
     const channel = `recover-${target}`;
     task.push(write(`retain-${index}`, channel, fact(`recovering-${target}`)));
     task.push(write(`recover-${index}`, channel, literal(true), [
-      condition(fact('preferred_focus'), false),
+      condition(fact('preferred_protection'), false),
       condition(fact(`target-visible-${target}`)),
       condition(fact(`target-preferred-${target}`)),
       condition(fact(`target-ready-${target}`)),

@@ -119,7 +119,7 @@ describe('visual typed System AI authoring', () => {
 
 
 const shieldSchema = () => ({...metadata.ai_state_tree,system_kinds:['shield_arc'],
-  hosts:{shield_arc:{facts:['preferred_focus','raised','thermal_stopped'],channels:['raised','focus'],numeric_facts:['strength_fraction','reserve_fraction','heat_fraction','recent_damage'],numeric_channels:{},sources:[...metadata.ai_state_tree.sources,'number_compare'],actions:metadata.ai_state_tree.actions}},
+  hosts:{shield_arc:{facts:['preferred_focus','preferred_protection','raised','thermal_stopped'],channels:['raised','focus'],numeric_facts:['strength_fraction','reserve_fraction','heat_fraction','recent_damage'],numeric_channels:{},sources:[...metadata.ai_state_tree.sources,'number_compare'],actions:metadata.ai_state_tree.actions}},
   shield_recovery_bindings:{facts:['target-visible','target-preferred','target-ready','recovering'],channels:['recover'],numeric_facts:['target-strength','target-reserve']}});
 
 describe('closed shield arc state-tree Workshop controls',()=>{

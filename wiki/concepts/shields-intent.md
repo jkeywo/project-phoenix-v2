@@ -37,6 +37,8 @@ carried into the permitted fine operation view, gates AI focus output and human
 controls, and is enforced by the shared command applier. Workshop edits it on
 the arc. Restore rejects focused state for equipment without that capability.
 The shipped single-arc Harrows opt out in data; arc count has no runtime role.
+AI `preferred_focus` ranks only capable arcs, while `preferred_protection` and
+recipient `target-preferred-*` rank all observed arcs for donor/recovery decisions.
 
 The physical damage-history producer runs regardless of delegation. Recharge,
 focus decay and voluntary recovery adjust its comparison baseline and do not

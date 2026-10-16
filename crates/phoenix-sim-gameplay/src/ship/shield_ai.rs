@@ -4,9 +4,14 @@ use crate::core::messages::SystemId;
 
 pub fn bindings(targets: &[SystemId]) -> (SupportedBindings, NumericBindings) {
     let mut booleans = SupportedBindings {
-        facts: ["preferred_focus", "raised", "thermal_stopped"]
-            .map(str::to_owned)
-            .into(),
+        facts: [
+            "preferred_focus",
+            "preferred_protection",
+            "raised",
+            "thermal_stopped",
+        ]
+        .map(str::to_owned)
+        .into(),
         channels: ["raised", "focus"].map(str::to_owned).into(),
     };
     let mut numbers = NumericBindings {

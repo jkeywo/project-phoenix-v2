@@ -3994,7 +3994,7 @@ equals = false
 
 [shield_arc.ai.tree.state.task.when.value]
 source = "fact"
-name = "preferred_focus"
+name = "preferred_protection"
 
 [[shield_arc.ai.tree.state.task.when]]
 equals = true
@@ -4166,7 +4166,7 @@ equals = false
 
 [shield_arc.ai.tree.state.task.when.value]
 source = "fact"
-name = "preferred_focus"
+name = "preferred_protection"
 
 [[shield_arc.ai.tree.state.task.when]]
 equals = true
@@ -4338,7 +4338,7 @@ equals = false
 
 [shield_arc.ai.tree.state.task.when.value]
 source = "fact"
-name = "preferred_focus"
+name = "preferred_protection"
 
 [[shield_arc.ai.tree.state.task.when]]
 equals = true
@@ -4596,7 +4596,7 @@ equals = false
 
 [shield_arc.ai.tree.state.task.when.value]
 source = "fact"
-name = "preferred_focus"
+name = "preferred_protection"
 
 [[shield_arc.ai.tree.state.task.when]]
 equals = true
@@ -4768,7 +4768,7 @@ equals = false
 
 [shield_arc.ai.tree.state.task.when.value]
 source = "fact"
-name = "preferred_focus"
+name = "preferred_protection"
 
 [[shield_arc.ai.tree.state.task.when]]
 equals = true
@@ -4940,7 +4940,7 @@ equals = false
 
 [shield_arc.ai.tree.state.task.when.value]
 source = "fact"
-name = "preferred_focus"
+name = "preferred_protection"
 
 [[shield_arc.ai.tree.state.task.when]]
 equals = true
@@ -5198,7 +5198,7 @@ equals = false
 
 [shield_arc.ai.tree.state.task.when.value]
 source = "fact"
-name = "preferred_focus"
+name = "preferred_protection"
 
 [[shield_arc.ai.tree.state.task.when]]
 equals = true
@@ -5370,7 +5370,7 @@ equals = false
 
 [shield_arc.ai.tree.state.task.when.value]
 source = "fact"
-name = "preferred_focus"
+name = "preferred_protection"
 
 [[shield_arc.ai.tree.state.task.when]]
 equals = true
@@ -5542,7 +5542,7 @@ equals = false
 
 [shield_arc.ai.tree.state.task.when.value]
 source = "fact"
-name = "preferred_focus"
+name = "preferred_protection"
 
 [[shield_arc.ai.tree.state.task.when]]
 equals = true
@@ -5800,7 +5800,7 @@ equals = false
 
 [shield_arc.ai.tree.state.task.when.value]
 source = "fact"
-name = "preferred_focus"
+name = "preferred_protection"
 
 [[shield_arc.ai.tree.state.task.when]]
 equals = true
@@ -5972,7 +5972,7 @@ equals = false
 
 [shield_arc.ai.tree.state.task.when.value]
 source = "fact"
-name = "preferred_focus"
+name = "preferred_protection"
 
 [[shield_arc.ai.tree.state.task.when]]
 equals = true
@@ -6144,7 +6144,7 @@ equals = false
 
 [shield_arc.ai.tree.state.task.when.value]
 source = "fact"
-name = "preferred_focus"
+name = "preferred_protection"
 
 [[shield_arc.ai.tree.state.task.when]]
 equals = true

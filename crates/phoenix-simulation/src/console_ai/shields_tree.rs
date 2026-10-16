@@ -58,10 +58,17 @@ pub(super) fn ai_shields(
             let Some(reserve) = &operation.reserve else {
                 continue;
             };
-            let preferred = preferred_arc(&view, tuning.unwrap_or(&defaults));
+            // Focus ranks only capable equipment. Protection/recovery retains
+            // the whole permitted picture, including arcs that cannot focus.
+            let preferred = preferred_arc(&view, tuning.unwrap_or(&defaults), false);
+            let preferred_focus = preferred_arc(&view, tuning.unwrap_or(&defaults), true);
             let mut facts = BTreeMap::from([
                 (
                     "preferred_focus".into(),
+                    preferred_focus.as_ref() == Some(&system.id),
+                ),
+                (
+                    "preferred_protection".into(),
                     preferred.as_ref() == Some(&system.id),
                 ),
                 ("raised".into(), operation.raised),
@@ -199,6 +206,7 @@ fn fraction(value: f32, capacity: f32) -> f64 {
 fn preferred_arc(
     view: &BTreeMap<SystemId, &SystemBlackboard>,
     tuning: &crate::ship::shields::ShieldsAiConfigResource,
+    focus_only: bool,
 ) -> Option<SystemId> {
     let bearing = view.values().find_map(|board| match board {
         SystemBlackboard::Shields(reading) => {
@@ -209,7 +217,15 @@ fn preferred_arc(
     let mut arcs: Vec<_> = view
         .iter()
         .filter_map(|(id, board)| match board {
-            SystemBlackboard::ShieldArc(reading) => Some((id, reading)),
+            SystemBlackboard::ShieldArc(reading)
+                if !focus_only
+                    || reading
+                        .operation
+                        .as_ref()
+                        .is_some_and(|operation| operation.focus_available) =>
+            {
+                Some((id, reading))
+            }
             _ => None,
         })
         .collect();

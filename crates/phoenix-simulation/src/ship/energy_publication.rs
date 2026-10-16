@@ -20,22 +20,39 @@ pub fn publish_power_blackboard(
         let config = p.config();
         let network = p.network();
         let r = &config.reactor;
-        let mut coolant = Vec::new();
+        let key = SystemId(crate::ship::system_registry::POWER_SYSTEM_ID.into());
+        let slot = boards
+            .0
+            .entry(key)
+            .or_insert_with(|| SystemBlackboard::Power(PowerBlackboard::default()));
+        if !matches!(slot, SystemBlackboard::Power(_)) {
+            *slot = SystemBlackboard::Power(PowerBlackboard::default());
+        }
+        let SystemBlackboard::Power(previous) = slot else {
+            unreachable!()
+        };
+        let previous_energy = previous.energy.take().unwrap_or_default();
+        let mut coolant = previous_energy.coolant;
+        let mut coolant_count = 0;
         if let Ok(bindings) = super::energy_runtime::coolant_bindings(p, services) {
             let ids: std::collections::BTreeSet<_> = std::iter::once(bindings.reactor)
                 .chain(bindings.consumers.into_values())
                 .collect();
             for id in ids {
-                coolant.push(CoolantReading {
+                let old = coolant.get_mut(coolant_count);
+                let reading = CoolantReading {
                     available: infrastructure
                         .and_then(|state| state.0.capacity_stock(&id))
                         .map(|stock| stock.available())
                         .unwrap_or(0),
                     credit: p.coolant_credit().get(&id).copied().unwrap_or(0.0),
-                    provider: id,
-                });
+                    provider: reuse_text(old.map(|row| &mut row.provider), &id),
+                };
+                replace_row(&mut coolant, coolant_count, reading);
+                coolant_count += 1;
             }
         }
+        coolant.truncate(coolant_count);
         let energy = PowerEnergyBlackboard {
             reactor: ReactorEnergyReading {
                 generation_enabled: network.generation_enabled,
@@ -54,20 +71,25 @@ pub fn publish_power_blackboard(
             },
             mode: network.mode,
             cooling_usage: network.cooling_usage,
-            groups: config
-                .groups
-                .iter()
-                .map(|group| {
+            groups: refresh_rows(
+                previous_energy.groups,
+                config.groups.iter(),
+                |group, mut old| {
                     let state = &network.groups[&group.id];
                     EnergyGroupReading {
-                        id: group.id.0.clone(),
-                        label: ship
-                            .0
-                            .power_groups
-                            .get(&group.id)
-                            .map(|group| group.label.clone())
-                            .unwrap_or_else(|| group.id.0.clone()),
-                        parent: group.parent.as_ref().map(|parent| parent.0.clone()),
+                        id: reuse_text(old.as_deref_mut().map(|row| &mut row.id), &group.id.0),
+                        label: reuse_text(
+                            old.as_deref_mut().map(|row| &mut row.label),
+                            ship.0
+                                .power_groups
+                                .get(&group.id)
+                                .map(|group| group.label.as_str())
+                                .unwrap_or(&group.id.0),
+                        ),
+                        parent: reuse_optional_text(
+                            old.as_deref_mut().map(|row| &mut row.parent),
+                            group.parent.as_ref().map(|parent| parent.0.as_str()),
+                        ),
                         desired_flow_per_sec: state.desired_flow_per_sec,
                         effective_flow_per_sec: state.effective_flow_per_sec,
                         max_flow_per_sec: group.max_flow_per_sec,
@@ -77,21 +99,32 @@ pub fn publish_power_blackboard(
                         priority: state.priority,
                         cut: state.cut,
                     }
-                })
-                .collect(),
-            consumers: config
-                .consumers
-                .iter()
-                .map(|consumer| {
+                },
+            ),
+            consumers: refresh_rows(
+                previous_energy.consumers,
+                config.consumers.iter(),
+                |consumer, mut old| {
                     let state = &network.consumers[&consumer.system];
                     ConsumerEnergyReading {
-                        system: consumer.system.clone(),
-                        group: ship
-                            .0
-                            .systems
-                            .iter()
-                            .find(|system| system.id == consumer.system)
-                            .and_then(|system| system.power_group.clone()),
+                        system: SystemId(reuse_text(
+                            old.as_deref_mut().map(|row| &mut row.system.0),
+                            &consumer.system.0,
+                        )),
+                        group: {
+                            let source = ship
+                                .0
+                                .systems
+                                .iter()
+                                .find(|system| system.id == consumer.system)
+                                .and_then(|system| system.power_group.as_ref());
+                            let mut prior = old
+                                .as_deref_mut()
+                                .and_then(|row| row.group.take())
+                                .map(|id| id.0);
+                            reuse_optional_text(Some(&mut prior), source.map(|id| id.0.as_str()))
+                                .map(PowerGroupId)
+                        },
                         energy: state.energy,
                         capacity: consumer.reserve.capacity,
                         heat: state.heat,
@@ -102,8 +135,8 @@ pub fn publish_power_blackboard(
                         max_intake_per_sec: consumer.reserve.max_intake_per_sec,
                         flow_override_per_sec: network.fine_flows.get(&consumer.system).copied(),
                     }
-                })
-                .collect(),
+                },
+            ),
             coolant,
         };
         let bb = PowerBlackboard {
@@ -121,10 +154,7 @@ pub fn publish_power_blackboard(
         let reactor = crate::ship::system_registry::power_reactor_system_id();
         let battery = crate::ship::system_registry::power_battery_system_id();
         let online = |id: &SystemId| !sources.is_some_and(|sources| sources.0.is_offline(id));
-        boards.0.insert(
-            SystemId(crate::ship::system_registry::POWER_SYSTEM_ID.into()),
-            SystemBlackboard::Power(bb),
-        );
+        *previous = bb;
         boards.0.insert(
             reactor.clone(),
             SystemBlackboard::PowerReactor(PowerReactorBlackboard {
@@ -145,3 +175,42 @@ pub fn publish_power_blackboard(
         );
     }
 }
+
+// Reuse storage only: every row and every scalar is projected anew from this call's inputs.
+fn replace_row<T>(rows: &mut Vec<T>, index: usize, row: T) {
+    if index < rows.len() {
+        rows[index] = row;
+    } else {
+        rows.push(row);
+    }
+}
+fn refresh_rows<T, I: IntoIterator>(
+    mut rows: Vec<T>,
+    input: I,
+    mut project: impl FnMut(I::Item, Option<&mut T>) -> T,
+) -> Vec<T> {
+    let mut count = 0;
+    for item in input {
+        let row = project(item, rows.get_mut(count));
+        replace_row(&mut rows, count, row);
+        count += 1;
+    }
+    rows.truncate(count);
+    rows
+}
+fn reuse_text(old: Option<&mut String>, source: &str) -> String {
+    let mut text = old.map(std::mem::take).unwrap_or_default();
+    text.clear();
+    text.push_str(source);
+    text
+}
+fn reuse_optional_text(old: Option<&mut Option<String>>, source: Option<&str>) -> Option<String> {
+    let mut text = old.and_then(Option::take);
+    source.map(|source| reuse_text(text.as_mut(), source))
+}
+#[cfg(test)]
+#[path = "energy_publication_reference.rs"]
+mod reference;
+#[cfg(test)]
+#[path = "energy_publication_tests.rs"]
+mod tests;

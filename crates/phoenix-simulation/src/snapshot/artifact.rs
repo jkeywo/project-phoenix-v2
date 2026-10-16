@@ -470,7 +470,8 @@ use super::*;
 /// `83` validates the derived typed claims in retained decoded publications.
 /// `84` retains accepted Command emission intent without restoring prepaid activity.
 /// `85` retains grouped-tube priorities and exact paid vessel-acquisition history.
-pub const SNAPSHOT_FORMAT: u32 = 85;
+/// `86` retains Radio listening intent and successful contextual emission frontiers.
+pub const SNAPSHOT_FORMAT: u32 = 86;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -645,7 +646,8 @@ pub const SNAPSHOT_FORMAT: u32 = 85;
 /// "0.68" derives paid NPC radio contacts, fulfills exact released delivery demand,
 /// shares guided-loader work and commits paid uncrewed vessel acquisition.
 /// "0.69" preserves authored height when ordinary Full3D hulls are spawned.
-pub const SIMULATION_RULES: &str = "0.69";
+/// "0.70" selects actual receive coverage and emits permitted contextual Radio reports.
+pub const SIMULATION_RULES: &str = "0.70";
 
 /// The authored data, computed rather than remembered.
 ///

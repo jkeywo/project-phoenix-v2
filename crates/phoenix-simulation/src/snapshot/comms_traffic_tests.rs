@@ -6,6 +6,9 @@ fn held_publication() -> (World, Entity, PhoenixSnapshot) {
     use crate::core::messages::{AdmittedCommand, AdmittedCommands, SystemControlPayload};
     let mut world = World::new();
     world.insert_resource(SimTick(10));
+    // The real accepted Cruiser includes Broad instruments; their unchanged
+    // resource restore guard requires the actual fixed logical clock.
+    world.insert_resource(Time::<Fixed>::from_hz(60.0));
     world.init_resource::<crate::server_app::CaptainPriorityBoost>();
     let accepted = crate::entities::include_resolve::load_entity_config(
         "tests/fixtures/listening-cruiser.toml",
@@ -110,6 +113,10 @@ fn genuine_held_alert_survives_canonical_change_without_refresh_or_private_value
             .unwrap()
             .0
     );
+    super::super::transit::validate_live(&world, actor, row, saved.tick)
+        .expect("the actual Cruiser Transit continuation is restorable");
+    super::super::preflight::validate_entity_resources(&world, actor, row)
+        .expect("the actual Cruiser resource continuation is restorable");
     super::super::application::apply_entity_state(&mut world, actor, row, saved.tick);
     let restored = world
         .get::<crate::server_app::ShipSystemBlackboards>(actor)

@@ -22,7 +22,11 @@ fn authored() -> crate::entities::config::EntityConfig {
         .iter_mut()
         .find(|console| console["id"].as_str() == Some("comms"))
         .unwrap();
-    console["feed"]
+    console
+        .as_table_mut()
+        .unwrap()
+        .entry("feed")
+        .or_insert_with(|| toml::Value::Array(Vec::new()))
         .as_array_mut()
         .unwrap()
         .push(toml::from_str("source='captain'\nkind='Captain'").unwrap());

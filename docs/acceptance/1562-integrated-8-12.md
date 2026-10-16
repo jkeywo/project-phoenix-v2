@@ -113,3 +113,52 @@ station-activity playtest result is supplied by these logs. No networking,
 multiplayer, whole-workspace CI or final pre-push gate pass is implied. Increments
 8–12 and PRD 1562 remain open until their applicable playable exits and the
 integrated checks are demonstrated.
+
+## Follow-up at `fee6b25e` / `964b4a98`
+
+The corrected renderer-free Simulation selection at `9a3b2f89` completed
+**141 passed, 6 failed** in 42.34 seconds. The remaining failures concern the
+discrete-shot fixture, engine fixture, shield recovery notification and three
+strict restore fixtures. Source-reviewed fixture corrections are integrated;
+their native retry remains required. Separate retained-beam diagnostics at
+`5cb35b1a` completed **2 passed, 2 failed** in 28.95 seconds. The server fixture
+has empty combat-bank definitions despite actual paid emission; its correction
+must use accepted equipment rather than add a runtime fallback.
+
+The four-target whole-host retry compiled at `fee6b25e` in 2m46s and completed
+**7 passed, 3 failed**:
+
+- Fitting facility: 1/1, 123.39s. Real paid facility refit and continuation pass;
+  intact salvage still lacks an eligible current equipment projection.
+- Logistics: 3/0, 24.94s, including finite six-round conservation, full JSON
+  continuation and malformed-state refusal before writes.
+- Production: 1/1, 16.61s. The priority correction provides current flow/intake,
+  reserve and paid fraction. The positive now fails at the fresh restored
+  checkpoint's transient emitted-work counter before its first update; investigate
+  that boundary without dropping final completion or full-state comparisons.
+- Recovery: 2/1, 24.41s. Finite-source competition and malformed-state refusal
+  pass. Full continuation diverges at step51 in `collisions[0].sim_t`
+  (live2.033333374, resumed1.533333364). This is an open runtime clock issue,
+  not an acceptable ignored field.
+
+The locked current client build passes **121 tests across21 files** at
+`5cb35b1a` in 22.72s. A client-only Chromium run after Repair fixture correction
+`964b4a98` passes **43/43** in 25.4s: Power, Shields, Repair, Engineering
+responsiveness and text-scale workflows. These use projected fixture data, not
+an authoritative WASM host. The earlier six-file selection was stopped after
+reproducing Repair's empty keyed System fixture and remains failed/incomplete;
+its actual host-dependent Station popup case was not executed. That case stays
+in the matching-host queue. Source corrections and narrower passes do not
+establish a green original combined native selection or a closed increment.
+
+Logs:
+`.phoenix/verify-8-12-corrected-owner-retry.log`,
+`.phoenix/verify-8-12-beam-frontier.log`,
+`.phoenix/verify-8-12-corrected-host-retry.log`,
+`.phoenix/verify-8-12-current-client-retry.log`,
+`.phoenix/verify-8-12-browser-dom.log`,
+`.phoenix/verify-8-12-browser-dom-corrected.log`.
+
+The coverage ledger also passes at `fee6b25e`:216 catalogue entries across25
+increments. No current all-green integration gate, increment closure or push is
+claimed.

@@ -2584,9 +2584,10 @@ fn the_composed_battleship_holds_its_impulse_drive_idle() {
 fn authored_power_trees_drive_actual_finite_hardware_without_legacy_policy() {
     use phoenix_model::energy::EnergyAllocationMode;
     use phoenix_sim_gameplay::ai::host::{decide_tree_with_numbers, TreeHostOutcome};
-    use phoenix_sim_gameplay::ai::state_tree::TaskAction;
+    use phoenix_sim_gameplay::ai::state_tree::{BoolSource, TaskAction};
     use std::collections::BTreeMap;
     let mut checked = 0;
+    let mut checked_recovery = 0;
     for (stem, hull) in ai_hulls() {
         let Some(hardware) = hull.energy.as_ref() else {
             continue;
@@ -2608,8 +2609,8 @@ fn authored_power_trees_drive_actual_finite_hardware_without_legacy_policy() {
         let (programs, mut frames) =
             crate::ai::state_tree_runtime::compile_ship_trees_with_energy(ship, Some(hardware))
                 .unwrap();
-        let authored_numbers: std::collections::BTreeSet<_> = programs.0[&reactor]
-            .resolved()
+        let resolved = programs.0[&reactor].resolved();
+        let authored_numbers: std::collections::BTreeSet<_> = resolved
             .tree
             .iter()
             .flat_map(|tree| &tree.state)
@@ -2619,6 +2620,18 @@ fn authored_power_trees_drive_actual_finite_hardware_without_legacy_policy() {
                 _ => None,
             })
             .collect();
+        // Hardware ceilings do not imply an AI recovery rule. New small
+        // receivers can intentionally author only their stable baseline; read
+        // the actual program's decision inputs before expecting a response.
+        let recovery_target = |channel: &str, input: &str| {
+            resolved.tree.iter().flat_map(|tree| &tree.state)
+                .flat_map(|state| &state.task)
+                .filter_map(|task| match &task.action {
+                    TaskAction::WriteNumber { channel: actual, value }
+                        if actual == channel && task.when.iter().any(|condition| matches!(&condition.value, BoolSource::NumberCompare { name, .. } if name == input)) => Some(*value as f32),
+                    _ => None,
+                }).last()
+        };
         let mut physical = crate::modifiers::power_system::PowerSystem::from_energy(
             hardware.clone(),
             ship.clone(),
@@ -2717,6 +2730,30 @@ fn authored_power_trees_drive_actual_finite_hardware_without_legacy_policy() {
             for group in &hardware.groups {
                 let flow_channel = format!("flow-{}", group.id.0);
                 let cooling_channel = format!("cooling-{}", group.id.0);
+                let reserve_recovery =
+                    recovery_target(&flow_channel, &format!("reserve-{}", group.id.0));
+                let heat_recovery =
+                    recovery_target(&cooling_channel, &format!("heat-{}", group.id.0));
+                for (target, baseline, limit) in [
+                    (
+                        reserve_recovery,
+                        group.default_flow_per_sec,
+                        group.max_flow_per_sec,
+                    ),
+                    (
+                        heat_recovery,
+                        group.default_cooling_per_sec,
+                        group.max_cooling_per_sec,
+                    ),
+                ] {
+                    if let Some(target) = target {
+                        assert!(target >= baseline && target <= limit, "{stem}/{}: authored recovery remains nondecreasing and within actual hardware", group.id.0);
+                    }
+                }
+                if recovering {
+                    checked_recovery += usize::from(reserve_recovery.is_some())
+                        + usize::from(heat_recovery.is_some());
+                }
                 let prior = physical.network().groups[&group.id].clone();
                 // A priority-only tree does not author individual settings for
                 // every hardware subgroup. Absence must preserve standing
@@ -2731,11 +2768,11 @@ fn authored_power_trees_drive_actual_finite_hardware_without_legacy_policy() {
                     assert_eq!(
                         flow,
                         if recovering {
-                            group.max_flow_per_sec
+                            reserve_recovery.unwrap_or(group.default_flow_per_sec)
                         } else {
                             group.default_flow_per_sec
                         },
-                        "{stem}/{}: reserve recovery uses authored flow",
+                        "{stem}/{}: flow follows its authored reserve response or stable baseline",
                         group.id.0
                     );
                     physical.set_flow(&group.id, flow).unwrap();
@@ -2760,11 +2797,11 @@ fn authored_power_trees_drive_actual_finite_hardware_without_legacy_policy() {
                     assert_eq!(
                         cooling,
                         if recovering {
-                            group.max_cooling_per_sec
+                            heat_recovery.unwrap_or(group.default_cooling_per_sec)
                         } else {
                             group.default_cooling_per_sec
                         },
-                        "{stem}/{}: heat recovery uses authored cooling",
+                        "{stem}/{}: cooling follows its authored heat response or stable baseline",
                         group.id.0
                     );
                     physical.set_cooling(&group.id, cooling).unwrap();
@@ -2813,6 +2850,10 @@ fn authored_power_trees_drive_actual_finite_hardware_without_legacy_policy() {
         checked += 1;
     }
     assert!(checked > 0, "the pin must execute real shipped Power trees");
+    assert!(
+        checked_recovery > 0,
+        "the pin must exercise actual authored recovery decisions as well as static outputs"
+    );
 }
 
 /// The offensive-weapon RED-ALERT fire gate, on all three fire channels, in

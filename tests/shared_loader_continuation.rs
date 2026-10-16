@@ -260,7 +260,7 @@ fn joined_priority_and_partial_shared_loading_survive_whole_json360_and_nowrite_
         assert_eq!(digest, world_digest(live.world()));
     }
     let (mut resumed, _) = boot(true);
-    assert!(ready_to_restore(resumed.world()));
+    assert!(ready_to_restore(resumed.world(), &saved));
     assert!(restore(resumed.world_mut(), &saved).gaps.is_empty());
     same(&live, &resumed, 0);
     let initial = prepared(&live, actor);

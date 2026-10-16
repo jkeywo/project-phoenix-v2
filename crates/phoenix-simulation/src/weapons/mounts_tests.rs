@@ -315,11 +315,36 @@ fn actual_tick_preserves_bearing_and_power_during_refit_and_vacancy_then_resumes
     use crate::ship::power::ShipPowerSystem;
     use bevy::ecs::system::RunSystemOnce;
 
-    let authored = crate::entities::include_resolve::load_entity_config(
+    let mut authored = crate::entities::include_resolve::load_entity_config(
         "assets/entities/alliance_cruiser.toml",
     )
     .unwrap();
     let owner = SystemId("phaser-fore".into());
+    // The shipped bank has a fixed arc. This refit fixture explicitly equips
+    // a traversing mount while retaining the real bank's fitting and power owner.
+    let bank = authored
+        .ship_config
+        .as_mut()
+        .unwrap()
+        .systems
+        .iter_mut()
+        .find(|system| system.id == owner)
+        .unwrap();
+    bank.components.extend([
+        crate::ship::composition::SystemComponentConfig::PowerInput {
+            id: "test-mount-power".into(),
+        },
+        crate::ship::composition::SystemComponentConfig::Turret {
+            id: "test-mount".into(),
+            power_input: "test-mount-power".into(),
+            config: TurretConfig {
+                facing_deg: 0.0,
+                traverse_arc_deg: 180.0,
+                traverse_deg_per_sec: 30.0,
+                aim_tolerance_deg: 1.0,
+            },
+        },
+    ]);
     let instrument = SystemId("tactical-radar".into());
     let broad = BroadProfile::from_config(&authored).unwrap().unwrap();
     let mut tracks = BroadTracks::new(&broad);

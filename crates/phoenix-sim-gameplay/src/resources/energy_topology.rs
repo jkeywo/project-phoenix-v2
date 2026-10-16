@@ -12,6 +12,8 @@ pub(crate) struct CompiledEnergyDefinition {
     pub(super) children: Vec<Vec<PowerGroupId>>,
     pub(super) group_consumers: Vec<Vec<usize>>,
     consumer_groups: Vec<Option<usize>>,
+    reactor_systems: Vec<usize>,
+    passive_work_systems: Vec<usize>,
     pub(super) consumer_paths: Vec<Vec<usize>>,
 }
 
@@ -99,6 +101,32 @@ impl CompiledEnergyDefinition {
                 path
             })
             .collect();
+        use crate::ship::system_registry::{
+            HELM_RADAR_KIND, NAVIGATION_KIND, POWER_REACTOR_KIND, SENSOR_RADAR_KIND,
+            TACTICAL_RADAR_KIND,
+        };
+        let reactor_systems = ship
+            .systems
+            .iter()
+            .enumerate()
+            .filter_map(|(index, system)| (system.kind == POWER_REACTOR_KIND).then_some(index))
+            .collect();
+        // This is the adapter's kind-major order, then authored order, including
+        // repeated System rows. It is not a deduplicated identity index.
+        let passive_work_systems = [
+            HELM_RADAR_KIND,
+            TACTICAL_RADAR_KIND,
+            SENSOR_RADAR_KIND,
+            NAVIGATION_KIND,
+        ]
+        .into_iter()
+        .flat_map(|kind| {
+            ship.systems
+                .iter()
+                .enumerate()
+                .filter_map(move |(index, system)| (system.kind == kind).then_some(index))
+        })
+        .collect();
         Ok(Self {
             config,
             ship,
@@ -109,7 +137,20 @@ impl CompiledEnergyDefinition {
             group_consumers,
             consumer_groups,
             consumer_paths,
+            reactor_systems,
+            passive_work_systems,
         })
+    }
+
+    pub(crate) fn reactor_systems(&self) -> impl Iterator<Item = &SystemId> {
+        self.reactor_systems
+            .iter()
+            .map(|index| &self.ship.systems[*index].id)
+    }
+    pub(crate) fn passive_work_systems(&self) -> impl Iterator<Item = &SystemId> {
+        self.passive_work_systems
+            .iter()
+            .map(|index| &self.ship.systems[*index].id)
     }
 
     pub(crate) fn config(&self) -> &EnergyConfigSection {

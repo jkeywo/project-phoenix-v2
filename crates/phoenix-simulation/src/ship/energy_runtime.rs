@@ -46,6 +46,7 @@ pub fn coolant_bindings(
 /// requests remain unchanged; repaired machinery resumes those same requests.
 fn hardware_effects(
     power: &crate::modifiers::power_system::PowerSystem,
+    selection: &crate::modifiers::power_system::EnergyAdapterSelection,
     physical: Option<&crate::ship::compartment_damage::ShipDamage>,
     sources: Option<&crate::ship_plugin::ShipSystemControlSources>,
 ) -> crate::resources::energy_network::EnergyHardwareEffects {
@@ -55,27 +56,22 @@ fn hardware_effects(
         physical.map_or(1.0, |damage| damage.factor(id, binding))
     };
     let mut effects = EnergyHardwareEffects::default();
-    for system in power
-        .ship_config()
-        .systems
-        .iter()
-        .filter(|system| system.kind == crate::ship::system_registry::POWER_REACTOR_KIND)
-    {
+    for system in selection.reactor_systems() {
         effects.reactor_operation = effects.reactor_operation.min(
-            if sources.is_some_and(|sources| sources.0.is_offline(&system.id)) {
+            if sources.is_some_and(|sources| sources.0.is_offline(system)) {
                 0.0
             } else {
-                factor(&system.id, DamageBinding::Operation)
+                factor(system, DamageBinding::Operation)
             },
         );
         effects.reactor.intake = effects
             .reactor
             .intake
-            .min(factor(&system.id, DamageBinding::Intake));
+            .min(factor(system, DamageBinding::Intake));
         effects.reactor.cooling = effects
             .reactor
             .cooling
-            .min(factor(&system.id, DamageBinding::Cooling));
+            .min(factor(system, DamageBinding::Cooling));
     }
     effects.consumers = power
         .config()
@@ -189,21 +185,14 @@ pub fn tick_power_system(
             .filter(|(_, group)| group.cut)
             .map(|(id, _)| id.clone())
             .collect();
-        let mut effects = hardware_effects(&power.0, physical, sources);
+        let selection = power.0.adapter_selection();
+        let mut effects = hardware_effects(&power.0, &selection, physical, sources);
         if fitting_profile
             .zip(fitting_state)
             .is_some_and(|(profile, state)| {
-                power
-                    .0
-                    .ship_config()
-                    .systems
-                    .iter()
-                    .filter(|system| {
-                        system.kind == crate::ship::system_registry::POWER_REACTOR_KIND
-                    })
-                    .any(|system| {
-                        crate::resources::fitting_server::unavailable(profile, state, &system.id)
-                    })
+                selection.reactor_systems().any(|system| {
+                    crate::resources::fitting_server::unavailable(profile, state, system)
+                })
             })
         {
             effects.reactor_operation = 0.0;
@@ -240,29 +229,14 @@ pub fn tick_power_system(
         if let Some(mut state) = brownout {
             state.locked_changed |= before != after;
         }
-        for kind in [
-            crate::ship::system_registry::HELM_RADAR_KIND,
-            crate::ship::system_registry::TACTICAL_RADAR_KIND,
-            crate::ship::system_registry::SENSOR_RADAR_KIND,
-            crate::ship::system_registry::NAVIGATION_KIND,
-        ] {
-            let ids: Vec<_> = power
-                .0
-                .ship_config()
-                .systems
-                .iter()
-                .filter(|system| system.kind == kind)
-                .map(|system| system.id.clone())
-                .collect();
-            for id in ids {
-                // Disabled machinery performs no work; a restored setting can resume.
-                let activity = if sources.is_some_and(|sources| sources.0.is_offline(&id)) {
-                    0.0
-                } else {
-                    1.0
-                };
-                let _ = power.0.work_continuous(&id, time.delta_secs(), activity);
-            }
+        for id in selection.passive_work_systems() {
+            // Disabled machinery performs no work; a restored setting can resume.
+            let activity = if sources.is_some_and(|sources| sources.0.is_offline(id)) {
+                0.0
+            } else {
+                1.0
+            };
+            let _ = power.0.work_continuous(id, time.delta_secs(), activity);
         }
     }
 }
@@ -270,3 +244,10 @@ pub fn tick_power_system(
 #[cfg(test)]
 #[path = "energy_runtime_effects_tests.rs"]
 mod effects_tests;
+
+#[cfg(test)]
+#[path = "energy_runtime_selection_reference.rs"]
+mod selection_reference;
+#[cfg(test)]
+#[path = "energy_runtime_selection_tests.rs"]
+mod selection_tests;

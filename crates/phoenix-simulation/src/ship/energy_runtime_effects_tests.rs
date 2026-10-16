@@ -59,14 +59,14 @@ fn runtime_derives_independent_actual_link_effects_without_changing_authored_req
     }
     damage.state.validate(&damage.definition).unwrap();
     let before = power.capture_continuation();
-    let effects = hardware_effects(&power, Some(&damage), None);
+    let effects = hardware_effects(&power, &power.adapter_selection(), Some(&damage), None);
     assert_eq!(effects.consumers[&consumer].intake, 0.0);
     assert_eq!(effects.consumers[&consumer].cooling, 0.5);
     assert_eq!(effects.reactor_operation, 0.5);
     assert_eq!(effects.reactor.intake, 1.0);
     assert_eq!(power.capture_continuation(), before);
     assert_eq!(
-        hardware_effects(&power, None, None),
+        hardware_effects(&power, &power.adapter_selection(), None, None),
         crate::resources::energy_network::EnergyHardwareEffects {
             consumers: power
                 .config()

@@ -161,7 +161,24 @@ pub struct PowerTickResult {
     pub coolant_withdrawals: BTreeMap<String, i64>,
 }
 
+/// Read-only selections from the accepted immutable definition. Holding this
+/// handle across a payment borrows IDs without copying configuration or strings.
+#[derive(Clone)]
+pub struct EnergyAdapterSelection(std::sync::Arc<CompiledEnergyDefinition>);
+impl EnergyAdapterSelection {
+    pub fn reactor_systems(&self) -> impl Iterator<Item = &SystemId> {
+        self.0.reactor_systems()
+    }
+    pub fn passive_work_systems(&self) -> impl Iterator<Item = &SystemId> {
+        self.0.passive_work_systems()
+    }
+}
+
 impl PowerSystem {
+    pub fn adapter_selection(&self) -> EnergyAdapterSelection {
+        EnergyAdapterSelection(std::sync::Arc::clone(&self.definition))
+    }
+
     pub fn from_energy(hardware: EnergyConfigSection, ship: ShipConfig) -> Result<Self, String> {
         let network = EnergyNetworkState::new(&hardware, &ship)?;
         let last_intake_per_sec = network

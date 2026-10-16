@@ -825,3 +825,86 @@ fn checked_ingress_still_rejects_invalid_findings_transactionally() {
     state.owner = SystemId("foreign".into());
     assert!(state.projection(&p, 0, 0.5).is_err());
 }
+
+#[test]
+fn route_projection_and_iteration_match_resolver_for_own_shared_unknown_and_expiry() {
+    use super::super::sharing::{export_samples, receive_samples};
+    let p = profile();
+    let mut state = BroadTrackState::new(&p);
+    let mut ghost = reported(&p, 0);
+    ghost.source = synthetic_source("route-index-test").unwrap();
+    ghost.observation.as_mut().unwrap().subject = ObservationSubject::Unknown;
+    ghost.selectable = false;
+    state
+        .advance(&p, 2, 0.5, 1.0, &[sample("own", 20.0), ghost])
+        .unwrap();
+    let mut remote = BroadTrackState::new(&p);
+    remote
+        .advance(&p, 2, 0.5, 1.0, &[sample("remote", 200.0)])
+        .unwrap();
+    // Two independent original observers can relay the same route; aliases
+    // remain separate and cannot become a unique contact_for_source shortcut.
+    for observer in ["remote-a", "remote-b"] {
+        let packets = export_samples(observer, &remote, &p, 2, 0.5).unwrap();
+        receive_samples("receiver", &mut state, &p, 2, 0.5, &packets).unwrap();
+    }
+    assert_eq!(state.tracks.len(), 4);
+    assert_eq!(state.contact_for_source("remote"), None);
+    for receive_shared in [true, false] {
+        for tick in [2, 3] {
+            let mut variant = state.clone();
+            variant.receive_shared = receive_shared;
+            variant.last_tick = Some(tick);
+            let before = variant.clone();
+            let expected: Vec<_> = variant
+                .tracks
+                .keys()
+                .filter_map(|id| {
+                    variant
+                        .resolve_current(id)
+                        .map(|route| (route, id.as_str()))
+                })
+                .collect();
+            assert_eq!(variant.current_routes().collect::<Vec<_>>(), expected);
+            let picture = variant.projection(&p, tick, 0.5).unwrap();
+            for (row, (id, track)) in picture.iter().zip(&variant.tracks) {
+                assert_eq!(&row.contact_id, id);
+                assert_eq!(
+                    row.selectable,
+                    track.selectable && variant.resolve_current(id).is_some()
+                );
+            }
+            assert_eq!(variant, before);
+        }
+    }
+}
+
+#[test]
+fn inverse_routes_keep_first_source_and_do_not_route_missing_or_unknown_rows() {
+    let p = profile();
+    let mut state = BroadTrackState::new(&p);
+    let mut ghost = reported(&p, 0);
+    ghost.source = synthetic_source("first-source-test").unwrap();
+    ghost.observation.as_mut().unwrap().subject = ObservationSubject::Unknown;
+    ghost.selectable = false;
+    state
+        .advance(&p, 2, 0.5, 1.0, &[sample("own", 20.0), ghost])
+        .unwrap();
+    let contact = state.current["own"].clone();
+    // Low-level resolver characterization, deliberately malformed canonical
+    // association; normal ingress must still reject it before installation.
+    state.current.insert("a-first".into(), contact.clone());
+    state.current.insert("z-last".into(), contact.clone());
+    state
+        .current
+        .insert("missing".into(), "absent-contact".into());
+    assert!(state.validate(&p, 2, 0.5).is_err());
+    assert_eq!(state.resolve_current(&contact), Some("a-first"));
+    let expected: Vec<_> = state
+        .tracks
+        .keys()
+        .filter_map(|id| state.resolve_current(id).map(|route| (route, id.as_str())))
+        .collect();
+    assert_eq!(state.current_routes().collect::<Vec<_>>(), expected);
+    assert_eq!(expected, vec![("a-first", contact.as_str())]);
+}

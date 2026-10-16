@@ -160,9 +160,32 @@ impl BroadTrackState {
         contacts.next().is_none().then_some(first)
     }
     pub fn current_routes(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.tracks
-            .keys()
-            .filter_map(|id| self.resolve_current(id).map(|source| (source, id.as_str())))
+        // Build this call's reverse lookup once. Entry order preserves the
+        // original resolver's first lexicographic source, even before validation
+        // rejects multiple physical sources bound to one contact.
+        let mut sources = BTreeMap::new();
+        for (source, contact) in &self.current {
+            sources.entry(contact.as_str()).or_insert(source.as_str());
+        }
+        self.tracks.iter().filter_map(move |(id, track)| {
+            if !route_subject_known(track) {
+                return None;
+            }
+            sources
+                .get(id.as_str())
+                .copied()
+                .or_else(|| self.received_route(track))
+                .map(|source| (source, id.as_str()))
+        })
+    }
+    fn received_route<'a>(&'a self, track: &'a BroadTrack) -> Option<&'a str> {
+        track
+            .received
+            .as_ref()
+            .filter(|_| self.receive_shared)
+            .filter(|received| Some(received.last_delivery_tick) == self.last_tick)?
+            .route
+            .as_deref()
     }
     pub fn validate(&self, profile: &BroadConfig, tick: u64, fixed_dt: f32) -> Result<(), String> {
         profile_valid(profile, fixed_dt)?;
@@ -755,7 +778,9 @@ impl BroadTrackState {
                         observation
                     }),
                     selectable: track.selectable
-                        && self.resolve_current(&track.contact_id).is_some(),
+                        && route_subject_known(track)
+                        && (current.contains(&track.contact_id)
+                            || self.received_route(track).is_some()),
                     observed_tick: track.observed_tick,
                     position,
                     velocity: track.velocity,
@@ -805,6 +830,12 @@ impl BroadTrackState {
             })
             .collect()
     }
+}
+fn route_subject_known(track: &BroadTrack) -> bool {
+    !track
+        .observation
+        .as_ref()
+        .is_some_and(|observation| observation.subject == ObservationSubject::Unknown)
 }
 fn report_metadata_valid(observation: &ObservationMetadata, tick: u64) -> bool {
     observation.is_valid()

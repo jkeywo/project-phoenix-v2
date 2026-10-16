@@ -237,7 +237,7 @@ pub(super) fn dispatch_order(
         request,
         mission_requests,
     )
-    .unwrap_or_else(|| request.amount.min(deficit));
+    .unwrap_or(request.amount.min(deficit));
     if amount <= 0 {
         return Err("local stock target has no remaining deficit".into());
     }

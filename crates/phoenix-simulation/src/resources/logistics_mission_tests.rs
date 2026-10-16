@@ -96,7 +96,7 @@ fn views(
 fn current_frontier_and_permitted_original_scope_must_match_exactly() {
     let (_, _, _, _, row) = fixture();
     assert_eq!(
-        intersect(vec![row.clone()], &[row.clone()]),
+        intersect(vec![row.clone()], std::slice::from_ref(&row)),
         vec![row.clone()]
     );
     for mutation in 0..5 {
@@ -148,7 +148,7 @@ fn exact_mission_dispatch_uses_real_stock_and_cannot_repeat_or_raise_stored_targ
         &mut state.0,
         1,
         &request(&row),
-        &[row.clone()],
+        std::slice::from_ref(&row),
         &BTreeSet::new(),
         Some(&mut inventory),
         Some(&mut magazine),
@@ -195,7 +195,7 @@ fn missing_stock_feed_partial_supply_incoming_and_closed_route_cannot_enable_mis
     let stocks = endpoint_view(&profile.0, Some(&inventory), Some(&magazine)).unwrap();
     let permitted = views(&profile, &state, &stocks);
     assert_eq!(
-        candidate(&profile, &state, &permitted, &[row.clone()]),
+        candidate(&profile, &state, &permitted, std::slice::from_ref(&row)),
         Some(request(&row))
     );
     let missing = permitted
@@ -203,7 +203,7 @@ fn missing_stock_feed_partial_supply_incoming_and_closed_route_cannot_enable_mis
         .filter(|store| store.id != row.source)
         .cloned()
         .collect::<Vec<_>>();
-    assert!(candidate(&profile, &state, &missing, &[row.clone()]).is_none());
+    assert!(candidate(&profile, &state, &missing, std::slice::from_ref(&row)).is_none());
     let from = profile.0.store(&row.source).unwrap().endpoint.clone();
     let to = profile.0.store(&row.destination).unwrap().endpoint.clone();
     let mut unavailable = stocks.clone();
@@ -215,7 +215,7 @@ fn missing_stock_feed_partial_supply_incoming_and_closed_route_cannot_enable_mis
         &unavailable,
         &BTreeSet::new(),
         &request(&row),
-        &[row.clone()]
+        std::slice::from_ref(&row)
     )
     .is_none());
     let mut incoming = stocks.clone();
@@ -231,14 +231,14 @@ fn missing_stock_feed_partial_supply_incoming_and_closed_route_cannot_enable_mis
         &incoming,
         &BTreeSet::new(),
         &request(&row),
-        &[row.clone()]
+        std::slice::from_ref(&row)
     )
     .is_none());
     assert!(candidate(
         &profile,
         &state,
         &views(&profile, &state, &incoming),
-        &[row.clone()]
+        std::slice::from_ref(&row)
     )
     .is_none());
     let blocked = profile
@@ -255,7 +255,7 @@ fn missing_stock_feed_partial_supply_incoming_and_closed_route_cannot_enable_mis
         &stocks,
         &blocked,
         &request(&row),
-        &[row.clone()]
+        std::slice::from_ref(&row)
     )
     .is_none());
     let mut wrong_amount = request(&row);
@@ -266,7 +266,7 @@ fn missing_stock_feed_partial_supply_incoming_and_closed_route_cannot_enable_mis
         &stocks,
         &BTreeSet::new(),
         &wrong_amount,
-        &[row.clone()]
+        std::slice::from_ref(&row)
     )
     .is_none());
     let mut wrong_resource = row.clone();

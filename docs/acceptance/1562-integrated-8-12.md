@@ -1,6 +1,6 @@
 # PRD 1562 — bounded verification record for increments 8–12
 
-**Draft evidence snapshot, 16 October 2026. Verification remains open.**
+**Targeted verification completed with failures, 16 October 2026. Work paused; automated exits 8–12 remain open.**
 
 This records the current targeted verification pass, not a release, an all-green
 suite or acceptance of all five increments. The original broad native selection failed;
@@ -9,14 +9,20 @@ Browser/native-device acceptance, performance/balance comparison and station
 activity evidence are separate obligations. Root owns sequential native
 execution and the eventual combined integration gates.
 
-Latest recorded boundary: the selected owner union at `8ac62cce` / rules 0.74
-passes **1618/1618**. After the empty motion-plan restore correction, the eight
-host targets at `e027e568` / rules 0.75 pass **19/19**, with the two selected energy
-resume checks also passing. Earlier failed results remain below at their tested
-revisions. Matching-host browser/Workshop, balance/performance and final
-integration acceptance remain open; these targeted native passes do not close
-all five increments. The user requested finishing verification of 8-12 and then
-pausing; implementation work for increments 13-24 remains parked.
+Latest recorded boundary: selected native owners **1618/1618**, current whole-host
+checks **19/19**, selected energy resume **2/2**, matching-host browser **15/15**
+and real Workshop render **3/3** pass at the separately pinned sources below.
+The current same-machine baseline at `9bd7bab6` passes all six determinism checks,
+but the unchanged Cruiser matrix **fails 11/16 checks**: zero wins, seven draws
+and thirteen timeouts. Headless tick cost also increases materially. These
+failures prevent an automated exit; no balance threshold was changed.
+
+The requested verification runs and a bounded combat diagnostic are collected.
+Work is now paused under the user's latest instruction. Increments 13–24 remain
+parked, with their work preserved. Formal closure, Human/device acceptance and
+pre-push integration gates are not claimed. The compact machine-readable
+[comparison receipt](../gameplay-redesign/implementation/verification-8-12.json)
+contains source hashes, timing samples, activity comparisons and failed checks.
 
 ## Tested source boundaries
 
@@ -367,3 +373,146 @@ substitute for these outstanding surfaces. No full CI pass, push, formal
 increment closure or completion through 24 is claimed. Finish the agreed 8-12
 verification and necessary corrections, commit the evidence, then pause;
 implementation work for increments 13-24 remains parked.
+
+## Final browser and Workshop results
+
+The matching development bundle was built at `ded6653a`: host WASM, client and
+Workshop preview WASM, using runtime `e027e568` / rules 0.75 plus the WASM-only
+message import correction `a794ac49`. The missing import was an actual build
+failure, retained in `.phoenix/verify-8-12-wasm-host-build-current.log`; it did
+not require a simulation behaviour change. Successful build logs and hashes are
+in `.phoenix/verify-8-12-wasm-host-build-typed-imports.log`,
+`.phoenix/verify-8-12-matching-client-build.log`,
+`.phoenix/verify-8-12-wasm-preview-build.log`,
+`.phoenix/verify-8-12-copy-preview.log` and
+`.phoenix/verify-8-12-browser-artifact-receipt.json`. This is a development
+browser build, not the release/deployment gate.
+
+The complete matching-host browser selection at test source `dbfd0027` passes
+**15/15 in 3.3 minutes**. It covers actual two/four-seat Energy journeys,
+Engineering projection and isolation, browser refresh/replacement and sever/revive,
+actual save export/import and refusal, damage popup and paid firing with restraint.
+Evidence: `.phoenix/verify-8-12-final-host-browser.log` and the corresponding
+`-artifacts` directory. Earlier 12/15 and diagnostic failures remain in their
+logs. Corrections select the active Console, assert the dated Sensors restraint
+record, and fire the currently ready bank for the exact target. They do not
+bypass ownership, grant private target knowledge or change weapon geometry.
+
+Workshop initially failed to start because the build copy list omitted eight
+existing required modules. Packaging fix `2ea96d97` adds those modules;
+`.phoenix/verify-8-12-workshop-startup-rebuild.log` records the successful rebuild.
+The initial run has one failure and two interrupted cases, not three failures.
+Two subsequent three-case attempts pass factions and disposable Test but fail
+resource-authoring validation. The first fixture duplicated the new primary
+transfer resource in its additional choices; the second tried to change exact
+fitted-default machinery without authoring a sidegrade. Both guards correctly
+refuse the edits. Fixture corrections `956a385c` and `9bd7bab6` retain those
+guards and select actual unfitted weapon/Energy hardware for positive edits.
+
+The final complete real three-case render selection at `9bd7bab6` passes
+**3/3 in 6.1 minutes**: resources 5.1 minutes, factions 19.0 seconds and disposable
+Test 35.1 seconds. It exercises accepted resource/Energy/shield/interior/damage
+and weapon edits, undo/history, reload/export, actual mesh Preview and disposable
+Test. The Test uses unsaved captured source and retires without Live storage or
+delivery. Evidence: `.phoenix/verify-8-12-workshop-unfitted-render.log` and
+`.phoenix/verify-8-12-workshop-unfitted-artifacts`. Earlier attempts remain in
+`.phoenix/verify-8-12-current-workshop-render.log`,
+`.phoenix/verify-8-12-current-workshop-render-retry.log` and
+`.phoenix/verify-8-12-final-workshop-render.log`.
+
+## Same-machine baseline comparison at 9bd7bab6
+
+The source and revision stayed fixed throughout the baseline and Cruiser matrix.
+The wrapper builds and copies the actual measure-profile executable, then hashes
+it and the runtime/content sources. Current protocol/snapshot/rules are **45/88/0.75**.
+The machine, measure profile and feature set match increment 0. Unrelated
+untracked `output/` is preserved; runtime/content sources are clean.
+
+- Source: `9bd7bab63230f1e653802cc995d15a3353d5076c`.
+- Runtime/content SHA-256: `66b54ee0734a6f19822c6e51912d310658d3b341c73238303e085872fc4b5cb4`.
+- Executable SHA-256: `72a004dbc0467cee5b39267baa4ecd705bfe5a62449708397a3aaa038a59afa8`.
+- Original baseline: `8d8143e9`, retained in `implementation/baseline.json`.
+
+Both 60-second, seed-42 scenarios pass byte-identical repeated reports,
+record/replay checkpoints and agreement between all three timing-run
+continuations: **6/6 checks, command exit 0**. Raw artifacts are in
+`.phoenix/redesign-baseline/2026-10-16-verify-8-12`; the command log is
+`.phoenix/verify-8-12-baseline-capture.log`.
+
+Each timing capture excludes 300 warm-up ticks and retains 3301 samples. The
+following values are medians across three captures, in milliseconds:
+
+| Scenario | Increment 0 p50 | Current p50 | Increment 0 p95 | Current p95 |
+|---|---:|---:|---:|---:|
+| Combat Test | 1.3267 | 5.3880 | 1.8900 | 9.0916 |
+| Falling Skyway | 1.1589 | 4.0296 | 1.5565 | 5.4523 |
+
+No measured tick exceeds 16.67 ms across **19,806** retained samples. Nevertheless,
+median and p95 tick costs increase roughly **3.5–4.8 times**; this is a measured
+regression, not a performance acceptance. These are current integrated-headless
+results, including already-landed later mechanisms; they do not isolate the
+increment responsible or measure rendering, real networking or devices.
+
+The receipt also compares the actual Backfill command buckets and combat AARs.
+For Combat Test, Helm commands rise 11,139 to 16,044, Tactical 11 to 489 and
+Science falls 34 to 10. Falling Skyway Helm commands rise 5397 to 10,794.
+All Human counts are zero. Counts show changed autonomous behaviour; they do
+not establish player engagement, communication, balanced workload or flow.
+
+## Unchanged Cruiser balance: failed
+
+The exact captured binary runs all four opponents across five seeds, for
+120 simulation seconds per duel. The configuration hash still matches increment
+0 exactly: `c6946bde4e6bfb9b702a9bb2dd1da38a59297ec5c1ef2a3eaf25bf89177be5ae`.
+No threshold, opponent, seed or duration changed.
+
+| Opponent | Wins | Draws | Timeouts | Mean damage margin |
+|---|---:|---:|---:|---:|
+| Destroyer | 0 | 1 | 4 | +111.3290 |
+| Cruiser | 0 | 1 | 4 | +186.5218 |
+| Patrol | 0 | 5 | 0 | +97.5028 |
+| Warhawk | 0 | 0 | 5 | −324.9360 |
+
+The old baseline won **20/20**. Current results are **0 wins, 0 losses, 7 draws,
+13 timeouts**, with zero runner failures. Of sixteen checks, five pass, seven
+explicitly fail and four TTK checks have no qualifying kills/data. The runner
+correctly treats those four missing-data checks as failures: **11/16 fail,
+command exit 1**. Zero runner failures is not a balance pass.
+
+Evidence: `.phoenix/verify-8-12-cruiser-balance.log`, plus `receipt.json`,
+`merged.json`, `summary.md` and every source AAR under
+`.phoenix/redesign-baseline/2026-10-16-verify-8-12-cruiser`.
+
+### Bounded diagnostic, without tuning
+
+The same captured binary and Destroyer seed 1 run for 30 simulation seconds with
+NDJSON output, exit 0. Its four beams last **0.9000, 2.0167, 0.1500 and 1.6500
+seconds**, rather than completing their authored nominal six-second cycles.
+At sampled cutoff boundaries the phaser reserves remain above 24/30 and no
+thermal stop is reported. Two aft cutoffs cross the authored 40-unit range;
+fore tracking errors change around the authored finite turret tolerance. This
+makes engagement geometry and mount tracking concrete next investigations.
+
+The 120-second seed-1 AAR has ten beam starts, 273 damage dealt, no torpedo launch
+and zero enemy hull damage. That average damage is below the enemy's base shield
+regeneration. Source review found no established free-regeneration, runaway
+repair or blanket torpedo-loading defect. Dated measured aiming is another
+candidate, but this trace does **not** establish a single exclusive cause or a
+safe tuning value. No simulation changes or balancing edits follow this probe.
+Raw stream, summary, bounded beam/cutoff extracts and file hashes are retained in
+`.phoenix/verify-8-12-duel-probe*` and the comparison receipt.
+
+## Paused disposition
+
+The agreed automated verification runs are collected and their necessary build,
+restore, packaging and fixture corrections are committed. **The automated exit
+for increments 8–12 has not passed:** unchanged combat balance fails, and the
+measured performance regression needs assessment. Further balance diagnosis must
+separate already-landed sensing/mount/AI changes from resource and damage changes
+before altering authored combat values. No threshold is relaxed to manufacture
+an exit.
+
+Work is paused as requested; increments 13–24 and their isolated unfinished work
+remain parked. Initial automated exits stay **1–7**, and formal closure stays
+**increment 0 only**. Human/device and station-workload acceptance remain separate.
+No full workspace/pre-push gate, push or release is claimed.

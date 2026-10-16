@@ -51,20 +51,26 @@ in **6.1 minutes**: resources 5.1 minutes, factions 19.0s and disposable Test
 mesh Preview and disposable Test. Its log is
 `.phoenix/verify-8-12-workshop-unfitted-render.log`.
 
-The measurement binary compiles (12m 30s), but no current balance or timing
-capture has passed. Pinned PASM at `e027e568` passes validation, scan and
-traceability; bounded affected-wiki checks pass separately. The earlier client
-121/121, projected-component Chromium 43/43 and affected authoring 53/53 results
-retain their original boundaries. Actual performance/balance, station workload,
-Human/device acceptance and the required
-pre-push integration gates remain open. Original failures, retries and pins are
-retained in [the verification record](../../acceptance/1562-integrated-8-12.md)
-and [the integration checkpoint](parallel-checkpoint.json).
+The current same-machine baseline at `9bd7bab6` passes **6/6** repeated-report,
+replay and continuation checks. Timings are now collected: median/p95 tick cost
+increases roughly **3.5–4.8 times**, although no retained tick exceeds 16.67 ms.
+The unchanged Cruiser matrix **fails 11/16 checks**: **0 wins, 7 draws and 13
+timeouts**, versus the baseline's 20 wins. No threshold was changed. The bounded
+unchanged-binary diagnostic shows short beam windows with available Energy;
+engagement geometry/mount tracking and dated aiming need a controlled follow-up,
+without claiming one exclusive cause. See the [comparison receipt](verification-8-12.json)
+and [verification record](../../acceptance/1562-integrated-8-12.md).
 
-No increment closure or push is claimed. Increments 8-12 have not been added to
-the initial automated exits. Complete their agreed verification and necessary
-fixes, commit the evidence, then pause. Later lanes and their isolated unfinished
-work remain parked.
+Pinned PASM at `e027e568` passes validation, scan and traceability; affected-wiki
+checks pass separately. The earlier client 121/121, projected-component Chromium
+43/43 and affected authoring 53/53 retain their original source boundaries.
+
+**Work is paused.** The requested targeted verification is collected, but balance
+failure prevents an automated exit for 8–12; performance also needs assessment.
+Initial automated exits remain 1–7 and formal closure remains increment 0 only.
+Human/device and station-workload acceptance remain separate. The required final
+integration gates must pass before any push; no push or full CI pass is claimed.
+Increments 13–24 and their isolated unfinished work stay parked.
 
 | Increment | Implementation state | Material remaining work |
 |---|---|---|
@@ -76,11 +82,11 @@ work remain parked.
 | 5 — Jobs/teams | Implemented; automated exit passed | Physical-device and human acceptance. |
 | 6 — Stores/services | Implemented; automated exit passed | Physical-device and human acceptance. |
 | 7 — Configurable weapons | Implemented; initial automated exit passed | Retained-beam regression fix integrated; native retry and human/device acceptance. |
-| 8 — Energy/thermal | Core implemented; selected owner union and current host/energy continuation checks pass; matching-browser Energy and real Workshop resource journey pass | Actual performance/balance and station workload, Human/device acceptance and pre-push integration gates. |
-| 9 — Shield energy | Core implemented; current paid whole-host JSON360/no-write proof, corrected owners and real Workshop resource journey pass | Balance/workload, Human/device acceptance and full integration gates. |
+| 8 — Energy/thermal | Core implemented; selected owner union and current host/energy continuation checks pass; matching-browser Energy and real Workshop resource journey pass | Failed unchanged Cruiser balance; assess measured performance regression; station workload, Human/device acceptance and pre-push gates. |
+| 9 — Shield energy | Core implemented; current paid whole-host JSON360/no-write proof, corrected owners and real Workshop resource journey pass | Failed unchanged Cruiser balance; workload, Human/device acceptance and integration gates. |
 | 10 — Interiors/routes | Core implemented; current physical-route host target passes 3/3 with strict shipped-content corpus; real Workshop resource/layout edit and Preview/Test journey passes | Supported Human/team acceptance and full integration gates. |
 | 11 — Damage/restoration | Core implemented; corrected owners and current actual damage/route/repair continuation targets pass; matching-browser damage/repair/reconnect and real Workshop resource journey pass | Human/AI station workload and device acceptance, full integration gates. |
-| 12 — Logistics/production | Finite stock/delivery/production/recovery/port journeys and current host continuations pass, including actual intact salvage and AI Repair installation; full real Workshop resource journey passes | Representative resource/workload and performance/balance evidence, Human/device acceptance and full integration gates; coolant recycling remains provisional. |
+| 12 — Logistics/production | Finite stock/delivery/production/recovery/port journeys and current host continuations pass, including actual intact salvage and AI Repair installation; full real Workshop resource journey passes | Failed unchanged Cruiser balance and measured performance regression; resource/workload, Human/device acceptance and integration gates; coolant recycling remains provisional. |
 | 13 — Equipment fitting | Beam/reactor fitting, physical spares/refit/salvage and personal favourites implemented | Personal-plan disposable rehearsal and measured whole-fit trial code is integrated with separate owner evidence; full-host/native-device and broader fitting acceptance remain. |
 | 14 — Sensing/environment | Substantial implementation | Knowledge, presentation, balance and full acceptance. |
 | 15 — Layered combat | Combat core implemented; shared loaders/priorities integrated and accepted-recipe/pure handling checks pass | Physical marking code and accepted recipe/launcher owner evidence are integrated; loader/marking full-host continuation, broader illumination/link-loss/payload journeys, combat styles, balance/workload and full acceptance remain. |

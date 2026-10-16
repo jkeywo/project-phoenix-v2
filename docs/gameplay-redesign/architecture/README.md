@@ -6,7 +6,7 @@ Start with the [feature reconciliation report](./feature-reconciliation.html): t
 
 ## Current implementation scope
 
-The user approved the [incremental implementation roadmap](../implementation/index.html) on 13 October 2026. Implementation follows dependency-ordered increments with the later approved isolated validation lanes; active work is now limited to finishing increments 8-12 verification before pausing. The [canonical ledger](../implementation/migration-ledger.json) accounts for every catalogue entry and records completion evidence.
+The user approved the [incremental implementation roadmap](../implementation/index.html) on 13 October 2026. Implementation follows dependency-ordered increments with the later approved isolated validation lanes; the requested increments 8-12 verification is collected with balance failures and work is now paused. The [canonical ledger](../implementation/migration-ledger.json) accounts for every catalogue entry and records completion evidence.
 
 Preserve the selected mechanisms and ownership boundaries. Detailed System rules, schemas and tuning are specified when their increment is prepared; do not restart the earlier broad interview. Adopt the relevant design into PASM before runtime work, and keep shipped content functional. Increment 0 changes planning/design records and captures evidence without changing gameplay.
 
@@ -29,15 +29,17 @@ real resource/factions/disposable-Test render selection passes at `9bd7bab6`:
 mesh Preview/Test. This is the actual Workshop browser journey, not all authored
 or Human workflows.
 
-Measurement compilation passes, but current timing/balance captures, Human/device
-and station-workload acceptance, and required pre-push gates remain open.
+The current same-machine baseline at `9bd7bab6` passes six determinism checks,
+but unchanged Cruiser balance fails 11/16 checks (zero wins, seven draws and
+thirteen timeouts). Measured headless median/p95 tick costs rise 3.5–4.8 times,
+with no observed 16.67 ms overruns. These results block automated exits 8–12;
+no thresholds changed. Work is now paused and increments 13–24 remain parked.
+Human/device, station-workload and pre-push integration acceptance stay separate.
 Follow the [implementation summary](../implementation/README.md),
-[verification record](../../acceptance/1562-integrated-8-12.md) and
+[verification record](../../acceptance/1562-integrated-8-12.md),
+[comparison receipt](../implementation/verification-8-12.json) and
 [source-pinned checkpoint](../implementation/parallel-checkpoint.json).
-Historical diagrams and the baseline orientation table below are design inputs.
-Finish the remaining increments 8-12 verification, commit its evidence, then
-pause as requested on 16 October. Increments 13-24 remain parked; no new automated
-exit, formal increment closure or push is claimed.
+Historical diagrams and the baseline orientation table below remain design inputs.
 
 ## Requested outcome
 

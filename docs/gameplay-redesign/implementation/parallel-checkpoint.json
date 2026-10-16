@@ -2,7 +2,7 @@
   "date": "2026-10-16",
   "status": "partial",
   "current_summary": {
-    "source": "Runtime e027e568 (protocol 45 / snapshot 88 / rules 0.75); scoped status through 9bd7bab6. Selected native owners, current host/browser selections and the complete three-case Workshop render selection pass. Actual performance/balance and wider acceptance remain open. Finish verification of 8-12 and pause; increments 13-24 are parked.",
+    "source": "Runtime e027e568 (45/88/0.75); matching browser and Workshop selections pass. Actual baseline at 9bd7bab6 passes six determinism checks but unchanged Cruiser balance fails 11/16 with zero wins. Headless timing costs regress. Verification collected with failures; paused, no automated exits 8-12; 13-24 parked.",
     "verification_8_12": {
       "status": "open; selected native owner and host batches failed; no increment closure or push",
       "evidence_document_donor": "65bcceb4, docs/acceptance/1562-integrated-8-12.md, integrated with this checkpoint packet",
@@ -318,8 +318,8 @@
     },
     "latest_verification_8_12": {
       "cutoff_source": "9bd7bab6",
-      "status": "Targeted native, matching-host browser and complete Workshop render selections pass; verification remains open. No new automated exits, formal increment closure, full CI pass or push.",
-      "evidence_document": "docs/acceptance/1562-integrated-8-12.md; native evidence integrated as ded6653a; later browser and measurement results remain separately source-pinned here.",
+      "status": "Targeted verification completed with failures; work paused. Selected native/browser/Workshop checks pass, unchanged balance fails. No new automated exits, formal closure, full CI pass or push.",
+      "evidence_document": "docs/acceptance/1562-integrated-8-12.md; final source-pinned comparison in verification-8-12.json; previous failed runs and pins preserved.",
       "native_owner_union": {
         "source": "8ac62cce",
         "rules": "0.74",
@@ -406,7 +406,7 @@
             "passed": 2,
             "failed": 0,
             "seconds": [
-              34.0,
+              34,
               48.6
             ]
           }
@@ -432,9 +432,14 @@
       },
       "measurement": {
         "binary_compile": "PASS, 12m 30s",
-        "timing_capture": "Not yet collected or passed.",
-        "balance_capture": "Not yet collected or passed.",
-        "scope": "Compilation is not performance or balance evidence."
+        "source": "9bd7bab63230f1e653802cc995d15a3353d5076c",
+        "profile": "measure",
+        "timing_capture": "Collected; 6/6 seeded-report/replay/continuation checks pass. Median/p95 tick costs regress 3.5-4.8x; zero of 19806 measured ticks exceeds 16.67ms. Not performance acceptance.",
+        "balance_capture": "FAIL, exit1: 20 duels,0wins,0losses,7draws,13timeouts. Five checks pass,seven explicitly fail,four TTK checks lack data and also fail. No ratified threshold changes.",
+        "receipt": "docs/gameplay-redesign/implementation/verification-8-12.json",
+        "raw_baseline": ".phoenix/redesign-baseline/2026-10-16-verify-8-12",
+        "raw_balance": ".phoenix/redesign-baseline/2026-10-16-verify-8-12-cruiser",
+        "scope": "Same-machine headless diagnostic on integrated main including later mechanisms. No exclusive causal attribution, render/device or workload acceptance."
       },
       "pasm": {
         "source": "e027e568",
@@ -453,11 +458,12 @@
         "receipt": ".phoenix/verify-8-12-bounded-wiki-lint-e027e568.json"
       },
       "remaining": [
-        "Actual performance and balance captures",
-        "Station workload and Human/device acceptance",
-        "Required pre-push integration gates on the final integrated result"
+        "Resolve unchanged Cruiser balance failures before automated exits 8-12.",
+        "Assess measured headless performance increase.",
+        "Human/device and station-workload acceptance remain separate.",
+        "Required final integration gates before any push."
       ],
-      "pause_instruction": "Finish the agreed 8-12 verification and necessary fixes, commit evidence, then pause. Do not resume implementation through 24 without user instruction.",
+      "pause_instruction": "Paused after collecting the requested 8-12 verification with failed balance and performance regressions recorded. No implementation of 13-24 resumes without user instruction.",
       "parked_increments": [
         13,
         14,

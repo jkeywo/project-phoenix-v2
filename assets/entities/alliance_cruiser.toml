@@ -5353,11 +5353,13 @@ verb = "release_torpedo"
 # because it is doing visible work in this probe today.
 [helm_console.engines_ai.param]
 torpedo_run_range = 25.0
+torpedo_run_exit_range = 37.5
 
 [helm_console.steering_ai.param]
 combat_orbit_range = 22.0
 combat_orbit_speed = 0.7
 torpedo_run_range = 25.0
+torpedo_run_exit_range = 37.5
 
 # ── Arc-keeping and the weak-broadside flip (issue #929) ─────────────────────
 #

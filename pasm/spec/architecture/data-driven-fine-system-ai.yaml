@@ -6,6 +6,7 @@ entities:
       title: Fine-System AI Policy Schema
       summary: Defines inline per-system reactive rules, optional states, explicit priorities, named parameters, typed local memory, targeting, and explicit idle declarations for every AI-capable fine system.
       rationale:
+        - "Destroyer engagement correction: broadside torpedo holds have an authored upper-range exit, authored beyond the entry range. When the target escapes that band and no rounds remain in flight, both axes return to ordinary acquisition. This uses existing target/range/flight facts and does not grant extra knowledge or alter damage."
         - "[ai] AI behaviour belongs to the fine system that owns the operated capability rather than a ship-wide combat controller."
         - Stateless systems should not acquire artificial lifecycle states merely to use the common evaluator.
         - "[ai] Designer-tunable behaviour values belong in entity TOML rather than Rust branches or hidden runtime defaults."

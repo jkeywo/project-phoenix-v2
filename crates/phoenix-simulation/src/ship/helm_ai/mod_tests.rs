@@ -1175,6 +1175,35 @@ fn ai_helm_impulse_cancels_when_the_target_is_close() {
     );
 }
 
+/// Losing the destination for a live objective must release the automatic drive.
+#[test]
+fn ai_helm_impulse_cancels_when_live_destination_is_lost_but_not_under_human_control() {
+    use crate::ship::impulse::ImpulsePhase;
+    for phase in [ImpulsePhase::Charging, ImpulsePhase::Active] {
+        for source in [ControlSource::Ai, ControlSource::Human] {
+            let mut app = impulse_ai_app(reach_scored_objective("missing-anchor", 10.0));
+            let mut state = crate::ship::impulse::ImpulseState::new();
+            state.phase = phase;
+            set_ship_impulse(&mut app, state);
+            set_impulse_command(&mut app, phase);
+            set_fine_control_source(
+                &mut app,
+                crate::ship::system_registry::helm_impulse_system_id(),
+                source,
+            );
+            tick(&mut app);
+            assert_eq!(
+                get_impulse_command(&mut app),
+                if source == ControlSource::Ai {
+                    ImpulsePhase::Idle
+                } else {
+                    phase
+                }
+            );
+        }
+    }
+}
+
 /// AC3: `ai_helm_impulse` is `AiHighFidelity`-scoped. The demoted ship keeps
 /// its `ImpulseCommand` here only so a stray write would be observable.
 #[test]
@@ -10683,6 +10712,9 @@ fn a_shieldless_target_does_not_trap_the_cruiser_bow_on() {
 #[test]
 fn the_bow_hold_tracks_a_moving_target() {
     let (mut app, uuid, bogey) = opportunity_app();
+    // Keep guiding committed rounds even when the target jinks beyond the
+    // close-range entry/exit band. Uncommitted holds resume pursuit instead.
+    set_torpedoes_in_flight(&mut app, 1);
     let facing = bogey_facing_index(&mut app, bogey);
     set_bogey_arc_online(&mut app, bogey, facing, false);
     // Settle onto the bow-on solution first, so what follows is the hold
@@ -12142,4 +12174,34 @@ fn fixture_control_sources_survive_console_host_resolution() {
                 .operate_ai
         );
     }
+}
+
+#[test]
+fn torpedo_hold_resumes_pursuit_after_target_escapes_but_finishes_committed_rounds() {
+    let (mut app, uuid, bogey) = opportunity_app();
+    app.world_mut()
+        .entity_mut(bogey)
+        .remove::<crate::server_app::ShipShields>();
+    tick_twice(&mut app);
+    assert_eq!(steering_state(&mut app), "torpedo_run");
+    set_torpedoes_in_flight(&mut app, 1);
+    let pose = ship_pose(&mut app);
+    let exit_range = cruiser_steering_param("torpedo_run_exit_range");
+    let offset = [pose.x, 0.0, pose.z - exit_range * 1.1];
+    set_bogey(&mut app, uuid, offset, 0.0, 0.0);
+    app.world_mut()
+        .entity_mut(bogey)
+        .insert(Transform::from_xyz(offset[0], offset[1], offset[2]));
+    tick_twice(&mut app);
+    assert_eq!(steering_state(&mut app), "torpedo_run");
+    set_torpedoes_in_flight(&mut app, 0);
+    tick(&mut app);
+    assert_eq!(steering_state(&mut app), "acquire");
+    assert_eq!(engines_state(&mut app), "acquire");
+    tick_twice(&mut app);
+    assert_ne!(
+        steering_state(&mut app),
+        "torpedo_run",
+        "outside the entry band the hold must not chatter back on"
+    );
 }

@@ -3134,3 +3134,14 @@ fn degenerate_orbit_geometry_holds_the_current_heading() {
     assert!(steering.is_finite());
     assert_eq!(steering, 0.0);
 }
+
+#[test]
+fn impulse_decide_releases_steering_when_target_moves_out_of_alignment() {
+    use crate::ship::impulse::ImpulsePhase;
+    for phase in [ImpulsePhase::Charging, ImpulsePhase::Active] {
+        for target in [[500.0, 0.0, 0.0], [0.0, 0.0, 500.0]] {
+            let input = impulse_input([0.0, 0.0], 0.0, target, phase, 200.0, 40.0);
+            assert_eq!(decide_impulse(&input), ImpulseDecision::Cancel);
+        }
+    }
+}

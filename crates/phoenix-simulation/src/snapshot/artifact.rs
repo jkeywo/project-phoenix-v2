@@ -656,7 +656,9 @@ pub const SNAPSHOT_FORMAT: u32 = 89;
 /// "0.75" replaces an empty saved Helm motion-plan frontier over bootstrap state.
 /// "0.76" respects authored shield-focus capability and measured Helm fallbacks,
 /// restores fixed Cruiser fore beams, and counts CLI duel neutralizations.
-pub const SIMULATION_RULES: &str = "0.76";
+/// "0.77" releases AI impulse when pursuit loses its target or alignment.
+/// Broadside torpedo holds resume approach after an uncommitted target escapes.
+pub const SIMULATION_RULES: &str = "0.77";
 
 /// The authored data, computed rather than remembered.
 ///

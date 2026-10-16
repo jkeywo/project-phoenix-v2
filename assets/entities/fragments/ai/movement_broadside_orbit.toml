@@ -446,6 +446,7 @@ rule = []
 # fine systems and neither may read the other's memory.
 engage_range = 220.0
 torpedo_run_range = 50.0
+torpedo_run_exit_range = 75.0
 # Minimum `target_facing_shield_down` reading the bow hold demands. 0.0 = any —
 # see the header. A hull that wants the Harrow's stricter reading authors 1.0.
 # Zero also permits an unobserved shield; it does not invent a shield reading.
@@ -550,6 +551,13 @@ id = "torpedo_run"
   to = "acquire"
   when = "fact(target_valid) < 1"
 
+  # A close-range opportunity is no longer a reason to sit still after
+  # the target escapes. Keep the bearing while committed rounds are in flight.
+  [[helm_console.engines_ai.state.transition]]
+  priority = 18
+  to = "acquire"
+  when = "fact(range_to_target) > param(torpedo_run_exit_range) and fact(torpedoes_in_flight) < 1"
+
   # THE WINDOW CLOSED — dead unless the hull demanded one (`torpedo_run_shield_gap
   # = 0.0` makes `< 0` unreachable). See the header.
   [[helm_console.engines_ai.state.transition]]
@@ -651,6 +659,7 @@ combat_orbit_spiral_gain = 4.0
 # nobody chose.
 torpedo_bearing_speed = 0.0
 torpedo_run_range = 50.0
+torpedo_run_exit_range = 75.0
 # Restated on this axis because its OWN guards reference it; content validation
 # rejects an undeclared `param(...)`. See the header.
 # Zero also permits an unobserved shield; it does not invent a shield reading.
@@ -828,6 +837,13 @@ id = "torpedo_run"
   priority = 20
   to = "acquire"
   when = "fact(target_valid) < 1"
+
+  # A close-range opportunity is no longer a reason to sit still after
+  # the target escapes. Keep the bearing while committed rounds are in flight.
+  [[helm_console.steering_ai.state.transition]]
+  priority = 18
+  to = "acquire"
+  when = "fact(range_to_target) > param(torpedo_run_exit_range) and fact(torpedoes_in_flight) < 1"
 
   # THE WINDOW CLOSED — dead unless the hull demanded one (`torpedo_run_shield_gap
   # = 0.0` makes `< 0` unreachable). `torpedoes_in_flight` is the same conjunct

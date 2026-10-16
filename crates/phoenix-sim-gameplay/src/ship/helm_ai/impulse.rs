@@ -80,7 +80,15 @@ impl HelmAxisHost for ImpulseAxis {
             cx.anchors,
             cx.cursors,
             sf.weapons_target,
-        )?;
+        );
+        let Some(target_pos) = target_pos else {
+            // A live pursuit without a permitted target cannot justify continuing
+            // a drive that overrides normal throttle and reduces steering.
+            return cx.impulse.and_then(|impulse| {
+                (impulse.0.phase != crate::ship::impulse::ImpulsePhase::Idle)
+                    .then_some(SystemControlPayload::CancelImpulse)
+            });
+        };
 
         // Whether the AI may engage impulse while pursuing this objective is
         // TOML-authored per doctrine entry; an objective with no matching

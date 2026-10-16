@@ -2,8 +2,8 @@
 title: AI Helm Decomposition
 type: concept
 tags: [ai, helm, per-axis, commands, control-source, tick, lod]
-sources: [crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/ship/helm_ai/mod.rs, crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/facts.rs, crates/phoenix-simulation/src/ship/helm_ai/steering.rs, crates/phoenix-simulation/src/ship/helm_ai/lateral.rs, crates/phoenix-simulation/src/ship/helm_ai/vertical.rs, crates/phoenix-simulation/src/ship/helm_ai/impulse.rs, crates/phoenix-simulation/src/ship/helm_ai/boost.rs, crates/phoenix-simulation/src/ship/helm_ai/engines.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-sim-gameplay/src/ship/helm_planner.rs, crates/phoenix-sim-gameplay/src/ai/core.rs, crates/phoenix-simulation/src/ai/cadence.rs, crates/phoenix-simulation/src/ai/lod.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-presentation/src/server_app_render.rs]
-updated: 2026-09-01
+sources: [crates/phoenix-sim-gameplay/src/ship/helm_ai/impulse.rs, assets/entities/fragments/ai/movement_broadside_orbit.toml, crates/phoenix-simulation/src/console/helm/server.rs, crates/phoenix-simulation/src/ship/helm_ai/mod.rs, crates/phoenix-simulation/src/ship/helm_ai/surfaces.rs, crates/phoenix-sim-gameplay/src/ship/helm_ai/facts.rs, crates/phoenix-simulation/src/ship/helm_ai/steering.rs, crates/phoenix-simulation/src/ship/helm_ai/lateral.rs, crates/phoenix-simulation/src/ship/helm_ai/vertical.rs, crates/phoenix-simulation/src/ship/helm_ai/impulse.rs, crates/phoenix-simulation/src/ship/helm_ai/boost.rs, crates/phoenix-simulation/src/ship/helm_ai/engines.rs, crates/phoenix-simulation/src/ship_plugin.rs, crates/phoenix-sim-gameplay/src/ship/helm_planner.rs, crates/phoenix-sim-gameplay/src/ai/core.rs, crates/phoenix-simulation/src/ai/cadence.rs, crates/phoenix-simulation/src/ai/lod.rs, crates/phoenix-simulation/src/ai/server.rs, crates/phoenix-presentation/src/server_app_render.rs]
+updated: 2026-10-16
 ---
 
 # AI Helm Decomposition
@@ -42,6 +42,12 @@ the steering host then reads the resulting state on the following logical tick.
 The hosts call `command_admission::ai_emit::emit_ai_command`. Their payloads enter that ship's `AdmittedCommands` before `process_helm_inputs`, alongside admitted human payloads. `process_helm_inputs` is the sole normal writer of helm intent components; `apply_helm_commands` applies drive transitions; `integrate_ship_physics` consumes the complete intent set.
 
 Authority is checked at admission. Nothing downstream can distinguish a human-issued command from an AI-issued command, and no host falls back to a coarse `helm` system id.
+
+## Pursuit drive and torpedo holds
+
+The Impulse axis releases a charging or active drive when a live Helm objective no longer resolves a permitted destination. The shared impulse geometry also cancels if that destination leaves the forward alignment cone, returning steering and throttle to normal control. Human-operated drives remain outside this AI path; a lull with no Helm objective retains the existing continuity behavior.
+
+The broadside movement fragment gives both axes an authored upper-range exit from `torpedo_run`. It resumes acquisition when the target escapes `torpedo_run_exit_range` (authored beyond the entry range), provided no torpedoes remain in flight. This preserves guidance for committed rounds while preventing an uncommitted stationary hold from lasting throughout a fleeing target’s escape.
 
 ## Shared cadence
 

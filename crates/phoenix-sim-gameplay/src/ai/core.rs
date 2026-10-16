@@ -213,6 +213,7 @@ pub struct ImpulseDecisionInput {
 /// - If the target is at least `engage_distance` away AND the target bearing
 ///   is within `angle_tolerance` radians of dead-ahead AND the impulse phase
 ///   is `Idle`, return `Engage`.
+/// - A charging/active drive cancels if its target leaves that forward cone.
 /// - Otherwise return `NoChange`.
 pub fn decide_impulse(input: &ImpulseDecisionInput) -> ImpulseDecision {
     let dx = input.target_pos[0] - input.pos[0];
@@ -224,13 +225,9 @@ pub fn decide_impulse(input: &ImpulseDecisionInput) -> ImpulseDecision {
         return ImpulseDecision::Cancel;
     }
 
-    // Only engage from Idle.
-    if input.phase != crate::ship::impulse::ImpulsePhase::Idle {
-        return ImpulseDecision::NoChange;
-    }
-
-    // Must be far enough to make impulse worthwhile.
-    if dist < input.engage_distance {
+    // Distance hysteresis applies only to engagement; an active drive still
+    // needs its bearing checked when the target moves or is overshot.
+    if input.phase == crate::ship::impulse::ImpulsePhase::Idle && dist < input.engage_distance {
         return ImpulseDecision::NoChange;
     }
 
@@ -243,7 +240,13 @@ pub fn decide_impulse(input: &ImpulseDecisionInput) -> ImpulseDecision {
     let dot = fwd_x * dir_x + fwd_z * dir_z;
     let angle = simmath::atan2(cross, dot);
 
-    if angle.abs() <= input.angle_tolerance {
+    if input.phase != crate::ship::impulse::ImpulsePhase::Idle {
+        if angle.abs() > input.angle_tolerance {
+            ImpulseDecision::Cancel
+        } else {
+            ImpulseDecision::NoChange
+        }
+    } else if angle.abs() <= input.angle_tolerance {
         ImpulseDecision::Engage
     } else {
         ImpulseDecision::NoChange

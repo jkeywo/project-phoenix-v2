@@ -465,7 +465,8 @@ use super::*;
 /// `78` retains heard formation lineage and dated measured Navigation courses.
 /// `79` retains selected radio call intent; device leases and media bytes are excluded.
 /// `80` retains actually intercepted emissions, decoder selection and paid progress.
-pub const SNAPSHOT_FORMAT: u32 = 80;
+/// `81` retains held Helm course provenance and future repair dispositions/evidence.
+pub const SNAPSHOT_FORMAT: u32 = 81;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -628,7 +629,9 @@ pub const SNAPSHOT_FORMAT: u32 = 80;
 /// transient Session media cannot issue commands or alter retained state.
 /// "0.62" captures only actual paid original emissions and advances decoding
 /// through finite ordinary Comms work before publishing acquired evidence.
-pub const SIMULATION_RULES: &str = "0.62";
+/// "0.63" follows only permitted dated Navigation courses, monitors actual repair
+/// footprints and admits ordinary finite fixed beam turrets through carried craft.
+pub const SIMULATION_RULES: &str = "0.63";
 
 /// The authored data, computed rather than remembered.
 ///

@@ -92,8 +92,23 @@ fn absent_equipment_never_borrows_another_ships_or_global_weapons() {
         "assets/entities/ship_civilian_hauler.toml",
     )
     .unwrap();
-    assert!(config.weapons_console.is_none());
+    // The shared fleet policy authors a WeaponsConsole wrapper, not hardware.
+    // Check the actual equipment lists and owned capabilities independently.
+    let declaration = config.weapons_console.as_ref().unwrap();
+    assert!(declaration.ai.is_some());
+    assert!(declaration.phaser_banks.is_empty());
+    assert!(declaration.blaster_banks.is_empty());
     assert!(config.torpedoes.is_none());
+    assert!(config
+        .ship_config
+        .as_ref()
+        .unwrap()
+        .systems
+        .iter()
+        .all(|system| !matches!(
+            system.kind.as_str(),
+            "phaser_bank" | "blaster_bank" | "torpedo_tube" | "torpedo_magazine"
+        )));
     let npc = crate::entities::spawner::spawn_entity(
         &mut app.world_mut().commands(),
         &config,
@@ -107,7 +122,20 @@ fn absent_equipment_never_borrows_another_ships_or_global_weapons() {
         .world()
         .get::<crate::ship::compartment_damage::ShipDamage>(npc)
         .is_some());
-    assert!(app.world().get::<PhaserCombatConfigResource>(npc).is_none());
+    // Ordinary spawn projects that declaration as an empty local bank owner.
+    // Thus this case checks both missing LocalShip hardware and empty NPC
+    // hardware without deleting the real wrapper or manufacturing a weapon.
+    assert!(app
+        .world()
+        .get::<PhaserCombatConfigResource>(player)
+        .is_none());
+    assert!(app
+        .world()
+        .get::<PhaserCombatConfigResource>(npc)
+        .unwrap()
+        .0
+        .banks
+        .is_empty());
     assert!(app.world().get::<TorpedoSystemResource>(npc).is_none());
     assert!(app.world().get::<BlasterSystemResource>(npc).is_none());
     // Keep the compatibility tubes loaded: a fallback would be able to fire

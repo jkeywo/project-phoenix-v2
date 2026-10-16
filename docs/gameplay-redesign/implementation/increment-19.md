@@ -388,3 +388,17 @@ Workshop composition/Preview/Test. Native execution, physical-device journeys an
 full increment19 completion remain separate from source checkpoints. An identity
 emitter decoy follows this coherent turret checkpoint; finite-round and moving
 craft remain later supported compositions.
+
+
+Fixed beam-turret source checkpoint: the optional `battery_turret.toml` composes
+actual probe geometry/damage/zero-generation stock with AI-only TacticalRadar and
+one generic beam bank. The narrow accepted subtype requires explicit permitted
+feeds, actual Broad/control binding and positive finite local work costs; armed
+passenger, projectile, moving and generating recipes refuse. The actual existing
+static-point-defence spawn consumer and ordinary per-System AI are unchanged.
+Targeted source tests cover accepted inheritance and twelve invalid compositions;
+Workshop source tests exercise real catalogue/compose, stale rejection and source
+undo/redo equivalence. Independent source review passed, and strict strings passed
+with 6387 identifiers. Cargo/native and mounted Preview/Test have not been run for
+this source checkpoint. Whole-host paid acquisition/firing/recovery/JSON witnesses
+are the next evidence slice; this checkpoint does not close increment19.

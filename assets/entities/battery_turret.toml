@@ -1,0 +1,254 @@
+# Optional increment19 fixed ordinary beam ship; provisional finite-battery tuning.
+# The existing static-point-defence predicate installs its ordinary Ship substrate.
+# No behaviour, Helm, generator, projectile family or profile-specific controller.
+includes = ["physical_probe.toml"]
+name = "entity.battery_turret.name"
+
+[[system]]
+id = "tactical-radar"
+power_group = "probe"
+kind = "tactical_radar"
+console = "probe"
+ai_only = true
+
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[system.config.ai]
+root = "targeting"
+[[system.config.ai.tree]]
+id = "targeting"
+initial = "observe"
+[[system.config.ai.tree.state]]
+id = "observe"
+[[system.config.ai.tree.state.task]]
+id = "designation"
+action = { kind = "write", channel = "designate", value = { source = "fact", name = "can_operate" } }
+
+[[system]]
+id = "phaser-turret"
+power_group = "probe"
+kind = "phaser_bank"
+console = "probe"
+ai_only = true
+
+[[system.damage_component]]
+id = "operation"
+binding = "operation"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "intake"
+binding = "intake"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[system.damage_component]]
+id = "cooling"
+binding = "cooling"
+fault_dose_threshold = 20
+degraded_factor = 0.5
+full_remedy = "machinery-full"
+patch_remedy = "machinery-patch"
+field_replaceable = true
+
+[system.damage_component.susceptibility]
+physical = 1
+laser = 1
+
+[[console]]
+id = "probe"
+name = "entity.battery_turret.name"
+[[console.feed]]
+source = "sensor-radar"
+kind = "SensorRadar"
+[[console.feed]]
+source = "tactical-radar"
+kind = "TacticalRadar"
+[[console.feed]]
+source = "phaser-turret"
+kind = "PhaserBank"
+
+[weapons_console.radar]
+range = 60
+shows = ["ship", "station"]
+selects = ["ship", "station"]
+
+[weapons_console.selector]
+sources = ["radar-contacts"]
+horizon = 60
+switch_margin = 5
+eligibility = "candidate_fact(detectable) > 0 and candidate_fact(hostile) > 0"
+[[weapons_console.selector.score]]
+when = "candidate_fact(source_radar) > 0"
+weight = 1
+
+[[weapon]]
+id = "phaser-turret"
+strategy_id = "turret"
+targets = ["ship", "station"]
+[weapon.mount]
+facing_deg = 0
+fire_arc_deg = 360
+range = 40
+[weapon.delivery]
+kind = "beam"
+auto_arc_deg = 360
+damage_per_sec = 2
+duration_secs = 2
+cooldown_secs = 2
+color = [0.25, 0.75, 1, 1]
+[weapon.impact]
+damage_type = "laser"
+penetration = 2
+[[weapon.ai.rule]]
+priority = 0
+channel = "phaser_fire"
+when = "true"
+verb = "fire_phaser"
+
+# Arrays below preserve the original sensor reserve and add only real local
+# radar/weapon reserves. Zero-generation reactor and zero inflow remain inherited.
+[[energy.consumer]]
+system = "sensor-radar"
+initial_energy = 12
+initial_heat = 0
+continuous_cost_per_sec = 1
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 12
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "tactical-radar"
+initial_energy = 60
+initial_heat = 0
+continuous_cost_per_sec = 0.25
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 60
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+[[energy.consumer]]
+system = "phaser-turret"
+initial_energy = 80
+initial_heat = 0
+continuous_cost_per_sec = 2
+discrete_cost = 0
+
+[energy.consumer.reserve]
+capacity = 80
+max_intake_per_sec = 1
+passive_loss_at_full_per_sec = 0.1
+charge_heat_per_unit = 0.1
+discharge_heat_per_unit = 0.1
+passive_cooling_per_sec = 0.2
+coolant_heat_per_unit = 10
+trip_heat = 50
+recover_heat = 30
+
+[energy.consumer.coolant]
+service = "coolant"
+
+
+[interior.placements]
+tactical-radar = "probe-core"
+phaser-turret = "probe-core"
+
+[[sensing.broad]]
+reading_ticks = 120
+system = "sensor-radar"
+sample_interval_secs = 0.5
+identity_secs = 1
+classification_secs = 3
+assessment_secs = 6
+position_error = 2
+drift_error_per_sec = 0.5
+track_retention_secs = 60
+
+[[sensing.broad]]
+reading_ticks = 120
+system = "tactical-radar"
+sample_interval_secs = 0.5
+identity_secs = 1
+classification_secs = 3
+assessment_secs = 6
+position_error = 0.05
+drift_error_per_sec = 0.5
+track_retention_secs = 60
+
+[sensing.control]
+combat_lock = "tactical-radar"

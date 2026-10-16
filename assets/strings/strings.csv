@@ -6456,3 +6456,4 @@ planning.intent.consequence_pending,Accepted work monitoring,Scenario consequenc
 planning.intent.consequence_applied,Accepted work monitoring,Scenario consequence applied,,,
 planning.intent.consequence_refused,Accepted work monitoring,Scenario consequence refused,,,
 planning.intent.status_work_in_progress,Accepted work monitoring,Blocked: another team already works on this target,,,
+entity.battery_turret.name,Optional finite battery beam turret,Battery Beam Turret,Battery Beam Turret,Battery Beam Turret,source

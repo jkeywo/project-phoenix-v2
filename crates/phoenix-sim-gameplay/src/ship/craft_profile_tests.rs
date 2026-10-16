@@ -151,3 +151,128 @@ fn actual_bay_cannot_omit_its_physical_damage_or_operation_owner() {
         .retain(|component| component.binding != phoenix_model::damage::DamageBinding::Operation);
     assert!(validate_entity(&config).is_err());
 }
+
+#[test]
+fn fixed_battery_turret_uses_existing_static_ship_substrate_without_changing_sensor_probe() {
+    let turret =
+        crate::test_fixtures::load_entity_config("assets/entities/battery_turret.toml").unwrap();
+    validate_entity(&turret).unwrap();
+    assert!(turret.is_static_point_defence());
+    assert!(turret.behaviour.is_none());
+    assert!(turret.helm_console.is_none());
+    assert_eq!(
+        turret.weapons_console.as_ref().unwrap().phaser_banks.len(),
+        1
+    );
+    let bank = &turret.weapons_console.as_ref().unwrap().phaser_banks[0];
+    assert_eq!(bank.id, "turret");
+    assert_eq!(bank.beam_range, 40.0);
+    assert_eq!(bank.beam_damage_per_sec, 2.0);
+    let sensor =
+        crate::test_fixtures::load_entity_config("assets/entities/physical_probe.toml").unwrap();
+    validate_entity(&sensor).unwrap();
+    assert!(!sensor.is_static_point_defence());
+    assert_eq!(
+        turret.energy.as_ref().unwrap().reactor,
+        sensor.energy.as_ref().unwrap().reactor
+    );
+    let original_sensor = &sensor.energy.as_ref().unwrap().consumers[0];
+    assert_eq!(
+        turret
+            .energy
+            .as_ref()
+            .unwrap()
+            .consumers
+            .iter()
+            .find(|consumer| consumer.system == original_sensor.system),
+        Some(original_sensor)
+    );
+    assert_eq!(
+        turret.collider.as_ref().unwrap(),
+        sensor.collider.as_ref().unwrap()
+    );
+    assert_eq!(
+        turret.interior.as_ref().unwrap().compartments,
+        sensor.interior.as_ref().unwrap().compartments
+    );
+    assert_eq!(
+        turret.probe.as_ref().unwrap().space,
+        sensor.probe.as_ref().unwrap().space
+    );
+}
+
+#[test]
+fn fixed_turret_refuses_unsupported_hardware_and_missing_real_ai_scope_or_paid_work() {
+    use phoenix_model::console::ConsoleObservationKind;
+    let valid =
+        crate::test_fixtures::load_entity_config("assets/entities/battery_turret.toml").unwrap();
+    for fault in 0..12 {
+        let mut invalid = valid.clone();
+        let bank = SystemId("phaser-turret".into());
+        let radar = SystemId("tactical-radar".into());
+        match fault {
+            0 => {
+                invalid
+                    .ship_config
+                    .as_mut()
+                    .unwrap()
+                    .systems
+                    .iter_mut()
+                    .find(|system| system.id == bank)
+                    .unwrap()
+                    .ai_only = false
+            }
+            1 => invalid.ship_config.as_mut().unwrap().consoles[0]
+                .feeds
+                .retain(|feed| feed.kind != ConsoleObservationKind::TacticalRadar),
+            2 => invalid.ship_config.as_mut().unwrap().consoles[0]
+                .feeds
+                .retain(|feed| feed.kind != ConsoleObservationKind::PhaserBank),
+            3 => {
+                invalid
+                    .energy
+                    .as_mut()
+                    .unwrap()
+                    .consumers
+                    .iter_mut()
+                    .find(|consumer| consumer.system == bank)
+                    .unwrap()
+                    .continuous_cost_per_sec = 0.0
+            }
+            4 => {
+                invalid
+                    .energy
+                    .as_mut()
+                    .unwrap()
+                    .consumers
+                    .iter_mut()
+                    .find(|consumer| consumer.system == radar)
+                    .unwrap()
+                    .continuous_cost_per_sec = f32::NAN
+            }
+            5 => invalid
+                .probe
+                .as_mut()
+                .unwrap()
+                .passenger_berths
+                .push("occupied-berth".into()),
+            6 => invalid
+                .weapons_console
+                .as_mut()
+                .unwrap()
+                .blaster_banks
+                .push(Default::default()),
+            7 => invalid.collider.as_mut().unwrap().movable = true,
+            8 => invalid.energy.as_mut().unwrap().reactor.max_output_per_sec = 1.0,
+            9 => invalid
+                .sensing
+                .as_mut()
+                .unwrap()
+                .broad
+                .retain(|scanner| scanner.system != radar),
+            10 => invalid.sensing.as_mut().unwrap().control.combat_lock = None,
+            _ => invalid.weapons_console.as_mut().unwrap().selector = None,
+        }
+        assert!(validate_entity(&invalid).is_err(), "case {fault}");
+    }
+}

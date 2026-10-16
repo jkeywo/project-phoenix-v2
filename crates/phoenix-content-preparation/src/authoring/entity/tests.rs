@@ -1507,3 +1507,77 @@ fn a_draft_fragment_revalidates_its_read_only_consuming_root() {
     assert!(invalid[0].message.contains("unsupported_equipment"));
     assert!(invalid[0].message.contains(PARTIAL));
 }
+
+#[test]
+fn fixed_beam_turret_uses_existing_exact_source_workshop_composition_and_validation() {
+    const TURRET: &str = "assets/entities/battery_turret.toml";
+    let mut files = BTreeMap::new();
+    text_members_under("assets", &mut files);
+    let dependencies = WorkshopDependencies::default();
+    let original = files[TURRET].clone();
+    let view = catalog(&files, &dependencies, TURRET);
+    assert!(view.resolvable, "{:?}", view.error);
+    assert!(view
+        .sources
+        .iter()
+        .any(|source| source == "assets/entities/battery_probe.toml"));
+    let edit = request(
+        &files,
+        TURRET,
+        vec![Edit::Set {
+            path: vec![
+                Segment::Key("weapon".into()),
+                Segment::Index(0),
+                Segment::Key("mount".into()),
+                Segment::Key("range".into()),
+            ],
+            value_source: "32".into(),
+        }],
+    );
+    let changed = compose(&files, &dependencies, &edit).unwrap();
+    assert!(changed.contains("# No behaviour, Helm, generator"));
+    files.insert(TURRET.into(), changed);
+    assert!(
+        compose(&files, &dependencies, &edit).is_err(),
+        "held stale source cannot overwrite the new recipe"
+    );
+    let resolved = resolve_template(TURRET, &files).unwrap();
+    let accepted = EntityConfig::from_toml(&toml::to_string(&resolved.value).unwrap()).unwrap();
+    assert!(accepted.is_static_point_defence());
+    assert_eq!(
+        accepted.weapons_console.as_ref().unwrap().phaser_banks[0].beam_range,
+        32.0
+    );
+    let invalid = request(
+        &files,
+        TURRET,
+        vec![Edit::Set {
+            path: vec![
+                Segment::Key("system".into()),
+                Segment::Index(1),
+                Segment::Key("ai_only".into()),
+            ],
+            value_source: "false".into(),
+        }],
+    );
+    assert!(
+        compose(&files, &dependencies, &invalid).is_err(),
+        "unsupported human/ownerless weapon refuses before Preview/Test installation"
+    );
+    let changed_source = files[TURRET].clone();
+    files.insert(TURRET.into(), original.clone());
+    let undo: EntityConfig = resolve_template(TURRET, &files).unwrap().parse().unwrap();
+    assert_eq!(
+        undo.weapons_console.as_ref().unwrap().phaser_banks[0].beam_range,
+        40.0
+    );
+    files.insert(TURRET.into(), changed_source);
+    let redo: EntityConfig = resolve_template(TURRET, &files).unwrap().parse().unwrap();
+    assert_eq!(
+        redo.weapons_console.as_ref().unwrap().phaser_banks[0].beam_range,
+        32.0
+    );
+    assert_eq!(redo.probe, undo.probe);
+    assert_eq!(redo.energy, undo.energy);
+    assert_eq!(redo.interior, undo.interior);
+}

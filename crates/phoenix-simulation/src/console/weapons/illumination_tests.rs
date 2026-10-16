@@ -458,3 +458,102 @@ fn ordinary_compiled_science_tree_reads_explicit_mission_then_uses_shared_admiss
         .0
         .contains(&id(OWNER)));
 }
+
+#[test]
+fn consumer_payment_matches_clone_emitter_with_partial_and_receiver_refusal() {
+    for case in 0..6 {
+        let (mut actual, a, target_a) = fixture();
+        let (mut expected, b, target_b) = fixture();
+        prepare(&mut actual, a, &target_a);
+        prepare(&mut expected, b, &target_b);
+        for (world, entity) in [(&mut actual, a), (&mut expected, b)] {
+            let dt = world.resource::<Time<Fixed>>().timestep().as_secs_f32();
+            let mut power = world.get_mut::<ShipPowerSystem>(entity).unwrap();
+            let rate = power
+                .0
+                .config()
+                .consumers
+                .iter()
+                .find(|consumer| consumer.system == id(OWNER))
+                .unwrap()
+                .continuous_cost_per_sec;
+            match case {
+                1 => {
+                    power
+                        .0
+                        .network_mut()
+                        .consumers
+                        .get_mut(&id(OWNER))
+                        .unwrap()
+                        .energy = rate * dt * 0.5
+                }
+                2 => {
+                    power
+                        .0
+                        .network_mut()
+                        .consumers
+                        .get_mut(&id(OWNER))
+                        .unwrap()
+                        .energy = 0.0
+                }
+                3 => {
+                    power
+                        .0
+                        .network_mut()
+                        .consumers
+                        .get_mut(&id(OWNER))
+                        .unwrap()
+                        .thermal_stopped = true
+                }
+                4 => {
+                    power.0.network_mut().consumers.remove(&id(OWNER));
+                }
+                _ => {}
+            }
+            drop(power);
+            if case == 5 {
+                world
+                    .get_mut::<super::super::TorpedoSystemResource>(entity)
+                    .unwrap()
+                    .0
+                    .in_flight[0]
+                    .profile
+                    .receiver
+                    .as_mut()
+                    .unwrap()
+                    .accept_external_illumination = false;
+            }
+        }
+        let before = actual.get::<ShipPowerSystem>(a).unwrap().0.clone();
+        actual.run_system_once(tick).unwrap();
+        expected
+            .run_system_once(payment_reference::tick_reference)
+            .unwrap();
+        let power = &actual.get::<ShipPowerSystem>(a).unwrap().0;
+        let oracle = &expected.get::<ShipPowerSystem>(b).unwrap().0;
+        assert_eq!(power, oracle, "case {case}");
+        assert_eq!(
+            serde_json::to_string(&power.capture_continuation()).unwrap(),
+            serde_json::to_string(&oracle.capture_continuation()).unwrap()
+        );
+        assert_eq!(
+            power.emitted_work(&id(OWNER)).to_bits(),
+            oracle.emitted_work(&id(OWNER)).to_bits()
+        );
+        assert_eq!(
+            actual.get::<IlluminationEmissions>(a).unwrap().0,
+            expected.get::<IlluminationEmissions>(b).unwrap().0
+        );
+        assert_eq!(
+            round(&actual, a).last_guidance,
+            round(&expected, b).last_guidance
+        );
+        if (1..=4).contains(&case) {
+            assert_eq!(power, &before);
+        }
+        if case == 5 {
+            assert!(power.emitted_work(&id(OWNER)) > before.emitted_work(&id(OWNER)));
+            assert!(round(&actual, a).last_guidance.is_none());
+        }
+    }
+}

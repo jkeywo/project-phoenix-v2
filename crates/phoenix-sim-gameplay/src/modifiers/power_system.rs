@@ -358,23 +358,56 @@ impl PowerSystem {
         dt: f32,
         activity: f32,
     ) -> Result<crate::resources::energy::EnergyGrant, String> {
+        self.work_continuous_if(system, dt, activity, |grant| Ok(Some(grant)))
+            .map(|result| result.expect("unconditional work accepts its grant"))
+    }
+
+    /// Stage one consumer's payment and accounting, committing only when the
+    /// recipient accepts. Return staged recipient state from the callback; do
+    /// not mutate live recipient state before its own checks have succeeded.
+    /// No ticket escapes this exclusive borrow, so later work cannot invalidate
+    /// the reserve between assessment and commit. Partial/zero acceptance is
+    /// deliberately the recipient's policy, not a new energy rule.
+    pub fn work_continuous_if<T>(
+        &mut self,
+        system: &SystemId,
+        dt: f32,
+        activity: f32,
+        recipient: impl FnOnce(crate::resources::energy::EnergyGrant) -> Result<Option<T>, String>,
+    ) -> Result<Option<T>, String> {
         if !dt.is_finite() || dt < 0.0 || !activity.is_finite() || activity < 0.0 {
             return Err("energy work requires finite nonnegative time and activity".into());
         }
-        let rate = self
+        let consumer = self
             .definition
             .config()
             .consumers
             .iter()
             .find(|consumer| &consumer.system == system)
-            .ok_or("unknown energy consumer")?
-            .continuous_cost_per_sec;
-        let grant = self.spend_continuous(system, rate * dt * activity)?;
-        self.last_work_fraction.insert(
-            system.clone(),
-            if activity > 0.0 { grant.fraction } else { 0.0 },
-        );
-        Ok(grant)
+            .ok_or("unknown energy consumer")?;
+        let requested = consumer.continuous_cost_per_sec * dt * activity;
+        let mut reserve = *self
+            .network
+            .consumers
+            .get(system)
+            .ok_or("unknown consumer state")?;
+        let grant = reserve.spend_continuous(&consumer.reserve, requested)?;
+        let emission =
+            self.work_emissions.get(system).copied().unwrap_or_default() + f64::from(grant.granted);
+        let fraction = if activity > 0.0 { grant.fraction } else { 0.0 };
+        let Some(result) = recipient(grant)? else {
+            return Ok(None);
+        };
+        // The exclusive owner borrow makes this lookup stable. All fallible
+        // payment and recipient work has completed before any owner mutation.
+        *self
+            .network
+            .consumers
+            .get_mut(system)
+            .expect("staged consumer exists") = reserve;
+        self.work_emissions.insert(system.clone(), emission);
+        self.last_work_fraction.insert(system.clone(), fraction);
+        Ok(Some(result))
     }
 
     /// A simultaneous firing step commits every projectile's energy or none.
@@ -1134,3 +1167,7 @@ mod stored_tests;
 #[cfg(test)]
 #[path = "power_transaction_tests.rs"]
 mod transaction_tests;
+
+#[cfg(test)]
+#[path = "power_payment_tests.rs"]
+mod payment_tests;

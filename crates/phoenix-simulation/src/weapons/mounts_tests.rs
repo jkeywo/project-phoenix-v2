@@ -517,3 +517,94 @@ fn actual_tick_preserves_bearing_and_power_during_refit_and_vacancy_then_resumes
     );
     assert_eq!(world.get::<Transform>(entity).unwrap(), &pose);
 }
+
+#[test]
+fn consumer_payment_matches_clone_based_mount_transaction() {
+    for case in 0..7 {
+        let (owner, profiles, mut states, mut power) = profile();
+        let rate = power
+            .0
+            .config()
+            .consumers
+            .iter()
+            .find(|consumer| consumer.system == owner)
+            .unwrap()
+            .continuous_cost_per_sec;
+        match case {
+            1 => {
+                power
+                    .0
+                    .network_mut()
+                    .consumers
+                    .get_mut(&owner)
+                    .unwrap()
+                    .energy = rate * 0.1
+            }
+            2 => {
+                power
+                    .0
+                    .network_mut()
+                    .consumers
+                    .get_mut(&owner)
+                    .unwrap()
+                    .energy = 0.0
+            }
+            3 => {
+                power
+                    .0
+                    .network_mut()
+                    .consumers
+                    .get_mut(&owner)
+                    .unwrap()
+                    .thermal_stopped = true
+            }
+            4 => {
+                power.0.network_mut().consumers.remove(&owner);
+            }
+            _ => {}
+        }
+        let mut reference_states = states.clone();
+        let mut reference_power = power.clone();
+        let desired = if case == 5 {
+            Some(f32::NAN)
+        } else {
+            Some(90.0)
+        };
+        let factor = if case == 6 { 0.0 } else { 1.0 };
+        for tick in [0, 0, 1] {
+            let actual = advance_system(
+                &profiles,
+                &mut states,
+                &owner,
+                tick,
+                1.0,
+                true,
+                desired,
+                factor,
+                &mut power,
+            );
+            let expected = payment_reference::advance_system_reference(
+                &profiles,
+                &mut reference_states,
+                &owner,
+                tick,
+                1.0,
+                true,
+                desired,
+                factor,
+                &mut reference_power,
+            );
+            assert_eq!(actual, expected, "case {case}");
+            assert_eq!(states, reference_states);
+            assert_eq!(power.0, reference_power.0);
+            assert_eq!(
+                serde_json::to_string(&power.0.capture_continuation()).unwrap(),
+                serde_json::to_string(&reference_power.0.capture_continuation()).unwrap()
+            );
+            assert_eq!(
+                power.0.emitted_work(&owner).to_bits(),
+                reference_power.0.emitted_work(&owner).to_bits()
+            );
+        }
+    }
+}

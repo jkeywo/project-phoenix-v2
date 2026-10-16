@@ -224,17 +224,20 @@ pub fn advance_system(
         states.0.insert(owner.clone(), next);
         return Ok(());
     }
-    let mut paid = power.0.clone();
-    let grant = paid.work_continuous(owner, offered, 1.0)?;
-    next.advance(
-        config,
-        tick,
-        offered,
-        true,
-        desired_deg,
-        grant.fraction * factor,
-    )?;
-    power.0 = paid;
+    let next = power
+        .0
+        .work_continuous_if(owner, offered, 1.0, |grant| {
+            next.advance(
+                config,
+                tick,
+                offered,
+                true,
+                desired_deg,
+                grant.fraction * factor,
+            )?;
+            Ok(Some(next))
+        })?
+        .expect("successful turret advance accepts its grant");
     states.0.insert(owner.clone(), next);
     Ok(())
 }
@@ -496,3 +499,7 @@ fn tick(
 #[cfg(test)]
 #[path = "mounts_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "mounts_payment_reference.rs"]
+mod payment_reference;

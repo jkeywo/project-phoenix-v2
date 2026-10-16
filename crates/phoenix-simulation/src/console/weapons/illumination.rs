@@ -279,14 +279,15 @@ pub(crate) fn tick(
             }
             // One fixed interval of emission is staged against the real owner.
             // A partial grant cannot produce a full-quality free observation.
-            let mut paid = power.0.clone();
-            if !paid
-                .work_continuous(owner, dt, 1.0 / factor)
-                .is_ok_and(|grant| grant.fraction >= 1.0 && grant.granted > 0.0)
+            if !power
+                .0
+                .work_continuous_if(owner, dt, 1.0 / factor, |grant| {
+                    Ok((grant.fraction >= 1.0 && grant.granted > 0.0).then_some(()))
+                })
+                .is_ok_and(|accepted| accepted.is_some())
             {
                 continue;
             }
-            power.0 = paid;
             readout.0.insert(owner.clone());
             emissions.push(Emission {
                 origin,
@@ -611,3 +612,7 @@ pub(crate) fn project(
     view.targets.sort_by(|a, b| a.contact.cmp(&b.contact));
     Some(view)
 }
+
+#[cfg(test)]
+#[path = "illumination_payment_reference.rs"]
+mod payment_reference;

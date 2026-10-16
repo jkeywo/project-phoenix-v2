@@ -330,6 +330,23 @@ fn prepared() -> (App, Entity, [i64; 3], i64) {
         .is_none());
     (app, entity, initial, target)
 }
+fn diagnostic(app: &App, entity: Entity) -> String {
+    let power = &app.world().get::<ShipPowerSystem>(entity).unwrap().0;
+    format!(
+        "tick={} period={} production={:?} fabrication={:?} group={:?} intake={:?} paid_fraction={:?} emitted={} hold={:?} rounds={} logistics={:?}",
+        app.world().resource::<SimTick>().0,
+        period(app),
+        state(app, entity),
+        power.network().consumers.get(&id("fabrication")),
+        power.network().groups.get(&project_phoenix::core::messages::PowerGroupId("energy-fabrication".into())),
+        power.last_intake_per_sec(&id("fabrication")),
+        power.last_work_fraction(&id("fabrication")),
+        power.emitted_work(&id("fabrication")),
+        stock(app, entity, "hold-ammunition"),
+        rounds(app, entity),
+        app.world().get::<ShipLogistics>(entity).unwrap().0,
+    )
+}
 fn checkpoint() -> (App, Entity, [i64; 3], i64) {
     let (mut app, entity, initial, target) = prepared();
     let work = work_secs(&app, entity);
@@ -366,6 +383,7 @@ fn checkpoint() -> (App, Entity, [i64; 3], i64) {
 #[test]
 fn paid_second_fabrication_batch_and_exact_claims_continue_through_full_json360() {
     let (mut live, entity, initial, target) = checkpoint();
+    let checkpoint_diagnostic = diagnostic(&live, entity);
     let saved: PhoenixSnapshot =
         serde_json::from_slice(&serde_json::to_vec(&capture(live.world())).unwrap()).unwrap();
     let (mut resumed, restored, restored_initial, restored_target) = prepared();
@@ -397,7 +415,11 @@ fn paid_second_fabrication_batch_and_exact_claims_continue_through_full_json360(
     }
     for (app, entity) in [(&live, entity), (&resumed, restored)] {
         let production = state(app, entity);
-        assert!(production.active.is_none());
+        assert!(
+            production.active.is_none(),
+            "checkpoint: {checkpoint_diagnostic}\nfinal: {}",
+            diagnostic(app, entity)
+        );
         assert_eq!(production.target, target);
         assert_eq!(
             production.next_id, 3,

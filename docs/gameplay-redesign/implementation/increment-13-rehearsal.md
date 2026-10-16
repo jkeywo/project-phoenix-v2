@@ -1,6 +1,6 @@
 # Increment 13 — Measured fitting rehearsal
 
-**Adopted implementation contract; runtime remains unimplemented.** Prepared from the actual
+**Adopted implementation contract; first consumer source is implemented, native and playable verification pending.** Prepared from the actual
 fitting and disposable Test owners on 16 October 2026. The approved direction
 closes the missing whole-fit comparison and direct favourite rehearsal selected
 by [increment 13](increment-13.md). Root adopted this contract after independent
@@ -216,7 +216,58 @@ made from a bounded trial or a target that was never acquired.
   authority and saves unchanged after success, cancellation and failed launch.
   Device/native acceptance remains distinct from source/mocked UI tests.
 
-This contract adds no runtime, request codec, global asset, compatibility epoch or
-full increment13 completion. Implementation follows the adopted boot, sampling
-and failure boundaries above. The complete native frame, including status prefix
-and line terminator, must satisfy the existing framing bound.
+The contract itself adopted no runtime or compatibility epoch. The source
+checkpoint below implements its first consumer; it does not establish full
+increment13 completion. The complete native frame, including status prefix and
+line terminator, satisfies the same explicit bound in the shared encoder.
+
+## First consumer source checkpoint
+
+The private Workshop Test panel now mounts the existing favourite planner with a
+Rehearse action. The ordinary phone and lobby widgets receive no private Test
+callback. One comparison freezes the document before yielding, then uses the
+existing serial Test session to create a fresh default child and a fresh selected
+child. Its existing immutable dependency provider supplies captured bytes;
+different actual source/workload identities refuse the comparison. Positive
+private run generations and exact report bindings prevent late results painting
+over source, plan, profile, seed or slot replacement. Cleanup failure releases
+the capture and controls and retains the error.
+
+`workshop/rehearsal_request.rs` decodes closed favourite/section/choice records,
+including duplicate-map refusal. `rehearsal.rs` re-admits the actual captured
+World and include-resolved Cruiser, verifies the original planner content_id and
+frozen slot, and stages actual FittingState and Power plus the read-only initial
+report before its single commit. Browser capture and the native private staged
+reader call the same admission. Refused initialization pauses and retires through
+the existing TestClock owner; Resume cannot operate a default fit under the
+requested favourite's label.
+
+The two actual reference Worlds contain a Test-only `test_rehearsal` declaration
+with strict workload/warmup/phase fields. Their first supported setup is one
+controlled Cruiser slot at 60 Hz, 120 warmup intervals and 1,800 measured intervals.
+The sustained phase requests engagement throughout. Burst/recovery requests 600
+engagement and 1,200 recovery intervals; at twelve ordinary scenario seconds the
+World retires its subject through the existing destruction effect. This is an
+explicit workload boundary, never damage or a kill credited to the fitting.
+The subject uses accepted finite probe equipment, ordinary empty behaviour/ship
+substrate and the existing Pirate relationship; its one room has 10,000 finite
+structural HP. It has no invulnerability or replenishment grant.
+
+The TestInfra sampler runs in FixedLast before the existing SimTick advance. It
+reads real current-interval work receipts, reactor output, reserve/thermal state,
+flow cuts and settled coolant Stocks plus fractional credit. Initial assumptions
+and nominal selected definitions are retained separately; measured start/minima
+begin after warmup. Observed subject HP loss is separate from retirement/loss.
+No measured fore-beam work is reported as insufficient activity. Frozen charts
+use a fixed interval stride and at most 121 points, with an explicit 32 KiB result
+and complete 64 KiB native prefix/JSON/newline refusal.
+
+Source review: Comms reviewed the Rust constructor, sampler and both adapter
+joins; Personnel reviewed the comparison, private UI and rejecting-stop cleanup.
+Targeted JavaScript checks and static import/string checks pass. Rust accepted
+World/compiler, atomic constructor, settled sampler and full-frame owner tests
+are authored but unexecuted. Root owns Cargo and must execute the accepted-loader
+gate before a whole-host tracer. Actual paid firing/recovery, hot/depleted cases,
+full child continuation, independent fresh-run results and browser/native/device
+acceptance are still required. These are remaining verification, not implied by
+the source reviews or mocked private-provider tests.

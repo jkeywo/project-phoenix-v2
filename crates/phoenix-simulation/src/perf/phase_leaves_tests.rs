@@ -1,4 +1,5 @@
 use super::*;
+use crate::perf::phase::Interval;
 use crate::sim_sets::SimSet;
 use bevy::prelude::*;
 

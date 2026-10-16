@@ -33,7 +33,9 @@ fn arrive(teams: &mut RepairTeams) {
 #[test]
 fn refit_uses_real_route_then_holds_team_until_physical_return() {
     let mut teams = fixture();
+    assert!(!teams.has_unsettled_refits());
     let id = claim(&mut teams);
+    assert!(teams.has_unsettled_refits());
     assert_eq!(teams.refit_job(1), Some(id));
     let row = teams
         .work_list()
@@ -59,6 +61,10 @@ fn refit_uses_real_route_then_holds_team_until_physical_return() {
     assert!(teams.refit_effect_enabled(id));
     assert!(teams.on_site_systems().next().is_none()); // No normal repair execution.
     assert!(teams.finish_refit(id));
+    assert!(
+        teams.has_unsettled_refits(),
+        "installation is not physical settlement"
+    );
     assert!(!teams.refit_effect_enabled(id));
     assert!(teams.is_committed_to_operation(0, None));
     teams.tick_refits(1.0, &BTreeSet::new());
@@ -66,7 +72,9 @@ fn refit_uses_real_route_then_holds_team_until_physical_return() {
     teams.tick_refits(1.0, &BTreeSet::new());
     assert_eq!(teams.free_team_indices(None), vec![0, 1]);
     assert_eq!(teams.work_list()[0].outcome, Some(JobOutcome::Completed));
+    assert!(!teams.has_unsettled_refits());
     teams.restore_state(&teams.save_state()).unwrap();
+    assert!(!teams.has_unsettled_refits());
 }
 
 #[test]

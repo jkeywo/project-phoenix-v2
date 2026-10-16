@@ -5,6 +5,14 @@ use crate::ship::interior::TeamLocation;
 use phoenix_model::job::JobId;
 
 impl RepairTeams {
+    /// Includes the trip home after fitting has removed its completed work row.
+    /// The existing JobId owns the team until its physical return settles.
+    pub fn has_unsettled_refits(&self) -> bool {
+        self.state.teams.iter().flatten().any(|job| {
+            job.outcome.is_none() && matches!(job.activity, RepairActivity::Refit { .. })
+        })
+    }
+
     pub fn is_refit_team(&self, team: usize) -> bool {
         self.state
             .teams

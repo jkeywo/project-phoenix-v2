@@ -309,8 +309,10 @@ fn cancellation_during_delivery_keeps_item_with_same_team_until_actual_storage_r
         .unwrap()
         .0
         .is_refit_team(0));
+    let mut next_tick = tick;
     for now in tick..tick + 800 {
         advance(&mut world, entity, now, 0.125);
+        next_tick = now + 1;
         if world.get::<ShipFitting>(entity).unwrap().work.is_empty() {
             break;
         }
@@ -336,4 +338,77 @@ fn cancellation_during_delivery_keeps_item_with_same_team_until_actual_storage_r
             .refit_job(1)
             .unwrap()
     );
+    // The fitting work row is gone, but the same actual Job still has to reach
+    // home. The idle fast path must not strand this cancelled carrier.
+    assert!(world
+        .get::<ShipRepairTeams>(entity)
+        .unwrap()
+        .0
+        .has_unsettled_refits());
+    for now in next_tick..next_tick + 800 {
+        advance(&mut world, entity, now, 0.125);
+        if !world
+            .get::<ShipRepairTeams>(entity)
+            .unwrap()
+            .0
+            .has_unsettled_refits()
+        {
+            break;
+        }
+    }
+    let teams = &world.get::<ShipRepairTeams>(entity).unwrap().0;
+    assert!(!teams.has_unsettled_refits());
+    assert_eq!(teams.job_state().teams[0].as_ref().unwrap().id, job);
+    assert_eq!(
+        teams.job_state().teams[0].as_ref().unwrap().outcome,
+        Some(phoenix_model::job::JobOutcome::Cancelled)
+    );
+    assert!(teams.free_team_indices(None).contains(&0));
+    assert_eq!(parts(&world, entity), initial_parts);
+}
+
+#[test]
+fn idle_fitting_keeps_selected_equipment_and_clock_without_touching_machinery() {
+    let (mut world, entity) = rig();
+    let choice = replacement(&world, entity, "fore-beam");
+    request(&mut world, entity, &id("phaser-fore"), "fore-beam", &choice).unwrap();
+    let mut expected = world.get::<ShipFitting>(entity).unwrap().clone();
+    assert!(expected.work.is_empty());
+    assert!(!expected.requested.is_empty());
+    assert!(!world
+        .get::<ShipRepairTeams>(entity)
+        .unwrap()
+        .0
+        .has_unsettled_refits());
+    world.clear_trackers();
+    advance(&mut world, entity, 17, 0.125);
+    expected.last_tick = Some(17);
+    assert_eq!(world.get::<ShipFitting>(entity).unwrap(), &expected);
+    macro_rules! unchanged {
+        ($owner:ty) => {
+            assert!(
+                !world
+                    .entity(entity)
+                    .get_ref::<$owner>()
+                    .unwrap()
+                    .is_changed(),
+                "idle fitting must not reinsert {}",
+                stringify!($owner)
+            );
+        };
+    }
+    unchanged!(ShipRepairTeams);
+    unchanged!(InfrastructureCondition);
+    unchanged!(ResourceServices);
+    unchanged!(ShipDamage);
+    unchanged!(ShipPowerSystem);
+}
+
+#[test]
+fn idle_fitting_missing_required_owner_keeps_original_clock() {
+    let (mut world, entity) = rig();
+    let before = world.get::<ShipFitting>(entity).unwrap().clone();
+    world.entity_mut(entity).remove::<ResourceServices>();
+    advance(&mut world, entity, 17, 0.125);
+    assert_eq!(world.get::<ShipFitting>(entity).unwrap(), &before);
 }

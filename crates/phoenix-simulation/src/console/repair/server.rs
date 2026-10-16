@@ -844,6 +844,35 @@ pub fn tick_repair_teams(
 
 // ── Blackboard publish ─────────────────────────────────────────────────────────
 
+/// Derived publication helpers only; never captured or used as repair authority.
+/// A live config change (including restore/refit) invalidates its group labels
+/// and membership. Missing entities/configs are evicted after publication.
+#[derive(Default)]
+pub(crate) struct RepairPublicationCache {
+    empty_teams: Option<ShipRepairTeams>,
+    groups: std::collections::BTreeMap<Entity, CachedRepairGroups>,
+}
+
+struct CachedRepairGroups {
+    systems: Vec<SystemId>,
+    definitions: Vec<RepairGroupDefinition>,
+}
+
+impl CachedRepairGroups {
+    fn refresh(
+        &mut self,
+        config: &crate::ship::config::ShipConfig,
+        changed: bool,
+        systems: &[SystemId],
+    ) -> Vec<RepairGroupDefinition> {
+        if changed || self.systems != systems {
+            self.systems = systems.to_vec();
+            self.definitions = repair_group_definitions(config, systems);
+        }
+        self.definitions.clone()
+    }
+}
+
 /// Per-`Ship` publisher (issue #830). Each ship builds its own repair blackboard
 /// from its own `ShipRepairTeams` / `EntitySystemHull` / `RepairRequestQueue`
 /// components and writes it into its own `ShipSystemBlackboards`. Ships without a
@@ -852,15 +881,17 @@ pub fn tick_repair_teams(
 /// `ShipSystemBlackboards`, so the query naturally scopes to AI-bearing ships;
 /// the wire broadcaster stays `LocalShip`-filtered.
 pub(crate) fn publish_repair_blackboard(
+    mut cache: Local<RepairPublicationCache>,
     transfer_context: Option<Res<super::personnel_transfer::PersonnelTransferContext>>,
     roster: Option<Res<phoenix_sim_gameplay::personnel::PersonnelRoster>>,
     tick: Option<Res<crate::sim_tick::SimTick>>,
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     base_world: Option<Res<crate::world::config::WorldConfig>>,
     mut ship_q: Query<(
+        Entity,
         Option<&ShipRepairTeams>,
         Option<&crate::entities::spawner::EntitySystemHull>,
-        Option<&crate::ship_plugin::ShipConfigComponent>,
+        Option<Ref<crate::ship_plugin::ShipConfigComponent>>,
         Option<&RepairRequestQueue>,
         // External repair-team dispatch (issue #1161). Present only on a
         // hull that authored `[repair.external_dispatch]`; a hull without it
@@ -896,7 +927,12 @@ pub(crate) fn publish_repair_blackboard(
         Option<&crate::ship::compartment_damage::ShipDamage>,
     )>,
 ) {
+    let RepairPublicationCache {
+        empty_teams,
+        groups,
+    } = &mut *cache;
     for (
+        entity,
         teams_opt,
         hull_opt,
         config_opt,
@@ -914,15 +950,13 @@ pub(crate) fn publish_repair_blackboard(
         let personnel_state = roster
             .as_deref()
             .and_then(|roster| actor.and_then(|actor| roster.state(&actor.0)));
-        let default_teams;
-        let teams: &ShipRepairTeams = match teams_opt {
-            Some(t) => t,
-            None => {
-                default_teams =
-                    ShipRepairTeams(crate::modifiers::repair_teams::RepairTeams::new(0));
-                &default_teams
-            }
-        };
+        let config_changed = config_opt
+            .as_ref()
+            .is_some_and(|config| config.is_changed());
+        let config_opt = config_opt.as_deref();
+        let teams: &ShipRepairTeams = teams_opt.unwrap_or_else(|| {
+            empty_teams.get_or_insert_with(|| ShipRepairTeams(RepairTeams::new(0)))
+        });
         let team_slots: Vec<TeamSlot> = teams.0.slots().to_vec();
 
         // Build the SystemHullStatus list from the authoritative `SystemHull`
@@ -1062,9 +1096,25 @@ pub(crate) fn publish_repair_blackboard(
         let (external_dispatch_candidate_name, external_dispatch_candidate_refusal) =
             candidate.map_or((None, None), |(name, refusal)| (Some(name), refusal));
 
-        let repair_groups = config_opt
-            .map(|config| repair_group_definitions(&config.0, &damageable_systems))
-            .unwrap_or_default();
+        let repair_groups =
+            if let Some(config) = config_opt {
+                match groups.entry(entity) {
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        let definitions = repair_group_definitions(&config.0, &damageable_systems);
+                        entry.insert(CachedRepairGroups {
+                            systems: damageable_systems.clone(),
+                            definitions: definitions.clone(),
+                        });
+                        definitions
+                    }
+                    std::collections::btree_map::Entry::Occupied(mut entry) => entry
+                        .get_mut()
+                        .refresh(&config.0, config_changed, &damageable_systems),
+                }
+            } else {
+                groups.remove(&entity);
+                Vec::new()
+            };
         let mut bb = RepairBlackboard {
             planned_intents: actor
                 .map(|actor| {
@@ -1153,6 +1203,7 @@ pub(crate) fn publish_repair_blackboard(
             SystemBlackboard::Repair(bb),
         );
     }
+    groups.retain(|entity, _| ship_q.contains(*entity));
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -2275,3 +2326,7 @@ mod activity_tests;
 #[cfg(test)]
 #[path = "treatment_tests.rs"]
 mod treatment_tests;
+
+#[cfg(test)]
+#[path = "publication_tests.rs"]
+mod publication_tests;

@@ -680,18 +680,30 @@ fn tick(world: &mut World) {
 }
 
 fn advance(world: &mut World, entity: Entity, now: u64, dt: f32) {
-    let Some(profile) = world
-        .get::<CompiledShipFitting>(entity)
-        .map(|p| p.0.clone())
-    else {
+    let Some(profile) = world.get::<CompiledShipFitting>(entity) else {
         return;
     };
-    let Some(mut state) = world.get::<ShipFitting>(entity).cloned() else {
+    let Some(state) = world.get::<ShipFitting>(entity) else {
         return;
     };
-    let Some(mut teams) = world.get::<ShipRepairTeams>(entity).cloned() else {
+    let Some(teams) = world.get::<ShipRepairTeams>(entity) else {
         return;
     };
+    if state.work.is_empty() && !teams.0.has_unsettled_refits() {
+        // Keep the canonical clock, including pending equipment selections, but
+        // do not clone/reinsert unrelated owners when no fitting job can move.
+        // These are the same required owners as the active transaction below.
+        if world.get::<InfrastructureCondition>(entity).is_some()
+            && world.get::<ResourceServices>(entity).is_some()
+            && world.get::<ShipDamage>(entity).is_some()
+        {
+            world.get_mut::<ShipFitting>(entity).unwrap().last_tick = Some(now);
+        }
+        return;
+    }
+    let profile = profile.0.clone();
+    let mut state = state.clone();
+    let mut teams = teams.clone();
     let Some(mut inventory) = world.get::<InfrastructureCondition>(entity).cloned() else {
         return;
     };
@@ -710,7 +722,7 @@ fn advance(world: &mut World, entity: Entity, now: u64, dt: f32) {
     // Redirect a recalled carrier before return travel can finish its JobId.
     // No paid stage or parts consumption occurs during this cleanup route.
     for work in state.work.values_mut() {
-        let recalled = teams.0.save_state().teams.iter().flatten().any(|job| {
+        let recalled = teams.0.job_state().teams.iter().flatten().any(|job| {
             job.id == work.job
                 && matches!(
                     job.activity,
@@ -971,6 +983,9 @@ fn advance(world: &mut World, entity: Entity, now: u64, dt: f32) {
         .insert((state, teams, inventory, damage));
     if let Some(power) = power {
         world.entity_mut(entity).insert(power);
+    }
+    if flags.is_empty() {
+        return;
     }
     let uuid = world.get::<EntityUuid>(entity).map(|uuid| uuid.0.clone());
     if let (Some(uuid), Some(mut runtime)) = (

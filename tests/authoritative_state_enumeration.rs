@@ -336,7 +336,6 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     "phoenix_simulation::ship::helm_ai::surfaces::HelmPassSurface",
     "phoenix_simulation::ship::helm_ai::surfaces::HelmRecoveryHistory",
     "phoenix_simulation::ship::helm_ai::steering::HelmSteeringAiPolicyState",
-    "phoenix_simulation::ship::helm_planner::HelmMotionPlan",
     "phoenix_simulation::ship::power::PowerConfigResource",
     "phoenix_simulation::ship::power::PowerMultiplierResource",
     "phoenix_simulation::ship::power::ShipPowerSystem",

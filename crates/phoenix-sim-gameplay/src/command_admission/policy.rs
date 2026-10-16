@@ -42,7 +42,8 @@ pub fn command_policy(
         }
     }
     let movement_kind = match payload {
-        SystemControlPayload::SetHelmMode { .. } => {
+        SystemControlPayload::SetHelmMode { .. }
+        | SystemControlPayload::SetFollowNavigation { .. } => {
             Some(&[HELM_THRUST_KIND, HELM_STEERING_KIND, LATERAL_THRUST_KIND][..])
         }
         SystemControlPayload::SetDesiredSpeed { .. }

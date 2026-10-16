@@ -637,3 +637,24 @@ an actual Human source turn, checks two malformed generation candidates without
 writes, and requires continued displacement from the paid saved checkpoint.
 This is authored test source until the integrator runs it, with no device or
 multiplayer acceptance claim.
+
+### Joined Helm checkpoint — 16 October 2026
+
+The Formation consumer is integrated on the prepared media/capture baseline.
+Canonical movement intent, existing held motion plans, current-tick derived
+inputs and validated held HUD publication frontiers retain their original
+owners. Follow commands use the actual three authored movement kinds at the
+normal admission boundary. Empty/unbound plans preserve their prior digest;
+the exact added empty stage is characterised alongside the existing namespaces.
+
+The existing `HelmMotionPlan` resource is now declared `DeferredFold` rather
+than left on the unclassified baseline: only `navigation_generation` is newly
+folded. Its legacy held motion/hazard/docking fields remain the prior fold gap.
+This checkpoint does not claim a whole-resource hash or introduce a second plan.
+
+The replayed runtime/publication/snapshot joins passed independent source review.
+Two targeted client files passed 23 tests (1.16s) after updating the exact action
+catalogue expectations for four already integrated media/personnel entries.
+Layer rules passed; strict strings checked 6,427 IDs with zero errors/warnings.
+Native compilation, owner/JSON360 execution, compatibility versions and integrated
+gates remain with the parent integration thread. No Cargo or device test ran here.

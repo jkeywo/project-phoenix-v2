@@ -30,6 +30,20 @@ entities:
       status: declared
       paths: [crates/phoenix-sim-gameplay/src/ship/helm_control.rs, crates/phoenix-simulation/src/entities/ship_spawn.rs]
       symbols: [CompiledHelmControl]
+  - state: helm-current-navigation-inputs
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Current Permitted Per-Axis Navigation Inputs
+      summary: "One derived current-tick context supplies each actual Helm axis only its explicitly permitted dated Navigation generation, measured slot and velocity. It is cleared on restore and never becomes a saved grant, goal or controller."
+    architecture:
+      classification: derived
+      owner: host-helm-control-router
+      writers: [host-helm-control-router]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-sim-gameplay/src/ship/helm_control.rs, crates/phoenix-simulation/src/console/helm/control.rs, crates/phoenix-simulation/src/snapshot/application.rs]
+      symbols: [HelmNavigationInputs, NavigationMotion]
   - decision: redesign-movement-single-physical-executor
     core:
       status: accepted

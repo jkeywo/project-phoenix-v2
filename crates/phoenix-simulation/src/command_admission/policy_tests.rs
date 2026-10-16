@@ -5,6 +5,35 @@ use crate::ship::control_source::{ControlSource, ControlSourceResolver};
 use crate::ship_plugin::ShipSystemControlSources;
 
 #[test]
+fn following_navigation_remains_scoped_to_actual_authored_movement_axis_kinds() {
+    let authored = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap();
+    let ship = authored.ship_config.unwrap();
+    let profile = authored.helm_control.unwrap();
+    let mut sources = ControlSourceResolver::default();
+    let payload = SystemControlPayload::SetFollowNavigation {
+        generation: Some(1),
+    };
+    for owner in [&profile.thrust, &profile.steering]
+        .into_iter()
+        .chain(profile.lateral.iter())
+    {
+        sources.set(owner.clone(), ControlSource::Ai);
+        assert!(command_policy(&ship, &sources, owner, &payload).operate_ai);
+        sources.set(owner.clone(), ControlSource::Human);
+        assert!(command_policy(&ship, &sources, owner, &payload).accept_human_input);
+    }
+    let wrong = SystemId("comms".into());
+    for source in [ControlSource::Ai, ControlSource::Human] {
+        sources.set(wrong.clone(), source);
+        let denied = command_policy(&ship, &sources, &wrong, &payload);
+        assert!(!denied.operate_ai && !denied.accept_human_input);
+    }
+}
+
+#[test]
 fn capture_handle_bounds_and_actual_comms_owner_apply_to_human_and_ai_admission() {
     let authored = crate::entities::include_resolve::load_entity_config(
         "assets/entities/capture_cruiser.toml",

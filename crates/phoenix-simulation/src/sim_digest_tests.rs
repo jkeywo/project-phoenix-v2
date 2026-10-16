@@ -142,6 +142,7 @@ fn optional_namespace_exact_fold_characterization() {
             ("broad-tracks", 13509907477215362722),
             ("navigation-sharing", 13509907477215362722),
             ("navigation-request", 13509907477215362722),
+            ("helm-navigation-plan", 13509907477215362722),
         ]
     );
 }
@@ -155,6 +156,7 @@ fn optional_namespaces_leave_unregistered_and_registered_empty_worlds_unchanged(
     registered.register_component::<crate::console::repair::ShipRepairTeams>();
     registered.register_component::<ShipSecurityTeams>();
     registered.register_component::<crate::comms::capture::ShipCommsCapture>();
+    registered.init_resource::<crate::ship::helm_planner::HelmMotionPlan>();
     for world in [World::new(), registered] {
         for fold in [
             fold_authored_ship_slots_namespace,
@@ -168,6 +170,7 @@ fn optional_namespaces_leave_unregistered_and_registered_empty_worlds_unchanged(
             fold_umbilical_namespace,
             fold_security_namespace,
             fold_comms_capture_namespace,
+            fold_helm_navigation_plan_namespace,
         ] {
             assert_eq!(fold(&world, 12345), 12345);
         }

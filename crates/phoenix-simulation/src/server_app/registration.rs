@@ -1130,6 +1130,8 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 reset_broadcast_caches_on_start,
                 crate::world::server::seed_ship_power_counter,
                 spawn_game_start_entities,
+                ApplyDeferred,
+                crate::workshop::rehearsal::initialize,
                 dump_tracked_entities,
             )
                 .chain(),

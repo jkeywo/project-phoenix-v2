@@ -221,6 +221,8 @@ pub struct Launch {
     pub revision: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub breakpoint: Option<TestBreakpoint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rehearsal: Option<super::rehearsal_request::RehearsalRequest>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

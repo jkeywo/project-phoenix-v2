@@ -4,6 +4,8 @@ pub use phoenix_content_preparation::authoring::*;
 pub mod captured_source;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod provider;
+pub mod rehearsal;
+pub mod rehearsal_request;
 pub mod test_breakpoint;
 pub mod test_clock;
 pub mod test_protocol;

@@ -77,6 +77,10 @@ fn fixture() -> (App, Entity, SystemId, SystemId, SystemId) {
             ShipRedAlert(false),
             ShipConfigComponent(ship),
             sources,
+            // Capture the real crew projection required by this configured
+            // ship. This sparse owner rig has no occupied human Stations.
+            crate::ship_plugin::ActiveStationRatings::default(),
+            crate::lobby::crew_replication::ShipCrewPresence::default(),
             AdmittedCommands::default(),
             ShipPowerSystem(power),
             ShipShields(shields, 0.5),

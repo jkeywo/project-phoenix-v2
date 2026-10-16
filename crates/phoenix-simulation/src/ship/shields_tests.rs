@@ -367,6 +367,9 @@ fn test_app() -> App {
     app.insert_resource(ShipEntity(ship));
     app.add_plugins(LobbyPlugin)
         .add_plugins(bevy::time::TimePlugin)
+        // The complete Shields plugin includes the ordinary frequency-cycle
+        // owner, whose clock is mandatory even without any cycling equipment.
+        .init_resource::<crate::sim_tick::SimTick>()
         .init_resource::<crate::lobby::WorldResource>()
         .init_resource::<SimOutbox>()
         .init_resource::<LastBroadcastEntityPositions>()
@@ -712,6 +715,9 @@ fn publish_shields_blackboard_four_facings() {
         .id();
     app.add_plugins(LobbyPlugin)
         .add_plugins(bevy::time::TimePlugin)
+        // The complete Shields plugin includes the ordinary frequency-cycle
+        // owner, whose clock is mandatory even without any cycling equipment.
+        .init_resource::<crate::sim_tick::SimTick>()
         .init_resource::<crate::lobby::WorldResource>()
         .init_resource::<SimOutbox>()
         .init_resource::<LastBroadcastEntityPositions>()
@@ -836,6 +842,9 @@ fn test_app_with_helm() -> App {
     app.insert_resource(ShipEntity(ship));
     app.add_plugins(LobbyPlugin)
         .add_plugins(bevy::time::TimePlugin)
+        // The complete Shields plugin includes the ordinary frequency-cycle
+        // owner, whose clock is mandatory even without any cycling equipment.
+        .init_resource::<crate::sim_tick::SimTick>()
         .init_resource::<crate::lobby::WorldResource>()
         .init_resource::<SimOutbox>()
         .init_resource::<LastBroadcastEntityPositions>()

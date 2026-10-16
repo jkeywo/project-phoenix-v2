@@ -224,7 +224,7 @@ pub(super) fn initial(
         ammunition.insert("torpedo-magazine".into(), torpedoes.0.magazine.level);
         for tube in &torpedoes.0.tubes {
             ammunition.insert(
-                format!("torpedo-tube/{}", tube.id.0),
+                format!("torpedo-tube/{}", tube.id),
                 i64::from(tube.loaded_count),
             );
         }

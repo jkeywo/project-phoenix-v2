@@ -651,8 +651,8 @@ pub const SNAPSHOT_FORMAT: u32 = 88;
 /// "0.70" selects actual receive coverage and emits permitted contextual Radio reports.
 /// "0.71" admits charted XYZ intent to the ordinary Full3D Navigation/Helm path.
 /// "0.72" adds finite physical marking and binds planned acquisition to actual work.
-/// "0.73" restores legacy GM damage parity and exact capability-command admission.
-pub const SIMULATION_RULES: &str = "0.73";
+/// "0.74" stamps collision history from the restored logical interval end.
+pub const SIMULATION_RULES: &str = "0.74";
 
 /// The authored data, computed rather than remembered.
 ///

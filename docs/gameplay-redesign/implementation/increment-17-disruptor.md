@@ -27,8 +27,10 @@ Holding future fire does not recall a projectile already physically launched.
 The ordinary individual bank AI uses only that same permitted current evidence
 and its actual admitted authority. There is no second global electronic planner.
 
-The first optional reference restricts this human-seeking Console's authored
-host candidates to its Comms home. Vacancy/AFK therefore selects ordinary
+The first optional reference uses an auxiliary human-seeking Console with no
+home Station and Comms as its sole authored host candidate. Its explicit own
+Std rating and visiting Std expose the bank's detailed controls without
+inheriting the home Station's unrelated System list. Vacancy/AFK selects ordinary
 Backfill, while the hull's existing conversation Console retains its own
 normal host policy. No special temporary-filling behaviour or new station
 complexity choice is introduced. Its explicit Weapons aggregate feed supplies
@@ -77,11 +79,15 @@ not invent those policies or close all of increment 17.
 ## Source handoff and remaining evidence
 
 The optional `disruptor_cruiser.toml` adds one actual bolt bank and Comms-hosted
-Console. Its accepted-loader regression is the separate
-`entities/config/disruptor_tests.rs` leaf; the integrator must register that test
-module before running it. Run this actual recipe check before the global
-authored-template corpus. A JavaScript include resolution alone does not prove
-that the native accepted recipe passes.
+Console. Its registered actual accepted-loader regression is
+`entities/config/disruptor_tests.rs`. The first native attempt caught unsupported
+home-Station simplified ownership; correction `c07b2c7e` uses the existing
+auxiliary Console rules and proves actual available-host/Backfill resolution
+while preserving every base Station, Console, System and energy consumer. The
+integrator's native retry passed at `27e579fa` (one test, 79 seconds). This clears
+the accepted-recipe gate, not the gameplay/browser or balance acceptance below.
+Continue running the actual recipe check before the global authored-template
+corpus. A JavaScript include resolution alone does not prove native acceptance.
 
 The existing Tactical builder, reusable bolt controls and semantic actions now
 respect each current bank's projected authority, including unqualified shortcuts

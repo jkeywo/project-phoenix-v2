@@ -9,6 +9,11 @@ complete [migration ledger](./migration-ledger.json). The
 
 ## Per-increment progress — 16 October 2026
 
+The user requested a pause after finishing increments 8–12 on 16 October.
+Complete their verification and necessary fixes, commit the evidence, then stop.
+Later implementation lanes are parked with their worktrees and unfinished work
+preserved; do not continue through 24 until the user resumes that work.
+
 Only increment 0 is formally closed. Increments 1–7 have recorded automated
 exits; physical-device and human-workload acceptance remain open. Later initial
 commits are implementation checkpoints, not verified increment exits.

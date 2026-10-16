@@ -50,7 +50,16 @@
       "catalogue_corrections": "3e0af042/7b9daead complete atomic energy;34e9bc5e restores inherited decks/rooms/placements;9a65aeb6 adds the ordinary receiver compartment connection. Actual f164binary now loads the catalogue, then fails FixedUpdate schedule initialization. Native catalogue logs retain the intermediate errors; no guard/physics/tuning relaxation.",
       "schedule_diagnostic": "52fccfe5 adds an explicit contradictory-edge/path diagnostic without reordering constraints;7674709d fixes its platform HashMap type annotation. Actual authoritative-state target rebuilding at7674709d, log .phoenix/resumed-host-schedule-cycle-diagnostic-retry.log. Initial diagnostic compile failure retained separately.",
       "physical_alias_correction": "78bb14ae corrects exact inventory to8RNG+4mint+1reconnect aliases, explicitly checking existing PowerFlowRng→SimRng; actual count was13, not stale12. Native assertion retry pending.",
-      "targets": ["comms_capture_continuation", "emission_continuation", "formation_continuation", "battery_turret_continuation", "battery_decoy_continuation", "personnel_craft_continuation", "optional_maintenance_continuation", "authoritative_state_enumeration"],
+      "targets": [
+        "comms_capture_continuation",
+        "emission_continuation",
+        "formation_continuation",
+        "battery_turret_continuation",
+        "battery_decoy_continuation",
+        "personnel_craft_continuation",
+        "optional_maintenance_continuation",
+        "authoritative_state_enumeration"
+      ],
       "log": ".phoenix/resumed-eight-host-native.log"
     },
     "per_increment_report": "README.md#per-increment-progress--16-october-2026",
@@ -555,5 +564,11 @@
     "passing": "Activity3; commitmentaccept/refuse2; physicalfacilitysupply2; relay1; hazard1; identity1; local/hardenedjump2; Medical2; PDC2; probe1; plannedComms2; Protection1; Security1. All13 selected targets have positive results after the focused fixture retry; this is not a green full repository suite.",
     "pasm": "Clean pinned32aa19c9: validate1152entities/621informationalfindings/StatusOK; scan3940files/18packages/8292dependencies/ValidationOK; traceability246rows/ValidationOK. Logs resumed-roster-pinned-{pasm,scan,traceability}.log. Temporary clean validation worktree removed after exact path/clean-state checks.",
     "remaining": "Fresh owner terminal-personnel/identity/sector and existing corrected snapshot/digest/Security/Presentation tests; ongoing16-24 implementation and physicaldevice/multiplayer/workload/balance/performance acceptance; full integrated gates. No full increment exit/PRD closure/push."
+  },
+  "execution_limit": {
+    "requested": "2026-10-16",
+    "instruction": "Pause after finishing increments 8–12.",
+    "current_work": "Verify increments 8–12, resolve necessary failures, commit evidence, then pause.",
+    "later_lanes": "Parked immediately; preserve isolated commits and uncommitted work. No later implementation or integration until user resumes."
   }
 }

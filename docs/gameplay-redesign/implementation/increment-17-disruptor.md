@@ -22,9 +22,18 @@ home/visiting/delegation and Console rating contracts. This adds a tab rather
 than a claimable seat or role-name rule. Its supported feeds explicitly permit
 the existing TacticalRadar and shared combat-lock publication; co-hosting does
 not pool knowledge. Human targeting uses the bank's independently admitted
-target/hold assignment, and firing/stop/charge use the existing bolt controls.
+target/hold assignment, and firing/charge/cancel use the existing bolt controls.
+Holding future fire does not recall a projectile already physically launched.
 The ordinary individual bank AI uses only that same permitted current evidence
 and its actual admitted authority. There is no second global electronic planner.
+
+The first optional reference restricts this human-seeking Console's authored
+host candidates to its Comms home. Vacancy/AFK therefore selects ordinary
+Backfill, while the hull's existing conversation Console retains its own
+normal host policy. No special temporary-filling behaviour or new station
+complexity choice is introduced. Its explicit Weapons aggregate feed supplies
+the existing bolt presentation because BlasterBank has no individual typed
+publication; that feed does not grant control of other weapons.
 
 Start with the existing reusable Tactical screen/components and Console hosting.
 Verify actual projected bank ownership, eligible contacts, selected per-bank
@@ -64,3 +73,29 @@ device/browser journeys, balance/performance and crew workload acceptance.
 Broader selected information/access operations remain open where they need a
 separate supported objective and delivery/prerequisite policy. This example does
 not invent those policies or close all of increment 17.
+
+## Source handoff and remaining evidence
+
+The optional `disruptor_cruiser.toml` adds one actual bolt bank and Comms-hosted
+Console. Its accepted-loader regression is the separate
+`entities/config/disruptor_tests.rs` leaf; the integrator must register that test
+module before running it. Run this actual recipe check before the global
+authored-template corpus. A JavaScript include resolution alone does not prove
+that the native accepted recipe passes.
+
+The existing Tactical builder, reusable bolt controls and semantic actions now
+respect each current bank's projected authority, including unqualified shortcuts
+which skip readonly aggregate banks. The authored Console-to-screen test and
+Workshop weapon/history/export/refusal test use production client/editor code;
+their wire observations and validation result are explicit test fixtures.
+Six focused JavaScript files pass 91 tests. No actual browser/native Workshop
+journey is inferred from those checks.
+
+`disruption_continuation.rs` supplies real full-game test source for Human
+selection/fire and ordinary individual AI after AFK, actual finite bank payment,
+physical EMP, automatic expiry/resistance and fresh JSON continuation with 360
+complete captures/digests and three malformed-condition no-write candidates.
+This source has not yet executed natively. Existing shared EMP owner coverage
+checks fully shield-intercepted carriers; actual full-game shield, geometry and
+unfunded negative journeys remain to be run or added as needed. Device operation,
+balance, performance and crew workload acceptance remain separate.

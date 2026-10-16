@@ -144,7 +144,8 @@ export function makeTacticalRender(variant) {
     if (ids.blasters) {
       const el = doc.getElementById(ids.blasters);
       if (el) {
-        const banks = w.blasters || [];
+        const banks = (w.blasters || []).map(bank => ({...bank,
+          ...(w.weapon_targets ? {manual_control:w.weapon_targets.rows?.some(row => row.system === `blaster-${bank.id.replaceAll('_','-')}` && row.controllable === true) === true} : {})}));
         if (variant.blastersHideWhenEmpty) el.hidden = banks.length === 0;
         el.state = { banks };
       }

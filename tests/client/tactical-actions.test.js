@@ -5,6 +5,7 @@ import {
   TACTICAL_ACTIONS,
   TACTICAL_BLASTER_CANCEL_ACTION_ID,
   TACTICAL_BLASTER_CHARGE_ACTION_ID,
+  TACTICAL_BLASTER_FIRE_ACTION_ID,
   TACTICAL_ACTION_CONTEXT,
   TACTICAL_PHASER_FIRE_ACTION_ID,
   TACTICAL_RESTRAINT_ACTION_ID,
@@ -35,6 +36,16 @@ const view = () => ({
 });
 
 describe('Tactical semantic actions', () => {
+  it.each([TACTICAL_BLASTER_CHARGE_ACTION_ID,TACTICAL_BLASTER_FIRE_ACTION_ID,TACTICAL_BLASTER_CANCEL_ACTION_ID])('skips readonly aggregate banks for %s shortcuts while refusing an explicit readonly bank',action=>{
+    const charging=action===TACTICAL_BLASTER_CANCEL_ACTION_ID;
+    const state={...view(),blasters:[{id:'readonly',fire_ready:!charging,charge_progress:charging?.5:0},{id:'owned',fire_ready:!charging,charge_progress:charging?.5:0}],
+      weapon_targets:{rows:[{system:'blaster-readonly',controllable:false},{system:'blaster-owned',controllable:true}]}};
+    const sendAction=vi.fn(),actions=registry({getState:()=>state,sendAction});
+    expect(actions.activate(action,{context:TACTICAL_ACTION_CONTEXT,source:'gamepad'})).toMatchObject({handled:true});
+    expect(sendAction).toHaveBeenLastCalledWith(expect.any(String),expect.objectContaining({bank:'owned'}));
+    expect(actions.activate(action,{context:TACTICAL_ACTION_CONTEXT,detail:{bank:'readonly'}})).toMatchObject({handled:false});
+    expect(sendAction).toHaveBeenCalledTimes(1);
+  });
   it('allows a human radar controller to hold delegated weapons and rejects a delegated radar', () => {
     let state = { ...view(), tactical_auto: true, tactical_radar_system_id: 'radar-forward', weapons_restrained: false, weapons_restraint_auto: false };
     const sendAction = vi.fn(), actions = registry({ getState: () => state, sendAction });

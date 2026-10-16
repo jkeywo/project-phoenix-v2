@@ -1,4 +1,6 @@
 id,context,en,de,de_source,de_provenance
+entity.disruptor_cruiser.name,Optional Comms disruption equipment,Disruptor Cruiser,,,
+entity.disruptor_cruiser.console.name,Optional Comms disruption equipment,Electronic Disruption,,,
 entity.capture_cruiser.name,Optional codebreaking reference,Codebreaking Cruiser,Entschlüsselungskreuzer,Codebreaking Cruiser,machine
 comms.capture.title,Comms intercepted evidence,Captured traffic,Abgefangener Funk,Captured traffic,machine
 comms.capture.typed_claim,Attributed intercepted typed evidence,Intercepted claim: {content},,,

@@ -207,7 +207,8 @@ export class PhBlastersControls extends PhElement {
       // There is no per-bank `state`, `_pct`, or `auto` field — derive display
       // state from these. The console projection supplies cooldown_secs from
       // Welcome's authored bank config for the remaining-time fraction.
-      row.querySelector('.auto-badge').style.display = 'none';
+      row.querySelector('.auto-badge').style.display = bank.manual_control === false ? '' : 'none';
+      row.querySelector('.auto-badge').textContent = t('weapons.assignments.read_only');
 
       const isCooling = !!bank.on_cooldown;
       const hasCharge = !!bank.has_charge;
@@ -232,6 +233,7 @@ export class PhBlastersControls extends PhElement {
         btn.disabled = isCooling || isCharging;
       }
       // charging → amber (tactical) pill, cooling → dimmed/disabled, else armed.
+      if(bank.manual_control === false)btn.disabled=true;
       btn.className = 'btn ' + (isCharging ? 'tactical' : btn.disabled ? 'disabled' : 'armed');
       btn.querySelector('.led').className = 'led' + (isCharging ? ' amber keep' : btn.disabled ? '' : ' on');
       btn.querySelector('.label').textContent = isCharging ? t('component.blasters.firing')

@@ -96,6 +96,11 @@ function blasterCharging(bank) {
   return !bank.on_cooldown && Number(bank.charge_progress || 0) > 0;
 }
 
+function blasterManual(view,bank){
+  return bank&&(!view.weapon_targets||view.weapon_targets.rows?.some(row=>
+    row.system===`blaster-${bank.id.replaceAll('_','-')}`&&row.controllable===true));
+}
+
 function blasterStartReady(bank) {
   const readiness = readinessReady(bank);
   return readiness == null
@@ -181,18 +186,21 @@ export function registerTacticalActions(registry, options = {}) {
   });
   registry.register(TACTICAL_ACTIONS[3], ({ actionId, correlation, inputMs, detail } = {}) => {
     const view = tacticalActionView(getState());
-    const bank = view && selectedOrEligible(view.blasters, detail && detail.bank, blasterStartReady);
-    return bank ? send(actionId, correlation, inputMs, 'charge_blaster_start', { bank: bank.id }) : false;
+    const bank = view && selectedOrEligible(view.blasters, detail && detail.bank,
+      (entry) => blasterManual(view,entry) && blasterStartReady(entry));
+    return blasterManual(view,bank) ? send(actionId, correlation, inputMs, 'charge_blaster_start', { bank: bank.id }) : false;
   });
   registry.register(TACTICAL_ACTIONS[4], ({ actionId, correlation, inputMs, detail } = {}) => {
     const view = tacticalActionView(getState());
-    const bank = view && selectedOrEligible(view.blasters, detail && detail.bank, blasterStartReady);
-    return bank ? send(actionId, correlation, inputMs, 'fire_blaster', { bank: bank.id }) : false;
+    const bank = view && selectedOrEligible(view.blasters, detail && detail.bank,
+      (entry) => blasterManual(view,entry) && blasterStartReady(entry));
+    return blasterManual(view,bank) ? send(actionId, correlation, inputMs, 'fire_blaster', { bank: bank.id }) : false;
   });
   registry.register(TACTICAL_ACTIONS[5], ({ actionId, correlation, inputMs, detail } = {}) => {
     const view = tacticalActionView(getState());
-    const bank = view && selectedOrEligible(view.blasters, detail && detail.bank, blasterCharging);
-    return bank ? send(actionId, correlation, inputMs, 'charge_blaster_cancel', { bank: bank.id }) : false;
+    const bank = view && selectedOrEligible(view.blasters, detail && detail.bank,
+      (entry) => blasterManual(view,entry) && blasterCharging(entry));
+    return blasterManual(view,bank) ? send(actionId, correlation, inputMs, 'charge_blaster_cancel', { bank: bank.id }) : false;
   });
   const volley = (delta) => ({ actionId, correlation, inputMs, detail } = {}) => {
     const view = tacticalActionView(getState());

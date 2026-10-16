@@ -975,3 +975,237 @@ fn current_world_frontier_preserves_other_drives_original_local_and_world_receip
         "older retained arrival cannot become the latest frontier"
     );
 }
+
+// The eager oracle changes only initialization of the two staged owner copies;
+// both Apps execute the actual Transit tick, work, placement and commit owners.
+fn staging_fixture(eager: bool, case: &str) -> (App, Entity) {
+    let (mut app, entity) = fixture();
+    if eager {
+        app.insert_resource(EagerTransitStaging);
+    }
+    app.insert_resource(crate::sim_rng::SimRng::new(
+        42,
+        crate::sim_rng::SeedSource::Cli,
+    ));
+    if case != "idle" {
+        command(
+            &mut app,
+            entity,
+            Control::BeginTransitToWaypoint { request: None },
+        );
+    }
+    match case {
+        "partial" => {
+            let available = energy(&app, entity);
+            app.world_mut()
+                .get_mut::<ShipPowerSystem>(entity)
+                .unwrap()
+                .0
+                .spend_continuous(&owner(), available - 0.25)
+                .unwrap();
+        }
+        "empty-fuel" | "collision-after-work" => {
+            let mut stock = app
+                .world()
+                .get::<InfrastructureCondition>(entity)
+                .unwrap()
+                .0
+                .capacity_stock("drive-transit-fuel")
+                .unwrap()
+                .clone();
+            if case == "empty-fuel" {
+                stock.adjust(-stock.available());
+            } else {
+                stock.reserve("transit:local-jump:1", 1).unwrap();
+                app.insert_resource(Time::<Fixed>::from_duration(
+                    std::time::Duration::from_secs(2),
+                ));
+            }
+            app.world_mut()
+                .get_mut::<InfrastructureCondition>(entity)
+                .unwrap()
+                .0
+                .replace_capacity_stock("drive-transit-fuel", stock)
+                .unwrap();
+        }
+        "refit-owner-missing" => {
+            assert!(app
+                .world()
+                .get::<crate::resources::fitting_server::CompiledShipFitting>(entity)
+                .is_some());
+            assert!(app
+                .world_mut()
+                .entity_mut(entity)
+                .take::<crate::resources::fitting_server::ShipFitting>()
+                .is_some());
+        }
+        "power-missing" => {
+            app.world_mut()
+                .entity_mut(entity)
+                .remove::<ShipPowerSystem>();
+        }
+        "inventory-missing" => {
+            app.world_mut()
+                .entity_mut(entity)
+                .remove::<InfrastructureCondition>();
+        }
+        _ => {}
+    }
+    (app, entity)
+}
+fn staging_changed(app: &App, entity: Entity) -> (Option<bool>, Option<bool>) {
+    let actor = app.world().entity(entity);
+    (
+        actor
+            .get_ref::<ShipPowerSystem>()
+            .map(|value| value.is_changed()),
+        actor
+            .get_ref::<InfrastructureCondition>()
+            .map(|value| value.is_changed()),
+    )
+}
+fn staging_same(first: &(App, Entity), second: &(App, Entity)) {
+    let (a, ae) = first;
+    let (b, be) = second;
+    assert_eq!(
+        a.world().get::<ShipTransitDrives>(*ae),
+        b.world().get::<ShipTransitDrives>(*be)
+    );
+    assert_eq!(
+        a.world().get::<TransitReadouts>(*ae).unwrap().0,
+        b.world().get::<TransitReadouts>(*be).unwrap().0
+    );
+    assert_eq!(
+        a.world().get::<ShipPowerSystem>(*ae).map(|power| &power.0),
+        b.world().get::<ShipPowerSystem>(*be).map(|power| &power.0)
+    );
+    assert_eq!(
+        a.world()
+            .get::<InfrastructureCondition>(*ae)
+            .map(|inventory| &inventory.0),
+        b.world()
+            .get::<InfrastructureCondition>(*be)
+            .map(|inventory| &inventory.0)
+    );
+    assert_eq!(
+        a.world().get::<ShipPhysics>(*ae),
+        b.world().get::<ShipPhysics>(*be)
+    );
+    assert_eq!(staging_changed(a, *ae), staging_changed(b, *be));
+    let captured = crate::snapshot::capture(a.world());
+    assert_eq!(captured, crate::snapshot::capture(b.world()));
+    let json = serde_json::to_string(&captured).unwrap();
+    let decoded: crate::snapshot::PhoenixSnapshot = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, captured);
+    assert_eq!(
+        crate::sim_digest::world_digest(a.world()),
+        crate::sim_digest::world_digest(b.world())
+    );
+    assert_eq!(
+        a.world().resource::<crate::sim_rng::SimRng>().state(),
+        b.world().resource::<crate::sim_rng::SimRng>().state()
+    );
+}
+
+#[test]
+fn lazy_transit_staging_matches_original_eager_tick_across_work_refusal_and_continuation() {
+    for case in [
+        "idle",
+        "active",
+        "partial",
+        "empty-fuel",
+        "collision-after-work",
+        "refit-owner-missing",
+        "power-missing",
+        "inventory-missing",
+        "restore",
+    ] {
+        let mut lazy = staging_fixture(false, case);
+        let mut eager = staging_fixture(true, case);
+        let initial_rng = lazy.0.world().resource::<crate::sim_rng::SimRng>().state();
+        let initial_energy = lazy
+            .0
+            .world()
+            .get::<ShipPowerSystem>(lazy.1)
+            .map(|power| power.0.network().consumers[&owner()].energy);
+        for iteration in 0..5 {
+            for (app, entity) in [&mut lazy, &mut eager] {
+                if let Some(mut power) = app.world_mut().get_mut::<ShipPowerSystem>(*entity) {
+                    power.0.begin_work_interval();
+                }
+                app.world_mut().clear_trackers();
+                app.world_mut().run_system_once(tick).unwrap();
+            }
+            staging_same(&lazy, &eager);
+            let (app, entity) = &lazy;
+            let drives = app.world().get::<ShipTransitDrives>(*entity).unwrap();
+            let result = app
+                .world()
+                .get::<TransitReadouts>(*entity)
+                .unwrap()
+                .0
+                .get(&owner());
+            if case == "collision-after-work" {
+                assert_eq!(
+                    drives.0[&owner()].last_tick,
+                    None,
+                    "failed commit rolls back preparation too"
+                );
+                assert_eq!(energy(app, *entity), initial_energy.unwrap());
+                assert_eq!(result, None);
+                assert_eq!(staging_changed(app, *entity), (Some(false), Some(false)));
+            } else {
+                assert_eq!(drives.0[&owner()].last_tick, Some(1 + iteration));
+                assert_eq!(
+                    staging_changed(app, *entity),
+                    (
+                        app.world().get::<ShipPowerSystem>(*entity).map(|_| true),
+                        app.world()
+                            .get::<InfrastructureCondition>(*entity)
+                            .map(|_| true)
+                    )
+                );
+            }
+            if iteration == 0 && case == "partial" {
+                assert!(
+                    drives.0[&owner()].worked_secs() > 0.0
+                        && drives.0[&owner()].worked_secs() < 1.0
+                );
+            }
+            if iteration == 1 && case == "empty-fuel" {
+                assert_eq!(
+                    result,
+                    Some(&TransitAdvance::Waiting(TransitWait::Unfunded))
+                );
+            }
+            if iteration == 3 && (case == "active" || case == "restore") {
+                assert!(matches!(
+                    drives.0[&owner()].phase,
+                    TransitPhase::Arrived { .. }
+                ));
+            }
+            assert_eq!(
+                app.world().resource::<crate::sim_rng::SimRng>().state(),
+                initial_rng
+            );
+            if iteration == 0 && case == "restore" {
+                for (app, entity) in [&mut lazy, &mut eager] {
+                    let encoded =
+                        serde_json::to_string(&crate::snapshot::capture(app.world())).unwrap();
+                    let candidate = serde_json::from_str(&encoded).unwrap();
+                    let report = crate::snapshot::restore(app.world_mut(), &candidate);
+                    assert!(report.is_complete(), "{report:?}");
+                    assert!(
+                        app.world().get::<ShipTransitDrives>(*entity).unwrap().0[&owner()]
+                            .worked_secs()
+                            > 0.0
+                    );
+                }
+                staging_same(&lazy, &eager);
+            }
+            for (app, _) in [&mut lazy, &mut eager] {
+                app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 += 1;
+            }
+        }
+    }
+}

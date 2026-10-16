@@ -322,11 +322,18 @@ pub(crate) fn install(
     }
 }
 
+// Differential owner tests retain the original two eager clone lines. This
+// oracle is absent from production parameters, resources and execution.
+#[cfg(test)]
+#[derive(Resource)]
+pub(crate) struct EagerTransitStaging;
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tick(
     now: Res<crate::sim_tick::SimTick>,
     fixed: Res<Time<Fixed>>,
     world: Res<crate::world::config::WorldConfig>,
+    #[cfg(test)] eager: Option<Res<EagerTransitStaging>>,
     context: (
         Option<Res<StaticTransitScopes>>,
         Option<Res<crate::world::server::WorldLayerMap>>,
@@ -436,8 +443,15 @@ pub(crate) fn tick(
                     }),
                 )
             });
-            let mut staged_power = power.as_deref().map(|power| power.0.clone());
-            let mut staged_inventory = inventory.as_deref().map(|inventory| inventory.0.clone());
+            // Idle/arrived/unavailable steps must still advance their clock and
+            // readout. Stage actual resource owners only if advance requests work.
+            let mut staged_power = None;
+            let mut staged_inventory = None;
+            #[cfg(test)]
+            if eager.is_some() {
+                staged_power = power.as_deref().map(|power| power.0.clone());
+                staged_inventory = inventory.as_deref().map(|inventory| inventory.0.clone());
+            }
             let mut flags = Vec::new();
             let available = power.as_deref().is_some_and(|power|power.0.config().consumers.iter().any(|consumer|&consumer.system==owner)) && online(sources, owner)
                 && inventory.is_some()
@@ -472,6 +486,13 @@ pub(crate) fn tick(
                 available,
                 operation,
                 |action, order| {
+                    if staged_power.is_none() {
+                        staged_power = power.as_deref().map(|power| power.0.clone());
+                    }
+                    if staged_inventory.is_none() {
+                        staged_inventory =
+                            inventory.as_deref().map(|inventory| inventory.0.clone());
+                    }
                     work(
                         action,
                         order,
@@ -529,6 +550,8 @@ pub(crate) fn tick(
             );
             match result {
                 Ok(result) => {
+                    // Keep both Mut dereferences even without staged work: the
+                    // eager successful transaction marked these owners Changed.
                     if let (Some(power), Some(next)) = (power.as_deref_mut(), staged_power) {
                         power.0 = next;
                     }

@@ -222,6 +222,11 @@ core (Craft) and the GUI/Workshop subset (Personnel), against the frozen
 `b7c81e29` to `4bc4a91e` packet. Their reviews do not claim compilation or test
 execution. The subsequent `6a4875d8` and `baa0bdbe` changes correct the host
 proof's snapshot-readiness API and assert ordinary running bootstrap; they do
-not change runtime behavior. The bounded actual-host proof source review is
-still pending. This packet remains uncompiled; native owner and host results,
-integrated compatibility and acceptance must be established separately.
+not change runtime behavior. Integration Review passes the bounded actual-host
+proof through `e1ff4759`, after correcting its initial settled-empty premise:
+ordinary target-zero handling must finish prior loads/unloads and release actual
+claims before the new priority witness. Finite ammunition, paid progress,
+aggregate rate and complete JSON360/no-write assertions remain. No reviewer ran
+Cargo or tests. This source-reviewed packet remains uncompiled; native owner
+and host results, integrated compatibility and acceptance must be established
+separately.

@@ -652,7 +652,8 @@ pub const SNAPSHOT_FORMAT: u32 = 88;
 /// "0.71" admits charted XYZ intent to the ordinary Full3D Navigation/Helm path.
 /// "0.72" adds finite physical marking and binds planned acquisition to actual work.
 /// "0.74" stamps collision history from the restored logical interval end.
-pub const SIMULATION_RULES: &str = "0.74";
+/// "0.75" replaces an empty saved Helm motion-plan frontier over bootstrap state.
+pub const SIMULATION_RULES: &str = "0.75";
 
 /// The authored data, computed rather than remembered.
 ///

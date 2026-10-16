@@ -1046,9 +1046,22 @@ fn comms_response_guard_truth_table() {
 #[test]
 fn authored_shield_arc_trees_raise_focus_and_bound_physical_recovery() {
     use phoenix_sim_gameplay::ai::host::{decide_tree_with_numbers, TreeHostOutcome};
-    let mut checked = 0;
+    let hulls = ai_hulls();
+    let expected: std::collections::BTreeSet<_> = hulls
+        .iter()
+        .flat_map(|(stem, hull)| {
+            hull.shield_arcs
+                .iter()
+                .map(move |arc| (stem.clone(), arc.id.clone()))
+        })
+        .collect();
+    assert!(
+        !expected.is_empty(),
+        "the actual authored corpus must contain physical arcs"
+    );
+    let mut checked = std::collections::BTreeSet::new();
     let mut recoverable = 0;
-    for (stem, hull) in ai_hulls() {
+    for (stem, hull) in hulls {
         assert!(
             hull.shields_console
                 .as_ref()
@@ -1154,12 +1167,15 @@ fn authored_shield_arc_trees_raise_focus_and_bound_physical_recovery() {
                 }
                 recoverable += 1;
             }
-            checked += 1;
+            assert!(
+                checked.insert((stem.clone(), arc.id.clone())),
+                "each actual authored arc executes once"
+            );
         }
     }
     assert_eq!(
-        checked, 21,
-        "all physical arcs in the thirteen-hull fleet execute their own tree"
+        checked, expected,
+        "all physical arcs in the current authored corpus execute their own tree"
     );
     assert!(
         recoverable > 0,
@@ -2602,10 +2618,20 @@ fn authored_power_trees_drive_actual_finite_hardware_without_legacy_policy() {
         let reactor = ship
             .systems
             .iter()
-            .find(|system| system.kind == crate::ship::system_registry::POWER_REACTOR_KIND)
-            .expect("physical hardware has a reactor System")
-            .id
-            .clone();
+            .find(|system| system.kind == crate::ship::system_registry::POWER_REACTOR_KIND);
+        let Some(reactor) = reactor else {
+            assert_eq!(
+                hardware.reactor.sustainable_output_per_sec, 0.0,
+                "{stem}: no controller is valid only for actual battery-only hardware"
+            );
+            assert_eq!(
+                hardware.reactor.max_output_per_sec, 0.0,
+                "{stem}: generating hardware requires its actual reactor System"
+            );
+            assert_eq!(hardware.reactor.initial_output_per_sec, 0.0);
+            continue;
+        };
+        let reactor = reactor.id.clone();
         let (programs, mut frames) =
             crate::ai::state_tree_runtime::compile_ship_trees_with_energy(ship, Some(hardware))
                 .unwrap();

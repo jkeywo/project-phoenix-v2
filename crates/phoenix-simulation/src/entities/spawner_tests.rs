@@ -350,9 +350,6 @@ fn an_unauthorable_infrastructure_table_fails_the_entity_load() {
 #[test]
 fn repair_teams_are_gated_on_the_authored_count_not_on_the_repair_table() {
     let selector_only = r#"
-[hull]
-hull_integrity = 100.0
-
 [behaviour]
 
 [[behaviour.doctrine]]
@@ -367,7 +364,7 @@ switch_margin = 0.0
 eligibility = "candidate_fact(source_repair_request) > 0"
 "#;
     let config = EntityConfig::from_toml_in_mode(
-        selector_only,
+        &shield_fixture::with_layout(selector_only, 100.0),
         crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
     )
     .expect("selector-only [repair] parses");
@@ -399,7 +396,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
 
     let with_teams = format!("{selector_only}\n[repair]\nrepair_team_count = 3\n");
     let config = EntityConfig::from_toml_in_mode(
-        &with_teams,
+        &shield_fixture::with_layout(&with_teams, 100.0),
         crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
     )
     .expect("[repair] with a count parses");
@@ -949,8 +946,7 @@ fn spawn_entity_without_hull_has_no_entity_console_hull() {
 fn spawn_entity_with_shields_console_block_attaches_ship_shields() {
     let mut app = test_app();
     let toml = r#"
-[hull]
-hull_integrity = 60.0
+# Structural durability is authored by the explicit physical fixture.
 
 [shields_console.base]
 num_facings = 1
@@ -1023,8 +1019,7 @@ fn an_empty_shields_console_attaches_no_ship_shields() {
 #[test]
 fn arcs_build_the_same_shield_system_with_or_without_a_shields_console() {
     const ARC: &str = r#"
-[hull]
-hull_integrity = 60.0
+# Structural durability is authored by the explicit physical fixture.
 
 [[shield_arc]]
 id = "all"

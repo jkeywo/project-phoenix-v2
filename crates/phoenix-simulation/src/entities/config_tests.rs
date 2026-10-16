@@ -4681,6 +4681,7 @@ fn phaser_bank_shield_pierce_defaults_to_none_when_absent() {
 [weapons_console]
 
 [[weapons_console.phaser_banks]]
+impact = { damage_type = "laser", penetration = 0 }
 id = "port"
 facing_deg = -90.0
 fire_arc_deg = 180.0
@@ -4701,6 +4702,7 @@ fn phaser_bank_shield_pierce_parses_when_present() {
 [weapons_console]
 
 [[weapons_console.phaser_banks]]
+impact = { damage_type = "laser", penetration = 0 }
 id = "port"
 facing_deg = -90.0
 fire_arc_deg = 180.0
@@ -4723,6 +4725,7 @@ fn torpedoes_shield_pierce_defaults_to_zero() {
 count = 5
 
 [[torpedoes.tubes]]
+impact = { damage_type = "physical", penetration = 0 }
 id = "fore"
 facing_deg = 0.0
 fire_arc_deg = 90.0
@@ -4747,6 +4750,7 @@ count = 5
 shield_pierce = 0.5
 
 [[torpedoes.tubes]]
+impact = { damage_type = "physical", penetration = 0 }
 id = "fore"
 facing_deg = 0.0
 fire_arc_deg = 90.0

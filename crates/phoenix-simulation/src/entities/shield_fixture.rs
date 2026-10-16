@@ -118,5 +118,93 @@ pub(super) fn with_energy(source: &str) -> String {
         )
         .unwrap(),
     );
+    with_layout(&toml::to_string(&value).unwrap(), 60.0)
+}
+
+/// Complete authored compartment recipe for these schema/spawn fixtures. This
+/// is test-source construction, never a production fallback for missing data.
+/// Callers remove legacy hull durability explicitly and supply its room total.
+pub(super) fn with_layout(source: &str, max_hp: f32) -> String {
+    let mut value: toml::Value = toml::from_str(source).unwrap();
+    assert!(
+        value.get("interior").is_none(),
+        "fixture layout must be explicit at one owner"
+    );
+    let mut systems = std::collections::BTreeSet::new();
+    let mut alert = false;
+    for system in value
+        .get("system")
+        .and_then(toml::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        systems.insert(system["id"].as_str().unwrap().to_string());
+        alert |= system["kind"].as_str() == Some(crate::ship::system_registry::RED_ALERT_KIND);
+    }
+    for arc in value
+        .get("shield_arc")
+        .and_then(toml::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        systems.insert(format!("shield-arc-{}", arc["id"].as_str().unwrap()));
+    }
+    if value.get("behaviour").is_some() && !alert {
+        systems.insert(crate::ship::system_registry::RED_ALERT_SYSTEM_ID.into());
+    }
+    let teams = value
+        .get("repair")
+        .and_then(|repair| repair.get("repair_team_count"))
+        .and_then(toml::Value::as_integer)
+        .unwrap_or(0);
+    let mut interior: phoenix_model::interior::InteriorConfig = toml::from_str(
+        r#"
+[[deck]]
+id="fixture"
+label="Fixture deck"
+damage_weight=1
+[[compartment]]
+id="equipment"
+deck="fixture"
+label="Fixture equipment"
+x=-1
+z=-1
+width=2
+depth=2
+material="bulkhead"
+max_hp=60
+recovery_fraction=0.2
+structural_remedy="structural"
+"#,
+    )
+    .unwrap();
+    interior.compartments[0].max_hp = max_hp;
+    interior.placements = systems
+        .into_iter()
+        .map(|id| (SystemId(id), "equipment".into()))
+        .collect();
+    interior.team_homes = (0..teams).map(|_| "equipment".into()).collect();
+    let root = value.as_table_mut().unwrap();
+    root.insert("interior".into(), toml::Value::try_from(interior).unwrap());
+    assert!(
+        !root.contains_key("damage"),
+        "fixture damage recipe has one source"
+    );
+    root.insert(
+        "damage".into(),
+        toml::from_str::<toml::Value>(
+            r#"
+[materials.bulkhead]
+resistance={physical=1,laser=0.7}
+residual_fraction=0.1
+[remedies.structural]
+work_secs=2
+manual_work_fraction=0.25
+structural_hp=10
+outcome={kind="structural"}
+"#,
+        )
+        .unwrap(),
+    );
     toml::to_string(&value).unwrap()
 }

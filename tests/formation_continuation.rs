@@ -181,9 +181,11 @@ fn follower(app: &mut App) -> Entity {
 fn earned_leader_motion(app: &App, observer: Entity, public_name: &str) -> bool {
     let config = &app.world().get::<ShipConfigComponent>(observer).unwrap().0;
     let boards = app.world().get::<ShipSystemBlackboards>(observer).unwrap();
-    config
-        .observations_for_system(&id("navigation"), &boards.0)
-        .values()
+    let permitted = config.observations_for_system(&id("navigation"), &boards.0);
+    boards
+        .0
+        .keys()
+        .filter_map(|source| permitted.get(source))
         .any(|board| {
             let SystemBlackboard::TacticalRadar(board) = board else {
                 return false;

@@ -1,0 +1,32 @@
+entities:
+  - component: contextual-comms-traffic-control
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Own Comms Listening and Contextual Reports
+      summary: Existing Radio processing admits the own listening order and commits a changed permitted dated alert report only after actual paid source emission. The existing ordinary per-System Comms controller uses that same admission path.
+    architecture:
+      kind: command-consumer
+      authority: authoritative
+      owns: [ship-comms-traffic]
+      reads: [ship-system-blackboards-state, system-control-source-state, comms-inbox-state]
+      writes: [ship-comms-traffic, comms-inbox-state]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/comms/traffic.rs, crates/phoenix-simulation/src/comms/radio.rs, crates/phoenix-simulation/src/console/comms/server.rs, crates/phoenix-sim-gameplay/src/electronic/traffic.rs]
+      symbols: [ShipCommsTraffic, CommsTrafficState, apply_order, prepare_report, decision, tick_radio]
+  - state: ship-comms-traffic
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Own Comms Listening and Successful Report Intent
+      summary: One actual Radio owner retains its priority order and last successfully emitted semantic/tick tuple. Current paid coverage is derived, omitted from snapshots and digests, and cleared on restore. Held dated Captain knowledge retains its original value and clock without private Alert rewriting.
+    architecture:
+      classification: authoritative
+      owner: contextual-comms-traffic-control
+      writers: [contextual-comms-traffic-control]
+    implementation:
+      status: declared
+      paths: [crates/phoenix-simulation/src/comms/traffic.rs, crates/phoenix-simulation/src/snapshot/comms_traffic.rs, crates/phoenix-simulation/src/sim_digest.rs, crates/phoenix-sim-gameplay/src/electronic/traffic.rs]
+      symbols: [ShipCommsTraffic, CommsTrafficState]

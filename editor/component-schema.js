@@ -357,6 +357,25 @@ export const COMPONENT_SCHEMA = {
       { key: 'radio', type: 'subobject', optional: true, subfields: [
         { key: 'system', type: 'string' },
         { key: 'request_reading_ticks', type: 'number', optional: true },
+        { key: 'media', type: 'string', enum: ['audio', 'audio_video'], optional: true },
+        { key: 'capture', type: 'subobject', optional: true, subfields: [
+          { key: 'max_level', type: 'number' },
+          { key: 'ticks_per_level', type: 'number' },
+          { key: 'held_key_ticks', type: 'number', optional: true },
+        ] },
+        { key: 'traffic', type: 'subobject', optional: true, subfields: [
+          { key: 'listening', type: 'subobject', optional: true, subfields: [
+            { key: 'simultaneous_channels', type: 'number' },
+            { key: 'priority', type: 'array', items: 'string' },
+          ] },
+          { key: 'alert', type: 'subobject', optional: true, subfields: [
+            { key: 'source', type: 'string' },
+            { key: 'channel', type: 'string' },
+            { key: 'minimum_spacing_ticks', type: 'number' },
+            { key: 'routine_text', type: 'string' },
+            { key: 'red_alert_text', type: 'string' },
+          ] },
+        ] },
         { key: 'keys', type: 'array', items: 'string', default: [] },
         { key: 'channel', type: 'array-of-tables', entryFields: [
           { key: 'id', type: 'string' },
@@ -364,6 +383,7 @@ export const COMPONENT_SCHEMA = {
           { key: 'work_units', type: 'number', default: 1 },
           { key: 'relay', type: 'boolean', default: false, optional: true },
           { key: 'key', type: 'string', optional: true },
+          { key: 'protection_level', type: 'number', optional: true },
         ] },
       ] },
     ],

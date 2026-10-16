@@ -639,7 +639,9 @@ pub const SNAPSHOT_FORMAT: u32 = 84;
 /// "0.65" discloses only safe attributed typed claims after the same paid decoder frontier.
 /// "0.66" advises on actual paid emissions, lets ordinary permitted AI react to
 /// declared intent, and accepts finite physical identity decoys through ordinary craft.
-pub const SIMULATION_RULES: &str = "0.66";
+/// "0.67" preserves physical modifier order before late Navigation sharing and
+/// generates shield knowledge Consoles only for actual shield equipment.
+pub const SIMULATION_RULES: &str = "0.67";
 
 /// The authored data, computed rather than remembered.
 ///

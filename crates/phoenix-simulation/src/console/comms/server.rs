@@ -198,10 +198,10 @@ pub(crate) fn publish_comms_blackboard(
             .map(|inbox| {
                 inbox
                     .0
-                    .messages()
-                    .into_iter()
+                    .iter()
                     .filter(|m| m.is_for_ship(uuid.map(|id| id.0.as_str())))
                     .filter(|m| is_local || slot.is_some() || m.transmission.is_some())
+                    .cloned()
                     .collect()
             })
             .unwrap_or_default();
@@ -3178,3 +3178,7 @@ fn resolve_hail_target(
 #[cfg(test)]
 #[path = "server_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "publication_cloning_oracle.rs"]
+mod publication_cloning_oracle;

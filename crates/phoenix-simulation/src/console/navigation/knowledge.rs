@@ -424,7 +424,7 @@ impl Picture {
 /// Identified measured contacts expose fixed authored interaction choices, not
 /// live itinerary/compliance. Explicit permitted Navigation claims retain their
 /// supplied fields; this publisher never refreshes those facts from an actor.
-pub(crate) fn civilian_rows(
+pub(crate) fn civilian_rows<'a>(
     picture: &Picture,
     civilians: &Query<(
         &crate::entities::spawner::EntityUuid,
@@ -432,20 +432,18 @@ pub(crate) fn civilian_rows(
         &crate::civilian::CivilianSection,
         &crate::civilian::CivilianTraffic,
     )>,
-    received: Option<&std::collections::HashMap<SystemId, crate::core::messages::SystemBlackboard>>,
+    received: impl Iterator<Item = (&'a SystemId, &'a crate::core::messages::SystemBlackboard)>,
     owner: &SystemId,
 ) -> Vec<crate::core::messages::CivilianTrafficSnapshot> {
     use crate::core::messages::{
         CivilianOrderOptionSnapshot, CivilianTrafficSnapshot, SystemBlackboard,
     };
     let mut rows = BTreeMap::new();
-    if let Some(received) = received {
+    {
         // Only another explicitly readable publication is a received claim;
-        // never turn our own previous publication into fresh telemetry.
-        let mut claims: Vec<_> = received
-            .iter()
-            .filter(|(source, _)| *source != owner)
-            .collect();
+        // never turn our own previous publication into fresh telemetry. Borrow
+        // the claims: unrelated permitted payloads need not be copied here.
+        let mut claims: Vec<_> = received.filter(|(source, _)| *source != owner).collect();
         claims.sort_by_key(|(source, _)| *source);
         for (_, board) in claims {
             if let SystemBlackboard::Navigation(board) = board {

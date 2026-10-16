@@ -999,14 +999,12 @@ pub(crate) fn publish_navigation_blackboard(
             });
         let picture = knowledge.picture(entity, config, &nav_id, Some(&bbs), profile);
         let visible_civilians = if picture.configured {
-            let received = config.map(|config| {
-                let view = config.0.observations_for_system(&nav_id, &bbs.0);
-                bbs.0
-                    .keys()
-                    .filter_map(|key| view.get(key).map(|value| (key.clone(), value.clone())))
-                    .collect()
-            });
-            super::knowledge::civilian_rows(&picture, &civilians_q, received.as_ref(), &nav_id)
+            let received = config.map(|config| config.0.observations_for_system(&nav_id, &bbs.0));
+            let claims = bbs
+                .0
+                .keys()
+                .filter_map(|key| received.as_ref()?.get(key).map(|value| (key, value)));
+            super::knowledge::civilian_rows(&picture, &civilians_q, claims, &nav_id)
         } else {
             civilians.clone()
         };
@@ -1728,3 +1726,7 @@ mod tests;
 #[cfg(test)]
 #[path = "knowledge_tests.rs"]
 mod knowledge_tests;
+
+#[cfg(test)]
+#[path = "publication_cloning_oracle.rs"]
+mod publication_cloning_oracle;

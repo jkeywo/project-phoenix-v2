@@ -4327,3 +4327,210 @@ fn comms_instance_history_survives_departure_and_completed_join() {
 
 #[path = "opportunity_response_tests.rs"]
 mod opportunity_responses;
+
+#[test]
+fn filtered_borrow_matches_original_full_comms_publications_and_json() {
+    use bevy::ecs::system::RunSystemOnce;
+    use phoenix_model::comms_channel::{CommsAudience, CommsTransmission};
+    use phoenix_model::comms_request::{
+        CommsRadioContent, CommsRequestProgress, CommsRequestStage,
+    };
+    use phoenix_model::wire::ShipKey;
+    let mut app = test_app();
+    // Keep the ordinary range/objective transformations enabled in both paths.
+    let local = {
+        let mut q = app.world_mut().query_filtered::<Entity, With<LocalShip>>();
+        q.single(app.world()).unwrap()
+    };
+    app.world_mut()
+        .entity_mut(local)
+        .insert(EntityUuid("local".into()));
+    let fleet = app
+        .world_mut()
+        .spawn((
+            Ship,
+            EntityUuid("fleet".into()),
+            crate::lockstep::FleetSlotOf(phoenix_runtime::HostSlot(1)),
+            ShipSystemBlackboards::default(),
+        ))
+        .id();
+    let npc = app
+        .world_mut()
+        .spawn((
+            Ship,
+            EntityUuid("npc".into()),
+            ShipSystemBlackboards::default(),
+        ))
+        .id();
+    let unnamed = app
+        .world_mut()
+        .spawn((Ship, ShipSystemBlackboards::default()))
+        .id();
+    let mut radio = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap()
+    .comms
+    .unwrap()
+    .radio
+    .unwrap();
+    radio.system = SystemId("radio-array".into());
+    let fixed = app
+        .world_mut()
+        .spawn((
+            EntityUuid("fixed".into()),
+            crate::comms::radio::RadioProfile(radio),
+            ShipSystemBlackboards::default(),
+        ))
+        .id();
+    let endpoints = [local, fleet, npc, unnamed, fixed];
+    for (index, recipient, text) in [
+        ("z-legacy", None, false),
+        ("a-local", Some("local"), false),
+        ("m-fleet", Some("fleet"), false),
+        ("b-npc-legacy", Some("npc"), false),
+        ("radio-npc", Some("npc"), true),
+        ("radio-global", None, true),
+        ("radio-fixed", Some("fixed"), true),
+        ("unheard-foreign", Some("foreign"), true),
+    ] {
+        let mut message = msg(index);
+        message.body = format!("{index}:{}", "payload ".repeat(256));
+        message.recipient_ship = recipient.map(|id| ShipKey(id.into()));
+        if text {
+            message.transmission = Some(CommsTransmission {
+                formation_sequence: None,
+                sustained: false,
+                origin_id: index.into(),
+                channel: "public".into(),
+                audience: CommsAudience::All,
+                emitted_tick: 3,
+                received_tick: Some(7),
+                content: CommsRadioContent::Text,
+            });
+        }
+        if index == "radio-npc" {
+            message.request_progress = Some(CommsRequestProgress {
+                last_returned: Some(CommsRequestStage::Read),
+                ..Default::default()
+            });
+        }
+        app.world_mut()
+            .resource_mut::<CommsInboxRes>()
+            .0
+            .inject(message);
+    }
+    for stage in 0..3 {
+        if stage == 1 {
+            app.world_mut()
+                .resource_mut::<CommsInboxRes>()
+                .0
+                .record_response("a-local", 0);
+            app.world_mut()
+                .resource_mut::<CommsInboxRes>()
+                .0
+                .clear_for_ship(Some("local"));
+            let saved =
+                serde_json::to_vec(&app.world().resource::<CommsInboxRes>().0.messages()).unwrap();
+            let restored: Vec<CommsMessage> = serde_json::from_slice(&saved).unwrap();
+            let mut inbox = crate::console::comms::CommsInbox::new();
+            for message in restored {
+                assert!(inbox.inject(message));
+            }
+            app.insert_resource(CommsInboxRes(inbox));
+        } else if stage == 2 {
+            // Missing optional owner retains the exact legacy empty publication.
+            app.world_mut().remove_resource::<CommsInboxRes>();
+        }
+        let originals: Vec<_> = endpoints
+            .iter()
+            .map(|entity| {
+                app.world()
+                    .get::<ShipSystemBlackboards>(*entity)
+                    .unwrap()
+                    .0
+                    .clone()
+            })
+            .collect();
+        app.world_mut()
+            .run_system_once(super::publication_cloning_oracle::publish)
+            .unwrap();
+        let expected: Vec<_> = endpoints
+            .iter()
+            .map(|entity| {
+                app.world()
+                    .get::<ShipSystemBlackboards>(*entity)
+                    .unwrap()
+                    .0
+                    .clone()
+            })
+            .collect();
+        for (entity, boards) in endpoints.iter().zip(originals) {
+            app.world_mut()
+                .get_mut::<ShipSystemBlackboards>(*entity)
+                .unwrap()
+                .0 = boards;
+        }
+        app.world_mut()
+            .run_system_once(publish_comms_blackboard)
+            .unwrap();
+        for (entity, expected) in endpoints.iter().zip(expected) {
+            let actual = &app.world().get::<ShipSystemBlackboards>(*entity).unwrap().0;
+            assert_eq!(
+                actual, &expected,
+                "complete Comms endpoint {entity:?} stage {stage}"
+            );
+            // Map encoding is compared structurally; each complete DTO's bytes
+            // retain its original field/row order exactly.
+            assert_eq!(
+                serde_json::to_value(actual).unwrap(),
+                serde_json::to_value(&expected).unwrap()
+            );
+            let key = if *entity == fixed {
+                SystemId("radio-array".into())
+            } else {
+                crate::ship::system_registry::comms_system_id()
+            };
+            assert_eq!(
+                serde_json::to_vec(&actual[&key]).unwrap(),
+                serde_json::to_vec(&expected[&key]).unwrap()
+            );
+            let SystemBlackboard::Comms(board) = &actual[&key] else {
+                unreachable!()
+            };
+            let ids: Vec<_> = board
+                .messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect();
+            if stage == 2 {
+                assert!(ids.is_empty());
+            } else if *entity == local {
+                assert_eq!(
+                    ids,
+                    if stage == 0 {
+                        vec!["z-legacy", "a-local", "radio-global"]
+                    } else {
+                        vec!["z-legacy", "radio-global"]
+                    }
+                );
+            } else if *entity == fleet {
+                assert_eq!(ids, vec!["z-legacy", "m-fleet", "radio-global"]);
+            } else if *entity == npc {
+                assert_eq!(ids, vec!["radio-npc", "radio-global"]);
+                assert_eq!(
+                    board.messages[0]
+                        .request_progress
+                        .as_ref()
+                        .unwrap()
+                        .last_returned,
+                    None
+                );
+            } else if *entity == unnamed {
+                assert_eq!(ids, vec!["radio-global"]);
+            } else {
+                assert_eq!(ids, vec!["radio-global", "radio-fixed"]);
+            }
+        }
+    }
+}

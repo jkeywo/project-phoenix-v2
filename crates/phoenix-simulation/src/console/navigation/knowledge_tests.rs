@@ -312,7 +312,7 @@ fn anonymous_and_lost_traffic_do_not_gain_manifest_or_live_itinerary() {
         super::super::knowledge::civilian_rows(
             &picture,
             &query.get(world),
-            None,
+            std::iter::empty(),
             &SystemId("navigation".into()),
         )
     };
@@ -794,10 +794,7 @@ fn formation_publications(world: &mut World) {
 /// sender association, received message or successful machinery result.
 #[test]
 fn formation_selection_uses_actual_heard_acceptance_and_earned_measurement_with_stable_pause() {
-    use crate::comms::{
-        radio::tick_radio,
-        server::CommsInboxRes,
-    };
+    use crate::comms::{radio::tick_radio, server::CommsInboxRes};
     use crate::console::comms::server::publish_comms_blackboard;
     use crate::core::messages::AdmittedCommand;
     use phoenix_model::{comms_channel::CommsAudience, comms_request::GenericCommsRequest};
@@ -1565,7 +1562,11 @@ fn exercise_formation_publication_frontier(app: &mut App, observer: Entity) {
         .world_mut()
         .run_system_once(crate::console::helm::server::publish_helm_blackboard)
         .unwrap();
-    assert_eq!(available(&resumed, restored), (None, vec![]), "the next ordinary publication must withhold the now-stale sample; restore cannot rejuvenate it");
+    assert_eq!(
+        available(&resumed, restored),
+        (None, vec![]),
+        "the next ordinary publication must withhold the now-stale sample; restore cannot rejuvenate it"
+    );
     assert!(resumed
         .world()
         .get::<HelmNavigationInputs>(restored)
@@ -1760,4 +1761,188 @@ fn actual_utility_charted_xyz_admission_preserves_fractional_height_and_fixed_co
     };
     assert!(board.charted_points.is_empty());
     assert_eq!(board.charted_course.as_ref(), Some(&course));
+}
+
+#[test]
+fn borrowed_civilian_claims_match_original_full_publication_and_json() {
+    use crate::server_app::{LocalShip, ShipSystemBlackboards};
+    use phoenix_model::console::{ConsoleFeed, ConsoleObservationKind};
+    for identified in [false, true] {
+        let (mut app, observer, target) = rig();
+        traffic(app.world_mut(), target);
+        app.world_mut().entity_mut(observer).insert(LocalShip);
+        app.init_resource::<crate::lobby::server::ShipClientConfigResource>();
+        let handle = observe(&mut app, observer, identified);
+        let nav = SystemId("navigation".into());
+        let console = app
+            .world()
+            .get::<crate::ship_plugin::ShipConfigComponent>(observer)
+            .unwrap()
+            .0
+            .system(&nav)
+            .unwrap()
+            .console
+            .clone()
+            .unwrap();
+        {
+            let mut config = app
+                .world_mut()
+                .get_mut::<crate::ship_plugin::ShipConfigComponent>(observer)
+                .unwrap();
+            let feeds = &mut config
+                .0
+                .consoles
+                .iter_mut()
+                .find(|row| row.id == console)
+                .unwrap()
+                .feeds;
+            for source in ["claim-z", "claim-a", "claim-missing", "claim-wrong"] {
+                feeds.push(ConsoleFeed {
+                    source: SystemId(source.into()),
+                    kind: ConsoleObservationKind::Navigation,
+                });
+            }
+            feeds.push(ConsoleFeed {
+                source: SystemId("large-unrelated".into()),
+                kind: ConsoleObservationKind::Comms,
+            });
+        }
+        let claim = |route: &str| {
+            SystemBlackboard::Navigation(NavigationBlackboard {
+                civilians: vec![crate::core::messages::CivilianTrafficSnapshot {
+                    uuid: handle.clone(),
+                    name: "received-name-must-not-win".into(),
+                    route: route.into(),
+                    leg: 3,
+                    legs: 5,
+                    order: "hold".into(),
+                    compliance: "dated-claim".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+        };
+        {
+            let mut boards = app
+                .world_mut()
+                .get_mut::<ShipSystemBlackboards>(observer)
+                .unwrap();
+            boards
+                .0
+                .insert(nav.clone(), claim("own-previous-must-not-win"));
+            // Intentionally opposite insertion/source order; source order owns ties.
+            boards
+                .0
+                .insert(SystemId("claim-z".into()), claim("z-claim"));
+            boards
+                .0
+                .insert(SystemId("claim-a".into()), claim("a-claim"));
+            boards
+                .0
+                .insert(SystemId("private-no-feed".into()), claim("private"));
+            let unrelated =
+                SystemBlackboard::Comms(crate::core::messages::CommsBlackboard::default());
+            boards
+                .0
+                .insert(SystemId("claim-wrong".into()), unrelated.clone());
+            boards
+                .0
+                .insert(SystemId("large-unrelated".into()), unrelated);
+        }
+        for stage in 0..4 {
+            if stage == 1 {
+                // Refit/configuration change removes the winning explicit feed.
+                let mut config = app
+                    .world_mut()
+                    .get_mut::<crate::ship_plugin::ShipConfigComponent>(observer)
+                    .unwrap();
+                config
+                    .0
+                    .consoles
+                    .iter_mut()
+                    .find(|row| row.id == console)
+                    .unwrap()
+                    .feeds
+                    .retain(|row| row.source.0 != "claim-a");
+            } else if stage == 2 {
+                // A restored payload still has its original claim data/order.
+                let encoded = serde_json::to_vec(
+                    &app.world()
+                        .get::<ShipSystemBlackboards>(observer)
+                        .unwrap()
+                        .0,
+                )
+                .unwrap();
+                app.world_mut()
+                    .get_mut::<ShipSystemBlackboards>(observer)
+                    .unwrap()
+                    .0 = serde_json::from_slice(&encoded).unwrap();
+            } else if stage == 3 {
+                let mut config = app
+                    .world_mut()
+                    .get_mut::<crate::ship_plugin::ShipConfigComponent>(observer)
+                    .unwrap();
+                config
+                    .0
+                    .consoles
+                    .iter_mut()
+                    .find(|row| row.id == console)
+                    .unwrap()
+                    .feeds
+                    .clear();
+            }
+            let original = app
+                .world()
+                .get::<ShipSystemBlackboards>(observer)
+                .unwrap()
+                .0
+                .clone();
+            app.world_mut()
+                .run_system_once(super::publication_cloning_oracle::publish)
+                .unwrap();
+            let expected = app
+                .world()
+                .get::<ShipSystemBlackboards>(observer)
+                .unwrap()
+                .0[&nav]
+                .clone();
+            app.world_mut()
+                .get_mut::<ShipSystemBlackboards>(observer)
+                .unwrap()
+                .0 = original;
+            app.world_mut()
+                .run_system_once(publish_navigation_blackboard)
+                .unwrap();
+            let actual = &app
+                .world()
+                .get::<ShipSystemBlackboards>(observer)
+                .unwrap()
+                .0[&nav];
+            assert_eq!(
+                actual, &expected,
+                "full board identified={identified} stage={stage}"
+            );
+            assert_eq!(
+                serde_json::to_vec(actual).unwrap(),
+                serde_json::to_vec(&expected).unwrap()
+            );
+            let SystemBlackboard::Navigation(actual) = actual else {
+                unreachable!()
+            };
+            if !identified || stage == 3 {
+                assert!(
+                    actual.civilians.is_empty(),
+                    "unknown/withdrawn observations confer no claims"
+                );
+            } else {
+                assert_eq!(actual.civilians.len(), 1);
+                assert_eq!(actual.civilians[0].uuid, handle);
+                assert_eq!(actual.civilians[0].name, "held-public-name");
+                assert_eq!(
+                    actual.civilians[0].route,
+                    if stage == 0 { "a-claim" } else { "z-claim" }
+                );
+            }
+        }
+    }
 }

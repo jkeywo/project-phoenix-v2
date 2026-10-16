@@ -4285,6 +4285,25 @@ fn torpedo_hit_from_astern_damages_the_astern_arc_not_the_fore_arc() {
         crate::ship::shields::ShipShields(shield_sys, 0.5),
         Transform::from_xyz(0.0, 0.0, 0.0),
     ));
+    // This new four-arc fixture needs its own finite upkeep consumers, just as
+    // payload_probe below does. The earlier weapons-only hardware predates
+    // these arcs and must not grant them unpaid protection.
+    app.world_mut()
+        .entity_mut(player_entity)
+        .remove::<crate::ship::power::ShipPowerSystem>();
+    attach_fixture_weapon_energy(&mut app, player_entity);
+    let shields = app
+        .world()
+        .get::<crate::ship::shields::ShipShields>(player_entity)
+        .unwrap();
+    let power = app
+        .world()
+        .get::<crate::ship::power::ShipPowerSystem>(player_entity)
+        .unwrap();
+    assert!(shields.0.facings.iter().all(|arc| {
+        crate::ship::system_registry::shield_arc_system_id(&arc.id)
+            .is_some_and(|owner| power.0.network().consumers.contains_key(&owner))
+    }));
 
     app.world_mut()
         .insert_resource(WorldResource(crate::core::messages::WorldData {

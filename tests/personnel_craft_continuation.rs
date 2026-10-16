@@ -69,6 +69,13 @@ fn boot_with_world(world_path: &str, ship_path: &str) -> (App, Entity, Entity) {
     app.finish();
     app.cleanup();
     steps(&mut app, 10);
+    assert_eq!(
+        app.world()
+            .resource::<State<project_phoenix::core::messages::GamePhase>>()
+            .get(),
+        &project_phoenix::core::messages::GamePhase::InProgress,
+        "the genuine headless auto-start must enter Running before claiming live Stations"
+    );
     let parent = app
         .world_mut()
         .query_filtered::<Entity, With<LocalShip>>()
@@ -160,6 +167,7 @@ fn bay(app: &App, parent: Entity) -> phoenix_model::craft::BayView {
 fn stored(app: &App, child: Entity) -> bool {
     app.world().get::<Disabled>(child).is_some()
 }
+#[track_caller]
 fn wait(app: &mut App, mut predicate: impl FnMut(&App) -> bool) {
     for _ in 0..600 {
         if predicate(app) {

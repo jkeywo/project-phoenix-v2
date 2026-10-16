@@ -117,6 +117,8 @@ physical=1
 laser=1
 
 [comms]
+# An addressable receiving service must opt into the ordinary Comms contact roster.
+hailable=true
 range=200
 [comms.radio]
 system="comms"

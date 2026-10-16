@@ -51,6 +51,7 @@ it('authors a genuinely fixed finite receiving facility and explicit negotiation
  const facility=resolve('assets/entities/reception_outpost.toml');
  expect(facility.helm_console).toBeUndefined();expect(facility.behaviour).toBeUndefined();expect(facility.probe).toBeUndefined();
  expect(facility.collider.movable).toBe(false);expect(facility.personnel).toBeUndefined();
+ expect(facility.comms.hailable).toBe(true);
  const bay=facility.system.find(row=>row.id==='reception-bay');validateBayComposition(bay,bay.component,[]);
  expect(facility.interior.placements[bay.id]).toBe(bay.component[1].config.compartment);
  expect(facility.energy.consumer.map(row=>row.system).sort()).toEqual(['comms','reception-bay','sensor-radar']);

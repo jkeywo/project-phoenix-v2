@@ -14,10 +14,25 @@ use project_phoenix::{
     entities::craft::{ProbeCustody, ShipBayJobs},
 };
 fn boot_reception() -> (App, Entity, Entity) {
-    boot_with_world(
+    let (app, parent, child) = boot_with_world(
         "tests/fixtures/personnel-reception-world.toml",
         "assets/entities/reception_carrier.toml",
-    )
+    );
+    let receiver = receiver(&app).expect("the authored receiving facility must actually exist");
+    assert!(
+        app.world()
+            .get::<project_phoenix::comms::CommsHailable>(receiver)
+            .is_some(),
+        "the actual receiver opts into the normal contact roster, not just radio range"
+    );
+    assert!(
+        app.world()
+            .get::<project_phoenix::comms::radio::RadioProfile>(receiver)
+            .is_some(),
+        "the actual receiver has its installed paid radio"
+    );
+    ordinary_receiver(&app);
+    (app, parent, child)
 }
 fn receiver(app: &App) -> Option<Entity> {
     app.world()

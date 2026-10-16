@@ -261,7 +261,7 @@ entities:
       status: declared
       paths: [src/headless/duel.rs, src/headless/app.rs, src/headless/args.rs, assets/worlds/duel.toml]
       symbols: [apply_duel_sides, resolve_template, SLOT_MARKER, DuelError, DuelTemplateLoader]
-      tests: [cargo test, tests/headless_runner.rs, src/headless/duel_tests.rs, src/headless/args_tests.rs]
+      tests: [cargo test, tests/headless_runner.rs, tests/combat_balance.rs, src/headless/duel_tests.rs, src/headless/args_tests.rs]
 
   - component: balance-batch-runner
     core:

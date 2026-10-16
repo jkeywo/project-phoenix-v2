@@ -9,6 +9,7 @@ import {
   waitForWasmReady,
   expectFixtureWorld,
 } from './fixtures';
+import { parse, stringify } from 'smol-toml';
 
 // Self-contained smoke-test world, the same shape `tactical-fire-flow.spec.js`
 // uses: the player's cruiser at the origin facing -Z, one hostile 15.8 units off
@@ -37,6 +38,7 @@ overrides = { tags = ["ship"] }
 [[entity]]
 template_path = "assets/entities/ship_harrow_patrol.toml"
 name          = "raider_alpha"
+overrides     = { name = "raider_alpha", display_name = "raider_alpha" }
 transform     = { position = [-15.0, 0.0, -5.0] }
 spawn_on      = "game_start"
 `;
@@ -82,18 +84,26 @@ async function startGame(context) {
     route.fulfill({ contentType: 'text/plain', body: MINIMAL_TEST_WORLD }),
   );
 
-  // Make the raider inert: idle, stationary, and with its enemy_in_range
-  // transition disabled, so the ONLY thing in this world that can produce a
-  // `BeamStarted` is the player's own fire order. The negative assertion counts
-  // beams, so a hostile taking pot shots would fail it for the wrong reason.
+  // Preserve the intended inert target using the current authored AI schema.
+  // None directives hold position; each unchanged equipped bank explicitly
+  // declines automatic fire. No retired FSM text or private state is patched.
   await context.route('**/assets/entities/ship_harrow_patrol.toml', async (route) => {
     const response = await route.fetch();
-    const text = await response.text();
-    const patched = text
-      .replace(/initial_state\s*=\s*"patrol"/, 'initial_state = "idle"')
-      .replace(/target_speed\s*=\s*[\d.]+/g, 'target_speed = 0.0')
-      .replace(/condition = "enemy_in_range"/, 'condition = "never_matches"');
-    await route.fulfill({ contentType: 'text/plain', body: patched });
+    const config = parse(await response.text());
+    expect(config.behaviour.doctrine.map(entry => entry.id).sort()).toEqual([
+      'destroy-hostiles', 'patrol-ironveil',
+    ]);
+    for (const entry of config.behaviour.doctrine) {
+      entry.directive_kind = 'None';
+      entry.directive_anchors = [];
+      entry.directive_loop = false;
+      entry.target_speed = 0;
+    }
+    expect(config.weapon.map(weapon => weapon.id).sort()).toEqual([
+      'phaser-port', 'phaser-starboard',
+    ]);
+    for (const weapon of config.weapon) weapon.ai = { idle: true };
+    await route.fulfill({ contentType: 'text/plain', body: stringify(config) });
   });
 
   const serverPage = await context.newPage();
@@ -128,22 +138,35 @@ test('Tactical holds and releases firing independently of Engineering flow', { t
   test.setTimeout(180_000);
   const { helm, tactical, engineering, serverCrashes } = await startGame(context);
 
-  // The raider's uuid, off WorldSetup.
   const worldSetup = await tactical.waitForMessage('WorldSetup', 5_000);
   expectFixtureWorld(worldSetup, MINIMAL_TEST_WORLD);
-  const entities = worldSetup?.data?.world?.entities ?? [];
-  const raider = entities.find(
-    (e) => Array.isArray(e.tags) && e.tags.includes('npc'),
-  );
-  expect(raider, 'raider entity must appear in WorldSetup').toBeDefined();
-  const raiderUuid = raider.uuid;
+  expect((worldSetup.data.world.entities || []).some(entity => entity.tags?.includes('npc'))).toBe(false);
+  // Acquire the observer-local handle from the latest actual paid Tactical
+  // publication. WorldSetup never supplies uncharted foreign live identities.
+  await tactical.page.bringToFront();
+  const contact = await tactical.page.waitForFunction(() => {
+    for (const message of [...(window.__messages || [])].reverse()) {
+      if (message.type !== 'BlackboardUpdate') continue;
+      const entry = (message.data.updates || []).find(([owner]) => owner === 'tactical-radar');
+      if (!entry) continue;
+      const track = entry[1]?.data?.tracks?.find(candidate => !candidate.predicted
+        && candidate.selectable && candidate.identity?.name === 'raider_alpha');
+      return track?.contact_id || null;
+    }
+    return null;
+  }, undefined, { timeout: 20000 });
+  const raiderContact = await contact.jsonValue();
+  expect(raiderContact, 'the target must be earned by Tactical').toBeTruthy();
 
   // Lock the raider and wait until a bank reports itself fire-ready, so every
   // other firing prerequisites are satisfied before Tactical holds fire.
   await tactical.send('ControlSystem', {
     target: 'tactical-radar',
-    payload: { type: 'SetTarget', data: { uuid: raiderUuid } },
+    payload: { type: 'SetTarget', data: { uuid: raiderContact } },
   });
+  await tactical.page.waitForFunction(handle => window.__messages?.some(message =>
+    message.type === 'TargetLock' && message.data.uuid === handle && message.data.locked === true),
+  raiderContact, { timeout: 15000 });
   await tactical.page.bringToFront();
   await tactical.page.waitForFunction(
     () => window.__messages?.some(
@@ -170,7 +193,7 @@ test('Tactical holds and releases firing independently of Engineering flow', { t
   await setRestraint(tactical, false);
   await tactical.send('ControlSystemCorrelated', { target: 'phaser-fore', correlation: 'released-fire', payload: { type: 'FirePhaser' } });
   const beamStarted = await tactical.waitForMessage('BeamStarted', 20000);
-  expect(beamStarted.data.target_uuid).toBe(raiderUuid);
+  expect(beamStarted.data.target_uuid).toBe(raiderContact);
 
   expect(serverCrashes).toEqual([]);
 

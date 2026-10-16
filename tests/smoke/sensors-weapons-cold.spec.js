@@ -11,7 +11,8 @@ import {
 } from './fixtures';
 import { ts } from './strings';
 
-// Two otherwise identical stationary tugs; scenario restraint holds one.
+// Two otherwise identical stationary, explicitly targetable tugs; scenario
+// restraint holds one. Accepted names feed real acquired identity samples.
 const WEAPONS_COLD_WORLD = `
 [global]
 seed = 1397
@@ -36,7 +37,7 @@ id            = "cold-hauler"
 name          = "cold_hauler"
 transform     = { position = [300.0, 0.0, -300.0] }
 spawn_on      = "game_start"
-overrides     = { tags = ["ship", "npc"] }
+overrides     = { name = "cold_hauler", display_name = "cold_hauler", tags = ["ship", "npc"], target = { tags = ["ship"] } }
 
 # The control leaves its ordinary explicit restraint released.
 [[entity]]
@@ -45,7 +46,7 @@ id            = "armed-hauler"
 name          = "armed_hauler"
 transform     = { position = [-300.0, 0.0, -300.0] }
 spawn_on      = "game_start"
-overrides     = { tags = ["ship", "npc"] }
+overrides     = { name = "armed_hauler", display_name = "armed_hauler", tags = ["ship", "npc"], target = { tags = ["ship"] } }
 
 [script]
 setup = """

@@ -1,12 +1,16 @@
-# Finite stationary reference equipment. The real probe systems, buffers,
-# collider, material and component damage remain ordinary accepted machinery.
-includes = ["battery_probe.toml"]
+# Finite stationary reference equipment. The complete unarmed utility hull's
+# real Systems, buffers, idle AI and component damage remain ordinary machinery.
+includes = ["utility_shuttle.toml"]
 name = "entity.fitting_rehearsal_subject.name"
 faction = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb"
 
-# Ordinary ship substrate makes this finite engineless subject visible to the
-# existing nearest-hostile doctrine. Empty behaviour gives it no travel order.
-[behaviour]
+# Keep the complete accepted ordinary Ship, including its explicit Red Alert
+# System. The inherited empty doctrine/idle selectors issue no travel order.
+[collider]
+shape = "Ball"
+radius = 0.5
+length = 0
+movable = false
 
 # Interior replaces atomically. Restate the complete one-room layout;
 # only finite structural endurance differs from the original probe room.
@@ -33,3 +37,11 @@ structural_remedy = "structural"
 
 [interior.placements]
 sensor-radar = "probe-core"
+helm-thrust = "probe-core"
+helm-steering = "probe-core"
+helm-lateral-thrust = "probe-core"
+helm-vertical-thrust = "probe-core"
+helm-radar = "probe-core"
+navigation = "probe-core"
+comms = "probe-core"
+red-alert = "probe-core"

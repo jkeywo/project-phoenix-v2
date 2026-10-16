@@ -249,7 +249,11 @@ The sustained phase requests engagement throughout. Burst/recovery requests 600
 engagement and 1,200 recovery intervals; at twelve ordinary scenario seconds the
 World retires its subject through the existing destruction effect. This is an
 explicit workload boundary, never damage or a kill credited to the fitting.
-The subject uses accepted finite probe equipment, ordinary empty behaviour/ship
+The subject uses the complete accepted finite unarmed utility hull, its ordinary
+empty doctrine/idle policies and a stationary collider. It retains all nine real
+Systems, their Operation hardware, reserves and complete physical placements;
+only its declared identity/faction, collider mobility and finite compartment HP
+differ from that hull. It uses the ordinary behaviour/ship
 substrate and the existing Pirate relationship; its one room has 10,000 finite
 structural HP. It has no invulnerability or replenishment grant.
 

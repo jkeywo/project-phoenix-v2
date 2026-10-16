@@ -4225,7 +4225,7 @@ fn phaser_damage_modifier_doubles_kill_rate() {
     // bank supplies the rate; both hosts run exactly the same actual duration.
     let intervals = (30.0 / (rate * 2.0 * dt)).ceil() as usize;
     assert!((2..=100).contains(&intervals));
-    assert!(rate * dt * intervals as f32 < 30.0);
+    assert!(rate * dt * (intervals as f32) < 30.0);
     let fast_ship = app_fast.world().resource::<ShipEntity>().0;
     let duration = app_fast
         .world()

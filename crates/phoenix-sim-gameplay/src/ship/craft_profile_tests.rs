@@ -166,6 +166,16 @@ fn fixed_battery_turret_uses_existing_static_ship_substrate_without_changing_sen
     );
     let bank = &turret.weapons_console.as_ref().unwrap().phaser_banks[0];
     assert_eq!(bank.id, "turret");
+    assert!(
+        turret
+            .weapons_console
+            .as_ref()
+            .unwrap()
+            .ai
+            .as_ref()
+            .unwrap()
+            .idle
+    );
     assert_eq!(bank.beam_range, 40.0);
     assert_eq!(bank.beam_damage_per_sec, 2.0);
     let sensor =
@@ -206,7 +216,7 @@ fn fixed_turret_refuses_unsupported_hardware_and_missing_real_ai_scope_or_paid_w
     use phoenix_model::console::ConsoleObservationKind;
     let valid =
         crate::test_fixtures::load_entity_config("assets/entities/battery_turret.toml").unwrap();
-    for fault in 0..12 {
+    for fault in 0..13 {
         let mut invalid = valid.clone();
         let bank = SystemId("phaser-turret".into());
         let radar = SystemId("tactical-radar".into());
@@ -271,7 +281,10 @@ fn fixed_turret_refuses_unsupported_hardware_and_missing_real_ai_scope_or_paid_w
                 .broad
                 .retain(|scanner| scanner.system != radar),
             10 => invalid.sensing.as_mut().unwrap().control.combat_lock = None,
-            _ => invalid.weapons_console.as_mut().unwrap().selector = None,
+            11 => invalid.weapons_console.as_mut().unwrap().selector = None,
+            _ => invalid.ship_config.as_mut().unwrap().consoles[0]
+                .feeds
+                .retain(|feed| feed.kind != ConsoleObservationKind::Viewscreen),
         }
         assert!(validate_entity(&invalid).is_err(), "case {fault}");
     }

@@ -119,11 +119,20 @@ kind = "TacticalRadar"
 [[console.feed]]
 source = "phaser-turret"
 kind = "PhaserBank"
+# The ordinary bank follows the ship's own primary-lock publication. Its actual
+# machinery resolver still requires the permitted acquired TacticalRadar record.
+[[console.feed]]
+source = "viewscreen"
+kind = "Viewscreen"
 
 [weapons_console.radar]
 range = 60
 shows = ["ship", "station"]
 selects = ["ship", "station"]
+
+# Stationary equipment has no Helm consumer for an arc-bearing request.
+[weapons_console.ai]
+idle = true
 
 [weapons_console.selector]
 sources = ["radar-contacts"]

@@ -214,6 +214,11 @@ fn validate_fixed_beam_turret(config: &EntityConfig) -> Result<(), String> {
             .ok_or_else(refuse)?;
         if !permitted(system, &radar.id, ConsoleObservationKind::TacticalRadar)
             || !permitted(system, &id, ConsoleObservationKind::PhaserBank)
+            || !permitted(
+                system,
+                &viewscreen_system_id(),
+                ConsoleObservationKind::Viewscreen,
+            )
             || !paid(&id)
         {
             return Err(refuse());

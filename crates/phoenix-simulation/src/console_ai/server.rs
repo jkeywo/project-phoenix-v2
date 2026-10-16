@@ -1009,6 +1009,14 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
         let Some(owner) = crate::science::broad::science_owner(controls, tracks.is_some()) else {
             continue;
         };
+        if !crate::science::shield_enquiry::has_permitted_shield_finding(
+            &ship_config.0,
+            blackboards,
+            &owner,
+        ) {
+            hint_state.0 = Default::default();
+            continue;
+        }
         // Frozen Combat Lock from this ship's viewscreen (issue #829, spec §3),
         // identical to how the low-fidelity twin `tick_sensors_frequency_hint`
         // and the firing paths read it — never the tactical radar's live
@@ -1187,3 +1195,6 @@ mod power_group_observations_tests;
 #[cfg(test)]
 #[path = "server_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+include!("frequency_hint_original.rs");

@@ -75,6 +75,10 @@ fn seed_viewscreen_from_selection(
 }
 
 fn freq_hint_test_app() -> App {
+    freq_hint_test_app_with_producer(false)
+}
+
+fn freq_hint_test_app_with_producer(original: bool) -> App {
     let mut app = App::new();
     crate::ai::host::register_ai_host_env(&mut app);
     // Manual `Time::advance_by` (mirroring `ai::server`'s LOD tests)
@@ -85,15 +89,26 @@ fn freq_hint_test_app() -> App {
         .init_resource::<crate::ship::sensors::SensorsAiConfigResource>()
         .init_resource::<CoordBox>()
         .add_message::<CoordinationEnqueue>()
-        .add_systems(
+        .add_systems(PostUpdate, collect_coord);
+    if original {
+        app.add_systems(
+            Update,
+            (
+                seed_viewscreen_from_selection,
+                original_tick_frequency_hint_high_fidelity,
+            )
+                .chain(),
+        );
+    } else {
+        app.add_systems(
             Update,
             (
                 seed_viewscreen_from_selection,
                 tick_frequency_hint_high_fidelity,
             )
                 .chain(),
-        )
-        .add_systems(PostUpdate, collect_coord);
+        );
+    }
 
     let mut control_sources = ShipSystemControlSources::default();
     control_sources.0.set(
@@ -850,3 +865,6 @@ fn concealed_contact_stops_high_fidelity_frequency_hints_until_normal() {
         .iter()
         .any(|row| matches!(row.payload, CoordinationPayload::FrequencyHint { .. })));
 }
+
+#[path = "frequency_preflight_tests.rs"]
+mod frequency_preflight_tests;

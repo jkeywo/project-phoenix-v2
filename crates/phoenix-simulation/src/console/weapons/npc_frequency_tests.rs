@@ -344,3 +344,6 @@ fn npc_correlates_distinct_current_aliases_only_through_its_explicit_radar_feed(
         "tuning cannot relabel or refresh acquired history"
     );
 }
+
+#[path = "npc_frequency_preflight_tests.rs"]
+mod preflight_tests;

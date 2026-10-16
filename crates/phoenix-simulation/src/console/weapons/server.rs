@@ -2501,6 +2501,13 @@ fn tick_npc_auto_match_frequency(
             system.kind == crate::ship::system_registry::PHASER_BANK_KIND
                 && control_sources.0.policy_for(&system.id).operate_ai
         }) {
+            if !crate::science::shield_enquiry::has_permitted_shield_finding(
+                &ship_config.0,
+                blackboards,
+                &system.id,
+            ) {
+                continue;
+            }
             let Some(public) = super::assignments::effective_weapon_contact(
                 &ship_config.0,
                 &system.id,
@@ -2887,3 +2894,6 @@ fn handle_set_weapons_restraint(
 #[cfg(test)]
 #[path = "npc_frequency_tests.rs"]
 mod npc_frequency_tests;
+
+#[cfg(test)]
+include!("npc_frequency_original.rs");

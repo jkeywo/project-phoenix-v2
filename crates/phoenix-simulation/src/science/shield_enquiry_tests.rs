@@ -96,3 +96,62 @@ fn equally_recent_contradictory_findings_across_proven_aliases_withhold_advice()
     };
     assert_eq!(scan.history, original);
 }
+
+#[test]
+fn shield_finding_preflight_is_only_a_permitted_qualified_necessary_condition() {
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_cruiser.toml",
+    )
+    .unwrap()
+    .ship_config
+    .unwrap();
+    let owner = SystemId("sensors".into());
+    let source = super::super::scan_blackboard_key_for(&owner);
+    let subjects = std::collections::BTreeSet::from(["public".to_string()]);
+    for variant in 0..10 {
+        let mut boards = ShipSystemBlackboards::default();
+        super::fixture::acquired(&mut boards, "public", 0.73);
+        let Some(SystemBlackboard::Scan(scan)) = boards.0.get_mut(&source) else {
+            panic!("Scan");
+        };
+        match variant {
+            0 => scan.history.clear(),
+            1 => scan.history[0].aim = FocusedAim::General,
+            2 => scan.history[0].shield_finding = None,
+            3 => scan.capable = false,
+            4 => scan.owner = Some(SystemId("other".into())),
+            5 => scan.history[0].shield_finding.as_mut().unwrap().frequency = -1.0,
+            6 => {
+                let mut newer = scan.history[0].clone();
+                newer.taken_at_tick += 1;
+                newer.shield_finding = None;
+                scan.history.push(newer);
+            }
+            7 => scan.history[0].subject_uuid = "other-public".into(),
+            8 => {}
+            _ => {
+                let row = boards.0.remove(&source).unwrap();
+                boards.0.insert(SystemId("scan/noncanonical".into()), row);
+            }
+        }
+        let before = boards.0.clone();
+        let possible = has_permitted_shield_finding(&config, &boards, &owner);
+        let actual = latest_permitted_finding_for_subjects(&config, &boards, &owner, &subjects);
+        if actual.is_some() {
+            assert!(possible);
+        }
+        assert_eq!(possible, matches!(variant, 5..=8), "variant {variant}");
+        if matches!(variant, 5..=7) {
+            assert!(
+                actual.is_none(),
+                "slow path still decides variant {variant}"
+            );
+        }
+        assert!(!has_permitted_shield_finding(
+            &config,
+            &boards,
+            &SystemId("repair".into())
+        ));
+        assert_eq!(boards.0, before);
+    }
+}

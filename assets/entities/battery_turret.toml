@@ -267,7 +267,30 @@ default_cooling_per_sec = 0
 priority = 15
 restore_delay_secs = 0.5
 
+# Interior is atomic at include composition: retain the complete sensor room.
+[interior]
+team_homes = []
+
+[[interior.deck]]
+id = "probe"
+label = "entity.battery_probe.room"
+damage_weight = 1
+
+[[interior.compartment]]
+id = "probe-core"
+deck = "probe"
+label = "entity.battery_probe.room"
+x = -0.5
+z = -0.5
+width = 1
+depth = 1
+material = "bulkhead"
+max_hp = 12
+recovery_fraction = 0.2
+structural_remedy = "structural"
+
 [interior.placements]
+sensor-radar = "probe-core"
 tactical-radar = "probe-core"
 phaser-turret = "probe-core"
 

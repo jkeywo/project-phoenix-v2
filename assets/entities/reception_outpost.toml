@@ -133,7 +133,15 @@ when="fact(request_receive_craft) > 0 and fact(is_read) > 0 and fact(comms_avail
 verb="respond_to_message"
 response_index=0
 
+# Interior is atomic: author the complete inherited deck and all real placements.
+[interior]
+team_homes=[]
+[[interior.deck]]
+id="probe"
+label="entity.battery_probe.room"
+damage_weight=1
 [interior.placements]
+sensor-radar="probe-core"
 comms="probe-core"
 reception-bay="receiving-room"
 [[interior.compartment]]

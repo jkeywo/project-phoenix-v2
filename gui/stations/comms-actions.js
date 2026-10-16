@@ -99,7 +99,16 @@ export function registerCommsActions(registry, options = {}) {
   const getState = typeof options.getState === 'function' ? options.getState : () => null;
   const getRadioDraft = typeof options.getRadioDraft === 'function' ? options.getRadioDraft : () => null;
   const sendAction = typeof options.sendAction === 'function' ? options.sendAction : null;
-  const send = createCorrelatedActionSender(sendAction);
+  const correlatedSend = createCorrelatedActionSender(sendAction);
+  const send = (actionId, correlation, inputMs, name, payload) => {
+    const view = commsActionView(getState());
+    if (!view || view.comms_controllable === false) return false;
+    return correlatedSend(actionId, correlation, inputMs, name, {
+      ...payload,
+      ...(typeof view.comms_system_id === 'string' && view.comms_system_id
+        ? { control_system_id: view.comms_system_id } : {}),
+    });
+  };
   const selectMessage = typeof options.selectMessage === 'function'
     ? options.selectMessage : null;
   const selectThread = typeof options.selectThread === 'function'

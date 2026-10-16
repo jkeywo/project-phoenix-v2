@@ -2299,6 +2299,10 @@ export function buildCommsConsoleState(state, systemIds = []) {
       objectives: bb.objectives ?? [],
       contacts:   bb.contacts   ?? [],
       channels:   bb.channels   ?? [],
+      media_capability: bb.media_capability ?? null,
+      comms_system_id: entry.systemId,
+      comms_controllable: systemIds.includes(entry.systemId)
+        && state.controlSources?.[entry.systemId] === 'Human',
       planned_requests: bb.planned_requests ?? [],
       receiver_interference: bb.receiver_interference ?? null,
       on_screen:  state.currentView === 'Comms',

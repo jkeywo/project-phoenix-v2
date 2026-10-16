@@ -5,6 +5,7 @@ import '../../gui/components/ph-comms-current-message.js';
 import {t} from '../../gui/strings.js';
 import {createCommsActionRegistry, COMMS_SEND_TEXT_ACTION_ID} from '../../gui/stations/comms-actions.js';
 import {ActionFeedbackLifecycle} from '../../gui/action-feedback.js';
+import {buildCommsConsoleState} from '../../gui/console-state.js';
 
 const state = () => ({channels:[{id:'public'}], contacts:[{uuid:'peer', name:'Peer'}], messages:[], comms_auto:false});
 function setup() {
@@ -13,6 +14,20 @@ function setup() {
 }
 afterEach(() => {document.body.replaceChildren(); delete window.activateSemanticAction;});
 describe('radio text command and local draft', () => {
+  it('shows the call controls from the actual Console projection and disables a shared read-only view', () => {
+    const el = setup();
+    const raw = {blackboards:{'radio-array':{...state(),media_capability:'audio_video'}},
+      blackboardKinds:{'radio-array':'Comms'},controlSources:{'radio-array':'Human'}};
+    el.state = buildCommsConsoleState(raw,['radio-array']);
+    el.audience.value = 'contact:peer'; el.audience.dispatchEvent(new Event('change'));
+    const audio = el.shadowRoot.getElementById('audio-call');
+    const video = el.shadowRoot.getElementById('video-call');
+    expect(audio.hidden).toBe(false); expect(audio.disabled).toBe(false);
+    expect(video.hidden).toBe(false); expect(video.disabled).toBe(false);
+    el.state = buildCommsConsoleState(raw,[]);
+    expect(audio.hidden).toBe(false); expect(audio.disabled).toBe(true);
+    expect(video.disabled).toBe(true); expect(el.controls.disabled).toBe(true);
+  });
   it('offers media only from actual published capability and one selected Contact', () => {
     const el = setup();
     const audio = el.shadowRoot.getElementById('audio-call'), video = el.shadowRoot.getElementById('video-call');

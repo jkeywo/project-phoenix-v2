@@ -237,9 +237,10 @@ export function makeCommsRender(variant) {
         mediaControls = controls;
       }
       mediaControls.origin = mediaCallOrigin(open.active);
-      mediaControls.section.hidden = !!view.comms_auto || (!mediaControls.origin && !mediaClient.state().call_origin_id);
-      mediaControls.select.disabled = !!view.comms_auto || !mediaControls.origin;
-      mediaControls.clear.disabled = !!view.comms_auto;
+      mediaControls.section.hidden = !!view.comms_auto || view.comms_controllable === false
+        || (!mediaControls.origin && !mediaClient.state().call_origin_id);
+      mediaControls.select.disabled = !!view.comms_auto || view.comms_controllable === false || !mediaControls.origin;
+      mediaControls.clear.disabled = !!view.comms_auto || view.comms_controllable === false;
     }
     const openSummary = open.threadId == null
       ? null
@@ -266,7 +267,7 @@ export function makeCommsRender(variant) {
           messages: open.messages,
           sender_name: openSummary ? openSummary.sender_name : null,
           rejection: view.rejection,
-          ...(open.active?.request_progress ? {read_only:!!view.comms_auto} : {}),
+          ...(open.active?.request_progress ? {read_only:!!view.comms_auto || view.comms_controllable === false} : {}),
         };
       }
     }

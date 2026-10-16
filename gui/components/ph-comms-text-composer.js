@@ -98,7 +98,7 @@ export class PhCommsTextComposer extends PhElement {
       ...(state.contacts || []).filter(contact => contact.uuid || contact.id)
         .map(contact => [`contact:${contact.uuid || contact.id}`, contact.name || contact.uuid || contact.id]),
     ]);
-    this.controls.disabled = state.comms_auto || !state.channels?.length;
+    this.controls.disabled = state.comms_auto || state.comms_controllable === false || !state.channels?.length;
     for (const [id, capable] of [['audio-call', ['audio', 'audio_video'].includes(state.media_capability)],
       ['video-call', state.media_capability === 'audio_video']]) {
       this.$(id).hidden = !capable;

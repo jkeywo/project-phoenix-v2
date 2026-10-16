@@ -922,7 +922,7 @@ export const ACTION_MAP = Object.freeze({
       const correlated = typeof a.correlation === 'string' && a.correlation;
       send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
         ...(correlated ? { correlation: a.correlation } : {}),
-        target: 'comms',
+        target: controlSystemId(a, 'comms'),
         payload: { type: 'Hail', data: { target_uuid: a.target_uuid } },
       });
     }
@@ -934,7 +934,7 @@ export const ACTION_MAP = Object.freeze({
       const correlated = typeof a.correlation === 'string' && a.correlation;
       send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
         ...(correlated ? { correlation: a.correlation } : {}),
-        target: 'comms',
+        target: controlSystemId(a, 'comms'),
         payload: {
           type: 'RespondToMessage',
           data: { message_id: a.message_id, response_index: a.response_index },
@@ -948,7 +948,7 @@ export const ACTION_MAP = Object.freeze({
     const correlated = typeof a.correlation === 'string' && a.correlation;
     send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
       ...(correlated ? { correlation: a.correlation } : {}),
-      target: 'comms',
+      target: controlSystemId(a, 'comms'),
       payload: { type: 'SendCommsText', data: { channel: a.channel, audience: a.audience, body: a.body } },
     });
   },
@@ -959,7 +959,7 @@ export const ACTION_MAP = Object.freeze({
     if (!request) return;
     const correlated = typeof a.correlation === 'string' && a.correlation;
     send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
-      ...(correlated ? {correlation:a.correlation} : {}), target:'comms',
+      ...(correlated ? {correlation:a.correlation} : {}), target:controlSystemId(a, 'comms'),
       payload:{type:'SendCommsRequest',data:{channel:a.channel,audience:a.audience,request,...(a.planned_request ? {planned_request:a.planned_request} : {})}},
     });
   },
@@ -967,7 +967,7 @@ export const ACTION_MAP = Object.freeze({
     if (a.origin_id !== null && typeof a.origin_id !== 'string') return;
     const correlated = typeof a.correlation === 'string' && a.correlation;
     send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
-      ...(correlated ? {correlation:a.correlation} : {}), target:'comms',
+      ...(correlated ? {correlation:a.correlation} : {}), target:controlSystemId(a, 'comms'),
       payload:{type:'SetCommsMediaCall',data:{origin_id:a.origin_id}},
     });
   },
@@ -975,7 +975,7 @@ export const ACTION_MAP = Object.freeze({
     if (!a.message_id) return;
     const correlated = typeof a.correlation === 'string' && a.correlation;
     send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
-      ...(correlated ? {correlation:a.correlation} : {}), target:'comms',
+      ...(correlated ? {correlation:a.correlation} : {}), target:controlSystemId(a, 'comms'),
       payload:{type:'MarkCommsRead',data:{message_id:a.message_id}},
     });
   },
@@ -985,7 +985,7 @@ export const ACTION_MAP = Object.freeze({
     const correlated = typeof a.correlation === 'string' && a.correlation;
     send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
       ...(correlated ? { correlation: a.correlation } : {}),
-      target: 'comms',
+      target: controlSystemId(a, 'comms'),
       payload: { type: 'ClearComms' },
     });
   },
@@ -996,7 +996,7 @@ export const ACTION_MAP = Object.freeze({
       const correlated = typeof a.correlation === 'string' && a.correlation;
       send(correlated ? 'ControlSystemCorrelated' : 'ControlSystem', {
         ...(correlated ? { correlation: a.correlation } : {}),
-        target: 'comms',
+        target: controlSystemId(a, 'comms'),
         payload: { type: 'ShowOnScreen', data: { message_id: a.message_id } },
       });
     }

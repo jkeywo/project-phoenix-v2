@@ -18,6 +18,8 @@ import {
 } from '../../gui/stations/comms-actions.js';
 import { NAVIGATION_ACTIONS } from '../../gui/stations/navigation-actions.js';
 import { RADAR_SHARING_ACTION } from '../../gui/stations/radar-sharing-actions.js';
+import { buildCommsConsoleState } from '../../gui/console-state.js';
+import { ACTION_MAP } from '../../gui/action-map.js';
 
 let sequence = 0;
 
@@ -39,6 +41,39 @@ function key(code, overrides = {}) {
 }
 
 describe('Comms semantic action family', () => {
+  it('projects media equipment and addresses the actual authored radio through the complete control path', () => {
+    const message = {id:'received-call', transmission:{origin_id:'heard-call',received_tick:12,
+      content:{kind:'request',request:{media_call:{mode:'audio_video'}}}},
+      request_progress:{facts:{decision:{choice:'accept',tick:13}}}};
+    const state = {blackboards:{'bridge-radio':{media_capability:'audio_video',messages:[message],
+      channels:[{id:'fleet'}],contacts:[{uuid:'other-ship'}]}},
+      blackboardKinds:{'bridge-radio':'Comms'},controlSources:{'bridge-radio':'Human'}};
+    let view = buildCommsConsoleState(state, ['bridge-radio']);
+    expect(view.media_capability).toBe('audio_video');
+    const wire = vi.fn();
+    const actions = registry({getState:()=>view,getCurrentMessage:()=>message,
+      sendAction:(name,args)=>ACTION_MAP[name](args,wire)});
+    expect(actions.activate(COMMS_SEND_REQUEST_ACTION_ID,{context:'comms',detail:{channel:'fleet',
+      audience:{kind:'contact',target_uuid:'other-ship'},request:{media_call:{mode:'audio_video'}}}}).handled).toBe(true);
+    expect(wire).toHaveBeenLastCalledWith('ControlSystemCorrelated',expect.objectContaining({target:'bridge-radio',
+      payload:{type:'SendCommsRequest',data:{channel:'fleet',audience:{kind:'contact',target_uuid:'other-ship'},
+        request:{media_call:{mode:'audio_video'}}}}}));
+    expect(actions.activate(COMMS_SELECT_MEDIA_ACTION_ID,{context:'comms'}).handled).toBe(true);
+    expect(wire).toHaveBeenLastCalledWith('ControlSystemCorrelated',expect.objectContaining({target:'bridge-radio',
+      payload:{type:'SetCommsMediaCall',data:{origin_id:'heard-call'}}}));
+    wire.mockClear();
+    // The same explicitly bound knowledge remains visible on another Console,
+    // but never turns that read-only projection into a control assignment.
+    view = buildCommsConsoleState(state, []);
+    expect(view.media_capability).toBe('audio_video');
+    expect(actions.activate(COMMS_SELECT_MEDIA_ACTION_ID,{context:'comms'}).handled).toBe(false);
+    expect(actions.activate(COMMS_CLEAR_ACTION_ID,{context:'comms'}).handled).toBe(false);
+    expect(wire).not.toHaveBeenCalled();
+    view = buildCommsConsoleState({...state,controlSources:{'bridge-radio':'Ai'}},['bridge-radio']);
+    expect(actions.activate(COMMS_SELECT_MEDIA_ACTION_ID,{context:'comms'}).handled).toBe(false);
+    expect(wire).not.toHaveBeenCalled();
+    expect(buildCommsConsoleState({...state,blackboards:{'bridge-radio':{}}},['bridge-radio']).media_capability).toBeNull();
+  });
   it('selects only an own received accepted media record through normal correlated System control', () => {
     const sendAction = vi.fn();
     const message = {id:'actual-message', transmission:{origin_id:'actual-call', received_tick:12,
